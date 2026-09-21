@@ -7,6 +7,7 @@ export const threadData = [
   { id: 'c1', contact: 'asha', name: 'Asha Kumar', channel: 'WhatsApp', team: 'Sales', assignee: 'Priya N.', status: 'Open', bot: true, unread: 2, time: '2m', messages: [
     { text: 'Hi, can you check the dispatch date for SO-0248?', who: 'Asha Kumar', time: '10:41 AM' },
     { text: 'I have your order number. Let me check the latest update.', who: 'Order assistant', time: '10:41 AM', out: true },
+    { text: 'I have emailed our updated delivery address.', who: 'Asha Kumar', time: '10:42 AM', channel: 'Email' },
     { text: 'Thank you. We need it by Friday.', who: 'Asha Kumar', time: '10:42 AM' },
   ] },
   { id: 'c2', contact: 'arun', name: 'Arun Das', channel: 'Telegram', team: 'People', assignee: 'Unassigned', status: 'Open', bot: true, unread: 1, time: '5m', messages: [
