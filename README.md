@@ -4,7 +4,7 @@ Frappe-based business communication workspace for WhatsApp, Telegram and email, 
 
 ## Current status
 
-Initial UI prototype, architecture and executable behavior specifications. This repository is **not yet an installable Frappe app**. The frontend uses sample data and in-memory state; Send and Publish do not call providers. Live APIs, MCP, AI, database persistence and migrations remain to be implemented.
+Initial UI prototype, architecture and executable behavior specifications. This repository is **not yet an installable Frappe app**. The frontend uses sample data and in-memory state; Send and Publish do not call providers. A server-side read-only Hub MCP client is now implemented; business APIs, AI, Core database persistence and migrations remain to be implemented.
 
 ## Contents
 
@@ -26,3 +26,15 @@ All new DocTypes, including child tables, use the `Relay ` prefix. Existing Frap
 ## Branch workflow
 
 Development happens on `develop`. The user merges reviewed work into production `main`.
+
+## Local Hub connection
+
+A server-side Core service package now provides the initial read-only MCP integration. `.env` is loaded automatically by the client, with process environment taking precedence. Copy `.env.example` to `.env` and set `RELAY_HUB_TOKEN` to the local Hub's `RELAY_MCP_TOKEN`; protect the file with mode 0600. Local files have already been configured on the development workstation and are excluded from Git. Never expose the service token through frontend/Vite configuration.
+
+```sh
+python3 -B -m relay_core check-hub
+python3 -B -m unittest discover -s tests -v
+RELAY_LIVE_TEST=1 python3 -B -m unittest discover -s tests -v
+```
+
+The live tests initialize an MCP session, call Hub `health.get`, and verify an invalid token receives 401. They perform no provider or business-data writes. This is a narrowly scoped stateless JSON MCP client, not a complete MCP SDK. Production multi-account authentication and Frappe installation remain future work. HTTPS is required except for explicit loopback IPs; redirects are rejected to avoid forwarding credentials to another destination.
