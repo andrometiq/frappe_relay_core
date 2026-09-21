@@ -1,0 +1,54 @@
+@import 'frappe-ui/style.css';
+@layer base {
+  html, body, #app { height: 100%; }
+  body { @apply m-0 bg-surface-white text-ink-gray-8 antialiased; }
+  button:focus-visible { @apply outline outline-2 outline-offset-2 outline-gray-400; }
+}
+@layer components {
+  .app-shell { @apply grid h-dvh overflow-hidden; grid-template-columns: 220px minmax(0,1fr); }
+  .app-nav { @apply flex min-h-0 flex-col border-r border-outline-gray-1 bg-surface-gray-1 p-2; }
+  .nav-item { @apply flex h-8 w-full items-center gap-2 rounded px-2 text-left text-base text-ink-gray-7 hover:bg-surface-gray-2; }
+  .nav-item.active { @apply bg-surface-selected font-medium text-ink-gray-9; }
+  .workspace { @apply flex min-h-0 min-w-0 flex-col; }
+  .page-header { @apply flex h-14 shrink-0 items-center justify-between gap-3 border-b border-outline-gray-1 px-5; }
+  .toolbar { @apply flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-outline-gray-1 px-5 py-2; }
+  .inbox-grid { @apply grid min-h-0 flex-1; grid-template-columns: 285px minmax(250px,1fr) 255px; }
+  .inbox-grid.hide-details { grid-template-columns: 285px minmax(250px,1fr); }
+  .conversation-list { @apply min-h-0 overflow-y-auto border-r border-outline-gray-1; }
+  .conversation-item { @apply flex w-full flex-col gap-2 border-b border-outline-gray-1 px-4 py-4 text-left hover:bg-surface-gray-1; }
+  .conversation-item.selected { @apply bg-surface-gray-2; }
+  .thread-panel { @apply flex min-h-0 min-w-0 flex-col; }
+  .message-scroll { @apply min-h-0 flex-1 overflow-y-auto px-6 py-6; }
+  .message { @apply mb-5 flex flex-col items-start; }
+  .message.outgoing { @apply items-end; }
+  .message-body { @apply max-w-[85%] whitespace-pre-wrap rounded-lg bg-surface-gray-2 px-3 py-2.5 text-base leading-relaxed text-ink-gray-8; }
+  .message.outgoing .message-body { @apply bg-surface-gray-1 ring-1 ring-inset ring-outline-gray-1; }
+  .message.note .message-body { @apply bg-surface-amber-1; }
+  .composer { @apply m-4 mt-0 rounded-lg border border-outline-gray-2; }
+  .details-panel { @apply min-h-0 space-y-5 overflow-y-auto border-l border-outline-gray-1 p-4; }
+  .field-label { @apply mb-2 block text-xs text-ink-gray-5; }
+  .page-body { @apply min-h-0 flex-1 overflow-auto px-6 py-5; }
+  .list-table { @apply w-full border-collapse text-left text-base; }
+  .list-table th { @apply h-10 border-b border-outline-gray-2 px-3 text-sm font-normal text-ink-gray-5; }
+  .list-table td { @apply h-14 border-b border-outline-gray-1 px-3; }
+  .list-table tbody tr { @apply hover:bg-surface-gray-1; }
+  .settings-layout { @apply grid min-h-0 flex-1; grid-template-columns: 190px minmax(0,1fr); }
+  .settings-nav { @apply space-y-1 border-r border-outline-gray-1 p-3; }
+  .form-page { @apply mx-auto w-full max-w-3xl space-y-6; }
+  .form-grid { @apply grid grid-cols-2 gap-5; }
+  .flow-layout { @apply grid min-h-0 flex-1; grid-template-columns: minmax(300px,1fr) 300px; }
+  .flow-canvas { @apply flex flex-col items-center overflow-auto bg-surface-gray-1 px-6 py-8; background-image:radial-gradient(#d9d9d9 .7px,transparent .7px);background-size:16px 16px; }
+  .flow-node { @apply w-64 shrink-0 rounded-lg border border-outline-gray-2 bg-surface-white p-3 text-left shadow-sm; }
+  .flow-node.selected { @apply border-outline-gray-5 ring-1 ring-outline-gray-5; }
+  .flow-edge { @apply h-7 w-px shrink-0 bg-surface-gray-4; }
+  .flow-inspector { @apply space-y-5 overflow-auto border-l border-outline-gray-1 p-5; }
+  .mobile-only { display:none; }
+}
+@media(max-width:1180px){.inbox-grid{grid-template-columns:260px minmax(240px,1fr)}.details-panel{position:absolute;right:0;top:110px;bottom:0;width:270px;background:white;box-shadow:-5px 0 20px #0000000a;z-index:5}.inbox-grid.hide-details{grid-template-columns:260px minmax(240px,1fr)}}
+@media(max-width:900px){.app-shell{grid-template-columns:52px minmax(0,1fr)}.nav-label,.workspace-label,.sidebar-caption,.account-name{display:none}.app-nav .nav-item{justify-content:center;padding-left:0;padding-right:0}.flow-layout{grid-template-columns:minmax(260px,1fr) 255px}.settings-layout{grid-template-columns:155px minmax(0,1fr)}}
+@media(max-width:650px){.page-header{padding-left:12px;padding-right:12px}.toolbar{padding-left:12px;padding-right:12px}.inbox-grid,.inbox-grid.hide-details{display:flex;flex-direction:column}.conversation-list{flex:1;border-right:0}.thread-panel{flex:1}.inbox-grid:not(.mobile-chat) .thread-panel{display:none}.inbox-grid.mobile-chat .conversation-list{display:none}.mobile-only{display:initial}.message-scroll{padding:16px}.composer{margin:0 10px 12px}.details-panel{top:110px;left:52px;right:0;width:auto}.settings-layout{display:flex;flex-direction:column}.settings-nav{display:flex;gap:4px;overflow:auto;border-right:0;border-bottom:1px solid #ededed;padding:8px}.settings-nav .nav-item{width:auto;flex-shrink:0}.page-body{padding:16px}.form-grid{grid-template-columns:1fr}.flow-layout{display:flex;flex-direction:column;overflow:auto}.flow-canvas{min-height:570px;overflow:visible}.flow-inspector{overflow:visible;border-left:0;border-top:1px solid #ededed}.desktop-only{display:none}.page-header h1{font-size:16px}.flow-node{max-width:100%}.flow-inspector{flex-shrink:0}}
+
+.details-toggle{display:none}
+.message-body.outgoing{background:var(--surface-gray-1,#fafafa);box-shadow:inset 0 0 0 1px #ededed}
+.message-body.note{background:#fff8e6}
+@media(max-width:1180px){.details-panel:not(.details-open){display:none}.details-toggle{display:inline-flex}}

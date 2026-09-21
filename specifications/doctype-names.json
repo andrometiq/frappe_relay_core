@@ -1,0 +1,95 @@
+{
+  "app": "relay_core",
+  "prefix": "Relay",
+  "status": "planned; not installed",
+  "doctypes": [
+    {
+      "name": "Relay Channel Account",
+      "module_name": "relay_channel_account"
+    },
+    {
+      "name": "Relay Channel",
+      "module_name": "relay_channel"
+    },
+    {
+      "name": "Relay Business Type",
+      "module_name": "relay_business_type"
+    },
+    {
+      "name": "Relay Business Link",
+      "module_name": "relay_business_link"
+    },
+    {
+      "name": "Relay Conversation",
+      "module_name": "relay_conversation"
+    },
+    {
+      "name": "Relay Message",
+      "module_name": "relay_message"
+    },
+    {
+      "name": "Relay Conversation User State",
+      "module_name": "relay_conversation_user_state"
+    },
+    {
+      "name": "Relay Message View",
+      "module_name": "relay_message_view"
+    },
+    {
+      "name": "Relay Folder",
+      "module_name": "relay_folder"
+    },
+    {
+      "name": "Relay Folder Item",
+      "module_name": "relay_folder_item"
+    },
+    {
+      "name": "Relay Team",
+      "module_name": "relay_team"
+    },
+    {
+      "name": "Relay Team Member",
+      "module_name": "relay_team_member"
+    },
+    {
+      "name": "Relay Canned Response",
+      "module_name": "relay_canned_response"
+    },
+    {
+      "name": "Relay Summary",
+      "module_name": "relay_summary"
+    },
+    {
+      "name": "Relay Flow",
+      "module_name": "relay_flow"
+    },
+    {
+      "name": "Relay Flow Version",
+      "module_name": "relay_flow_version"
+    },
+    {
+      "name": "Relay Flow Run",
+      "module_name": "relay_flow_run"
+    },
+    {
+      "name": "Relay Campaign",
+      "module_name": "relay_campaign"
+    },
+    {
+      "name": "Relay Campaign Recipient",
+      "module_name": "relay_campaign_recipient"
+    },
+    {
+      "name": "Relay Call",
+      "module_name": "relay_call"
+    },
+    {
+      "name": "Relay AI Configuration",
+      "module_name": "relay_ai_configuration"
+    },
+    {
+      "name": "Relay Action Audit",
+      "module_name": "relay_action_audit"
+    }
+  ]
+}
