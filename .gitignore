@@ -7,3 +7,5 @@ __pycache__/
 .env.*
 !.env.example
 frontend/communication-preview.html
+
+frontend/.scroll-test-dist/

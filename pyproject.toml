@@ -10,3 +10,6 @@ requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
 include = ["relay_core*"]
+
+[tool.setuptools.package-data]
+relay_core = ["modules.txt", "**/*.json"]

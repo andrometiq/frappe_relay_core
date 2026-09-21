@@ -1,0 +1,81 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Message",
+  "module": "Relay Core",
+  "autoname": "RELAY-MSG-.##########",
+  "naming_rule": "Expression (old style)",
+  "engine": "InnoDB",
+  "field_order": [
+    "relay_contact",
+    "channel",
+    "content",
+    "direction",
+    "status",
+    "provider_id"
+  ],
+  "fields": [
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "content",
+      "label": "Content",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "direction",
+      "label": "Direction",
+      "fieldtype": "Select",
+      "options": "Incoming\nOutgoing",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nSent\nDelivered\nRead\nFailed",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "provider_id",
+      "label": "Provider message ID",
+      "fieldtype": "Data",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1
+    }
+  ],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

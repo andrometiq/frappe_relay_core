@@ -52,3 +52,22 @@
 .message-body.outgoing{background:var(--surface-gray-1,#fafafa);box-shadow:inset 0 0 0 1px #ededed}
 .message-body.note{background:#fff8e6}
 @media(max-width:1180px){.details-panel:not(.details-open){display:none}.details-toggle{display:inline-flex}}
+
+/* Restrained channel and selection accents, shared across responsive views. */
+.nav-item.active{background:#edf4ff;color:#2459a6}
+.app-nav>div:first-child{color:#3468a9}
+.conversation-item.selected{background:#f0f6ff;box-shadow:inset 3px 0 #5685c1}
+.message-body.outgoing{background:#edf4ff;box-shadow:none}
+.channel-toolbar{display:flex;gap:12px;padding:8px 16px;border-bottom:1px solid #eee;flex-wrap:wrap}
+.channel-toolbar>div{flex:1;min-width:100px}
+.channel-label{font-size:11px;color:#426aa4;margin-left:5px}
+.channel-label[data-channel="WhatsApp"]{color:#26734b}
+.channel-label[data-channel="Email"]{color:#936c20}
+.message-body{overflow-wrap:anywhere}
+.page-header{height:auto;min-height:56px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
+.app-nav{overflow-y:auto}
+@media(max-width:900px){.app-nav .nav-item{min-height:40px}.settings-nav .nav-item{justify-content:flex-start}}
+@media(max-width:650px){.toolbar{gap:4px}.toolbar>div{width:100%;margin-left:0}.thread-panel>div:first-child{flex-wrap:wrap;height:auto;min-height:56px;padding:8px}.details-panel{top:0;left:52px;max-width:calc(100vw - 52px)}.page-body>.list-table{display:block;overflow-x:auto}.form-page section>div{flex-wrap:wrap}.channel-toolbar{padding:6px 10px}.message-body{max-width:95%}.composer textarea{max-height:120px}.page-header>div{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+.contact-row{height:100%;padding:12px 4px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #eee}.contact-row>div{min-width:0}.contact-row p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){.app-nav.mobile-nav-open{position:absolute;inset:0 auto 0 0;width:220px;z-index:30;background:white;box-shadow:5px 0 25px #0002}.app-nav.mobile-nav-open .nav-label{display:initial}.app-nav.mobile-nav-open .nav-item{justify-content:flex-start;padding:0 8px}}

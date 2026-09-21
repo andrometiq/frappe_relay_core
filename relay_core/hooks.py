@@ -1,0 +1,8 @@
+app_name = "relay_core"
+app_title = "Relay Core"
+app_publisher = "Andrometiq"
+app_description = "Multi-channel business communication"
+app_email = "support@andrometiq.com"
+app_license = "MIT"
+before_install = "relay_core.permissions.install_roles"
+after_migrate = "relay_core.permissions.after_migrate"
