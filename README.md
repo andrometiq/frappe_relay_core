@@ -38,3 +38,7 @@ RELAY_LIVE_TEST=1 python3 -B -m unittest discover -s tests -v
 ```
 
 The live tests initialize an MCP session, call Hub `health.get`, and verify an invalid token receives 401. They perform no provider or business-data writes. This is a narrowly scoped stateless JSON MCP client, not a complete MCP SDK. Production multi-account authentication and Frappe installation remain future work. HTTPS is required except for explicit loopback IPs; redirects are rejected to avoid forwarding credentials to another destination.
+
+## Workspace UI
+
+The preview now includes Dashboard, Contacts, personal folders, Important/unread filters, campaign drafts and canned replies. See [UI progress and limitations](docs/ui-progress.md). Start the local preview with `npm run preview -- --host 127.0.0.1 --port 18082` from `frontend/`.
