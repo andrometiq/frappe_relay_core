@@ -29,7 +29,8 @@
     "business_name",
     "legacy_author",
     "legacy_checksum",
-    "legacy_triage"
+    "legacy_triage",
+    "automation_status"
   ],
   "fields": [
     {
@@ -185,6 +186,15 @@
       "fieldtype": "Check",
       "read_only": 1,
       "default": "0"
+    },
+    {
+      "fieldname": "automation_status",
+      "label": "Automation status",
+      "fieldtype": "Select",
+      "options": "\nPending\nComplete",
+      "read_only": 1,
+      "hidden": 1,
+      "search_index": 1
     }
   ],
   "permissions": [
