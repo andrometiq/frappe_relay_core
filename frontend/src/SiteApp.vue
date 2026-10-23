@@ -10,6 +10,9 @@ import { useViewRoute } from './useViewRoute'
 const location = window.location
 const views = {
   Messages: defineAsyncComponent(() => import('./components/ConnectedMessages.vue')),
+  Tickets: defineAsyncComponent(() => import('./components/TicketsWorkspace.vue')),
+  Skills: defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
+  'Business events': defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   Contacts: defineAsyncComponent(() => import('./components/ContactsWorkspace.vue')),
   WhatsApp: defineAsyncComponent(() => import('./components/WhatsAppWorkspace.vue')),
   Teams: defineAsyncComponent(() => import('./components/AccessWorkspace.vue')),
@@ -20,6 +23,9 @@ const navigation = [
   { name: 'Messages', label: 'Inbox', icon: 'inbox' },
   { name: 'Contacts', label: 'Contacts & links', icon: 'users' },
   { name: 'WhatsApp', label: 'Templates', icon: 'file-text' },
+  { name: 'Tickets', label: 'Tickets', icon: 'file-text' },
+  { name: 'Skills', label: 'AI & skills', icon: 'cpu', configure: true },
+  { name: 'Business events', label: 'Business events', icon: 'zap', configure: true },
   { name: 'Teams', label: 'Teams & access', icon: 'user-check' },
   { name: 'Settings', label: 'Settings & setup', icon: 'settings' },
   { name: 'Activity', label: 'Activity & health', icon: 'activity', manage: true },
@@ -70,7 +76,7 @@ onErrorCaptured(e => {
       <div class="relay-brand"><FeatherIcon name="message-circle" class="h-5 w-5" /><strong>Relay</strong><Button class="mobile-only ml-auto" icon="x" aria-label="Close navigation" @click="closeNavigation" /></div>
       <p class="relay-nav-caption">WhatsApp workspace</p>
       <nav class="relay-nav-section" aria-label="Workspace">
-        <button v-for="item in navigation.filter(item => !item.manage || capabilities.manage)" :key="item.name"
+        <button v-for="item in navigation.filter(item => (!item.manage || capabilities.manage) && (!item.configure || capabilities.configure))" :key="item.name"
           class="nav-item" :class="{ active: view === item.name }" :aria-current="view === item.name ? 'page' : undefined" @click="view = item.name">
           <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
         </button>
@@ -89,7 +95,7 @@ onErrorCaptured(e => {
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <p v-else-if="current?.manage && !capabilities.manage" class="p-4">A Relay Communication Manager role is required. <a href="#/teams" class="underline">Review access</a></p>
-      <component :is="views[view]" v-else-if="ready" />
+      <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events'].includes(view) ? { kind: view === 'Skills' ? 'skills' : 'business_events' } : {}" />
     </main>
   </div>
 </template>
