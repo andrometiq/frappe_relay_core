@@ -62,6 +62,119 @@ class DispatchRecoveryTests(unittest.TestCase):
         target.assert_called_once_with(self.action)
         self.assertEqual(send.call_args.args[-2:],('Customer','customer-two'))
 
+    def test_skill_recovery_rechecks_user_scoped_reads_before_resubmission(self):
+        from relay_core.ai import service as skills
+        from relay_core.ai import handoff
+        self.payload['automation_run'] = 'run'
+        self.action.payload = json.dumps(self.payload)
+        run = _dict(name='run', skill='skill')
+        skill = _dict(name='skill')
+        self.api.frappe.get_doc.side_effect = lambda dt, name: {'Relay Message Action': self.action,
+            'Relay Automation Run': run, 'Relay AI Skill': skill}[dt]
+        self.api.frappe.conf = {'relay_automation_enabled': 1}
+        self.api.frappe.db = Mock()
+        self.hub.call_tool.return_value = {'deliveries': []}
+        with patch.object(skills, 'delivery_scope', side_effect=PermissionError), patch.object(handoff, 'handoff') as transfer:
+            with self.assertRaises(PermissionError): self.api.reconcile('action')
+        transfer.assert_called_once_with(run, skill, 'Reply recovery authorization failed; review required')
+        self.hub.call_tool.assert_called_once_with('whatsapp.deliveries', {'request_key': 'original-key'})
+
+    def test_event_recovery_rechecks_rule_and_source_before_resubmission(self):
+        from relay_core import business_events
+        self.payload['business_event'] = 'event'
+        self.action.payload = json.dumps(self.payload)
+        delivery = _dict(name='event')
+        self.api.frappe.get_doc.side_effect = lambda dt, name: self.action if dt == 'Relay Message Action' else delivery
+        self.hub.call_tool.return_value = {'deliveries': []}
+        with patch.object(business_events, 'delivery_scope', side_effect=ValueError('Rule disabled')) as check:
+            with self.assertRaises(ValueError): self.api.reconcile('action')
+        check.assert_called_once_with(delivery)
+        self.hub.call_tool.assert_called_once_with('whatsapp.deliveries', {'request_key': 'original-key'})
+
+
+class InitialSkillSubmissionTests(unittest.TestCase):
+    def setUp(self):
+        from relay_core import messaging
+        from relay_core.ai import service, tools
+        self.api = messaging
+        self.source = _dict(name='source', relay_contact='contact', business_doctype='Supplier', business_name='SUP-A')
+        self.channel = _dict(name='channel', channel='WhatsApp')
+        self.contact = _dict(automation_paused=0, automation_generation=1)
+        self.skill = _dict(name='skill', enabled=1, modified='v1')
+        self.reads = [{'tool': 'ledger', 'arguments': {'name': 'LED-1'},
+            'digest': tools.fingerprint({'name': 'LED-1', 'amount': 1250})}]
+        self.run = _dict(name='run', skill='skill', skill_version='v1', generation=1, message_hash='hash',
+            decision=json.dumps({'user': 'partner', 'reads': self.reads}))
+        self.action = _dict(name='action', status='Dispatching', reload=Mock())
+        self.hub = Mock()
+        self.committed = False
+        self.denied = False
+        self.revoke = lambda: None
+        self.fake = SimpleNamespace(session=_dict(user='operator'), db=Mock(), get_doc=Mock(),
+            conf={'relay_automation_enabled': 1}, ValidationError=ValueError,
+            PermissionError=PermissionError, DoesNotExistError=LookupError)
+        self.fake.db.get_value.return_value = None
+        self.fake.get_doc.side_effect = lambda dt, name=None: self.action if isinstance(dt, dict) else {
+            'Relay Automation Run': self.run, 'Relay AI Skill': self.skill}[dt]
+        def commit():
+            if not self.committed:
+                self.committed = True
+                self.revoke()
+        self.fake.db.commit.side_effect = commit
+        def context(skill, message):
+            self.assertTrue(self.committed)
+            if self.denied: raise PermissionError('Linked user lost access to SUP-A')
+            return 'partner', ('Supplier', 'SUP-A')
+        self.recheck = Mock()
+        for fixture in (
+            patch.object(messaging, 'frappe', self.fake), patch.object(service, 'frappe', self.fake),
+            patch.object(messaging, 'readable_source', return_value=(self.source, self.channel, {})),
+            patch.object(messaging, 'prepare', return_value=('whatsapp.execute', {'body': 'Balance 1250'}, {'text': 'Balance 1250'})),
+            patch.object(messaging, 'require_reply_window'), patch.object(messaging, 'internal_save'),
+            patch.object(messaging.whatsapp, 'client', return_value=self.hub),
+            patch.object(messaging, 'finish', return_value={'status': 'Submitted'}),
+            patch.object(service, 'lock_contact', return_value=self.contact),
+            patch.object(service, 'message_hash', return_value='hash'),
+            patch.object(service, 'latest_message', return_value=True),
+            patch.object(service, 'context', side_effect=context), patch.object(tools, 'recheck', self.recheck),
+        ):
+            fixture.start(); self.addCleanup(fixture.stop)
+
+    def send(self):
+        token = self.api.outgoing_run.set('run')
+        try:
+            return self.api.send('source', 'text', {'text': 'Balance 1250'}, 'initial-key', quote=0)
+        finally:
+            self.api.outgoing_run.reset(token)
+
+    def test_initial_submission_rechecks_after_commit_and_sends_once(self):
+        self.assertEqual(self.send()['status'], 'Submitted')
+        self.recheck.assert_called_once_with(self.skill, 'partner', ('Supplier', 'SUP-A'), self.reads)
+        self.hub.call_tool.assert_called_once()
+
+    def test_changes_at_journal_commit_block_initial_submission(self):
+        changes = {
+            'takeover': lambda: self.contact.update(automation_paused=1, automation_generation=2),
+            'generation': lambda: self.contact.update(automation_generation=2),
+            'disabled skill': lambda: self.skill.update(enabled=0),
+            'edited skill': lambda: self.skill.update(modified='v2'),
+            'linked user permission': lambda: setattr(self, 'denied', True),
+            'read evidence permission': lambda: setattr(self.recheck, 'side_effect', PermissionError('Ledger revoked')),
+            'automation disabled': lambda: self.fake.conf.update(relay_automation_enabled=0),
+        }
+        for label, change in changes.items():
+            with self.subTest(change=label):
+                self.committed = self.denied = False
+                self.contact.update(automation_paused=0, automation_generation=1)
+                self.skill.update(enabled=1, modified='v1')
+                self.fake.conf['relay_automation_enabled'] = 1
+                self.recheck.side_effect = None
+                self.action.status = 'Dispatching'
+                self.revoke = change
+                self.assertEqual(self.send()['status'], 'Rejected')
+                self.hub.call_tool.assert_not_called()
+                self.assertEqual(self.action.status, 'Rejected')
+
 
 class CallbackBoundaryTests(unittest.TestCase):
     def test_event_guard_rejects_document_flags_and_resets_after_failure(self):

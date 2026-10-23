@@ -25,6 +25,10 @@ def validate_ticket(doc, check_assignment=True):
         message = frappe.get_doc('Relay Message', row.message)
         message.check_permission('read')
         readable_contact(message.relay_contact)
+        if doc.get('business_doctype') or doc.get('business_name'):
+            from relay_core.business_access import reference
+            if reference(message) != (doc.get('business_doctype'), doc.get('business_name')):
+                frappe.throw('Ticket business must match its conversation')
     if not check_assignment:
         return
     previous = doc.get_doc_before_save()
@@ -87,6 +91,8 @@ def read(name):
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief,
             'category': doc.category, 'status': doc.status, 'messages': links,
             'assigned_to': doc.get('assigned_to'),
+            'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),
+            'handoff_reason': doc.get('handoff_reason'), 'source_run': doc.get('source_run'),
             'can_assign': bool(set(frappe.get_roles()).intersection({'System Manager','Relay Communication Manager'}))}
 
 
@@ -116,10 +122,14 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, status=None):
+def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None):
     require_access()
     if not isinstance(query,str) or len(query)>80 or before and after: frappe.throw('Invalid ticket search')
     filters={}
+    for key, value in dict(business_doctype=business_doctype, business_name=business_name, assigned_to=assigned_to, category=category).items():
+        if value:
+            if not isinstance(value, str) or len(value) > 140: frappe.throw('Invalid ticket filter')
+            filters[key] = value
     if status:
         if status not in ('Open','In progress','Resolved','Closed'): frappe.throw('Invalid ticket status')
         filters['status']=status

@@ -1,11 +1,51 @@
 {
- "doctype":"DocType","name":"Relay Settings","module":"Relay Core","issingle":1,"track_changes":1,
- "field_order":["hub_url","hub_account","hub_token","callback_secret"],
- "fields":[
-  {"fieldname":"hub_url","label":"Hub MCP URL","fieldtype":"Data"},
-  {"fieldname":"hub_account","label":"Hub account","fieldtype":"Data"},
-  {"fieldname":"hub_token","label":"Hub API token","fieldtype":"Password"},
-  {"fieldname":"callback_secret","label":"Callback signing secret","fieldtype":"Password"}
- ],
- "permissions":[{"role":"System Manager","read":1,"write":1,"create":1}]
+  "doctype": "DocType",
+  "name": "Relay Settings",
+  "module": "Relay Core",
+  "issingle": 1,
+  "track_changes": 1,
+  "field_order": [
+    "hub_url",
+    "hub_account",
+    "hub_token",
+    "callback_secret",
+    "ai_handoff_owner"
+  ],
+  "fields": [
+    {
+      "fieldname": "hub_url",
+      "label": "Hub MCP URL",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "hub_account",
+      "label": "Hub account",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "hub_token",
+      "label": "Hub API token",
+      "fieldtype": "Password"
+    },
+    {
+      "fieldname": "callback_secret",
+      "label": "Callback signing secret",
+      "fieldtype": "Password"
+    },
+    {
+      "fieldname": "ai_handoff_owner",
+      "label": "AI handoff owner",
+      "fieldtype": "Link",
+      "options": "User",
+      "description": "Fallback for skill handoffs; must have access to the conversation."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ]
 }

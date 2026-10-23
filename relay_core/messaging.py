@@ -192,6 +192,13 @@ def send(message, kind, data, request_key, quote=1):
         fresh_tool, fresh_arguments, _ = prepare(fresh_source, fresh_channel, fresh_context, kind, data, quote)
         if fresh_tool != tool or fresh_arguments != arguments:
             raise ValueError('Conversation changed before sending')
+        if outgoing_run.get():
+            run = frappe.get_doc('Relay Automation Run', outgoing_run.get())
+            if not frappe.conf.get('relay_automation_enabled'):
+                raise ValueError('Automation is disabled')
+            if run.get('skill'):
+                from relay_core.ai.service import delivery_scope
+                delivery_scope(run, frappe.get_doc('Relay AI Skill', run.skill), fresh_source)
     except (ValueError, frappe.ValidationError, frappe.PermissionError, frappe.DoesNotExistError):
         action.reload(); action.status = 'Rejected'; internal_save(action); frappe.db.commit()
         return {'action': action.name, 'status': action.status, 'message': None}
@@ -410,7 +417,23 @@ def reconcile(action):
             from relay_core.automation.service import scope
             run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
             if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
-            scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+            if run.get('skill'):
+                from relay_core.ai.service import delivery_scope, Superseded
+                skill = frappe.get_doc('Relay AI Skill', run.skill)
+                try:
+                    delivery_scope(run, skill, source)
+                except Superseded:
+                    raise
+                except Exception:
+                    from relay_core.ai.handoff import handoff
+                    handoff(run, skill, 'Reply recovery authorization failed; review required')
+                    frappe.db.commit()
+                    raise
+            else:
+                scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+        if payload.get('business_event'):
+            from relay_core.business_events import delivery_scope as event_delivery_scope
+            event_delivery_scope(frappe.get_doc('Relay Business Event Delivery', payload['business_event']))
         if payload.get('routing'):
             from relay_core.business_routing_prompt import prepared as prepare_prompt
             try:

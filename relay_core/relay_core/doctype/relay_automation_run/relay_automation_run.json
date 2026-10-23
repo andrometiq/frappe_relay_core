@@ -23,7 +23,9 @@
     "message_hash",
     "transcript",
     "report_scope",
-    "transcript_metadata"
+    "transcript_metadata",
+    "skill",
+    "skill_version"
   ],
   "fields": [
     {
@@ -44,14 +46,12 @@
       "fieldname": "policy",
       "label": "Policy",
       "fieldtype": "Link",
-      "options": "Relay Automation Policy",
-      "reqd": 1
+      "options": "Relay Automation Policy"
     },
     {
       "fieldname": "policy_version",
       "label": "Policy Version",
-      "fieldtype": "Data",
-      "reqd": 1
+      "fieldtype": "Data"
     },
     {
       "fieldname": "execution_user",
@@ -132,6 +132,17 @@
       "fieldtype": "JSON",
       "read_only": 1,
       "permlevel": 1
+    },
+    {
+      "fieldname": "skill",
+      "label": "Skill",
+      "fieldtype": "Link",
+      "options": "Relay AI Skill"
+    },
+    {
+      "fieldname": "skill_version",
+      "label": "Skill Version",
+      "fieldtype": "Data"
     }
   ],
   "permissions": [
@@ -141,10 +152,6 @@
       "write": 1,
       "create": 1,
       "delete": 0
-    },
-    {
-      "role": "Relay Communication Manager",
-      "read": 1
     },
     {
       "role": "System Manager",

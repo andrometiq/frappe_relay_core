@@ -1,4 +1,4 @@
-"""Durable first automation slice: text -> ticket/approved reply/handoff.
+"""Durable skill scheduling and compatibility for existing automation outboxes.
 
 Only background workers commit explicitly. Public enqueue methods rely on the
 normal Frappe request transaction. Runtime writes use a private service flag;
@@ -10,8 +10,8 @@ from contextvars import ContextVar
 import frappe
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access
-from relay_core.automation.contracts import action_key, canonical, event_key, validate_decision
-from relay_core.automation.providers import complete, ProviderError
+from relay_core.automation.contracts import canonical, event_key
+from relay_core.automation.providers import ProviderError
 
 
 outgoing_run = ContextVar('relay_automation_outgoing_run', default=None)
@@ -144,20 +144,11 @@ def create_run(doc):
     existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(doc.name)}, ['name', 'status'], as_dict=True)
     if existing:
         return dict(existing)
-    policy_name = frappe.db.get_value('Relay Automation Policy', {'channel': doc.channel, 'enabled': 1}, 'name')
-    if not policy_name:
-        return {'status': 'Disabled'}
-    policy = frappe.get_doc('Relay Automation Policy', policy_name)
-    check_actor(policy)
-    contact = frappe.get_doc('Relay Contact', doc.relay_contact)
-    run = frappe.get_doc({'doctype': 'Relay Automation Run', 'event_key': event_key(doc.name),
-        'message': doc.name, 'policy': policy.name, 'policy_version': str(policy.modified),
-        'execution_user': policy.execution_user, 'status': 'Pending',
-        'message_hash': message_hash(doc),
-        'generation': int(contact.automation_generation or 0)})
-    internal_save(run, new=True)
-    frappe.enqueue('relay_core.automation.service.process', name=run.name, queue='long', timeout=180, enqueue_after_commit=True)
-    return {'name': run.name, 'status': run.status}
+    from relay_core.ai.service import skill_for, create_run as create_skill_run
+    skill = skill_for(doc)
+    if skill:
+        return create_skill_run(doc, skill)
+    return {'status': 'Disabled'}
 
 
 def on_message(doc, method=None):
@@ -176,112 +167,32 @@ def reserve_attempt(policy):
 
 
 def complete_with_fallback(policy, prompt, images=None):
-    names=[policy.provider]
-    fallback=policy.get('fallback_provider')
-    if fallback and fallback!=policy.provider: names.append(fallback)
-    for index,name in enumerate(names):
-        provider=frappe.get_doc('Relay AI Provider',name)
-        if not provider.enabled:
-            if index+1<len(names):continue
-            raise ProviderError('Provider disabled')
-        reserve_attempt(policy)
-        try:
-            return complete(provider.provider,provider.model,provider.get_password('api_key'),prompt,**({'images':images} if images else {}))
-        except ProviderError:
-            if index+1==len(names):raise
-    raise ProviderError('No enabled provider')
+    """Keep the legacy task entry point while routing through the shared AI Model."""
+    from relay_core.ai.adapter import complete_json
+    if images or not policy.get('ai_model'):
+        raise ProviderError('Choose an AI Model; image tasks are not supported by this adapter')
+    reserve_attempt(policy)
+    return complete_json(policy.ai_model, prompt)
 
 
 def _process(name):
     if not frappe.conf.get('relay_automation_enabled'):
         return
-    original = frappe.session.user
     run = lock_run(name)
-    if run.status not in ('Pending', 'Deciding') or (run.status == 'Deciding' and run.lease_until and run.lease_until > now_datetime()):
+    if run.status not in ('Pending', 'Deciding'):
         return
+    if run.get('skill'):
+        from relay_core.ai.service import process as process_skill
+        return process_skill(name)
+    # Existing provider-backed runs remain readable and receive a human owner.
     policy = frappe.get_doc('Relay Automation Policy', run.policy)
-    if int(run.attempts or 0) >= 2:
-        run.status = 'Handoff'; run.reason = 'AI attempt limit reached'
-        internal_save(run); frappe.db.commit(); return
-    run.status = 'Deciding'; run.fence = int(run.fence or 0) + 1
-    run.attempts = int(run.attempts or 0) + 1
-    run.lease_until = add_to_date(now_datetime(), seconds=240)
-    fence = run.fence
-    internal_save(run); frappe.db.commit()
-    try:
-        check_actor(policy)
-        frappe.set_user(run.execution_user)
-        message, contact, person, channel, doctype, business = scope(run, policy)
-        allowed = replies(policy, channel) if policy.allow_reply else {}
-        from relay_core.automation.multimodal import context as media_context
-        input_text, images = media_context(policy,message,run)
-        from relay_core.learning.service import prompt as learning_prompt, published_instructions
-        prompt = learning_prompt(policy, allowed, input_text, published_instructions(policy))
-        decision = validate_decision(complete_with_fallback(policy, prompt, **({'images':images} if images else {})), allowed, allow_ticket=bool(policy.allow_ticket), allow_report=bool(policy.get("allow_report")))
-        if not decision['reply'] and policy.allow_reply and policy.fallback_reply in allowed:
-            decision['reply'] = policy.fallback_reply; decision['handoff'] = True
-        # End the read snapshot before rechecking policy/permissions after inference.
-        frappe.db.commit()
-        apply(name, fence, decision, allowed)
-        frappe.db.commit()
-    except Exception:
-        frappe.db.rollback()
-        current = lock_run(name)
-        if current.status == 'Deciding' and current.fence == fence:
-            current.status = 'Handoff'; current.reason = 'Decision or authorization failed; review required'
-            internal_save(current); frappe.db.commit()
-    finally:
-        frappe.set_user(original)
-
-
-def apply(name, fence, decision, previous_replies):
-    run = lock_run(name)
-    if run.status != 'Deciding' or run.fence != fence or run.lease_until <= now_datetime():
-        raise ValueError('Stale worker')
-    policy = frappe.get_doc('Relay Automation Policy', run.policy)
-    message = frappe.get_doc('Relay Message', run.message)
-    lock_contact(message.relay_contact)
-    message, contact, person, channel, doctype, business = scope(run, policy)
-    allowed = replies(policy, channel) if policy.allow_reply else {}
-    decision = validate_decision(decision, allowed, allow_ticket=bool(policy.allow_ticket), allow_report=bool(policy.get("allow_report")))
-    if decision['reply'] and allowed[decision['reply']] != previous_replies.get(decision['reply']):
-        raise ValueError('Reply changed during decision')
-    run.decision = canonical(decision)
     if policy.mode == 'Shadow':
-        run.status = 'Shadow'; internal_save(run); return
-    if decision.get('create_report'):
-        from relay_core.reports import preview
-        report = preview(doctype,business)
-        run.report_scope = canonical({'doctype':doctype,'name':business,'count':report['count']})
-    if decision['create_ticket']:
-        ticket = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': decision['brief'][:140],
-            'brief': decision['brief'], 'category': decision['category'], 'status': 'Open',
-            'source_action_key': action_key(run.message, 'ticket'), 'messages': [{'message': run.message}]})
-        ticket.insert()
-        run.ticket = ticket.name
-    if decision['reply'] and (channel.channel!='WhatsApp' or not message.sender_endpoint):
-        decision['reply'] = None; decision['handoff'] = True
-        run.reason = 'Automatic channel reply is unavailable'
-    if decision['reply']:
-        body = allowed[decision['reply']]['body']
-        from relay_core.whatsapp import prepare
-        arguments={'body':body};payload=prepare('messages.send',arguments,person.name,doctype,business)
-        if not message.sender_endpoint or payload['to']!=message.sender_endpoint:raise ValueError('Sender endpoint does not match the resolved recipient')
-        submission={'key':action_key(run.message,'reply'),'operation':'messages.send','arguments':arguments,
-            'contact':person.name,'business_doctype':doctype,'business_name':business}
-        encoded = canonical(submission)
-        internal_save(frappe.get_doc({'doctype': 'Relay Automation Outbox', 'run': run.name,
-            'action_key': submission['key'], 'payload': encoded, 'payload_hash': hashlib.sha256(encoded.encode()).hexdigest(),
-            'recipient': message.sender_endpoint, 'reply': decision['reply'], 'reply_version': allowed[decision['reply']]['version'],
-            'status': 'Pending'}), new=True)
-        frappe.enqueue('relay_core.automation.service.recover', queue='long', enqueue_after_commit=True)
-    run.decision = canonical(decision)
-    run.status = 'Handoff' if decision['handoff'] else 'Completed'
-    internal_save(run)
-    if decision['handoff']:
-        contact.automation_paused = 1
-        # The current acknowledgement may dispatch; takeover endpoint cancels older intents separately.
-        contact.save(ignore_permissions=True)
+        run.status = 'Shadow'; run.reason = 'Configure a Relay AI Skill to replace the legacy policy'
+        internal_save(run)
+    else:
+        from relay_core.ai.handoff import handoff
+        handoff(run, policy, 'Configure a Relay AI Skill to replace the legacy policy')
+    frappe.db.commit()
 
 
 def dispatch(name):

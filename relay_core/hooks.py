@@ -15,6 +15,9 @@ scheduler_events = {"cron": {"* * * * *": ["relay_core.automation.service.recove
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
 has_permission = {'Relay Contact':'relay_core.permissions.contact_permission', 'Relay Message':'relay_core.permissions.message_permission', 'Relay Ticket':'relay_core.tickets.permission'}
+for _doctype in ('Relay Automation Run', 'Relay Business Event Delivery'):
+    has_permission[_doctype] = 'relay_core.permissions.internal_record_permission'
+    permission_query_conditions[_doctype] = 'relay_core.permissions.internal_record_query'
 
 app_home = "/relay"
 add_to_apps_screen = [{"name":"relay_core","title":"Relay Core",
@@ -48,3 +51,12 @@ from relay_core.business_references import RELAY_DOCTYPES as _relay_doctypes
 ignore_links_on_delete = list(_relay_doctypes)
 doc_events['*'] = {event: 'relay_core.business_references.allow_cancel'
                    for event in ('before_cancel', 'on_cancel')}
+
+required_apps = ["frappe_tools"]
+after_migrate = [after_migrate, 'relay_core.business_events.install_samples']
+after_install = [after_install, 'relay_core.business_events.install_samples']
+for _event in ('after_insert', 'on_submit', 'on_cancel'):
+    _handlers = doc_events['*'].get(_event, [])
+    if isinstance(_handlers, str): _handlers = [_handlers]
+    doc_events['*'][_event] = [*_handlers, 'relay_core.business_events.on_event']
+scheduler_events['cron']['* * * * *'].append('relay_core.business_events.recover')

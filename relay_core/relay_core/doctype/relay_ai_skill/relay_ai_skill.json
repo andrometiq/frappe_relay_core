@@ -1,0 +1,110 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Skill",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIS-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "title",
+    "enabled",
+    "channel",
+    "business_doctype",
+    "ai_model",
+    "run_as_user",
+    "handoff_owner",
+    "mode",
+    "daily_limit",
+    "instructions",
+    "allowed_tools"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "ai_model",
+      "label": "Ai Model",
+      "fieldtype": "Link",
+      "options": "AI Model",
+      "reqd": 1
+    },
+    {
+      "fieldname": "run_as_user",
+      "label": "Run As User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "handoff_owner",
+      "label": "Handoff Owner",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "mode",
+      "label": "Mode",
+      "fieldtype": "Select",
+      "options": "Shadow\nAutomatic",
+      "default": "Shadow",
+      "reqd": 1
+    },
+    {
+      "fieldname": "daily_limit",
+      "label": "Daily Limit",
+      "fieldtype": "Int",
+      "default": 100,
+      "reqd": 1
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "allowed_tools",
+      "label": "Allowed Tools",
+      "fieldtype": "JSON",
+      "default": "[]",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

@@ -10,7 +10,11 @@
     "status",
     "assigned_to",
     "messages",
-    "source_action_key"
+    "source_action_key",
+    "business_doctype",
+    "business_name",
+    "handoff_reason",
+    "source_run"
   ],
   "fields": [
     {
@@ -58,6 +62,30 @@
       "label": "Assigned To",
       "fieldtype": "Link",
       "options": "User"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business Name",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "handoff_reason",
+      "label": "Handoff Reason",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_run",
+      "label": "Source Run",
+      "fieldtype": "Link",
+      "options": "Relay Automation Run",
+      "read_only": 1
     }
   ],
   "autoname": "RELAY-TKT-.##########",

@@ -1,10 +1,8 @@
 """Installed automation configuration; API secrets are write-only."""
-import re
 import frappe
 from relay_core.permissions import require_access
 
-PROVIDERS=('OpenAI','OpenRouter','Gemini','Anthropic','GLM')
-POLICY_FIELDS=('channel','provider','fallback_provider','execution_user','enabled','mode','allow_ticket','allow_reply','business_doctype','daily_limit','instructions','reply_ids','fallback_reply','allow_images','allow_voice','transcription_provider','allow_report','allow_summary','allow_translation')
+POLICY_FIELDS=('ai_model','channel','provider','fallback_provider','execution_user','enabled','mode','allow_ticket','allow_reply','business_doctype','daily_limit','instructions','reply_ids','fallback_reply','allow_images','allow_voice','transcription_provider','allow_report','allow_summary','allow_translation')
 
 
 @frappe.whitelist(methods=['GET'])
@@ -21,15 +19,7 @@ def providers(query='',after=None):
 @frappe.whitelist(methods=['POST'])
 def save_provider(provider,model,enabled=0,api_key='',name=None):
     require_access(configure=True)
-    if provider not in PROVIDERS or not isinstance(model,str) or not re.fullmatch(r'[A-Za-z0-9._:/-]{1,160}',model):frappe.throw('Choose a supported provider and model identifier')
-    if str(enabled) not in ('0','1','True','False'):frappe.throw('Invalid enabled flag')
-    if not isinstance(api_key,str) or len(api_key)>1024 or any(ord(c)<32 for c in api_key):frappe.throw('Invalid API key')
-    doc=frappe.get_doc('Relay AI Provider',name) if name else frappe.new_doc('Relay AI Provider')
-    if name and doc.provider!=provider and not api_key:frappe.throw('Enter a new key when changing providers')
-    doc.provider=provider;doc.model=model;doc.enabled=int(str(enabled) in ('1','True'))
-    if api_key:doc.api_key=api_key
-    doc.save()
-    return {'name':doc.name,'provider':doc.provider,'model':doc.model,'enabled':doc.enabled}
+    frappe.throw('Configure AI Model and AI Provider Account in frappe_tools; legacy providers are read-only')
 
 
 @frappe.whitelist(methods=['GET'])
@@ -57,7 +47,7 @@ def references(kind, query=''):
         'policy': ('Relay Automation Policy', ['name','channel'], {}),
         'source_message': ('Relay Message', ['name'], {'direction':'Incoming'}),
         'channel': ('Relay Channel', ['name', 'channel'], {}),
-        'provider': ('Relay AI Provider', ['name', 'provider', 'model'], {}),
+        'provider': ('AI Model', ['name', 'model_id'], {'enabled': 1}),
         'execution_user': ('User', ['name', 'full_name'], [['User', 'enabled', '=', 1], ['Has Role', 'role', '=', 'Relay Communication Manager']]),
         'reply': ('Relay Canned Reply', ['name', 'language'], {'published': 1, 'ai_enabled': 1}),
     }

@@ -1,0 +1,105 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Event Delivery",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-BED-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "event_key",
+    "rule",
+    "rule_version",
+    "source_doctype",
+    "source_name",
+    "event",
+    "business_doctype",
+    "business_name",
+    "contact",
+    "payload",
+    "status",
+    "action"
+  ],
+  "fields": [
+    {
+      "fieldname": "event_key",
+      "label": "Event Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "rule",
+      "label": "Rule",
+      "fieldtype": "Link",
+      "options": "Relay Business Event Rule",
+      "reqd": 1
+    },
+    {
+      "fieldname": "rule_version",
+      "label": "Rule Version",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "source_doctype",
+      "label": "Source Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_name",
+      "label": "Source Name",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event",
+      "label": "Event",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business Name",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "contact",
+      "label": "Contact",
+      "fieldtype": "Link",
+      "options": "Contact"
+    },
+    {
+      "fieldname": "payload",
+      "label": "Payload",
+      "fieldtype": "JSON"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nSubmitted\nUncertain\nFailed",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "action",
+      "label": "Action",
+      "fieldtype": "Link",
+      "options": "Relay Message Action"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ]
+}

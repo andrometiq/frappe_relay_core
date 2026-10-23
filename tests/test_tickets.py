@@ -62,3 +62,16 @@ class TicketTests(unittest.TestCase):
         self.assertEqual(result['messages'][0]['message'],self.message.name)
         self.module.readable_contact.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.module.read(self.doc.name)
+
+
+    def test_directory_applies_business_assignee_category_and_status_filters(self):
+        self.f.get_list = Mock(return_value=[])
+        self.module.directory(business_doctype='Supplier', business_name='SUP-A', assigned_to='agent', category='Support', status='Open')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(business_doctype='Supplier',
+            business_name='SUP-A', assigned_to='agent', category='Support', status='Open'))
+
+    def test_business_tag_cannot_differ_from_linked_conversation(self):
+        self.doc.business_doctype = 'Supplier'; self.doc.business_name = 'SUP-B'
+        access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'))
+        with patch.dict(sys.modules, {'relay_core.business_access': access}):
+            with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
