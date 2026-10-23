@@ -324,6 +324,29 @@ class DisabledSurfaceTests(unittest.TestCase):
 
 
 class OutgoingProjectionTests(unittest.TestCase):
+    def test_uncertain_reaction_recovers_from_manual_resolution_without_message_id(self):
+        from relay_core import messaging
+        content={'kind':'reaction','emoji':'👍'}
+        action=_dict(name='action',status='Dispatching',operation='reaction',request_key='original-key',
+            source_message='source',payload=json.dumps({'content':content}),reload=Mock(),check_permission=Mock())
+        source=_dict(name='source',reactions='{}',reload=Mock())
+        channel=_dict(channel='WhatsApp')
+        fake=SimpleNamespace(db=Mock(),get_doc=Mock(return_value=action))
+        hub=Mock()
+        hub.call_tool.return_value={'deliveries':[{'key':'original-key','state':'submitted',
+            'result':{'manually_reconciled':True}}]}
+        with patch.object(messaging,'frappe',fake),patch.object(messaging,'internal_save'), \
+             patch.object(messaging,'action_target',return_value=(source,channel,{})), \
+             patch.object(messaging.whatsapp,'client',return_value=hub),patch('relay_core.realtime.changed') as changed:
+            messaging.finish(action,source,channel,{},content,{'delivery':{'state':'uncertain'},'_relay_status_id':10})
+            self.assertEqual(action.status,'Uncertain')
+            changed.assert_not_called()
+            result=messaging.reconcile(action.name)
+        self.assertEqual(result,{'action':'action','status':'Submitted','message':None})
+        hub.call_tool.assert_called_once_with('whatsapp.deliveries',{'request_key':'original-key'})
+        self.assertEqual(json.loads(fake.db.set_value.call_args.args[3]),{'bot':[{'type':'emoji','emoji':'👍'}]})
+        changed.assert_called_once_with(source)
+
     def test_immediate_reaction_acknowledgement_projects_on_loaded_message(self):
         from relay_core import conversation_start, messaging, whatsapp
         source = _dict(relay_contact='contact', channel='channel', sender_endpoint='15550000001',

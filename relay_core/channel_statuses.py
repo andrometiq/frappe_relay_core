@@ -1,5 +1,4 @@
 """Apply durable channel receipts without making a provider or Hub request."""
-import json
 import frappe
 from relay_core import messaging
 from relay_core.settings import value as connection_value
@@ -29,11 +28,7 @@ def project_batch(event, rows):
             frappe.set_user(action.owner)
             try:
                 action.check_permission('read')
-                if action.start_contact:
-                    from relay_core.conversation_start import action_target
-                    source,channel,context=action_target(action)
-                else:
-                    source,channel,context=messaging.readable_source(action.source_message)
+                source,channel,context=messaging.action_target(action)
                 medium={'telegram.message':'Telegram','email.send':'Email','whatsapp.execute':'WhatsApp'}[row['operation']]
                 if channel.channel!=medium or channel.account!=event.account:
                     raise ValueError('Status receipt channel mismatch')
@@ -60,18 +55,9 @@ def project_batch(event, rows):
 
 def apply_email(action,row):
     from relay_core import email
-    from relay_core.automation.service import internal_save
     payload=messaging.object_value(action.payload)
     if action.operation!='email' or not isinstance(payload.get('email_values'),dict):
         raise ValueError('Email receipt does not match an email action')
-    receipt=dict(row['receipt']);receipt['_relay_status_id']=row['id']
-    if row['state']=='submitted':
-        result=email._send(**payload['email_values'],request_key=payload['email_request'],_receipt=receipt,_commit=False)
-        if result.get('message'):
-            action.outbound_message=result['message'];action.status='Submitted'
-        else:
-            action.status='Uncertain'
-    else:
-        action.status={'rejected':'Rejected','cancelled':'Rejected'}.get(row['state'],'Uncertain')
-    action.result=json.dumps(receipt)
-    internal_save(action)
+    receipt=dict(row['receipt']) if row['state']=='submitted' else {'delivery':{'state':row['state']}}
+    receipt['_relay_status_id']=row['id']
+    email.finish(action,receipt,commit=False)

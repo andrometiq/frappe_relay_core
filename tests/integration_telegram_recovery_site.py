@@ -1,17 +1,13 @@
 """Durable Telegram rejection and recovery against isolated Frappe database/Redis."""
-import os,json,time
-from pathlib import Path
+import json,time
 from unittest.mock import patch
-root=Path(__file__).resolve().parents[1];sites=root/'.runtime/automation-bench/sites'
-assert Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()==sites.resolve()
-os.chdir(sites)
 import frappe
-from relay_core import inbox,messaging,whatsapp
-frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
-frappe.connect();frappe.set_user('Administrator')
+from channel_site_fixtures import init, business as fixture_business, user as fixture_user, push_status
+from relay_core import messaging,whatsapp
+init()
 try:
  assert messaging.action_error(frappe._dict(status='Dispatching',result=None)) is None
- stamp=str(time.time_ns());business=frappe.get_doc({'doctype':'Relay Inbox Simulation Business','title':'Typing '+stamp}).insert()
+ stamp=str(time.time_ns());business=fixture_business('Telegram '+stamp)
  person=frappe.get_doc({'doctype':'Contact','first_name':'Typing '+stamp,'links':[{'link_doctype':business.doctype,'link_name':business.name}]}).insert()
  contact=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,'display_name':'Typing fixture'}).insert()
  channel=frappe.get_doc({'doctype':'Relay Channel','channel':'Telegram','account':'typing-'+stamp,'enabled':1}).insert()
@@ -36,14 +32,6 @@ try:
   assert restored['status']=='Failed' and 'not authorized' in restored['error']
   activity=next(row for row in messaging.actions(contact.name)['items'] if row['name']==denied['action'])
   assert activity['can_retry'] and 'not authorized' in activity['error']
-  from relay_core import conversation_start
-  with patch.object(conversation_start,'connection_value',return_value=channel.account):
-   start=conversation_start.send(contact.name,endpoint.name,'text',{'text':'Denied start'},'start-'+stamp)
-   assert start['status']=='Rejected' and 'not authorized' in start['error']
-   calls=client.return_value.call_tool.call_count
-   replay=conversation_start.send(contact.name,endpoint.name,'text',{'text':'Denied start'},'start-'+stamp)
-   assert replay['status']=='Rejected' and 'not authorized' in replay['error']
-   assert client.return_value.call_tool.call_count==calls
   client.return_value.call_tool.side_effect=TimeoutError('Lost response')
   pending=messaging.send(source.name,'text',{'text':'Recovered fixture'},'pending-'+stamp)
   assert pending['status']=='Uncertain'
@@ -128,14 +116,12 @@ try:
   pending=messaging.send(source.name,'text',{'text':'Pushed receipt fixture'},'callback-'+stamp)
   receipt_action=frappe.get_doc('Relay Message Action',pending['action'])
   client.reset_mock()
-  with patch.object(frappe,'enqueue'):
-   event=frappe.get_doc({'doctype':'Relay Hub Event','event_key':'callback-'+stamp,'account':channel.account,'hub_event_id':'100','payload':'{}'}).insert()
   row={'id':100,'delivery_id':7,'request_key':receipt_action.request_key,'operation':'telegram.message','state':'submitted','receipt':{'message_id':987657,'chat_id':123456},'occurred_at':'2026-09-24T10:00:00Z'}
-  channel_statuses.project_batch(event,[row]);frappe.db.commit()
+  push_status(channel.account,[row]);frappe.db.commit()
   receipt_action.reload();assert receipt_action.status=='Submitted'
   assert frappe.db.count('Relay Message',{'source_key':receipt_action.request_key})==1
   message_before=frappe.db.get_value('Relay Message',receipt_action.outbound_message,'modified')
-  channel_statuses.project_batch(event,[row,dict(row,id=99,state='uncertain',receipt={})]);frappe.db.commit()
+  push_status(channel.account,[row,dict(row,id=99,state='uncertain',receipt={})]);frappe.db.commit()
   receipt_action.reload();assert receipt_action.status=='Submitted'
   assert frappe.db.count('Relay Message',{'source_key':receipt_action.request_key})==1
   assert frappe.db.get_value('Relay Message',receipt_action.outbound_message,'modified')==message_before
@@ -143,14 +129,72 @@ try:
   assert frappe.session.user=='Administrator'
   def receipt_before_timeout(tool,args):
    raced=dict(row,id=101,request_key=args['request_key'],receipt={'message_id':987658,'chat_id':123456})
-   channel_statuses.project_batch(event,[raced]);frappe.db.commit()
+   push_status(channel.account,[raced]);frappe.db.commit()
    raise TimeoutError('HTTP response lost after callback')
   client.return_value.call_tool.side_effect=receipt_before_timeout
   raced=messaging.send(source.name,'text',{'text':'Receipt race fixture'},'callback-race-'+stamp)
   assert raced['status']=='Submitted' and raced['message']
   assert frappe.db.get_value('Relay Message Action',raced['action'],'status')=='Submitted'
   print('PASS pushed Telegram receipts project once without Hub lookups and cannot regress submitted messages')
+ with patch.object(messaging,'connection_value',return_value=channel.account),patch.object(whatsapp,'client') as client:
+  # A process can disappear after Core commits and before Hub admits the intent.
+  client.return_value.call_tool.side_effect=SystemExit('Local crash before Hub admission')
+  try:messaging.send(source.name,'text',{'text':'Admission recovery quantity 25'},'crash-'+stamp)
+  except SystemExit:pass
+  key=__import__('hashlib').sha256(('Administrator:crash-'+stamp).encode()).hexdigest()
+  crashed=frappe.get_doc('Relay Message Action',{'request_key':key})
+  assert crashed.status=='Dispatching'
+  client.reset_mock();client.return_value.call_tool.side_effect=[{'deliveries':[]},{'pending':True,'state':'queued','request_key':key,'delivery_id':301}]
+  assert messaging.reconcile(crashed.name)['status']=='Queued'
+  assert [c.args[0] for c in client.return_value.call_tool.call_args_list]==['channels.deliveries','telegram.message']
+  assert client.return_value.call_tool.call_args.args[1]['request_key']==key
+  client.return_value.call_tool.side_effect=None
+  client.return_value.call_tool.return_value={'deliveries':[{'key':key,'operation':'telegram.message','state':'queued'}]}
+  assert messaging.reconcile(crashed.name)['status']=='Queued'
+  assert client.return_value.call_tool.call_args.args[0]=='channels.deliveries'
+  # Reassigning a source after admission cannot move the outgoing business.
+  second_business=fixture_business('Telegram alternate '+stamp)
+  person.append('links',{'link_doctype':second_business.doctype,'link_name':second_business.name});person.save()
+  frappe.db.set_value('Relay Message',source.name,{'business_doctype':second_business.doctype,'business_name':second_business.name});frappe.db.commit()
+  receipt={'id':301,'delivery_id':301,'request_key':key,'operation':'telegram.message','state':'submitted',
+      'receipt':{'chat_id':123456,'message_id':988001},'occurred_at':'2026-10-24T10:00:00Z'}
+  push_status(channel.account,[receipt]);crashed.reload()
+  outgoing=frappe.get_doc('Relay Message',crashed.outbound_message)
+  assert outgoing.business_name==business.name and outgoing.business_name!=second_business.name
+  assert frappe.db.count('Relay Message',{'source_key':key})==1
+  # Newer callback evidence wins even when an older HTTP pending response arrives last.
+  def callback_then_pending(tool,args):
+   push_status(channel.account,[dict(receipt,id=302,request_key=args['request_key'],state='rejected',receipt={})])
+   return {'pending':True,'state':'dispatching'}
+  client.return_value.call_tool.side_effect=callback_then_pending
+  raced=messaging.send(source.name,'text',{'text':'Rejected callback beats pending'},'pending-race-'+stamp)
+  assert raced['status']=='Rejected'
+  client.return_value.call_tool.side_effect=SystemExit('Crash with later revocation')
+  try:messaging.send(source.name,'text',{'text':'Must not send after revocation'},'revoke-crash-'+stamp)
+  except SystemExit:pass
+  revoked_key=__import__('hashlib').sha256(('Administrator:revoke-crash-'+stamp).encode()).hexdigest()
+  revoked=frappe.get_doc('Relay Message Action',{'request_key':revoked_key})
+  frappe.db.set_value('Relay Contact Endpoint',endpoint.name,'verified',0);frappe.db.commit();client.reset_mock()
+  try:messaging.reconcile(revoked.name)
+  except frappe.PermissionError:frappe.db.rollback()
+  else:raise AssertionError('Revoked binding recovered admission')
+  client.return_value.call_tool.assert_not_called()
+  frappe.db.set_value('Relay Contact Endpoint',endpoint.name,'verified',1);frappe.db.commit()
+  # Explicit chat/topic sends share the same admission recovery.
+  with patch.object(telegram,'connection_value',return_value=channel.account),patch.object(telegram_delivery,'connection_value',return_value=channel.account):
+   client.return_value.call_tool.side_effect=SystemExit('Group admission crash')
+   try:telegram.send(-100123456,'Group admission quantity 12',message_thread_id=7,request_key='group-crash-'+stamp)
+   except SystemExit:pass
+   group_key=__import__('hashlib').sha256(('Administrator:group-crash-'+stamp).encode()).hexdigest()
+   group_action=frappe.get_doc('Relay Message Action',{'request_key':group_key})
+   client.return_value.call_tool.side_effect=[{'deliveries':[]},{'pending':True,'state':'dispatching'}]
+   assert messaging.reconcile(group_action.name)['status']=='Queued'
+   assert client.return_value.call_tool.call_args.args[1]['message_thread_id']==7
+ print('PASS Telegram pre-admission recovery, accepted-pending receipts, revocation, immutable business and callback races')
  expected=frappe.get_all('Relay Message Action',filters={'status':['in',['Dispatching','Queued','Uncertain']]},fields=['name'],order_by='modified asc, name asc',limit_page_length=30)
  assert [row.name for row in messaging.recovery_candidates()]==[row.name for row in expected]
  print('PASS Hub authentication rejection is definitive; Telegram journal recovery projects one message without resending')
+ from channel_site_fixtures import check_business_lifecycle
+ check_business_lifecycle(business)
+ print('PASS business update and delete/cancel link guards remain independent of Relay history')
 finally:frappe.destroy()

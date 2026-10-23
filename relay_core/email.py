@@ -1,5 +1,6 @@
 """Email submissions require verified endpoints and readable business contacts."""
 import hashlib
+import json
 import re
 import frappe
 from relay_core.permissions import require_access, readable_contact
@@ -22,6 +23,13 @@ def recipients(values, *, required=False):
     return result
 
 
+def recipient_lists(to, cc=None, bcc=None):
+    values = recipients(to, required=True), recipients(cc), recipients(bcc)
+    if sum(map(len, values)) > 50:
+        raise ValueError('At most 50 recipients are allowed')
+    return values
+
+
 def verify_recipient(address, channels):
     for channel in channels:
         key = hashlib.sha256((channel.name + ':' + address).encode()).hexdigest()
@@ -30,7 +38,7 @@ def verify_recipient(address, channels):
         if contact:
             frappe.get_doc('Relay Channel', channel.name).check_permission('read')
             readable_contact(contact)
-            return
+            return contact
     frappe.throw('Every email recipient must have a verified business contact endpoint', frappe.PermissionError)
 
 
@@ -67,18 +75,14 @@ def recipient_options(message, query=''):
 
 @frappe.whitelist(methods=['POST'])
 def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, html=None, attachment_ids=None, forward=0, auto_submitted=0):
-    """Persist the attempt before provider I/O; replay only reads its outcome."""
-    import json
+    """Journal every send before admission, including standalone notifications."""
     import uuid
-    values=dict(to=to,subject=subject,body=body,cc=cc,bcc=bcc,message=message,
-        html=html,attachment_ids=attachment_ids,forward=forward,auto_submitted=auto_submitted)
-    if not message:
-        return _send(**values,request_key=request_key)
     from relay_core import messaging
     from relay_core.automation.service import internal_save
-    from relay_core.hub import HubError
-    source,channel,_=messaging.readable_source(message)
-    if channel.channel!='Email':raise ValueError('Choose an email conversation')
+    from relay_core.ticket_notifications import outgoing_notification
+    recipient_lists(to, cc, bcc)
+    values=dict(to=to,subject=subject,body=body,cc=cc,bcc=bcc,message=message,
+        html=html,attachment_ids=attachment_ids,forward=forward,auto_submitted=auto_submitted)
     request_key=request_key or uuid.uuid4().hex
     if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}',request_key):
         raise ValueError('A stable request key is required')
@@ -87,71 +91,140 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
     digest=hashlib.sha256(encoded.encode()).hexdigest()
     key=hashlib.sha256(('email:'+frappe.session.user+':'+request_key).encode()).hexdigest()
     with frappe.cache.lock('relay-email-attempt:'+key,timeout=120,blocking_timeout=3):
-        existing=frappe.db.get_value('Relay Message Action',{'request_key':key},'name')
+        notification=outgoing_notification.get()
+        keys=[key,request_key] if notification and not message else [key]
+        existing=frappe.db.get_value('Relay Message Action',{'request_key':['in',keys],'owner':frappe.session.user},'name')
         if existing:
             action=frappe.get_doc('Relay Message Action',existing);action.check_permission('read')
             if action.payload_hash!=digest:raise ValueError('Request key was already used for different content')
             return reconcile_action(action)
+        source,channel,_=messaging.readable_source(message) if message else unanchored_target(to)
+        if channel.channel!='Email':raise ValueError('Choose an email conversation')
+        # Pre-journal notifications used the raw key. Adopt any durable intent
+        # before a new hashed identity could admit the same notification again.
+        legacy=None
+        if notification and not message:
+            legacy=messaging.delivery_receipt(frappe._dict(request_key=request_key),channel)
+            if legacy is not None:key=request_key
+        payload={'email_request':request_key,'email_values':values,
+            'business':[source.get('business_doctype'),source.get('business_name')],
+            'notification':notification}
         action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,
-            'source_message':source.name,'operation':'email','target_channel':channel.name,
+            'source_message':source.name,'start_contact':None if message else source.relay_contact,
+            'operation':'email','target_channel':channel.name,
             'preview':str(body or '')[:300],'payload_hash':digest,
-            'payload':json.dumps({'email_request':request_key,'email_values':values}),'status':'Dispatching'})
+            'payload':json.dumps(payload),'status':'Dispatching'})
         internal_save(action,new=True);frappe.db.commit()
-        dispatched=False
-        def dispatching():
-            nonlocal dispatched
-            dispatched=True
-        try:
-            result=_send(**values,request_key=request_key,_dispatch=dispatching,_hub_request_key=action.request_key)
-        except Exception as exc:
-            frappe.db.get_value('Relay Message Action',action.name,'name',for_update=True)
-            action.reload()
-            if action.status=='Submitted' or messaging.object_value(action.result or {}).get('_relay_status_id'):
-                return {'action':action.name,'status':action.status,'message':action.outbound_message}
-            rejected=(not dispatched and isinstance(exc,(ValueError,frappe.ValidationError,frappe.PermissionError))) or (isinstance(exc,HubError) and exc.metadata.get('error',{}).get('outcome_unknown') is False)
-            action.status='Rejected' if rejected else 'Uncertain'
-            internal_save(action);frappe.db.commit()
-            return {'action':action.name,'status':action.status,'message':None}
-        frappe.db.get_value('Relay Message Action',action.name,'name',for_update=True)
-        action.reload();action.outbound_message=result.get('message')
-        action.status='Submitted' if action.outbound_message else 'Uncertain'
-        internal_save(action);frappe.db.commit()
-        return dict(result,action=action.name,status=action.status)
+        if legacy is not None:return finish(action,legacy)
+        return submit(action)
+
+
+def unanchored_target(to, channel_name=None):
+    require_access()
+    addresses=recipients(to,required=True)
+    filters={'channel':'Email','enabled':1,'account':connection_value('relay_hub_account')}
+    if channel_name:filters['name']=channel_name
+    channels=frappe.get_list('Relay Channel',filters=filters,fields=['name'],page_length=2)
+    if len(channels)!=1:raise ValueError('Configure one enabled email channel for this account')
+    channel=frappe.get_doc('Relay Channel',channels[0].name);channel.check_permission('read')
+    contact=verify_recipient(addresses[0],channels)
+    source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=addresses[0])
+    from relay_core.business_access import reference
+    business=reference(source)
+    if business:source.business_doctype,source.business_name=business
+    return source,channel,{'provider':'Email'}
+
+
+def target(action):
+    from relay_core import messaging
+    payload=messaging.object_value(action.payload)
+    if action.source_message:
+        source,channel,context=messaging.readable_source(action.source_message)
+    else:
+        source,channel,context=unanchored_target(payload['email_values']['to'],action.target_channel)
+        if source.relay_contact!=action.start_contact:
+            frappe.throw('Email destination binding changed',frappe.PermissionError)
+    if channel.channel!='Email' or channel.name!=action.target_channel:
+        frappe.throw('Email channel changed',frappe.PermissionError)
+    values=payload['email_values']
+    for address in set(recipients(values['to'],required=True)+recipients(values.get('cc'))+recipients(values.get('bcc'))):
+        verify_recipient(address,[channel])
+    return source,channel,context
+
+
+def submit(action):
+    from relay_core import messaging
+    from relay_core.automation.service import internal_save
+    payload=messaging.object_value(action.payload)
+    try:
+        messaging.admission_scope(action)
+        arguments=prepare(**payload['email_values'],channel_name=action.target_channel)
+        if payload.get('arguments') is not None and payload['arguments']!=arguments:
+            raise ValueError('Email content changed before recovery')
+        payload['arguments']=arguments
+        action.payload=json.dumps(payload);internal_save(action);frappe.db.commit()
+    except frappe.TimestampMismatchError:
+        frappe.db.rollback()
+        action.reload()
+        return reconcile_action(action)
+    except (ValueError,frappe.ValidationError,frappe.PermissionError,frappe.DoesNotExistError):
+        return finish(action,{'delivery':{'state':'rejected'}})
+    try:
+        receipt=whatsapp.client().call_tool('email.send',dict(arguments,request_key=action.request_key))
+    except Exception as exc:
+        return messaging.record_submission_error(action,exc)
+    return finish(action,receipt)
 
 
 def reconcile_action(action):
-    """Recover a local receipt only; an unknown provider outcome must not resend."""
-    import json
+    from relay_core import messaging
     from relay_core.automation.service import internal_save
-    payload=json.loads(action.payload) if isinstance(action.payload,str) else action.payload
-    request=payload['email_request']
-    receipt=send_status(action.source_message,request)
-    if receipt.get('message'):
-        action.reload();action.outbound_message=receipt['message'];action.status='Submitted'
-        internal_save(action);frappe.db.commit()
-    elif action.status=='Dispatching' and frappe.utils.time_diff_in_seconds(frappe.utils.now_datetime(),action.modified)>120:
-        action.status='Uncertain';internal_save(action);frappe.db.commit()
-    result={'action':action.name,'status':action.status,'message':action.outbound_message}
-    if receipt.get('message'):result['message_id']=frappe.db.get_value('Relay Message',receipt['message'],'provider_id')
-    return result
+    _,channel,_=target(action)
+    if action.status in ('Submitted','Rejected'):return messaging.action_result(action)
+    payload=messaging.object_value(action.payload)
+    if action.source_message:
+        local=send_status(action.source_message,payload['email_request'])
+        if local.get('message'):
+            frappe.db.get_value('Relay Message Action',action.name,'name',for_update=True)
+            action.reload();action.outbound_message=local['message'];action.status='Submitted'
+            internal_save(action);frappe.db.commit()
+            return messaging.action_result(action)
+    receipt=messaging.delivery_receipt(action,channel)
+    if receipt is None:
+        return submit(action) if action.status=='Dispatching' else messaging.action_result(action)
+    return finish(action,receipt)
 
 
-def _send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, html=None, attachment_ids=None, forward=0, auto_submitted=0, _dispatch=None, _hub_request_key=None, _receipt=None, _commit=True):
+def finish(action,receipt,*,commit=True):
+    from relay_core import messaging
+    from relay_core.automation.service import internal_save
+    frappe.db.get_value('Relay Message Action',action.name,'name',for_update=True)
+    action.reload()
+    status=messaging.receipt_status(receipt)
+    identifier=receipt.get('message_id')
+    valid=isinstance(identifier,str) and re.fullmatch(r'<[^<>\s@]{1,120}@[^<>\s@]{1,120}>',identifier)
+    if messaging.stale_receipt(action,receipt,accepted=bool(valid and not status)):
+        return messaging.action_result(action)
+    if not status and valid:
+        action.outbound_message=project(action,receipt)
+        status='Submitted'
+    action.status=status or 'Uncertain';action.result=json.dumps(receipt)
+    internal_save(action)
+    if commit:frappe.db.commit()
+    return dict(messaging.action_result(action),**({'message_id':identifier} if valid else {}))
+
+
+def prepare(to, subject, body, cc=None, bcc=None, message=None, html=None, attachment_ids=None, forward=0, auto_submitted=0, channel_name=None):
     require_access()
-    to, cc, bcc = recipients(to, required=True), recipients(cc), recipients(bcc)
-    if len(to) + len(cc) + len(bcc) > 50:
-        raise ValueError('At most 50 recipients are allowed')
+    to, cc, bcc = recipient_lists(to, cc, bcc)
     if not isinstance(subject, str) or not subject.strip() or len(subject) > 998 or any(c in subject for c in '\r\n'):
         raise ValueError('Provide a single-line email subject')
     if not isinstance(body, str) or not body.strip() or len(body) > 100000:
         raise ValueError('Provide an email body of at most 100000 characters')
     channels = frappe.get_list('Relay Channel', filters={'channel': 'Email', 'enabled': 1,
-        'account': connection_value('relay_hub_account')}, fields=['name'], page_length=100)
+        'account': connection_value('relay_hub_account'), **({'name':channel_name} if channel_name else {})}, fields=['name'], page_length=100)
     for address in set(to + cc + bcc):
         verify_recipient(address, channels)
-    if message and not request_key:
-        import uuid
-        request_key=uuid.uuid4().hex
     extra={}
     if str(auto_submitted) not in ('0','1'):raise ValueError('Invalid automatic reply flag')
     if str(auto_submitted)=='1':extra['auto_submitted']=True
@@ -179,38 +252,46 @@ def _send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, 
             if total>attachments.MAX_BYTES:raise ValueError('Combined attachments exceed 4 MiB')
             files.append({'filename':file.file_name,'content_type':mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream','content_base64':base64.b64encode(raw).decode()})
         if files:extra['attachments']=files
-    if _dispatch:_dispatch()
-    result=dict(_receipt) if _receipt is not None else whatsapp.client().call_tool('email.send', {'to': to, 'cc': cc, 'bcc': bcc,
-        'subject': subject, 'body': body, **({'request_key':_hub_request_key or request_key} if request_key else {}),**extra})
-    if message and isinstance(result.get('message_id'),str) and re.fullmatch(r'<[^<>\s@]{1,120}@[^<>\s@]{1,120}>',result['message_id']):
-        import json
-        from relay_core.automation.provenance import conversation_key
-        from relay_core.message_updates import provider_key
-        history_key=hashlib.sha256(('relay-email-history:'+channel.account+':'+request_key).encode()).hexdigest()
-        with frappe.cache.lock('relay-email-history-'+history_key,timeout=10,blocking_timeout=3):
-            existing=frappe.db.get_value('Relay Message',{'source_key':history_key},'name')
-            if not existing:
-                # Recheck access after the external operation before projecting its receipt.
-                messaging.readable_source(message)
-                outgoing=frappe.get_doc({'doctype':'Relay Message','relay_contact':source.relay_contact,'channel':source.channel,
-                    'direction':'Outgoing','status':'Sent','content':body,'message_type':'text','sender_endpoint':source.sender_endpoint,
-                    'provider_id':result['message_id'],'source_key':history_key,
-                    'conversation_key':conversation_key(source.channel,source.sender_endpoint,context),
-                    'provider_message_key':provider_key(source.channel,source.sender_endpoint,result['message_id']),
-                    'provider_context':json.dumps({'provider':'Email','message_id':result['message_id'],'subject':subject,'references':extra.get('references',[])}),
-                    'message_data':json.dumps({'kind':'text','text':body,'email':{'subject':subject,'html':html or '',
-                        'to':to,'cc':cc,'attachments':[{'filename':item['filename'],'content_type':item['content_type']} for item in extra.get('attachments',[])],
-                        'local_attachments':attachment_ids,'attachment_source':source.name}})}).insert(ignore_permissions=True)
-                existing=outgoing.name
-                if _commit:frappe.db.commit()
-            result=dict(result,message=existing)
-    return result
+    return {'to':to,'cc':cc,'bcc':bcc,'subject':subject,'body':body,**extra}
+
+
+def project(action,receipt):
+    from relay_core import messaging
+    from relay_core.automation.provenance import conversation_key
+    from relay_core.message_updates import provider_key
+    payload=messaging.object_value(action.payload)
+    values=payload['email_values'];args=payload.get('arguments') or {}
+    source,channel,context=target(action)
+    history_key=action.request_key
+    keys=history_keys(channel.account,payload['email_request']) if action.source_message else [history_key]
+    existing=frappe.db.get_value('Relay Message',{'source_key':['in',keys],
+        'owner':action.owner,'relay_contact':source.relay_contact,'channel':channel.name},'name')
+    if existing:return existing
+    business=payload.get('business') or [source.get('business_doctype'),source.get('business_name')]
+    outgoing=frappe.get_doc({'doctype':'Relay Message','relay_contact':source.relay_contact,'channel':source.channel,
+        'direction':'Outgoing','status':'Sent','content':values['body'],'message_type':'text','sender_endpoint':source.sender_endpoint,
+        'provider_id':receipt['message_id'],'source_key':history_key,
+        'business_doctype':business[0],'business_name':business[1],
+        'conversation_key':conversation_key(source.channel,source.sender_endpoint,context),
+        'provider_message_key':provider_key(source.channel,source.sender_endpoint,receipt['message_id']),
+        'provider_context':json.dumps({'provider':'Email','message_id':receipt['message_id'],'subject':values['subject'],'references':args.get('references',[])}),
+        'message_data':json.dumps({'kind':'text','text':values['body'],'email':{'subject':values['subject'],'html':values.get('html') or '',
+            'to':recipients(values['to']),'cc':recipients(values.get('cc')),
+            'attachments':[{'filename':item['filename'],'content_type':item['content_type']} for item in args.get('attachments',[])],
+            'local_attachments':values.get('attachment_ids') or [],'attachment_source':source.name}})}).insert(ignore_permissions=True)
+    return outgoing.name
 
 
 @frappe.whitelist(methods=['GET'])
 def mailbox_status():
     require_access(manage=True)
     return whatsapp.client().call_tool('email.mailbox',{})
+
+
+def history_keys(account,request_key):
+    current=hashlib.sha256(('email:'+frappe.session.user+':'+request_key).encode()).hexdigest()
+    legacy=hashlib.sha256(('relay-email-history:'+account+':'+request_key).encode()).hexdigest()
+    return [current,legacy]
 
 
 @frappe.whitelist(methods=['GET'])
@@ -220,8 +301,7 @@ def send_status(message, request_key):
     source, channel, _ = readable_source(message)
     if channel.channel != 'Email' or not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,140}', request_key):
         raise ValueError('Invalid email request')
-    key=hashlib.sha256(('relay-email-history:'+channel.account+':'+request_key).encode()).hexdigest()
-    name=frappe.db.get_value('Relay Message', {'source_key':key,
+    name=frappe.db.get_value('Relay Message', {'source_key':['in',history_keys(channel.account,request_key)],'owner':frappe.session.user,
         'relay_contact':source.relay_contact,'channel':source.channel}, 'name')
     if not name:return {'status':'Unconfirmed'}
     doc=frappe.get_doc('Relay Message',name);doc.check_permission('read')
