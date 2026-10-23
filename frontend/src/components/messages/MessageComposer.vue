@@ -181,12 +181,11 @@ function keydown(event) {
   <form class="message-composer" @submit.prevent="canSend && send()">
     <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
     <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
-    <div v-else-if="!windowState.open" class="flex items-center gap-2 text-sm">
+    <div v-else-if="!windowState.open" class="composer-window-notice">
       <span>The WhatsApp reply window is closed.</span
       ><Button label="Use an approved template" @click="emit('template')" />
     </div>
-    <p v-if="windowState.open && sourceContext.provider === 'WhatsApp'" class="text-xs text-ink-gray-5">24-hour reply window open{{ windowState.expires_at ? ' until ' + windowState.expires_at : '' }}</p>
-    <div v-if="quoting" class="flex items-center gap-2 text-xs text-ink-gray-5">
+    <div v-if="quoting" class="composer-quote">
       Replying to {{ (source.content || "Message").slice(0, 80)
       }}<span v-if="sourceContext.message_thread_id">
         · Topic {{ sourceContext.message_thread_id }}</span
@@ -205,7 +204,7 @@ function keydown(event) {
       Topic {{ sourceContext.message_thread_id }}
     </div>
     <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-    <details><summary class="text-sm">From {{ identity?.display_phone_number || 'Number unavailable' }} · {{ source.channel }}</summary><WhatsAppIdentity /></details>
+    <details class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
     <div class="composer-toolbar">
       <SendChannel whatsapp-only /><Button label="Template" :disabled="busy" @click="emit('template')" />
       <Dropdown :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>

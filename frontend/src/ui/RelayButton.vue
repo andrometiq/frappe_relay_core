@@ -8,8 +8,11 @@ const props = defineProps({
   variant: { type: String, default: 'subtle' }, theme: { type: String, default: 'gray' },
   size: { type: String, default: 'sm' }, loading: Boolean, disabled: Boolean, type: { type: String, default: 'button' },
 })
+const variants = { solid: 'relay-button--solid', subtle: 'relay-button--subtle', ghost: 'relay-button--ghost' }
+const themes = { gray: 'relay-button--gray', red: 'relay-button--red', blue: 'relay-button--blue', green: 'relay-button--green' }
+const sizes = { xs: 'relay-button--xs', sm: 'relay-button--sm', lg: 'relay-button--lg' }
 const classes = computed(() => [
-  'relay-button', `relay-button--${props.variant}`, `relay-button--${props.theme}`, `relay-button--${props.size}`,
+  'relay-button', variants[props.variant], themes[props.theme], sizes[props.size],
   { 'relay-button--icon-only': !props.label && !useDefault.value, 'is-loading': props.loading },
 ])
 const slots = defineSlots()

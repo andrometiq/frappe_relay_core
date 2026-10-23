@@ -1,5 +1,6 @@
 <script setup>
-import { FeatherIcon } from "@relay/ui";
+import LoadingRows from "../LoadingRows.vue";
+import WorkspaceState from "../WorkspaceState.vue";
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -47,12 +48,9 @@ function onScroll(event) {
           </span>
         </button>
       </div>
-      <div v-if="busy" class="frappe-list-loading" role="status">Loading records…</div>
+      <LoadingRows v-if="busy && !items.length" label="Loading records…" :count="6" />
       <div v-if="loadingMore" class="frappe-list-loading" role="status">Loading more…</div>
-      <div v-else-if="!items.length && !busy" class="frappe-empty-state">
-        <span class="frappe-empty-icon"><FeatherIcon name="file-text" :size="28" /></span>
-        <h3>{{ emptyTitle }}</h3><p v-if="emptyDescription">{{ emptyDescription }}</p><slot name="empty-action" />
-      </div>
+      <WorkspaceState v-else-if="!items.length && !busy" :title="emptyTitle" :description="emptyDescription" icon="file-text"><slot name="empty-action" /></WorkspaceState>
     </div>
     <footer v-if="$slots.footer" class="frappe-list-footer"><slot name="footer" /></footer>
   </section>

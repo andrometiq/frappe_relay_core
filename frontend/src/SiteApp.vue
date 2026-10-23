@@ -1,8 +1,9 @@
 <script setup>
 import { computed, defineAsyncComponent, onErrorCaptured, onMounted, provide, ref, watch, nextTick } from 'vue'
-import { Button, ErrorMessage, FeatherIcon } from '@relay/ui'
+import { Avatar, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi, frappeRequest } from './services/coreApi'
 import { realtimeStatus, startRealtime } from './services/realtime'
+import LoadingRows from './components/LoadingRows.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import { useViewRoute } from './useViewRoute'
 
@@ -76,17 +77,17 @@ onErrorCaptured(e => {
       </nav>
       <div class="relay-nav-footer">
         <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" />Frappe Desk</a>
-        <div class="relay-account"><span class="relay-user-name" :title="user">{{ user }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+        <div class="relay-account"><Avatar :label="user" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="user">{{ user }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
     <main class="workspace" :inert="mobile || undefined">
       <header class="page-header v1-header">
         <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="mobile = true" />
         <h1>{{ current?.label }}</h1>
-        <div class="ml-auto flex items-center gap-2"><span class="v1-connection" role="status">{{ realtimeStatus }}</span><NotificationInbox /></div>
+        <div class="ml-auto flex items-center gap-2"><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
       </header>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
-      <p v-if="!ready && !error" role="status" class="p-4">Loading workspace…</p>
+      <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <p v-else-if="current?.manage && !capabilities.manage" class="p-4">A Relay Communication Manager role is required. <a href="#/teams" class="underline">Review access</a></p>
       <component :is="views[view]" v-else-if="ready" />
     </main>
