@@ -10,7 +10,8 @@
     "account",
     "hub_event_id",
     "payload",
-    "projection_status"
+    "projection_status",
+    "routing_decisions"
   ],
   "fields": [
     {
@@ -44,6 +45,12 @@
       "fieldtype": "Select",
       "options": "Pending\nProjected\nUncategorized\nIgnored\nFailed",
       "default": "Pending"
+    },
+    {
+      "fieldname": "routing_decisions",
+      "label": "Routing decisions",
+      "fieldtype": "JSON",
+      "read_only": 1
     }
   ],
   "permissions": [

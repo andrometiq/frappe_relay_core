@@ -8,7 +8,7 @@ def candidates(contact):
     enabled=set(frappe.get_all('Relay Contact Type',filters={'enabled':1},pluck='business_doctype'))
     rows=frappe.get_all('Dynamic Link',filters={'parent':person,'parenttype':'Contact','parentfield':'links'},fields=['link_doctype','link_name'],limit_page_length=51)
     if len(rows)>50:return []
-    return sorted({(r.link_doctype,r.link_name) for r in rows if r.link_doctype in enabled})
+    return sorted({(r.link_doctype,r.link_name) for r in rows if r.link_doctype in enabled and frappe.db.exists(r.link_doctype, r.link_name)})
 
 
 def reference(doc):
@@ -55,15 +55,18 @@ def query_condition(user=None):
     return '('+' OR '.join(clauses)+')' if clauses else '1=0'
 
 
-def incoming_reference(contact, channel, endpoint, context):
-    links = candidates(contact)
+def incoming_reference(contact, channel, endpoint, context, links=None):
+    if links is None: links = candidates(contact)
     reply = context.get('reply_to_message_id')
     if reply:
         from relay_core.message_updates import provider_key
+        from relay_core.automation.provenance import conversation_key
         target = frappe.db.get_value('Relay Message',
             {'provider_message_key': provider_key(channel, endpoint, reply), 'relay_contact': contact,
-             'channel': channel, 'sender_endpoint': endpoint},
+             'channel': channel, 'sender_endpoint': endpoint,
+             'conversation_key': conversation_key(channel, endpoint, context)},
             ['business_doctype', 'business_name'], as_dict=True)
         if target and (target.business_doctype, target.business_name) in links:
+            context['business_rule'] = 'reply_context'
             return target.business_doctype, target.business_name
-    return links[0] if len(links) == 1 else None
+    return None

@@ -95,7 +95,8 @@ def project(name, business_overrides=None):
     except (ValueError, TypeError, AttributeError):
         frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Failed'); return
     unresolved = update_status == 'Uncategorized'
-    for row in incoming:
+    decisions = json.loads(event.get('routing_decisions') or '{}')
+    for position, row in enumerate(incoming):
         key = hashlib.sha256((event.account + ':' + channel + ':' + row['id']).encode()).hexdigest()
         context = row.get('provider_context', {})
         message_key = provider_key(channel, row['from'], context.get('message_id') or row['id'])
@@ -104,9 +105,13 @@ def project(name, business_overrides=None):
         endpoint_key = hashlib.sha256((channel + ':' + row['from']).encode()).hexdigest()
         contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
         if not contact:
+            decisions[row['id']] = 'triage_unverified'
             unresolved = True; continue
-        from relay_core.business_access import incoming_reference
-        business = (business_overrides or {}).get(row['id']) or incoming_reference(contact, channel, row['from'], context)
+        from relay_core.business_routing import resolve
+        business, rule = resolve(contact, channel, row['from'], context, row, event,
+                                 (business_overrides or {}).get(row['id']), position=position)
+        decisions[row['id']] = rule
+        context['business_rule'] = rule
         if not business:
             unresolved = True
             continue
@@ -118,7 +123,7 @@ def project(name, business_overrides=None):
         data = row.get('message_data') or {'kind': kind, 'text': text}
         if kind != 'unsupported':
             text = preview(data)
-        if kind in ('interactive','button') and data.get('kind')=='text':
+        if kind in ('interactive','button') and data.get('kind')=='text' and rule != 'sender_choice':
             context['original_message_type']=kind;kind='text'
         from relay_core.timeline import provider_time
         frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
@@ -128,6 +133,7 @@ def project(name, business_overrides=None):
             'provider_context': json.dumps(context, sort_keys=True),
             'message_data': json.dumps(data, ensure_ascii=False), 'provider_message_key': message_key,
             'conversation_key': conversation_key(channel, row['from'], context)}).insert(ignore_permissions=True)
+    frappe.db.set_value('Relay Hub Event', name, 'routing_decisions', json.dumps(decisions, sort_keys=True))
     frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or update_status == 'Projected' else 'Ignored')
     from relay_core.realtime import changed
     changed(event)

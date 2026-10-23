@@ -38,7 +38,8 @@ def pending(after=None):
             data=row.get('message_data') or {};detail=row.get('text') or {}
             items.append({'event':doc.name,'channel':channel,'medium':medium,'provider_id':row['id'],
                           'endpoint':row['from'],'preview':str(data.get('text') or data.get('caption') or detail.get('body') or '['+row.get('type','message')+']')[:300],
-                          'received_at':doc.creation,'contact':contact,'ambiguous':bool(contact)})
+                          'received_at':doc.creation,'contact':contact,'ambiguous':bool(contact),
+                          'routing_rule':json.loads(doc.get('routing_decisions') or '{}').get(row['id'])})
     return {'items':items,'next':events[19].name if len(events)>20 else None}
 
 
