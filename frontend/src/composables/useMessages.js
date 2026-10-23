@@ -12,6 +12,7 @@ export function useMessages() {
     rows = ref([]),
     before = ref(null),
     more = ref(false);
+  const ingestionCursor = ref('RELAY-MSG-0000000000');
   const attachment = ref(null);
   const pendingMessages=ref([]), pendingCursor=ref(null), emailDrafts=reactive(new Map());
   const displayRows=computed(()=>[...rows.value,...pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))]);
@@ -49,6 +50,7 @@ export function useMessages() {
     if(!message.action)return;
     await run(async()=>{
       const result=await coreApi('messaging.reconcile',{action:message.action},true);
+      retireAction(result);
       if(result.status==='Submitted') {
         pendingMessages.value=pendingMessages.value.filter(row=>row.action!==message.action);
         await history();
@@ -73,7 +75,22 @@ export function useMessages() {
     pendingMessages.value=[...pendingMessages.value.filter(row=>row.scope!==contact || (!row.action&&!items.some(item=>item.emailRequest&&item.emailRequest===row.emailRequest)) || (older&&row.action&&!items.some(item=>item.action===row.action))),
       ...items].sort((a,b)=>String(a.creation).localeCompare(String(b.creation)));
   }
+  function retireAction(state) {
+    if (!['Submitted','Rejected'].includes(state.status)) return;
+    const index='relay-typed-result-'+state.action;
+    const storage=sessionStorage.getItem(index);
+    if(storage)sessionStorage.removeItem(storage);
+    sessionStorage.removeItem(index);
+  }
+  async function retireCompletedActions() {
+    const names=Object.keys(sessionStorage).filter(key=>key.startsWith('relay-typed-result-')).map(key=>key.slice('relay-typed-result-'.length));
+    for(let i=0;i<names.length;i+=50){
+      const result=await coreApi('messaging.action_snapshots',{names:JSON.stringify(names.slice(i,i+50))});
+      result.items.forEach(retireAction);
+    }
+  }
   async function refreshPendingStatuses() {
+    await retireCompletedActions();
     const scope=selected.value||businessType.value+':'+businessName.value;
     const items=pendingMessages.value.filter(row=>row.scope===scope&&row.action).slice(0,50);
     if(!items.length)return;
@@ -150,13 +167,13 @@ export function useMessages() {
     const key = windowKey();
     if (!key || !rows.value.length) return;
     windows.delete(key);
-    windows.set(key, {rows: rows.value, before: before.value, last: last.value, more:more.value, newer:newer.value, position:viewPosition.value});
+    windows.set(key, {rows: rows.value, before: before.value, last: last.value, ingestionCursor:ingestionCursor.value, more:more.value, newer:newer.value, position:viewPosition.value});
     while(windows.size>20) windows.delete(windows.keys().next().value);
   }
   function restoreWindow() {
     const saved=windows.get(windowKey());
     if (!saved) { viewPosition.value=null; return false; }
-    rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
+    ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
     viewPosition.value=saved.position;restored.value=saved.position?.name||'';
     if(!businessName.value && !source.value)source.value=rows.value.at(-1)||null;
     return true;
@@ -187,6 +204,9 @@ export function useMessages() {
       : await coreApi('inbox.view_state',{contact:selected.value,...(usePreferred?{}:{channel:channel.value})});
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     if(!saved.name){await history();return;}
+    const checkpoint=await historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})});
+    if(generation!==requestSequence||identity!==conversationIdentity())return;
+    ingestionCursor.value=checkpoint.ingestion_cursor||'RELAY-MSG-0000000000';
     if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;restoreDraft();}
     const page=businessName.value
       ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:saved.name})
@@ -208,7 +228,15 @@ export function useMessages() {
     refreshing = true;
     try {
       if(!last.value){await history();return;}
-      const page = newer.value ? {items:[]} : await historyRequest({ after: last.value, limit: 50, ...(channel.value ? {channel:channel.value} : {}) });
+      const page = {items:[]};
+      let cursor = ingestionCursor.value, hasMore = true;
+      while (hasMore) {
+        const batch = await historyRequest({since:cursor,limit:50,...(channel.value?{channel:channel.value}:{})});
+        if (generation !== requestSequence || identity !== conversationIdentity()) return;
+        page.items.push(...batch.items);
+        cursor = batch.ingestion_cursor || cursor;
+        hasMore = batch.has_more && batch.items.length > 0;
+      }
       if (generation !== requestSequence || identity !== conversationIdentity()) return;
       if (rows.value.length) {
         const start=Math.max(0,rows.value.findIndex(row=>row.name===viewPosition.value?.name)-10);
@@ -226,14 +254,14 @@ export function useMessages() {
       if (page.items.length) {
         if(viewPosition.value && !viewPosition.value.atBottom) { newArrivals.value=page.items.length; return; }
         const known = new Set(rows.value.map(row => row.name));
-        const combined = [...rows.value, ...page.items.filter(row => !known.has(row.name))];
+        const combined = [...rows.value, ...page.items.filter(row => !known.has(row.name))].sort((a,b)=>String(a.sent_at||a.creation).localeCompare(String(b.sent_at||b.creation))||a.name.localeCompare(b.name));
         rows.value = combined.slice(-150);
         if (combined.length > 150) more.value = true;
         before.value = rows.value[0]?.name;
-        last.value = page.last || last.value;
-        newer.value = page.has_more;
+        last.value = rows.value.at(-1)?.name || last.value;
         updateChannels();
       }
+      ingestionCursor.value = cursor;
     } catch (err) {
       if (generation === requestSequence) {
         connectionError.value = err.message || 'Live updates unavailable.';
@@ -347,6 +375,7 @@ export function useMessages() {
           ...rows.value,
         ].slice(0, 150)
       : page.items;
+    if(!older)ingestionCursor.value=page.ingestion_cursor||'RELAY-MSG-0000000000';
     before.value = page.first;
     last.value = older ? rows.value.at(-1)?.name : page.last;
     newer.value = older && (rows.value.length >= 150 || newer.value);
@@ -370,6 +399,7 @@ export function useMessages() {
     viewPosition.value=null;newArrivals.value=0;
     newer.value = false;
     last.value = null;
+    ingestionCursor.value = 'RELAY-MSG-0000000000';
     attachment.value = null;
     selected.value = contact;
     source.value = null;
@@ -419,6 +449,7 @@ export function useMessages() {
     body.value = "";
     before.value = null;
     last.value = null;
+    ingestionCursor.value = 'RELAY-MSG-0000000000';
     newer.value = false;
     restored.value = "";
     more.value = false;
@@ -586,6 +617,8 @@ export function useMessages() {
         { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0 },
         true,
       ); } catch(err) {if(pending)pending.status='Unconfirmed';throw err;}
+      sessionStorage.setItem('relay-typed-result-'+result.action,storage);
+      retireAction(result);
       if(pending) {pending.error=result.error||null;pending.action=result.action;pending.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[result.status]||result.status;}
       notice.value = result.error || (
         result.status === "Submitted"

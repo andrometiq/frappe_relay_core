@@ -1,0 +1,75 @@
+{
+  "doctype": "DocType",
+  "name": "Relay WhatsApp Template",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:record_key",
+  "fields": [
+    {
+      "fieldname": "record_key",
+      "label": "Record key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "account",
+      "label": "Account",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "template_id",
+      "label": "Template id",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "template_name",
+      "label": "Template name",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "language",
+      "label": "Language",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "hub_event_id",
+      "label": "Hub event id",
+      "fieldtype": "Data",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ],
+  "field_order": [
+    "record_key",
+    "account",
+    "template_id",
+    "template_name",
+    "language",
+    "status",
+    "reason",
+    "hub_event_id"
+  ]
+}

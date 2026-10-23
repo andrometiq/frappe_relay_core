@@ -93,7 +93,12 @@ def apply_updates(payload, channel, event):
     if not updates: return 'Ignored'
     if any(type(item['timestamp']) is not int or item['timestamp'] < 0 or type(item.get('sequence', 0)) is not int for item in updates):
         raise ValueError('Invalid update timestamp')
+    deliveries = [row for row in updates if row['kind'] == 'delivery' and not row.get('participant')]
     unresolved = False
+    if deliveries:
+        from relay_core.whatsapp_receipts import apply_batch
+        unresolved = apply_batch(deliveries, channel) == 'Uncategorized'
+    updates = [row for row in updates if row['kind'] != 'delivery' or row.get('participant')]
     delivery_contacts = {}
     for update in updates:
         if type(update['timestamp']) is not int or update['timestamp'] < 0: raise ValueError('Invalid update timestamp')

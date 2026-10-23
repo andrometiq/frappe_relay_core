@@ -28,15 +28,15 @@ const views = {
   Flows: defineAsyncComponent(() => import('./components/WorkflowViewer.vue')),
   WhatsApp: defineAsyncComponent(() => import('./components/WhatsAppWorkspace.vue')),
   Teams: defineAsyncComponent(() => import('./components/TeamsWorkspace.vue')),
-  Campaigns: defineAsyncComponent(() => import('./components/CampaignsWorkspace.vue')),
+  Incoming: defineAsyncComponent(() => import('./components/IncomingWorkspace.vue')),
 };
 const navigation = [
   {name:'Messages',label:'Business inbox',icon:'inbox'},
   {name:'Teams',label:'Teams',icon:'users'},
-  {name:'Campaigns',label:'Bulk messaging',icon:'send'},
+
   {name:'Flows',label:'Workflow viewer',icon:'git-branch'},
 ];
-const tools = [{name:'WhatsApp',label:'Templates',icon:'file-text',manage:true}];
+const tools = [{name:'Incoming',label:'Unlinked/ambiguous',icon:'inbox',manage:true},{name:'WhatsApp',label:'Templates',icon:'file-text',manage:true}];
 const view = useViewRoute(Object.keys(views), "Messages"),
   mobile = ref(false),
   expanded = ref(tools.some((item) => item.name === view.value));
@@ -191,7 +191,7 @@ async function logout() {
         </div>
         <div class="flex items-center gap-2"><span v-if="realtimeStatus !== 'Live'" class="relay-connection-state compact" role="status">Reconnecting…</span><NotificationInbox /></div>
       </header>
-      <KeepAlive :include="['CallsWorkspace']"
+      <KeepAlive
         ><component :is="views[view]"
       /></KeepAlive>
     </main>

@@ -6,11 +6,15 @@ all business reads and ticket writes still check the execution user's access.
 """
 import hashlib
 import json
+from contextvars import ContextVar
 import frappe
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import action_key, canonical, event_key, validate_decision
 from relay_core.automation.providers import complete, ProviderError
+
+
+outgoing_run = ContextVar('relay_automation_outgoing_run', default=None)
 
 
 def internal_save(doc, new=False):
@@ -281,7 +285,7 @@ def apply(name, fence, decision, previous_replies):
 
 
 def dispatch(name):
-    from relay_core.whatsapp import enqueue as send
+    from relay_core.messaging import send
     original = frappe.session.user
     frappe.db.get_value('Relay Automation Outbox', name, 'name', for_update=True)
     out = frappe.get_doc('Relay Automation Outbox', name)
@@ -317,6 +321,7 @@ def dispatch(name):
         reply = frappe.get_doc('Relay Canned Reply', out.reply)
         if submission.get('operation')!='messages.send' or submission.get('arguments')!={'body':reply.body}:
             out.status = 'Cancelled'; internal_save(out); frappe.db.commit(); return
+        out.result = canonical({'journal':'message_action'})
         out.status = 'Dispatching'; out.attempts = int(out.attempts or 0) + 1
         out.lease_until = add_to_date(now_datetime(), seconds=120)
         internal_save(out); frappe.db.commit()
@@ -327,8 +332,10 @@ def dispatch(name):
         from relay_core.whatsapp import prepare
         resolved=prepare(**{k:v for k,v in submission.items() if k!='key'})
         if resolved.get('to')!=out.recipient:out.reload();out.status='Cancelled';internal_save(out);frappe.db.commit();return
-        result=send([submission])
-        out.reload(); out.status = 'Submitted'; out.result = canonical(result)
+        token = outgoing_run.set(run.name)
+        try: result=send(message.name, 'text', {'text': reply.body}, submission['key'], quote=0)
+        finally: outgoing_run.reset(token)
+        out.reload(); out.status = 'Submitted' if result['status'] == 'Submitted' else 'Uncertain'; out.result = canonical(result)
         internal_save(out); frappe.db.commit()
     except Exception as exc:
         frappe.db.rollback(); out.reload()
@@ -343,12 +350,22 @@ def dispatch(name):
 def recover():
     if not frappe.conf.get('relay_automation_enabled'):
         return
-    # Recovery is bounded. Uncertain sends require reconciliation, not a new key.
-    for row in frappe.get_all('Relay Automation Outbox', filters={'status': 'Dispatching', 'lease_until': ['<', now_datetime()]}, fields=['name'], limit_page_length=20):
+    # Core owns delivery recovery; the outbox follows its action without resending.
+    for row in frappe.get_all('Relay Automation Outbox', filters={'status':['in',['Dispatching','Uncertain']]}, fields=['name'], limit_page_length=20, order_by='modified asc'):
         frappe.db.get_value('Relay Automation Outbox', row.name, 'name', for_update=True)
         out = frappe.get_doc('Relay Automation Outbox', row.name)
-        if out.status == 'Dispatching' and out.lease_until < now_datetime():
-            out.status = 'Uncertain'; internal_save(out)
+        if out.status == 'Dispatching' and out.lease_until >= now_datetime(): continue
+        run = frappe.get_doc('Relay Automation Run', out.run)
+        key = hashlib.sha256((run.execution_user + ':' + json.loads(out.payload)['key']).encode()).hexdigest()
+        action = frappe.db.get_value('Relay Message Action', {'request_key':key}, ['name','status','outbound_message'], as_dict=True)
+        if action:
+            out.status = 'Submitted' if action.status == 'Submitted' else 'Uncertain'
+            out.result = canonical({'action':action.name,'status':action.status,'message':action.outbound_message})
+        elif json.loads(out.result or '{}').get('journal') == 'message_action':
+            out.status = 'Pending'
+        else:
+            out.status = 'Uncertain'
+        internal_save(out)
     for row in frappe.get_all('Relay Automation Run', filters={'status': ['in', ['Pending', 'Deciding']]}, fields=['name'], limit_page_length=20, order_by='creation asc'):
         frappe.enqueue('relay_core.automation.service.process', name=row.name, queue='long', timeout=180)
     for row in frappe.get_all('Relay Automation Outbox', filters={'status': 'Pending'}, fields=['name'], limit_page_length=20, order_by='creation asc'):

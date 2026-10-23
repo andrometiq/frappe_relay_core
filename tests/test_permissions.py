@@ -24,6 +24,12 @@ class PermissionsTest(unittest.TestCase):
     def test_doctype_metadata_uses_series_and_protects_configuration(self):
         import json
         from pathlib import Path
+        field_names = {
+            'Relay Automation Policy':'channel', 'Relay Email Rule':'channel',
+            'Relay Email Preference':'user', 'Relay Contact Type':'business_doctype',
+            'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
+            'Relay WhatsApp Template':'record_key',
+        }
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
             doc=json.loads(path.read_text())
             self.assertTrue(doc['name'].startswith('Relay '))
@@ -32,6 +38,10 @@ class PermissionsTest(unittest.TestCase):
                 self.assertFalse(doc['permissions'])
                 key=next(field for field in doc['fields'] if field['fieldname']=='receipt_key')
                 self.assertTrue(key['unique'] and key['read_only'] and key['reqd'])
+            elif doc['name'] in field_names:
+                field = field_names[doc['name']]
+                self.assertEqual(doc['autoname'], 'field:' + field)
+                self.assertTrue(next(row for row in doc['fields'] if row['fieldname'] == field)['reqd'])
             elif not doc.get('issingle'):
                 self.assertTrue(doc['autoname'].endswith('.##########'))
             if doc['name'] in ('Relay Channel', 'Relay Settings'):

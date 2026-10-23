@@ -195,13 +195,13 @@ def records(doctype, query='', after=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium='WhatsApp', names=None, query=None):
+def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium='WhatsApp', names=None, query=None, since=None):
     check_type(doctype)
     if not isinstance(name,str) or not name or len(name)>140:
         frappe.throw('Choose a business record')
     frappe.get_doc(doctype,name).check_permission('read')
-    if before and after:frappe.throw('Choose one message cursor')
-    for value,prefix in ((before,'MSG'),(after,'MSG'),(channel,'CH')):
+    if sum(bool(value) for value in (before, after, since)) > 1:frappe.throw('Choose one message cursor')
+    for value,prefix in ((before,'MSG'),(after,'MSG'),(since,'MSG'),(channel,'CH')):
         if value is not None:validate_reference(value,prefix)
     if isinstance(limit,bool) or not str(limit).isdigit() or not 1<=int(limit)<=100:
         frappe.throw('Message limit must be between 1 and 100')
@@ -225,7 +225,7 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
             'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint']
     # Frappe applies role/user permissions and the assignment query hook before LIMIT.
     from relay_core.timeline import page_query
-    query=page_query(fields,filters,limit+1,before,after)
+    query=page_query(fields,filters,limit+1,before,since or after,ingestion=bool(since))
     if from_date is not None or to_date is not None:
         from relay_core.prepared_reports import date_range
         from pypika.functions import Coalesce
@@ -238,9 +238,13 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     if medium!='WhatsApp':frappe.throw('Unsupported business inbox channel')
     channels=frappe.qb.DocType('Relay Channel')
     query=query.where(message.channel.isin(frappe.qb.from_(channels).select(channels.name).where(channels.channel=='WhatsApp')))
+    watermark = []
+    if not since and names is None:
+        watermark = (page_query(['name'],filters,1,ingestion=True).where(message.relay_contact.isin(linked)).where(scope)
+            .where(message.channel.isin(frappe.qb.from_(channels).select(channels.name).where(channels.channel=='WhatsApp'))).run(as_dict=True))
     rows=query.where(message.relay_contact.isin(linked)).where(scope).run(as_dict=True)
     more=len(rows)>limit;page=rows[:limit]
-    if not after:page.reverse()
+    if not after and not since:page.reverse()
     readable={};items=[]
     for row in page:
         if row.relay_contact not in readable:
@@ -256,7 +260,8 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
         frappe.get_doc('Relay Channel',row.channel).check_permission('read')
         identity=readable[row.relay_contact]
         items.append(dict(row,contact_label=identity['label'],frappe_contact=identity['frappe_contact']))
-    return {'items':items,'has_more':more,'first':page[0].name if page else None,'last':page[-1].name if page else None}
+    cursor = page[-1].name if since and page else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
+    return {'items':items,'has_more':more,'ingestion_cursor':cursor,'first':page[0].name if page else None,'last':page[-1].name if page else None}
 
 
 @frappe.whitelist(methods=['GET'])

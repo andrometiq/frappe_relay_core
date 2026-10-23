@@ -10,6 +10,8 @@ RESOURCES = {
 }
 
 def changed(doc, method=None):
+    if doc.doctype == 'Relay Hub Event':
+        return incoming_changed()
     kind = RESOURCES.get(doc.doctype)
     if not kind:
         return
@@ -27,3 +29,11 @@ def changed(doc, method=None):
 def contact_changed(contact, kind='messages'):
     frappe.publish_realtime('relay_changed', {'kind': kind},
         doctype='Relay Contact', docname=contact, after_commit=True)
+
+
+def incoming_changed():
+    # Triage access does not grant REST access to raw Hub event payloads.
+    users = frappe.get_all('Has Role', filters={'parenttype':'User',
+        'role':['in',['System Manager','Relay Communication Manager']]}, pluck='parent', distinct=True)
+    for user in set(users) | {'Administrator'}:
+        frappe.publish_realtime('relay_changed', {'kind':'incoming'}, user=user, after_commit=True)

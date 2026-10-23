@@ -115,7 +115,29 @@ def options(contact, business_doctype=None, business_name=None):
 def prepared(contact, endpoint, kind, data, business_doctype=None, business_name=None):
     source,channel,context=target(contact,endpoint,business_doctype,business_name)
     data=messaging.object_value(data)
-    if kind=='text':
+    if kind=='whatsapp':
+        if set(data) != {'operation', 'arguments'} or data['operation'] not in whatsapp.SEND:
+            raise ValueError('Invalid WhatsApp message')
+        person = frappe.db.get_value('Relay Contact', contact, 'contact')
+        args = whatsapp.prepare(data['operation'], data['arguments'], person,
+                                source.business_doctype, source.business_name)
+        if args['to'] != source.sender_endpoint:
+            raise ValueError('Conversation destination changed')
+        if data['operation'] != 'templates.send':
+            service_window.require_open(contact, channel.name, source.sender_endpoint)
+        content = whatsapp_content(args)
+        if args.get('reply_to'):
+            from relay_core.message_updates import provider_key
+            reference = frappe.db.get_value('Relay Message', {'provider_message_key': provider_key(channel.name, source.sender_endpoint, args['reply_to'])}, 'name')
+            if not reference: raise ValueError('Reply target is not in this conversation')
+            quoted = frappe.get_doc('Relay Message', reference); quoted.check_permission('read')
+            if (quoted.business_doctype, quoted.business_name) != (source.business_doctype, source.business_name):
+                raise ValueError('Reply target belongs to another business')
+            if content['kind'] == 'reaction': source = quoted
+        elif content['kind'] == 'reaction':
+            raise ValueError('A reaction requires a reply target')
+        tool = 'whatsapp.execute'
+    elif kind=='text':
         if set(data)!={'text'}:raise ValueError('Unexpected message fields')
         content={'kind':'text','text':text(data.get('text'),4096,required=True)}
         if channel.channel=='WhatsApp':
@@ -148,8 +170,8 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
         return messaging.reconcile(existing.name)
     source,channel,context,tool,args,content=prepared(contact,endpoint,kind,data,business_doctype,business_name)
     payload={'tool':tool,'arguments':args,'content':content,'start':intent}
-    action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'operation':kind,'payload':json.dumps(payload),
-                          'payload_hash':digest,'status':'Dispatching','start_contact':contact,'target_channel':channel.name,'preview':content['text'][:300]})
+    action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'operation':content['kind'] if kind=='whatsapp' else kind,'payload':json.dumps(payload),
+                          'payload_hash':digest,'status':'Dispatching','start_contact':contact,'target_channel':channel.name,'preview':messaging.preview(content)[:300]})
     internal_save(action,new=True);frappe.db.commit()
     try:
         _,_,_,fresh_tool,fresh_args,_=prepared(contact,endpoint,kind,data,business_doctype,business_name)
@@ -173,4 +195,29 @@ def action_target(doc):
     source,channel,context=target(doc.start_contact,intent.get('endpoint'),intent.get('business_doctype'),intent.get('business_name'))
     if source.sender_endpoint!=intent.get('destination') or channel.name!=intent.get('channel'):
         frappe.throw('Conversation endpoint changed',frappe.PermissionError)
+    if doc.operation == 'reaction':
+        from relay_core.message_updates import provider_key
+        source.name = frappe.db.get_value('Relay Message', {'provider_message_key':provider_key(channel.name, source.sender_endpoint, payload['arguments'].get('reply_to'))}, 'name')
+        if not source.name: raise ValueError('Reaction target is unavailable')
+        source = frappe.get_doc('Relay Message', source.name); source.check_permission('read')
     return source,channel,context
+
+
+def whatsapp_content(args):
+    operation = args['operation']
+    if operation == 'messages.send':
+        return {'kind': 'text', 'text': text(args.get('body'), 4096, required=True)}
+    if operation == 'templates.send':
+        return {'kind': 'text', 'text': 'Template: ' + text(args.get('name'), 512, required=True),
+                'template': {key: args[key] for key in ('name', 'language', 'components') if key in args}}
+    if operation == 'messages.react':
+        return {'kind': 'reaction', 'emoji': text(args.get('emoji', ''), 100)}
+    if operation == 'messages.location':
+        return {'kind': 'location', 'location': messaging.location(args.get('location') or {})}
+    if operation == 'messages.contacts':
+        return {'kind': 'contact', 'contacts': messaging.contacts(args.get('contacts'))}
+    kind = {'image': 'photo'}.get(args.get('media_type'), args.get('media_type'))
+    if kind not in ('photo', 'video', 'audio', 'document', 'sticker'):
+        raise ValueError('Unsupported media type')
+    return {'kind': kind, 'caption': text(args.get('caption', ''), 1024),
+            'media': {'id': args.get('media_id'), 'url': args.get('media_url'), 'file_name': args.get('filename')}}

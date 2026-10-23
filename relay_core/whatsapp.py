@@ -52,7 +52,7 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
     allowed={'request_key','id','name','language','category','parameter_format','message_send_ttl_seconds','body','subject','action','sdp','sdp_type','after','components','reply_to','emoji','media_type','media_id','media_url','caption','filename','description','participants','join_requests','expiration_days','join_approval_mode','photo_base64','location','contacts','content_base64','mime_type'}
     if set(arguments)-allowed:frappe.throw('Unsupported operation arguments')
     if {'content_base64','mime_type'}.intersection(arguments):
-        if operation not in {'groups.media','templates.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
+        if operation not in {'messages.media','templates.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
         content = arguments.get('content_base64')
         if not isinstance(content,str) or not 1 <= len(content) <= ((4*1024*1024+2)//3)*4:frappe.throw('Attachment must be at most 4 MiB')
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
@@ -82,25 +82,6 @@ def checked_client():
 
 
 @frappe.whitelist(methods=['POST'])
-def enqueue(messages):
-    require_access()
-    if isinstance(messages,str):messages=frappe.parse_json(messages)
-    if not isinstance(messages,list) or not 1<=len(messages)<=50:frappe.throw('Submit 1 to 50 messages')
-    batch=[]
-    for item in messages:
-        if not isinstance(item,dict) or set(item)-{'key','operation','arguments','contact','business_doctype','business_name'}:frappe.throw('Invalid message')
-        if item.get('operation') not in {'messages.media','messages.send','messages.react','messages.location','messages.contacts','templates.send'}:frappe.throw('Operation cannot be queued')
-        key=item.get('key')
-        if not isinstance(key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',key):frappe.throw('Request key is required')
-        batch.append({'key':key,'message':prepare(**{k:v for k,v in item.items() if k!='key'})})
-    try:
-        hub,_=checked_client()
-        return hub.call_tool('whatsapp.enqueue',{'messages':batch})
-    except (HubError, ValueError):
-        frappe.throw('Submission could not be confirmed. Retry with the same request keys.')
-
-
-@frappe.whitelist(methods=['POST'])
 def deliveries(after='',cancel_id=None):
     # Account-wide delivery results are manager-only. Sending remains available
     # to users through permission-checked business records and contacts.
@@ -115,7 +96,10 @@ def deliveries(after='',cancel_id=None):
 
 
 @frappe.whitelist(methods=['POST'])
-def execute(operation, arguments=None, contact=None, business_doctype=None, business_name=None):
+def execute(operation, arguments=None, contact=None, business_doctype=None, business_name=None, request_key=None):
+    if operation in SEND:
+        return send(dict(key=request_key, operation=operation, arguments=arguments, contact=contact,
+                         business_doctype=business_doctype, business_name=business_name))
     payload=prepare(operation,arguments,contact,business_doctype,business_name)
     try:
         hub=client()
@@ -124,6 +108,9 @@ def execute(operation, arguments=None, contact=None, business_doctype=None, busi
         if str(capabilities.get('site','')).rstrip('/') != site_url:
             frappe.throw('Hub account belongs to another site')
         result=capabilities if operation=='capabilities' else hub.execute(payload)
+        if operation == 'templates.list':
+            from relay_core.whatsapp_templates import overlay
+            result = overlay(result)
         return result
     except (HubError, ValueError):
         frappe.throw('Hub could not complete this operation. Check account configuration, capability and provider status before retrying.')
@@ -158,9 +145,25 @@ def conversation(contact, business_doctype, business_name, after=None, before=No
 
 @frappe.whitelist(methods=['POST'])
 def send(message):
-    """Structured single-message endpoint with the same durable retry contract as bulk."""
-    if isinstance(message,str):message=frappe.parse_json(message)
-    return enqueue([message])
+    """Submit one immutable intent through the Core action journal."""
+    from relay_core.conversation_start import business_channels, send_business
+    if isinstance(message, str): message = frappe.parse_json(message)
+    fields = {'key', 'operation', 'arguments', 'contact', 'business_doctype', 'business_name'}
+    if not isinstance(message, dict) or set(message) - fields:
+        raise ValueError('Invalid message')
+    if message.get('operation') not in SEND:
+        raise ValueError('Unsupported WhatsApp send')
+    key = message.get('key')
+    if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', key):
+        raise ValueError('A stable request key is required')
+    scope = {field: message.get(field) for field in ('contact', 'business_doctype', 'business_name')}
+    prepare(message['operation'], message.get('arguments'), **scope)
+    channels = business_channels(**scope)
+    if len(channels) != 1:
+        raise ValueError('Configure one available WhatsApp channel')
+    return send_business(**scope, channel=channels[0]['value'], kind='whatsapp',
+                         data={'operation': message['operation'], 'arguments': message.get('arguments') or {}},
+                         request_key=key)
 
 
 @frappe.whitelist(methods=['GET'])

@@ -1,9 +1,10 @@
 <script setup>
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { Button, ErrorMessage, FormControl } from "@relay/ui";
 import RelaySelect from "./RelaySelect.vue";
 import { coreApi } from "../services/coreApi";
+const businesses = ref([]), business = ref("");
 const rows = ref([]),
   next = ref(null),
   busy = ref(false),
@@ -13,6 +14,12 @@ const rows = ref([]),
   contacts = ref([]),
   contact = ref(""),
   notice = ref("");
+watch(contact, async value => {
+  business.value = ""; businesses.value = [];
+  if (!value) return;
+  try { const rows = await coreApi("enrollment.businesses", {contact:value}); if (contact.value === value) businesses.value = rows; }
+  catch(e) { error.value = e.message; }
+});
 async function run(fn) {
   if (busy.value) return;
   busy.value = true;
@@ -36,10 +43,12 @@ async function search() {
     limit: 30,
   });
   contacts.value = result.items;
+  if(selected.value?.contact && !contacts.value.some(row=>row.name===selected.value.contact))
+    contacts.value.unshift({name:selected.value.contact,display_name:selected.value.endpoint});
 }
 async function choose(row) {
   selected.value = row;
-  contact.value = "";
+  contact.value = row.contact || "";
   query.value = "";
   await run(search);
 }
@@ -51,6 +60,7 @@ async function bind() {
         event: selected.value.event,
         provider_id: selected.value.provider_id,
         contact: contact.value,
+        ...JSON.parse(business.value),
       },
       true,
     );
@@ -61,13 +71,13 @@ async function bind() {
   });
 }
 onMounted(() => run(() => load()));
-useRealtimeRefresh(['Relay Hub Event'],['incoming'],()=>{if(!busy.value&&!selected.value)return run(()=>load())});
+useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return run(()=>load())});
 </script>
 <template>
   <section class="incoming-workspace">
     <header>
       <div>
-        <h2>Unlinked senders</h2>
+        <h2>Unlinked/ambiguous</h2>
         <p>
           Link incoming messages to the right business contact so your team can
           handle them.
@@ -91,11 +101,11 @@ useRealtimeRefresh(['Relay Hub Event'],['incoming'],()=>{if(!busy.value&&!select
             </div>
             <p class="incoming-preview">{{ row.preview }}</p>
             <small>{{ row.received_at }}</small
-            ><Button label="Link sender" :disabled="busy" @click="choose(row)"
+            ><Button :label="row.ambiguous ? 'Choose business' : 'Link sender'" :disabled="busy" @click="choose(row)"
           /></template>
         </article>
         <p v-if="!rows.length && !busy" class="incoming-empty">
-          No unlinked incoming messages.
+          No unlinked or ambiguous incoming messages.
         </p>
         <Button
           v-if="next"
@@ -127,6 +137,7 @@ useRealtimeRefresh(['Relay Hub Event'],['incoming'],()=>{if(!busy.value&&!select
             }))
           "
         />
+        <RelaySelect label="Business record" v-model="business" :options="businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:row.doctype+' · '+row.name}))" />
         <p class="text-xs text-ink-gray-5">
           Missing a contact? Create it and its business link in
           <a href="/desk/relay-contact" target="_blank" rel="noopener"
@@ -137,7 +148,7 @@ useRealtimeRefresh(['Relay Hub Event'],['incoming'],()=>{if(!busy.value&&!select
           label="Link sender and load history"
           type="submit"
           variant="solid"
-          :disabled="busy || !contact"
+          :disabled="busy || !contact || !business"
         /><Button label="Cancel" :disabled="busy" @click="selected = null" />
       </form>
     </div>

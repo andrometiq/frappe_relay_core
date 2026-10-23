@@ -1,0 +1,56 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Pending Receipt",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:record_key",
+  "fields": [
+    {
+      "fieldname": "record_key",
+      "label": "Record key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "provider_timestamp",
+      "label": "Provider timestamp",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event_id",
+      "label": "Event id",
+      "fieldtype": "Small Text",
+      "reqd": 1
+    }
+  ],
+  "permissions": [],
+  "field_order": [
+    "record_key",
+    "channel",
+    "endpoint",
+    "status",
+    "provider_timestamp",
+    "event_id"
+  ]
+}

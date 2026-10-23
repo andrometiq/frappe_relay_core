@@ -13,7 +13,7 @@ from relay_core.settings import value as connection_value
 from relay_core import whatsapp
 from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
-from relay_core.automation.service import internal_save
+from relay_core.automation.service import internal_save, outgoing_run
 from relay_core.hub import HubError
 from relay_core.message_types import contacts, location, normalize, preview, text, telegram_vcard
 from relay_core.message_updates import provider_key
@@ -74,7 +74,7 @@ def _prepare(source, channel, context, kind, data):
                 'document':{'application/pdf','text/plain','application/msword','application/vnd.ms-excel','application/vnd.ms-powerpoint',
                     'application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.openxmlformats-officedocument.presentationml.presentation'}}
             if mime not in allowed_mimes.get(media_type,set()):raise ValueError('Choose a supported WhatsApp attachment format')
-            args={'operation':'groups.media' if group else 'messages.media','to':source.sender_endpoint,
+            args={'operation':'messages.media','to':source.sender_endpoint,
                   'reply_to':text(context.get('message_id') or source.provider_id,300,required=True),
                   'media_type':media_type,'content_base64':base64.b64encode(raw).decode(),
                   'mime_type':mime}
@@ -95,8 +95,6 @@ def _prepare(source, channel, context, kind, data):
                'location': {'latitude', 'longitude', 'name', 'address'}, 'contact': {'contacts'}}[kind]
     if set(data) - allowed: raise ValueError('Unexpected message arguments')
     group = context.get('group_id')
-    if channel.channel == 'WhatsApp' and group and kind not in ('text', 'sticker'):
-        raise ValueError('WhatsApp Groups supports text and media; this type is not supported by Meta for groups')
     if channel.channel not in ('Telegram', 'WhatsApp'):
         raise ValueError('This channel does not support these message controls')
     if kind == 'text': content = {'kind': kind, 'text': text(data.get('text'), 4096, required=True)}
@@ -148,9 +146,9 @@ def _prepare(source, channel, context, kind, data):
     if context.get('provider') != 'WhatsApp' or group and group != source.sender_endpoint:
         raise ValueError('WhatsApp conversation provenance is required')
     target = text(context.get('message_id') or source.provider_id, 300, required=True)
-    args = {'operation': ('groups.send' if group else 'messages.send'), 'to': source.sender_endpoint, 'reply_to': target}
+    args = {'operation': 'messages.send', 'to': source.sender_endpoint, 'reply_to': target}
     if kind == 'text': args['body'] = content['text']
-    elif kind == 'sticker': args.update(operation='groups.media' if group else 'messages.media', media_type='sticker', media_id=content['media']['id'])
+    elif kind == 'sticker': args.update(operation='messages.media', media_type='sticker', media_id=content['media']['id'])
     elif kind == 'reaction': args.update(operation='messages.react', emoji=content['emoji'])
     elif kind == 'location': args.update(operation='messages.location', location=content['location'])
     elif kind == 'contact': args.update(operation='messages.contacts', contacts=content['contacts'])
@@ -158,6 +156,8 @@ def _prepare(source, channel, context, kind, data):
 
 
 def prepare(source, channel, context, kind, data, quote=True):
+    if channel.channel == 'WhatsApp' and context.get('group_id'):
+        raise ValueError('WhatsApp group sending is unavailable in v1')
     tool, arguments, content = _prepare(source, channel, context, kind, data)
     if not quote and kind != 'reaction':
         arguments.pop('reply_to', None)
@@ -174,7 +174,8 @@ def send(message, kind, data, request_key, quote=1):
     if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', request_key):
         raise ValueError('A stable request key is required')
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
-    encoded = json.dumps({'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content}, sort_keys=True, separators=(',', ':'))
+    encoded = json.dumps({'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
+        'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get()}, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(json.dumps({'tool':tool,'arguments':arguments,'source':source.name}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     key = hashlib.sha256((frappe.session.user + ':' + request_key).encode()).hexdigest()
     existing = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'payload_hash', 'status', 'outbound_message'], as_dict=True, for_update=True)
@@ -247,19 +248,27 @@ def finish(action, source, channel, context, content, result, *, commit=True):
         from relay_core.realtime import changed
         changed(source)
     else:
+        stored = object_value(action.payload)
+        business = stored.get('business') or [source.get('business_doctype'), source.get('business_name')]
         outgoing_context = dict(context)
         outgoing_context.pop('reply_to_message_id', None)
         reply_to = object_value(action.payload).get('arguments', {}).get('reply_to')
         if reply_to: outgoing_context['reply_to_message_id'] = reply_to
         if provider_id: outgoing_context['message_id'] = provider_id
+        if channel.channel == 'WhatsApp':
+            from relay_core.whatsapp_receipts import lock_endpoints
+            lock_endpoints(source.channel, [source.sender_endpoint])
         outgoing = frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': source.relay_contact,
             'channel': source.channel, 'direction': 'Outgoing', 'status': 'Sent', 'content': preview(content),
             'message_type': content['kind'], 'message_data': json.dumps(content, ensure_ascii=False),
             'sender_endpoint': source.sender_endpoint, 'provider_id': str(provider_id or ''),
             'provider_context': json.dumps(outgoing_context), 'source_key': action.request_key,
-            'business_doctype':source.get('business_doctype'), 'business_name':source.get('business_name'),
+            'business_doctype':business[0], 'business_name':business[1],
             'conversation_key': conversation_key(source.channel, source.sender_endpoint, context),
             'provider_message_key': provider_key(source.channel, source.sender_endpoint, provider_id) if provider_id else None}).insert(ignore_permissions=True)
+        if channel.channel == 'WhatsApp':
+            from relay_core.whatsapp_receipts import apply_pending
+            apply_pending(outgoing)
         action.outbound_message = outgoing.name
     action.status = 'Submitted'; action.result = json.dumps(result); internal_save(action)
     if commit: frappe.db.commit()
@@ -389,7 +398,34 @@ def reconcile(action):
     if not isinstance(payload.get('content'), dict):
         return {'action': doc.name, 'status': doc.status, 'message': doc.outbound_message, **({'error': action_error(doc)} if action_error(doc) else {})}
     result = whatsapp.client().call_tool('channels.deliveries' if channel.channel=='Telegram' else 'whatsapp.deliveries', {'request_key': doc.request_key})
-    rows = result.get('deliveries', [])
+    rows = result.get('deliveries')
+    if not isinstance(rows, list): raise ValueError('Invalid delivery lookup')
+    if rows == [] and doc.status == 'Dispatching' and channel.channel == 'WhatsApp':
+        # An authenticated, successful empty lookup proves Hub has no intent.
+        # Timeouts, malformed replies and Uncertain actions never enter this path.
+        if context.get('group_id'): raise ValueError('WhatsApp group sending is unavailable in v1')
+        if payload.get('business') and payload['business'] != [source.get('business_doctype'),source.get('business_name')]:
+            raise ValueError('Message business changed before recovery')
+        if payload.get('automation_run'):
+            from relay_core.automation.service import scope
+            run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
+            if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
+            scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+        if doc.get('start_contact'):
+            from relay_core.conversation_start import prepared
+            intent = payload['start']
+            _, _, _, tool, arguments, _ = prepared(intent['contact'], intent['endpoint'], intent['kind'],
+                intent['data'], intent.get('business_doctype'), intent.get('business_name'))
+        else:
+            require_reply_window(source, channel, context)
+            tool, arguments = payload['tool'], payload['arguments']
+        if tool != payload['tool'] or arguments != payload['arguments']:
+            raise ValueError('Conversation changed before recovery')
+        try:
+            receipt = whatsapp.client().call_tool(tool, dict(arguments, request_key=doc.request_key))
+        except Exception as exc:
+            return record_submission_error(doc, exc)
+        return finish(doc, source, channel, context, payload['content'], receipt)
     if len(rows) != 1 or rows[0].get('key') != doc.request_key:
         raise ValueError('Delivery receipt is unavailable')
     row = rows[0]
@@ -485,7 +521,8 @@ def retry(action):
         from relay_core.conversation_start import send as start_send, action_target
         action_target(doc)
         intent=payload['start']
-        return start_send(intent['contact'],intent['endpoint'],intent['kind'],intent['data'],key)
+        return start_send(intent['contact'],intent['endpoint'],intent['kind'],intent['data'],key,
+                          intent.get('business_doctype'),intent.get('business_name'))
     readable_source(doc.source_message)
     if doc.operation=='email':
         from relay_core.email import send as email_send
