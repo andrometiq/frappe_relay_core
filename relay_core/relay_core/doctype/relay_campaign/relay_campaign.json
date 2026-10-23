@@ -42,9 +42,8 @@
     {
       "fieldname": "business_name",
       "label": "Business Name",
-      "fieldtype": "Dynamic Link",
-      "read_only": 1,
-      "options": "business_doctype"
+      "fieldtype": "Data",
+      "read_only": 1
     },
     {
       "fieldname": "operation",
