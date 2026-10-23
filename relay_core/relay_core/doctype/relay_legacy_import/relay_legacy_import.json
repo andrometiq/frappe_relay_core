@@ -7,15 +7,27 @@
   "engine": "InnoDB",
   "field_order": [
     "source_bundle",
+    "source_site",
     "source_conversation",
+    "source_channel",
     "relay_contact",
     "channel",
+    "business_doctype",
+    "business_name",
+    "user_mapping",
+    "team_mapping",
+    "delta_since",
     "status",
+    "watermark",
+    "last_creation",
     "last_source",
+    "upper_creation",
     "upper_source",
     "imported",
     "skipped",
     "warnings",
+    "reconcile_report",
+    "source_metadata",
     "bundle_sha256"
   ],
   "fields": [
@@ -24,7 +36,7 @@
       "label": "Legacy conversation",
       "fieldtype": "Data",
       "reqd": 1,
-      "description": "WhatsApp Core Conversation name on this site"
+      "description": "Original WhatsApp Core Conversation name on the source site"
     },
     {
       "fieldname": "relay_contact",
@@ -46,7 +58,8 @@
       "fieldtype": "Select",
       "options": "Draft\nRunning\nCompleted",
       "default": "Draft",
-      "read_only": 1
+      "read_only": 1,
+      "description": "Completed means this pass was processed. Review all reconciliation mismatches before cutover."
     },
     {
       "fieldname": "last_source",
@@ -89,6 +102,80 @@
       "fieldname": "bundle_sha256",
       "label": "Pinned bundle checksum",
       "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_site",
+      "label": "Source site",
+      "fieldtype": "Data",
+      "description": "Stable source identity. Renaming the source requires retaining this value."
+    },
+    {
+      "fieldname": "source_channel",
+      "label": "Source channel",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Explicit business DocType",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Explicit business record",
+      "fieldtype": "Data",
+      "description": "Leave blank for restricted migration triage. No inferred business association."
+    },
+    {
+      "fieldname": "user_mapping",
+      "label": "Source user \u2192 target user",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "team_mapping",
+      "label": "Source team \u2192 Relay team",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "delta_since",
+      "label": "Delta from (inclusive)",
+      "fieldtype": "Datetime",
+      "description": "For a same-site delta, create a new import using the previous pass watermark. Includes modified rows."
+    },
+    {
+      "fieldname": "watermark",
+      "label": "Pass watermark",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_creation",
+      "label": "Last source creation",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "upper_creation",
+      "label": "Snapshot boundary creation",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_metadata",
+      "label": "Original identities, links and collaboration history",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "reconcile_report",
+      "label": "Reconciliation report",
+      "fieldtype": "Code",
+      "options": "JSON",
       "read_only": 1
     }
   ],
