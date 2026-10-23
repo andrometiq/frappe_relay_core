@@ -153,7 +153,6 @@ def record_action(payload, channel):
     internal_save(doc)
 
 
-@frappe.whitelist(methods=['POST'])
 def connected(provider_id):
     require_access();channel=active_channel()
     name=frappe.db.get_value('Relay Call',{'provider_key':call_key(channel.name,provider_id)},'name')
@@ -189,7 +188,6 @@ def _store_recording(provider_id, content):
     return {'name':record.name}
 
 
-@frappe.whitelist(methods=['POST'])
 def upload_recording(provider_id):
     require_access()
     upload=frappe.request.files.get('file')
@@ -319,7 +317,6 @@ def uncertain_attempts(contact=None, before=None):
     return {'items': items, 'before': rows[29].name if len(rows) > 30 else None, 'can_resolve': can_resolve}
 
 
-@frappe.whitelist(methods=['POST'])
 def resolve_attempt(name, outcome, evidence, provider_id=None):
     """Record verified operator evidence without issuing any provider request."""
     require_access(manage=True)
