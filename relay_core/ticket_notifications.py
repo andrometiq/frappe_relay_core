@@ -1,9 +1,12 @@
 """Opt-in ticket notifications, restricted to a subscriber's verified endpoint."""
 import hashlib
+from contextvars import ContextVar
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core import tickets
 
+
+outgoing_notification = ContextVar('relay_ticket_notification', default=None)
 
 def digest(*parts):
     return hashlib.sha256(':'.join(parts).encode()).hexdigest()
@@ -129,35 +132,89 @@ def on_update(doc, method=None):
     frappe.enqueue('relay_core.ticket_notifications.recover', enqueue_after_commit=True)
 
 
+def authorized(row):
+    sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)
+    if not sub.enabled or not frappe.db.get_value('User', sub.user, 'enabled'):
+        raise frappe.PermissionError('Subscription disabled')
+    if frappe.session.user != sub.user:
+        raise frappe.PermissionError('Subscription owner changed')
+    tickets.read(row.ticket)
+    return destination(sub.destination)
+
+
+def authorize_action(action):
+    from relay_core.messaging import object_value
+    payload = object_value(action.payload)
+    name = payload.get('notification')
+    if not name: return
+    row = frappe.get_doc('Relay Ticket Notification', name)
+    if row.status != 'Pending': raise frappe.PermissionError('Notification is no longer pending')
+    endpoint, channel = authorized(row)
+    recipient = payload['email_values']['to'][0] if action.operation == 'email' else str(payload['group']['chat_id'])
+    if channel.name != action.target_channel or endpoint.endpoint != recipient:
+        raise frappe.PermissionError('Notification destination changed')
+
+
+def complete(action):
+    from relay_core.messaging import object_value
+    name = object_value(action.payload).get('notification')
+    if not name or action.status not in ('Submitted', 'Rejected'): return
+    set_outcome(name,action.status)
+
+
+def set_outcome(name,status,reason=None):
+    # A late success is evidence of delivery even after local revocation.
+    current=frappe.db.get_value('Relay Ticket Notification',name,'status',for_update=True)
+    if current=='Submitted':return
+    frappe.db.set_value('Relay Ticket Notification',name,{'status':status,
+        'reason':'' if status=='Submitted' else reason or 'Delivery rejected','next_attempt':None})
+
+
+def defer(row):
+    if frappe.db.get_value('Relay Ticket Notification',row.name,'status',for_update=True)!='Pending':return
+    row.reload()
+    attempts = int(row.attempts or 0)+1
+    frappe.db.set_value('Relay Ticket Notification', row.name, {'attempts':attempts,
+        'next_attempt':frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=min(60, 2**min(attempts,6))),
+        'reason':'Delivery not confirmed; recovery uses the same request key'})
+
+
 def dispatch(name):
+    from relay_core import messaging
     with frappe.cache.lock('relay-ticket-notification-'+name, timeout=90, blocking_timeout=1):
         row = frappe.get_doc('Relay Ticket Notification', name)
-        if row.status != 'Pending':
-            return
+        if row.status != 'Pending': return
         sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)
         actor = frappe.session.user
+        token = outgoing_notification.set(name)
         try:
-            if not sub.enabled or not frappe.db.get_value('User', sub.user, 'enabled'):
-                raise frappe.PermissionError('Subscription disabled')
             frappe.set_user(sub.user)
-            tickets.read(row.ticket)
-            endpoint, channel = destination(sub.destination)
+            endpoint, channel = authorized(row)
             key = 'ticket-'+row.event_key
-            if channel.channel == 'Email':
+            keys = [digest(sub.user, key), digest('email', sub.user, key), key]
+            existing = frappe.db.get_value('Relay Message Action', {'request_key':['in',keys], 'owner':sub.user}, 'name')
+            if existing:
+                action = frappe.get_doc('Relay Message Action', existing)
+                if messaging.object_value(action.payload).get('notification') != name:
+                    raise ValueError('Request key belongs to another notification')
+                result = messaging.reconcile(existing)
+            elif channel.channel == 'Email':
                 from relay_core.email import send
-                send([endpoint.endpoint], 'Ticket update: '+row.ticket, row.body, request_key=key, auto_submitted=1)
+                result = send([endpoint.endpoint], 'Ticket update: '+row.ticket, row.body, request_key=key, auto_submitted=1)
             else:
                 from relay_core.telegram import send
-                send(int(endpoint.endpoint), row.body, request_key=key)
-            frappe.db.set_value('Relay Ticket Notification', name, {'status':'Submitted', 'reason':''})
+                result = send(int(endpoint.endpoint), row.body, request_key=key)
+            status = result.get('status')
+            if status in ('Submitted','Rejected'):
+                set_outcome(name,status)
+            else:
+                defer(row)
         except (frappe.PermissionError, frappe.ValidationError, ValueError):
-            frappe.db.set_value('Relay Ticket Notification', name, {'status':'Rejected', 'reason':'Subscription, ticket or endpoint is no longer permitted'})
+            set_outcome(name,'Rejected','Subscription, ticket or endpoint is no longer permitted')
         except Exception:
-            attempts = int(row.attempts or 0)+1
-            frappe.db.set_value('Relay Ticket Notification', name, {'attempts':attempts,
-                'next_attempt':frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=min(60, 2**min(attempts,6))),
-                'reason':'Delivery not confirmed; retry uses the same provider request key'})
+            defer(row)
         finally:
+            outgoing_notification.reset(token)
             frappe.set_user(actor)
         frappe.db.commit()
 

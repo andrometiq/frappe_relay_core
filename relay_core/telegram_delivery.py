@@ -4,7 +4,6 @@ import json
 import re
 import frappe
 from relay_core import messaging, whatsapp
-from relay_core.hub import HubError
 from relay_core.settings import value as connection_value
 from relay_core.permissions import readable_contact
 from relay_core.automation.service import internal_save
@@ -23,6 +22,14 @@ def target(doc):
     context={'provider':'Telegram','chat_id':chat_id}
     if intent.get('message_thread_id'):context['message_thread_id']=intent['message_thread_id']
     source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=str(chat_id))
+    business=messaging.object_value(doc.payload).get('business')
+    if business:
+        source.business_doctype,source.business_name=business
+        if all(business):
+            from relay_core.business_access import candidates
+            if tuple(business) not in candidates(contact):
+                frappe.throw('Telegram business binding is no longer available',frappe.PermissionError)
+            frappe.get_doc(*business).check_permission('read')
     return source,channel,context
 
 
@@ -38,14 +45,19 @@ def send_group(contact,channel,chat_id,text,reply_to,thread,request_key):
         return messaging.reconcile(existing.name)
     content={'kind':'text','text':text}
     args={'operation':'text',**intent}
-    payload={'group':intent,'tool':'telegram.message','arguments':args,'content':content}
+    from relay_core.ticket_notifications import outgoing_notification
+    payload={'group':intent,'tool':'telegram.message','arguments':args,'content':content,
+        'notification':outgoing_notification.get()}
     action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'payload_hash':digest,
         'operation':'text','start_contact':contact,'target_channel':channel,'preview':text[:300],
         'payload':json.dumps(payload),'status':'Dispatching'})
     source,channel_doc,context=target(action)
+    from relay_core.business_access import reference
+    payload['business']=list(reference(source) or (None,None))
+    action.payload=json.dumps(payload)
     internal_save(action,new=True);frappe.db.commit()
     try:
-        source,channel_doc,context=target(action)
+        source,channel_doc,context=messaging.admission_scope(action)
     except (frappe.PermissionError,frappe.DoesNotExistError):
         action.status='Rejected';internal_save(action);frappe.db.commit();raise
     try:

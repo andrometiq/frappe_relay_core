@@ -190,6 +190,9 @@ def send(message, kind, data, request_key, quote=1):
         fresh_source, fresh_channel, fresh_context = readable_source(message)
         require_reply_window(fresh_source,fresh_channel,fresh_context)
         fresh_tool, fresh_arguments, _ = prepare(fresh_source, fresh_channel, fresh_context, kind, data, quote)
+        if ([fresh_source.get('business_doctype'),fresh_source.get('business_name')]
+                != [source.get('business_doctype'),source.get('business_name')]):
+            raise ValueError('Message business changed before sending')
         if fresh_tool != tool or fresh_arguments != arguments:
             raise ValueError('Conversation changed before sending')
         if outgoing_run.get():
@@ -210,6 +213,70 @@ def send(message, kind, data, request_key, quote=1):
     return finish(action, source, channel, context, content, result)
 
 
+def action_target(action):
+    if action.operation == 'email':
+        from relay_core.email import target
+        return target(action)
+    if action.get('start_contact'):
+        from relay_core.conversation_start import action_target as start_target
+        return start_target(action)
+    return readable_source(action.source_message)
+
+
+def action_result(action):
+    result = {'action': action.name, 'status': action.status, 'message': action.outbound_message}
+    error = action_error(action)
+    if error: result['error'] = error
+    return result
+
+
+def receipt_status(receipt):
+    delivery = receipt.get('delivery')
+    state = delivery.get('state') if isinstance(delivery, dict) else receipt.get('state')
+    if state in ('queued', 'submitting', 'dispatching'):
+        return 'Queued'
+    if state in ('rejected', 'cancelled'):
+        return 'Rejected'
+    if state == 'uncertain' or receipt.get('pending') is True:
+        return 'Uncertain'
+    return None
+
+
+def stale_receipt(action, receipt, *, accepted=False):
+    if action.status == 'Submitted': return True
+    previous = object_value(action.result or {}).get('_relay_status_id', 0)
+    incoming = receipt.get('_relay_status_id', 0)
+    if incoming: return bool(previous and previous >= incoming)
+    return bool(previous and not accepted)
+
+
+def delivery_receipt(action, channel):
+    tool = 'whatsapp.deliveries' if channel.channel == 'WhatsApp' else 'channels.deliveries'
+    result = whatsapp.client().call_tool(tool, {'request_key': action.request_key})
+    rows = result.get('deliveries')
+    if not isinstance(rows, list): raise ValueError('Invalid delivery lookup')
+    if not rows: return None
+    if len(rows) != 1 or rows[0].get('key') != action.request_key:
+        raise ValueError('Delivery receipt is unavailable')
+    row = rows[0]
+    operation = {'Telegram': 'telegram.message', 'Email': 'email.send'}.get(channel.channel)
+    if operation and row.get('operation') != operation:
+        raise ValueError('Delivery receipt belongs to another channel')
+    receipt = row.get('result') if row.get('state') == 'submitted' else {'delivery': row}
+    if not isinstance(receipt, dict): raise ValueError('Invalid delivery receipt')
+    return receipt
+
+
+def admission_scope(action):
+    from relay_core.ticket_notifications import authorize_action
+    authorize_action(action)
+    source, channel, context = action_target(action)
+    payload = object_value(action.payload)
+    if payload.get('business') and payload['business'] != [source.get('business_doctype'), source.get('business_name')]:
+        raise ValueError('Message business changed before recovery')
+    return source, channel, context
+
+
 def record_submission_error(action, exc):
     # A pushed receipt may win the race with a timed-out submission response.
     frappe.db.get_value('Relay Message Action', action.name, 'name', for_update=True)
@@ -225,28 +292,26 @@ def record_submission_error(action, exc):
 def finish(action, source, channel, context, content, result, *, commit=True):
     frappe.db.get_value('Relay Message Action', action.name, 'name', for_update=True)
     action.reload()
-    if action.status == 'Submitted':
-        return {'action': action.name, 'status': action.status, 'message': action.outbound_message}
-    delivery = result.get('delivery')
-    if isinstance(delivery, dict):
-        state = delivery.get('state')
-        action.status = {'queued':'Queued','submitting':'Queued','dispatching':'Queued','rejected':'Rejected','cancelled':'Rejected'}.get(state,'Uncertain')
+    status = receipt_status(result)
+    provider_id = result.get('message_id') if channel.channel == 'Telegram' else next((row.get('id') for row in result.get('messages', []) if isinstance(row, dict)), None)
+    accepted = not status and isinstance(provider_id, (str, int)) and not isinstance(provider_id, bool) and bool(str(provider_id))
+    if action.operation == 'reaction' and channel.channel == 'WhatsApp' and not status:
+        accepted = accepted or result.get('success') is True or result.get('manually_reconciled') is True
+    if action.operation == 'reaction' and channel.channel == 'Telegram':
+        arguments = object_value(action.payload).get('arguments', {})
+        accepted = (accepted and result.get('operation') == 'reaction' and result.get('result') is True
+            and result.get('chat_id') == arguments.get('chat_id') and provider_id == arguments.get('message_id'))
+    if stale_receipt(action, result, accepted=accepted):
+        return action_result(action)
+    if status or isinstance(result.get('delivery'), dict):
+        action.status = status or 'Uncertain'
         action.result = json.dumps(result); internal_save(action)
         if commit: frappe.db.commit()
         return {'action': action.name, 'status': action.status, 'message': None}
-    provider_id = result.get('message_id') if channel.channel == 'Telegram' else next((row.get('id') for row in result.get('messages', []) if isinstance(row, dict)), None)
-    if action.operation != 'reaction' and (not isinstance(provider_id, (str, int)) or isinstance(provider_id, bool) or not str(provider_id)):
-        action.reload(); action.status = 'Uncertain'; action.result = json.dumps(result); internal_save(action)
+    if not accepted and (action.operation != 'reaction' or channel.channel == 'Telegram'):
+        action.status = 'Uncertain'; action.result = json.dumps(result); internal_save(action)
         if commit: frappe.db.commit()
-        return {'action': action.name, 'status': action.status, 'message': None}
-    if action.operation == 'reaction' and channel.channel == 'Telegram':
-        arguments = object_value(action.payload).get('arguments', {})
-        if (result.get('operation') != 'reaction' or result.get('result') is not True
-                or result.get('chat_id') != arguments.get('chat_id')
-                or result.get('message_id') != arguments.get('message_id')):
-            action.status = 'Uncertain'; action.result = json.dumps(result); internal_save(action)
-            if commit: frappe.db.commit()
-            return {'action': action.name, 'status': action.status, 'message': None}
+        return action_result(action)
     if action.operation == 'reaction':
         frappe.db.get_value('Relay Message', source.name, 'name', for_update=True); source.reload()
         state = object_value(source.reactions or {})
@@ -340,12 +405,8 @@ def pending_messages(contact, before=None):
         try:
             doc = frappe.get_doc('Relay Message Action', row.name)
             doc.check_permission('read')
-            if row.start_contact:
-                from relay_core.conversation_start import action_target
-                source, channel, context = action_target(doc)
-            else:
-                source, channel, context = readable_source(row.source_message)
-        except (frappe.PermissionError, frappe.DoesNotExistError):
+            source, channel, context = action_target(doc)
+        except (frappe.PermissionError, frappe.DoesNotExistError, ValueError):
             continue
         items.append({'name': 'pending:' + row.name, 'action': row.name,
             'contact': contact, 'scope': contact, 'channel': channel.name,
@@ -379,10 +440,7 @@ def action_snapshots(names):
     for name in dict.fromkeys(names):
         validate_reference(name,'MA')
         doc=frappe.get_doc('Relay Message Action',name);doc.check_permission('read')
-        if doc.get('start_contact'):
-            from relay_core.conversation_start import action_target
-            action_target(doc)
-        else:readable_source(doc.source_message)
+        action_target(doc)
         items.append({'action':name,'status':doc.status,'message':doc.outbound_message,'error':action_error(doc)})
     return {'items':items}
 
@@ -390,11 +448,7 @@ def action_snapshots(names):
 @frappe.whitelist(methods=['POST'])
 def reconcile(action):
     doc = frappe.get_doc('Relay Message Action', action); doc.check_permission('read')
-    if doc.get("start_contact"):
-        from relay_core.conversation_start import action_target
-        source, channel, context = action_target(doc)
-    else:
-        source, channel, context = readable_source(doc.source_message)
+    source, channel, context = action_target(doc)
     if channel.channel == 'Email' and doc.operation == 'email':
         from relay_core.email import reconcile_action
         return reconcile_action(doc)
@@ -404,15 +458,11 @@ def reconcile(action):
     # Older actions were sent directly and cannot be looked up in the Hub journal.
     if not isinstance(payload.get('content'), dict):
         return {'action': doc.name, 'status': doc.status, 'message': doc.outbound_message, **({'error': action_error(doc)} if action_error(doc) else {})}
-    result = whatsapp.client().call_tool('channels.deliveries' if channel.channel=='Telegram' else 'whatsapp.deliveries', {'request_key': doc.request_key})
-    rows = result.get('deliveries')
-    if not isinstance(rows, list): raise ValueError('Invalid delivery lookup')
-    if rows == [] and doc.status == 'Dispatching' and channel.channel == 'WhatsApp':
-        # An authenticated, successful empty lookup proves Hub has no intent.
-        # Timeouts, malformed replies and Uncertain actions never enter this path.
-        if context.get('group_id'): raise ValueError('WhatsApp group sending is unavailable in v1')
-        if payload.get('business') and payload['business'] != [source.get('business_doctype'),source.get('business_name')]:
-            raise ValueError('Message business changed before recovery')
+    receipt = delivery_receipt(doc, channel)
+    if receipt is None and doc.status == 'Dispatching':
+        # Only a successful empty lookup proves admission can safely resume.
+        source, channel, context = admission_scope(doc)
+        if channel.channel == 'WhatsApp' and context.get('group_id'): raise ValueError('WhatsApp group sending is unavailable in v1')
         if payload.get('automation_run'):
             from relay_core.automation.service import scope
             run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
@@ -441,6 +491,8 @@ def reconcile(action):
             except ValueError:
                 doc.status = 'Rejected'; internal_save(doc); frappe.db.commit()
                 return {'action': doc.name, 'status': doc.status, 'message': None}
+        elif payload.get('group'):
+            tool, arguments = payload['tool'], payload['arguments']
         elif doc.get('start_contact'):
             from relay_core.conversation_start import prepared
             intent = payload['start']
@@ -456,12 +508,7 @@ def reconcile(action):
         except Exception as exc:
             return record_submission_error(doc, exc)
         return finish(doc, source, channel, context, payload['content'], receipt)
-    if len(rows) != 1 or rows[0].get('key') != doc.request_key:
-        raise ValueError('Delivery receipt is unavailable')
-    row = rows[0]
-    if channel.channel=='Telegram' and row.get('operation')!='telegram.message':raise ValueError('Delivery receipt belongs to another channel')
-    receipt = row.get('result') if row.get('state') == 'submitted' else {'delivery': row}
-    if not isinstance(receipt, dict): raise ValueError('Invalid delivery receipt')
+    if receipt is None: raise ValueError('Delivery receipt is unavailable')
     return finish(doc, source, channel, context, payload['content'], receipt)
 
 
@@ -522,8 +569,9 @@ def actions(contact, before=None):
         channel=row.target_channel or frappe.db.get_value('Relay Message',row.source_message or row.outbound_message,'channel')
         if not channel or not frappe.get_doc('Relay Channel',channel).has_permission('read'):continue
         retryable=row.status=='Rejected' and row.owner==frappe.session.user and row.operation!='business_prompt'
-        if retryable and row.operation=='email':
-            retryable=isinstance(object_value(frappe.get_doc('Relay Message Action',row.name).payload).get('email_values'),dict)
+        if retryable:
+            payload=object_value(frappe.get_doc('Relay Message Action',row.name).payload)
+            retryable=not payload.get('notification') and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
         items.append({'name':row.name,'operation':row.operation,'status':row.status,'creation':row.creation,
                       'preview':(row.preview or '')[:300], 'message':row.outbound_message,
                       'can_retry':retryable, 'error':action_error(row)})
@@ -546,21 +594,23 @@ def retry(action):
     # that child is a separate reviewed action with its own retry identity.
     key=retry_key(doc.name)
     payload=object_value(doc.payload)
+    if payload.get('notification'):
+        frappe.throw('Ticket notifications cannot be retried from the inbox',frappe.PermissionError)
     if payload.get('group'):
         from relay_core.telegram import send as group_send
         return group_send(**payload['group'],request_key=key)
+    if doc.operation == 'email':
+        from relay_core.email import send as email_send
+        values = payload.get('email_values')
+        if not isinstance(values, dict): raise ValueError('This older email cannot be retried; compose a new message')
+        return email_send(**values, request_key=key)
     if doc.get('start_contact'):
-        from relay_core.conversation_start import send as start_send, action_target
-        action_target(doc)
+        from relay_core.conversation_start import send as start_send, action_target as start_target
+        start_target(doc)
         intent=payload['start']
         return start_send(intent['contact'],intent['endpoint'],intent['kind'],intent['data'],key,
                           intent.get('business_doctype'),intent.get('business_name'))
     readable_source(doc.source_message)
-    if doc.operation=='email':
-        from relay_core.email import send as email_send
-        values=payload.get('email_values')
-        if not isinstance(values,dict):raise ValueError('This older email cannot be retried; compose a new message')
-        return email_send(**values,request_key=key)
     content=payload.get('content') or {};kind=doc.operation
     if kind=='text':data={'text':content.get('text')}
     elif kind=='reaction':data={'emoji':content.get('emoji','')}
