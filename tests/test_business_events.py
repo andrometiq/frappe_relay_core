@@ -9,6 +9,8 @@ from test_ai_skills import Doc, framework, module
 class BusinessEventTests(unittest.TestCase):
     def setUp(self):
         self.f = framework(); self.intents = []
+        self.f.cache = Mock()
+        self.f.cache.get_value.return_value = {('Delivery Note', 'on_submit')}
         automation = types.SimpleNamespace(internal_save=lambda doc, **kw: self.intents.append(doc))
         tools = module('relay_core/ai/tools.py', self.f)
         self.service = module('relay_core/business_events.py', self.f,
@@ -22,6 +24,62 @@ class BusinessEventTests(unittest.TestCase):
         self.f.get_all.return_value = ['PERSON-A']
         self.f.get_doc.side_effect = lambda values: Doc(values, name='DELIVERY-1')
         self.f.db.exists.side_effect = lambda dt, filters: any(d.event_key == filters['event_key'] for d in self.intents)
+
+    def test_unmatched_pair_never_queries_database(self):
+        for pairs in (set(), {('Sales Order', 'on_submit')}, {('Delivery Note', 'on_cancel')}):
+            with self.subTest(pairs=pairs), patch.object(self.f, 'get_all') as get_all, patch.object(self.f, 'db') as db:
+                self.f.cache.get_value.return_value = pairs
+                self.service.on_event(self.source, 'on_submit')
+                get_all.assert_not_called()
+                self.assertEqual(db.mock_calls, [])
+                self.assertFalse(self.f.flags.relay_business_event)
+
+    def test_cache_miss_builds_enabled_pairs_once_including_empty_set(self):
+        for rows in ([], [Doc(source_doctype='Sales Order', event='on_submit')]):
+            with self.subTest(rows=rows):
+                self.f.cache.get_value.return_value = None
+                self.f.get_all.reset_mock()
+                self.f.get_all.return_value = rows
+                self.service.on_event(self.source, 'on_submit')
+                pairs = {(row.source_doctype, row.event) for row in rows}
+                self.f.cache.set_value.assert_called_with(self.service.RULE_PAIRS_CACHE_KEY, pairs)
+                self.f.cache.get_value.return_value = pairs
+                self.service.on_event(self.source, 'on_submit')
+                self.f.get_all.assert_called_once_with('Relay Business Event Rule',
+                    filters={'enabled': 1}, fields=['source_doctype', 'event'])
+
+    def test_matching_cached_pair_captures_event(self):
+        self.f.get_all.return_value = ['RULE-1']
+        self.f.get_doc.side_effect = None
+        self.f.get_doc.return_value = self.rule
+        self.service.capture = Mock()
+        self.service.on_event(self.source, 'on_submit')
+        self.service.capture.assert_called_once_with(self.rule, self.source, 'on_submit')
+
+    def test_import_migration_install_and_patch_skip_all_work(self):
+        for flag in ('in_import', 'in_migrate', 'in_install', 'in_patch'):
+            with self.subTest(flag=flag), patch.dict(self.f.flags, {flag: True}):
+                for event in self.service.EVENTS:
+                    self.service.on_event(self.source, event)
+        self.assertEqual(self.f.cache.mock_calls, [])
+        self.f.get_all.assert_not_called()
+        self.f.get_doc.assert_not_called()
+        self.assertEqual(self.f.db.mock_calls, [])
+
+    def test_rule_save_and_trash_clear_cache_immediately_and_after_commit(self):
+        controller = module('relay_core/relay_core/doctype/relay_business_event_rule/relay_business_event_rule.py',
+            self.f, {'frappe.model.document': types.SimpleNamespace(Document=Doc),
+                     'relay_core.business_events': self.service})
+        rule = controller.RelayBusinessEventRule()
+        for hook in (rule.on_update, rule.on_trash):
+            with self.subTest(hook=hook.__name__):
+                self.f.cache.reset_mock()
+                self.f.db.after_commit.add.reset_mock()
+                hook()
+                self.f.cache.delete_value.assert_called_once_with(self.service.RULE_PAIRS_CACHE_KEY)
+                self.f.db.after_commit.add.assert_called_once()
+                self.f.db.after_commit.add.call_args.args[0]()
+                self.assertEqual(self.f.cache.delete_value.call_count, 2)
 
     def test_duplicate_event_has_one_after_commit_intent_with_qty_and_uom(self):
         for _ in range(2): self.service.capture(self.rule, self.source, 'on_submit')
@@ -99,6 +157,8 @@ class BusinessEventTests(unittest.TestCase):
         self.f.db.exists.side_effect = lambda dt, key: dt == 'DocType' or any(row.sample_key == key['sample_key'] for row in samples)
         self.f.get_doc.side_effect = lambda values: samples.append(Doc(values)) or samples[-1]
         for _ in range(2): self.service.install_samples()
+        self.assertEqual(self.f.cache.delete_value.call_count, 2)
+        self.f.cache.delete_value.assert_called_with(self.service.RULE_PAIRS_CACHE_KEY)
         self.assertEqual(len(samples), 2)
         self.assertTrue(all(not row.enabled for row in samples))
         self.assertEqual({row.source_doctype for row in samples}, {'Delivery Note', 'Sales Order'})

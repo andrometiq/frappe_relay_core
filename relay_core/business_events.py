@@ -11,6 +11,7 @@ from relay_core.automation.service import internal_save
 FIELDS = ('title', 'enabled', 'source_doctype', 'event', 'recipient_field', 'business_doctype',
           'channel', 'run_as_user', 'template', 'parameter_mapping')
 EVENTS = ('after_insert', 'on_submit', 'on_cancel')
+RULE_PAIRS_CACHE_KEY = 'relay_business_event_rule_pairs'
 outgoing_event = ContextVar('relay_outgoing_business_event', default=None)
 
 
@@ -85,11 +86,29 @@ def log_failure(context=''):
         pass
 
 
+def clear_rule_cache():
+    frappe.cache.delete_value(RULE_PAIRS_CACHE_KEY)
+    frappe.db.after_commit.add(lambda: frappe.cache.delete_value(RULE_PAIRS_CACHE_KEY))
+
+
+def enabled_rule_pairs():
+    pairs = frappe.cache.get_value(RULE_PAIRS_CACHE_KEY)
+    if pairs is None:
+        pairs = {(row.source_doctype, row.event) for row in frappe.get_all(
+            'Relay Business Event Rule', filters={'enabled': 1}, fields=['source_doctype', 'event'])}
+        frappe.cache.set_value(RULE_PAIRS_CACHE_KEY, pairs)
+    return pairs
+
+
 def on_event(doc, method=None):
+    if any(getattr(frappe.flags, flag, False) for flag in ('in_import', 'in_migrate', 'in_install', 'in_patch')):
+        return
     if method not in EVENTS or doc.doctype in RELAY_DOCTYPES or getattr(frappe.flags, 'relay_business_event', False):
         return
     frappe.flags.relay_business_event = True
     try:
+        if (doc.doctype, method) not in enabled_rule_pairs():
+            return
         rules = frappe.get_all('Relay Business Event Rule', filters={'enabled': 1,
             'source_doctype': doc.doctype, 'event': method}, pluck='name')
         for name in rules:
@@ -209,3 +228,4 @@ def install_samples():
         frappe.get_doc({'doctype': 'Relay Business Event Rule', 'title': title, 'sample_key': source,
             'enabled': 0, 'source_doctype': source, 'event': 'on_submit', 'recipient_field': 'customer',
             'business_doctype': 'Customer', 'parameter_mapping': json.dumps(params)}).insert(ignore_permissions=True)
+    clear_rule_cache()
