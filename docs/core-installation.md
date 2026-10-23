@@ -52,6 +52,15 @@ mapping. Rebuild these ignored assets for each frontend release.
 
 ## Configure the connection
 
+Run automation on its own worker: `bench worker --queue default`. Run message
+and receipt projection separately with `bench worker --queue short,long`.
+Do not let a worker consume both `default` and either projection queue: one slow
+AI request would then occupy projection capacity. No custom queue configuration
+is required. Incoming-message hooks defer policy reads and intent creation until
+after the message commits; AI, flows, translations, automatic email replies and
+their recovery jobs use `default`. Restart Python web and worker processes after
+deploying these backend changes when automatic reload is disabled.
+
 In **Relay → Settings**, a System Manager supplies the Hub MCP URL, account, API
 token, and callback signing secret. The token must include `account:read` in
 addition to operational scopes. Core verifies the account and site URL through

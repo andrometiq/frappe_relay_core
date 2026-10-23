@@ -1,6 +1,7 @@
 """Per-user signatures and explicitly enabled, loop-safe automatic replies."""
 import hashlib
 import frappe
+from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access
 
 
@@ -34,11 +35,12 @@ def save(signature):
     return {'saved':True}
 
 
+@after_message_commit
 def on_message(doc,method=None):
     if not doc.get('legacy_source') and doc.direction=='Incoming' and frappe.db.exists('Relay Email Rule',{'channel':doc.channel,'enabled':1}):
         from relay_core.flows.service import claims
         if claims(doc):return
-        frappe.enqueue('relay_core.email_preferences.auto_reply',message=doc.name,queue='short',timeout=60,enqueue_after_commit=True)
+        frappe.enqueue('relay_core.email_preferences.auto_reply',message=doc.name,queue=QUEUE,timeout=60,enqueue_after_commit=True)
 
 
 def auto_reply(message):

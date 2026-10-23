@@ -8,6 +8,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
+from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical, event_key
@@ -151,6 +152,7 @@ def create_run(doc):
     return {'status': 'Disabled'}
 
 
+@after_message_commit
 def on_message(doc, method=None):
     if frappe.conf.get('relay_automation_enabled'):
         from relay_core.flows.service import claims
@@ -278,9 +280,9 @@ def recover():
             out.status = 'Uncertain'
         internal_save(out)
     for row in frappe.get_all('Relay Automation Run', filters={'status': ['in', ['Pending', 'Deciding']]}, fields=['name'], limit_page_length=20, order_by='creation asc'):
-        frappe.enqueue('relay_core.automation.service.process', name=row.name, queue='long', timeout=180)
+        frappe.enqueue('relay_core.automation.service.process', name=row.name, queue=QUEUE, timeout=180)
     for row in frappe.get_all('Relay Automation Outbox', filters={'status': 'Pending'}, fields=['name'], limit_page_length=20, order_by='creation asc'):
-        frappe.enqueue('relay_core.automation.service.dispatch', name=row.name, queue='long', timeout=90)
+        frappe.enqueue('relay_core.automation.service.dispatch', name=row.name, queue=QUEUE, timeout=90)
 
 
 @frappe.whitelist(methods=['POST'])
