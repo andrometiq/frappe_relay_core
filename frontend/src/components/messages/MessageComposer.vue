@@ -5,10 +5,12 @@ import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
 import { Button, FormControl, Dropdown } from "@relay/ui";
 import SendChannel from "./SendChannel.vue";
-import SendFormDialog from "./SendFormDialog.vue";
+import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
+const { identity } = useWhatsAppIdentity();
+import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
 const showReplies=ref(false);
-const showForm = ref(false);
+
 import { messagesKey } from "../../composables/messagesContext";
 const {
   selected,
@@ -54,7 +56,6 @@ const attachTypes = {photo:['Photo','image','image/*'],video:['Video','video','v
 const attachmentOptions = computed(()=>[
   ...kinds.value.filter(value=>attachTypes[value]).map(value=>({label:attachTypes[value][0],icon:attachTypes[value][1],onClick:()=>chooseAttachment(value)})),
   ...kinds.value.filter(value=>['location','contact'].includes(value)).map(value=>({label:value==='location'?'Location':'Contact',icon:value==='location'?'map-pin':'user',onClick:()=>{kind.value=value;attachment.value=null;}})),
-  ...(sourceContext.value.provider==='WhatsApp'&&!sourceContext.value.group_id?[{label:'WhatsApp form',icon:'file-text',onClick:()=>showForm.value=true}]:[])
 ]);
 const emojiOptions=['😀','😊','👍','❤️','🙏','🎉'].map(value=>({label:value,onClick:()=>body.value+=value}));
 function resizeDraft() {
@@ -178,11 +179,13 @@ function keydown(event) {
 </script>
 <template>
   <form class="message-composer" @submit.prevent="canSend && send()">
+    <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
     <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
     <div v-else-if="!windowState.open" class="flex items-center gap-2 text-sm">
       <span>The WhatsApp reply window is closed.</span
       ><Button label="Use an approved template" @click="emit('template')" />
     </div>
+    <p v-if="windowState.open && sourceContext.provider === 'WhatsApp'" class="text-xs text-ink-gray-5">24-hour reply window open{{ windowState.expires_at ? ' until ' + windowState.expires_at : '' }}</p>
     <div v-if="quoting" class="flex items-center gap-2 text-xs text-ink-gray-5">
       Replying to {{ (source.content || "Message").slice(0, 80)
       }}<span v-if="sourceContext.message_thread_id">
@@ -202,9 +205,9 @@ function keydown(event) {
       Topic {{ sourceContext.message_thread_id }}
     </div>
     <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-    <SendFormDialog v-if="source" v-model="showForm" :source="source" />
+    <details><summary class="text-sm">From {{ identity?.display_phone_number || 'Number unavailable' }} · {{ source.channel }}</summary><WhatsAppIdentity /></details>
     <div class="composer-toolbar">
-      <SendChannel />
+      <SendChannel whatsapp-only /><Button label="Template" :disabled="busy" @click="emit('template')" />
       <Dropdown :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
       <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
       <Button icon="zap" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />

@@ -4,6 +4,7 @@ import { TextInput, ErrorMessage, FeatherIcon } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { coreApi } from "../../services/coreApi";
+import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import VirtualScroller from "primevue/virtualscroller";
 
 const props = defineProps({ selected: String, selectedDoctype: String, busy: Boolean });
@@ -104,6 +105,7 @@ onMounted(async () => {
     if (doctype.value) await loadInitialGroup();
   } catch (e) { error.value = e.message; }
 });
+useRealtimeRefresh(["Relay Message", "Contact", "Relay Conversation Summary"], ["messages", "incoming", "contacts", "reports"], () => loadRecords(true));
 onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
 </script>
 

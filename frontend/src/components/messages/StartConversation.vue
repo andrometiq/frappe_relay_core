@@ -238,7 +238,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
           {{ businessName
             ? "No WhatsApp channel is available for this contact. Configure or enable the channel in Frappe Desk."
-            : "No verified private-chat endpoint is available. Connect this contact’s channel in Frappe Desk first." }}
+            : "No eligible WhatsApp endpoint is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
         </p>
         <template v-if="destination">
           <p v-if="destination.provider === 'WhatsApp'" class="text-sm">

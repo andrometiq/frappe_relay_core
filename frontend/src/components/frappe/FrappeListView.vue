@@ -42,11 +42,12 @@ function onScroll(event) {
           <span v-for="column in columns" :key="column.key" role="columnheader">{{ column.label }}</span>
         </div>
         <button v-for="item in items" :key="item.id || item.name" type="button" class="frappe-list-row" role="row" :style="grid.value" @click="emit('open', item)">
-          <span v-for="column in columns" :key="column.key" role="cell">
+          <span v-for="column in columns" :key="column.key" role="cell" :data-label="column.label">
             <slot :name="`cell-${column.key}`" :item="item"><span :title="String(item[column.key] ?? '')">{{ item[column.key] }}</span></slot>
           </span>
         </button>
       </div>
+      <div v-if="busy" class="frappe-list-loading" role="status">Loading records…</div>
       <div v-if="loadingMore" class="frappe-list-loading" role="status">Loading more…</div>
       <div v-else-if="!items.length && !busy" class="frappe-empty-state">
         <span class="frappe-empty-icon"><FeatherIcon name="file-text" :size="28" /></span>

@@ -18,6 +18,7 @@ import {
 } from "../../services/templateList";
 import TemplateEditor from "./TemplateEditor.vue";
 
+const access = inject('relayCapabilities', ref({ manage: false }));
 const workspace = inject(whatsappKey);
 const {
   busy,
@@ -37,6 +38,7 @@ const {
 const query = ref("");
 const status = ref("ALL");
 const category = ref("ALL");
+const language = ref("ALL");
 const confirmingDelete = ref(false);
 let restoreInFlight = false;
 const columns = [
@@ -51,6 +53,7 @@ const filteredTemplates = computed(() =>
     query: query.value,
     status: status.value,
     category: category.value,
+    language: language.value,
   }),
 );
 const statuses = computed(() => [
@@ -87,6 +90,7 @@ function openList(updateRoute = true) {
   if (updateRoute) routeTemplate();
 }
 function createTemplate(updateRoute = true) {
+  if (!access.value.manage) return;
   confirmingDelete.value = false;
   template.value = "";
   editingTemplate.value = "";
@@ -94,6 +98,7 @@ function createTemplate(updateRoute = true) {
   if (updateRoute) routeTemplate("new");
 }
 function editTemplate() {
+  if (!access.value.manage) return;
   if (!selectedTemplate.value) return;
   confirmingDelete.value = false;
   editingTemplate.value = selectedTemplate.value.id;
@@ -150,7 +155,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
 
 <template>
   <TemplateEditor
-    v-if="creating"
+    v-if="creating && access.manage"
     :key="editingTemplate || 'new'"
     :enabled="supported"
     :template="editingTemplate ? selectedTemplate : null"
@@ -167,14 +172,15 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     @back="openList"
   >
     <template #actions>
-      <Button label="Edit" :disabled="!supported" @click="editTemplate" />
-      <Button v-if="!confirmingDelete" icon="trash" variant="ghost" theme="red" aria-label="Delete template" :disabled="!supported" @click="confirmingDelete = true" />
+      <Button v-if="access.manage" label="Edit" :disabled="!supported" @click="editTemplate" />
+      <Button v-if="access.manage && !confirmingDelete" icon="trash" variant="ghost" theme="red" aria-label="Delete template" :disabled="!supported" @click="confirmingDelete = true" />
     </template>
 
     <FrappeFormSection>
       <div class="frappe-field-grid">
         <FrappeReadField label="Template name" :value="selectedTemplate.name" />
         <FrappeReadField label="Status" :value="selectedTemplate.status || 'Unknown'" />
+        <FrappeReadField v-if="selectedTemplate.status === 'REJECTED'" label="Rejection reason" :value="selectedTemplate.rejected_reason || selectedTemplate.rejection_reason || 'Meta has not provided a rejection reason. Review the template in WhatsApp Manager.'" wide />
         <FrappeReadField label="Category" :value="selectedTemplate.category" />
         <FrappeReadField label="Language" :value="languageLabel(selectedTemplate.language)" />
         <FrappeReadField label="Parameter format" :value="selectedTemplate.parameter_format || 'POSITIONAL'" />
@@ -238,12 +244,13 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
   >
     <template #actions>
       <Button icon="refresh-cw" variant="ghost" aria-label="Refresh templates" :loading="busy" @click="refresh" />
-      <Button label="New template" icon-left="plus" variant="solid" :disabled="!supported" @click="createTemplate" />
+      <Button v-if="access.manage" label="New template" icon-left="plus" variant="solid" :disabled="!supported" @click="createTemplate" />
     </template>
     <template #filters>
       <TextInput v-model="query" type="search" placeholder="Search templates" aria-label="Search templates"><template #prefix><FeatherIcon name="search" /></template></TextInput>
       <RelaySelect v-model="status" label="Status" :options="statuses" />
       <RelaySelect v-model="category" label="Category" :options="[{ value: 'ALL', label: 'All categories' }, 'UTILITY', 'MARKETING', 'AUTHENTICATION']" />
+      <RelaySelect v-model="language" label="Language" :options="[{ value: 'ALL', label: 'All languages' }, ...new Set(templates.map(row => row.language).filter(Boolean))]" />
     </template>
     <template #cell-name="{ item }"><strong>{{ item.name }}</strong><small>{{ item.id }}</small></template>
     <template #cell-status="{ item }"><Badge :label="item.status || 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
