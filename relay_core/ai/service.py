@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core.automation.queue import QUEUE
 from relay_core.ai.tools import as_user
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import event_key, action_key
@@ -28,7 +29,7 @@ def create_run(message, skill):
         'execution_user': skill.run_as_user, 'message_hash': message_hash(message),
         'status': 'Pending', 'generation': int(contact.automation_generation or 0)})
     internal_save(run, new=True)
-    frappe.enqueue('relay_core.automation.service.process', name=run.name, queue='short', timeout=90, enqueue_after_commit=True)
+    frappe.enqueue('relay_core.automation.service.process', name=run.name, queue=QUEUE, timeout=90, enqueue_after_commit=True)
     return {'name': run.name, 'status': run.status}
 
 

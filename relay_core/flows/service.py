@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access, readable_contact
 from relay_core.automation.service import internal_save, check_actor, business_scope, message_hash
 from relay_core.automation.provenance import context_of, conversation_key
@@ -204,13 +205,14 @@ def claims(message):
     return bool(matching(message) or active(route(message)))
 
 
+@after_message_commit
 def on_message(doc,method=None):
     if not claims(doc):return
     if frappe.db.exists('Relay Flow Event',{'message':doc.name}):return
     event=frappe.get_doc({'doctype':'Relay Flow Event','message':doc.name,'message_hash':message_hash(doc),
                           'conversation_key':route(doc),'status':'Pending'})
     internal_save(event,new=True)
-    frappe.enqueue('relay_core.flows.service.process',name=event.name,enqueue_after_commit=True)
+    frappe.enqueue('relay_core.flows.service.process',name=event.name,queue=QUEUE,enqueue_after_commit=True)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -359,7 +361,7 @@ def _process(event):
             from relay_core.automation.service import takeover
             takeover(source.relay_contact,paused=1);run.status='Handoff';internal_save(run);finish(event);return
         run.step=next_step(nodes,run.step);internal_save(run);frappe.db.commit()
-    frappe.enqueue('relay_core.flows.service.process',name=event.name,enqueue_after_commit=True)
+    frappe.enqueue('relay_core.flows.service.process',name=event.name,queue=QUEUE,enqueue_after_commit=True)
 
 
 def process(name):
@@ -397,7 +399,7 @@ def recover():
     rows=frappe.get_all('Relay Flow Event',filters={'status':'Pending'},
         or_filters=[['next_attempt','is','not set'],['next_attempt','<=',frappe.utils.now_datetime()]],
         pluck='name',order_by='name asc',limit_page_length=30)
-    for name in rows:frappe.enqueue('relay_core.flows.service.process',name=name,job_id='relay-flow-'+name,deduplicate=True)
+    for name in rows:frappe.enqueue('relay_core.flows.service.process',name=name,queue=QUEUE,job_id='relay-flow-'+name,deduplicate=True)
 
 
 @frappe.whitelist(methods=['GET'])

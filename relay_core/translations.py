@@ -3,10 +3,12 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.automation import providers
 from relay_core.automation.service import message_hash, internal_save, check_actor, business_scope, reserve_attempt
 
 
+@after_message_commit
 def on_message(doc, method=None):
     if not frappe.conf.get('relay_automation_enabled') or doc.direction != 'Incoming' or doc.get('legacy_source'):
         return
@@ -26,7 +28,7 @@ def on_message(doc, method=None):
     job=frappe.get_doc({'doctype':'Relay Message Translation','job_key':key,'message':doc.name,
         'source_hash':digest,'policy':policy.name,'policy_version':str(policy.modified),'status':'Pending'})
     internal_save(job,new=True)
-    frappe.enqueue('relay_core.translations.process',name=job.name,queue='long',timeout=900,enqueue_after_commit=True)
+    frappe.enqueue('relay_core.translations.process',name=job.name,queue=QUEUE,timeout=900,enqueue_after_commit=True)
     return job.name
 
 
@@ -190,7 +192,7 @@ def recover():
     now=frappe.utils.now_datetime()
     for row in frappe.get_all('Relay Message Translation',filters={'status':['in',['Pending','Processing']]},fields=['name','status','lease_until'],order_by='modified asc',limit_page_length=50):
         if row.status=='Pending' or not row.lease_until or row.lease_until<=now:
-            frappe.enqueue('relay_core.translations.process',name=row.name,queue='long',timeout=900,enqueue_after_commit=True)
+            frappe.enqueue('relay_core.translations.process',name=row.name,queue=QUEUE,timeout=900,enqueue_after_commit=True)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -206,6 +208,6 @@ def retry(name):
     if target==name:
         job.status='Pending';job.attempts=0;job.lease_until=None;job.reason=''
         internal_save(job)
-        frappe.enqueue('relay_core.translations.process',name=name,queue='long',timeout=900,enqueue_after_commit=True)
+        frappe.enqueue('relay_core.translations.process',name=name,queue=QUEUE,timeout=900,enqueue_after_commit=True)
     job.add_comment('Info','Translation retry requested; queued job '+target)
     return {'name':target,'status':'Pending'}
