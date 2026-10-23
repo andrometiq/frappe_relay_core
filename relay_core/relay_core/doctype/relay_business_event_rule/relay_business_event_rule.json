@@ -1,0 +1,104 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Event Rule",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-BER-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "title",
+    "enabled",
+    "source_doctype",
+    "event",
+    "recipient_field",
+    "business_doctype",
+    "channel",
+    "run_as_user",
+    "template",
+    "parameter_mapping",
+    "sample_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "source_doctype",
+      "label": "Source Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event",
+      "label": "Event",
+      "fieldtype": "Select",
+      "options": "on_submit\nafter_insert\non_cancel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recipient_field",
+      "label": "Recipient Field",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "run_as_user",
+      "label": "Run As User",
+      "fieldtype": "Link",
+      "options": "User"
+    },
+    {
+      "fieldname": "template",
+      "label": "Template",
+      "fieldtype": "Link",
+      "options": "Relay WhatsApp Template"
+    },
+    {
+      "fieldname": "parameter_mapping",
+      "label": "Parameter Mapping",
+      "fieldtype": "JSON",
+      "default": "[]"
+    },
+    {
+      "fieldname": "sample_key",
+      "label": "Sample Key",
+      "fieldtype": "Data",
+      "unique": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

@@ -60,8 +60,12 @@ class AutomationPolicy(Document):
             frappe.throw('Select at most 20 distinct replies')
         if self.fallback_reply and self.fallback_reply not in ids:
             frappe.throw('Fallback must be in the allowed reply list')
-        if self.get('fallback_provider') == self.provider:
+        if self.get('fallback_provider') and self.get('fallback_provider') == self.provider:
             frappe.throw('Fallback provider must differ from the primary provider')
+        if self.enabled and not self.get('ai_model'):
+            frappe.throw('Choose an AI Model from frappe_tools')
+        if self.get('allow_report'):
+            frappe.throw('AI reports are unavailable; use a scoped read skill')
         if self.get('allow_voice'):
             if not self.get('transcription_provider'):
                 frappe.throw('Choose a transcription provider for voice input')

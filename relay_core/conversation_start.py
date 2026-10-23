@@ -170,6 +170,8 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
         return messaging.reconcile(existing.name)
     source,channel,context,tool,args,content=prepared(contact,endpoint,kind,data,business_doctype,business_name)
     payload={'tool':tool,'arguments':args,'content':content,'start':intent}
+    from relay_core.business_events import outgoing_event
+    if outgoing_event.get(): payload['business_event'] = outgoing_event.get()
     action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'operation':content['kind'] if kind=='whatsapp' else kind,'payload':json.dumps(payload),
                           'payload_hash':digest,'status':'Dispatching','start_contact':contact,'target_channel':channel.name,'preview':messaging.preview(content)[:300]})
     internal_save(action,new=True);frappe.db.commit()

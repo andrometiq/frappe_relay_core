@@ -2,6 +2,8 @@
 import frappe
 
 RESOURCES = {
+    'Relay AI Skill': 'skills', 'Relay Business Event Rule': 'business_events',
+    'Relay Business Event Delivery': 'business_events',
     'Relay Message': 'messages', 'Relay Contact': 'contacts',
     'Relay Hub Event': 'incoming', 'Relay Ticket': 'tickets',
     'Relay Campaign': 'campaigns', 'Relay Campaign Recipient': 'campaigns',

@@ -3,6 +3,16 @@ MANAGER = 'Relay Communication Manager'
 USER = 'Relay Communication User'
 
 
+def internal_record_permission(doc=None, user=None, permission_type=None):
+    import frappe
+    user = user or frappe.session.user
+    return user == 'Administrator' or 'System Manager' in frappe.get_roles(user)
+
+
+def internal_record_query(user=None):
+    return '' if internal_record_permission(user=user) else '1=0'
+
+
 def readable_contact(name):
     """A Relay label alone never grants access to a business conversation."""
     import frappe
