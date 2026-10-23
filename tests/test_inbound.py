@@ -7,7 +7,7 @@ import sys
 import time
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 class CallbackTests(unittest.TestCase):
     def setUp(self):
@@ -26,6 +26,33 @@ class CallbackTests(unittest.TestCase):
         now=int(time.time())
         for raw,stamp,signature,account in [(self.raw,now-301,self.sign(now-301),'site-a'),(self.raw,now,self.sign(now),'other'),(self.raw+b' ',now,self.sign(now),'site-a')]:
             with self.assertRaises(ValueError):self.api.validate_callback(raw,str(stamp),signature,self.secret,account)
+
+    def test_snapshot_conflict_retries_entire_callback_without_committing(self):
+        class Conflict(Exception):
+            pass
+        db = Mock()
+        callback = Mock(side_effect=[Conflict(1020), {'accepted': 500}])
+        with patch.object(self.api, 'frappe', types.SimpleNamespace(db=db, QueryDeadlockError=Conflict)), \
+                patch.object(self.api.time, 'sleep'):
+            result = self.api.retry_callback(callback)()
+        self.assertEqual(result, {'accepted': 500})
+        self.assertEqual(callback.call_count, 2)
+        db.rollback.assert_called_once_with()
+        db.commit.assert_not_called()
+
+    def test_callback_retries_are_bounded_and_other_errors_propagate(self):
+        class Conflict(Exception):
+            pass
+        for failure, attempts in ((Conflict(1213), 5), (ValueError('invalid signature'), 1)):
+            db = Mock()
+            callback = Mock(side_effect=failure)
+            with patch.object(self.api, 'frappe', types.SimpleNamespace(db=db, QueryDeadlockError=Conflict)), \
+                    patch.object(self.api.time, 'sleep'):
+                with self.assertRaises(type(failure)):
+                    self.api.retry_callback(callback)()
+            self.assertEqual(callback.call_count, attempts)
+            self.assertEqual(db.rollback.call_count, 5 if isinstance(failure, Conflict) else 0)
+            db.commit.assert_not_called()
 
     def test_compact_status_boundaries_and_identity(self):
         now=int(time.time())

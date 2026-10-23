@@ -5,11 +5,34 @@ import json
 import re
 import time
 from contextvars import ContextVar
+from functools import wraps
 import frappe
 from relay_core.settings import value as connection_value
 
 
 callback_write = ContextVar('relay_authenticated_callback', default=False)
+
+
+def retry_callback(method):
+    """Retry the whole ingress transaction, including inline projection.
+
+    MariaDB snapshot conflicts (1020) are QueryDeadlockError too: concurrent
+    callbacks can advance tabSeries after our first read, before naming an
+    event. Retrying only the insert or a savepoint cannot refresh that snapshot.
+    Rollback also discards projection/wake/realtime callbacks from the attempt.
+    Use only on ingress boundaries, never inside another write transaction.
+    """
+    @wraps(method)
+    def receive(*args, **kwargs):
+        for attempt in range(5):
+            try:
+                return method(*args, **kwargs)
+            except frappe.QueryDeadlockError:
+                frappe.db.rollback()
+                if attempt == 4:
+                    raise
+                time.sleep(.01 * (attempt + 1))
+    return receive
 
 
 def insert_event(values, *, inline=False, received_ns=None):
@@ -55,6 +78,7 @@ def validate_callback(raw, timestamp, signature, secret, expected_account):
 
 
 @frappe.whitelist(methods=['POST'])
+@retry_callback
 def receive(**_ignored):
     started = time.time_ns()
     projection_ms = 0
@@ -151,6 +175,7 @@ def validate_status_callback(raw, timestamp, signature, secret, expected_account
 
 
 @frappe.whitelist(methods=['POST'])
+@retry_callback
 def receive_statuses(**_ignored):
     """Durably accept a bounded compact receipt batch for background projection."""
     started = time.time_ns()
@@ -231,6 +256,7 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
 
 
 @frappe.whitelist(methods=['POST'])
+@retry_callback
 def receive_channel_statuses(**_ignored):
     """Acknowledge only after a signed channel status batch is durably stored."""
     if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
