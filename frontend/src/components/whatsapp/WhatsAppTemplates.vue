@@ -238,7 +238,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     :busy="busy"
     :loading-more="loadingMore"
     empty-title="No templates found"
-    empty-description="Try another name, status, or category."
+    :empty-description="templates.length ? 'Try another name, status, category or language.' : 'Create an approved message to start conversations with your customers.'"
     @open="openTemplate"
     @near-end="templateCursor && nextTemplates()"
   >
@@ -257,6 +257,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <template #cell-category="{ item }">{{ item.category || "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
     <template #cell-message="{ item }">{{ templateBody(item) || "No message body" }}</template>
+    <template #empty-action><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
     <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} loaded templates</span><span v-if="templateCursor">More templates load as you scroll</span></template>
   </FrappeListView>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { Button, Badge, ErrorMessage } from '@relay/ui'
+import { Avatar, Button, Badge, ErrorMessage } from '@relay/ui'
+import LoadingRows from './LoadingRows.vue'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 const props = defineProps({ contact: String })
@@ -20,11 +21,11 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
 </script>
 <template>
   <section class="workflow-card" aria-label="Contact and business links">
-    <p v-if="busy" role="status">Loading contact details…</p>
+    <LoadingRows v-if="busy" :count="2" label="Loading contact details…" />
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
-      <h3 class="font-semibold">{{ detail.label }}</h3>
-      <p>{{ detail.phone || 'No phone number' }} <Badge :label="/^[0-9]{7,15}$/.test(detail.phone.replace(/[ +()\-]/g, '')) ? 'Phone format valid' : 'Country code and number required'" /></p>
+      <header class="contact-detail-heading"><Avatar :label="detail.label" /><div><h3>{{ detail.label }}</h3><p>Contact details</p></div></header>
+      <p>{{ detail.phone || 'No phone number' }} <Badge :label="/^[0-9]{7,15}$/.test((detail.phone || '').replace(/[ +()\-]/g, '')) ? 'Phone format valid' : 'Country code and number required'" /></p>
       <a class="underline" :href="desk('Contact', detail.name)">Edit Contact and business links in Desk</a>
       <h4 class="font-medium">Permitted business links</h4>
       <div v-for="link in detail.links" :key="link.doctype + link.name" class="flex flex-wrap gap-3">
@@ -34,7 +35,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
       <p v-if="!detail.links.length">No accessible, configured business links. Add a link in Contact and enable its business type in Settings.</p>
       <h4 class="font-medium">WhatsApp endpoints</h4>
       <article v-for="endpoint in detail.endpoints" :key="endpoint.name" class="border-t pt-3 space-y-1">
-        <p>{{ endpoint.endpoint }} · {{ endpoint.channel }} <Badge :label="endpoint.verified ? 'Verified binding' : 'Needs review'" /></p>
+        <p>{{ endpoint.endpoint }} · {{ endpoint.channel }} <Badge :label="endpoint.verified ? 'Verified binding' : 'Needs review'" :theme="endpoint.verified ? 'green' : 'amber'" /></p>
         <p class="text-sm text-ink-gray-5">Created {{ endpoint.creation }} · Updated {{ endpoint.modified }}</p>
       </article>
       <p v-if="!detail.endpoints.length">No stored WhatsApp endpoints. Start a conversation from a business link or review an unlinked sender.</p>

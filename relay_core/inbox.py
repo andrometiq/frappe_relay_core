@@ -124,8 +124,10 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     if before:page.reverse()
     items=[]
     from relay_core.timeline import page_query
+    from relay_core.api import business_types
+    configured = set(business_types())
     for row in page:
-        try:readable_contact(row.name)
+        try:_, person = readable_contact(row.name)
         except frappe.PermissionError:continue
         latest_filters={'relay_contact':row.name}
         if medium:latest_filters['channel']=['in',channel_names]
@@ -134,7 +136,12 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         unread=unread_count(row.name, channels=channel_names)
         last=latest[0] if latest else {}
         if last and not frappe.get_doc('Relay Channel',last.channel).has_permission('read'):last={}
-        items.append(dict(row,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
+        business = next(({'doctype': link.link_doctype, 'name': link.link_name}
+                         for link in person.links if link.link_doctype in configured
+                         and frappe.get_doc(link.link_doctype, link.link_name).has_permission('read')), None)
+        assigned = frappe.db.get_value('Relay Conversation Assignment', {'relay_contact': row.name},
+                                      ['team', 'assigned_to'], as_dict=True) or {}
+        items.append(dict(row,business=business,assignment=assigned,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
                           latest_preview=(last.get('content') or '')[:200],latest_at=last.get('sent_at') or last.get('creation'),
                           unread=unread,unread_more=False))
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,

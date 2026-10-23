@@ -1,6 +1,7 @@
 <script setup>
 import { provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
-import { Button, ErrorMessage, FeatherIcon } from "@relay/ui";
+import { Avatar, Button, ErrorMessage } from "@relay/ui";
+import WorkspaceState from "./WorkspaceState.vue";
 import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
 import ConversationDeliveries from "./messages/ConversationDeliveries.vue";
@@ -199,8 +200,8 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
 
     <div v-if="active" class="connected-thread">
       <header class="conversation-heading">
-        <Button class="mobile-only conversation-back" icon="arrow-left" aria-label="Back to businesses" title="Back to businesses" @click="state.clearSelection()" />
-        <span class="conversation-avatar" aria-hidden="true">{{ title.slice(0, 1).toUpperCase() }}</span>
+        <Button class="mobile-only conversation-back" icon="arrow-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
+        <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
           <h2>{{ title }}</h2>
           <div class="conversation-meta">
@@ -259,7 +260,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
       </div>
       <MessageComposer v-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')" />
       <div v-else-if="active" class="business-compose-start">
-        <Button icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
+        <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
           :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
       </div>
 
@@ -267,10 +268,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         @close="summaryOpen = false" @open="focusMessage" />
     </div>
     <div v-else class="connected-thread whatsapp-empty-pane" aria-label="No open conversation">
-      <div class="whatsapp-empty-mark" aria-hidden="true"><FeatherIcon name="message-circle" :size="34" /></div>
-      <h2>Relay for WhatsApp</h2>
-      <p>Business conversations, linked contacts, and message history in one workspace.</p>
-      <div class="whatsapp-empty-security"><FeatherIcon name="lock" :size="13" /> Connected to your Frappe business records</div>
+      <WorkspaceState title="Choose a conversation" description="Select a customer on the left to view messages and reply." icon="message-circle" />
     </div>
   </section>
 </template>

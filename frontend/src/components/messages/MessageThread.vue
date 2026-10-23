@@ -1,5 +1,6 @@
 <script setup>
 import { useMessageInfo } from "../../composables/useMessageInfo";
+import LoadingRows from "../LoadingRows.vue";
 import ReadByBubble from "./ReadByBubble.vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import ParticipantReceipts from "./ParticipantReceipts.vue";
@@ -83,8 +84,14 @@ function timeLabel(message) {
   );
 }
 function dayLabel(message) {
+  const date = timeOf(message);
+  if (!date) return '';
+  const today = new Date();
+  const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
   return (
-    timeOf(message)?.toLocaleDateString([], {
+    date.toLocaleDateString([], {
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -261,6 +268,7 @@ function actions(message) {
     aria-label="WhatsApp conversation"
     @scroll.passive="scrolled"
   >
+    <LoadingRows v-if="busy && !rows.length" label="Loading messages…" :count="3" />
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
     </div>
