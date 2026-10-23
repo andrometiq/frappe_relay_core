@@ -20,3 +20,10 @@ The main frontend still uses session-only sample data. Virtual rendering bounds 
 Existing WhatsApp Core read-state code was inspected read-only: it distinguishes provider receipts from operator reads and persists a per-user ledger. That distinction must survive migration. No installed app, production site or production data was changed.
 
 Run browser fixture: `cd frontend && npx vite build --config tests/vite.config.js`, then serve `.scroll-test-dist` and open `/tests/scroll.html`. Unit tests: `node --test frontend/tests/*.test.mjs`; Python tests: `RELAY_LIVE_TEST=1 python3 -B -m unittest discover -s tests -v`.
+
+## Local visual refinement (not pushed)
+
+Conversation details now open on demand. Channel filtering uses compact tabs;
+reply-channel selection lives in the composer. Folder creation is disclosed on
+request. Conversation rows are more compact, bubbles fit their content, and
+mobile conversation mode hides list controls while retaining the back button.

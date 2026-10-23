@@ -1,0 +1,61 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Procedure Evaluation",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-PEVAL-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "procedure",
+    "input_hash",
+    "policy_hash",
+    "status",
+    "results",
+    "reason"
+  ],
+  "fields": [
+    {
+      "fieldname": "procedure",
+      "label": "Procedure",
+      "fieldtype": "Link",
+      "options": "Relay Learned Procedure",
+      "reqd": 1
+    },
+    {
+      "fieldname": "input_hash",
+      "label": "Input Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy_hash",
+      "label": "Policy Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nRunning\nPassed\nFailed",
+      "default": "Pending",
+      "reqd": 1
+    },
+    {
+      "fieldname": "results",
+      "label": "Results",
+      "fieldtype": "JSON"
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ]
+}

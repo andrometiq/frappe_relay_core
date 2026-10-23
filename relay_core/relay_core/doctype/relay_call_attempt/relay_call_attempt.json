@@ -1,0 +1,105 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Call Attempt",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CA-.##########",
+  "field_order": [
+    "request_key",
+    "channel",
+    "relay_contact",
+    "endpoint",
+    "requested_by",
+    "started_at",
+    "state",
+    "provider_call",
+    "resolution",
+    "resolution_note",
+    "resolved_by",
+    "resolved_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "request_key",
+      "label": "Request Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay Contact",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact"
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "requested_by",
+      "label": "Requested By",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "started_at",
+      "label": "Started At",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "state",
+      "label": "State",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Uncertain\nConfirmed\nRejected"
+    },
+    {
+      "fieldname": "provider_call",
+      "label": "Provider Call",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Call"
+    },
+    {
+      "fieldname": "resolution",
+      "label": "Resolution",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "\nNot started\nExisting call"
+    },
+    {
+      "fieldname": "resolution_note",
+      "label": "Verification evidence",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "resolved_by",
+      "label": "Resolved By",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "resolved_at",
+      "label": "Resolved At",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    }
+  ],
+  "permissions": []
+}

@@ -9,3 +9,6 @@ __pycache__/
 frontend/communication-preview.html
 
 frontend/.scroll-test-dist/
+
+/.runtime/
+/relay_core/public/relay/

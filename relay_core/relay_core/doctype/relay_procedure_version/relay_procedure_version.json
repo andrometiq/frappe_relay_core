@@ -1,0 +1,78 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Procedure Version",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-PVER-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "procedure",
+    "policy",
+    "instructions",
+    "input_hash",
+    "policy_hash",
+    "evaluation",
+    "reviewer",
+    "review_note"
+  ],
+  "fields": [
+    {
+      "fieldname": "procedure",
+      "label": "Procedure",
+      "fieldtype": "Link",
+      "options": "Relay Learned Procedure",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy",
+      "label": "Policy",
+      "fieldtype": "Link",
+      "options": "Relay Automation Policy",
+      "reqd": 1
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "input_hash",
+      "label": "Input Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy_hash",
+      "label": "Policy Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "evaluation",
+      "label": "Evaluation",
+      "fieldtype": "Link",
+      "options": "Relay Procedure Evaluation",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reviewer",
+      "label": "Reviewer",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "review_note",
+      "label": "Review Note",
+      "fieldtype": "Small Text",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ]
+}

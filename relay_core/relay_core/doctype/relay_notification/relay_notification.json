@@ -1,0 +1,65 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Notification",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-NOTIFY-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "user",
+    "relay_contact",
+    "comment",
+    "kind",
+    "is_read",
+    "event_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "Recipient",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Conversation",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact"
+    },
+    {
+      "fieldname": "comment",
+      "label": "Note",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Internal Comment"
+    },
+    {
+      "fieldname": "kind",
+      "label": "Kind",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Mention\nTask\nReply"
+    },
+    {
+      "fieldname": "is_read",
+      "label": "Read",
+      "fieldtype": "Check",
+      "read_only": 1
+    },
+    {
+      "fieldname": "event_key",
+      "label": "Event key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ]
+}

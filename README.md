@@ -1,44 +1,51 @@
 # Relay Core
 
-Frappe-based business communication workspace for WhatsApp, Telegram and email, backed by the separate [Relay Hub](https://github.com/andrometiq/relay_hub) Go service.
+Relay Core is a Frappe app for business conversations across WhatsApp, Telegram,
+and email. It links messages to existing Frappe Contacts and business records.
+The separate [Relay Hub](https://github.com/andrometiq/relay_hub) Go service owns
+provider credentials, delivery, and provider callbacks.
 
-## Current status
+Core uses the site's Frappe login, users, permissions, and API credentials. It
+does not add a second login system. All app DocTypes and roles use Relay names.
 
-Initial UI prototype, architecture and executable behavior specifications. This repository is **not yet an installable Frappe app**. The frontend uses sample data and in-memory state; Send and Publish do not call providers. A server-side read-only Hub MCP client is now implemented; business APIs, AI, Core database persistence and migrations remain to be implemented.
+## Start here
 
-## Contents
+- [Documentation](docs/README.md): installation, guides, references, and tests.
+- [Install on a test site](docs/core-installation.md).
+- [Reply, react, and view message content](docs/messaging.md).
+- [API and MCP reference](docs/api-reference.md).
+- [Current support and limitations](docs/implementation-status.md).
 
-- `frontend/`: Vue prototype using actual Frappe UI components; inbox, team forms and fixed flow node editor.
-- `specifications/`: Relay-prefixed DocType naming registry and read-state/permission reference model.
-- `docs/architecture.md`: architecture, requirements, implementation sequence and release gates.
-- `docs/architecture.png`: visual overview.
+For the installed UI, build `frontend` with `npm run build:site` and open `/relay`
+on the Frappe site. See the installation guide for account connection settings.
 
 ## Development
 
-Frontend: `cd frontend`, `npm install`, `npm run build`, then `npm run preview`.
-
-Behavior specification: `python3 -B -m unittest discover -s specifications -v`.
-
-The frontend dependency manifest includes its icon build plugin. A fresh dependency install and production frontend build passed. The dependency lockfile is committed; use `npm ci` for subsequent installs.
-
-All new DocTypes, including child tables, use the `Relay ` prefix. Existing Frappe masters remain unchanged. No production site configuration or credentials belong in this repository.
-
-## Branch workflow
-
-Development happens on `develop`. The user merges reviewed work into production `main`.
-
-## Local Hub connection
-
-A server-side Core service package now provides the initial read-only MCP integration. `.env` is loaded automatically by the client, with process environment taking precedence. Copy `.env.example` to `.env` and set `RELAY_HUB_TOKEN` to the local Hub's `RELAY_MCP_TOKEN`; protect the file with mode 0600. Local files have already been configured on the development workstation and are excluded from Git. Never expose the service token through frontend/Vite configuration.
+From `frontend/`, install locked dependencies, build, and start a local preview:
 
 ```sh
-python3 -B -m relay_core check-hub
-python3 -B -m unittest discover -s tests -v
-RELAY_LIVE_TEST=1 python3 -B -m unittest discover -s tests -v
+npm ci
+npm run build
+npm run preview -- --port 18082
 ```
 
-The live tests initialize an MCP session, call Hub `health.get`, and verify an invalid token receives 401. They perform no provider or business-data writes. This is a narrowly scoped stateless JSON MCP client, not a complete MCP SDK. Production multi-account authentication and Frappe installation remain future work. HTTPS is required except for explicit loopback IPs; redirects are rejected to avoid forwarding credentials to another destination.
+Open the URL printed by Vite. Design-preview screens use sample data. Connected
+screens require same-origin Frappe APIs; the standalone preview does not provide
+an authenticated Frappe site. See the [frontend guide](frontend/README.md).
 
-## Workspace UI
+Run backend contracts and frontend data tests as described in the
+[testing guide](docs/testing.md). Database simulations use a separate Frappe test
+site and local provider fixtures; they do not establish live-provider acceptance.
 
-The preview now includes Dashboard, Contacts, personal folders, Important/unread filters, campaign drafts and canned replies. See [UI progress and limitations](docs/ui-progress.md). Start the local preview with `npm run preview -- --host 127.0.0.1 --port 18082` from `frontend/`.
+## Repository layout
+
+| Directory | Purpose |
+| --- | --- |
+| `relay_core/` | Frappe APIs, permissions, channel projection, automation, and DocTypes |
+| `frontend/` | Vue components, connected workspaces, and design previews |
+| `tests/` | Backend contracts and isolated Frappe/database simulations |
+| `specifications/` | Original behavior specifications |
+| `docs/` | User/developer documentation and dated design records |
+
+Development stays on `develop`. The user reviews and merges into `main`. Keep
+tokens, `.env` files, site configuration, and real business data out of Git.

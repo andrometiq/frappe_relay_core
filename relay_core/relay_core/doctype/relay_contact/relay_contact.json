@@ -7,7 +7,11 @@
   "engine": "InnoDB",
   "field_order": [
     "contact",
-    "display_name"
+    "display_name",
+    "automation_paused",
+    "automation_generation",
+    "last_message_at",
+    "last_message"
   ],
   "fields": [
     {
@@ -23,6 +27,31 @@
       "label": "Display name",
       "fieldtype": "Data",
       "reqd": 1
+    },
+    {
+      "fieldname": "automation_paused",
+      "label": "Automation Paused",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "automation_generation",
+      "label": "Automation Generation",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "last_message_at",
+      "label": "Latest message time",
+      "fieldtype": "Datetime",
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "last_message",
+      "label": "Latest message",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Message"
     }
   ],
   "permissions": [

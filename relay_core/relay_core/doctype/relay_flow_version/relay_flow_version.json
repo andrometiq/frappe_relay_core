@@ -1,0 +1,72 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Flow Version",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-FV-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "flow",
+    "nodes",
+    "definition_hash",
+    "execution_user",
+    "business_doctype",
+    "channel",
+    "template_button"
+  ],
+  "fields": [
+    {
+      "fieldname": "flow",
+      "label": "Flow",
+      "fieldtype": "Link",
+      "options": "Relay Flow",
+      "reqd": 1
+    },
+    {
+      "fieldname": "nodes",
+      "label": "Nodes",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "reqd": 1
+    },
+    {
+      "fieldname": "definition_hash",
+      "label": "Definition Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "template_button",
+      "label": "Template Button Payload",
+      "fieldtype": "Data"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

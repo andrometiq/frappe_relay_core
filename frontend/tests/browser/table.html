@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module">
+import {createApp,h} from 'vue';import RelayTable from '../../src/components/RelayTable.vue';import '../../src/style.css';
+window.testPages=0;window.maxRequested=0;
+const fetchPage=async({cursor,limit})=>{window.testPages++;window.maxRequested=Math.max(window.maxRequested,limit);const start=cursor?.before?Math.max(1,Number(cursor.before)-limit):cursor?.after?Number(cursor.after)+1:1;const end=cursor?.before?Number(cursor.before):Math.min(1000001,start+limit);const items=Array.from({length:end-start},(_,i)=>({id:String(start+i),name:'Record '+(start+i)}));return {items,previous:start>1?{before:String(start)}:null,next:end<=1000000?{after:String(end-1)}:null}};
+createApp({render:()=>h('main',{style:'padding:20px'},[h(RelayTable,{fetchPage,columns:[{key:'name',label:'Name'}],label:'Million record fixture',rowHeight:76})])}).mount('#app')
+</script></body></html>

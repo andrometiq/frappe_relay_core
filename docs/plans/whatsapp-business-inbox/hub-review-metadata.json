@@ -1,0 +1,17 @@
+{
+  "requested_model": "glm-5.3",
+  "response_model": "glm-5.3",
+  "finish_reason": "stop",
+  "usage": {
+    "completion_tokens": 4413,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2970
+    },
+    "prompt_tokens": 3249,
+    "prompt_tokens_details": {
+      "cached_tokens": 1088
+    },
+    "total_tokens": 7662
+  },
+  "characters": 6764
+}

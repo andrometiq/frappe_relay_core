@@ -1,0 +1,170 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Automation Policy",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:channel",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "field_order": [
+    "channel",
+    "provider",
+    "fallback_provider",
+    "execution_user",
+    "enabled",
+    "mode",
+    "allow_ticket",
+    "allow_reply",
+    "business_doctype",
+    "daily_limit",
+    "instructions",
+    "reply_ids",
+    "fallback_reply",
+    "allow_images",
+    "allow_voice",
+    "transcription_provider",
+    "allow_report",
+    "learned_procedure",
+    "allow_summary",
+    "allow_translation"
+  ],
+  "fields": [
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1,
+      "set_only_once": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "provider",
+      "label": "Provider",
+      "fieldtype": "Link",
+      "options": "Relay AI Provider",
+      "reqd": 1
+    },
+    {
+      "fieldname": "fallback_provider",
+      "label": "Fallback Provider",
+      "fieldtype": "Link",
+      "options": "Relay AI Provider",
+      "description": "Optional second provider, attempted only when the primary fails. Each attempt counts against the daily limit."
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "mode",
+      "label": "Mode",
+      "fieldtype": "Select",
+      "options": "Shadow\nAutomatic",
+      "default": "Shadow",
+      "reqd": 1
+    },
+    {
+      "fieldname": "allow_ticket",
+      "label": "Allow Ticket",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "allow_reply",
+      "label": "Allow Reply",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "daily_limit",
+      "label": "Daily Limit",
+      "fieldtype": "Int",
+      "default": 100
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "reply_ids",
+      "label": "Reply Ids",
+      "fieldtype": "Small Text",
+      "description": "One approved Relay Canned Reply name per line; maximum 20."
+    },
+    {
+      "fieldname": "fallback_reply",
+      "label": "Fallback Reply",
+      "fieldtype": "Link",
+      "options": "Relay Canned Reply"
+    },
+    {
+      "fieldname": "allow_images",
+      "label": "Allow Image Analysis",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "allow_voice",
+      "label": "Allow Voice Transcription",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "transcription_provider",
+      "label": "Transcription Provider",
+      "fieldtype": "Link",
+      "options": "Relay AI Provider",
+      "description": "Choose an OpenAI provider configured with a transcription model. Attempts share the policy daily limit."
+    },
+    {
+      "fieldname": "allow_report",
+      "label": "Allow communication reports",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "learned_procedure",
+      "label": "Learned Procedure",
+      "fieldtype": "Link",
+      "options": "Relay Learned Procedure"
+    },
+    {
+      "fieldname": "allow_summary",
+      "label": "Allow conversation summaries",
+      "fieldtype": "Check",
+      "default": 0
+    },
+    {
+      "fieldname": "allow_translation",
+      "label": "Automatically translate incoming messages to English",
+      "fieldtype": "Check",
+      "default": 0,
+      "description": "Detect language and store a separate English translation. Original messages are retained. Uses the policy provider and daily AI attempt budget. Voice requires Allow Voice Transcription."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

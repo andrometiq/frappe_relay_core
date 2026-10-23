@@ -1,0 +1,74 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Ticket Subscription",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TSUB-.##########",
+  "field_order": [
+    "ticket",
+    "user",
+    "destination",
+    "enabled",
+    "subscription_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "ticket",
+      "label": "Ticket",
+      "fieldtype": "Link",
+      "options": "Relay Ticket",
+      "reqd": 1
+    },
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "destination",
+      "label": "Destination",
+      "fieldtype": "Link",
+      "options": "Relay Contact Endpoint",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": 1
+    },
+    {
+      "fieldname": "subscription_key",
+      "label": "Subscription Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    }
+  ],
+  "naming_rule": "Expression (old style)"
+}

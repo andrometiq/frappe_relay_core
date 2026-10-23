@@ -1,0 +1,82 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Flow Event",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-FE-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "message",
+    "conversation_key",
+    "run",
+    "status",
+    "attempts",
+    "next_attempt",
+    "reason",
+    "input_applied",
+    "message_hash"
+  ],
+  "fields": [
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "conversation_key",
+      "label": "Conversation Key",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "run",
+      "label": "Run",
+      "fieldtype": "Link",
+      "options": "Relay Flow Run"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nComplete\nRejected",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "next_attempt",
+      "label": "Next Attempt",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "input_applied",
+      "label": "Input Applied",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "message_hash",
+      "label": "Message Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

@@ -1,0 +1,23 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Team Member",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TM-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    }
+  ],
+  "field_order": [
+    "user"
+  ],
+  "permissions": [],
+  "track_changes": 1,
+  "istable": 1
+}

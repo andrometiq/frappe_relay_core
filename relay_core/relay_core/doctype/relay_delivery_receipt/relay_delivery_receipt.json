@@ -1,0 +1,55 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Delivery Receipt",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:receipt_key",
+  "fields": [
+    {
+      "fieldname": "receipt_key",
+      "label": "Receipt key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "read_only": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "read_only": 1,
+      "options": "Relay Message"
+    },
+    {
+      "fieldname": "participant",
+      "label": "Participant",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "read_only": 1,
+      "options": "Sent\nDelivered\nRead\nFailed"
+    },
+    {
+      "fieldname": "provider_timestamp",
+      "label": "Provider timestamp",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "receipt_key",
+    "message",
+    "participant",
+    "status",
+    "provider_timestamp"
+  ],
+  "permissions": []
+}

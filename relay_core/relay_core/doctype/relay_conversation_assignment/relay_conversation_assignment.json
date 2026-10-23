@@ -1,0 +1,52 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Conversation Assignment",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-ASG-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "relay_contact",
+      "label": "Contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "team",
+      "label": "Team",
+      "fieldtype": "Link",
+      "options": "Relay Team"
+    },
+    {
+      "fieldname": "assigned_to",
+      "label": "Assigned agent",
+      "fieldtype": "Link",
+      "options": "User"
+    }
+  ],
+  "field_order": [
+    "relay_contact",
+    "team",
+    "assigned_to"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "track_changes": 1
+}

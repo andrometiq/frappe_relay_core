@@ -1,0 +1,102 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Call",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CALL-.##########",
+  "fields": [
+    {
+      "fieldname": "provider_key",
+      "label": "Provider key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "provider_id",
+      "label": "Provider call ID",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Contact",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact"
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Destination",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "direction",
+      "label": "Direction",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Incoming\nOutgoing"
+    },
+    {
+      "fieldname": "state",
+      "label": "State",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Incoming\nDialing\nRinging\nConnecting\nConnected\nEnded\nRejected\nFailed"
+    },
+    {
+      "fieldname": "started_at",
+      "label": "Started",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "ended_at",
+      "label": "Ended",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_event_at",
+      "label": "Last provider event",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "duration",
+      "label": "Duration (seconds)",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "session",
+      "label": "Signaling session",
+      "fieldtype": "JSON",
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "provider_key",
+    "provider_id",
+    "relay_contact",
+    "channel",
+    "endpoint",
+    "direction",
+    "state",
+    "started_at",
+    "ended_at",
+    "last_event_at",
+    "duration",
+    "session"
+  ],
+  "permissions": []
+}

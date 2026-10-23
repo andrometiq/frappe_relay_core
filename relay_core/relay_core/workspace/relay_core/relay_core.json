@@ -1,0 +1,160 @@
+{
+ "doctype": "Workspace",
+ "name": "Relay Core",
+ "label": "Relay Core",
+ "title": "Relay Core",
+ "module": "Relay Core",
+ "app": "relay_core",
+ "type": "Workspace",
+ "public": 1,
+ "is_hidden": 0,
+ "icon": "message",
+ "sequence_id": 25,
+ "content": "[{\"id\":\"relay-shortcut-0\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Open Relay\",\"col\":3}},{\"id\":\"relay-shortcut-1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Tickets\",\"col\":3}},{\"id\":\"relay-shortcut-flow-viewer\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Workflow viewer\",\"col\":3}},{\"id\":\"relay-shortcut-3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"AI Automation\",\"col\":3}},{\"id\":\"relay-shortcut-4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Reports\",\"col\":3}},{\"id\":\"relay-shortcut-5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Reviewed Learning\",\"col\":3}},{\"id\":\"relay-shortcut-6\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Relay Settings\",\"col\":3}},{\"id\":\"relay-records\",\"type\":\"card\",\"data\":{\"card_name\":\"Relay records\",\"col\":6}},{\"id\":\"relay-admin\",\"type\":\"card\",\"data\":{\"card_name\":\"Administration\",\"col\":6}}]",
+ "shortcuts": [
+  {
+   "label": "Open Relay",
+   "type": "URL",
+   "url": "/relay#/messages"
+  },
+  {
+   "label": "Tickets",
+   "type": "URL",
+   "url": "/relay#/tickets"
+  },
+  {
+   "label": "Workflow viewer",
+   "type": "URL",
+   "url": "/relay#/flows"
+  },
+  {
+   "label": "AI Automation",
+   "type": "URL",
+   "url": "/relay#/automation"
+  },
+  {
+   "label": "Reports",
+   "type": "URL",
+   "url": "/relay#/reports"
+  },
+  {
+   "label": "Reviewed Learning",
+   "type": "URL",
+   "url": "/relay#/learning"
+  },
+  {
+   "label": "Relay Settings",
+   "type": "DocType",
+   "link_to": "Relay Settings"
+  }
+ ],
+ "links": [
+  {
+   "type": "Card Break",
+   "label": "Relay records"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Contact",
+   "label": "Contact"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Message",
+   "label": "Message"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Ticket",
+   "label": "Ticket"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Team",
+   "label": "Team"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Learned Procedure",
+   "label": "Learned Procedure"
+  },
+  {
+   "type": "Card Break",
+   "label": "Administration"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Settings",
+   "label": "Settings"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Channel",
+   "label": "Channel"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Contact Type",
+   "label": "Contact Type"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Contact Endpoint",
+   "label": "Contact Endpoint"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay AI Provider",
+   "label": "AI Provider"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Automation Policy",
+   "label": "Automation Policy"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Canned Reply",
+   "label": "Canned Reply"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Email Rule",
+   "label": "Email Rule"
+  },
+  {
+   "type": "Link",
+   "link_type": "DocType",
+   "link_to": "Relay Legacy Import",
+   "label": "Legacy history import"
+  }
+ ],
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Relay Communication Manager"
+  },
+  {
+   "role": "Relay Communication User"
+  }
+ ],
+ "charts": [],
+ "number_cards": [],
+ "quick_lists": [],
+ "custom_blocks": []
+}

@@ -1,0 +1,51 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Group Claim",
+  "module": "Relay Core",
+  "autoname": "field:claim_key",
+  "fields": [
+    {
+      "fieldname": "claim_key",
+      "label": "Claim Key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "grouping_field",
+      "label": "Grouping Field",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "group_value",
+      "label": "Group Value",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "assigned_to",
+      "label": "Assigned To",
+      "fieldtype": "Link",
+      "options": "User"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "field_order": [
+    "claim_key",
+    "business_doctype",
+    "grouping_field",
+    "group_value",
+    "assigned_to"
+  ]
+}

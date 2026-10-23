@@ -1,0 +1,83 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Internal Comment",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-NOTE-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "relay_contact",
+    "body",
+    "messages",
+    "reply_to",
+    "request_key",
+    "deleted",
+    "assigned_to",
+    "task_status",
+    "mentions"
+  ],
+  "fields": [
+    {
+      "fieldname": "relay_contact",
+      "label": "Conversation",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "body",
+      "label": "Comment",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "messages",
+      "label": "Referenced messages",
+      "fieldtype": "JSON"
+    },
+    {
+      "fieldname": "reply_to",
+      "label": "Reply to comment",
+      "fieldtype": "Link",
+      "options": "Relay Internal Comment"
+    },
+    {
+      "fieldname": "request_key",
+      "label": "Request key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "deleted",
+      "label": "Deleted",
+      "fieldtype": "Check",
+      "read_only": 1
+    },
+    {
+      "fieldname": "assigned_to",
+      "label": "Task owner",
+      "fieldtype": "Link",
+      "options": "User"
+    },
+    {
+      "fieldname": "task_status",
+      "label": "Task status",
+      "fieldtype": "Select",
+      "options": "\nOpen\nDone"
+    },
+    {
+      "fieldname": "mentions",
+      "label": "Mentioned colleagues",
+      "fieldtype": "JSON"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ]
+}

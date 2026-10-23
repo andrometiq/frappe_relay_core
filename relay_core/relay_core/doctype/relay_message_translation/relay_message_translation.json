@@ -1,0 +1,95 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Message Translation",
+  "module": "Relay Core",
+  "autoname": "RELAY-MT-.##########",
+  "naming_rule": "Expression (old style)",
+  "engine": "InnoDB",
+  "fields": [
+    {
+      "fieldname": "job_key",
+      "label": "Job key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_hash",
+      "label": "Source hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy",
+      "label": "Policy",
+      "fieldtype": "Link",
+      "options": "Relay Automation Policy",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy_version",
+      "label": "Policy version",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nProcessing\nCompleted\nFailed\nCancelled",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "lease_until",
+      "label": "Lease until",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "result",
+      "label": "Result",
+      "fieldtype": "JSON",
+      "permlevel": 1
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    }
+  ],
+  "field_order": [
+    "job_key",
+    "message",
+    "source_hash",
+    "policy",
+    "policy_version",
+    "status",
+    "attempts",
+    "lease_until",
+    "result",
+    "reason"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    },
+    {
+      "role": "System Manager",
+      "permlevel": 1,
+      "read": 1
+    }
+  ]
+}

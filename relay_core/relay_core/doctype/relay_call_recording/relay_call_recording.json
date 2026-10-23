@@ -1,0 +1,66 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Call Recording",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CR-.##########",
+  "fields": [
+    {
+      "fieldname": "call",
+      "label": "Call",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Call"
+    },
+    {
+      "fieldname": "file",
+      "label": "Private file",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "File"
+    },
+    {
+      "fieldname": "uploaded_by",
+      "label": "Recorded by",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "checksum",
+      "label": "Content hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "recording_key",
+      "label": "Recording key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "content_type",
+      "label": "Media type",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "file_size",
+      "label": "Size",
+      "fieldtype": "Int",
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "call",
+    "file",
+    "uploaded_by",
+    "checksum",
+    "recording_key",
+    "content_type",
+    "file_size"
+  ],
+  "permissions": []
+}

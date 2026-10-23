@@ -1,0 +1,76 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Ticket Notification",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TNOT-.##########",
+  "field_order": [
+    "ticket",
+    "subscription",
+    "event_key",
+    "status",
+    "body",
+    "reason",
+    "attempts",
+    "next_attempt"
+  ],
+  "fields": [
+    {
+      "fieldname": "ticket",
+      "label": "Ticket",
+      "fieldtype": "Link",
+      "options": "Relay Ticket",
+      "reqd": 1
+    },
+    {
+      "fieldname": "subscription",
+      "label": "Subscription",
+      "fieldtype": "Link",
+      "options": "Relay Ticket Subscription",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event_key",
+      "label": "Event Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nSubmitted\nRejected",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "body",
+      "label": "Body",
+      "fieldtype": "Small Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "next_attempt",
+      "label": "Next Attempt",
+      "fieldtype": "Datetime"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "naming_rule": "Expression (old style)"
+}

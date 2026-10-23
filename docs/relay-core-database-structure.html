@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M8 9h16v11H14l-5 4v-4H8z' fill='white'/%3E%3C/svg%3E">
+  <title>Relay Core — Database Structure</title>
+  <style>
+    :root {
+      --bg: #f7f7f5;
+      --surface: #ffffff;
+      --surface-soft: #f1f1ee;
+      --ink: #171717;
+      --muted: #666662;
+      --line: #deded9;
+      --accent: #2563eb;
+      --accent-soft: #e8efff;
+      --green: #0f766e;
+      --green-soft: #e4f6f2;
+      --amber: #9a6700;
+      --amber-soft: #fff4d6;
+      --red: #b42318;
+      --red-soft: #ffebe9;
+      --shadow: 0 16px 45px rgba(20, 20, 18, .08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e0f10;
+        --surface: #171819;
+        --surface-soft: #202224;
+        --ink: #f3f3f1;
+        --muted: #aaa9a4;
+        --line: #303235;
+        --accent: #79a7ff;
+        --accent-soft: #182746;
+        --green: #72d5c4;
+        --green-soft: #12352f;
+        --amber: #f3c969;
+        --amber-soft: #3d3117;
+        --red: #ff9187;
+        --red-soft: #421f1c;
+        --shadow: 0 18px 50px rgba(0, 0, 0, .28);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.55; }
+    a { color: var(--accent); }
+    code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .9em; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 72px; }
+    .hero {
+      position: relative; overflow: hidden; padding: 42px;
+      border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: ""; position: absolute; width: 320px; height: 320px; right: -120px; top: -150px;
+      border-radius: 50%; background: var(--accent-soft); filter: blur(4px);
+    }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    h1 { position: relative; z-index: 1; max-width: 800px; margin: 10px 0 12px; font-size: clamp(34px, 6vw, 64px); line-height: 1.02; letter-spacing: -.045em; }
+    .hero p { position: relative; z-index: 1; max-width: 760px; margin: 0; color: var(--muted); font-size: 17px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .pill { padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-soft); color: var(--muted); font-size: 12px; }
+    .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+    .toc a { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); text-decoration: none; font-size: 13px; }
+    section { margin-top: 42px; scroll-margin-top: 20px; }
+    .section-kicker { color: var(--accent); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
+    h2 { margin: 5px 0 8px; font-size: clamp(24px, 4vw, 34px); letter-spacing: -.025em; }
+    .lede { max-width: 800px; margin: 0 0 20px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+    .card { grid-column: span 4; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .card.wide { grid-column: span 6; }
+    .card.full { grid-column: 1 / -1; }
+    .card h3 { margin: 0 0 5px; font-size: 15px; }
+    .card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .table-name { display: block; margin-bottom: 11px; color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    .fields { display: grid; gap: 6px; margin: 13px 0 0; padding: 0; list-style: none; }
+    .fields li { display: grid; grid-template-columns: minmax(110px, .85fr) 1.15fr; gap: 12px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12px; }
+    .fields code { color: var(--ink); overflow-wrap: anywhere; }
+    .fields span { color: var(--muted); }
+    .architecture { display: grid; grid-template-columns: 1fr 42px 1fr 42px 1fr; align-items: center; gap: 8px; }
+    .node { min-height: 114px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .node strong { display: block; margin-bottom: 6px; }
+    .node span { color: var(--muted); font-size: 12px; }
+    .arrow { color: var(--accent); text-align: center; font-size: 22px; }
+    .example { padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .tree { display: grid; gap: 10px; margin-top: 14px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; }
+    .tree-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; background: var(--surface-soft); }
+    .tree-row.level-2 { margin-left: 26px; }
+    .tree-row.level-3 { margin-left: 52px; }
+    .badge { flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 700 10px/1.6 Inter, sans-serif; text-transform: uppercase; }
+    .flow { display: grid; gap: 0; counter-reset: step; }
+    .flow-step { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 13px; padding-bottom: 20px; }
+    .flow-step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: white; font-size: 12px; font-weight: 700; }
+    .flow-step:not(:last-child)::after { content: ""; position: absolute; left: 16px; top: 34px; bottom: 0; width: 2px; background: var(--line); }
+    .flow-step h3 { margin: 4px 0 3px; font-size: 14px; }
+    .flow-step p { margin: 0; color: var(--muted); font-size: 13px; }
+    .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 14px; }
+    .status { padding: 5px 9px; border-radius: 7px; background: var(--surface-soft); font: 600 11px/1.4 Inter, sans-serif; }
+    .status.good { background: var(--green-soft); color: var(--green); }
+    .status.warn { background: var(--amber-soft); color: var(--amber); }
+    .status.bad { background: var(--red-soft); color: var(--red); }
+    .matrix { width: 100%; border-collapse: collapse; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 13px; }
+    .matrix th, .matrix td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .matrix th { background: var(--surface-soft); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .matrix tr:last-child td { border-bottom: 0; }
+    .callout { padding: 17px 18px; border-left: 4px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout p { margin: 0; color: var(--muted); font-size: 13px; }
+    .risks { display: grid; gap: 10px; }
+    .risk { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .risk b { color: var(--amber); }
+    .risk p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 20px, 1180px); padding-top: 10px; }
+      .hero { padding: 26px 20px; border-radius: 14px; }
+      .card, .card.wide { grid-column: 1 / -1; }
+      .architecture { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); }
+      .fields li { grid-template-columns: 1fr; gap: 2px; }
+      .tree-row.level-2 { margin-left: 12px; }
+      .tree-row.level-3 { margin-left: 24px; }
+      .matrix { display: block; overflow-x: auto; }
+    }
+    @media print {
+      :root { color-scheme: light; --bg: #fff; --surface: #fff; --surface-soft: #f5f5f2; --ink: #111; --muted: #555; --line: #ccc; }
+      .shell { width: 100%; padding: 0; }
+      .hero { box-shadow: none; }
+      .toc { display: none; }
+      section { break-inside: avoid; margin-top: 26px; }
+      .card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="eyebrow">Relay Core · Technical Reference</div>
+      <h1>Database structure and message lifecycle</h1>
+      <p>How Relay connects Frappe business records to multiple contacts, verified WhatsApp endpoints, durable messages, delivery receipts, operator read positions, permissions, and AI summaries.</p>
+      <div class="meta">
+        <span class="pill">Frappe v16</span>
+        <span class="pill">Business record first</span>
+        <span class="pill">WhatsApp focused</span>
+        <span class="pill">Socket.IO realtime</span>
+        <span class="pill">Generated 28 Sep 2026</span>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="Document sections">
+      <a href="#model">Relationship model</a>
+      <a href="#example">AMAN example</a>
+      <a href="#tables">Core tables</a>
+      <a href="#incoming">Incoming flow</a>
+      <a href="#outgoing">Outgoing flow</a>
+      <a href="#read-state">Read state</a>
+      <a href="#permissions">Permissions</a>
+      <a href="#limits">Current limits</a>
+    </nav>
+
+    <section id="model">
+      <div class="section-kicker">01 · Relationship model</div>
+      <h2>ERPNext remains the source of truth</h2>
+      <p class="lede">Relay does not duplicate Customer data. Standard Frappe Dynamic Links connect business records to Contacts; Relay adds only the communication identity, channel binding, and message history.</p>
+      <div class="architecture" aria-label="Relationship overview">
+        <div class="node"><strong>Business record</strong><span>Customer, Supplier, Lead, or another configured DocType.</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><strong>Frappe Contact</strong><span>Linked to the business through the Contact's Dynamic Link child rows.</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><strong>Relay identity</strong><span>Relay Contact + verified phone endpoint + channel-specific messages.</span></div>
+      </div>
+      <div class="callout" style="margin-top:14px">
+        <strong>The business conversation is a projection, not a duplicated master.</strong>
+        <p>The inbox combines messages using <code>business_doctype</code> and <code>business_name</code>, while every message still retains the exact person and endpoint involved.</p>
+      </div>
+    </section>
+
+    <section id="example">
+      <div class="section-kicker">02 · Concrete example</div>
+      <h2>AMAN HOSIERY with two contacts</h2>
+      <div class="example">
+        <div class="tree">
+          <div class="tree-row"><span class="badge">Customer</span><strong>AMAN HOSIERY</strong></div>
+          <div class="tree-row level-2"><span class="badge">Contact</span>AMAN HOSIERY (BARWANI) Madhya Pradesh · 9425044852</div>
+          <div class="tree-row level-3"><span class="badge">Relay</span>Relay Contact → WhatsApp endpoint → messages scoped to AMAN HOSIERY</div>
+          <div class="tree-row level-2"><span class="badge">Contact</span>aman · 9425090626</div>
+          <div class="tree-row level-3"><span class="badge">Relay</span>Relay Contact → WhatsApp endpoint → messages scoped to AMAN HOSIERY</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tables">
+      <div class="section-kicker">03 · Core tables</div>
+      <h2>Operational schema</h2>
+      <p class="lede">Frappe stores these DocTypes as MariaDB/PostgreSQL tables prefixed with <code>tab</code>.</p>
+      <div class="grid">
+        <article class="card wide">
+          <span class="table-name">tabRelay Contact Type</span>
+          <h3>Business inbox configuration</h3>
+          <p>Enables a business DocType and selects its optional grouping field.</p>
+          <ul class="fields"><li><code>business_doctype</code><span>Customer; also used as the document name</span></li><li><code>grouping_field</code><span>Territory, Customer Group, or custom field selected from Customer metadata</span></li></ul>
+        </article>
+        <article class="card wide">
+          <span class="table-name">tabRelay Contact</span>
+          <h3>Communication identity</h3>
+          <p>One unique wrapper per Frappe Contact.</p>
+          <ul class="fields"><li><code>contact</code><span>Unique Link to Contact</span></li><li><code>display_name</code><span>Readable conversation label</span></li><li><code>last_message</code><span>Latest-message cache</span></li></ul>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Channel</span>
+          <h3>Provider account</h3>
+          <p>Local channel identity for the connected Hub account.</p>
+          <ul class="fields"><li><code>channel</code><span>WhatsApp</span></li><li><code>account</code><span>Hub account ID</span></li><li><code>enabled</code><span>Availability switch</span></li></ul>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Contact Endpoint</span>
+          <h3>Verified destination</h3>
+          <p>Binds one phone number to a Relay Contact and channel.</p>
+          <ul class="fields"><li><code>endpoint</code><span>Normalized phone</span></li><li><code>verified</code><span>Allowed for routing</span></li><li><code>endpoint_key</code><span>Unique SHA-256 identity</span></li></ul>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Message</span>
+          <h3>Conversation history</h3>
+          <p>One immutable conversation turn with bounded status and update fields.</p>
+          <ul class="fields"><li><code>relay_contact</code><span>Person</span></li><li><code>channel</code><span>Transport</span></li><li><code>business_*</code><span>Owning business record</span></li><li><code>direction/status</code><span>Lifecycle</span></li><li><code>message_data</code><span>Typed JSON payload</span></li></ul>
+        </article>
+        <article class="card wide">
+          <span class="table-name">tabRelay Message Action</span>
+          <h3>Durable outgoing attempt</h3>
+          <p>Created before the network call so a timeout cannot cause a blind resend.</p>
+          <ul class="fields"><li><code>request_key</code><span>Unique idempotency key</span></li><li><code>payload_hash</code><span>Prevents key reuse for different content</span></li><li><code>status</code><span>Dispatching, Queued, Submitted, Uncertain, Rejected</span></li><li><code>outbound_message</code><span>Confirmed Relay Message</span></li></ul>
+        </article>
+        <article class="card wide">
+          <span class="table-name">tabRelay Hub Event</span>
+          <h3>Durable callback inbox</h3>
+          <p>Stores signed inbound messages and receipt batches before projection.</p>
+          <ul class="fields"><li><code>event_key</code><span>Unique callback identity</span></li><li><code>payload</code><span>Original bounded callback</span></li><li><code>projection_status</code><span>Pending, Projected, Uncategorized, Ignored, Failed</span></li></ul>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Business Conversation State</span>
+          <h3>Per-user business view</h3>
+          <p>Stores last-read and restored chat position.</p>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Message Read</span>
+          <h3>Exact read evidence</h3>
+          <p>Unique user-message pairs power the read-by bubbles.</p>
+        </article>
+        <article class="card">
+          <span class="table-name">tabRelay Conversation Summary</span>
+          <h3>AI summary result</h3>
+          <p>Tracks background summary status, source messages, input hash, and structured result.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="incoming">
+      <div class="section-kicker">04 · Incoming message flow</div>
+      <h2>Persist first, process second</h2>
+      <div class="flow">
+        <div class="flow-step"><div><h3>Hub sends a signed batch</h3><p>Core validates the account, timestamp, HMAC signature, payload size, and a maximum of 50 events.</p></div></div>
+        <div class="flow-step"><div><h3>Core inserts Relay Hub Event</h3><p>The unique event key makes repeated webhook deliveries safe.</p></div></div>
+        <div class="flow-step"><div><h3>The HTTP request is acknowledged</h3><p>Provider processing does not hold the webhook request open.</p></div></div>
+        <div class="flow-step"><div><h3>A background worker projects the event</h3><p>It resolves one enabled channel and one verified endpoint.</p></div></div>
+        <div class="flow-step"><div><h3>Relay Message is inserted</h3><p>The before-insert hook associates the business automatically only when the contact has one unambiguous configured business.</p></div></div>
+        <div class="flow-step"><div><h3>Socket.IO publishes the change</h3><p>Permitted users refresh the visible timeline without browser polling.</p></div></div>
+      </div>
+    </section>
+
+    <section id="outgoing">
+      <div class="section-kicker">05 · Outgoing and delivery flow</div>
+      <h2>Idempotent sends and batched receipts</h2>
+      <div class="grid">
+        <article class="card wide">
+          <h3>Outgoing message</h3>
+          <p>The selected business and contact are permission checked. Core creates a Message Action, commits it, calls Hub, and creates the outgoing Message only after a confirmed provider ID.</p>
+          <div class="status-line"><span class="status">Dispatching</span><span>→</span><span class="status warn">Queued</span><span>→</span><span class="status good">Submitted</span><span class="status bad">Uncertain / Rejected</span></div>
+        </article>
+        <article class="card wide">
+          <h3>Delivery receipts</h3>
+          <p>Hub may push up to 500 compact statuses in one signed callback. Core applies monotonic transitions and emits one realtime refresh for the affected conversation.</p>
+          <div class="status-line"><span class="status">Sent</span><span>→</span><span class="status good">Delivered</span><span>→</span><span class="status good">Read</span><span class="status bad">Failed</span></div>
+        </article>
+      </div>
+      <div class="callout" style="margin-top:14px">
+        <strong>WhatsApp's customer-service window is derived locally.</strong>
+        <p>The most recent non-legacy incoming message opens the 24-hour reply window. Outside it, Relay requires an approved template.</p>
+      </div>
+    </section>
+
+    <section id="read-state">
+      <div class="section-kicker">06 · Read state and restored position</div>
+      <h2>Operator activity is separate from provider receipts</h2>
+      <table class="matrix">
+        <thead><tr><th>Record</th><th>Identity</th><th>Stored state</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>Relay Business Conversation State</code></td><td>User + business DocType + business name</td><td>Last read, last seen, message anchor, pixel offset</td><td>Reopen the business exactly where the operator stopped.</td></tr>
+          <tr><td><code>Relay Message Read</code></td><td>User + message</td><td>Exact read timestamp</td><td>Read-by bubbles and required-reader coverage.</td></tr>
+          <tr><td><code>Relay Delivery Receipt</code></td><td>Message + participant</td><td>Sent, delivered, read, failed</td><td>Provider-side delivery evidence, especially for group participants.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="permissions">
+      <div class="section-kicker">07 · Permissions and responsibility</div>
+      <h2>Every layer is checked server-side</h2>
+      <div class="grid">
+        <article class="card"><h3>Business permission</h3><p>The user must be able to read the Customer or configured business document.</p></article>
+        <article class="card"><h3>Contact permission</h3><p>The linked Frappe Contact and Relay Contact must also be readable.</p></article>
+        <article class="card"><h3>Responsibility</h3><p>A group claim, direct assignment, or team membership determines who handles the conversation.</p></article>
+        <article class="card full"><h3>Filtering happens before pagination</h3><p>Frappe permission query conditions combine assignment and business ownership in SQL. A group claim never grants access to a business record the user could not already read.</p></article>
+      </div>
+    </section>
+
+    <section id="limits">
+      <div class="section-kicker">08 · Current implementation boundaries</div>
+      <h2>Known schema decisions to address before very large production loads</h2>
+      <div class="risks">
+        <div class="risk"><b>01</b><div><strong>Relay uses the standard Frappe Contact model.</strong><p>Business records are resolved through Contact Dynamic Links, so no separate contact DocType setting is required.</p></div></div>
+        <div class="risk"><b>02</b><div><strong>One phone linked to several businesses is inherently ambiguous on inbound traffic.</strong><p>Relay does not guess. An ambiguous inbound message remains unassigned rather than appearing under the wrong business. Outgoing messages from the business inbox always carry the selected business explicitly.</p></div></div>
+        <div class="risk"><b>03</b><div><strong>Business timelines need a dedicated composite index at multi-million scale.</strong><p>Current indexes cover contact, channel, and conversation history. Add a composite index around business DocType, business name, channel, and message ordering before very large production volumes.</p></div></div>
+      </div>
+    </section>
+
+    <footer>
+      Relay Core database structure · Generated from the installed <code>develop</code> implementation in the version16-dev bench.
+    </footer>
+  </main>
+</body>
+</html>

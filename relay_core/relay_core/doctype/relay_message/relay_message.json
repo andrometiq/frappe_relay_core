@@ -11,7 +11,22 @@
     "content",
     "direction",
     "status",
-    "provider_id"
+    "provider_id",
+    "sender_endpoint",
+    "source_key",
+    "message_type",
+    "provider_context",
+    "conversation_key",
+    "message_data",
+    "provider_message_key",
+    "reactions",
+    "message_updates",
+    "edited_at",
+    "sent_at",
+    "legacy_source",
+    "legacy_data",
+    "business_doctype",
+    "business_name"
   ],
   "fields": [
     {
@@ -53,6 +68,102 @@
       "label": "Provider message ID",
       "fieldtype": "Data",
       "read_only": 1
+    },
+    {
+      "fieldname": "sender_endpoint",
+      "label": "Sender Endpoint",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "source_key",
+      "label": "Source Key",
+      "fieldtype": "Data",
+      "unique": 1
+    },
+    {
+      "fieldname": "message_type",
+      "label": "Message type",
+      "fieldtype": "Data",
+      "default": "text"
+    },
+    {
+      "fieldname": "provider_context",
+      "label": "Provider context",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "conversation_key",
+      "label": "Conversation key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "message_data",
+      "label": "Message data",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "provider_message_key",
+      "label": "Provider message key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "reactions",
+      "label": "Reactions",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "message_updates",
+      "label": "Message updates",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "edited_at",
+      "label": "Edited at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sent_at",
+      "label": "Message time",
+      "fieldtype": "Datetime",
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "legacy_source",
+      "label": "Legacy source message",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "legacy_data",
+      "label": "Legacy record",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business Record",
+      "fieldtype": "Dynamic Link",
+      "options": "business_doctype",
+      "read_only": 1,
+      "search_index": 1
     }
   ],
   "permissions": [
@@ -72,7 +183,8 @@
     },
     {
       "role": "Relay Communication User",
-      "read": 1
+      "read": 1,
+      "report": 1
     }
   ],
   "sort_field": "creation",

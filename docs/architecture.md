@@ -4,11 +4,11 @@ Status: architecture and first isolated foundation work, 21 September 2026. Inco
 
 ## 1. Product and boundaries
 
-One standalone Go Hub serves multiple Frappe Core sites. An account belongs to exactly one site; a site may have multiple accounts, each enabling selected channels. Core owns business records, permissions, workflows, AI and the user interface. Hub owns transport, provider credentials, delivery queues, channel/template reconciliation and call transport. Do not rebuild Contact, Customer, Supplier, Employee, Sales Person or Sales Partner masters. No external I2A dependency.
+Relay Core is installed as a normal Frappe app on each site and uses the host site login, sessions, roles, User Permissions and API-key authentication. It does not provide a separate login page. One standalone Go Hub serves multiple Frappe Core sites. An account belongs to exactly one site; a site may have multiple accounts, each enabling selected channels. Core owns business records, permissions, workflows, AI and the user interface. Hub owns transport, provider credentials, delivery queues, channel/template reconciliation and call transport. Do not rebuild Contact, Customer, Supplier, Employee, Sales Person or Sales Partner masters. No external I2A dependency.
 
 ```mermaid
 flowchart LR
- UI[Frappe UI frontend] --> CS[Core application services]
+ UI[PrimeVue Relay frontend] --> CS[Core application services]
  Agent[Authorized AI agent] --> CM[Core MCP]
  CM --> CS
  CS --> DB[(Site Frappe database)]
@@ -42,9 +42,9 @@ Read-only inspection of `frappe-v15/apps/frappe_whatsapp_core`:
 
 This was targeted code inspection, not a completed security or performance audit. Existing repositories were not edited.
 
-## 3. Frappe component foundation
+## 3. Relay component foundation
 
-Build one versioned metadata-to-component adapter on actual Frappe UI, shared by Core and the Go Hub administration frontend. Do not invent independent form styling. Core reads permitted DocType metadata; Hub exposes the same presentation schema without depending on a Frappe server.
+Build one versioned Relay-owned component adapter on PrimeVue unstyled primitives, shared by Core and the Go Hub administration frontend. Map that layer to Frappe-compatible semantic tokens rather than maintaining independent form styling. Core reads permitted DocType metadata; Hub exposes the same presentation schema without depending on a Frappe server.
 
 | Family | Required behavior |
 |---|---|
@@ -200,7 +200,7 @@ Release gates: zero cross-account access in adversarial tests; agent sees only a
 ## References
 
 - Local sources listed in section 2; Frappe metadata and layout reference: `frappe/model/meta.py`, `frappe/public/js/frappe/form/layout.js` in the installed bench.
-- [Frappe UI](https://github.com/frappe/frappe-ui): frontend component base.
+- [PrimeVue](https://github.com/primefaces/primevue): unstyled accessible component primitives behind the Relay component layer.
 - [PostgreSQL SELECT](https://www.postgresql.org/docs/current/sql-select.html): SKIP LOCKED queue-consumer semantics; used only for job claiming, not ordinary consistent business reads.
 - [Telegram Bot API](https://core.telegram.org/bots/api): webhook secret and message/chat contracts.
 - [go-telegram/bot](https://github.com/go-telegram/bot): candidate Go adapter; wrap in our durable processing boundary.

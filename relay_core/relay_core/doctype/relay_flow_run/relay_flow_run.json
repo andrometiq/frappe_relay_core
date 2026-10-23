@@ -1,0 +1,117 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Flow Run",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-FR-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "flow",
+    "version",
+    "conversation_key",
+    "start_message",
+    "last_message",
+    "relay_contact",
+    "business_doctype",
+    "business_name",
+    "status",
+    "step",
+    "values",
+    "reason",
+    "generation"
+  ],
+  "fields": [
+    {
+      "fieldname": "flow",
+      "label": "Flow",
+      "fieldtype": "Link",
+      "options": "Relay Flow",
+      "reqd": 1
+    },
+    {
+      "fieldname": "version",
+      "label": "Version",
+      "fieldtype": "Link",
+      "options": "Relay Flow Version",
+      "reqd": 1
+    },
+    {
+      "fieldname": "conversation_key",
+      "label": "Conversation Key",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "start_message",
+      "label": "Start Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1
+    },
+    {
+      "fieldname": "last_message",
+      "label": "Last Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay Contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Dynamic Link",
+      "options": "business_doctype",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Running\nWaiting\nCompleted\nHandoff\nCancelled\nFailed",
+      "default": "Running"
+    },
+    {
+      "fieldname": "step",
+      "label": "Step",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "values",
+      "label": "Values",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "default": "{}"
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "generation",
+      "label": "Generation",
+      "fieldtype": "Int"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

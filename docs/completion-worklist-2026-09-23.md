@@ -1,0 +1,87 @@
+# Relay completion worklist
+
+Scope confirmed in the continuation session on 2026-09-23: complete **every unfinished feature** in `requirements-verification-2026-09-23.md`, including the component-based, usable installed UI. This is an implementation ledger, not a completion claim. Work remains on `develop`. Live providers will be configured/tested by the user; local provider fixtures must cover implemented contracts before handoff.
+
+## Current verified foundations
+
+- Hub shell split into Accounts, Overview, Channels, Events and Delivery views; shared API client, account editor and table component.
+- Core WhatsApp panels split into Templates, Groups, Recipient, Messages, Calls and Deliveries; separate call, conversation, template, group and delivery composables.
+- Telegram group panels split into Conversation, Details, Members, Invites and Topics with shared controller and validation.
+- Installed inbox split into contact directory, message thread and composer; server contact paging, channel filtering, scroll preservation and responsive layout.
+- Unified Core API error/CSRF/session handling, reusable choice fields and form validation.
+- Hub account search now uses bounded PostgreSQL keyset pages with totals; new channels default enabled. Creating an existing account must not overwrite it.
+- Email recipient boundary checks every To/CC/BCC verified business endpoint; tickets recheck business contact access.
+- First component refactor checkpoint: complete local simulation suite passed in Hub `.runtime/component-refactor-simulation.json`. Later changes below require updated verification.
+- Browser checkpoint: Telegram groups and WhatsApp call state across navigation; seven typed message/retry/failure submissions; widths 320/390/768/1440 passed. Subsequent inbox controls need updated fixtures and another browser run.
+- New isolated database test `tests/integration_inbox_site.py` passes: unassigned denial, team reads, individual assignment revocation, state isolation, monotonic read cursor, agent cannot reassign, verified email recipients/revocation.
+
+## In progress
+
+- Team, assignment and per-user conversation state DocTypes/services/permission hooks; connected Teams and conversation controls. Need whole-suite regressions, efficient inbox folders/unread browsing, automatic read-position restore, presence and business-record aggregation.
+- Connected multi-message ticket creation, directory, details/status changes, source-message deep links. Need integrated/browser checks and persisted subscription/notification delivery.
+- Durable Telegram/email Hub journal, stable request keys, bounded admission, concurrent claim, restart recovery and unknown-outcome protection. New migration `0019_channel_outbox.sql`; need DB/race coverage, callback/state reconciliation, operator resolution and installed deployment.
+- Cross-channel delivery UI and Core facade; verify all error/cancellation/permissions paths.
+
+## Remaining acceptance by audit area
+
+1. Inbox: business-record aggregation across contacts/channels; persistent unread, folders/stars, last-read restoration, presence; agent/team assignment checks in all direct APIs and MCP tools; uncategorized inbound enrollment.
+2. Installed dashboards, campaigns, teams, folders, flows: replace preview-only behavior with persisted, permission-checked data and usable forms/tables. Campaign sends must chunk and remain cancellable/bounded.
+3. Provider controls: cover every supported WhatsApp/Telegram group operation with appropriate UI; human-readable topic discovery; WhatsApp call failure recovery and recording archive. Calling remains WhatsApp-only per original requirement.
+4. Attachments/media: outbound Telegram media, private upload/download/proxy and lazy document/image/audio/video viewer; account/channel/conversation authorization and bounded sizes.
+5. Email: mailbox receive/IMAP, MIME/HTML/attachments, reply threading, forwarding, signatures and loop-safe automatic replies; recipient-scoped permissions throughout.
+6. Durable delivery/recovery: account journal, cancel/resolve uncertain results, rate limits and restart behavior across channels; periodic scheduler in isolated review.
+7. Flows: persistent visual editing and MCP; slash-command triggers, validated input collection, scoped action execution and handoff; tested resume/replay.
+8. AI: native multiple providers including OpenAI, configured fallback; voice/vision with bounded media; scoped report/PDF actions; human-reviewed learned procedures with publish/evaluation/versioning.
+9. Tickets: assignment/status workflow, exact chat navigation, email/Telegram subscription notifications (no WhatsApp ticket notifications).
+10. Provider metadata: hourly WhatsApp profile/template reconciliation and health/last-sync visibility; key rotation preserving unreadable credentials.
+11. Operations: recovery services, migrations, backup/restore rehearsal, retention/monitoring, sustained load and scale-up/down validation. Production deployment remains separate from local verification.
+12. Documentation: current feature/API/setup/test/support docs must match verified behavior; keep a requirement-to-evidence matrix and explicit external validation limits.
+
+Do not label the project complete based on component builds or narrow simulations. Update each acceptance item with implementation and verification evidence.
+
+## Continuation evidence
+
+- Inbox restoration/newer paging, visible-message read advancement, presence, and folder search browser simulation passes at 320/390/768/1440 (`frontend/tests/browser/inboxStateSimulation.mjs`). Existing seven typed submission/retry/CSRF scenarios still pass. Star/folder isolation passes in the real guarded database.
+- Hub durable channel queue and authenticated MCP race/database tests pass after fixing explicit empty Telegram reaction serialization. Migration 0020 adds recorded operator evidence and timestamp for uncertain-outcome resolution; tests verify account isolation, immutable resolution and no provider replay.
+- Core delivery facade now requires POST (including reads because the original endpoint includes cancellation); WhatsApp cursor normalization fixed. New resolution UI writes verification evidence through manager-only APIs.
+- Native OpenAI Responses text adapter and one explicitly configured fallback provider implemented. Provider response completeness/refusal checks and secret redaction tested. Real DB fallback tests cover two-provider cap and shared daily attempt budget; no live AI calls. Provider configuration is connected in installed Settings with write-only encrypted keys.
+- Still pending: complete policy editor, flows, campaigns, business aggregation, general media/email, ticket notifications, multimodal/report/learning work and operational acceptance below. These remain required scope.
+
+- Telegram general photo/video/audio/voice/document upload transport now supports bounded multipart sends and known-ID sends, durable journal admission validation, account-journaled private downloads and a lazy viewer. Core upload/send/read enforces exact source-conversation access; real DB regression passes 25 scenarios including document retry deduplication. Hub transport/account/MCP race tests pass. UI media browser coverage still needs expansion.
+- Email MIME composition/parsing, HTML alternatives, attachments, reply headers and automatic-response headers implemented; SMTP TLS tests and MIME round trips pass. Installed email composer supports reply/forward, CC/BCC, HTML and private uploads. IMAP uses pinned go-imap/v2 beta.8 streaming reads (v1 was discarded before use), mandatory verified TLS, read-only EXAMINE/BODY.PEEK, 20-UID batches, durable UIDVALIDITY checkpoints and rejected-message records. Mailbox tests cover paging, resume, epoch changes, unread flags, sink failure and untrusted certificates; DB tests cover cursor persistence, duplicate events and attachment storage. Hub migrations 0021 adds mailbox state/attachments. Installed mailbox status and HTML/attachment viewer are connected; complete browser/email integration tests remain pending.
+- Per-user email signatures and explicitly enabled email auto-reply rules added to isolated schema. Loop flags and daily recipient request keys are implemented but still need integrated tests. No live mailbox/provider connections were made; all current transport tests are local fixtures.
+
+## Authenticated-work continuation checkpoint
+
+- User confirmed all logins complete. Browser currently available for verification is the local fixture/review preview; provider tests remain synthetic. No live send authorization inferred.
+- Full regression checkpoint `.runtime/continued-audit-simulation.json` in Hub passes: race/database contracts, static analysis, Core unit contracts, seven Core site integrations (now including email), frontend data simulations and whitespace. Changes below have targeted verification and need the next integrated checkpoint.
+- Email forwarding now clears previous CC/BCC, HTML, attachments and notices, and supports returning to reply mode. Email browser simulation passes sandboxed HTML, signature insertion, failure draft retention, stable retries, CSRF and 320/390/768/1440 widths.
+- Conversation preference loads no longer skip or overwrite another contact when navigation races a pending operation. Saved-folder/star searches perform escaped subsequence filtering in SQL before pagination; real database search and isolation tests pass.
+- Installed automation policy editor added to Settings with reusable bounded remote reference fields, dedicated execution user selection, fallback provider, shadow default and explicit action permissions. Policy reference permission/database tests and browser failure-draft/search/CSRF/responsive checks pass (`policySimulation.mjs`).
+- Ticket assignment now grants the assigned agent ticket access only after checking linked conversation access. Own verified email/Telegram subscriptions persist; transactional notification records use stable provider keys across retries and recheck current access. WhatsApp notification endpoints are rejected. Connected assignment/subscription UI, ticket deep links and browser checks pass (`ticketSimulation.mjs`). Guarded DB tests cover email retry/replay, Telegram replay, revoked endpoint/ticket access, unsubscribe and unrelated-user denial. New ticket notification integration is included in the full harness. These are local fixture tests, not live notification delivery validation.
+- Business-record inbox now combines Contacts across channels using a bounded, permission-filtered SQL page. Per-contact labels and source-bound replies preserve recipient routing. Real database tests cover linked Contacts, assignment exclusion and duplicate-free keyset paging; browser test `businessInboxSimulation.mjs` passes source-specific reply routing and all four viewport widths. Existing message/inbox/email browser regressions still pass. Core unit contracts: 72 tests pass, two optional live integrations skipped.
+- Persisted visual flows and MCP controls implemented: saved drafts, immutable published versions, sequential input/reply/ticket/handoff steps, slash-command triggers, typed input validation and conversation/participant-scoped runs. Journaled events preserve ordering and action keys across recovery; stale published versions, revoked endpoints and human takeover stop execution. AI and email auto-reply hooks defer to active flows. Core unit contracts now pass 75 tests (two optional live skips). Guarded flow integration passes invalid-input, replay, ticket deduplication, handoff, version-change and participant/revocation checks; `flowsSimulation.mjs` passes draft/publish, typed visual steps and all viewport widths. A further full integrated checkpoint is running; voice/vision, reporting/learning, campaigns/dashboard, remaining provider controls and operations remain unfinished.
+- Integrated checkpoint `.runtime/flows-business-tickets-simulation.json` is the regression report for the business inbox, ticket notifications and flows. Refer to its per-check results rather than assuming later AI/provider work is covered by this checkpoint.
+- Voice/vision policy opt-ins and native image request contracts added for OpenAI, OpenRouter, Anthropic, Gemini and GLM. Bounded OpenAI transcription uses a configured transcription model, private temporary audio validation (`ffprobe`), transcript persistence and the shared daily budget. Core unit tests now pass 79 contracts (two optional live skips); guarded multimodal integration covers opt-in, endpoint revocation, transcript replay and inference budget. Transcript visibility is checked against the underlying conversation and hidden from ordinary generic DocType reads. Installed policy/transcript UI builds; current changes still need expanded browser/integrated regression.
+- WhatsApp general incoming attachment proxy added alongside the existing sticker proxy, with known-account media lookup, fixed Meta host, bounded reads and digest checks. Targeted Go race + PostgreSQL ownership tests pass. Outbound WhatsApp private-file uploads and typed-send journal reconciliation remain required.
+
+## Latest implementation checkpoint
+
+- Full local regression `.runtime/media-recovery-final-simulation.json` in Hub passes: Go race/database tests, static analysis, 79 Core unit contracts (77 passed, two optional live skips), ten Core database integration suites, frontend data checks and whitespace.
+- WhatsApp typed sends now use durable stable-key queue admission, receipt lookup and Core recovery without provider replay. Recorded operator resolution requires evidence and provider ID for accepted non-reaction messages. Targeted database/race tests and responsive delivery browser checks pass.
+- Scoped communication reports and PDF export implemented, with policy-opted AI report actions. Real PDF rendering and cross-business denial pass in `integration_multimodal_site.py`.
+- Reviewed learning includes draft suggestions, 3–5 evaluation cases, no-side-effect evaluation, immutable reviewed versions and policy-change invalidation. Guarded `integration_learning_site.py` passes; browser/full regression for this latest feature remains pending.
+- User explicitly requested moving the app into Pilot's version16-dev bench and installing on yrp.site. Canonical repository is now `/run/media/sakthi/storage/development/pilot/benches/version16-dev/apps/relay_core`; the previous repository path is a compatibility symlink for existing isolated review/test processes. Git history and all dirty work were preserved. Site backup and installation verification are in progress.
+- Native Frappe app launcher and Desk workspace were added. This does not establish completion of campaigns/dashboard, remaining provider features or operational acceptance.
+
+- Installed `relay_core` on Pilot version16-dev `yrp.site` at the user’s explicit request. Pilot installation completed successfully; verified 30 Relay DocTypes, native Desk workspace/app launcher, server-rendered asset selection and HTTP 200 for the built entry and logo. `/relay` redirects guests to normal Frappe login. Review URL: `http://yrp.site:8002/relay`. User requested proceeding without waiting for the previously started database backup. This installation is not a claim that the remaining audited features are complete.
+
+## Test UI checkpoint — 2026-09-23
+
+- Core now uses a dedicated CRM-style Frappe-compatible shell built on PrimeVue: chat-first inbox, compact navigation, contextual message actions, collapsible tools, and mobile navigation. Technical settings and automation policies open in Desk. Built assets are installed on yrp.site.
+- Production-shell, typed messaging, uploads, email and inbox-state browser checks pass, including widths 320/390/768/1440. Final desktop chat was visually inspected. These checks use synthetic data, not live provider delivery.
+- Hub now has a consistent compact shell and account-scoped delivery inspection, queued cancellation and evidence-based uncertain-outcome resolution. Backend authentication/CSRF tests and review proxy tests pass under Go race detection. Browser account CRUD/search/paging/draft retention and delivery cancellation/resolution/failure retention pass at four widths.
+- Hub database migrations are current and the repository runtime was rebuilt/restarted successfully; readiness reports relay-hub-1790185205369486871. Both UI and delivery API are present in that release. Core guest login reaches HTTP 200 through the standard login redirect.
+- Ready for user configuration and testing. Live AI/provider acceptance and the previously listed unfinished audit features remain outstanding; this is not whole-product completion.
+
+- Live Telegram inbound checkpoint: registered relay-review webhook at the user-provided tunnel, confirmed three incoming Telegram events in Hub, repaired empty yrp.site Relay Settings with the matching saved account token/callback signature, and verified Hub callback cursor advanced to 3 with zero failures. Reloaded Pilot workload because the pre-install worker could not import relay_core. At user authorization created Relay Telegram Test customer/contact in Relay Test Contacts, enabled Customer contact type, bound only the single observed private Telegram chat, and paused automation. Replayed saved events through the worker: all three Projected; permission-checked inbox API returns three readable text messages. No outgoing provider message was sent.

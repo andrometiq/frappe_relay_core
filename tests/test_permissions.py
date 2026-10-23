@@ -27,8 +27,14 @@ class PermissionsTest(unittest.TestCase):
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
             doc=json.loads(path.read_text())
             self.assertTrue(doc['name'].startswith('Relay '))
-            self.assertTrue(doc['autoname'].endswith('.##########'))
-            if doc['name']=='Relay Channel':
+            if doc['name']=='Relay Delivery Receipt':
+                self.assertEqual(doc['autoname'],'field:receipt_key')
+                self.assertFalse(doc['permissions'])
+                key=next(field for field in doc['fields'] if field['fieldname']=='receipt_key')
+                self.assertTrue(key['unique'] and key['read_only'] and key['reqd'])
+            elif not doc.get('issingle'):
+                self.assertTrue(doc['autoname'].endswith('.##########'))
+            if doc['name'] in ('Relay Channel', 'Relay Settings'):
                 for permission in doc['permissions']:
                     if permission['role']!='System Manager':
                         self.assertFalse(permission.get('write'))

@@ -1,0 +1,51 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Case Type",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CT-.##########",
+  "track_changes": 1,
+  "field_order": [
+    "type_key",
+    "title",
+    "enabled",
+    "definition"
+  ],
+  "fields": [
+    {
+      "fieldname": "type_key",
+      "label": "Type Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": 1
+    },
+    {
+      "fieldname": "definition",
+      "label": "Definition",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ]
+}

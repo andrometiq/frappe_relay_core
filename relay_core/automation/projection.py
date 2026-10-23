@@ -1,0 +1,136 @@
+"""Verified Hub events -> bounded, deduplicated Core message projection."""
+import hashlib
+import json
+import frappe
+from relay_core.automation.provenance import conversation_key, telegram_message
+from relay_core.message_types import normalize, preview
+from relay_core.message_updates import apply_updates, provider_key
+
+
+def extract_messages(payload):
+    if payload.get('channel') in ('Telegram', 'Email'):
+        if payload.get('direction') != 'inbound':
+            return []
+        provider_id, sender, body = (payload.get(k) for k in ('provider_id', 'sender', 'body'))
+        if not isinstance(provider_id, str) or not 1 <= len(provider_id) <= 300:
+            raise ValueError('Invalid provider identity')
+        if not isinstance(sender, str) or not 1 <= len(sender) <= 200:
+            raise ValueError('Invalid sender identity')
+        if not isinstance(body, str):
+            raise ValueError('Invalid message body')
+        row = {'id': provider_id, 'from': sender, 'type': 'text', 'text': {'body': body}}
+        if payload['channel'] == 'Telegram':
+            context = telegram_message(payload)
+            if context == {}:
+                return []
+            if context is not None:
+                row['provider_context'] = context
+                row['type'] = context.get('message_type', 'text')
+                raw = payload['payload']['message']
+                row['message_data'] = normalize(row['type'], raw.get(row['type'], {}), provider='Telegram', body=body)
+        if payload['channel']=='Email':
+            raw=payload.get('payload') or {}
+            row['provider_context']={'provider':'Email','subject':payload.get('subject',''),'message_id':raw.get('message_id'),'references':raw.get('references',[]),'auto_submitted':raw.get('auto_submitted',False)}
+            row['message_data']={'kind':'text','text':body,'email':{'subject':payload.get('subject',''),'html':raw.get('html',''),'attachments':raw.get('attachments',[])}}
+        return [row]
+    result = []
+    for entry in payload.get('entry', []):
+        for change in entry.get('changes', []):
+            value = change.get('value', {})
+            for message in value.get('messages', []):
+                if len(result) >= 50:
+                    raise ValueError('Message projection batch exceeds limit')
+                if not isinstance(message, dict) or not isinstance(message.get('id'), str) or not isinstance(message.get('from'), str):
+                    raise ValueError('Invalid incoming message')
+                if not 1 <= len(message['id']) <= 300 or not 1 <= len(message['from']) <= 200:
+                    raise ValueError('Invalid incoming identity')
+                row = dict(message)
+                if message.get('type') == 'reaction':
+                    continue  # Applied to the original message, never inserted as a new turn.
+                context = {'provider': 'WhatsApp', 'participant_id': message['from'], 'message_id': message['id'],
+                           'reply_to_message_id': (message.get('context') or {}).get('id')}
+                row['provider_context'] = context
+                if message.get('group_id'):
+                    group_id = message['group_id']
+                    if not isinstance(group_id, str) or not 1 <= len(group_id) <= 200:
+                        raise ValueError('Invalid WhatsApp group identity')
+                    row['from'] = group_id
+                    context['group_id'] = group_id
+                kind = message.get('type', 'unsupported'); detail = message.get(kind, {})
+                row['message_data'] = normalize(kind, detail, provider='WhatsApp',
+                    body=(detail.get('body') if kind == 'text' else detail.get('caption', '')) if isinstance(detail, dict) else '')
+                result.append(row)
+    return result
+
+
+def project(name):
+    frappe.db.get_value('Relay Hub Event', name, 'name', for_update=True)
+    event = frappe.get_doc('Relay Hub Event', name)
+    if event.projection_status not in ('Pending', 'Uncategorized', None, ''):
+        return
+    try:
+        payload = json.loads(event.payload)
+        if not isinstance(payload, dict):
+            raise ValueError('Invalid payload')
+        medium = payload.get('channel', 'WhatsApp')
+        if medium not in ('WhatsApp', 'Telegram', 'Email'):
+            raise ValueError('Unsupported channel')
+    except (ValueError, TypeError):
+        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Failed'); return
+    if 'channel_statuses' in payload:
+        from relay_core.channel_statuses import project_batch
+        project_batch(event, payload['channel_statuses'])
+        return
+    channels = frappe.get_all('Relay Channel', filters={'account': event.account, 'channel': medium, 'enabled': 1}, pluck='name', limit_page_length=2)
+    if len(channels) != 1:
+        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized'); return
+    channel = channels[0]
+    try:
+        incoming = extract_messages(payload)
+        update_status = apply_updates(payload, channel, event)
+        from relay_core.call_records import ingest as ingest_calls
+        if medium == "WhatsApp" and ingest_calls(payload,channel):update_status="Uncategorized"
+    except (ValueError, TypeError, AttributeError):
+        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Failed'); return
+    unresolved = update_status == 'Uncategorized'
+    for row in incoming:
+        key = hashlib.sha256((event.account + ':' + channel + ':' + row['id']).encode()).hexdigest()
+        context = row.get('provider_context', {})
+        message_key = provider_key(channel, row['from'], context.get('message_id') or row['id'])
+        if frappe.db.exists('Relay Message', {'source_key': key}) or frappe.db.exists('Relay Message', {'provider_message_key': message_key}):
+            continue
+        endpoint_key = hashlib.sha256((channel + ':' + row['from']).encode()).hexdigest()
+        contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
+        if not contact:
+            unresolved = True; continue
+        kind = row.get('type', 'unknown')
+        detail = row.get(kind, {})
+        text = detail.get('body', '') if kind == 'text' and isinstance(detail, dict) else '[Attachment or unsupported message type]'
+        if not isinstance(text, str) or len(text) > 12000:
+            text = '[Message exceeds automation input limit]'; kind = 'unsupported'
+        data = row.get('message_data') or {'kind': kind, 'text': text}
+        if kind != 'unsupported':
+            text = preview(data)
+        if kind in ('interactive','button') and data.get('kind')=='text':
+            context['original_message_type']=kind;kind='text'
+        from relay_core.timeline import provider_time
+        frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
+            'direction': 'Incoming', 'status': 'Delivered', 'sent_at': provider_time(payload, row), 'content': text, 'sender_endpoint': row['from'], 'source_key': key,
+            'provider_id': row['id'], 'message_type': kind,
+            'provider_context': json.dumps(context, sort_keys=True),
+            'message_data': json.dumps(data, ensure_ascii=False), 'provider_message_key': message_key,
+            'conversation_key': conversation_key(channel, row['from'], context)}).insert(ignore_permissions=True)
+    frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or update_status == 'Projected' else 'Ignored')
+    if medium == 'Telegram':
+        from relay_core.telegram_topics import observe
+        try:observe(payload, channel)
+        except (ValueError, TypeError):pass  # Invalid topic metadata cannot alter message routing.
+
+
+def on_event(doc, method=None):
+    frappe.enqueue('relay_core.automation.projection.project', name=doc.name, queue='long', enqueue_after_commit=True)
+
+
+def recover():
+    for row in frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name'], order_by='modified asc', limit_page_length=20):
+        frappe.enqueue('relay_core.automation.projection.project', name=row.name, queue='long')

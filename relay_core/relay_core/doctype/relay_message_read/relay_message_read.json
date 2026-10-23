@@ -1,0 +1,48 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Message Read",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-READ-.##########",
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "Reader",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Conversation",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "read_key",
+      "label": "Read key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1,
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "user",
+    "relay_contact",
+    "message",
+    "read_key"
+  ],
+  "permissions": []
+}

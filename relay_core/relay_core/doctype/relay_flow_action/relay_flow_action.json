@@ -1,0 +1,51 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Flow Action",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-FA-.##########",
+  "field_order": [
+    "action_key",
+    "run",
+    "action",
+    "input_hash",
+    "result"
+  ],
+  "fields": [
+    {
+      "fieldname": "action_key",
+      "label": "Action Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "run",
+      "label": "Run",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Flow Run",
+      "reqd": 1
+    },
+    {
+      "fieldname": "action",
+      "label": "Action",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "input_hash",
+      "label": "Input Hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "result",
+      "label": "Result",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    }
+  ],
+  "permissions": []
+}
