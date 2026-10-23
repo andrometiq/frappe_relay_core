@@ -1,8 +1,12 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { Button, ErrorMessage, FormControl } from '@relay/ui'
+import { Avatar, Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
+import WorkspaceHeading from './WorkspaceHeading.vue'
+import WorkspaceState from './WorkspaceState.vue'
+import LoadingRows from './LoadingRows.vue'
+import { relativeTime } from './relativeTime'
 const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' })
 const page = ref({ items: [] }), selected = ref(null), owner = ref(''), busy = ref(false), error = ref('')
 let generation = 0
@@ -21,6 +25,8 @@ async function load(cursor = {}) {
   } catch (e) { error.value = e.message }
   finally { if (request === generation) busy.value = false }
 }
+function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' }; load() }
+function status(value) { filters.value.status = value; load() }
 function select(row) { selected.value = row; owner.value = row.assigned_to || '' }
 async function update(method, values) {
   busy.value = true; error.value = ''
@@ -33,28 +39,35 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
-    <form class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" @submit.prevent="load()">
-      <FormControl v-model="filters.business_doctype" label="Business type" placeholder="Supplier or Customer" />
-      <FormControl v-model="filters.business_name" label="Business record" />
+    <WorkspaceHeading title="Tickets" description="Review handoffs, assign an owner and follow each conversation." icon="bookmark" />
+    <form class="automation-filter-bar" @submit.prevent="load()">
+      <div class="automation-chips" role="group" aria-label="Ticket status">
+        <button v-for="value in ['', 'Open', 'In progress', 'Resolved', 'Closed']" :key="value" type="button" class="automation-chip" :aria-pressed="filters.status === value" :disabled="busy" @click="status(value)">{{ value || 'All tickets' }}</button>
+      </div>
+      <FormControl v-model="filters.business_name" label="Business" placeholder="Business record" />
       <FormControl v-model="filters.assigned_to" label="Assignee" placeholder="User email" />
-      <FormControl v-model="filters.status" label="Status" type="select" :options="['', 'Open', 'In progress', 'Resolved', 'Closed']" />
       <FormControl v-model="filters.category" label="Category" type="select" :options="['', 'Query', 'Payment evidence', 'Support', 'Other']" />
-      <Button type="submit" label="Filter tickets" :loading="busy" />
+      <Button type="submit" label="Apply" :loading="busy" />
     </form>
-    <ErrorMessage :message="error" /><p v-if="busy" role="status">Loading tickets…</p>
+    <ErrorMessage :message="error" />
     <div class="v1-detail-grid">
       <div class="space-y-3">
-        <button v-for="row in page.items" :key="row.name" class="v1-list-card" :aria-pressed="selected?.name === row.name" @click="select(row)"><strong>{{ row.subject }}</strong><span>{{ row.business_name || 'Conversation' }} · {{ row.status }} · {{ row.category }}</span><span>{{ row.assigned_to || 'Unassigned' }}</span></button>
-        <p v-if="!busy && !error && !page.items.length">No tickets match these filters.</p>
+        <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
+        <button v-for="row in page.items" :key="row.name" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
+          <div class="automation-card-heading"><strong>{{ row.subject }}</strong><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></div>
+          <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? `${row.business_doctype} · ${row.business_name}` : 'Conversation'" /><span>{{ row.category }}</span></div>
+          <div class="automation-card-heading"><span class="flex items-center gap-2"><Avatar :label="row.assigned_to || 'Unassigned'" size="sm" />{{ row.assigned_to || 'Unassigned' }}</span><time :datetime="row.creation" :title="row.creation">{{ relativeTime(row.creation) }}</time></div>
+        </button>
+        <WorkspaceState v-if="!busy && !error && !page.items.length" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button label="Clear filters" @click="reset" /></WorkspaceState>
         <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
       </div>
-      <article v-if="selected" class="workflow-card space-y-3">
-        <h2 class="font-semibold">{{ selected.subject }}</h2><p>{{ selected.brief }}</p>
-        <p>{{ selected.business_doctype }} {{ selected.business_name }}</p><p>{{ selected.handoff_reason }}</p>
+      <article v-if="selected" class="workflow-card">
+        <div class="automation-card-heading"><h2 class="font-semibold">{{ selected.subject }}</h2><Button label="Dismiss" @click="selected = null" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
+        <p class="ticket-business-name">{{ selected.business_doctype }} {{ selected.business_name }}</p><p v-if="selected.handoff_reason">{{ selected.handoff_reason }}</p>
         <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ message.channel }}</a>
         <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><FormControl v-model="owner" label="Assign to user" placeholder="User email" /><Button type="submit" label="Assign" :disabled="busy" /></form>
         <div class="flex flex-wrap gap-3"><Button label="Start work" :disabled="busy || selected.status === 'In progress'" @click="update('update_status', { status: 'In progress' })" /><Button label="Close ticket" :disabled="busy || selected.status === 'Closed'" @click="update('update_status', { status: 'Closed' })" /></div>
-      </article><p v-else class="v1-empty">Select a ticket to review the conversation and assignment.</p>
+      </article><WorkspaceState v-else title="Your next conversation" description="Select a ticket to review its conversation and assignment." icon="message-circle" />
     </div>
   </div></section>
 </template>

@@ -229,3 +229,27 @@ def install_samples():
             'enabled': 0, 'source_doctype': source, 'event': 'on_submit', 'recipient_field': 'customer',
             'business_doctype': 'Customer', 'parameter_mapping': json.dumps(params)}).insert(ignore_permissions=True)
     clear_rule_cache()
+
+
+@frappe.whitelist(methods=['GET'])
+def template_preview(name):
+    """Read template wording from Hub for the editor; never sends a message."""
+    require_access(configure=True)
+    template = frappe.get_doc('Relay WhatsApp Template', name)
+    template.check_permission('read')
+    from relay_core.whatsapp import execute
+    from relay_core.settings import value
+    if template.account != value('relay_hub_account'):
+        raise ValueError('Template belongs to another Hub account')
+    after = None
+    for _ in range(20):
+        page = execute('templates.list', {'after': after} if after else {})
+        for row in page.get('data', []):
+            if str(row['id']) == template.template_id:
+                return {'body': next((part.get('text', '') for part in row.get('components', [])
+                    if part.get('type', '').upper() == 'BODY'), '')}
+        cursor = page.get('paging', {}).get('cursors', {}).get('after')
+        if not cursor or cursor == after:
+            break
+        after = cursor
+    raise ValueError('Template wording unavailable; refresh Templates and try again')

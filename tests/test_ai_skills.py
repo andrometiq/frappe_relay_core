@@ -290,6 +290,17 @@ class SharedAdapterTests(unittest.TestCase):
         self.model.enabled = 0
         with self.assertRaises(ValueError): self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
 
+    def test_ledger_reply_ignores_model_arithmetic(self):
+        from relay_core.ai.ledger import summarize
+        ledger = summarize([dict(debit='100.10', credit='40.05', posting_date='2026-10-01',
+            voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')], False)
+        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
+        self.attempt.return_value = self.outcome({'reply': 'Invented total 999999', 'handoff': False, 'reason': ''})
+        with patch.object(self.adapter, 'Reader', return_value=reader):
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'yes')
+        self.assertIn('Net debit: 60.05', result['reply'])
+        self.assertNotIn('999999', result['reply'])
+
     def test_non_tool_compatibility_uses_same_engine(self):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})

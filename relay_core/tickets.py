@@ -89,7 +89,7 @@ def read(name):
         links.append({'message': message.name, 'contact': message.relay_contact,
                       'channel': message.channel})
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief,
-            'category': doc.category, 'status': doc.status, 'messages': links,
+            'category': doc.category, 'status': doc.status, 'messages': links, 'creation': doc.creation,
             'assigned_to': doc.get('assigned_to'),
             'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),
             'handoff_reason': doc.get('handoff_reason'), 'source_run': doc.get('source_run'),

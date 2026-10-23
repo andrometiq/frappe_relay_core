@@ -13,12 +13,16 @@ def validate_skill(doc):
         raise ValueError('Use 1–8000 instruction characters and a daily limit of 1–1000')
     if doc.mode not in ('Shadow', 'Automatic'):
         raise ValueError('Choose Shadow or Automatic mode')
-    with as_user(doc.run_as_user):
-        require_access(manage=True)
-    with as_user(doc.handoff_owner):
-        require_access()
+    if doc.enabled or doc.run_as_user:
+        with as_user(doc.run_as_user):
+            require_access(manage=True)
+    if doc.enabled or doc.handoff_owner:
+        with as_user(doc.handoff_owner):
+            require_access()
     contracts(doc)
     if doc.enabled:
+        if not doc.channel or not doc.ai_model:
+            raise ValueError('Choose a channel and AI Model before enabling the skill')
         # Serialize activation so two skills cannot own the same channel/business.
         frappe.db.get_value('Relay Channel', doc.channel, 'name', for_update=True)
         names = frappe.get_all('Relay AI Skill', filters={'channel': doc.channel,
