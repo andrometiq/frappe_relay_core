@@ -50,3 +50,19 @@ def recovery_status():
         elif not scoped:reasons.append('Relay recovery process has no recent heartbeat')
         elif scoped.get('state')!='running':reasons.append('Some Relay jobs need attention; check the job states below')
     return {'inactive':inactive,'mode':mode,'runtime':scoped,'reasons':reasons,'items':items,'checked_at':str(now)}
+
+
+@frappe.whitelist(methods=['GET'])
+def callback_status():
+    """Bounded account-scoped receipt/projection status, without event payloads."""
+    require_access(manage=True)
+    from relay_core.settings import value
+    filters = {'account': value('relay_hub_account')}
+    latest = frappe.get_all('Relay Hub Event', filters=filters,
+                            fields=['name', 'creation', 'projection_status'],
+                            order_by='creation desc', limit_page_length=1)
+    failures = frappe.get_all('Relay Hub Event',
+                              filters={**filters, 'projection_status': ['in', ['Failed', 'Pending']]},
+                              fields=['name', 'creation', 'projection_status'],
+                              order_by='creation desc', limit_page_length=51)
+    return {'latest': latest[0] if latest else None, 'items': failures[:50], 'more': len(failures) > 50}

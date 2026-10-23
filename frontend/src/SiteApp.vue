@@ -1,200 +1,94 @@
 <script setup>
-import { realtimeStatus, startRealtime } from "./services/realtime";
-onMounted(startRealtime);
-import {
-  defineAsyncComponent,
-  provide,
-  ref,
-  computed,
-  watch,
-  onMounted,
-  onErrorCaptured,
-} from "vue";
-import { FeatherIcon, ErrorMessage } from "@relay/ui";
-import { frappeRequest, coreApi } from "./services/coreApi";
-import NotificationInbox from "./components/NotificationInbox.vue";
-import { useViewRoute } from "./useViewRoute";
-if (window.location.hash.split("?")[0] === "#/settings")
-  window.location.replace("/desk/relay-settings");
-const capabilities = ref({ manage: false, configure: false });
-provide("relayCapabilities", capabilities);
-onMounted(async () => {
-  try {
-    capabilities.value = await coreApi("api.capabilities");
-  } catch {}
-});
+import { computed, defineAsyncComponent, onErrorCaptured, onMounted, provide, ref, watch, nextTick } from 'vue'
+import { Button, ErrorMessage, FeatherIcon } from '@relay/ui'
+import { coreApi, frappeRequest } from './services/coreApi'
+import { realtimeStatus, startRealtime } from './services/realtime'
+import NotificationInbox from './components/NotificationInbox.vue'
+import { useViewRoute } from './useViewRoute'
+
+const location = window.location
 const views = {
   Messages: defineAsyncComponent(() => import('./components/ConnectedMessages.vue')),
-  Flows: defineAsyncComponent(() => import('./components/WorkflowViewer.vue')),
+  Contacts: defineAsyncComponent(() => import('./components/ContactsWorkspace.vue')),
   WhatsApp: defineAsyncComponent(() => import('./components/WhatsAppWorkspace.vue')),
-  Teams: defineAsyncComponent(() => import('./components/TeamsWorkspace.vue')),
-  Incoming: defineAsyncComponent(() => import('./components/IncomingWorkspace.vue')),
-};
-const navigation = [
-  {name:'Messages',label:'Business inbox',icon:'inbox'},
-  {name:'Teams',label:'Teams',icon:'users'},
-
-  {name:'Flows',label:'Workflow viewer',icon:'git-branch'},
-];
-const tools = [{name:'Incoming',label:'Unlinked/ambiguous',icon:'inbox',manage:true},{name:'WhatsApp',label:'Templates',icon:'file-text',manage:true}];
-const view = useViewRoute(Object.keys(views), "Messages"),
-  mobile = ref(false),
-  expanded = ref(tools.some((item) => item.name === view.value));
-const current = computed(() =>
-  [...navigation, ...tools].find((item) => item.name === view.value),
-);
-const user =
-  window.frappe?.session?.user ||
-  document.getElementById("app")?.dataset.user ||
-  "Account";
-const location = window.location;
-const logoutError = ref(""),
-  loadError = ref("");
-onErrorCaptured((error) => {
-  if (
-    /dynamically imported module|Loading chunk|Importing a module script/.test(
-      String(error),
-    )
-  ) {
-    loadError.value = "A new Relay version is available. Refresh to load it.";
-    return false;
-  }
-});
-watch(view, () => {
-  mobile.value = false;
-  if (tools.some((item) => item.name === view.value)) expanded.value = true;
-});
-async function logout() {
-  try {
-    await frappeRequest("logout", {}, true);
-    location.assign("/login?redirect-to=/relay");
-  } catch (e) {
-    logoutError.value = e.message;
-  }
+  Teams: defineAsyncComponent(() => import('./components/AccessWorkspace.vue')),
+  Settings: defineAsyncComponent(() => import('./components/SiteSettings.vue')),
+  Activity: defineAsyncComponent(() => import('./components/ActivityWorkspace.vue')),
 }
+const navigation = [
+  { name: 'Messages', label: 'Inbox', icon: 'inbox' },
+  { name: 'Contacts', label: 'Contacts & links', icon: 'users' },
+  { name: 'WhatsApp', label: 'Templates', icon: 'file-text' },
+  { name: 'Teams', label: 'Teams & access', icon: 'user-check' },
+  { name: 'Settings', label: 'Settings & setup', icon: 'settings' },
+  { name: 'Activity', label: 'Activity & health', icon: 'activity', manage: true },
+]
+// Preserve the existing triage deep link without adding a seventh screen.
+if (location.hash.split('?')[0] === '#/incoming') location.hash = '/contacts?tab=unlinked'
+const view = useViewRoute(Object.keys(views), 'Messages')
+const capabilities = ref({ manage: false, configure: false }), ready = ref(false)
+const mobile = ref(false), error = ref(''), loadError = ref('')
+const current = computed(() => navigation.find(item => item.name === view.value))
+const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
+provide('relayCapabilities', capabilities)
+async function initialize() {
+  error.value = ''
+  try { capabilities.value = await coreApi('api.capabilities'); ready.value = true }
+  catch (e) { error.value = e.message }
+}
+async function logout() {
+  error.value = ''
+  try { await frappeRequest('logout', {}, true); location.assign('/login?redirect-to=/relay') }
+  catch (e) { error.value = e.message }
+}
+function closeNavigation() {
+  mobile.value = false
+  document.getElementById('relay-menu')?.focus()
+}
+function trapNavigation(event) {
+  if (!mobile.value || event.key !== 'Tab') return
+  const nodes = [...event.currentTarget.querySelectorAll('button, a[href]')].filter(node => node.offsetParent)
+  const first = nodes[0], last = nodes.at(-1)
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
+watch(mobile, async value => { if (value) { await nextTick(); document.querySelector('.mobile-nav-open button')?.focus() } })
+watch(view, () => { if (mobile.value) closeNavigation() })
+onMounted(() => { startRealtime(); initialize() })
+onErrorCaptured(e => {
+  if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
+    loadError.value = 'This screen could not load. Refresh Relay to try again.'
+    return false
+  }
+})
 </script>
 <template>
-  <div
-    class="app-shell relay-shell"
-    @keydown.esc="mobile = false"
-  >
-    <button
-      v-if="mobile"
-      class="relay-nav-backdrop"
-      aria-label="Close navigation"
-      @click="mobile = false"
-    />
-    <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }">
-      <div class="relay-brand w-full" aria-label="Relay">
-        <span class="relay-brand-mark"
-          ><FeatherIcon name="message-circle" class="h-4 w-4" /></span
-        ><span class="nav-label flex-1 text-left">Relay</span>
-      </div>
-      <div class="nav-label relay-nav-caption">Workspace</div>
-      <nav aria-label="Workspace" class="relay-nav-section">
-        <button
-          v-for="item in navigation"
-          :key="item.name"
-          class="nav-item"
-          :class="{ active: view === item.name }"
-          :aria-label="item.label"
-          :aria-current="view === item.name ? 'page' : undefined"
-          :title="item.label"
-          @click="view = item.name"
-        >
-          <FeatherIcon :name="item.icon" class="h-4 w-4" /><span
-            class="nav-label"
-            >{{ item.label }}</span
-          >
-        </button>
-      </nav>
-      <button
-        class="relay-tools-toggle"
-        :aria-expanded="expanded"
-        aria-label="Workspace tools"
-        @click="expanded = !expanded"
-      >
-        <FeatherIcon name="grid" class="h-4 w-4" /><span
-          class="nav-label flex-1 text-left"
-          >Tools</span
-        ><FeatherIcon
-          :name="expanded ? 'chevron-down' : 'chevron-right'"
-          class="nav-label h-3 w-3"
-        />
-      </button>
-      <nav v-if="expanded" aria-label="Tools" class="relay-nav-section">
-        <button
-          v-for="item in tools.filter(
-            (item) => !item.manage || capabilities.manage,
-          )"
-          :key="item.name"
-          class="nav-item"
-          :class="{ active: view === item.name }"
-          :aria-label="item.label"
-          :aria-current="view === item.name ? 'page' : undefined"
-          :title="item.label"
-          @click="view = item.name"
-        >
-          <FeatherIcon :name="item.icon" class="h-4 w-4" /><span
-            class="nav-label"
-            >{{ item.label }}</span
-          >
+  <div class="app-shell relay-shell v1-shell" @keydown.esc="closeNavigation">
+    <button v-if="mobile" class="relay-nav-backdrop" aria-label="Close navigation" @click="closeNavigation" />
+    <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }" aria-label="Relay navigation" @keydown="trapNavigation">
+      <div class="relay-brand"><FeatherIcon name="message-circle" class="h-5 w-5" /><strong>Relay</strong><Button class="mobile-only ml-auto" icon="x" aria-label="Close navigation" @click="closeNavigation" /></div>
+      <p class="relay-nav-caption">WhatsApp workspace</p>
+      <nav class="relay-nav-section" aria-label="Workspace">
+        <button v-for="item in navigation.filter(item => !item.manage || capabilities.manage)" :key="item.name"
+          class="nav-item" :class="{ active: view === item.name }" :aria-current="view === item.name ? 'page' : undefined" @click="view = item.name">
+          <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
         </button>
       </nav>
       <div class="relay-nav-footer">
-        <a
-          href="/desk/relay-core"
-          class="nav-item"
-          aria-label="Frappe Desk"
-          title="Frappe Desk"
-          ><FeatherIcon name="grid" class="h-4 w-4" /><span class="nav-label"
-            >Frappe Desk<FeatherIcon
-              name="arrow-up-right"
-              class="inline ml-2 h-3 w-3" /></span
-        ></a>
-        <div class="relay-account">
-          <span class="relay-user-avatar" :title="user">{{
-            user.slice(0, 1).toUpperCase()
-          }}</span
-          ><span class="nav-label relay-user-name" :title="user">{{
-            user
-          }}</span
-          ><button
-            class="nav-label relay-icon-button"
-            aria-label="Sign out"
-            title="Sign out"
-            @click="logout"
-          >
-            <FeatherIcon name="log-out" class="h-4 w-4" />
-          </button>
-        </div>
+        <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" />Frappe Desk</a>
+        <div class="relay-account"><span class="relay-user-name" :title="user">{{ user }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
-    <main class="workspace">
-      <ErrorMessage :message="logoutError" />
-      <div v-if="loadError" role="alert" class="p-3 text-sm">
-        {{ loadError }}
-        <button class="underline" @click="location.reload()">
-          Refresh Relay
-        </button>
-      </div>
-      <header class="page-header relay-mobile-page-header">
-        <div class="flex items-center gap-3">
-          <button
-            class="relay-mobile-menu relay-icon-button"
-            aria-label="Toggle navigation"
-            :aria-expanded="mobile"
-            @click="mobile = !mobile"
-          >
-            <FeatherIcon name="menu" class="h-4 w-4" /></button
-          ><h1>Relay</h1>
-        </div>
-        <div class="flex items-center gap-2"><span v-if="realtimeStatus !== 'Live'" class="relay-connection-state compact" role="status">Reconnecting…</span><NotificationInbox /></div>
+    <main class="workspace" :inert="mobile || undefined">
+      <header class="page-header v1-header">
+        <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="mobile = true" />
+        <h1>{{ current?.label }}</h1>
+        <div class="ml-auto flex items-center gap-2"><span class="v1-connection" role="status">{{ realtimeStatus }}</span><NotificationInbox /></div>
       </header>
-      <KeepAlive
-        ><component :is="views[view]"
-      /></KeepAlive>
+      <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
+      <p v-if="!ready && !error" role="status" class="p-4">Loading workspace…</p>
+      <p v-else-if="current?.manage && !capabilities.manage" class="p-4">A Relay Communication Manager role is required. <a href="#/teams" class="underline">Review access</a></p>
+      <component :is="views[view]" v-else-if="ready" />
     </main>
-
   </div>
 </template>

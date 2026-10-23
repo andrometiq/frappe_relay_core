@@ -1,7 +1,9 @@
 <script setup>
-import { provide } from "vue";
+import { provide, watch } from "vue";
 import { Button, ErrorMessage, FeatherIcon } from "@relay/ui";
 import { useWhatsAppTemplatesWorkspace } from "../composables/whatsapp/useWhatsAppTemplatesWorkspace";
+import { useWhatsAppIdentity } from "../composables/useWhatsAppIdentity";
+import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { whatsappKey } from "../composables/whatsapp/context";
 import WhatsAppTemplates from "./whatsapp/WhatsAppTemplates.vue";
 import FrappePageHeader from "./frappe/FrappePageHeader.vue";
@@ -10,6 +12,9 @@ const props = defineProps({
   focused: Boolean,
 });
 const workspace = useWhatsAppTemplatesWorkspace();
+const { identity, error: metadataError, load: refreshMetadata } = useWhatsAppIdentity({ immediate: false });
+watch(() => workspace.supported.value, value => { if (value) refreshMetadata(); });
+useRealtimeRefresh([], ["templates"], () => { if (workspace.supported.value) return refreshMetadata(); });
 provide(whatsappKey, workspace);
 const {
   busy,
@@ -22,7 +27,7 @@ const {
 </script>
 <template>
   <div class="whatsapp-template-workspace">
-    <div v-if="error || notice" class="template-workspace-feedback">
+    <div v-if="error || notice" class="v1-template-feedback">
       <ErrorMessage :message="error" />
       <p v-if="notice" role="status">{{ notice }}</p>
     </div>
@@ -43,7 +48,7 @@ const {
         <p>Enable message templates in this account’s WhatsApp channel settings in Relay Hub.</p>
       </div>
     </template>
-    <WhatsAppTemplates v-else-if="capabilities && supported" />
+    <template v-else-if="capabilities && supported"><p class="px-4 py-2 text-xs text-ink-gray-5">Metadata sync: {{ identity?.status || 'Not checked' }} · Last successful sync: {{ identity?.updated || 'Not available' }}</p><ErrorMessage :message="metadataError" /><WhatsAppTemplates /></template>
     <template v-else>
       <FrappePageHeader title="Message templates" />
       <div class="template-workspace-loading" role="status">Loading templates…</div>

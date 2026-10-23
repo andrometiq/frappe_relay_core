@@ -1,7 +1,13 @@
 <script setup>
-import { provide, computed, ref, watch, onBeforeUnmount } from "vue";
+import { provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
 import { Button, ErrorMessage, FeatherIcon } from "@relay/ui";
-import BusinessDirectory from "./messages/BusinessDirectory.vue";
+import InboxDirectory from "./messages/InboxDirectory.vue";
+import ConversationTools from "./messages/ConversationTools.vue";
+import ConversationDeliveries from "./messages/ConversationDeliveries.vue";
+import MessageSearch from "./messages/MessageSearch.vue";
+import InternalNotes from "./messages/InternalNotes.vue";
+import ContactDetails from "./ContactDetails.vue";
+import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
 import StartConversation from "./messages/StartConversation.vue";
 import BusinessMessageSearch from "./messages/BusinessMessageSearch.vue";
@@ -9,10 +15,15 @@ import ConversationSummary from "./messages/ConversationSummary.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
 import { useMessages } from "../composables/useMessages";
 import { useConversationPresence } from "../composables/useConversationPresence";
-import { coreApi } from "../services/coreApi";
+import { coreApi, frappeRequest } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
 
 const state = useMessages();
+const deliveriesOpen = ref(false), contactRecord = ref(null);
+const notesOpen = ref(false), contextOpen = ref(false), noteMessages = ref([]), noteContact = ref('');
+const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
+const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
+const isWhatsApp = row => objectValue(row.provider_context).provider === 'WhatsApp' && !objectValue(row.provider_context).group_id;
 provide(messagesKey, state);
 const {
   businessType, businessName, businessContext, openBusiness,
@@ -27,7 +38,7 @@ const activeBusinessContact = ref("");
 let contactRequest = 0;
 
 const active = computed(() => selected.value || businessName.value);
-const title = computed(() => businessContext.value?.title || businessName.value || "Business inbox");
+const title = computed(() => businessContext.value?.title || businessName.value || contactRecord.value?.display_name || "Conversation");
 const groupLabel = computed(() => businessContext.value?.grouping_value || "");
 const contactCount = computed(() => {
   const count = businessContext.value?.contact_count;
@@ -41,7 +52,7 @@ const messagesByContact = computed(() => {
   return result;
 });
 const visibleRows = computed(() => {
-  const all = state.displayRows.value;
+  const all = state.displayRows.value.filter(isWhatsApp);
   if (!activeBusinessContact.value) return all;
   const target = messagesByContact.value.get(activeBusinessContact.value);
   if (!target) return [];
@@ -51,14 +62,14 @@ const visibleRows = computed(() => {
 const recipientLabel = computed(() => {
   if (!source.value) return "";
   const linked = linkedContacts.value.find(item => item.value === source.value.frappe_contact);
-  return linked?.label || source.value.contact_label || "Contact";
+  return linked?.label || source.value.contact_label || contactRecord.value?.display_name || "Contact";
 });
 
 async function loadBusinessContacts() {
   const request = ++contactRequest;
   linkedContacts.value = [];
   contactsError.value = "";
-  if (!businessType.value || !businessName.value) return;
+  if (!businessType.value || !businessName.value) { contactsBusy.value = false; return; }
   contactsBusy.value = true;
   try {
     const result = await coreApi("business_inbox.contacts", { doctype: businessType.value, name: businessName.value });
@@ -79,32 +90,58 @@ function contactRoute(contact) {
   window.history.pushState(null, "", "#/messages?" + params.toString());
 }
 function chooseContact(contact, updateRoute = true) {
+  if (busy.value) return;
+  state.clearRecipient();
+  closeNotes();
   activeBusinessContact.value = contact;
   const message = messagesByContact.value.get(contact);
-  if (message) state.selectRecipient(message);
+  if (message && isWhatsApp(message)) state.selectRecipient(message);
   if (updateRoute) contactRoute(contact);
 }
 function showAllContacts() {
+  if (busy.value) return;
+  state.clearRecipient();
+  closeNotes();
   activeBusinessContact.value = "";
   contactRoute("");
 }
 function openStart(contact = "") {
-  startContact.value = contact;
+  startContact.value = businessName.value ? contact : selected.value;
   startContactLabel.value = linkedContacts.value.find(item => item.value === contact)?.label || "";
   startOpen.value = true;
 }
 async function started(result) {
   startOpen.value = false;
-  await history();
-  if (result?.contact) chooseContact(result.contact);
+  if (!businessName.value && result?.contact && result.contact !== selected.value) {
+    historyRoute(result.contact);
+    await state.open(result.contact);
+  } else {
+    await run(() => history());
+    if (businessName.value && result?.contact) chooseContact(result.contact);
+  }
 }
+function historyRoute(contact) { window.history.pushState(null, '', '#/messages?contact=' + encodeURIComponent(contact)); }
+function closeNotes() { notesOpen.value = false; noteMessages.value = []; noteContact.value = ''; }
+function openNote(message) {
+  noteContact.value = message ? message.relay_contact : conversationContact.value;
+  noteMessages.value = message ? [message] : [];
+  notesOpen.value = !!noteContact.value;
+}
+watch(source, value => {
+  if (value && !isWhatsApp(value)) state.clearRecipient();
+  else if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
+});
 function clearRecipient() {
   activeBusinessContact.value = "";
-  source.value = null;
-  state.quoting.value = false;
+  state.clearRecipient();
 }
 
 const lastVisible = ref(""), visibleMessages = ref([]);
+const contactRows = computed(() => visibleRows.value.filter(row => row.relay_contact === conversationContact.value && !row._pending));
+const contactVisibleMessages = computed(() => {
+  const visible = new Set(visibleMessages.value);
+  return contactRows.value.filter(row => visible.has(row.name)).map(row => row.name);
+});
 const { people } = useConversationPresence({
   get contact() { return selected.value; },
   get businessDoctype() { return businessType.value; },
@@ -113,7 +150,15 @@ const { people } = useConversationPresence({
   get visibleMessages() { return visibleMessages.value; },
 }, () => {});
 
+watch(selected, async contact => {
+  contactRecord.value = null; closeNotes(); deliveriesOpen.value = false;
+  lastVisible.value = ''; visibleMessages.value = [];
+  if (!contact) return;
+  try { const record = await frappeRequest('frappe.client.get', { doctype: 'Relay Contact', name: contact }); if (selected.value === contact) contactRecord.value = record; }
+  catch (e) { if (selected.value === contact) contactsError.value = e.message; }
+}, { immediate: true });
 watch([businessType, businessName], () => {
+  closeNotes(); contextOpen.value = false;
   summaryOpen.value = false;
   searchOpen.value = false;
   activeBusinessContact.value = "";
@@ -121,7 +166,24 @@ watch([businessType, businessName], () => {
   visibleMessages.value = [];
   loadBusinessContacts();
 }, { immediate: true });
-onBeforeUnmount(() => { ++contactRequest; });
+function readContactRoute() {
+  if (location.hash.split('?')[0] !== '#/messages' || busy.value) return;
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  if (!businessName.value) {
+    if (params.get('contact') === selected.value && params.get('notes') === '1' && !error.value) {
+      openNote();
+      params.delete('notes');
+      window.history.replaceState(null, '', '#/messages?' + params.toString());
+    }
+    return;
+  }
+  if (params.get('business_name') !== businessName.value || params.get('business_doctype') !== businessType.value) return;
+  const contact = params.get('contact') || '';
+  if (contact !== activeBusinessContact.value) chooseContact(contact, false);
+}
+watch([busy, selected], readContactRoute, { flush: 'post' });
+onMounted(() => { readContactRoute(); window.addEventListener('hashchange', readContactRoute); window.addEventListener('popstate', readContactRoute); });
+onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange', readContactRoute); window.removeEventListener('popstate', readContactRoute); });
 </script>
 
 <template>
@@ -131,7 +193,8 @@ onBeforeUnmount(() => { ++contactRequest; });
       :business-doctype="businessType" :business-name="businessName" @close="startOpen = false" @sent="started" />
 
     <aside class="contact-directory">
-      <BusinessDirectory :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="openBusiness" />
+      <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
+        @business="openBusiness" @select="contact => { state.open(contact); historyRoute(contact) }" />
     </aside>
 
     <div v-if="active" class="connected-thread">
@@ -148,24 +211,32 @@ onBeforeUnmount(() => { ++contactRequest; });
           </div>
         </div>
         <div class="conversation-heading-actions">
-          <Button icon="file-text" aria-label="Conversation summary" title="Conversation summary" @click="summaryOpen = !summaryOpen" />
+          <Button v-if="conversationContact" icon="activity" aria-label="Delivery failures and retry" title="Delivery failures and retry" @click="deliveriesOpen = true" />
+          <Button v-if="frappeContact" icon="info" aria-label="Business context" title="Business context" @click="contextOpen = !contextOpen" />
+          <Button v-if="conversationContact" icon="message-square" aria-label="Internal notes" title="Internal notes" @click="openNote()" />
+          <Button v-if="businessName" icon="file-text" aria-label="Conversation summary" title="Conversation summary" @click="summaryOpen = !summaryOpen" />
           <Button icon="search" aria-label="Search conversation" title="Search conversation" @click="searchOpen = !searchOpen" />
         </div>
       </header>
 
       <nav v-if="businessName" class="business-contact-strip" aria-label="Business contacts">
-        <button type="button" :aria-pressed="!activeBusinessContact" :class="{ active: !activeBusinessContact }" @click="showAllContacts">
+        <button type="button" :aria-pressed="!activeBusinessContact" :class="{ active: !activeBusinessContact }" :disabled="busy" @click="showAllContacts">
           <span>All</span><small>{{ linkedContacts.length }}</small>
         </button>
         <button v-for="contact in linkedContacts" :key="contact.value" type="button"
           :aria-pressed="activeBusinessContact === contact.value" :class="{ active: activeBusinessContact === contact.value }"
-          @click="chooseContact(contact.value)">
+          :disabled="busy" @click="chooseContact(contact.value)">
           <span class="contact-chip-avatar">{{ contact.label.slice(0, 1).toUpperCase() }}</span>
           <span class="contact-chip-copy"><strong>{{ contact.label }}</strong><small>{{ contact.description || "No WhatsApp number" }}</small></span>
         </button>
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
       </nav>
 
+      <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" />
+      <div v-if="contextOpen && frappeContact" class="v1-context"><ContactDetails :contact="frappeContact" /></div>
+      <InternalNotes v-if="notesOpen && noteContact" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" />
+      <ConversationDeliveries v-if="deliveriesOpen && conversationContact" :key="conversationContact" :contact="conversationContact" @close="deliveriesOpen = false" @open="focusMessage" />
+      <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="searchOpen = false" @open="searchOpen = false; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
         @close="searchOpen = false" @open="searchOpen = false; focusMessage($event)" />
       <ErrorMessage class="px-4" :message="error || contactsError" />
@@ -174,7 +245,7 @@ onBeforeUnmount(() => { ++contactRequest; });
 
       <MessageThread :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :rows="visibleRows" :more="more" :busy="busy" :emoji="emoji"
-        :selected="active" :contact-name="activeContact?.label || title" :can-comment="!!selected"
+        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="run(() => history(true))" @reply="reply"
         @quote="openQuote" @reconcile="state.checkPending" @send="send" />
@@ -183,11 +254,11 @@ onBeforeUnmount(() => { ++contactRequest; });
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <div v-if="businessName && source" class="business-recipient-bar">
-        <span>To</span><strong>{{ recipientLabel }}</strong><button type="button" @click="clearRecipient">Change</button>
+      <div v-if="source" class="business-recipient-bar">
+        <span>To</span><strong>{{ recipientLabel }} · {{ source.sender_endpoint }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button>
       </div>
-      <MessageComposer v-if="source" @template="openStart(source?.frappe_contact || '')" />
-      <div v-else-if="businessName" class="business-compose-start">
+      <MessageComposer v-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')" />
+      <div v-else-if="active" class="business-compose-start">
         <Button icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
           :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
       </div>

@@ -71,3 +71,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(result['previous'],{'before':'RELAY-CON-0000000002'})
         for kwargs in ({'query':'x'*81},{'query':{}},{'limit':True},{'before':'bad'},{'before':'RELAY-CON-0000000001','after':'RELAY-CON-0000000002'}):
             with self.assertRaises(ValueError):self.api.contacts(**kwargs)
+
+
+class ContactDetailsTests(unittest.TestCase):
+    setUp = ApiTests.setUp
+    def test_details_exclude_unconfigured_private_links_and_other_channels(self):
+        person = types.SimpleNamespace(name='fixture-contact', full_name='Local fixture', mobile_no='15550000001', phone='',
+            check_permission=Mock(), links=[types.SimpleNamespace(link_doctype='Customer', link_name=name) for name in ['visible', 'private']])
+        person.links.append(types.SimpleNamespace(link_doctype='Supplier', link_name='unconfigured'))
+        docs = {('Contact', 'fixture-contact'): person,
+                ('Customer', 'visible'): types.SimpleNamespace(has_permission=lambda _: True),
+                ('Customer', 'private'): types.SimpleNamespace(has_permission=lambda _: False),
+                ('Relay Channel', 'wa'): types.SimpleNamespace(channel='WhatsApp', has_permission=lambda _: True),
+                ('Relay Channel', 'email'): types.SimpleNamespace(channel='Email', has_permission=lambda _: True)}
+        self.f.get_doc.side_effect=lambda dt,name:docs[(dt,name)]
+        self.api.business_types=Mock(return_value=['Customer'])
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        endpoint=types.SimpleNamespace(name='binding', channel='wa', verified=0)
+        self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
+        result=self.api.contact_details('fixture-contact')
+        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}])
+        self.assertEqual(result['endpoints'],[endpoint])
+        self.api.readable_contact.assert_called_once_with('relay-contact')
+        person.check_permission.assert_called_once_with('read')
+        self.assertEqual(self.api.contact_details.allowed_methods,['GET'])
+
+    def test_details_stop_before_endpoint_read_when_assignment_is_denied(self):
+        person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(),links=[])
+        self.f.get_doc.return_value=person
+        self.api.business_types=Mock(return_value=[])
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        self.f.get_all=Mock()
+        self.api.readable_contact.side_effect=PermissionError('Not assigned')
+        with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
+        self.f.get_all.assert_not_called()

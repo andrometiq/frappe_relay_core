@@ -38,7 +38,7 @@ export function templateStatusTheme(status) {
 
 export function filterTemplates(
   templates,
-  { query = "", status = "ALL", category = "ALL" } = {},
+  { query = "", status = "ALL", category = "ALL", language = "ALL" } = {},
 ) {
   const needle = text(query).toLocaleLowerCase();
   return (Array.isArray(templates) ? templates : []).filter((template) => {
@@ -49,6 +49,7 @@ export function filterTemplates(
       text(template.category).toUpperCase() !== category
     )
       return false;
+    if (language !== "ALL" && text(template.language) !== language) return false;
     if (!needle) return true;
     return [
       template.name,

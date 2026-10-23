@@ -29,8 +29,7 @@ npm run build
 npm run preview -- --port 18082
 ```
 
-Open the URL printed by Vite. Design-preview screens use sample data. Connected
-screens require same-origin Frappe APIs; the standalone preview does not provide
+Open the URL printed by Vite. The WhatsApp v1 screens require same-origin Frappe APIs; the standalone preview does not provide
 an authenticated Frappe site. See the [frontend guide](frontend/README.md).
 
 Run backend contracts and frontend data tests as described in the
@@ -42,7 +41,7 @@ site and local provider fixtures; they do not establish live-provider acceptance
 | Directory | Purpose |
 | --- | --- |
 | `relay_core/` | Frappe APIs, permissions, channel projection, automation, and DocTypes |
-| `frontend/` | Vue components, connected workspaces, and design previews |
+| `frontend/` | Vue components and connected WhatsApp v1 workspaces |
 | `tests/` | Backend contracts and isolated Frappe/database simulations |
 | `specifications/` | Original behavior specifications |
 | `docs/` | User/developer documentation and dated design records |

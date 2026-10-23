@@ -33,9 +33,6 @@ async function visit(row) {
     open.value = false;
     window.location.hash =
       "/messages?contact=" + encodeURIComponent(row.relay_contact) + "&notes=1";
-    window.dispatchEvent(
-      new CustomEvent("relay-open-notes", { detail: row.relay_contact }),
-    );
   } catch (e) {
     error.value = e.message;
   }
@@ -74,7 +71,7 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
         <Button icon="x" label="Close notifications" @click="open = false" />
       </header>
       <ErrorMessage :message="error" />
-      <div class="notification-rows">
+      <div class="notification-rows"><p v-if="busy" role="status">Loading notifications…</p>
         <button
           v-for="row in rows"
           :key="row.name"
@@ -109,10 +106,10 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
   place-items: center;
   padding: 8px;
   border-radius: 6px;
-  color: #666;
+  color: var(--ink-gray-7);
 }
 .notification-toggle:hover {
-  background: #f3f3f3;
+  background: var(--surface-gray-2);
 }
 .notification-dot {
   position: absolute;
@@ -131,8 +128,8 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
   max-width: calc(100vw - 32px);
   max-height: 70vh;
   z-index: 60;
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: var(--surface-white);
+  border: 1px solid var(--outline-gray-2);
   border-radius: 9px;
   box-shadow: 0 10px 35px #0002;
   display: flex;
@@ -143,7 +140,7 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
   align-items: center;
   justify-content: space-between;
   padding: 14px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--outline-gray-2);
 }
 .notification-panel h2 {
   font-size: 14px;
@@ -159,16 +156,16 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
   width: 100%;
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--outline-gray-2);
   border-radius: 5px;
 }
 .notification-rows button.unread {
-  background: #f3f7ff;
+  background: var(--surface-blue-1);
 }
 .notification-rows small,
 .notification-rows time {
   font-size: 10px;
-  color: #7b8490;
+  color: var(--ink-gray-6);
 }
 .notification-rows p {
   font-size: 12px;
@@ -178,6 +175,6 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
 }
 .notification-rows .notification-empty {
   padding: 20px;
-  color: #888;
+  color: var(--ink-gray-6);
 }
 </style>

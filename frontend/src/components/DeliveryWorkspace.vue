@@ -1,27 +1,24 @@
 <script setup>
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted } from "vue";
 import { Button, Badge, ErrorMessage, FormControl } from "@relay/ui";
 import RelaySelect from "./RelaySelect.vue";
 import { coreApi } from "../services/coreApi";
+import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { useTask } from "../composables/useTask";
-const mailbox = ref(null);
 const metadata = ref(null);
 const syncLabels = { ready: "Up to date", failed: "Last refresh failed", syncing: "Synchronization pending", not_synced: "Not synchronized yet", stale: "Refresh overdue" };
 async function metadataStatus() {
   metadata.value = await coreApi("whatsapp.metadata_status");
-}
-async function mailboxStatus() {
-  mailbox.value = await coreApi("email.mailbox_status");
 }
 const { busy, error, run } = useTask(),
   channel = ref("WhatsApp"),
   rows = ref([]),
   cursor = ref(null),
   more = ref(false),
-  resolving = ref(null),
+  resolving = ref(null), actionId = ref(null),
   outcome = ref("submitted"),
   note = ref(""), providerId = ref("");
-watch(channel, () => { resolving.value = null; note.value = ""; providerId.value = ""; });
+
 async function load(next = false) {
   const after = next ? rows.value.at(-1)?.id : null;
   const page = await coreApi(
@@ -51,7 +48,8 @@ async function resolve() {
   note.value = "";
   await load();
 }
-onMounted(() => run(() => load()));
+onMounted(() => run(async () => { await load(); await metadataStatus(); }));
+useRealtimeRefresh([], ["messages"], () => run(() => load()));
 </script>
 <template>
   <section class="page-body space-y-5">
@@ -63,13 +61,7 @@ onMounted(() => run(() => load()));
       </p>
     </div>
     <div class="flex flex-wrap items-end gap-3">
-      <RelaySelect
-        label="Delivery channel"
-        v-model="channel"
-        :options="['WhatsApp', 'Telegram and email']"
-        :disabled="busy"
-        @update:model-value="run(() => load())"
-      /><Button
+      <Button
         label="Refresh deliveries"
         :loading="busy"
         @click="run(() => load())"
@@ -94,32 +86,8 @@ onMounted(() => run(() => load()));
       <p class="text-sm">{{ metadata.template_count }} cached templates{{ metadata.truncated ? " · Partial snapshot" : "" }}</p>
       <p v-if="metadata.status !== 'ready'" class="text-sm text-ink-gray-5">Check the account’s scheduled metadata sync and channel connection in Hub. This check reads saved results.</p>
     </section>
-    <Button
-      label="Check mailbox sync"
-      :disabled="busy"
-      @click="run(mailboxStatus)"
-    />
-    <div v-if="mailbox" class="workflow-card space-y-3">
-      <h3>Mailbox synchronization</h3>
-      <p v-if="!mailbox.mailboxes.length" class="text-sm">
-        Configure IMAP in the Hub account's email channel to receive messages.
-      </p>
-      <div v-for="row in mailbox.mailboxes" :key="row.mailbox" class="text-sm">
-        <p>Last sync: {{ row.last_sync || "Not yet synchronized" }}</p>
-        <p v-if="row.error" role="status">{{ row.error }}</p>
-      </div>
-      <details v-if="mailbox.rejections.length">
-        <summary>Messages requiring review</summary>
-        <p
-          v-for="row in mailbox.rejections"
-          :key="row.uid + row.created_at"
-          class="text-sm"
-        >
-          UID {{ row.uid }} · {{ row.reason }}
-        </p>
-      </details>
-    </div>
     <ErrorMessage :message="error" />
+    <p v-if="busy" role="status">Loading / updating deliveries…</p>
     <div class="workflow-card">
       <article
         v-for="row in rows"
@@ -135,7 +103,7 @@ onMounted(() => run(() => load()));
           v-if="row.state === 'queued'"
           label="Cancel delivery"
           :disabled="busy"
-          @click="run(() => cancel(row.id))"
+          @click="actionId = row.id; run(() => cancel(row.id))"
         /><Button
           v-if="row.state === 'uncertain'"
           label="Resolve outcome"
@@ -145,6 +113,7 @@ onMounted(() => run(() => load()));
             note = ''; providerId = ''; outcome = 'submitted';
           "
         />
+        <ErrorMessage v-if="actionId === row.id" :message="error" />
       </article>
       <p v-if="!rows.length && !busy" class="text-sm text-ink-gray-5">
         No deliveries on this page.
@@ -173,6 +142,7 @@ onMounted(() => run(() => load()));
         label="Verification evidence"
         v-model="note"
       />
+      <ErrorMessage :message="error" />
       <div class="flex gap-2">
         <Button
           type="submit"

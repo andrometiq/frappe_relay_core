@@ -1,3 +1,5 @@
+import { serverError } from './serverError.js';
+import { invalidateReads } from './realtime.js';
 export async function frappeRequest(
   method,
   values = {},
@@ -46,13 +48,16 @@ export async function frappeRequest(
     if (response.status === 401)
       throw Object.assign(Error("Your session has expired. Sign in again to continue."), {status:401});
     if (response.status === 403)
-      throw Object.assign(Error("You do not have permission for this action."), {status:403});
+      throw Object.assign(Error(serverError(body, "You do not have permission for this action.")), {status:403});
     throw Error(
-      "Action was not confirmed. Check the channel configuration and permissions before retrying.",
+      serverError(body, "Action was not confirmed. Check the channel configuration and permissions before retrying."),
     );
   }
   return body.message;
 }
-export function coreApi(method, values = {}, write = false, options = {}) {
-  return frappeRequest("relay_core." + method, values, write, options);
+export async function coreApi(method, values = {}, write = false, options = {}) {
+  const result = await frappeRequest("relay_core." + method, values, write, options);
+  if (write && (method === 'message_reads.mark' || method === 'business_inbox.mark_visible' ||
+    (['inbox.update', 'business_inbox.read'].includes(method) && values.last_read))) invalidateReads();
+  return result;
 }

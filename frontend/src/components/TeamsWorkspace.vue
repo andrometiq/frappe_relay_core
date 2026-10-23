@@ -112,7 +112,7 @@ onMounted(() => guarded(async () => {
     await loadGroups();
     const routed = params.get("group");
     const match = groups.value.find((row) => row.value === routed);
-    if (match) choose(match);
+    if (match) { selected.value = match; await loadRecords(); }
   }
   initialized = true;
 }));
@@ -120,28 +120,29 @@ onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(rec
 </script>
 
 <template>
-  <section class="team-workspace" :class="{ 'has-selection': selected }" aria-label="Business teams">
+  <section class="team-workspace" :class="{ 'has-selection': selected }" aria-label="Business responsibility groups">
     <aside class="team-groups">
-      <header><div><h2>Teams</h2><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
+      <header><div><h2>Business groups</h2><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
       <div class="team-filters">
         <RelaySelect v-if="types.length > 1" label="Business type" v-model="doctype" :options="types" :disabled="busy" />
-        <TextInput v-model="groupQuery" type="search" placeholder="Search teams" aria-label="Search teams"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>
+        <TextInput v-model="groupQuery" type="search" placeholder="Search business groups" aria-label="Search business groups"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>
       </div>
       <ErrorMessage :message="error" />
       <VirtualScroller :items="groups" :item-size="58" class="team-group-list" @scroll.passive="groupScrolled">
         <template #item="{ item }"><button type="button" :class="{ active: selected?.value === item.value }" @click="choose(item)"><span class="team-avatar">{{ (item.label || 'U').slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.label }}</strong><small>{{ groupingField || "All accessible records" }}</small></span><FeatherIcon name="chevron-right" class="h-4 w-4" /></button></template>
       </VirtualScroller>
+      <p v-if="!groups.length && !busy && !error" class="team-empty">No business groups match this search. Configure a grouping field in Settings.</p>
       <p v-if="busy" class="team-loading" role="status">Loading…</p>
     </aside>
 
     <main v-if="selected" class="team-records">
-      <header class="team-heading"><Button class="mobile-only" icon="arrow-left" aria-label="Back to teams" @click="clearSelection" /><span class="team-avatar large">{{ selected.label.slice(0, 1).toUpperCase() }}</span><div><h2>{{ selected.label }}</h2><p>{{ records.length }} loaded · {{ visibleUnread }} unread in this view</p></div><Badge :label="owner ? `Handled by ${owner}` : 'Unclaimed'" :theme="owner ? 'blue' : 'gray'" /><Button v-if="!owner" label="Take team" variant="solid" :disabled="busy" @click="claim()" /><Button v-else-if="owner === user" label="Release" :disabled="busy" @click="claim(true)" /></header>
+      <header class="team-heading"><Button class="mobile-only" icon="arrow-left" aria-label="Back to business groups" @click="clearSelection" /><span class="team-avatar large">{{ selected.label.slice(0, 1).toUpperCase() }}</span><div><h2>{{ selected.label }}</h2><p>{{ records.length }} loaded · {{ visibleUnread }} unread in this view</p></div><Badge :label="owner ? `Handled by ${owner}` : 'Unclaimed'" :theme="owner ? 'blue' : 'gray'" /><Button v-if="!owner" label="Take group" variant="solid" :disabled="busy" @click="claim()" /><Button v-else-if="owner === user" label="Release" :disabled="busy" @click="claim(true)" /></header>
       <div class="team-record-search"><TextInput v-model="recordQuery" type="search" placeholder="Search records, contacts, or mobile numbers" aria-label="Search team business records"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
       <VirtualScroller :items="records" :item-size="76" class="team-record-list" @scroll.passive="recordScrolled">
         <template #item="{ item }"><button type="button" @click="openRecord(item)"><span class="team-avatar">{{ item.label.slice(0, 1).toUpperCase() }}</span><span class="team-record-copy"><span><strong>{{ item.label }}</strong><time v-if="item.last_activity">{{ item.last_activity }}</time></span><small>{{ item.summary || item.last_message || item.description || "No WhatsApp activity yet" }}</small></span><Badge v-if="item.unread" :label="String(item.unread)" theme="blue" /><FeatherIcon name="chevron-right" class="h-4 w-4 text-ink-gray-4" /></button></template>
       </VirtualScroller>
-      <p v-if="!records.length && !busy" class="team-empty">No accessible business records match this team.</p>
+      <p v-if="!records.length && !busy" class="team-empty">No accessible business records match this group.</p>
     </main>
-    <div v-else class="team-welcome"><span class="team-avatar large"><FeatherIcon name="users" class="h-5 w-5" /></span><h2>Choose a team</h2><p>Teams come directly from the configured grouping field. They do not create duplicate business records.</p></div>
+    <div v-else class="team-welcome"><span class="team-avatar large"><FeatherIcon name="users" class="h-5 w-5" /></span><h2>Choose a business group</h2><p>Business groups come directly from the configured grouping field. They do not create duplicate business records.</p></div>
   </section>
 </template>

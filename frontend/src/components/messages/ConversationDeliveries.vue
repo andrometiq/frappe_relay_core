@@ -100,6 +100,7 @@ watch(
           :loading="busy"
           @click="load()"
         /><ErrorMessage :message="error" />
+        <p v-if="busy" role="status">Loading / updating message activity…</p>
         <p v-if="notice" role="status">{{ notice }}</p>
         <p v-if="!rows.length && !busy">
           No outgoing actions in this conversation.
@@ -137,6 +138,7 @@ watch(
             @click="retrying = row.name"
           />
           <div v-if="retrying === row.name" class="space-y-2">
+            <ErrorMessage :message="error" />
             <p class="text-sm">
               Send the content shown above again? The destination, permissions
               and reply window will be checked before submission.
