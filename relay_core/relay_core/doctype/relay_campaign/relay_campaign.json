@@ -1,0 +1,108 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Campaign",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CAM-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "title",
+    "channel",
+    "business_doctype",
+    "business_name",
+    "operation",
+    "arguments",
+    "status",
+    "execution_user",
+    "account",
+    "request_key",
+    "last_error"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business Name",
+      "fieldtype": "Dynamic Link",
+      "read_only": 1,
+      "options": "business_doctype"
+    },
+    {
+      "fieldname": "operation",
+      "label": "Operation",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "messages.send\ntemplates.send\ntelegram.send\nemail.send"
+    },
+    {
+      "fieldname": "arguments",
+      "label": "Arguments",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Draft\nRunning\nPaused\nCancelling\nCancelled\nCompleted",
+      "search_index": 1
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "account",
+      "label": "Account",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "request_key",
+      "label": "Request Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "last_error",
+      "label": "Latest issue",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

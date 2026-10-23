@@ -1,0 +1,63 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Hub Event",
+  "module": "Relay Core",
+  "autoname": "RELAY-EVT-.##########",
+  "naming_rule": "Expression (old style)",
+  "engine": "InnoDB",
+  "field_order": [
+    "event_key",
+    "account",
+    "hub_event_id",
+    "payload",
+    "projection_status"
+  ],
+  "fields": [
+    {
+      "fieldname": "event_key",
+      "label": "Hub event key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "account",
+      "label": "Account",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "hub_event_id",
+      "label": "Hub event ID",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "payload",
+      "label": "Payload",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "projection_status",
+      "label": "Projection status",
+      "fieldtype": "Select",
+      "options": "Pending\nProjected\nUncategorized\nIgnored\nFailed",
+      "default": "Pending"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Hub Service",
+      "read": 1,
+      "create": 1
+    }
+  ],
+  "sort_field": "creation",
+  "sort_order": "DESC"
+}

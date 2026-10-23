@@ -1,0 +1,104 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Automation Outbox",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AO-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "action_key",
+    "run",
+    "payload",
+    "payload_hash",
+    "status",
+    "result",
+    "attempts",
+    "lease_until",
+    "recipient",
+    "reply",
+    "reply_version"
+  ],
+  "fields": [
+    {
+      "fieldname": "action_key",
+      "label": "Action Key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "run",
+      "label": "Run",
+      "fieldtype": "Link",
+      "options": "Relay Automation Run",
+      "reqd": 1
+    },
+    {
+      "fieldname": "payload",
+      "label": "Payload",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "payload_hash",
+      "label": "Payload Hash",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nDispatching\nSubmitted\nUncertain\nCancelled\nConflict",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "result",
+      "label": "Result",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "lease_until",
+      "label": "Lease Until",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "recipient",
+      "label": "Recipient",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reply",
+      "label": "Reply",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reply_version",
+      "label": "Reply_Version",
+      "fieldtype": "Data",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

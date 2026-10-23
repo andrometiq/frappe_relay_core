@@ -1,0 +1,59 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Email Rule",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:channel",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "field_order": [
+    "channel",
+    "enabled",
+    "execution_user",
+    "subject",
+    "body"
+  ],
+  "fields": [
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1,
+      "set_only_once": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "subject",
+      "label": "Reply Subject",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "body",
+      "label": "Reply Body",
+      "fieldtype": "Small Text",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ]
+}

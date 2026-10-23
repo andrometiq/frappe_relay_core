@@ -1,0 +1,126 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Canned Reply",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CR-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "title",
+    "channel",
+    "language",
+    "reply_type",
+    "body",
+    "latitude",
+    "longitude",
+    "contact_name",
+    "phone",
+    "ai_enabled",
+    "published",
+    "action_key",
+    "action_arguments"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Select",
+      "options": "WhatsApp\nTelegram\nEmail",
+      "reqd": 1
+    },
+    {
+      "fieldname": "language",
+      "label": "Language",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "body",
+      "label": "Body",
+      "fieldtype": "Small Text",
+      "reqd": 0,
+      "depends_on": "eval:!doc.reply_type || doc.reply_type=='Text'",
+      "mandatory_depends_on": "eval:!doc.reply_type || doc.reply_type=='Text'"
+    },
+    {
+      "fieldname": "ai_enabled",
+      "label": "Ai Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "published",
+      "label": "Published",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "reply_type",
+      "label": "Reply type",
+      "fieldtype": "Select",
+      "options": "Text\nLocation\nContact",
+      "default": "Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "latitude",
+      "label": "Latitude",
+      "fieldtype": "Float",
+      "precision": "6",
+      "depends_on": "eval:doc.reply_type=='Location'"
+    },
+    {
+      "fieldname": "longitude",
+      "label": "Longitude",
+      "fieldtype": "Float",
+      "precision": "6",
+      "depends_on": "eval:doc.reply_type=='Location'"
+    },
+    {
+      "fieldname": "contact_name",
+      "label": "Contact name",
+      "fieldtype": "Data",
+      "depends_on": "eval:doc.reply_type=='Contact'",
+      "mandatory_depends_on": "eval:doc.reply_type=='Contact'"
+    },
+    {
+      "fieldname": "phone",
+      "label": "Phone number",
+      "fieldtype": "Data",
+      "depends_on": "eval:doc.reply_type=='Contact'",
+      "mandatory_depends_on": "eval:doc.reply_type=='Contact'"
+    },
+    {
+      "fieldname": "action_key",
+      "label": "Business action",
+      "fieldtype": "Data",
+      "description": "Registered relay_saved_reply_actions key. Execution is explicit in the saved reply picker."
+    },
+    {
+      "fieldname": "action_arguments",
+      "label": "Action arguments",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "default": "{}",
+      "depends_on": "action_key"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

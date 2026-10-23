@@ -1,0 +1,59 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Contact Endpoint",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CE-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay Contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "verified",
+      "label": "Verified",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "endpoint_key",
+      "label": "Endpoint Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1
+    }
+  ],
+  "field_order": [
+    "channel",
+    "endpoint",
+    "relay_contact",
+    "verified",
+    "endpoint_key"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "track_changes": 1
+}

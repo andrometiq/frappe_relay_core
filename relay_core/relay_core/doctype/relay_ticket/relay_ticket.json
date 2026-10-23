@@ -1,0 +1,87 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Ticket",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "field_order": [
+    "subject",
+    "brief",
+    "category",
+    "status",
+    "assigned_to",
+    "messages",
+    "source_action_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "subject",
+      "label": "Subject",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "brief",
+      "label": "Brief",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "category",
+      "label": "Category",
+      "fieldtype": "Select",
+      "options": "Query\nPayment evidence\nSupport\nOther",
+      "default": "Query",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Open\nIn progress\nResolved\nClosed",
+      "default": "Open",
+      "reqd": 1
+    },
+    {
+      "fieldname": "messages",
+      "label": "Messages",
+      "fieldtype": "Table",
+      "options": "Relay Ticket Message",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_action_key",
+      "label": "Source Action Key",
+      "fieldtype": "Data",
+      "unique": 1
+    },
+    {
+      "fieldname": "assigned_to",
+      "label": "Assigned To",
+      "fieldtype": "Link",
+      "options": "User"
+    }
+  ],
+  "autoname": "RELAY-TKT-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    }
+  ]
+}

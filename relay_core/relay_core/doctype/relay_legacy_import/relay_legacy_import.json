@@ -1,0 +1,105 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Legacy Import",
+  "module": "Relay Core",
+  "autoname": "RELAY-IMPORT-.##########",
+  "naming_rule": "Expression (old style)",
+  "engine": "InnoDB",
+  "field_order": [
+    "source_bundle",
+    "source_conversation",
+    "relay_contact",
+    "channel",
+    "status",
+    "last_source",
+    "upper_source",
+    "imported",
+    "skipped",
+    "warnings",
+    "bundle_sha256"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_conversation",
+      "label": "Legacy conversation",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "description": "WhatsApp Core Conversation name on this site"
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Relay channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Draft\nRunning\nCompleted",
+      "default": "Draft",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_source",
+      "label": "Last imported source",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "upper_source",
+      "label": "Source boundary",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "imported",
+      "label": "Imported messages",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "skipped",
+      "label": "Already present",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "warnings",
+      "label": "Import notes",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_bundle",
+      "label": "Private source bundle",
+      "fieldtype": "Link",
+      "options": "File",
+      "description": "Optional cross-site export bundle. Leave empty for a same-site import."
+    },
+    {
+      "fieldname": "bundle_sha256",
+      "label": "Pinned bundle checksum",
+      "fieldtype": "Data",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1
+    }
+  ],
+  "track_changes": 1
+}

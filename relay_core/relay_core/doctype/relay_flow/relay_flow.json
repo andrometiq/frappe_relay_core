@@ -1,0 +1,107 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Flow",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-FLOW-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "title",
+    "channel",
+    "command",
+    "trigger_key",
+    "execution_user",
+    "business_doctype",
+    "enabled",
+    "nodes",
+    "published_version",
+    "template_button",
+    "button_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "command",
+      "label": "Command",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "trigger_key",
+      "label": "Trigger Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business Doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "nodes",
+      "label": "Nodes",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "reqd": 1
+    },
+    {
+      "fieldname": "published_version",
+      "label": "Published Version",
+      "fieldtype": "Link",
+      "options": "Relay Flow Version",
+      "read_only": 1
+    },
+    {
+      "fieldname": "template_button",
+      "label": "Template Button Payload",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "button_key",
+      "label": "Button Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

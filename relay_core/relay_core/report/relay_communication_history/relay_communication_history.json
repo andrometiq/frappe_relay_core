@@ -1,0 +1,22 @@
+{
+  "doctype": "Report",
+  "name": "Relay Communication History",
+  "report_name": "Relay Communication History",
+  "ref_doctype": "Relay Message",
+  "report_type": "Script Report",
+  "is_standard": "Yes",
+  "module": "Relay Core",
+  "prepared_report": 1,
+  "timeout": 1500,
+  "roles": [
+    {
+      "role": "System Manager"
+    },
+    {
+      "role": "Relay Communication Manager"
+    },
+    {
+      "role": "Relay Communication User"
+    }
+  ]
+}

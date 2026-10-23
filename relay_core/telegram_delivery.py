@@ -1,0 +1,87 @@
+"""Durable Telegram group delivery using the shared action recovery journal."""
+import hashlib
+import json
+import re
+import frappe
+from relay_core import messaging, whatsapp
+from relay_core.hub import HubError
+from relay_core.settings import value as connection_value
+from relay_core.permissions import readable_contact
+from relay_core.automation.service import internal_save
+
+
+def target(doc):
+    intent=messaging.object_value(doc.payload)['group']
+    channel=frappe.get_doc('Relay Channel',doc.target_channel)
+    channel.check_permission('read');readable_contact(doc.start_contact)
+    chat_id=intent['chat_id']
+    key=hashlib.sha256((channel.name+':'+str(chat_id)).encode()).hexdigest()
+    contact=frappe.db.get_value('Relay Contact Endpoint',{'endpoint_key':key,'verified':1},'relay_contact')
+    if (not channel.enabled or channel.channel!='Telegram' or channel.account!=connection_value('relay_hub_account')
+            or contact!=doc.start_contact):
+        frappe.throw('Telegram destination is no longer available',frappe.PermissionError)
+    context={'provider':'Telegram','chat_id':chat_id}
+    if intent.get('message_thread_id'):context['message_thread_id']=intent['message_thread_id']
+    source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=str(chat_id))
+    return source,channel,context
+
+
+def send_group(contact,channel,chat_id,text,reply_to,thread,request_key):
+    if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}',request_key):
+        raise ValueError('A stable request key is required')
+    intent={'chat_id':chat_id,'text':text,'reply_to':reply_to,'message_thread_id':thread}
+    digest=hashlib.sha256(json.dumps([channel,contact,intent],sort_keys=True).encode()).hexdigest()
+    key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
+    existing=frappe.db.get_value('Relay Message Action',{'request_key':key},['name','payload_hash'],as_dict=True)
+    if existing:
+        if existing.payload_hash!=digest:raise ValueError('Request key already belongs to different content')
+        return messaging.reconcile(existing.name)
+    content={'kind':'text','text':text}
+    args={'operation':'text',**intent}
+    payload={'group':intent,'tool':'telegram.message','arguments':args,'content':content}
+    action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'payload_hash':digest,
+        'operation':'text','start_contact':contact,'target_channel':channel,'preview':text[:300],
+        'payload':json.dumps(payload),'status':'Dispatching'})
+    source,channel_doc,context=target(action)
+    internal_save(action,new=True);frappe.db.commit()
+    try:
+        source,channel_doc,context=target(action)
+    except (frappe.PermissionError,frappe.DoesNotExistError):
+        action.status='Rejected';internal_save(action);frappe.db.commit();raise
+    try:
+        result=whatsapp.client().call_tool('telegram.message',dict(args,request_key=key))
+    except Exception as exc:
+        return messaging.record_submission_error(action, exc)
+    return messaging.finish(action,source,channel_doc,context,content,result)
+
+
+@frappe.whitelist(methods=['GET'])
+def pending(endpoint, before=None):
+    """Restore only the caller's actions for a currently verified group."""
+    from relay_core.permissions import require_access
+    require_access();messaging.validate_reference(endpoint,'CE')
+    if before:messaging.validate_reference(before,'MA')
+    binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
+    if not binding.verified or not re.fullmatch(r'-[0-9]{1,16}',binding.endpoint or ''):
+        frappe.throw('Select a verified Telegram group',frappe.PermissionError)
+    chat_id=int(binding.endpoint)
+    target(frappe._dict(start_contact=binding.relay_contact,target_channel=binding.channel,
+        payload={'group':{'chat_id':chat_id}}))
+    filters={'owner':frappe.session.user,'start_contact':binding.relay_contact,'target_channel':binding.channel,
+        'status':['in',['Dispatching','Queued','Uncertain','Rejected']]}
+    if before:filters['name']=['<',before]
+    rows=frappe.get_all('Relay Message Action',filters=filters,
+        fields=['name','status','payload','result','creation'],order_by='name desc',limit_page_length=51)
+    # A retried failure remains in the audit journal, but the pending panel
+    # follows its child action. Resolve at most one page in one indexed query.
+    retry_keys={row.name:hashlib.sha256((frappe.session.user+':'+messaging.retry_key(row.name)).encode()).hexdigest()
+        for row in rows[:50] if row.status=='Rejected'}
+    retried=set(frappe.get_all('Relay Message Action',filters={'owner':frappe.session.user,
+        'request_key':['in',list(retry_keys.values())]},pluck='request_key',limit_page_length=50)) if retry_keys else set()
+    items=[]
+    for row in rows[:50]:
+        if retry_keys.get(row.name) in retried:continue
+        intent=messaging.object_value(row.payload).get('group')
+        if not isinstance(intent,dict) or intent.get('chat_id')!=chat_id:continue
+        items.append({'action':row.name,'status':row.status,'args':intent,'error':messaging.action_error(row),'creation':row.creation})
+    return {'items':items,'next':rows[49].name if len(rows)>50 else None}

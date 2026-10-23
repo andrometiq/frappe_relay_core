@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="{{ lang or 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Relay Core</title>
+  {% for stylesheet in relay_styles %}<link rel="stylesheet" href="{{ stylesheet | e }}">{% endfor %}
+</head>
+<body>
+  <div id="app" data-csrf="{{ relay_csrf | e }}" data-user="{{ relay_user | e }}" data-site="{{ relay_site | e }}" data-socket-port="{{ relay_socket_port | e }}"></div>
+  <script type="module" src="{{ relay_script | e }}"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Provider",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIP-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "provider",
+    "model",
+    "api_key",
+    "enabled"
+  ],
+  "fields": [
+    {
+      "fieldname": "provider",
+      "label": "Provider",
+      "fieldtype": "Select",
+      "options": "OpenRouter\nGemini\nAnthropic\nGLM\nOpenAI",
+      "reqd": 1
+    },
+    {
+      "fieldname": "model",
+      "label": "Model",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "api_key",
+      "label": "Api Key",
+      "fieldtype": "Password",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    }
+  ]
+}

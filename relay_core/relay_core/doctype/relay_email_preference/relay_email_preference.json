@@ -1,0 +1,52 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Email Preference",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:user",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "field_order": [
+    "user",
+    "signature"
+  ],
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "set_only_once": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "signature",
+      "label": "Signature",
+      "fieldtype": "Small Text"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1
+    }
+  ]
+}

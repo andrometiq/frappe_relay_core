@@ -1,0 +1,22 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Ticket Message",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "field_order": [
+    "message"
+  ],
+  "fields": [
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1
+    }
+  ],
+  "istable": 1,
+  "permissions": [],
+  "autoname": "RELAY-TKM-.##########",
+  "naming_rule": "Expression (old style)"
+}

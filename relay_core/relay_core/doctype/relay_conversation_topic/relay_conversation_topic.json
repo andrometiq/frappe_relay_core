@@ -1,0 +1,89 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Conversation Topic",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TOP-.##########",
+  "field_order": [
+    "topic_key",
+    "relay_contact",
+    "title",
+    "summary",
+    "category",
+    "status",
+    "source",
+    "human_edited",
+    "messages",
+    "attributes"
+  ],
+  "fields": [
+    {
+      "fieldname": "topic_key",
+      "label": "Topic Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay Contact",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "summary",
+      "label": "Summary",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "category",
+      "label": "Category",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Open\nWaiting\nResolved\nArchived"
+    },
+    {
+      "fieldname": "source",
+      "label": "Source",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Manual\nFlow\nExternal AI\nImport"
+    },
+    {
+      "fieldname": "human_edited",
+      "label": "Human Edited",
+      "fieldtype": "Check",
+      "read_only": 1
+    },
+    {
+      "fieldname": "messages",
+      "label": "Messages",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "attributes",
+      "label": "Attributes",
+      "fieldtype": "JSON",
+      "read_only": 1
+    }
+  ],
+  "permissions": []
+}

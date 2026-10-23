@@ -1,5 +1,9 @@
 # Core UI — workspace views
 
+> Historical checkpoint. For current behavior, use the [documentation index](README.md)
+> and [support status](implementation-status.md). Counts and pending items below
+> describe the original checkpoint, not the latest working tree.
+
 Added Dashboard, searchable/category-filtered Contacts, personal folders, Important and Unread filtering, campaign draft forms and canned replies to the existing Inbox, Teams and Flow editor. Selecting an unread conversation clears its local badge. Canned replies can be inserted into a matching-channel reply composer. Campaign drafts validate channel-compatible contacts. Saved drafts survive view changes.
 
 All Core data here remains sample/in-memory and resets on reload. No server permissions, durable user read-state or AI summarization is claimed. Exact reader avatars, viewport resume, multi-business-link expansion, full visual flow authoring, templates, channel settings, full Frappe layouts and child tables remain future work.

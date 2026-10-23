@@ -1,6 +1,6 @@
 <script setup>
 import {ref,computed,watch,nextTick} from 'vue'
-import {Button} from 'frappe-ui'
+import {Button} from '@relay/ui'
 const props=defineProps({messages:{type:Array,default:()=>[]},conversation:String})
 const viewport=ref(null), end=ref(0), expanded=ref(new Set()), positions=new Map()
 let shifting=false

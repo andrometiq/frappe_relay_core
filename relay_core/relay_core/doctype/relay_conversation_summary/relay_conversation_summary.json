@@ -1,0 +1,147 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Conversation Summary",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-SUM-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "relay_contact",
+    "business_doctype",
+    "business_name",
+    "channel",
+    "policy",
+    "policy_version",
+    "requested_by",
+    "period",
+    "status",
+    "request_key",
+    "sources",
+    "input_hash",
+    "result",
+    "reason",
+    "truncated",
+    "attempts",
+    "summary_date"
+  ],
+  "fields": [
+    {
+      "fieldname": "relay_contact",
+      "label": "Conversation",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Dynamic Link",
+      "options": "business_doctype",
+      "read_only": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "policy",
+      "label": "Policy",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Automation Policy"
+    },
+    {
+      "fieldname": "policy_version",
+      "label": "Policy version",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "requested_by",
+      "label": "Requested by",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "period",
+      "label": "Period",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "7\n30\n90\nall\nDaily"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Pending\nRunning\nReady\nFailed"
+    },
+    {
+      "fieldname": "request_key",
+      "label": "Request key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "sources",
+      "label": "Source messages",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "input_hash",
+      "label": "Input hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "result",
+      "label": "Summary",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "reason",
+      "label": "Result note",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "truncated",
+      "label": "Limited context",
+      "fieldtype": "Check",
+      "read_only": 1
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "summary_date",
+      "label": "Summary date",
+      "fieldtype": "Date",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ],
+  "track_changes": 1
+}

@@ -1,0 +1,65 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Telegram Topic",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TGT-.##########",
+  "field_order": [
+    "topic_key",
+    "channel",
+    "chat_id",
+    "thread_id",
+    "title",
+    "state",
+    "last_event_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "topic_key",
+      "label": "Topic Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel"
+    },
+    {
+      "fieldname": "chat_id",
+      "label": "Chat ID",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "thread_id",
+      "label": "Thread ID",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "state",
+      "label": "State",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Open\nClosed\nHidden\nDeleted"
+    },
+    {
+      "fieldname": "last_event_at",
+      "label": "Last Event At",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    }
+  ],
+  "permissions": []
+}

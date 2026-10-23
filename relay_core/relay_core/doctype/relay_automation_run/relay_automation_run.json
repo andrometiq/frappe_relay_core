@@ -1,0 +1,156 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Automation Run",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AR-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "field_order": [
+    "event_key",
+    "message",
+    "policy",
+    "policy_version",
+    "execution_user",
+    "status",
+    "lease_until",
+    "fence",
+    "attempts",
+    "decision",
+    "reason",
+    "ticket",
+    "generation",
+    "message_hash",
+    "transcript",
+    "report_scope",
+    "transcript_metadata"
+  ],
+  "fields": [
+    {
+      "fieldname": "event_key",
+      "label": "Event Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "message",
+      "label": "Message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy",
+      "label": "Policy",
+      "fieldtype": "Link",
+      "options": "Relay Automation Policy",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy_version",
+      "label": "Policy Version",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nDeciding\nCompleted\nHandoff\nShadow\nCancelled",
+      "default": "Pending"
+    },
+    {
+      "fieldname": "lease_until",
+      "label": "Lease Until",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "fence",
+      "label": "Fence",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "attempts",
+      "label": "Attempts",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "decision",
+      "label": "Decision",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "reason",
+      "label": "Reason",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "ticket",
+      "label": "Ticket",
+      "fieldtype": "Link",
+      "options": "Relay Ticket"
+    },
+    {
+      "fieldname": "generation",
+      "label": "Generation",
+      "fieldtype": "Int",
+      "default": 0
+    },
+    {
+      "fieldname": "message_hash",
+      "label": "Source message hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "transcript",
+      "label": "Transcript",
+      "fieldtype": "Long Text",
+      "read_only": 1,
+      "permlevel": 1
+    },
+    {
+      "fieldname": "report_scope",
+      "label": "Report scope",
+      "fieldtype": "JSON",
+      "read_only": 1,
+      "permlevel": 1
+    },
+    {
+      "fieldname": "transcript_metadata",
+      "label": "Transcript provenance",
+      "fieldtype": "JSON",
+      "read_only": 1,
+      "permlevel": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 0
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    },
+    {
+      "role": "System Manager",
+      "permlevel": 1,
+      "read": 1,
+      "write": 1
+    }
+  ]
+}

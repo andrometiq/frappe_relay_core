@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relay TGS simulation</title></head>
+<body style="margin:16px"><div id="app"></div>
+<script type="module">
+import { createApp, ref, h } from 'vue'
+import TgsSticker from '../../src/components/TgsSticker.vue'
+createApp({
+ setup() {
+  const show = ref(true)
+  return () => h('div', [
+    h('button', { onClick: () => { show.value = !show.value } }, 'Toggle sticker'),
+    show.value ? h(TgsSticker, { source: '/api/method/relay_core.messaging.sticker?message=RELAY-MSG-TGS-TEST' }) : null,
+    h('div', { style: 'height:2200px' }, 'Scroll fixture'),
+  ])
+ },
+}).mount('#app')
+</script></body></html>

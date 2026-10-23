@@ -1,0 +1,63 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Contact Type",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:business_doctype",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "field_order": [
+    "business_doctype",
+    "enabled",
+    "label",
+    "grouping_field"
+  ],
+  "fields": [
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "set_only_once": 1,
+      "in_list_view": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": 1
+    },
+    {
+      "fieldname": "label",
+      "label": "Label",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "grouping_field",
+      "label": "Grouping Field",
+      "fieldtype": "Autocomplete",
+      "description": "Choose a field from the business document to group the inbox. Leave blank to show all records."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1
+    }
+  ]
+}

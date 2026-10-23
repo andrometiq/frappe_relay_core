@@ -1,0 +1,102 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Case",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CASE-.##########",
+  "track_changes": 1,
+  "field_order": [
+    "request_key",
+    "case_type",
+    "relay_contact",
+    "title",
+    "priority",
+    "stage",
+    "state",
+    "definition",
+    "field_values",
+    "source_flow",
+    "closed_at",
+    "intent_hash",
+    "assigned_to"
+  ],
+  "fields": [
+    {
+      "fieldname": "request_key",
+      "label": "Request Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "case_type",
+      "label": "Case Type",
+      "fieldtype": "Link",
+      "options": "Relay Case Type",
+      "reqd": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay Contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "priority",
+      "label": "Priority",
+      "fieldtype": "Select",
+      "options": "Low\nNormal\nHigh\nCritical"
+    },
+    {
+      "fieldname": "stage",
+      "label": "Stage",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "state",
+      "label": "State",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "definition",
+      "label": "Definition",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "field_values",
+      "label": "Field Values",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "source_flow",
+      "label": "Source Flow",
+      "fieldtype": "Link",
+      "options": "Relay Flow Run"
+    },
+    {
+      "fieldname": "closed_at",
+      "label": "Closed At",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "intent_hash",
+      "label": "Intent Hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "assigned_to",
+      "label": "Assigned To",
+      "fieldtype": "Link",
+      "options": "User"
+    }
+  ],
+  "permissions": []
+}

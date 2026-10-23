@@ -1,0 +1,44 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Team",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-TEAM-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Team name",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "members",
+      "label": "Members",
+      "fieldtype": "Table",
+      "options": "Relay Team Member",
+      "reqd": 1
+    }
+  ],
+  "field_order": [
+    "title",
+    "members"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "track_changes": 1
+}

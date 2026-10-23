@@ -1,0 +1,5 @@
+// Supported rights mirror the Hub's explicit Telegram group-operation allowlists.
+export const memberRights = ['can_send_messages','can_send_audios','can_send_documents','can_send_photos','can_send_videos','can_send_video_notes','can_send_voice_notes','can_send_polls','can_send_other_messages','can_add_web_page_previews','can_react_to_messages','can_edit_tag','can_change_info','can_invite_users','can_pin_messages','can_manage_topics'];
+export const adminRights = ['is_anonymous','can_manage_chat','can_delete_messages','can_manage_video_chats','can_restrict_members','can_promote_members','can_change_info','can_invite_users','can_post_stories','can_edit_stories','can_delete_stories','can_post_messages','can_edit_messages','can_pin_messages','can_manage_topics','can_manage_direct_messages','can_manage_tags','can_send_welcome_messages'];
+export function permissionValues(keys, source = {}) { return Object.fromEntries(keys.map(key => [key, source?.[key] === true])); }
+export function permissionLabel(key) { const text = key.replace(/^can_/, '').replace(/^is_/, '').replaceAll('_',' ');return text[0].toUpperCase()+text.slice(1); }

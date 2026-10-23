@@ -1,0 +1,108 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Conversation State",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CS-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "state_key",
+      "label": "State key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "last_read",
+      "label": "Last read message",
+      "fieldtype": "Link",
+      "options": "Relay Message"
+    },
+    {
+      "fieldname": "starred",
+      "label": "Starred",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "folder",
+      "label": "Folder",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "last_seen",
+      "label": "Last seen",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "exact_reads",
+      "label": "Track exact message reads",
+      "fieldtype": "Check",
+      "read_only": 1
+    },
+    {
+      "fieldname": "read_baseline",
+      "label": "Previous read cursor",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "chat_views",
+      "label": "Chat view positions",
+      "fieldtype": "JSON",
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "state_key",
+    "user",
+    "relay_contact",
+    "last_read",
+    "starred",
+    "folder",
+    "last_seen",
+    "exact_reads",
+    "read_baseline",
+    "chat_views"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "Relay Communication User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "if_owner": 1
+    }
+  ],
+  "track_changes": 1
+}

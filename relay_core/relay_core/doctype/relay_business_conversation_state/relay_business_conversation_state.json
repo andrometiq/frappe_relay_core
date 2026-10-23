@@ -1,0 +1,75 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Conversation State",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-BCS-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "state_key",
+      "label": "State key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Dynamic Link",
+      "options": "business_doctype",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_read",
+      "label": "Last read message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_seen",
+      "label": "Last seen",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "chat_view",
+      "label": "Chat view position",
+      "fieldtype": "JSON",
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "state_key",
+    "user",
+    "business_doctype",
+    "business_name",
+    "last_read",
+    "last_seen",
+    "chat_view"
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1},
+    {"role": "Relay Communication Manager", "read": 1},
+    {"role": "Relay Communication User", "read": 1, "if_owner": 1}
+  ]
+}

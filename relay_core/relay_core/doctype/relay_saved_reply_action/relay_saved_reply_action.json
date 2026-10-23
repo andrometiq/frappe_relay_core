@@ -1,0 +1,64 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Saved Reply Action",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-SRA-.##########",
+  "fields": [
+    {
+      "fieldname": "request_key",
+      "label": "Request Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "reply",
+      "label": "Reply",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "reqd": 1,
+      "options": "Relay Canned Reply"
+    },
+    {
+      "fieldname": "source_message",
+      "label": "Source Message",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "reqd": 1,
+      "options": "Relay Message"
+    },
+    {
+      "fieldname": "actor",
+      "label": "Actor",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "reqd": 1,
+      "options": "User"
+    },
+    {
+      "fieldname": "input_hash",
+      "label": "Input Hash",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "result",
+      "label": "Result",
+      "fieldtype": "Long Text",
+      "read_only": 1,
+      "reqd": 1
+    }
+  ],
+  "field_order": [
+    "request_key",
+    "reply",
+    "source_message",
+    "actor",
+    "input_hash",
+    "result"
+  ],
+  "permissions": []
+}

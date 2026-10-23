@@ -1,0 +1,61 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Learned Procedure",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-PROC-.##########",
+  "naming_rule": "Expression (old style)",
+  "field_order": [
+    "title",
+    "policy",
+    "source_message",
+    "instructions",
+    "examples",
+    "published_version"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "policy",
+      "label": "Policy",
+      "fieldtype": "Link",
+      "options": "Relay Automation Policy",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_message",
+      "label": "Source Message",
+      "fieldtype": "Link",
+      "options": "Relay Message"
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "examples",
+      "label": "Examples",
+      "fieldtype": "JSON",
+      "reqd": 1
+    },
+    {
+      "fieldname": "published_version",
+      "label": "Published Version",
+      "fieldtype": "Link",
+      "options": "Relay Procedure Version"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    }
+  ]
+}
