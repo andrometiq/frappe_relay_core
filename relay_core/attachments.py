@@ -51,15 +51,24 @@ def archived_attachment(message,download=0):
     from relay_core.permissions import require_access, readable_contact
     require_access();messaging.validate_reference(message,'MSG')
     source=frappe.get_doc('Relay Message',message);source.check_permission('read')
-    readable_contact(source.relay_contact)
+    if source.get('legacy_triage'): require_access(configure=True)
+    else: readable_contact(source.relay_contact)
     frappe.get_doc('Relay Channel',source.channel).check_permission('read')
     if not source.get('legacy_source'):return None
     data=messaging.object_value(source.message_data or {})
     if not data.get('attachment') or data.get('attachment_source')!=source.name:
         frappe.throw('This historical attachment was not available locally during import')
-    file,raw=file_content(data['attachment'],source)
+    file=frappe.get_doc('File',data['attachment'])
+    if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
+        frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
+    file.check_permission('read')
+    from relay_core.legacy_media import source_file, CHUNK
+    def chunks():
+        with source_file(file) as stream:
+            while chunk := stream.read(CHUNK):
+                yield chunk
     import mimetypes
-    return response(raw,mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
+    return response(chunks(),mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
 
 
 @frappe.whitelist(methods=['GET'])
