@@ -160,8 +160,7 @@
     {
       "fieldname": "business_name",
       "label": "Business Record",
-      "fieldtype": "Dynamic Link",
-      "options": "business_doctype",
+      "fieldtype": "Data",
       "read_only": 1,
       "search_index": 1
     }
