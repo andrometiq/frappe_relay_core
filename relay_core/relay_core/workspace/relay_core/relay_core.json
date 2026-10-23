@@ -10,42 +10,37 @@
  "is_hidden": 0,
  "icon": "message",
  "sequence_id": 25,
- "content": "[{\"id\":\"relay-shortcut-0\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Open Relay\",\"col\":3}},{\"id\":\"relay-shortcut-1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Tickets\",\"col\":3}},{\"id\":\"relay-shortcut-flow-viewer\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Workflow viewer\",\"col\":3}},{\"id\":\"relay-shortcut-3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"AI Automation\",\"col\":3}},{\"id\":\"relay-shortcut-4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Reports\",\"col\":3}},{\"id\":\"relay-shortcut-5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Reviewed Learning\",\"col\":3}},{\"id\":\"relay-shortcut-6\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Relay Settings\",\"col\":3}},{\"id\":\"relay-records\",\"type\":\"card\",\"data\":{\"card_name\":\"Relay records\",\"col\":6}},{\"id\":\"relay-admin\",\"type\":\"card\",\"data\":{\"card_name\":\"Administration\",\"col\":6}}]",
+ "content": "[{\"id\":\"relay-shortcut-messages\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Inbox\",\"col\":4}},{\"id\":\"relay-shortcut-contacts\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Contacts & links\",\"col\":4}},{\"id\":\"relay-shortcut-whatsapp\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Templates\",\"col\":4}},{\"id\":\"relay-shortcut-teams\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Teams & access\",\"col\":4}},{\"id\":\"relay-shortcut-settings\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Settings & setup\",\"col\":4}},{\"id\":\"relay-shortcut-activity\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Activity & health\",\"col\":4}},{\"id\":\"relay-records\",\"type\":\"card\",\"data\":{\"card_name\":\"Relay records\",\"col\":6}},{\"id\":\"relay-admin\",\"type\":\"card\",\"data\":{\"card_name\":\"Administration\",\"col\":6}}]",
  "shortcuts": [
   {
-   "label": "Open Relay",
+   "label": "Inbox",
    "type": "URL",
    "url": "/relay#/messages"
   },
   {
-   "label": "Tickets",
+   "label": "Contacts & links",
    "type": "URL",
-   "url": "/relay#/tickets"
+   "url": "/relay#/contacts"
   },
   {
-   "label": "Workflow viewer",
+   "label": "Templates",
    "type": "URL",
-   "url": "/relay#/flows"
+   "url": "/relay#/whatsapp"
   },
   {
-   "label": "AI Automation",
+   "label": "Teams & access",
    "type": "URL",
-   "url": "/relay#/automation"
+   "url": "/relay#/teams"
   },
   {
-   "label": "Reports",
+   "label": "Settings & setup",
    "type": "URL",
-   "url": "/relay#/reports"
+   "url": "/relay#/settings"
   },
   {
-   "label": "Reviewed Learning",
+   "label": "Activity & health",
    "type": "URL",
-   "url": "/relay#/learning"
-  },
-  {
-   "label": "Relay Settings",
-   "type": "DocType",
-   "link_to": "Relay Settings"
+   "url": "/relay#/activity"
   }
  ],
  "links": [
@@ -68,20 +63,8 @@
   {
    "type": "Link",
    "link_type": "DocType",
-   "link_to": "Relay Ticket",
-   "label": "Ticket"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
    "link_to": "Relay Team",
    "label": "Team"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
-   "link_to": "Relay Learned Procedure",
-   "label": "Learned Procedure"
   },
   {
    "type": "Card Break",
@@ -114,32 +97,8 @@
   {
    "type": "Link",
    "link_type": "DocType",
-   "link_to": "Relay AI Provider",
-   "label": "AI Provider"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
-   "link_to": "Relay Automation Policy",
-   "label": "Automation Policy"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
    "link_to": "Relay Canned Reply",
    "label": "Canned Reply"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
-   "link_to": "Relay Email Rule",
-   "label": "Email Rule"
-  },
-  {
-   "type": "Link",
-   "link_type": "DocType",
-   "link_to": "Relay Legacy Import",
-   "label": "Legacy history import"
   }
  ],
  "roles": [

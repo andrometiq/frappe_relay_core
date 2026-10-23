@@ -34,7 +34,7 @@ async function run(fn) {
 }
 async function load(after) {
   const result = await coreApi("enrollment.pending", { after });
-  rows.value = result.items;
+  rows.value = result.items.filter(row => row.configuration_required || row.medium === 'WhatsApp');
   next.value = result.next;
 }
 async function search() {
@@ -87,6 +87,7 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
     </header>
     <ErrorMessage :message="error" />
     <p v-if="notice" role="status">{{ notice }}</p>
+    <p v-if="busy" role="status">Loading / linking senders…</p>
     <div class="incoming-grid">
       <div>
         <article v-for="(row, index) in rows" :key="row.event + ':' + index">
@@ -115,6 +116,7 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
         />
       </div>
       <form v-if="selected" @submit.prevent="bind">
+        <ErrorMessage :message="error" />
         <h3>Link {{ selected.endpoint }}</h3>
         <p>
           Choose the business contact that owns this

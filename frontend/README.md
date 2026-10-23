@@ -1,58 +1,54 @@
 # Relay Core frontend
 
-Vue 3 with PrimeVue unstyled components behind Relay-owned wrappers. This directory contains both design previews
-and workspaces that call the installed Core backend.
+Vue 3, PrimeVue unstyled, Tailwind and the local `@relay/ui` wrappers. Both entry
+points mount the same connected WhatsApp v1 application. There are no sample
+screens or simulated save/send actions in the application.
 
-## Installed workspace
+## Screens
 
-Run `npm ci` and `npm run build:site`, then restart the site's Frappe web workers.
-Open `/relay` on the installed site. This entry includes only Messages, WhatsApp,
-Automation, and Settings and uses standard Frappe login and CSRF protection.
-The build goes to `relay_core/public/relay`; it is ignored by Git and rebuilt for
-each deployment. See [installation](../docs/core-installation.md).
+| Route | Contents |
+| --- | --- |
+| `/relay#/messages` | All/Mine/Unread/Unassigned queues, manager Unlinked link, business directory, recipient and sending number, history/search, attachments, reply window, approved templates, notes, assignment and reviewed retries |
+| `/relay#/contacts` | Frappe Contact search, WhatsApp endpoint validity/binding timestamps, permitted business links and manager sender triage (`?tab=unlinked`) |
+| `/relay#/whatsapp` | Template list, language/category/status filters, detail/preview, rejection reason, manager editor and socket status updates |
+| `/relay#/teams` | Communication teams/members, separate business responsibility groups, role explanations and Frappe permission links |
+| `/relay#/settings` | Setup checklist, saved connection verification, callback-secret readiness, account/number readback, channel/business-type configuration links and saved replies |
+| `/relay#/activity` | Manager delivery controls, uncertain outcomes, failed-message links, callback/projection receipt status, recovery and socket health |
 
-## Build and preview
+The sidebar stays visible above 640px. Mobile uses a compact header and keyboard
+accessible drawer. Connection status and notifications remain visible on both.
+Template tables become labeled cards on mobile. Existing theme tokens are used.
 
-From this directory:
+## Build and test
+
+In this worktree, `node_modules` is a shared symlink. Do not install packages or
+modify it. With the existing dependencies:
 
 ```sh
-npm ci
+node --test frontend/tests/*.test.mjs frontend/tests/*.test.js
+cd frontend
 npm run build
-npm run preview -- --port 18082
+npm run build:site
 ```
 
-Open the URL printed by Vite. The preview binds to loopback by default.
-`npm ci` uses the committed dependency lockfile. Do not put Hub/provider tokens
-in frontend environment variables.
+The site build writes only `relay_core/public/relay` within this repository.
+Generated assets are ignored. The standalone build needs same-origin Frappe
+APIs and an authenticated session; it does not fabricate successful requests.
 
-## Views
+`tests/browser/v1Acceptance.mjs` exports an acceptance function taking an existing
+Playwright browser and a Vite origin. It intercepts all APIs with local-only
+fixtures and exercises all six screens, five viewport widths, recipient resets,
+rejected-send retry, inline errors, empty lists and business-group deep links.
+It also checks unread refresh after reads, mixed-contact read/note ownership,
+send-dialog navigation, repeated notification note links, business-context resets
+and dialog/menu touch targets on mobile and desktop.
+It does not establish installed-site or provider acceptance.
 
-| View | Data source |
-| --- | --- |
-| Messages | Same-origin Core contacts/history/typed-send/sticker APIs |
-| Automation | Same-origin Core automation APIs |
-| WhatsApp tools | Core's permission-checked WhatsApp operations |
-| Sample Inbox, dashboard, folders, team forms, flow diagram | Design-preview data and state |
+Realtime invalidation uses the existing Socket.IO transport, including Frappe
+list updates. No polling has been added. Recovery timers and reply-window expiry
+are local state/timing controls, not polling loops.
 
-Core uses the host Frappe site's login. The standalone Vite preview has no
-Frappe session/backend of its own; connected views should show an unavailable
-or permission error there, rather than fabricated success.
-
-Messages retain a bounded history window and render typed content with shared
-components. Telegram TGS rendering is loaded on demand and has resource limits.
-See [message behavior](../docs/messaging.md) and
-[current limitations](../docs/implementation-status.md).
-
-## Components and tests
-
-`DocumentForm` composes individual fields. `RelayForm`, `RelaySelect`,
-`RelayTable`, and paging/virtual-row components provide reusable building blocks.
-`MessageContent` renders a stored typed message. `TgsSticker` owns animated
-sticker loading and cleanup.
-
-Run `node --test frontend/tests/*.test.mjs` from the repository root. Browser
-fixtures under `tests/browser/` exercise the built components with synthetic
-data. See the [testing guide](../docs/testing.md).
-
-Production integration must serve connected views with the site's authenticated
-API and CSRF behavior. A preview build alone is not that integration.
+See [v1 validation and remaining gaps](../docs/v1-ui-validation.md). Do not call a
+change ready for developer testing until the orchestrator installs this worktree
+on the exact isolated site, builds there, applies approved workspace migration,
+reloads backend processes and verifies real local records through the site.
