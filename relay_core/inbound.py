@@ -12,10 +12,13 @@ from relay_core.settings import value as connection_value
 callback_write = ContextVar('relay_authenticated_callback', default=False)
 
 
-def insert_event(values):
+def insert_event(values, *, inline=False, received_ns=None):
     token = callback_write.set(True)
     try:
-        return frappe.get_doc(dict(values, doctype='Relay Hub Event')).insert(ignore_permissions=True)
+        doc = frappe.get_doc(dict(values, doctype='Relay Hub Event'))
+        doc.flags.relay_inline_projection = inline
+        doc.flags.relay_received_ns = received_ns
+        return doc.insert(ignore_permissions=True)
     finally:
         callback_write.reset(token)
 
@@ -53,6 +56,8 @@ def validate_callback(raw, timestamp, signature, secret, expected_account):
 
 @frappe.whitelist(methods=['POST'])
 def receive(**_ignored):
+    started = time.time_ns()
+    projection_ms = 0
     if not {'System Manager', 'Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
         frappe.throw('Not permitted', frappe.PermissionError)
     try:
@@ -82,11 +87,33 @@ def receive(**_ignored):
                 if json.loads(existing.payload) != part:
                     frappe.throw('Conflicting Hub event')
                 continue
-            insert_event({'event_key':part_key,'account':account,'hub_event_id':str(event['id']),'payload':encoded})
+            doc = insert_event({'event_key':part_key,'account':account,'hub_event_id':str(event['id']),'payload':encoded},
+                inline=len(payload['events']) == 1 and single_text(part), received_ns=started)
+            projection_ms += doc.flags.get('relay_projection_ms', 0)
     # Frappe commits successful POST methods before returning the acknowledgement.
     # Per-user notifications avoid broadcasting event contents to all site users.
     frappe.publish_realtime('relay_events_available', {'account': account}, user=frappe.session.user, after_commit=True)
-    return {'accepted': len(payload['events'])}
+    return {'accepted': len(payload['events']), 'timing': {
+        'receive_ms': (time.time_ns() - started) / 1e6, 'inline_projection_ms': projection_ms}}
+
+
+def single_text(payload):
+    """Only a small, unmixed WhatsApp text envelope can bypass the worker."""
+    try:
+        if payload.get('channel', 'WhatsApp') != 'WhatsApp' or len(payload['entry']) != 1:
+            return False
+        changes = payload['entry'][0]['changes']
+        if len(changes) != 1 or changes[0].get('field', 'messages') != 'messages':
+            return False
+        value = changes[0]['value']
+        if set(value) - {'metadata', 'messaging_product', 'contacts', 'messages'}:
+            return False
+        messages = value['messages']
+        return (len(messages) == 1 and messages[0].get('type') == 'text'
+                and isinstance(messages[0]['text']['body'], str)
+                and len(json.dumps(payload).encode()) <= 16384)
+    except (KeyError, TypeError, AttributeError):
+        return False
 
 
 def validate_status_callback(raw, timestamp, signature, secret, expected_account):
@@ -126,6 +153,7 @@ def validate_status_callback(raw, timestamp, signature, secret, expected_account
 @frappe.whitelist(methods=['POST'])
 def receive_statuses(**_ignored):
     """Durably accept a bounded compact receipt batch for background projection."""
+    started = time.time_ns()
     if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
         frappe.throw('Not permitted',frappe.PermissionError)
     try:
@@ -149,8 +177,8 @@ def receive_statuses(**_ignored):
         projection = {'entry':[{'changes':[{'value':{'statuses':statuses}}]}]}
         insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,
             'hub_event_id':str(payload['statuses'][-1]['event_id']),
-            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))})
-    return {'accepted':len(payload['statuses'])}
+            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))}, received_ns=started)
+    return {'accepted':len(payload['statuses']), 'timing': {'receive_ms': (time.time_ns() - started) / 1e6}}
 
 
 def validate_channel_status_callback(raw, timestamp, signature, secret, expected_account):

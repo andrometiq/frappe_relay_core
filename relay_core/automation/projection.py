@@ -1,6 +1,8 @@
 """Verified Hub events -> bounded, deduplicated Core message projection."""
 import hashlib
 import json
+import time
+from datetime import timezone
 import frappe
 from relay_core.automation.provenance import conversation_key, telegram_message
 from relay_core.message_types import normalize, preview
@@ -144,12 +146,44 @@ def project(name, business_overrides=None):
 
 
 def on_event(doc, method=None):
-    frappe.enqueue('relay_core.automation.projection.project', name=doc.name, queue=projection_queue(doc.payload), enqueue_after_commit=True)
+    if doc.flags.get('relay_inline_projection'):
+        started = time.perf_counter_ns()
+        project(doc.name)
+        doc.flags.relay_projection_ms = (time.perf_counter_ns() - started) / 1e6
+        return
+    frappe.db.after_commit.add(lambda: enqueue_projection(doc.name, doc.payload, doc.flags.get('relay_received_ns')))
+
+
+def enqueue_projection(name, payload, received_ns=None):
+    frappe.enqueue('relay_core.automation.projection.project_queued', name=name, queue=projection_queue(payload),
+        submitted_ns=time.time_ns(), received_ns=received_ns)
+
+
+def project_queued(name, submitted_ns, received_ns=None):
+    from rq import get_current_job
+    started = time.time_ns()
+    monotonic = time.monotonic_ns()
+    job = get_current_job()
+    project(name)
+    if job:
+        def completed():
+            finished = time.monotonic_ns()
+            timing = {'projection_ms': (finished - monotonic) / 1e6,
+                      'started_ns': monotonic, 'finished_ns': finished,
+                      'receive_to_enqueue_ms': (submitted_ns - received_ns) / 1e6 if received_ns else None}
+            enqueued = job.enqueued_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
+            picked_up = job.started_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
+            timing.update(enqueue_ms=(enqueued - submitted_ns) / 1e6,
+                          queue_wait_ms=(picked_up - enqueued) / 1e6,
+                          worker_setup_ms=(started - picked_up) / 1e6)
+            job.meta['relay_timing'] = timing
+            job.save_meta()
+        frappe.db.after_commit.add(completed)
 
 
 def recover():
     for row in frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name', 'payload'], order_by='modified asc', limit_page_length=20):
-        frappe.enqueue('relay_core.automation.projection.project', name=row.name, queue=projection_queue(row.payload))
+        enqueue_projection(row.name, row.payload)
 
 
 def projection_queue(payload):
