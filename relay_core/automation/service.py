@@ -261,6 +261,8 @@ def dispatch(name):
 
 
 def recover():
+    from relay_core.automation.queue import recover as recover_messages
+    recover_messages()
     if not frappe.conf.get('relay_automation_enabled'):
         return
     # Core owns delivery recovery; the outbox follows its action without resending.
