@@ -53,3 +53,17 @@ def query_condition(user=None):
           WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links')=1))"""
         clauses.append('('+explicit+' OR '+legacy+')')
     return '('+' OR '.join(clauses)+')' if clauses else '1=0'
+
+
+def incoming_reference(contact, channel, endpoint, context):
+    links = candidates(contact)
+    reply = context.get('reply_to_message_id')
+    if reply:
+        from relay_core.message_updates import provider_key
+        target = frappe.db.get_value('Relay Message',
+            {'provider_message_key': provider_key(channel, endpoint, reply), 'relay_contact': contact,
+             'channel': channel, 'sender_endpoint': endpoint},
+            ['business_doctype', 'business_name'], as_dict=True)
+        if target and (target.business_doctype, target.business_name) in links:
+            return target.business_doctype, target.business_name
+    return links[0] if len(links) == 1 else None

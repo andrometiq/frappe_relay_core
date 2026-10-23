@@ -49,13 +49,11 @@
   "permissions": [
     {
       "role": "System Manager",
-      "read": 1,
-      "create": 1
+      "read": 1
     },
     {
       "role": "Relay Hub Service",
-      "read": 1,
-      "create": 1
+      "read": 1
     }
   ],
   "sort_field": "creation",

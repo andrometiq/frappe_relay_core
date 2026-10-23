@@ -32,20 +32,27 @@ def pending(after=None):
             items.append({'event':event.name,'configuration_required':True});continue
         for row in rows:
             key=hashlib.sha256((channel+':'+row['from']).encode()).hexdigest()
-            if frappe.db.exists('Relay Contact Endpoint',{'endpoint_key':key,'verified':1}):continue
+            contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key':key,'verified':1}, 'relay_contact')
+            from relay_core.message_updates import provider_key
+            if frappe.db.exists('Relay Message', {'provider_message_key': provider_key(channel, row['from'], row['id'])}): continue
             data=row.get('message_data') or {};detail=row.get('text') or {}
             items.append({'event':doc.name,'channel':channel,'medium':medium,'provider_id':row['id'],
                           'endpoint':row['from'],'preview':str(data.get('text') or data.get('caption') or detail.get('body') or '['+row.get('type','message')+']')[:300],
-                          'received_at':doc.creation})
+                          'received_at':doc.creation,'contact':contact,'ambiguous':bool(contact)})
     return {'items':items,'next':events[19].name if len(events)>20 else None}
 
 
 @frappe.whitelist(methods=['POST'])
-def bind(event, provider_id, contact):
+def bind(event, provider_id, contact, business_doctype=None, business_name=None):
     require_access(manage=True);readable_contact(contact)
     doc,channel,medium,rows=event_rows(event)
     matches=[row for row in rows if row['id']==provider_id]
     if len(matches)!=1:frappe.throw('Select a sender from the authenticated incoming event')
+    from relay_core.business_access import candidates
+    links = candidates(contact)
+    business = (business_doctype, business_name) if business_doctype or business_name else links[0] if len(links) == 1 else None
+    if business not in links: frappe.throw('Choose a linked business record')
+    frappe.get_doc(*business).check_permission('read')
     endpoint=matches[0]['from'];key=hashlib.sha256((channel+':'+endpoint).encode()).hexdigest()
     with frappe.cache.lock('relay-enroll:'+key,timeout=30):
         existing=frappe.db.get_value('Relay Contact Endpoint',{'endpoint_key':key},['name','relay_contact','verified'],as_dict=True)
@@ -57,5 +64,13 @@ def bind(event, provider_id, contact):
             try:frappe.get_doc(dict(doctype='Relay Contact Endpoint',channel=channel,relay_contact=contact,endpoint=endpoint,verified=1)).insert(ignore_permissions=True)
             finally:frappe.flags.relay_endpoint_enrollment=previous
         # Only project stored history. Existing message hooks retain their configured behavior.
-        project(doc.name);frappe.db.commit()
+        project(doc.name, business_overrides={provider_id: business});frappe.db.commit()
     return {'contact':contact,'event':doc.name,'status':frappe.db.get_value('Relay Hub Event',doc.name,'projection_status')}
+
+
+@frappe.whitelist(methods=['GET'])
+def businesses(contact):
+    require_access(manage=True); readable_contact(contact)
+    from relay_core.business_access import candidates
+    return [{'doctype': dt, 'name': name} for dt, name in candidates(contact)
+            if frappe.get_doc(dt, name).has_permission('read')]

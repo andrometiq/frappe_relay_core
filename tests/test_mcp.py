@@ -10,7 +10,7 @@ class MCPTests(unittest.TestCase):
     def setUp(self):
         self.wa = types.ModuleType('relay_core.whatsapp')
         self.wa.READ={'capabilities'};self.wa.MANAGE={'templates.create'};self.wa.SEND={'messages.send'}
-        for name in ('enqueue','execute','deliveries','business_contacts','conversation'):
+        for name in ('send','execute','deliveries','business_contacts','conversation'):
             setattr(self.wa,name,Mock(return_value={'ok':True}))
         self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn)
         permissions=types.ModuleType('relay_core.permissions');permissions.require_access=Mock()
@@ -19,17 +19,17 @@ class MCPTests(unittest.TestCase):
         with patch.dict(sys.modules,frappe=self.f,**{'relay_core.whatsapp':self.wa,'relay_core.permissions':permissions}),patch.object(relay_core,'whatsapp',self.wa,create=True):
             spec.loader.exec_module(self.api)
 
-    def test_single_and_bulk_use_same_permission_checked_queue(self):
+    def test_single_send_uses_durable_service_and_bulk_is_absent(self):
         message={'key':'stable-1','operation':'messages.send'}
         self.api.dispatch('tools/call',{'name':'relay.messages.send','arguments':{'message':message}})
-        self.wa.enqueue.assert_called_with([message])
-        self.api.dispatch('tools/call',{'name':'relay.messages.bulk','arguments':{'messages':[message]}})
-        self.wa.enqueue.assert_called_with(messages=[message])
+        self.wa.send.assert_called_once_with(message=message)
+        with self.assertRaises(ValueError):
+            self.api.dispatch('tools/call',{'name':'relay.messages.bulk','arguments':{'messages':[message]}})
 
     def test_unknown_tool_and_arguments_are_rejected(self):
         for params in ({'name':'frappe.db.sql','arguments':{}},{'name':'relay.messages.send','arguments':{'message':{},'ignore_permissions':True}}):
             with self.assertRaises(ValueError):self.api.dispatch('tools/call',params)
-        self.wa.enqueue.assert_not_called()
+        self.wa.send.assert_not_called()
 
     def test_service_permission_failure_is_not_bypassed(self):
         self.wa.execute.side_effect=PermissionError('denied')
@@ -86,8 +86,8 @@ class MCPTests(unittest.TestCase):
         self.f.request=types.SimpleNamespace(content_length=300,get_json=lambda:body)
         with patch.dict(sys.modules,**{'werkzeug.wrappers':types.SimpleNamespace(Response=Response)}):
             self.assertEqual(self.api.endpoint().status_code,400)
-            self.wa.enqueue.assert_not_called()
-            body['id']=1;self.wa.enqueue.side_effect=RuntimeError('secret-provider-token')
+            self.wa.send.assert_not_called()
+            body['id']=1;self.wa.send.side_effect=RuntimeError('secret-provider-token')
             result=self.api.endpoint();self.assertNotIn('secret-provider-token',result.body);self.assertIn('error',result.body)
 
     def test_ticket_mcp_uses_service_permission_boundary(self):
@@ -116,8 +116,8 @@ class MCPTests(unittest.TestCase):
         body={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'relay.whatsapp.execute','arguments':{'operation':'groups.photo','arguments':{'id':'group-one','photo_base64':'synthetic'}}}}
         self.f.request=types.SimpleNamespace(content_length=2*1024*1024,get_json=lambda:body)
         with patch.dict(sys.modules,**{'werkzeug.wrappers':types.SimpleNamespace(Response=Response)}):
-            self.assertEqual(self.api.endpoint().status_code,200)
-            self.wa.execute.assert_called_once()
+            self.assertEqual(self.api.endpoint().status_code,413)
+            self.wa.execute.assert_not_called()
             body['params']['arguments']['operation']='templates.create'
             self.assertEqual(self.api.endpoint().status_code,413)
             self.f.request.content_length=7*1024*1024+1

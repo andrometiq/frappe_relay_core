@@ -34,7 +34,7 @@ def project_batch(event, rows):
                     source,channel,context=action_target(action)
                 else:
                     source,channel,context=messaging.readable_source(action.source_message)
-                medium='Telegram' if row['operation']=='telegram.message' else 'Email'
+                medium={'telegram.message':'Telegram','email.send':'Email','whatsapp.execute':'WhatsApp'}[row['operation']]
                 if channel.channel!=medium or channel.account!=event.account:
                     raise ValueError('Status receipt channel mismatch')
                 if medium=='Email':
@@ -45,6 +45,8 @@ def project_batch(event, rows):
                     unresolved=True
                     continue
                 receipt=dict(row['receipt']) if row['state']=='submitted' else {'delivery':{'state':row['state']}}
+                if medium == 'WhatsApp' and row['state'] == 'submitted' and not receipt.get('messages') and receipt.get('message_id'):
+                    receipt['messages'] = [{'id': str(receipt['message_id'])}]
                 receipt['_relay_status_id']=row['id']
                 messaging.finish(action,source,channel,context,content,receipt,commit=False)
             except (frappe.PermissionError,frappe.DoesNotExistError):

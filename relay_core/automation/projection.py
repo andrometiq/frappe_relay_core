@@ -63,7 +63,7 @@ def extract_messages(payload):
     return result
 
 
-def project(name):
+def project(name, business_overrides=None):
     frappe.db.get_value('Relay Hub Event', name, 'name', for_update=True)
     event = frappe.get_doc('Relay Hub Event', name)
     if event.projection_status not in ('Pending', 'Uncategorized', None, ''):
@@ -86,6 +86,8 @@ def project(name):
         frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized'); return
     channel = channels[0]
     try:
+        from relay_core.whatsapp_templates import project as project_templates
+        template_update = project_templates(payload, event) if medium == 'WhatsApp' else False
         incoming = extract_messages(payload)
         update_status = apply_updates(payload, channel, event)
         from relay_core.call_records import ingest as ingest_calls
@@ -103,6 +105,11 @@ def project(name):
         contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
         if not contact:
             unresolved = True; continue
+        from relay_core.business_access import incoming_reference
+        business = (business_overrides or {}).get(row['id']) or incoming_reference(contact, channel, row['from'], context)
+        if not business:
+            unresolved = True
+            continue
         kind = row.get('type', 'unknown')
         detail = row.get(kind, {})
         text = detail.get('body', '') if kind == 'text' and isinstance(detail, dict) else '[Attachment or unsupported message type]'
@@ -115,12 +122,15 @@ def project(name):
             context['original_message_type']=kind;kind='text'
         from relay_core.timeline import provider_time
         frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
+            'business_doctype': business[0], 'business_name': business[1],
             'direction': 'Incoming', 'status': 'Delivered', 'sent_at': provider_time(payload, row), 'content': text, 'sender_endpoint': row['from'], 'source_key': key,
             'provider_id': row['id'], 'message_type': kind,
             'provider_context': json.dumps(context, sort_keys=True),
             'message_data': json.dumps(data, ensure_ascii=False), 'provider_message_key': message_key,
             'conversation_key': conversation_key(channel, row['from'], context)}).insert(ignore_permissions=True)
-    frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or update_status == 'Projected' else 'Ignored')
+    frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or update_status == 'Projected' else 'Ignored')
+    from relay_core.realtime import changed
+    changed(event)
     if medium == 'Telegram':
         from relay_core.telegram_topics import observe
         try:observe(payload, channel)
@@ -128,9 +138,17 @@ def project(name):
 
 
 def on_event(doc, method=None):
-    frappe.enqueue('relay_core.automation.projection.project', name=doc.name, queue='long', enqueue_after_commit=True)
+    frappe.enqueue('relay_core.automation.projection.project', name=doc.name, queue=projection_queue(doc.payload), enqueue_after_commit=True)
 
 
 def recover():
-    for row in frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name'], order_by='modified asc', limit_page_length=20):
-        frappe.enqueue('relay_core.automation.projection.project', name=row.name, queue='long')
+    for row in frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name', 'payload'], order_by='modified asc', limit_page_length=20):
+        frappe.enqueue('relay_core.automation.projection.project', name=row.name, queue=projection_queue(row.payload))
+
+
+def projection_queue(payload):
+    try:
+        payload = json.loads(payload) if isinstance(payload, str) else payload
+        return 'short' if extract_messages(payload) else 'long'
+    except (ValueError, TypeError, AttributeError):
+        return 'long'

@@ -16,7 +16,7 @@ def obj(properties, required=()):
 
 
 STRING = {"type": "string"}
-MESSAGE = obj({"key": STRING, "operation": {"type": "string", "enum": ["messages.send", "messages.media", "messages.react", "messages.location", "messages.contacts", "templates.send", "groups.send", "groups.media", "groups.template", "groups.pin"]},
+MESSAGE = obj({"key": STRING, "operation": {"type": "string", "enum": ["messages.send", "messages.media", "messages.react", "messages.location", "messages.contacts", "templates.send"]},
                "arguments": {"type": "object"}, "contact": STRING, "business_doctype": STRING, "business_name": STRING}, ("key", "operation"))
 TOOLS = [
     {"name":"relay.flows.providers","description":"List configured AI providers available for permission-checked workflow generation.","inputSchema":obj({"query":STRING,"after":STRING})},
@@ -48,8 +48,7 @@ TOOLS = [
     {"name": "relay.tickets.assign", "description": "Assign a ticket to an agent who can read its linked conversations; managers only.", "inputSchema": obj({"name": STRING, "user": STRING}, ("name",))},
     {"name": "relay.tickets.subscribe", "description": "Opt in or out of ticket updates using your own verified email or Telegram endpoint.", "inputSchema": obj({"ticket": STRING, "endpoint": STRING, "enabled": {"type":"integer","enum":[0,1]}}, ("ticket",))},
     {"name": "relay.messages.send", "description": "Queue one message using a stable request key and permission-checked business Contact.", "inputSchema": obj({"message": MESSAGE}, ("message",))},
-    {"name": "relay.messages.bulk", "description": "Queue 1–50 messages atomically. Retry with the same request keys.", "inputSchema": obj({"messages": {"type": "array", "items": MESSAGE, "minItems": 1, "maxItems": 50}}, ("messages",))},
-    {"name": "relay.whatsapp.execute", "description": "Run a permitted template, group, call or account operation. Provider mutations must not be retried blindly.", "inputSchema": obj({"operation": {"type": "string", "enum": sorted(whatsapp.READ | whatsapp.MANAGE | whatsapp.SEND)}, "arguments": {"type": "object"}, "contact": STRING, "business_doctype": STRING, "business_name": STRING}, ("operation",))},
+    {"name": "relay.whatsapp.execute", "description": "Run a permitted template or account operation. Sends require a stable request key.", "inputSchema": obj({"operation": {"type": "string", "enum": sorted(whatsapp.READ | whatsapp.MANAGE | whatsapp.SEND)}, "arguments": {"type": "object"}, "contact": STRING, "business_doctype": STRING, "business_name": STRING, "request_key": STRING}, ("operation",))},
     {"name": "relay.deliveries.list", "description": "Read or cancel account deliveries; requires Relay Communication Manager.", "inputSchema": obj({"after": STRING, "cancel_id": STRING})},
     {"name": "relay.contacts.list", "description": "List accessible Contacts linked to a business record.", "inputSchema": obj({"doctype": STRING, "name": STRING, "after": STRING}, ("doctype", "name"))},
     {"name": "relay.conversation.read", "description": "Read conversation pages for an accessible business Contact.", "inputSchema": obj({"contact": STRING, "business_doctype": STRING, "business_name": STRING, "before": STRING, "after": STRING}, ("contact", "business_doctype", "business_name"))},
@@ -76,8 +75,7 @@ def dispatch(method, params):
         raise ValueError("Invalid tool arguments")
     handlers = {
         
-        "relay.messages.send": lambda message: whatsapp.enqueue([message]),
-        "relay.messages.bulk": whatsapp.enqueue,
+        "relay.messages.send": whatsapp.send,
         "relay.whatsapp.execute": whatsapp.execute,
         "relay.deliveries.list": whatsapp.deliveries,
         "relay.contacts.list": whatsapp.business_contacts,
@@ -160,8 +158,7 @@ def endpoint(**kwargs):
         if frappe.request.content_length > 1048576:
             arguments = params.get('arguments', {})
             photo_operation = (
-                params.get('name') == 'relay.whatsapp.execute' and arguments.get('operation') == 'groups.photo'
-                or params.get('name') in ('relay.telegram.groups', 'relay.telegram.execute') and arguments.get('operation') == 'photo.set'
+                params.get('name') in ('relay.telegram.groups', 'relay.telegram.execute') and arguments.get('operation') == 'photo.set'
             ) if isinstance(arguments, dict) else False
             if body['method'] != 'tools/call' or not photo_operation:
                 return Response('Request size rejected', status=413)

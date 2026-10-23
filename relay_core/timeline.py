@@ -21,7 +21,7 @@ def provider_time(payload, row=None):
         return None
 
 
-def page_query(fields, filters, limit, before=None, after=None, contact=None):
+def page_query(fields, filters, limit, before=None, after=None, contact=None, ingestion=False):
     message = frappe.qb.DocType('Relay Message')
     timestamp = (message.relay_timeline_time if frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message','relay_timeline_time')
                  else Coalesce(message.sent_at, message.creation))
@@ -38,8 +38,10 @@ def page_query(fields, filters, limit, before=None, after=None, contact=None):
             frappe.throw('History cursor belongs to another conversation', frappe.PermissionError)
         value = anchor.sent_at or anchor.creation
         condition = ((timestamp > value) | ((timestamp == value) & (message.name > anchor.name))) if after else ((timestamp < value) | ((timestamp == value) & (message.name < anchor.name)))
+        if ingestion: condition = message.name > anchor.name if after else message.name < anchor.name
         query = query.where(condition)
     order = Order.asc if after else Order.desc
+    if ingestion: return query.orderby(message.name, order=order)
     return query.orderby(timestamp, order=order).orderby(message.name, order=order)
 
 

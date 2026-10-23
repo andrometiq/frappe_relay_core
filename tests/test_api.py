@@ -40,7 +40,7 @@ class ApiTests(unittest.TestCase):
             result=self.api.messages('RELAY-CON-0000000001',limit=9999)
         self.assertEqual(len(result['items']),100);self.assertTrue(result['has_more'])
         self.assertEqual(result['first'],'RELAY-MSG-0000000002')
-        self.assertEqual(page_query.call_args.args[2],101)
+        self.assertEqual(page_query.call_args_list[1].args[2],101)
         self.api.readable_contact.assert_called_with('RELAY-CON-0000000001')
         self.f.get_doc.return_value.check_permission.assert_called_with('read')
 

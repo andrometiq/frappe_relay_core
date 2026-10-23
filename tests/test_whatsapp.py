@@ -26,8 +26,8 @@ class WhatsAppTests(unittest.TestCase):
     def test_explicit_contact_resolves_number_server_side(self):
         doc=types.SimpleNamespace(check_permission=Mock(),links=[types.SimpleNamespace(link_doctype='Customer',link_name='CUST-1')],mobile_no='+91 99999 99999')
         self.f.get_doc.return_value=doc
-        self.api.execute('templates.send',{'name':'hello','language':'en'},contact='Contact-B',business_doctype='Customer',business_name='CUST-1')
-        self.assertEqual(self.hub.execute.call_args.args[0]['to'],'919999999999')
+        result=self.api.prepare('templates.send',{'name':'hello','language':'en'},contact='Contact-B',business_doctype='Customer',business_name='CUST-1')
+        self.assertEqual(result['to'],'919999999999')
     def test_client_cannot_supply_an_arbitrary_number(self):
         with self.assertRaises(ValueError):self.api.execute('templates.send',{'to':'123'})
         self.hub.execute.assert_not_called()
@@ -36,17 +36,22 @@ class WhatsAppTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.api.execute('templates.list')
         self.assertEqual(self.hub.execute.call_count,1)
 
-    def test_batch_resolves_every_contact_and_retains_retry_key(self):
+    def test_public_send_uses_durable_action_and_stable_key(self):
         doc=types.SimpleNamespace(check_permission=Mock(),links=[types.SimpleNamespace(link_doctype='Customer',link_name='CUST-1')],mobile_no='+91 99999 99999')
         self.f.get_doc.return_value=doc
-        self.api.enqueue([{'key':'retry-1','operation':'messages.send','arguments':{'body':'Hello'},'contact':'Contact-B','business_doctype':'Customer','business_name':'CUST-1'}])
-        tool,args=self.hub.call_tool.call_args.args
-        self.assertEqual(tool,'whatsapp.enqueue')
-        self.assertEqual(args['messages'][0]['key'],'retry-1')
-        self.assertEqual(args['messages'][0]['message']['to'],'919999999999')
+        target=types.SimpleNamespace(business_channels=Mock(return_value=[{'value':'channel'}]),send_business=Mock(return_value={'action':'action','status':'Queued'}))
+        with patch.dict(sys.modules, **{'relay_core.conversation_start':target}):
+            result=self.api.execute('messages.send',{'body':'Hello'},'Contact-B','Customer','CUST-1',request_key='retry-1')
+        self.assertEqual(result['action'],'action')
+        self.assertEqual(target.send_business.call_args.kwargs['request_key'],'retry-1')
+        self.assertEqual(target.send_business.call_args.kwargs['business_name'],'CUST-1')
+        self.hub.call_tool.assert_not_called()
+        self.hub.execute.assert_not_called()
 
-    def test_invalid_batch_never_submits_partial_messages(self):
-        with self.assertRaises(ValueError):self.api.enqueue([{'key':'one','operation':'calls.action'}])
+    def test_missing_keys_bulk_groups_and_calls_are_unavailable(self):
+        self.assertFalse(hasattr(self.api,'enqueue'))
+        for operation in ('messages.send','groups.send','groups.media','groups.template','calls.action'):
+            with self.assertRaises(ValueError):self.api.execute(operation)
         self.hub.call_tool.assert_not_called()
 
     def test_account_delivery_list_requires_manager(self):

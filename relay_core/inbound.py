@@ -4,8 +4,20 @@ import hmac
 import json
 import re
 import time
+from contextvars import ContextVar
 import frappe
 from relay_core.settings import value as connection_value
+
+
+callback_write = ContextVar('relay_authenticated_callback', default=False)
+
+
+def insert_event(values):
+    token = callback_write.set(True)
+    try:
+        return frappe.get_doc(dict(values, doctype='Relay Hub Event')).insert(ignore_permissions=True)
+    finally:
+        callback_write.reset(token)
 
 
 def authenticated_payload(raw, timestamp, signature, secret, expected_account):
@@ -59,16 +71,18 @@ def receive(**_ignored):
             frappe.throw('Unsupported event channel')
         key = (f"{account}:{event['id']}" if medium == 'WhatsApp'
                else f"{account}:{medium}:{event['id']}")
-        encoded = json.dumps(event['payload'], sort_keys=True, separators=(',', ':'))
-        existing = frappe.db.get_value('Relay Hub Event', {'event_key': key}, ['name', 'payload'], as_dict=True)
-        if existing:
-            if json.loads(existing.payload) != event['payload']:
-                frappe.throw('Conflicting Hub event')
-            continue
-        # A duplicate after an HTTP timeout is normal. The unique key protects
-        # against concurrent retries; a failed transaction is retried by Hub.
-        frappe.get_doc({'doctype': 'Relay Hub Event', 'event_key': key, 'account': account,
-                        'hub_event_id': str(event['id']), 'payload': encoded}).insert()
+        previous = frappe.db.get_value('Relay Hub Event', {'event_key':key}, 'payload')
+        if previous and json.loads(previous) == event['payload']:
+            continue  # Existing unsplit events retain their original replay identity.
+        for suffix, part in split_payload(event['payload']):
+            part_key = key + suffix
+            encoded = json.dumps(part, sort_keys=True, separators=(',', ':'))
+            existing = frappe.db.get_value('Relay Hub Event', {'event_key': part_key}, ['name', 'payload'], as_dict=True)
+            if existing:
+                if json.loads(existing.payload) != part:
+                    frappe.throw('Conflicting Hub event')
+                continue
+            insert_event({'event_key':part_key,'account':account,'hub_event_id':str(event['id']),'payload':encoded})
     # Frappe commits successful POST methods before returning the acknowledgement.
     # Per-user notifications avoid broadcasting event contents to all site users.
     frappe.publish_realtime('relay_events_available', {'account': account}, user=frappe.session.user, after_commit=True)
@@ -133,9 +147,9 @@ def receive_statuses(**_ignored):
                      **({'recipient_type':row['recipient_type']} if 'recipient_type' in row else {}),
                      **({'recipient_participant_id':row['participant']} if 'participant' in row else {})} for row in payload['statuses']]
         projection = {'entry':[{'changes':[{'value':{'statuses':statuses}}]}]}
-        frappe.get_doc({'doctype':'Relay Hub Event','event_key':key,'account':account,
+        insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,
             'hub_event_id':str(payload['statuses'][-1]['event_id']),
-            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))}).insert()
+            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['statuses'])}
 
 
@@ -161,11 +175,15 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
             raise ValueError('Invalid delivery identity')
         if not isinstance(row['request_key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', row['request_key']):
             raise ValueError('Invalid delivery request key')
-        if row['operation'] not in ('telegram.message','email.send') or row['state'] not in ('submitted','rejected','uncertain','cancelled'):
+        if row['operation'] not in ('telegram.message','email.send','whatsapp.execute') or row['state'] not in ('submitted','rejected','uncertain','cancelled'):
             raise ValueError('Invalid channel delivery state')
         receipt = row['receipt']
-        if not isinstance(receipt, dict) or set(receipt)-{'message_id','chat_id','operation','sent','result','manually_reconciled'}:
+        if not isinstance(receipt, dict) or set(receipt)-{'message_id','chat_id','operation','sent','result','manually_reconciled','messages'}:
             raise ValueError('Invalid compact receipt')
+        if 'messages' in receipt:
+            messages = receipt['messages']
+            if row['operation'] != 'whatsapp.execute' or not isinstance(messages, list) or len(messages) != 1 or not isinstance(messages[0], dict) or set(messages[0]) != {'id'} or not isinstance(messages[0]['id'], str) or not 1 <= len(messages[0]['id']) <= 300:
+                raise ValueError('Invalid WhatsApp receipt')
         if len(json.dumps(receipt, separators=(',', ':')).encode()) > 8192:
             raise ValueError('Receipt exceeds byte limit')
         for field in ('sent','result','manually_reconciled'):
@@ -198,7 +216,36 @@ def receive_channel_statuses(**_ignored):
     encoded=json.dumps(payload,sort_keys=True,separators=(',',':'))
     key='channel-statuses:'+hashlib.sha256(encoded.encode()).hexdigest()
     if not frappe.db.exists('Relay Hub Event',{'event_key':key}):
-        frappe.get_doc({'doctype':'Relay Hub Event','event_key':key,'account':payload['account'],
+        insert_event({'doctype':'Relay Hub Event','event_key':key,'account':payload['account'],
             'hub_event_id':str(payload['statuses'][-1]['id']),
-            'payload':json.dumps({'channel_statuses':payload['statuses']},sort_keys=True,separators=(',',':'))}).insert()
+            'payload':json.dumps({'channel_statuses':payload['statuses']},sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['statuses'])}
+
+
+def split_payload(payload):
+    """Mixed Meta envelopes get independent fast-message and status jobs."""
+    try:
+        return _split_payload(payload)
+    except (AttributeError, TypeError, ValueError):
+        return [('', payload)]  # Preserve malformed evidence for failed projection.
+
+
+def _split_payload(payload):
+    if payload.get('channel', 'WhatsApp') != 'WhatsApp': return [('', payload)]
+    fast_entries, slow_entries = [], []
+    for entry in payload.get('entry', []):
+        fast_changes, slow_changes = [], []
+        for change in entry.get('changes', []):
+            value = change.get('value') or {}
+            incoming = [row for row in value.get('messages', []) if row.get('type') != 'reaction']
+            reactions = [row for row in value.get('messages', []) if row.get('type') == 'reaction']
+            if incoming:
+                fast_changes.append(dict(change, value={key: val for key, val in dict(value, messages=incoming).items() if key != 'statuses'}))
+            if not incoming:
+                slow_changes.append(change)
+            elif value.get('statuses') or reactions:
+                slow_changes.append(dict(change, value=dict(value, messages=reactions)))
+        if fast_changes: fast_entries.append(dict(entry, changes=fast_changes))
+        if slow_changes: slow_entries.append(dict(entry, changes=slow_changes))
+    if not fast_entries or not slow_entries: return [('', payload)]
+    return [('', dict(payload, entry=fast_entries)), (':updates', dict(payload, entry=slow_entries))]

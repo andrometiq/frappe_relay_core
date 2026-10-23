@@ -36,12 +36,12 @@ def update_channel(name, account, enabled=0):
 
 
 @frappe.whitelist(methods=["GET", "POST"])
-def messages(contact, before=None, after=None, channel=None, limit=50, sender_endpoint=None, query=''):
+def messages(contact, before=None, after=None, channel=None, limit=50, sender_endpoint=None, query='', since=None):
     require_access()
-    if before and after:
+    if sum(bool(value) for value in (before, after, since)) > 1:
         frappe.throw('Use one history cursor at a time')
     validate_reference(contact, 'CON')
-    for value, prefix in ((channel, 'CH'), (before, 'MSG'), (after, 'MSG')):
+    for value, prefix in ((channel, 'CH'), (before, 'MSG'), (after, 'MSG'), (since, 'MSG')):
         if value is not None and (not isinstance(value, str) or not re.fullmatch(r'RELAY-' + prefix + r'-[0-9]{10}', value)):
             frappe.throw('Invalid Relay record reference')
     if isinstance(limit, bool) or not isinstance(limit, (str, int)) or not str(limit).isdigit() or int(limit) < 1:
@@ -61,17 +61,19 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     if channel:
         filters['channel'] = channel
     from relay_core.timeline import page_query
+    watermark = page_query(['name'], filters, 1, contact=contact, ingestion=True).run(as_dict=True) if not since else []
     rows = page_query(
         ['name', 'channel', 'content', 'direction', 'status', 'creation', 'sent_at', 'provider_context',
          'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint'],
-        filters, limit+1, before, after, contact).run(as_dict=True)
+        filters, limit+1, before, since or after, contact, ingestion=bool(since)).run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]
     for channel_name in {row.channel for row in rows}:
         frappe.get_doc('Relay Channel', channel_name).check_permission('read')
-    if not after:
+    if not after and not since:
         rows.reverse()
-    return {'items': rows, 'has_more': more,
+    cursor = rows[-1].name if since and rows else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
+    return {'items': rows, 'has_more': more, 'ingestion_cursor': cursor,
         'first': rows[0].name if rows else None, 'last': rows[-1].name if rows else None}
 
 
