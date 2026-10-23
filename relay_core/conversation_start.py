@@ -187,6 +187,9 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
 
 def action_target(doc):
     payload=messaging.object_value(doc.payload)
+    if payload.get('routing'):
+        from relay_core.business_routing_prompt import target as prompt_target
+        return prompt_target(doc)
     if payload.get('group'):
         from relay_core.telegram_delivery import target as group_target
         return group_target(doc)

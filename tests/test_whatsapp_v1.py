@@ -115,7 +115,7 @@ class IncomingBusinessTests(unittest.TestCase):
         event=_dict(name='event',account='fixture',payload=json.dumps(payload),projection_status='Pending')
         db=Mock();db.exists.return_value=False;db.get_value.return_value='contact'
         fake=SimpleNamespace(db=db,get_doc=Mock(return_value=event),get_all=Mock(return_value=['channel']))
-        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch.object(business_access,'incoming_reference',return_value=None),patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'):
+        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch('relay_core.business_routing.resolve',return_value=(None,'triage_window_closed')),patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'):
             projection.project('event')
         fake.get_doc.assert_called_once_with('Relay Hub Event','event')
         db.set_value.assert_called_with('Relay Hub Event','event','projection_status','Uncategorized')

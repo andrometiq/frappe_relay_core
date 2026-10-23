@@ -1,0 +1,128 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Routing",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-BR-.##########",
+  "naming_rule": "Expression (old style)",
+  "fields": [
+    {
+      "fieldname": "conversation_key",
+      "label": "Conversation key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "relay_contact",
+      "label": "Relay contact",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business name",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_at",
+      "label": "Selected at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_event",
+      "label": "Selection event",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "selected_position",
+      "label": "Selection position",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "rule",
+      "label": "Decision rule",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "prompt_action",
+      "label": "Prompt action",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Message Action"
+    },
+    {
+      "fieldname": "prompt_message_id",
+      "label": "Prompt source message",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "prompt_expires_at",
+      "label": "Prompt expires at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "choices",
+      "label": "Choices",
+      "fieldtype": "JSON",
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "conversation_key",
+    "relay_contact",
+    "channel",
+    "endpoint",
+    "business_doctype",
+    "business_name",
+    "selected_at",
+    "selected_event",
+    "selected_position",
+    "rule",
+    "prompt_action",
+    "prompt_message_id",
+    "prompt_expires_at",
+    "choices"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ]
+}

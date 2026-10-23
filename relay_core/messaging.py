@@ -247,7 +247,7 @@ def finish(action, source, channel, context, content, result, *, commit=True):
         frappe.db.set_value('Relay Message', source.name, 'reactions', json.dumps(state, ensure_ascii=False))
         from relay_core.realtime import changed
         changed(source)
-    else:
+    elif action.operation != 'business_prompt':
         stored = object_value(action.payload)
         business = stored.get('business') or [source.get('business_doctype'), source.get('business_name')]
         outgoing_context = dict(context)
@@ -411,7 +411,14 @@ def reconcile(action):
             run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
             if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
             scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
-        if doc.get('start_contact'):
+        if payload.get('routing'):
+            from relay_core.business_routing_prompt import prepared as prepare_prompt
+            try:
+                tool, arguments = prepare_prompt(doc)
+            except ValueError:
+                doc.status = 'Rejected'; internal_save(doc); frappe.db.commit()
+                return {'action': doc.name, 'status': doc.status, 'message': None}
+        elif doc.get('start_contact'):
             from relay_core.conversation_start import prepared
             intent = payload['start']
             _, _, _, tool, arguments, _ = prepared(intent['contact'], intent['endpoint'], intent['kind'],
@@ -491,7 +498,7 @@ def actions(contact, before=None):
     for row in rows[:20]:
         channel=row.target_channel or frappe.db.get_value('Relay Message',row.source_message or row.outbound_message,'channel')
         if not channel or not frappe.get_doc('Relay Channel',channel).has_permission('read'):continue
-        retryable=row.status=='Rejected' and row.owner==frappe.session.user
+        retryable=row.status=='Rejected' and row.owner==frappe.session.user and row.operation!='business_prompt'
         if retryable and row.operation=='email':
             retryable=isinstance(object_value(frappe.get_doc('Relay Message Action',row.name).payload).get('email_values'),dict)
         items.append({'name':row.name,'operation':row.operation,'status':row.status,'creation':row.creation,
@@ -508,6 +515,8 @@ def retry_key(action):
 def retry(action):
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
+    if doc.operation == 'business_prompt':
+        frappe.throw('Business prompts are sent once. Assign the business in manager triage.')
     if doc.owner!=frappe.session.user or doc.status!='Rejected':
         frappe.throw('Only the original sender can retry a confirmed rejected action',frappe.PermissionError)
     # One immutable retry identity per rejected action. If it too is rejected,
