@@ -1,99 +1,201 @@
-"""Legacy import acceptance on an isolated DB; never writes old installed-site data."""
-import json,os,time,tempfile,io,zipfile
+"""Target-only cutover acceptance: real DB, private media and normal read APIs.
+
+No source writes, source schemas, migrations or external effects. Records are
+clearly labelled local-only and retained for review (no destructive cleanup).
+"""
+import hashlib
+import io
+import json
+import os
 from pathlib import Path
+import time
 from unittest.mock import patch
-root=Path(__file__).resolve().parents[1];sites=root/'.runtime/automation-bench/sites'
-assert Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()==sites.resolve();os.chdir(sites)
+import zipfile
+
 import frappe
-from relay_core import legacy,legacy_bundle,attachments,whatsapp,api
-frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
-frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
-run=str(time.time_ns())
-for kind,content,expected in [
- ('template',{'template':'welcome','template_snapshot':{'header':'Hello','body':'Welcome Sam','footer':'Reply STOP','buttons':[{'text':'View order'}]}},'Hello\n\nWelcome Sam\n\nReply STOP\n\nView order'),
- ('interactive',{'interactive':{'button_reply':{'id':'yes','title':'Yes please'}}},'Yes please'),
- ('interactive',{'interactive':{'call_permission_reply':{'response':'accept'}}},'Call permission: accept')
-]:
- row=frappe._dict(message_type=kind,content=content,body='',delivery_status='Read')
- data,quote,url,notes=legacy.converted(row)
- assert data['kind']=='text' and data['text']==expected and not notes,(data,notes)
-print('PASS historical template snapshots and interactive replies remain readable')
-# Minimal source schemas reproduce the installed legacy fields without invoking its hooks.
-for name,fields in {
- 'WhatsApp Core Identity':[('normalized_value','Data'),('identifier_type','Data')],
- 'WhatsApp Core Conversation':[('channel','Data'),('remote_identity','Data')],
- 'WhatsApp Core Message':[(key,'JSON' if key in ('content','failure') else 'Datetime' if key=='provider_timestamp' else 'Long Text' if key=='body' else 'Data') for key in legacy.FIELDS if key not in ('name','owner','creation')]
-}.items():
- if not frappe.db.exists('DocType',name):
-  frappe.get_doc(dict(doctype='DocType',name=name,module='Relay Core',custom=1,autoname='hash',fields=[dict(fieldname=k,label=k,fieldtype=t) for k,t in fields],permissions=[dict(role='System Manager',read=1,write=1,create=1)])).insert()
-frappe.db.commit();frappe.clear_cache()
-contact=frappe.db.get_value('Relay Contact',{'display_name':['like','Inbox %']},'name');assert contact,'Run inbox integration first'
-channel=frappe.get_doc(dict(doctype='Relay Channel',channel='WhatsApp',account='archive-'+run,enabled=0)).insert()
-identity=frappe.get_doc(dict(doctype='WhatsApp Core Identity',normalized_value='919000099999',identifier_type='Phone')).insert()
-conversation=frappe.get_doc(dict(doctype='WhatsApp Core Conversation',channel='legacy-test-'+run,remote_identity=identity.name)).insert()
-source=[]
-for i in range(52):
- source.append(frappe.get_doc(dict(doctype=legacy.SOURCE,conversation=conversation.name,channel=conversation.channel,
-  recipient_address=identity.normalized_value,provider_message_id='legacy-'+run+'-'+str(i),direction='Inbound' if i%2 else 'Outbound',
-  message_type='text',body='Legacy fixture '+str(i),content=json.dumps({'context':{'id':'legacy-'+run+'-0'}} if i else {}),
-  provider_timestamp='2020-01-01 12:00:00',delivery_status='Received' if i%2 else 'Read')).insert())
-from frappe.utils.file_manager import save_file
-file=save_file('legacy-evidence.txt',b'Preserved local evidence',legacy.SOURCE,source[0].name,is_private=1)
-frappe.db.set_value(legacy.SOURCE,source[0].name,{'message_type':'document','content':json.dumps({'payload':{'local_file_url':file.file_url,'filename':file.file_name}})})
-job=frappe.get_doc(dict(doctype='Relay Legacy Import',source_conversation=conversation.name,relay_contact=contact,channel=channel.name)).insert()
-frappe.db.commit()
-def denied(fn):
- try:fn()
- except frappe.PermissionError:frappe.db.rollback()
- else:raise AssertionError('Unauthorized import accepted')
-try:
- before=frappe.db.count('Relay Message',{'channel':channel.name})
- assert legacy.preview(job.name)['messages']==50
- assert frappe.db.count('Relay Message',{'channel':channel.name})==before
- frappe.conf.relay_automation_enabled=1
- with patch.object(whatsapp,'client',side_effect=AssertionError('Import must not call any provider')), patch.object(frappe,'enqueue',side_effect=AssertionError('Import must not enqueue automation')):
-  first=legacy.run_batch(job.name);assert first['status']=='Running' and first['imported']==50,first
-  second=legacy.run_batch(job.name);assert second['status']=='Completed' and second['imported']==52,second
-  assert legacy.run_batch(job.name)['imported']==52
-  archived=frappe.db.get_value('Relay Message',{'legacy_source':source[0].name},'name')
-  assert attachments.read(archived).get_data()==b'Preserved local evidence'
- assert frappe.db.count('Relay Message',{'channel':channel.name})==52
- assert not frappe.db.exists('Relay Contact Endpoint',{'channel':channel.name})
- assert frappe.db.count(legacy.SOURCE,{'conversation':conversation.name})==52
- history=api.messages(contact,channel=channel.name)
- assert all(str(row.sent_at)=='2020-01-01 12:00:00' for row in history['items'])
- assert any(row.status=='Read' for row in history['items'])
- again=frappe.get_doc(dict(doctype='Relay Legacy Import',source_conversation=conversation.name,relay_contact=contact,channel=channel.name)).insert();frappe.db.commit()
- legacy.run_batch(again.name);result=legacy.run_batch(again.name)
- assert result['imported']==0 and result['skipped']==52,result
- job.reload();job.channel='changed'
- try:job.save()
- except frappe.ValidationError:frappe.db.rollback()
- else:raise AssertionError('Started mapping changed')
- with tempfile.TemporaryDirectory() as directory:
-  path=Path(directory)/'history.zip';exported=legacy_bundle.export_conversation(conversation.name,path)
-  assert exported['count']==52 and exported['attachments']==1
-  bundle=legacy_bundle.decode(path.read_bytes());assert len(bundle['rows'])==52 and len(bundle['files'])==1
-  archive_file=save_file('legacy-history.zip',path.read_bytes(),'Relay Legacy Import',None,is_private=1)
-  cross_channel=frappe.get_doc(dict(doctype='Relay Channel',channel='WhatsApp',account='cross-archive-'+run,enabled=0)).insert()
-  cross_job=frappe.get_doc(dict(doctype='Relay Legacy Import',source_bundle=archive_file.name,source_conversation=conversation.name,relay_contact=contact,channel=cross_channel.name)).insert();frappe.db.commit()
-  assert legacy.preview(cross_job.name)['messages']==50
-  with patch.object(whatsapp,'client',side_effect=AssertionError('Bundle import must not call a provider')),patch.object(frappe,'enqueue',side_effect=AssertionError('Bundle import must not enqueue automation')):
-   legacy.run_batch(cross_job.name);completed=legacy.run_batch(cross_job.name);assert completed['status']=='Completed' and completed['imported']==52
-  copied=frappe.db.get_value('Relay Message',{'channel':cross_channel.name,'provider_id':source[0].provider_message_id},'name')
-  assert attachments.read(copied).get_data()==b'Preserved local evidence'
-  cross_job.reload();assert cross_job.bundle_sha256==exported['sha256']
-  # Contents, not merely the File name, are pinned across resumptions.
-  with patch.object(legacy_bundle,'load',return_value={**bundle,'sha256':'changed'}):
-   try:legacy.preview(cross_job.name)
-   except frappe.ValidationError:frappe.db.rollback()
-   else:raise AssertionError('Changed bundle accepted')
-  hostile=io.BytesIO()
-  with zipfile.ZipFile(hostile,'w') as archive:archive.writestr('../outside','bad')
-  try:legacy_bundle.decode(hostile.getvalue())
-  except frappe.ValidationError:frappe.db.rollback()
-  else:raise AssertionError('Unsafe archive accepted')
- print('PASS cross-site bundle checksum, bounded archive validation, private media, resumable mapping and zero provider/automation calls')
- frappe.set_user('relay-agent-a@example.invalid');denied(lambda:legacy.preview(again.name));denied(lambda:legacy.run_batch(again.name))
- print('PASS preview is read-only; 52-message resumable import, replay deduplication, timestamp/status preservation, private attachment copy, mapping immutability, role denial and zero provider calls')
-finally:frappe.destroy()
+from relay_core import legacy, legacy_bundle as bundles, attachments, api
+from relay_core.legacy_metadata import direct_document, prepare_import
+
+
+def main():
+    os.chdir('/home/sakthi/development/pilot/benches/version_16/sites')
+    frappe.init(site='yrp.site'); frappe.connect(); frappe.set_user('Administrator'); frappe.flags.mute_emails = True
+    run = str(time.time_ns()); site = 'local-only-relay-cutover-' + run
+    customer = 'Local-only Relay migration ' + run
+    direct_document('Customer', dict(customer_name=customer, customer_type='Company'), customer)
+    channel = direct_document('Relay Channel', dict(channel='WhatsApp', account=site, enabled=0)).name
+    metadata = {'identity': {'name': 'original-person', 'identifier_type': 'Phone'},
+        'channel': {'phone_number_id': 'local-only-number-' + run},
+        'conversation': {'name': 'conversation', 'status': 'Resolved', 'assigned_user': 'old-staff'},
+        'staff_reads': [{'name': 'read', 'user': 'old-staff', 'message': 'zzz', 'read_at': '2020-01-02 12:00:00'}],
+        'conversation_reads': [{'name': 'cursor', 'user': 'old-staff', 'last_read_message': 'zzz', 'last_opened_at': '2020-01-03 12:00:00'}],
+        'notes': [{'name': 'note', 'user': 'old-staff', 'content': 'Local-only note with meaningful evidence', 'message_references': '["zzz"]', 'status': 'Resolved'}],
+        'topics': [{'name': 'topic', 'title': 'Local-only topic', 'summary': 'Shipment reference 123', 'status': 'Resolved'}],
+        'topic_messages': [{'name': 'topic-link', 'topic': 'topic', 'message': 'zzz'}]}
+    base = dict(format='relay-legacy-history', version=2, source_site=site, source_conversation='conversation',
+        source_channel='old-channel', endpoint='local-only-' + run, identifier_type='Phone', metadata=metadata,
+        metadata_sha256=bundles.checksum(metadata), warnings=[], watermark='2020-02-01 00:00:00')
+    raw = bytes(range(256)) * 24576  # 6 MiB, includes non-text bytes.
+    digest = hashlib.sha256(raw).hexdigest()
+    source = [frappe._dict(name='zzz', creation='2020-01-01 00:00:00', modified='2020-01-01 00:00:00',
+        owner='old-staff', channel='old-channel', conversation='conversation', body='Local-only invoice 123: amount 456.78',
+        message_type='document', content='{}', direction='Outbound', delivery_status='Queued', provider_message_id='local-only-provider-' + run)]
+    for i in range(51):
+        source.append(frappe._dict(dict(source[0], name='row-' + str(i).zfill(3), creation='2020-01-02 00:00:00',
+            message_type='text', body='Local-only history ' + str(i), provider_message_id='local-only-' + run + '-' + str(i))))
+    media = {'zzz': [{'path': 'files/' + digest, 'filename': 'local-only-six-mib.bin',
+        'availability': 'available', 'size': len(raw), 'sha256': digest}]}
+
+    def bundle(rows, *, files=None, since=None, mapped=True, metadata_override=None):
+        manifest = dict(base, count=len(rows), attachments=files or {}, since=since,
+            messages_sha256=hashlib.sha256(bundles.canonical(rows).encode()).hexdigest())
+        if metadata_override is not None:
+            manifest.update(metadata=metadata_override, metadata_sha256=bundles.checksum(metadata_override))
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, 'w') as archive:
+            archive.writestr('manifest.json', bundles.canonical(manifest)); archive.writestr('messages.json', bundles.canonical(rows))
+            if files: archive.writestr('files/' + digest, raw)
+        content = out.getvalue(); name = 'local-only-cutover-' + hashlib.sha256(content).hexdigest() + '.zip'
+        path = Path(frappe.get_site_path('private', 'files', name)); path.write_bytes(content); path.chmod(0o600)
+        file = direct_document('File', dict(file_name=name, file_url='/private/files/' + name, is_private=1, file_size=len(content)))
+        return prepare_import(manifest, channel, source_bundle=file.name,
+            business=('Customer', customer) if mapped else None, user_map={'old-staff': 'Administrator'})
+
+    def finish(job):
+        frappe.db.commit()
+        while True:
+            for attempt in range(3):
+                try:
+                    result = legacy.run_batch(job.name)
+                    break
+                except frappe.QueryDeadlockError:
+                    frappe.db.rollback()
+                    if attempt == 2: raise
+            if result['status'] == 'Completed': return result
+
+    try:
+        with patch.object(frappe, 'enqueue', side_effect=AssertionError('History enqueued work')), \
+             patch.object(frappe, 'sendmail', side_effect=AssertionError('History sent email')), \
+             patch('relay_core.whatsapp.client', side_effect=AssertionError('History called provider')):
+            first = bundle(source, files=media); result = finish(first)
+            assert result['imported'] == 52 and result['mismatches'] == 0, result
+            target = frappe.db.get_value('Relay Message', {'source_key': legacy.source_key(site, 'zzz')}, 'name')
+            doc = frappe.get_doc('Relay Message', target)
+            assert doc.status == 'Pending' and doc.owner == 'Administrator' and doc.legacy_author == 'old-staff'
+            assert attachments.read(target).get_data() == raw
+            assert frappe.db.count('Relay Message Read', {'message': target}) == 1
+            assert frappe.db.count('Relay Internal Comment', {'relay_contact': first.relay_contact}) == 1
+            assert frappe.db.count('Relay Conversation Topic', {'relay_contact': first.relay_contact}) == 1
+            assert frappe.db.get_value('Relay Contact Endpoint', {'channel': channel}, 'verified') == 0
+            from relay_core import collaboration, topics
+            notes = collaboration.comments(first.relay_contact)['items']
+            assert len(notes) == 1 and notes[0]['name'].startswith('RELAY-NOTE-')
+            assert len(topics.directory(first.relay_contact)['items']) == 1
+            history = api.messages(first.relay_contact, channel=channel)
+            assert history['items'], history
+            again = finish(bundle(source, files=media)); assert again['imported'] == 0 and again['skipped'] == 52, again
+            sent = frappe._dict(dict(source[0], delivery_status='Sent', provider_message_id='local-only-sent-' + run))
+            sent_result = finish(bundle([sent], files=media))
+            assert sent_result['updated'] == 1 and sent.modified == source[0].modified
+            doc.reload(); assert doc.status == 'Sent' and doc.provider_id == sent.provider_message_id
+            cached = frappe._dict(dict(sent, content=bundles.canonical({'document': {'local_file_url': '/private/files/cache.bin'},
+                '_media_cache': {'status': 'stored', 'file': 'local-only-cache'}})))
+            cache_result = finish(bundle([cached], files=media))
+            assert cache_result['updated'] == 1 and cached.modified == source[0].modified
+            doc.reload(); assert json.loads(doc.legacy_data)['row']['content'] == cached.content
+            assert attachments.read(target).get_data() == raw
+            changed = frappe._dict(dict(source[0], modified='2020-02-02 00:00:00', delivery_status='Read', body='Updated amount 999.50'))
+            new = frappe._dict(dict(source[1], name='aaa', creation='2020-02-02 00:00:00', modified='2020-02-02 00:00:00', provider_message_id='local-only-new-' + run))
+            delta = finish(bundle([changed, new], files=media, since=base['watermark']))
+            assert delta['updated'] == 1 and delta['imported'] == 1, delta
+            doc.reload(); assert doc.status == 'Read' and doc.content == changed.body
+            assert attachments.read(target).get_data() == raw
+            stale = finish(bundle([source[0]], files=media)); assert stale['mismatches'] == 1 and stale['updated'] == 0, stale
+            doc.reload(); assert doc.status == 'Read'
+            broken = frappe._dict(dict(new, name='bad-direction', direction='Unknown', provider_message_id='bad-' + run))
+            good = frappe._dict(dict(new, name='good-after-error', provider_message_id='good-' + run))
+            failure = finish(bundle([broken, good])); assert failure['imported'] == 1 and failure['mismatches'] == 1, failure
+            assert not frappe.db.exists('Relay Message Action', {'target_channel': channel})
+            assert not frappe.db.exists('Relay Automation Run', {'message': target})
+            from relay_core import messaging
+            try: messaging.readable_source(target)
+            except frappe.PermissionError: pass
+            else: raise AssertionError('Historical Pending source was sendable')
+
+            from relay_core import inbox, teams, message_updates
+            from relay_core.permissions import sequential_name
+            live = direct_document('Relay Message', dict(relay_contact=first.relay_contact, channel=channel,
+                direction='Incoming', status='Delivered', content='Local-only live follow-up: amount 1200',
+                business_doctype='Customer', business_name=customer, message_type='text'), sequential_name('message'))
+            note = notes[0]['name']
+            topic = topics.directory(first.relay_contact)['items'][0]
+            collaboration.edit(note, body='Local-only staff correction')
+            teams.assign(first.relay_contact)
+            inbox.update(first.relay_contact, last_read=live.name)
+            last_seen = inbox.read(first.relay_contact)['last_seen']
+            topics.save(first.relay_contact, dict(title='Local-only live topic title', summary=topic['summary'],
+                status=topic['status'], category='', messages=topic['messages'], modified=str(topic['modified'])), name=topic['name'])
+            updated_metadata = json.loads(json.dumps(metadata))
+            updated_metadata['notes'][0]['status'] = 'Open'
+            updated_metadata['topics'][0]['summary'] = 'Updated source summary'
+            for _ in range(2):
+                replay_job = bundle([changed, new], files=media, metadata_override=updated_metadata)
+                edited_replay = finish(replay_job)
+                assert edited_replay['imported'] == 0
+                assert frappe.db.get_value('Relay Internal Comment', note, 'body') == 'Local-only staff correction'
+                assert frappe.db.get_value('Relay Internal Comment', note, 'task_status') == 'Open'
+                assert not frappe.db.get_value('Relay Conversation Assignment', {'relay_contact': first.relay_contact}, 'assigned_to')
+                assert inbox.read(first.relay_contact)['last_read'] == live.name
+                assert inbox.read(first.relay_contact)['last_seen'] == last_seen
+                assert frappe.db.get_value('Relay Conversation Topic', topic['name'], 'title') == 'Local-only live topic title'
+                assert frappe.db.get_value('Relay Conversation Topic', topic['name'], 'summary') == 'Updated source summary'
+                report = json.loads(frappe.db.get_value('Relay Legacy Import', replay_job.name, 'reconcile_report'))
+                conflicts = [r['detail'] for r in report['mismatches'] if r['kind'] == 'collaboration_conflict']
+                for dt in ('Relay Internal Comment', 'Relay Conversation Assignment', 'Relay Conversation State', 'Relay Conversation Topic'):
+                    assert any(detail.startswith(dt + ':') for detail in conflicts), conflicts
+
+            triage_metadata = dict(metadata, notes=[dict(name='restricted-note', user='old-staff', content='Restricted triage secret')],
+                topics=[dict(name='restricted-topic', title='Restricted triage title')], topic_messages=[])
+            triage_row = frappe._dict(dict(new, name='restricted-message', provider_message_id='restricted-' + run))
+            triage_job = bundle([triage_row], mapped=False, metadata_override=triage_metadata)
+            finish(triage_job)
+            assert frappe.db.count('Relay Internal Comment', {'relay_contact': first.relay_contact}) == 1
+            assert frappe.db.count('Relay Conversation Topic', {'relay_contact': first.relay_contact}) == 1
+            assert 'Restricted triage secret' in frappe.db.get_value('Relay Legacy Import', triage_job.name, 'source_metadata')
+            reader = 'local-only-relay-' + run + '@example.invalid'
+            direct_document('User', dict(email=reader, first_name='Local-only migration reader', enabled=1,
+                user_type='System User'), reader)
+            for role in ('Relay Communication User', 'Sales User'):
+                direct_document('Has Role', dict(parent=reader, parenttype='User', parentfield='roles', role=role))
+            teams.assign(first.relay_contact, assigned_to=reader); frappe.db.commit()
+            frappe.set_user(reader)
+            assert not frappe.has_permission('Relay Legacy Import', 'read', doc=triage_job.name)
+            restricted = frappe.db.get_value('Relay Message', {'source_key': legacy.source_key(site, triage_row.name)}, 'name')
+            assert not frappe.has_permission('Relay Message', 'read', doc=restricted)
+            assert all(item['body'] != 'Restricted triage secret' for item in collaboration.comments(first.relay_contact)['items'])
+            assert all(item['title'] != 'Restricted triage title' for item in topics.directory(first.relay_contact)['items'])
+            frappe.set_user('Administrator')
+
+            reaction = frappe._dict(dict(new, name='reaction', message_type='reaction', direction='Inbound',
+                provider_message_id='reaction-' + run, content=bundles.canonical({'from': base['endpoint'],
+                    'reaction': {'message_id': changed.provider_message_id, 'emoji': '👍'}})))
+            finish(bundle([reaction]))
+            doc.reload(); assert json.loads(doc.reactions)[base['endpoint']][0]['emoji'] == '👍'
+            endpoint = frappe.db.get_value('Relay Contact Endpoint', {'channel': channel}, 'name')
+            frappe.db.set_value('Relay Contact Endpoint', endpoint, 'verified', 1)
+            removal = {'channel': 'WhatsApp', 'entry': [{'changes': [{'value': {'messages': [{
+                'type': 'reaction', 'from': base['endpoint'], 'id': 'local-only-live-removal-' + run,
+                'timestamp': str(legacy.reaction_timestamp(reaction.creation) + 1),
+                'reaction': {'message_id': changed.provider_message_id, 'emoji': ''}}]}}]}]}
+            assert message_updates.apply_updates(removal, channel, 'local-only-removal') == 'Projected'
+            frappe.db.commit()
+            finish(bundle([reaction]))
+            doc.reload(); assert json.loads(doc.reactions) == {base['endpoint']: []}
+            assert json.loads(doc.message_updates)['reaction:' + base['endpoint']]['event_id'] == 'local-only-live-removal-' + run
+            print(json.dumps(dict(snapshot=result, replay=again, delta=delta, stale=stale, failure=failure,
+                private_attachment_bytes=len(raw), channel=channel, no_resend=True,
+                live_edits_preserved=True, triage_denied=True, live_reaction_removal_preserved=True), indent=2))
+    finally: frappe.destroy()
+
+
+if __name__ == '__main__': main()
