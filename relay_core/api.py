@@ -64,7 +64,7 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     watermark = page_query(['name'], filters, 1, contact=contact, ingestion=True).run(as_dict=True) if not since else []
     rows = page_query(
         ['name', 'channel', 'content', 'direction', 'status', 'creation', 'sent_at', 'provider_context',
-         'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint'],
+         'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint', 'legacy_author'],
         filters, limit+1, before, since or after, contact, ingestion=bool(since)).run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]
@@ -148,7 +148,7 @@ def message_context(message, channel=None):
         frappe.throw('Message belongs to another channel')
     earlier=messages(doc.relay_contact,before=message,limit=25,channel=channel)
     later=messages(doc.relay_contact,after=message,limit=25,channel=channel)
-    fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','provider_id','sender_endpoint']
+    fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author']
     row={key:doc.get(key) for key in fields}
     return {'contact':doc.relay_contact,'items':earlier['items']+[row]+later['items'],'first':earlier['first'] or message,'has_more':earlier['has_more'],'has_newer':later['has_more'],'last':later['last'] or message,'anchor':message}
 
@@ -181,7 +181,7 @@ def message_snapshots(contact, names):
     for name in names:validate_reference(name,'MSG')
     rows=frappe.get_list('Relay Message',filters={'relay_contact':contact,'name':['in',names]},
         fields=['name','channel','content','direction','status','creation','sent_at','provider_context',
-                'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint'],page_length=50)
+                'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author'],page_length=50)
     for channel in {row.channel for row in rows}:frappe.get_doc('Relay Channel',channel).check_permission('read')
     return {'items':rows}
 

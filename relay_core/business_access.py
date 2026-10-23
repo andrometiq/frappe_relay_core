@@ -12,6 +12,7 @@ def candidates(contact):
 
 
 def reference(doc):
+    if doc.get('legacy_triage'): return None
     if doc.get('business_doctype') and doc.get('business_name'):
         return doc.business_doctype,doc.business_name
     links=candidates(doc.relay_contact)
@@ -19,6 +20,8 @@ def reference(doc):
 
 
 def allowed(doc,user=None):
+    if doc.get('legacy_triage'):
+        return 'System Manager' in frappe.get_roles(user or frappe.session.user)
     target=reference(doc)
     if not target:return False
     try:return frappe.get_doc(*target).has_permission('read',user=user)
@@ -52,7 +55,10 @@ def query_condition(user=None):
          (SELECT count(*) FROM `tabDynamic Link` x JOIN `tabRelay Contact Type` t ON t.business_doctype=x.link_doctype AND t.enabled=1
           WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links')=1))"""
         clauses.append('('+explicit+' OR '+legacy+')')
-    return '('+' OR '.join(clauses)+')' if clauses else '1=0'
+    business = '(COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND ('+' OR '.join(clauses)+'))' if clauses else '1=0'
+    if 'System Manager' in frappe.get_roles(user):
+        return '('+business+' OR `tabRelay Message`.legacy_triage=1)'
+    return business
 
 
 def incoming_reference(contact, channel, endpoint, context, links=None):

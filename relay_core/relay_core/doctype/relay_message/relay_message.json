@@ -26,7 +26,10 @@
     "legacy_source",
     "legacy_data",
     "business_doctype",
-    "business_name"
+    "business_name",
+    "legacy_author",
+    "legacy_checksum",
+    "legacy_triage"
   ],
   "fields": [
     {
@@ -163,6 +166,25 @@
       "fieldtype": "Data",
       "read_only": 1,
       "search_index": 1
+    },
+    {
+      "fieldname": "legacy_author",
+      "label": "Original author",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "legacy_checksum",
+      "label": "Original row SHA-256",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "legacy_triage",
+      "label": "Restricted migration triage",
+      "fieldtype": "Check",
+      "read_only": 1,
+      "default": "0"
     }
   ],
   "permissions": [
