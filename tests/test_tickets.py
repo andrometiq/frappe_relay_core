@@ -58,7 +58,9 @@ class TicketTests(unittest.TestCase):
     def test_read_rechecks_access_instead_of_exposing_stale_links(self):
         self.doc.name='RELAY-TKT-0000000001';self.doc.check_permission=Mock()
         self.f.get_doc.side_effect=lambda doctype,name: self.doc if doctype=='Relay Ticket' else self.message if doctype=='Relay Message' else self.contact
+        self.doc.creation = '2026-10-24 09:00:00'
         result=self.module.read(self.doc.name)
+        self.assertEqual(result['creation'], self.doc.creation)
         self.assertEqual(result['messages'][0]['message'],self.message.name)
         self.module.readable_contact.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.module.read(self.doc.name)

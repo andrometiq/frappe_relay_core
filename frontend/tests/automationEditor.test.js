@@ -18,3 +18,16 @@ test('event parameter order preserves template numbering', () => {
   const result = configurationValues(newConfiguration(false), false, [], 'name\n items_summary \n')
   assert.deepEqual(JSON.parse(result.parameter_mapping), ['name', 'items_summary'])
 })
+
+test('rule cards describe document, recipient and lifecycle in plain words', async () => {
+  const { eventDescription } = await import('../src/services/automationEditor.js')
+  assert.equal(eventDescription({ source_doctype: 'Delivery Note', business_doctype: 'Customer', event: 'on_submit' }), 'Delivery Note → Customer · on submit')
+  assert.match(eventDescription({ event: 'after_insert' }), /when created/)
+})
+test('message preview replaces numbered parameters in order and preserves missing slots', async () => {
+  const { messagePreview, toolCount } = await import('../src/services/automationEditor.js')
+  assert.equal(messagePreview('Order {{1}}: {{ 2 }}. {{3}}', 'name\nitems_summary'), 'Order [name]: [items_summary]. [Parameter 3]')
+  assert.equal(messagePreview('Plain wording', ''), 'Plain wording')
+  assert.equal(toolCount('invalid'), 0)
+  assert.equal(toolCount('[{},{}]'), 2)
+})

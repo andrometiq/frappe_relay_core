@@ -69,6 +69,7 @@ class Reader:
         self.skill, self.user, self.business = skill, user, business
         self.failed = False
         self.evidence = []
+        self.ledger_results = []
 
     def read(self, contract, **arguments):
         try:
@@ -95,6 +96,8 @@ class Reader:
         scope_meta = meta.get_field(field)
         if scope_meta and scope_meta.fieldtype == 'Dynamic Link':
             filters[scope_meta.options] = self.business[0]
+        if doctype == 'GL Entry':
+            filters['is_cancelled'] = 0
         if contract['method'] == 'get_doc':
             if set(arguments) != {'name'} or not isinstance(arguments['name'], str):
                 raise ValueError('A document name is required')
@@ -121,11 +124,12 @@ class Reader:
             limit = arguments.get('limit', 20)
             if type(limit) is not int or not 1 <= limit <= 20:
                 raise ValueError('Invalid row limit')
-        names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit, order_by='name asc')
+        ledger = doctype == 'GL Entry' and contract['method'] == 'get_list' and {'debit', 'credit'}.issubset(contract['fields'])
+        names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit + int(ledger), order_by='name asc')
         if not names:
             raise ValueError('No readable business data; hand off for review')
         result = []
-        for row in names:
+        for row in names[:limit]:
             doc = frappe.get_doc(doctype, row.name)
             doc.check_permission('read')
             if doc.get(field) != self.business[1] or scope_meta and scope_meta.fieldtype == 'Dynamic Link' and doc.get(scope_meta.options) != self.business[0]:
@@ -134,6 +138,10 @@ class Reader:
             result.append({key: doc.get(key) for key in contract['fields']})
         if contract['method'] == 'get_doc':
             return result[0]
+        if ledger:
+            from relay_core.ai.ledger import summarize
+            result = summarize(result, len(names) > limit)
+            self.ledger_results.append(result)
         return result
 
 

@@ -25,6 +25,34 @@ class BusinessEventTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda values: Doc(values, name='DELIVERY-1')
         self.f.db.exists.side_effect = lambda dt, filters: any(d.event_key == filters['event_key'] for d in self.intents)
 
+    def test_preview_uses_template_permissions_and_paginated_hub_wording(self):
+        self.service.require_access = Mock()
+        template = Doc(account='sim-v1', template_id='2')
+        self.f.get_doc.side_effect = None
+        self.f.get_doc.return_value = template
+        execute = Mock(side_effect=[{'data': [{'id': '1'}], 'paging': {'cursors': {'after': 'next'}}},
+            {'data': [{'id': '2', 'components': [{'type': 'BODY', 'text': 'Order {{1}}'}]}]}])
+        with patch.dict(sys.modules, {'relay_core.whatsapp': types.SimpleNamespace(execute=execute),
+                'relay_core.settings': types.SimpleNamespace(value=lambda key: 'sim-v1')}):
+            self.assertEqual(self.service.template_preview('TPL-1'), {'body': 'Order {{1}}'})
+            self.assertEqual(execute.call_args.args, ('templates.list', {'after': 'next'}))
+            template.account = 'other'
+            with self.assertRaises(ValueError): self.service.template_preview('TPL-1')
+            template.account, template.denied = 'sim-v1', True
+            with self.assertRaises(PermissionError): self.service.template_preview('TPL-1')
+        self.assertEqual(execute.call_count, 2)
+        self.service.require_access.assert_called_with(configure=True)
+
+    def test_missing_template_preview_fails_without_looping_on_repeated_cursor(self):
+        self.service.require_access = Mock()
+        self.f.get_doc.side_effect = None
+        self.f.get_doc.return_value = Doc(account='sim-v1', template_id='2')
+        execute = Mock(return_value={'data': [], 'paging': {'cursors': {'after': 'same'}}})
+        with patch.dict(sys.modules, {'relay_core.whatsapp': types.SimpleNamespace(execute=execute),
+                'relay_core.settings': types.SimpleNamespace(value=lambda key: 'sim-v1')}):
+            with self.assertRaisesRegex(ValueError, 'unavailable'): self.service.template_preview('TPL-1')
+        self.assertEqual(execute.call_count, 2)
+
     def test_unmatched_pair_never_queries_database(self):
         for pairs in (set(), {('Sales Order', 'on_submit')}, {('Delivery Note', 'on_cancel')}):
             with self.subTest(pairs=pairs), patch.object(self.f, 'get_all') as get_all, patch.object(self.f, 'db') as db:

@@ -17,7 +17,8 @@
     "mode",
     "daily_limit",
     "instructions",
-    "allowed_tools"
+    "allowed_tools",
+    "sample_key"
   ],
   "fields": [
     {
@@ -36,7 +37,7 @@
       "label": "Channel",
       "fieldtype": "Link",
       "options": "Relay Channel",
-      "reqd": 1
+      "mandatory_depends_on": "eval:doc.enabled"
     },
     {
       "fieldname": "business_doctype",
@@ -50,21 +51,21 @@
       "label": "Ai Model",
       "fieldtype": "Link",
       "options": "AI Model",
-      "reqd": 1
+      "mandatory_depends_on": "eval:doc.enabled"
     },
     {
       "fieldname": "run_as_user",
       "label": "Run As User",
       "fieldtype": "Link",
       "options": "User",
-      "reqd": 1
+      "mandatory_depends_on": "eval:doc.enabled"
     },
     {
       "fieldname": "handoff_owner",
       "label": "Handoff Owner",
       "fieldtype": "Link",
       "options": "User",
-      "reqd": 1
+      "mandatory_depends_on": "eval:doc.enabled"
     },
     {
       "fieldname": "mode",
@@ -93,6 +94,14 @@
       "fieldtype": "JSON",
       "default": "[]",
       "reqd": 1
+    },
+    {
+      "fieldname": "sample_key",
+      "label": "Sample key",
+      "fieldtype": "Data",
+      "hidden": 1,
+      "unique": 1,
+      "read_only": 1
     }
   ],
   "permissions": [

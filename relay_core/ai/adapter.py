@@ -57,6 +57,9 @@ def complete(skill, user, business, text, run_id=None):
         raise ValueError('Invalid skill decision')
     if not value['reply'].strip() and not value['handoff']:
         raise ValueError('Empty skill decision')
+    if reader.ledger_results and not value['handoff']:
+        from relay_core.ai.ledger import reply
+        value['reply'] = reply(reader.ledger_results[-1])
     return dict(value, reads=reader.evidence, user=user)
 
 
