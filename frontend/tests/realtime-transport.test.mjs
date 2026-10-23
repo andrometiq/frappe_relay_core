@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createRequire} from 'node:module'
@@ -5,7 +7,7 @@ import {setTimeout as wait} from 'node:timers/promises'
 import {once} from 'node:events'
 import {realtimeRefreshQueue} from '../src/services/realtimeRefreshQueue.js'
 // Use the bench's installed Socket.IO server, never a public service.
-const require=createRequire(new URL('../../../frappe/package.json',import.meta.url))
+const require=createRequire(resolve(realpathSync(new URL('../node_modules', import.meta.url)), '../../../frappe/package.json'))
 const {Server}=require('socket.io')
 
 test('production client uses WebSocket, rejoins rooms and catches up once after transport loss',async()=>{
@@ -31,6 +33,10 @@ test('production client uses WebSocket, rejoins rooms and catches up once after 
   assert.deepEqual(batches,[['reconnect']])
   for(let i=0;i<100;i++)connections[0].emit('relay_changed',{kind:'messages'})
   await wait(100);assert.deepEqual(batches[1],['messages'])
+  connections[0].emit('list_update', {doctype:'Contact'})
+  await wait(80);assert.deepEqual(batches.at(-1), ['contacts'])
+  connections[0].emit('relay_changed', {kind:'reads'})
+  await wait(80);assert.deepEqual(batches.at(-1), ['reads'])
   const initial=batches.length;await wait(200);assert.equal(batches.length,initial)
   const connected=once(client,'connect');connections[0].conn.close();await connected;await wait(100)
   assert.equal(connections.length,2)

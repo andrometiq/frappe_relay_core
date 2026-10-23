@@ -210,3 +210,30 @@ def conversation_channels(contact):
         fields=['name', 'channel'], order_by='channel asc', limit_page_length=100)
     from relay_core.inbox import unread_count
     return {'items': [{'value': row.name, 'label': row.channel, 'unread': unread_count(contact, row.name), 'translation_enabled': bool(frappe.conf.get('relay_automation_enabled') and frappe.db.exists('Relay Automation Policy', {'channel':row.name,'enabled':1,'allow_translation':1}))} for row in channels]}
+
+
+@frappe.whitelist(methods=['GET'])
+def contact_details(contact):
+    """Read permitted business links and WhatsApp endpoint provenance for a Contact."""
+    require_access()
+    person = frappe.get_doc('Contact', contact)
+    person.check_permission('read')
+    configured = set(business_types())
+    links = [{'doctype': row.link_doctype, 'name': row.link_name}
+             for row in person.links
+             if row.link_doctype in configured
+             and frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')]
+    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
+    endpoints = []
+    if relay:
+        readable_contact(relay)
+        rows = frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': relay},
+                             fields=['name', 'channel', 'endpoint', 'verified', 'creation', 'modified'],
+                             limit_page_length=100)
+        for row in rows:
+            channel = frappe.get_doc('Relay Channel', row.channel)
+            if channel.channel == 'WhatsApp' and channel.has_permission('read'):
+                endpoints.append(row)
+    return {'name': person.name, 'label': person.full_name or person.name,
+            'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
+            'links': links, 'endpoints': endpoints}

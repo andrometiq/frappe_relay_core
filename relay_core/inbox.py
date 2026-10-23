@@ -69,21 +69,27 @@ def read(contact):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None):
+def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None):
     """Filter before pagination and expose only accessible conversation previews."""
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>50 or before and after:
         frappe.throw('Invalid conversation search')
-    if str(starred) not in ('0','1') or mode not in ('all','unread','unassigned'):
+    if str(starred) not in ('0','1') or mode not in ('all','mine','unread','unassigned'):
         frappe.throw('Invalid conversation filter')
     from pypika import Order
     from pypika.functions import Coalesce
     contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
     assignment=frappe.qb.DocType('Relay Conversation Assignment');message=frappe.qb.DocType('Relay Message')
     filters={}
+    if medium not in (None, 'WhatsApp'):frappe.throw('Invalid medium')
     activity=Coalesce(contact.last_message_at,contact.creation)
     search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters=filters,
                                ignore_permissions=False,order_by='',limit=31)
+    if medium:
+        channels=frappe.qb.DocType('Relay Channel')
+        endpoints=frappe.qb.DocType('Relay Contact Endpoint')
+        available=frappe.qb.from_(channels).select(channels.name).where(channels.channel==medium)
+        search=search.where(contact.name.isin(frappe.qb.from_(endpoints).select(endpoints.relay_contact).where(endpoints.channel.isin(available))))
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
         stamp=anchor.last_message_at or anchor.creation
@@ -100,7 +106,11 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         search=search.where(contact.name.isin(states))
     if mode=='unread':
         unseen=_unread_query(['relay_contact'])
+        if medium:unseen=unseen.where(message.channel.isin(available))
         search=search.where(contact.name.isin(unseen))
+    if mode=='mine':
+        mine=frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.assigned_to==frappe.session.user)
+        search=search.where(contact.name.isin(mine))
     if mode=='unassigned':
         assigned=frappe.qb.from_(assignment).select(assignment.relay_contact).where((Coalesce(assignment.assigned_to,'')!='')|(Coalesce(assignment.team,'')!=''))
         search=search.where(contact.name.notin(assigned))
@@ -109,6 +119,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         from relay_core.teams import readable_filter_team
         readable_filter_team(team)
         search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.team==team)))
+    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=100) if medium else None
     rows=search.run(as_dict=True);more=len(rows)>30;page=rows[:30]
     if before:page.reverse()
     items=[]
@@ -116,9 +127,11 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     for row in page:
         try:readable_contact(row.name)
         except frappe.PermissionError:continue
-        latest=page_query(['name','content','channel','creation','sent_at'],{'relay_contact':row.name},1).run(as_dict=True)
+        latest_filters={'relay_contact':row.name}
+        if medium:latest_filters['channel']=['in',channel_names]
+        latest=page_query(['name','content','channel','creation','sent_at'],latest_filters,1).run(as_dict=True)
         state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(row.name)},['last_read','starred','folder'],as_dict=True) or {}
-        unread=unread_count(row.name)
+        unread=unread_count(row.name, channels=channel_names)
         last=latest[0] if latest else {}
         if last and not frappe.get_doc('Relay Channel',last.channel).has_permission('read'):last={}
         items.append(dict(row,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
@@ -202,11 +215,13 @@ def _unread_query(fields, contact=None):
     return query.where((legacy|exact)&message.name.notin(recorded))
 
 
-def unread_count(contact, channel=None):
+def unread_count(contact, channel=None, channels=None):
     from pypika.functions import Count
     query = _unread_query(['name'], contact)
     if channel:
         query = query.where(frappe.qb.DocType('Relay Message').channel == channel)
+    if channels is not None:
+        query = query.where(frappe.qb.DocType('Relay Message').channel.isin(channels))
     return int(frappe.qb.from_(query.as_('unseen')).select(Count('*')).run()[0][0])
 
 

@@ -1,3 +1,4 @@
+import { resetRecipient } from '../services/recipientContext.js';
 import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { sha256Hex, randomUUID } from '../services/crypto.js';
 import { computed, onMounted, onBeforeUnmount, ref, watch, reactive } from "vue";
@@ -136,28 +137,15 @@ export function useMessages() {
   const newer = ref(false),
     last = ref(null),
     restored = ref("");
-  // Keep drafts in this inbox instance only; never persist customer text in browser storage.
-  const drafts = new Map();
   const windows = new Map(), preferredChannels = new Map();
   const viewPosition = ref(null), newArrivals = ref(0);
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
-  const draftKey = () => businessName.value
-    ? JSON.stringify(['business', businessType.value, businessName.value, channel.value, source.value?.channel||'', source.value?.sender_endpoint||''])
-    : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
   const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source};
-  function saveDraft() {
-    const key = draftKey();
-    if (!key) return;
-    drafts.delete(key);
-    drafts.set(key, Object.fromEntries(Object.entries(draftFields).map(([name, field]) => [name, field.value])));
-    while (drafts.size > 30) drafts.delete(drafts.keys().next().value);
-  }
-  function restoreDraft() {
-    const saved = drafts.get(draftKey());
-    const defaults = {body:'',kind:'text',emoji:'👍',latitude:'',longitude:'',contactName:'',phone:'',attachment:null,quoting:false,source:null};
-    for (const [name,field] of Object.entries(draftFields)) field.value = saved ? saved[name] : defaults[name];
+  function clearRecipient() {
+    resetRecipient(draftFields);
+    error.value = ""; notice.value = "";
   }
   function saveWindow() {
     flushPosition();
@@ -207,7 +195,7 @@ export function useMessages() {
     const checkpoint=await historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})});
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     ingestionCursor.value=checkpoint.ingestion_cursor||'RELAY-MSG-0000000000';
-    if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;restoreDraft();}
+    if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;clearRecipient();}
     const page=businessName.value
       ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:saved.name})
       : await coreApi('api.message_context',{message:saved.name,...(channel.value?{channel:channel.value}:{})});
@@ -352,10 +340,10 @@ export function useMessages() {
 
   function filterChannel(value) {
     if(busy.value || channel.value===value) return;
-    saveDraft();saveWindow();++requestSequence;
+    clearRecipient();saveWindow();++requestSequence;
     channel.value=value;rows.value=[];source.value=null;quoting.value=false;
     restored.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
-    restoreDraft();
+    clearRecipient();
     if(!restoreWindow())run(restoreSavedView);
   }
 
@@ -392,9 +380,10 @@ export function useMessages() {
 
   function open(contact) {
     if (busy.value || !contact) return;
-    saveDraft();saveWindow();
+    clearRecipient();saveWindow();
     businessName.value = "";
     businessType.value = "";
+    businessContext.value = null;
     restored.value = "";
     viewPosition.value=null;newArrivals.value=0;
     newer.value = false;
@@ -410,8 +399,8 @@ export function useMessages() {
     body.value = "";
     channel.value = preferredChannels.get(contact)||"";
     channels.value = [];
-    restoreDraft();
-    run(async () => {
+    clearRecipient();
+    return run(async () => {
       const metadata=await coreApi('api.conversation_channels',{contact});
       channels.value=metadata.items;
       await restorePending();
@@ -426,7 +415,7 @@ export function useMessages() {
     window.history[replace ? "replaceState" : "pushState"](null, "", route);
   }
   function clearSelection(updateRoute = true) {
-    saveDraft();saveWindow();++requestSequence;
+    clearRecipient();saveWindow();++requestSequence;
     selected.value="";businessName.value="";businessType.value="";businessContext.value=null;
     rows.value=[];source.value=null;quoting.value=false;
     if(updateRoute && location.hash.split('?')[0]==='#/messages')window.history.pushState(null,"","#/messages");
@@ -434,7 +423,7 @@ export function useMessages() {
   function openBusiness(doctype, record, updateRoute = true) {
     const name=typeof record==='string'?record:record?.name;
     if (busy.value || !doctype || !name) return;
-    saveDraft();saveWindow();
+    clearRecipient();saveWindow();
     ++requestSequence;
     selected.value = "";
     businessType.value = doctype;
@@ -455,7 +444,7 @@ export function useMessages() {
     more.value = false;
     channel.value = "";
     channels.value = [];
-    restoreDraft();
+    clearRecipient();
     if(updateRoute)businessRoute(doctype,name);
     const cached=restoreWindow();
     return run(async()=>{
@@ -483,20 +472,14 @@ export function useMessages() {
   }
   function reply(message) {
     if(businessName.value && (source.value?.channel!==message.channel || source.value?.sender_endpoint!==message.sender_endpoint)) {
-      saveDraft();source.value=message;restoreDraft();
+      clearRecipient();
     }
     source.value = message;
     quoting.value = true;
   }
   function selectRecipient(message) {
-    if (!message) return;
-    if (businessName.value && (source.value?.channel !== message.channel || source.value?.sender_endpoint !== message.sender_endpoint)) {
-      saveDraft();
-      source.value = message;
-      restoreDraft();
-    }
-    source.value = message;
-    quoting.value = false;
+    clearRecipient();
+    source.value = message || null;
   }
   async function focusMessage(message) {
     await run(async () => {
@@ -508,15 +491,16 @@ export function useMessages() {
         ++requestSequence;
         rows.value=page.items;before.value=page.first;last.value=page.last;
         more.value=page.has_more;newer.value=page.has_newer;restored.value=message;
-        source.value=page.items.find(row=>row.name===message)||source.value;
+        const recipient=page.items.find(row=>row.name===message);
+        if(recipient && (source.value?.channel!==recipient.channel || source.value?.sender_endpoint!==recipient.sender_endpoint)) clearRecipient();
+        source.value=recipient||source.value;
         updateChannels();return;
       }
       const changed = selected.value !== page.contact || !!businessName.value;
-      if (changed) saveDraft();
+      if (changed) clearRecipient();
       ++requestSequence;
       businessName.value = '';
       selected.value = page.contact;
-      if (changed) restoreDraft();
       channel.value = '';
       rows.value = page.items;
       before.value = page.first;
@@ -680,7 +664,7 @@ export function useMessages() {
 
   return {
     beginEmail, finishEmail, checkPending, pendingCursor, loadPending:()=>run(()=>restorePending(true)), displayRows, emailDrafts, viewPosition, rememberPosition, newArrivals, latest,
-    clearSelection,
+    clearSelection, clearRecipient,
     businessType,
     businessName,
     businessContext,

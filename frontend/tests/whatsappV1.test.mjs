@@ -1,3 +1,4 @@
+import { resetRecipient } from '../src/services/recipientContext.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -7,7 +8,7 @@ import {sha256Hex} from '../src/services/crypto.js'
 
 const source=(await readFile(new URL('../src/composables/useMessages.js',import.meta.url),'utf8'))
   .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','function')
-const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','"use strict";\n'+source+'\nreturn useMessages();')
+const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','"use strict";\n'+source+'\nreturn useMessages();')
 function storage(){
   const value={}
   Object.defineProperties(value,{
@@ -20,7 +21,7 @@ function setup(api){
   globalThis.sessionStorage=storage()
   let refresh,id=0
   const scope=effectScope()
-  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue))
+  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue,resetRecipient))
   return {state,refresh:(...kinds)=>refresh({kinds:new Set(kinds)}),stop:()=>scope.stop()}
 }
 const row=(number,time)=>({name:`RELAY-MSG-${String(number).padStart(10,'0')}`,channel:'channel',content:'Hello',creation:'2026-10-24',sent_at:time,provider_context:{provider:'WhatsApp'},sender_endpoint:'15550000001'})
@@ -30,7 +31,7 @@ test('manager triage starts, loads pending messages and watches the selected con
   const script=text.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm,'')
   const make=new Function('useRealtimeRefresh','onMounted','ref','watch','coreApi',
     '"use strict";\n'+script+'\nreturn {rows,contact,business,businesses,error};')
-  const pending={event:'event',contact:'contact',ambiguous:true},businesses=[{doctype:'Customer',name:'customer'}]
+  const pending={event:'event',contact:'contact',ambiguous:true,medium:'WhatsApp'},businesses=[{doctype:'Customer',name:'customer'}]
   let mount
   const api=async(method,args)=>{
     if(method==='enrollment.pending')return {items:[pending],next:null}
@@ -155,6 +156,52 @@ test('template lifecycle events refresh after an in-flight request without polli
 
 test('active navigation omits bulk, calls and groups and includes manager triage',async()=>{
   const text=await readFile(new URL('../src/SiteApp.vue',import.meta.url),'utf8')
-  assert.match(text,/name:'Incoming',label:'Unlinked\/ambiguous'.*manage:true/)
+  assert.match(text, /Contacts: defineAsyncComponent/)
+  const contacts = await readFile(new URL('../src/components/ContactsWorkspace.vue', import.meta.url), 'utf8')
+  assert.match(contacts, /IncomingWorkspace v-if="tab === 'unlinked' && capabilities.manage"/)
+  assert.match(text, /location.hash = '\/contacts\?tab=unlinked'/)
   assert.doesNotMatch(text,/Campaigns:|name:'Campaigns'|name:'Calls'|name:'Groups'/)
+})
+
+
+test('changing to a contact without history clears recipient, quote, draft and attachment', () => {
+  const fixture = setup(async () => ({ items: [] }))
+  try {
+    fixture.state.source.value = row(1, '2026-10-24')
+    fixture.state.quoting.value = true
+    fixture.state.body.value = 'Private draft for the first contact'
+    fixture.state.attachment.value = { filename: 'first-contact.pdf' }
+    fixture.state.kind.value = 'document'
+    fixture.state.selectRecipient(null)
+    assert.equal(fixture.state.source.value, null)
+    assert.equal(fixture.state.quoting.value, false)
+    assert.equal(fixture.state.body.value, '')
+    assert.equal(fixture.state.attachment.value, null)
+    assert.equal(fixture.state.kind.value, 'text')
+    fixture.state.selectRecipient(row(2, '2026-10-24'))
+    assert.equal(fixture.state.source.value.name, row(2, '2026-10-24').name)
+    assert.equal(fixture.state.body.value, '')
+  } finally { fixture.stop() }
+})
+
+test('opening a queue contact clears the previous business context before history loads', async () => {
+  const fixture = setup(async method => method.endsWith('view_state') ? {} : { items: [] })
+  try {
+    fixture.state.businessType.value = 'Customer'
+    fixture.state.businessName.value = 'Previous customer'
+    fixture.state.businessContext.value = { title: 'Previous customer', contact_count: 5 }
+    fixture.state.source.value = row(1, '2026-10-24')
+    fixture.state.body.value = 'Previous draft'
+    fixture.state.quoting.value = true
+    const opened = fixture.state.open('new-contact')
+    assert.equal(fixture.state.businessContext.value, null)
+    assert.equal(fixture.state.businessName.value, '')
+    assert.equal(fixture.state.businessType.value, '')
+    assert.equal(fixture.state.source.value, null)
+    assert.equal(fixture.state.body.value, '')
+    assert.equal(fixture.state.quoting.value, false)
+    await opened
+    assert.equal(fixture.state.selected.value, 'new-contact')
+    assert.equal(fixture.state.error.value, '')
+  } finally { fixture.stop() }
 })
