@@ -1,0 +1,89 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Channel Preference",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CHP-.##########",
+  "track_changes": 1,
+  "field_order": [
+    "scope_key",
+    "preference_key",
+    "business_doctype",
+    "business_name",
+    "contact",
+    "endpoint",
+    "consent",
+    "priority"
+  ],
+  "fields": [
+    {
+      "fieldname": "scope_key",
+      "label": "Scope Key",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "preference_key",
+      "label": "Preference Key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business Name",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "contact",
+      "label": "Person",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Contact"
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint",
+      "fieldtype": "Link",
+      "reqd": 1,
+      "options": "Relay Contact Endpoint"
+    },
+    {
+      "fieldname": "consent",
+      "label": "Consent",
+      "fieldtype": "Select",
+      "reqd": 1,
+      "options": "Granted\nDenied",
+      "default": "Denied"
+    },
+    {
+      "fieldname": "priority",
+      "label": "Priority",
+      "fieldtype": "Int",
+      "reqd": 1,
+      "default": "10"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ],
+  "naming_rule": "Expression (old style)"
+}

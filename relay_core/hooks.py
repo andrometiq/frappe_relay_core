@@ -65,3 +65,6 @@ scheduler_events['cron']['* * * * *'].append('relay_core.business_events.recover
 
 after_migrate.append('relay_core.ai.samples.install_samples')
 after_install.append('relay_core.ai.samples.install_samples')
+
+has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.permission'
+permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'
