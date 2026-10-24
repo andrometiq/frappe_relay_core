@@ -7,6 +7,7 @@ import frappe
 from relay_core.automation.provenance import conversation_key, telegram_message, email_context
 from relay_core.message_types import normalize, preview
 from relay_core.message_updates import apply_updates, provider_key
+from relay_core.inbound import retry_callback
 
 
 def extract_messages(payload):
@@ -163,6 +164,7 @@ def enqueue_projection(name, payload, received_ns=None):
         submitted_ns=time.time_ns(), received_ns=received_ns)
 
 
+@retry_callback
 def project_queued(name, submitted_ns, received_ns=None):
     from rq import get_current_job
     started = time.time_ns()
