@@ -19,6 +19,9 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
     links = candidates(contact)
     if override is not None and tuple(override) not in links:
         raise ValueError('Choose a linked business record')
+    if (override is None and len(links) > 1 and context.get('provider') == 'Email'
+            and context.get('authentication', {}).get('status') != 'pass'):
+        return None, 'triage_unverified_sender'
     business = incoming_reference(contact, channel, endpoint, context, links=links)
     state_key = conversation_key(channel, endpoint, context)
     name = frappe.db.get_value('Relay Business Routing', {'conversation_key': state_key}, 'name', for_update=True)
@@ -31,14 +34,24 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
     rule = context.pop('business_rule', None)
     if override is not None:
         business, rule = tuple(override), 'manager'
+    elif rule in ('triage_conflicting_references', 'triage_unlinked_reference'):
+        business = None
     elif business:
         rule = rule or 'reply_context'
     else:
         choice_id = (row.get('message_data') or {}).get('selection_id')
+        if context.get('provider') in ('Telegram', 'Email'):
+            body = (row.get('text') or {}).get('body', '').strip()
+            if body.startswith('relay-business:'):
+                choice_id = body
         choices = json.loads(state.choices or '[]')
         selected = next((item for item in choices if item['id'] == choice_id), None)
         if choice_id and str(choice_id).startswith('relay-business:'):
-            if selected and (selected['doctype'], selected['name']) in links and not state.selected_at:
+            if (selected and (selected['doctype'], selected['name']) in links and not state.selected_at
+                    and state.prompt_expires_at
+                    and frappe.utils.now_datetime() < frappe.utils.get_datetime(state.prompt_expires_at)
+                    and frappe.utils.get_datetime(event.creation) < frappe.utils.get_datetime(state.prompt_expires_at)
+                    and choice_scope(context)):
                 business, rule = (selected['doctype'], selected['name']), 'sender_choice'
             else:
                 rule = 'triage_invalid_choice'
@@ -67,15 +80,23 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
 
 
 def prompt(state, links, context, row, event):
-    if context.get('provider') != 'WhatsApp' or context.get('group_id') or not 2 <= len(links) <= 10:
+    provider = context.get('provider')
+    if provider not in ('WhatsApp', 'Telegram', 'Email') or context.get('group_id') or not 2 <= len(links) <= 10:
+        return 'triage_no_prompt'
+    if provider == 'Telegram' and not choice_scope(context):
+        return 'triage_no_prompt'
+    if provider == 'Email' and (not context.get('message_id') or context.get('auto_submitted')
+            or context.get('authentication', {}).get('status') != 'pass'):
         return 'triage_no_prompt'
     try:
-        stamp = datetime.fromtimestamp(int(row['timestamp']), timezone.utc).replace(tzinfo=None)
+        stamp = (datetime.fromtimestamp(int(row['timestamp']), timezone.utc).replace(tzinfo=None)
+                 if provider == 'WhatsApp' else frappe.utils.get_datetime(event.creation))
     except (KeyError, ValueError, TypeError, OverflowError, OSError):
         return 'triage_window_closed'
     now = frappe.utils.now_datetime()
     # Provider times are UTC; Frappe dates use the site's timezone.
-    stamp = frappe.utils.convert_utc_to_system_timezone(stamp).replace(tzinfo=None)
+    if provider == 'WhatsApp':
+        stamp = frappe.utils.convert_utc_to_system_timezone(stamp).replace(tzinfo=None)
     stamp = min(stamp, frappe.utils.get_datetime(event.creation), now)
     expires = stamp + timedelta(hours=24)
     if now >= expires:
@@ -89,5 +110,13 @@ def prompt(state, links, context, row, event):
     state.choices = json.dumps(choices)
     state.prompt_message_id, state.prompt_expires_at = row['id'], expires
     from relay_core.business_routing_prompt import create
-    state.prompt_action = create(state, choices)
+    state.prompt_action = create(state, choices, context)
     return 'triage_prompt_pending'
+
+
+def choice_scope(context):
+    if context.get('provider') == 'Email':
+        return context.get('authentication', {}).get('status') == 'pass' and not context.get('auto_submitted')
+    if context.get('provider') == 'Telegram':
+        return context.get('chat_type') == 'private' and context.get('participant_id') == context.get('chat_id')
+    return True

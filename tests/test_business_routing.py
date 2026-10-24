@@ -8,7 +8,7 @@ from frappe import _dict
 from relay_core import business_access, business_routing as routing, business_routing_prompt as prompts
 
 
-class RoutingTests(unittest.TestCase):
+class RoutingFixtures:
     def setUp(self):
         self.now = datetime(2026, 10, 24, 12)
         self.links = [('Customer', 'customer-one'), ('Supplier', 'supplier-two')]
@@ -73,6 +73,8 @@ class RoutingTests(unittest.TestCase):
     def state(self):
         return next(iter(self.states.values()))
 
+
+class RoutingTests(RoutingFixtures, unittest.TestCase):
     def test_prompt_once_even_across_replay_and_message_burst(self):
         for index in range(100):
             self.assertEqual(self.resolve(str(index)), (None, 'triage_prompt_pending'))
@@ -176,16 +178,16 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(self.actions)
 
     def test_unsupported_channel_and_groups_stay_in_triage(self):
-        for context in ({'provider': 'Email'}, {'provider': 'Telegram'}, {'group_id': 'group'}):
+        for context in ({'provider': 'Email', 'authentication': {'status': 'pass'}}, {'provider': 'Telegram'}, {'group_id': 'group'}):
             self.assertEqual(self.resolve(context=context), (None, 'triage_no_prompt'))
         self.assertFalse(self.actions)
 
     def test_manager_selection_is_channel_neutral_and_rejects_unlinked_business(self):
         with self.assertRaises(ValueError):
             self.resolve(override=('Customer', 'stranger'))
-        self.assertEqual(self.resolve(context={'provider': 'Email'}, override=self.links[1]), (self.links[1], 'manager'))
+        self.assertEqual(self.resolve(context={'provider': 'Email', 'authentication': {'status': 'pass'}}, override=self.links[1]), (self.links[1], 'manager'))
         self.now += timedelta(seconds=1)
-        self.assertEqual(self.resolve(context={'provider': 'Email'}), (self.links[1], 'conversation'))
+        self.assertEqual(self.resolve(context={'provider': 'Email', 'authentication': {'status': 'pass'}}), (self.links[1], 'conversation'))
         self.assertFalse(self.actions)
 
     def test_single_link_and_revoked_endpoint(self):
@@ -343,3 +345,51 @@ class PromptRecoveryTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.api.reconcile('action')
         prepare.assert_not_called()
         self.hub.call_tool.assert_called_once_with('whatsapp.deliveries', {'request_key': 'stable-key'})
+
+
+class ChannelRoutingTests(RoutingFixtures, unittest.TestCase):
+    def test_unlinked_reply_does_not_fall_back_to_remaining_business(self):
+        from relay_core.message_updates import provider_key
+        self.references[provider_key('channel', '15550000001', 'old')] = _dict(
+            business_doctype='Supplier', business_name='supplier-two')
+        self.links = self.links[:1]
+        self.assertEqual(self.resolve(context={'reply_to_message_id': 'old'}), (None, 'triage_unlinked_reference'))
+
+    def telegram(self, **extra):
+        return {'provider': 'Telegram', 'chat_id': 15550000001, 'chat_type': 'private',
+                'participant_id': 15550000001, 'message_id': 12, **extra}
+
+    def email(self, thread='thread-one', **extra):
+        return {'provider': 'Email', 'message_id': '<' + thread + '@example.invalid>',
+                'email_thread_id': thread, 'authentication': {'status': 'pass'}, **extra}
+
+    def test_text_prompt_expiry_and_scope(self):
+        for context in (self.telegram(), self.email()):
+            with self.subTest(provider=context['provider']):
+                self.states.clear(); self.actions.clear()
+                self.assertEqual(self.resolve(context=context), (None, 'triage_prompt_pending'))
+                action = next(iter(self.actions.values()))
+                payload = json.loads(action.payload)
+                self.assertIn(payload['tool'], ('telegram.message', 'email.send'))
+                token = json.loads(self.state().choices)[0]['id']
+                row = {'id': 'selection', 'text': {'body': token}, 'message_data': {}}
+                foreign = dict(context, email_thread_id='another', message_thread_id=3)
+                self.assertEqual(routing.resolve('contact', 'channel', '15550000001', foreign, row,
+                    _dict(name='selection', creation=self.now)), (None, 'triage_invalid_choice'))
+                self.now += timedelta(hours=24)
+                self.assertEqual(routing.resolve('contact', 'channel', '15550000001', context, row,
+                    _dict(name='selection', creation=self.now)), (None, 'triage_invalid_choice'))
+
+    def test_automatic_or_unauthenticated_email_does_not_prompt(self):
+        for context in (self.email(auto_submitted=True), self.email(authentication={'status': 'unverified'})):
+            expected = 'triage_no_prompt' if context.get('auto_submitted') else 'triage_unverified_sender'
+            self.assertEqual(self.resolve(context=context), (None, expected))
+        self.assertFalse(self.actions)
+
+    def test_another_telegram_participant_cannot_select(self):
+        context = self.telegram()
+        self.resolve(context=context)
+        token = json.loads(self.state().choices)[0]['id']
+        row = {'id': 'selection', 'text': {'body': token}}
+        self.assertEqual(routing.resolve('contact', 'channel', '15550000001', self.telegram(participant_id=22), row,
+            _dict(name='selection', creation=self.now)), (None, 'triage_invalid_choice'))
