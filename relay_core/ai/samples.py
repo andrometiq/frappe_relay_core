@@ -1,9 +1,12 @@
-"""Disabled, editable starter skills; existing configuration is never overwritten."""
+"""Editable starter skills; upgrade known defaults without replacing custom tools."""
 import json
 import frappe
 
 LEDGER_TOOL = {'name': 'supplier_ledger', 'method': 'get_list', 'doctype': 'GL Entry',
     'scope_field': 'party', 'fields': ['company', 'posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit', 'remarks']}
+# The shipped contract before ledger totals required company metadata.
+LEGACY_LEDGER_TOOL = {**LEDGER_TOOL,
+    'fields': ['posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit', 'remarks']}
 INSTRUCTIONS = """Help suppliers with questions about their ledger.
 Supplier types we manage: configure this text to describe your supplier groups and what your team handles.
 For a ledger doubt, offer an explicit start and end date and ask the supplier to confirm.
@@ -18,7 +21,17 @@ If the request is unclear, outside this skill, data is unavailable, or the suppl
 def install_samples():
     if not all(frappe.db.exists('DocType', name) for name in ('Supplier', 'GL Entry', 'Relay AI Skill')):
         return
-    if frappe.db.exists('Relay AI Skill', {'sample_key': 'supplier_ledger'}):
+    name = frappe.db.exists('Relay AI Skill', {'sample_key': 'supplier_ledger'})
+    if name:
+        skill = frappe.get_doc('Relay AI Skill', name, for_update=True)
+        try:
+            tools = json.loads(skill.allowed_tools or '[]')
+        except (TypeError, ValueError):
+            return
+        if (skill.business_doctype == 'Supplier' and skill.instructions == INSTRUCTIONS
+                and tools == [LEGACY_LEDGER_TOOL]):
+            skill.allowed_tools = json.dumps([LEDGER_TOOL])
+            skill.save(ignore_permissions=True)
         return
     frappe.get_doc({'doctype': 'Relay AI Skill', 'title': 'Supplier ledger',
         'sample_key': 'supplier_ledger', 'enabled': 0, 'mode': 'Shadow', 'daily_limit': 100,
