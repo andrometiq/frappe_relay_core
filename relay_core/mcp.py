@@ -19,10 +19,10 @@ STRING = {"type": "string"}
 MESSAGE = obj({"key": STRING, "operation": {"type": "string", "enum": ["messages.send", "messages.media", "messages.react", "messages.location", "messages.contacts", "templates.send"]},
                "arguments": {"type": "object"}, "contact": STRING, "business_doctype": STRING, "business_name": STRING}, ("key", "operation"))
 TOOLS = [
-    {"name":"relay.flows.providers","description":"List configured AI providers available for permission-checked workflow generation.","inputSchema":obj({"query":STRING,"after":STRING})},
+    {"name":"relay.flows.providers","description":"List configured AI Models available for permission-checked workflow generation.","inputSchema":obj({"query":STRING,"after":STRING})},
     {"name":"relay.flows.references","description":"Search valid WhatsApp channels, execution users, or business document types for an AI-authored workflow.","inputSchema":obj({"kind":{"type":"string","enum":["channel","execution_user","business_doctype"]},"query":STRING},("kind",))},
     {"name":"relay.flows.actions","description":"List installed replay-safe business actions and their exact JSON input schemas for AI workflow authoring.","inputSchema":obj({})},
-    {"name":"relay.flows.generate","description":"Generate a bounded, validated workflow draft with a configured AI provider. The draft is not saved, published, enabled, or executed.","inputSchema":obj({"requirement":STRING,"provider":STRING},("requirement","provider"))},
+    {"name":"relay.flows.generate","description":"Generate a bounded, validated workflow draft with a configured AI Model. The draft is not saved, published, enabled, or executed.","inputSchema":obj({"requirement":STRING,"provider":STRING},("requirement","provider"))},
     {"name":"relay.flows.validate","description":"Validate a complete AI-authored workflow draft and its permission-bound runtime context without writing it.","inputSchema":obj({"name":STRING,"values":{"type":"object"}},("values",))},
     {"name":"relay.flows.list","description":"List persisted conversation flows.","inputSchema":obj({"after":STRING,"query":STRING})},
     {"name":"relay.flows.read","description":"Read a saved flow definition.","inputSchema":obj({"name":STRING},("name",))},

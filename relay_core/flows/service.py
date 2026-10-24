@@ -70,16 +70,17 @@ def read(name):
 
 @frappe.whitelist(methods=['GET'])
 def providers(query='',after=None):
-    """Return only enabled providers that can generate a flow now."""
+    """Return enabled AI Models with enabled provider accounts."""
     require_access(configure=True)
     if not isinstance(query,str) or len(query)>80 or (after is not None and (not isinstance(after,str) or len(after)>140)):
         frappe.throw('Invalid provider search')
-    filters={'enabled':1}
+    accounts = frappe.get_list('AI Provider Account', filters={'enabled': 1}, pluck='name', page_length=0)
+    filters={'enabled':1, 'account':['in', accounts]}
     if after:filters['name']=['>',after]
     needle='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
-    rows=frappe.get_list('Relay AI Provider',filters=filters,
-        or_filters=[['model','like',needle],['provider','like',needle]],
-        fields=['name','provider','model'],order_by='name asc',page_length=31)
+    rows=frappe.get_list('AI Model',filters=filters,
+        or_filters=[['model_id','like',needle],['provider','like',needle]],
+        fields=['name','provider','model_id as model'],order_by='name asc',page_length=31)
     return {'items':rows[:30],'next':rows[29].name if len(rows)>30 else None}
 
 
@@ -202,7 +203,8 @@ def claims(message):
     except (ValueError,TypeError):
         return False
     if context.get('provider')!='WhatsApp':return False
-    return bool(matching(message) or active(route(message)))
+    return bool(matching(message) or active(route(message)) or frappe.db.exists(
+        'Relay Flow Event', {'conversation_key': route(message), 'status': 'Pending'}))
 
 
 @after_message_commit
@@ -224,7 +226,10 @@ def enqueue(message):
     return {'event':frappe.db.get_value('Relay Flow Event',{'message':message},'name')}
 
 
-def scope(run,message):
+def scope(run,message, *, handoff=False):
+    statuses = ('Handoff',) if handoff else ('Running', 'Waiting')
+    if run.status not in statuses:
+        raise ValueError('Flow is no longer active')
     flow=frappe.get_doc('Relay Flow',run.flow)
     version=frappe.get_doc('Relay Flow Version',run.version)
     if not flow.enabled or flow.published_version!=version.name:
@@ -238,7 +243,8 @@ def scope(run,message):
     if source.direction!='Incoming' or channel.name!=version.channel or route(source)!=run.conversation_key:
         raise ValueError('Flow conversation changed')
     contact,_=readable_contact(source.relay_contact)
-    if contact.automation_paused or int(contact.automation_generation or 0)!=int(run.generation or 0):
+    generation = int(run.generation or 0) + int(handoff)
+    if bool(contact.automation_paused) != handoff or int(contact.automation_generation or 0) != generation:
         raise ValueError('A human has taken ownership of this conversation')
     from relay_core.business_access import reference,candidates
     target=(run.get('business_doctype'),run.get('business_name')) if run.get('business_name') else reference(source)
@@ -255,9 +261,29 @@ def send(run,event,source,channel,text,key):
         result=email_send([source.sender_endpoint],'Flow update',text,message=source.name,request_key=key,auto_submitted=1)
         if not result.get('message_id'):raise RuntimeError('Delivery not confirmed')
     else:
-        from relay_core.messaging import send as message_send
-        result=message_send(source.name,'text',{'text':text},key)
+        from relay_core.messaging import send as message_send, outgoing_flow
+        marker = {'name': run.name, 'version': run.version, 'generation': int(run.generation or 0)}
+        if run.status == 'Handoff': marker['handoff'] = True
+        token = outgoing_flow.set(marker)
+        try:
+            result=message_send(source.name,'text',{'text':text},key)
+        finally:
+            outgoing_flow.reset(token)
         if result.get('status')!='Submitted':raise RuntimeError('Delivery not confirmed')
+
+
+def flow_ticket(run, source, text, key, category):
+    from relay_core.business_access import reference
+    from relay_core.tickets import read as read_ticket
+    business = reference(source)
+    if not business: raise ValueError('Flow ticket needs a business record')
+    action = digest(key)
+    existing = frappe.db.get_value('Relay Ticket', {'source_action_key': action}, 'name')
+    if existing: return read_ticket(existing)
+    return frappe.get_doc({'doctype': 'Relay Ticket', 'subject': text[:140] or 'Conversation needs a person',
+        'brief': text, 'category': category, 'status': 'Open', 'source_action_key': action,
+        'assigned_to': frappe.session.user, 'business_doctype': business[0], 'business_name': business[1],
+        'messages': [{'message': name} for name in dict.fromkeys([run.start_message, source.name])]}).insert()
 
 
 def next_step(nodes,index):
@@ -338,14 +364,7 @@ def _process(event):
         if node['kind']=='reply':
             send(run,event,source,channel,text,key)
         elif node['kind']=='ticket':
-            from relay_core.tickets import read as read_ticket
-            action=digest(key)
-            existing=frappe.db.get_value('Relay Ticket',{'source_action_key':action},'name')
-            if existing:read_ticket(existing)
-            else:
-                sources=list(dict.fromkeys([run.start_message,message.name]))
-                frappe.get_doc({'doctype':'Relay Ticket','subject':text[:140],'brief':text,'category':node.get('category','Query'),
-                    'status':'Open','source_action_key':action,'messages':[{'message':name} for name in sources]}).insert()
+            flow_ticket(run, source, text, key, node.get('category', 'Query'))
         elif node['kind']=='action':
             from relay_core.flows.actions import execute
             execute(run,node,values,key)
@@ -357,9 +376,12 @@ def _process(event):
                 'summary':text,'category':node.get('category',''),'status':node.get('status','Open'),
                 'messages':list(dict.fromkeys([run.start_message]+sources))},source='Flow',source_key=key)
         elif node['kind']=='handoff':
-            send(run,event,source,channel,text,key)
+            flow_ticket(run, source, text, key, 'Support')
             from relay_core.automation.service import takeover
-            takeover(source.relay_contact,paused=1);run.status='Handoff';internal_save(run);finish(event);return
+            takeover(source.relay_contact,paused=1)
+            run.status='Handoff';internal_save(run);finish(event)
+            send(run,event,source,channel,text,key)
+            return
         run.step=next_step(nodes,run.step);internal_save(run);frappe.db.commit()
     frappe.enqueue('relay_core.flows.service.process',name=event.name,queue=QUEUE,enqueue_after_commit=True)
 
@@ -381,12 +403,16 @@ def process(name):
         if first!=event.name and not matching(frappe.get_doc('Relay Message',event.message)):return
         try:_process(event)
         except (frappe.PermissionError,frappe.ValidationError,ValueError):
-            frappe.db.rollback();event.reload();event.status='Rejected';event.reason='Flow, input or conversation is no longer permitted'
+            frappe.db.rollback();event.reload()
+            if event.status == 'Complete': return
+            event.status='Rejected';event.reason='Flow, input or conversation is no longer permitted'
             internal_save(event)
             if event.run:frappe.db.set_value('Relay Flow Run',event.run,{'status':'Cancelled','reason':event.reason})
             frappe.db.commit()
         except Exception:
-            frappe.db.rollback();event.reload();event.attempts=int(event.attempts or 0)+1
+            frappe.db.rollback();event.reload()
+            if event.status == 'Complete': return
+            event.attempts=int(event.attempts or 0)+1
             event.reason='Step not confirmed; recovery reuses the same action key'
             event.next_attempt=frappe.utils.add_to_date(frappe.utils.now_datetime(),minutes=min(60,2**min(event.attempts,6)))
             internal_save(event)
@@ -402,15 +428,29 @@ def recover():
     for name in rows:frappe.enqueue('relay_core.flows.service.process',name=name,queue=QUEUE,job_id='relay-flow-'+name,deduplicate=True)
 
 
+def readable_run(run):
+    readable_contact(run.relay_contact)
+    from relay_core.business_access import reference
+    target = (run.business_doctype, run.business_name) if run.get('business_name') else None
+    if not target and run.get('start_message'):
+        source = frappe.get_doc('Relay Message', run.start_message)
+        source.check_permission('read')
+        target = reference(source)
+    if not target:
+        frappe.throw('Flow business context is unavailable', frappe.PermissionError)
+    frappe.get_doc(*target).check_permission('read')
+    return target
+
+
 @frappe.whitelist(methods=['GET'])
 def runs(flow,after=None):
     require_access(manage=True)
     read(flow)
     rows=frappe.get_all('Relay Flow Run',filters={'flow':flow,**({'name':['>',after]} if after else {})},
-        fields=['name','relay_contact','business_doctype','business_name','status','step','reason','creation'],order_by='name asc',limit_page_length=31)
+        fields=['name','relay_contact','business_doctype','business_name','start_message','status','step','reason','creation'],order_by='name asc',limit_page_length=31)
     items=[]
     for row in rows[:30]:
-        try:readable_contact(row.relay_contact)
+        try:readable_run(row)
         except frappe.PermissionError:continue
         row['display_name']=frappe.db.get_value('Relay Contact',row.relay_contact,'display_name')
         items.append(row)
@@ -420,7 +460,7 @@ def runs(flow,after=None):
 @frappe.whitelist(methods=['POST'])
 def cancel(name):
     require_access(manage=True)
-    run=frappe.get_doc('Relay Flow Run',name);readable_contact(run.relay_contact)
+    run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
     with frappe.cache.lock('relay-flow-conversation-'+run.conversation_key,timeout=10,blocking_timeout=3):
         run.reload()
         if run.status in ('Running','Waiting'):
@@ -432,7 +472,7 @@ def cancel(name):
 @frappe.whitelist(methods=['GET'])
 def responses(name):
     require_access(manage=True)
-    run=frappe.get_doc('Relay Flow Run',name);readable_contact(run.relay_contact)
+    run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
     read(run.flow)
     values=json.loads(run.get('values') or '{}')
     version=frappe.get_doc('Relay Flow Version',run.version)
