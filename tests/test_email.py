@@ -51,3 +51,32 @@ class EmailPermissionsTests(unittest.TestCase):
         self.f.get_doc.assert_not_called()
         self.f.db.get_value.assert_not_called()
         self.wa.client.assert_not_called()
+
+    def test_reload_status_returns_permission_checked_durable_action(self):
+        source=types.SimpleNamespace(channel='channel',relay_contact='contact',name='source')
+        action=Mock()
+        self.f.session=types.SimpleNamespace(user='sender')
+        self.f.db.get_value.side_effect=['action',None,'action']
+        self.f.get_doc.return_value=action
+        readable=Mock(return_value=(source,types.SimpleNamespace(channel='Email',account='local'),{}))
+        result={'action':'action','status':'Queued','message':None}
+        with patch.dict(sys.modules, {'relay_core.messaging':types.SimpleNamespace(readable_source=readable,action_result=lambda _:result)}):
+            self.assertEqual(self.service.send_status('source','stable-key'),result)
+            action.check_permission.assert_called_once_with('read')
+            action.check_permission.side_effect=PermissionError
+            with self.assertRaises(PermissionError):self.service.send_status('source','stable-key')
+        self.wa.client.assert_not_called()
+
+    def test_reload_receipt_precedes_stale_dispatching_action(self):
+        source=types.SimpleNamespace(channel='channel',relay_contact='contact',name='source')
+        self.f.session=types.SimpleNamespace(user='sender')
+        self.f.db.get_value.side_effect=['action','persisted']
+        action=Mock(status='Dispatching')
+        message=types.SimpleNamespace(name='persisted',status='Sent',check_permission=Mock())
+        self.f.get_doc.side_effect=[action,message]
+        result=Mock()
+        with patch.dict(sys.modules, {'relay_core.messaging':types.SimpleNamespace(
+            readable_source=lambda _: (source,types.SimpleNamespace(channel='Email',account='local'),{}),action_result=result)}):
+            self.assertEqual(self.service.send_status('source','stable-key'),{'status':'Sent','message':'persisted'})
+        result.assert_not_called();message.check_permission.assert_called_once_with('read')
+        self.wa.client.assert_not_called()

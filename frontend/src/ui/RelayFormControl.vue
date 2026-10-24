@@ -30,7 +30,7 @@ const checkboxPt = { root: { class: 'relay-checkbox' }, input: { class: 'relay-c
   </label>
   <label v-else :class="['relay-field', attrs.class]" :for="id">
     <span v-if="label" class="relay-field__label">{{ label }}<span v-if="required" aria-hidden="true"> *</span></span>
-    <PrimeSelect v-if="inputType === 'select'" :input-id="id" :model-value="modelValue" :options="normalizedOptions" option-label="label" option-value="value" option-disabled="disabled" :disabled="disabled" :pt="selectPt" v-bind="inputAttrs" class="relay-control relay-select" @update:model-value="update" />
+    <PrimeSelect v-if="inputType === 'select'" :aria-label="label" :input-id="id" :model-value="modelValue" :placeholder="normalizedOptions.find(option => option.value === modelValue)?.label" :options="normalizedOptions" option-label="label" option-value="value" option-disabled="disabled" :disabled="disabled" :pt="selectPt" v-bind="inputAttrs" class="relay-control relay-select" @update:model-value="update" />
     <PrimeTextarea v-else-if="inputType === 'textarea'" :id="id" :model-value="modelValue" :rows="Number(rows)" :disabled="disabled" :required="required" v-bind="inputAttrs" class="relay-control relay-textarea" @update:model-value="update" />
     <PrimeInputText v-else :id="id" :model-value="modelValue" :type="inputType" :disabled="disabled" :required="required" v-bind="inputAttrs" class="relay-control" @update:model-value="update" />
   </label>

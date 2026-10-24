@@ -205,3 +205,49 @@ test('opening a queue contact clears the previous business context before histor
     assert.equal(fixture.state.error.value, '')
   } finally { fixture.stop() }
 })
+
+test('reconnect rechecks every loaded message across channels and removes revoked history',async()=>{
+  const messages=Array.from({length:120},(_,index)=>({...row(index+1,'2026-10-24'),provider_context:{provider:index%2?'Email':'Telegram'}}))
+  let snapshots=0,reads=0
+  const api=async(method,args)=>{
+    if(method==='api.messages'){reads++;return {items:args.since?[]:[messages[0]],first:messages[0].name,last:messages[0].name,ingestion_cursor:messages.at(-1).name}}
+    if(method==='api.message_snapshots'){snapshots++;return {items:JSON.parse(args.names).filter(name=>name===messages[0].name).map(()=>messages[0])}}
+    return {items:[]}
+  }
+  const fixture=setup(api)
+  try {
+    fixture.state.selected.value='contact';fixture.state.rows.value=messages
+    // Establish the current ingestion cursor with a first history read.
+    await fixture.state.history()
+    fixture.state.rows.value=messages
+    await fixture.refresh('reconnect')
+    assert.equal(fixture.state.rows.value.length,1)
+    assert.equal(snapshots,3)
+    const before=reads;await new Promise(resolve=>setTimeout(resolve,20));assert.equal(reads,before)
+  } finally {fixture.stop()}
+})
+
+test('permission invalidation clears recipient, pending actions and cached history on denial',async()=>{
+  const fixture=setup(async method=>{if(method==='api.messages')throw Object.assign(Error('Revoked'),{status:403});return {items:[]}})
+  try {
+    fixture.state.selected.value='contact';fixture.state.rows.value=[row(1,'2026-10-24')]
+    fixture.state.source.value=row(1,'2026-10-24');fixture.state.body.value='Private draft'
+    await fixture.refresh('permissions')
+    assert.deepEqual(fixture.state.rows.value,[]);assert.equal(fixture.state.source.value,null);assert.equal(fixture.state.body.value,'')
+  } finally {fixture.stop()}
+})
+
+test('business reconnect restores only its scoped durable pending attempts',async()=>{
+  const pending={name:'pending:action',action:'action',scope:'Customer:local',channel:'email',status:'Queued',_pending:true}
+  const fixture=setup(async(method,args)=>{
+    if(method==='messaging.pending_messages') {assert.deepEqual(args,{business_doctype:'Customer',business_name:'local'});return {items:[pending]}}
+    if(method==='messaging.action_snapshots')return {items:[{action:'action',status:'Queued'}]}
+    if(method==='business_inbox.messages')return {items:[]}
+    return {items:[]}
+  })
+  try {
+    fixture.state.businessType.value='Customer';fixture.state.businessName.value='local'
+    await fixture.refresh('reconnect')
+    assert.equal(fixture.state.displayRows.value[0].action,'action')
+  } finally {fixture.stop()}
+})

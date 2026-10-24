@@ -4,12 +4,13 @@ import { Avatar, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi, frappeRequest } from './services/coreApi'
 import { realtimeStatus, startRealtime } from './services/realtime'
 import LoadingRows from './components/LoadingRows.vue'
+import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import { useViewRoute } from './useViewRoute'
 
 const location = window.location
 const views = {
-  Messages: defineAsyncComponent(() => import('./components/ConnectedMessages.vue')),
+  Messages: ConnectedMessages,
   Tickets: defineAsyncComponent(() => import('./components/TicketsWorkspace.vue')),
   Skills: defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   'Business events': defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
@@ -74,7 +75,7 @@ onErrorCaptured(e => {
     <button v-if="mobile" class="relay-nav-backdrop" aria-label="Close navigation" @click="closeNavigation" />
     <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }" aria-label="Relay navigation" @keydown="trapNavigation">
       <div class="relay-brand"><FeatherIcon name="message-circle" class="h-5 w-5" /><strong>Relay</strong><Button class="mobile-only ml-auto" icon="x" aria-label="Close navigation" @click="closeNavigation" /></div>
-      <p class="relay-nav-caption">WhatsApp workspace</p>
+      <p class="relay-nav-caption">Communication workspace</p>
       <nav class="relay-nav-section" aria-label="Workspace">
         <button v-for="item in navigation.filter(item => (!item.manage || capabilities.manage) && (!item.configure || capabilities.configure))" :key="item.name"
           class="nav-item" :class="{ active: view === item.name }" :aria-current="view === item.name ? 'page' : undefined" @click="view = item.name">

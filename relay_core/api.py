@@ -238,3 +238,68 @@ def contact_details(contact):
     return {'name': person.name, 'label': person.full_name or person.name,
             'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
             'links': links, 'endpoints': endpoints}
+
+
+@frappe.whitelist(methods=['GET'])
+def channel_options():
+    """Safe local channel readiness; provider receipt health lives in Activity."""
+    require_access()
+    from relay_core.settings import value
+    rows = frappe.get_list('Relay Channel', filters={'account': value('relay_hub_account')},
+        fields=['name', 'channel', 'enabled'], order_by='channel asc', page_length=100)
+    return {'items': rows}
+
+
+@frappe.whitelist(methods=['GET'])
+def contact_directory(query='', after=None):
+    require_access()
+    if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
+        frappe.throw('Invalid contact search')
+    filters = {'name': ['>', after]} if after else {}
+    if query.strip():
+        filters['full_name'] = ['like', '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%']
+    rows = frappe.get_list('Contact', filters=filters, fields=['name', 'full_name', 'mobile_no'],
+        order_by='name asc', page_length=31)
+    return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
+
+
+@frappe.whitelist(methods=['GET'])
+def contact_profile(contact):
+    require_access()
+    doc, _ = readable_contact(contact)
+    return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact}
+
+
+@frappe.whitelist(methods=['GET'])
+def contact_preferences(contact, business_doctype, business_name):
+    require_access()
+    from relay_core.conversation_start import business_contact
+    business_contact(contact, business_doctype, business_name)
+    return {'items': frappe.get_list('Relay Channel Preference', filters={
+        'contact': contact, 'business_doctype': business_doctype, 'business_name': business_name},
+        fields=['name', 'endpoint', 'consent', 'priority'], order_by='priority asc, name asc', page_length=100)}
+
+
+@frappe.whitelist(methods=['POST'])
+def save_contact_preference(contact, business_doctype, business_name, endpoint, consent, priority=10):
+    require_access(configure=True)
+    from relay_core.conversation_start import business_contact
+    from relay_core.channel_preferences import scope_key
+    business_contact(contact, business_doctype, business_name)
+    binding = frappe.get_doc('Relay Contact Endpoint', endpoint)
+    readable_contact(binding.relay_contact)
+    frappe.get_doc('Relay Channel', binding.channel).check_permission('read')
+    if frappe.db.get_value('Relay Contact', binding.relay_contact, 'contact') != contact:
+        frappe.throw('Endpoint does not belong to this person', frappe.PermissionError)
+    if consent not in ('Granted', 'Denied') or not str(priority).isdigit() or not 1 <= int(priority) <= 100:
+        frappe.throw('Choose consent and a priority from 1 to 100')
+    if consent == 'Granted' and not binding.verified:
+        frappe.throw('Review the revoked identity before granting consent')
+    scope = scope_key(contact, business_doctype, business_name)
+    with frappe.cache.lock('relay-preference:' + scope, timeout=10):
+        name = frappe.db.get_value('Relay Channel Preference', {'scope_key': scope, 'endpoint': endpoint}, 'name')
+        doc = frappe.get_doc('Relay Channel Preference', name) if name else frappe.new_doc('Relay Channel Preference')
+        doc.update(dict(contact=contact, business_doctype=business_doctype, business_name=business_name,
+                        endpoint=endpoint, consent=consent, priority=int(priority)))
+        doc.save()
+    return {'name': doc.name, 'endpoint': doc.endpoint, 'consent': doc.consent, 'priority': doc.priority}

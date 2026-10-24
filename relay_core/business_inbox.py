@@ -195,7 +195,7 @@ def records(doctype, query='', after=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium='WhatsApp', names=None, query=None, since=None):
+def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium=None, names=None, query=None, since=None):
     check_type(doctype)
     if not isinstance(name,str) or not name or len(name)>140:
         frappe.throw('Choose a business record')
@@ -235,13 +235,15 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     # Only this business's messages belong in its timeline. Legacy unassociated
     # messages are visible only through the global single-business permission rule.
     scope=((message.business_doctype==doctype)&(message.business_name==name)) | (message.business_name.isnull() | (message.business_name==''))
-    if medium!='WhatsApp':frappe.throw('Unsupported business inbox channel')
+    if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Unsupported business inbox channel')
     channels=frappe.qb.DocType('Relay Channel')
-    query=query.where(message.channel.isin(frappe.qb.from_(channels).select(channels.name).where(channels.channel=='WhatsApp')))
+    available=frappe.qb.from_(channels).select(channels.name)
+    if medium:available=available.where(channels.channel==medium)
+    query=query.where(message.channel.isin(available))
     watermark = []
     if not since and names is None:
         watermark = (page_query(['name'],filters,1,ingestion=True).where(message.relay_contact.isin(linked)).where(scope)
-            .where(message.channel.isin(frappe.qb.from_(channels).select(channels.name).where(channels.channel=='WhatsApp'))).run(as_dict=True))
+            .where(message.channel.isin(available)).run(as_dict=True))
     rows=query.where(message.relay_contact.isin(linked)).where(scope).run(as_dict=True)
     more=len(rows)>limit;page=rows[:limit]
     if not after and not since:page.reverse()

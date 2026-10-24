@@ -106,3 +106,68 @@ class ContactDetailsTests(unittest.TestCase):
         self.api.readable_contact.side_effect=PermissionError('Not assigned')
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
         self.f.get_all.assert_not_called()
+
+
+class ChannelUITests(unittest.TestCase):
+    setUp = ApiTests.setUp
+
+    def test_contact_directory_bounds_search_and_denies_before_query(self):
+        self.f.get_list.return_value = [types.SimpleNamespace(name=str(i)) for i in range(31)]
+        result = self.api.contact_directory('a%_', 'before')
+        self.assertEqual(len(result['items']), 30)
+        self.assertEqual(result['next'], '29')
+        query = self.f.get_list.call_args.kwargs
+        self.assertEqual(query['filters']['full_name'], ['like', '%a\\%\\_%'])
+        self.assertEqual(query['filters']['name'], ['>', 'before'])
+        self.assertEqual(query['page_length'], 31)
+        self.api.require_access.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.api.contact_directory()
+        for value in ({}, 'a' * 81):
+            self.api.require_access.side_effect = None
+            with self.assertRaises(ValueError): self.api.contact_directory(value)
+
+    def test_profile_returns_only_safe_identity_and_rechecks_access(self):
+        self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), None)
+        self.assertEqual(self.api.contact_profile('relay'), {'name':'relay','display_name':'Local','contact':'person'})
+        self.api.readable_contact.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.api.contact_profile('relay')
+
+    def test_channels_are_account_scoped_and_permission_filtered(self):
+        with patch.dict(sys.modules, {'relay_core.settings': types.SimpleNamespace(value=lambda _: 'local')}):
+            self.assertEqual(self.api.channel_options(), {'items':[]})
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'account':'local'})
+        self.assertEqual(self.f.get_list.call_args.kwargs['fields'], ['name','channel','enabled'])
+        self.api.require_access.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.api.channel_options()
+
+    def test_preferences_check_exact_business_before_read(self):
+        check = Mock()
+        with patch.dict(sys.modules, {'relay_core.conversation_start':types.SimpleNamespace(business_contact=check)}):
+            self.assertEqual(self.api.contact_preferences('person','Customer','local'), {'items':[]})
+            check.assert_called_with('person','Customer','local')
+            self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'contact':'person','business_doctype':'Customer','business_name':'local'})
+            check.side_effect = PermissionError
+            with self.assertRaises(PermissionError): self.api.contact_preferences('person','Supplier','private')
+
+    def test_consent_save_is_post_only_and_never_transfers_ownership(self):
+        from contextlib import nullcontext
+        self.f.PermissionError = PermissionError
+        self.f.throw = lambda message, exception=ValueError: (_ for _ in ()).throw(exception(message))
+        binding = types.SimpleNamespace(relay_contact='relay', channel='channel', verified=1)
+        doc = Mock(); doc.name='preference';doc.endpoint='endpoint';doc.consent='Granted';doc.priority=2
+        self.f.get_doc.side_effect = lambda dt, name: binding if dt == 'Relay Contact Endpoint' else Mock()
+        self.f.db = types.SimpleNamespace(get_value=Mock(side_effect=['person', None]))
+        self.f.new_doc = Mock(return_value=doc)
+        self.f.cache = types.SimpleNamespace(lock=lambda *a, **kw:nullcontext())
+        modules={'relay_core.conversation_start':types.SimpleNamespace(business_contact=Mock()),
+                 'relay_core.channel_preferences':types.SimpleNamespace(scope_key=lambda *a:'scope')}
+        with patch.dict(sys.modules, modules):
+            result=self.api.save_contact_preference('person','Customer','local','endpoint','Granted',2)
+            self.assertEqual(result,{'name':'preference','endpoint':'endpoint','consent':'Granted','priority':2})
+            self.api.require_access.assert_called_with(configure=True)
+            doc.save.assert_called_once()
+            self.f.db.get_value.side_effect=None;self.f.db.get_value.return_value='other-person'
+            with self.assertRaises(PermissionError): self.api.save_contact_preference('person','Customer','local','endpoint','Granted',2)
+            self.f.db.get_value.return_value='person';binding.verified=0
+            with self.assertRaises(ValueError): self.api.save_contact_preference('person','Customer','local','endpoint','Granted',2)
+        self.assertEqual(self.api.save_contact_preference.allowed_methods,['POST'])

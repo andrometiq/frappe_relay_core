@@ -1,4 +1,5 @@
 <script setup>
+import { channelStatus } from '../../services/channelComposition';
 import { useMessageInfo } from "../../composables/useMessageInfo";
 import LoadingRows from "../LoadingRows.vue";
 import ReadByBubble from "./ReadByBubble.vue";
@@ -53,7 +54,7 @@ function canReact(message) {
 }
 function deliveryKind(message) {
   const status = String(message.status || "");
-  if (["Failed", "Unconfirmed", "Uncertain"].includes(status)) return "failed";
+  if (["Failed", "Rejected", "Unconfirmed", "Uncertain"].includes(status)) return "failed";
   if (["Pending", "Queued", "Sending"].includes(status)) return "sending";
   if (status === "Read") return "read";
   if (status === "Delivered") return "delivered";
@@ -308,6 +309,7 @@ function actions(message) {
             quoted(message)?.content || "View original message"
           }}</span>
         </button>
+        <span class="text-xs text-ink-gray-5">{{ objectValue(message.provider_context).provider }}</span>
         <MessageContent :message="message" :show-reply-reference="false" />
         <p v-if="message._pending && message.error" class="text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
         <footer class="message-footer">
@@ -319,8 +321,8 @@ function actions(message) {
           <span v-if="message.edited_at" title="Message edited">edited</span>
           <span
             v-if="message.direction === 'Outgoing'"
-            :title="message.status"
-            :aria-label="message.status"
+            :title="channelStatus(message)"
+            :aria-label="channelStatus(message)"
             class="message-delivery"
             :class="{
               'delivery-failed': deliveryKind(message) === 'failed',
@@ -344,7 +346,8 @@ function actions(message) {
                 class="h-3 w-3"
             /></span>
           </span>
-          <span v-if="message._pending" class="pending-status">{{message.status}}
+          <span v-if="!message._pending && message.direction === 'Outgoing' && objectValue(message.provider_context).provider !== 'WhatsApp'" class="pending-status">{{ channelStatus(message) }}</span>
+          <span v-if="message._pending" class="pending-status">{{channelStatus(message)}}
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
           <div v-else class="message-actions">
@@ -388,7 +391,7 @@ function actions(message) {
           <dd>{{ info.direction }}</dd>
           <dt>Status</dt>
           <dd>
-            {{ info.direction === "Incoming" ? "Received" : info.status }}
+            {{ info.direction === "Incoming" ? "Received" : channelStatus(info) }}
           </dd>
           <dt>Time</dt>
           <dd>{{ timeOf(info)?.toLocaleString() || "Unavailable" }}</dd>
