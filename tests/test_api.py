@@ -75,7 +75,7 @@ class ApiTests(unittest.TestCase):
 
 class ContactDetailsTests(unittest.TestCase):
     setUp = ApiTests.setUp
-    def test_details_exclude_unconfigured_private_links_and_other_channels(self):
+    def test_details_exclude_private_links_and_include_readable_channels(self):
         person = types.SimpleNamespace(name='fixture-contact', full_name='Local fixture', mobile_no='15550000001', phone='',
             check_permission=Mock(), links=[types.SimpleNamespace(link_doctype='Customer', link_name=name) for name in ['visible', 'private']])
         person.links.append(types.SimpleNamespace(link_doctype='Supplier', link_name='unconfigured'))
@@ -91,7 +91,8 @@ class ContactDetailsTests(unittest.TestCase):
         self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
         result=self.api.contact_details('fixture-contact')
         self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}])
-        self.assertEqual(result['endpoints'],[endpoint])
+        self.assertEqual([row.channel for row in result['endpoints']],['wa','email'])
+        self.assertEqual([row.provider for row in result['endpoints']],['WhatsApp','Email'])
         self.api.readable_contact.assert_called_once_with('relay-contact')
         person.check_permission.assert_called_once_with('read')
         self.assertEqual(self.api.contact_details.allowed_methods,['GET'])

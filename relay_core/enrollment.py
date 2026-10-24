@@ -9,6 +9,7 @@ from relay_core.settings import value as connection_value
 
 def event_rows(name):
     event=frappe.get_doc('Relay Hub Event',name)
+    event.check_permission('read')
     if event.account!=connection_value('relay_hub_account'):frappe.throw('Event belongs to another Hub account',frappe.PermissionError)
     payload=json.loads(event.payload);medium=payload.get('channel','WhatsApp')
     channels=frappe.get_all('Relay Channel',filters={'account':event.account,'channel':medium,'enabled':1},pluck='name',limit_page_length=2)
@@ -19,12 +20,13 @@ def event_rows(name):
 
 @frappe.whitelist(methods=['GET'])
 def pending(after=None):
-    require_access(manage=True)
+    # Unprojected events have no trustworthy business owner yet.
+    require_access(configure=True)
     filters={'projection_status':'Uncategorized','account':connection_value('relay_hub_account')}
     if after:
         from relay_core.api import validate_reference
         validate_reference(after,'EVT');filters['name']=['>',after]
-    events=frappe.get_all('Relay Hub Event',filters=filters,fields=['name'],order_by='name asc',limit_page_length=21)
+    events=frappe.get_list('Relay Hub Event',filters=filters,fields=['name'],order_by='name asc',limit_page_length=21)
     items=[]
     for event in events[:20]:
         try:doc,channel,medium,rows=event_rows(event.name)
@@ -32,7 +34,16 @@ def pending(after=None):
             items.append({'event':event.name,'configuration_required':True});continue
         for row in rows:
             key=hashlib.sha256((channel+':'+row['from']).encode()).hexdigest()
-            contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key':key,'verified':1}, 'relay_contact')
+            contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key':key}, 'relay_contact')
+            if contact:
+                from relay_core.business_access import candidates
+                try:
+                    readable_contact(contact)
+                    # No selected owner exists: every possible business must be readable.
+                    for business in candidates(contact):
+                        frappe.get_doc(*business).check_permission('read')
+                except (frappe.PermissionError, frappe.DoesNotExistError):
+                    continue
             from relay_core.message_updates import provider_key
             if frappe.db.exists('Relay Message', {'provider_message_key': provider_key(channel, row['from'], row['id'])}): continue
             data=row.get('message_data') or {};detail=row.get('text') or {}
@@ -54,9 +65,12 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
     business = (business_doctype, business_name) if business_doctype or business_name else links[0] if len(links) == 1 else None
     if business not in links: frappe.throw('Choose a linked business record')
     frappe.get_doc(*business).check_permission('read')
-    endpoint=matches[0]['from'];key=hashlib.sha256((channel+':'+endpoint).encode()).hexdigest()
+    from relay_core.identity import bindings, normalize
+    endpoint=normalize(medium, matches[0]['from']);key=hashlib.sha256((channel+':'+endpoint).encode()).hexdigest()
     with frappe.cache.lock('relay-enroll:'+key,timeout=30):
-        existing=frappe.db.get_value('Relay Contact Endpoint',{'endpoint_key':key},['name','relay_contact','verified'],as_dict=True)
+        aliases = list(bindings(channel, medium, endpoint))
+        if len(aliases) > 1:frappe.throw('Conflicting legacy bindings require administrator review')
+        existing = aliases[0] if aliases else None
         if existing:
             if existing.relay_contact!=contact:frappe.throw('This sender is already linked to another contact')
             if not existing.verified:frappe.throw('This binding was revoked. An administrator must review it in Desk')
@@ -75,3 +89,22 @@ def businesses(contact):
     from relay_core.business_access import candidates
     return [{'doctype': dt, 'name': name} for dt, name in candidates(contact)
             if frappe.get_doc(dt, name).has_permission('read')]
+
+
+@frappe.whitelist(methods=['POST'])
+def revoke(endpoint):
+    require_access(manage=True)
+    doc = frappe.get_doc('Relay Contact Endpoint', endpoint)
+    readable_contact(doc.relay_contact)
+    channel = frappe.get_doc('Relay Channel', doc.channel)
+    channel.check_permission('read')
+    if channel.account != connection_value('relay_hub_account'):
+        frappe.throw('Endpoint belongs to another Hub account', frappe.PermissionError)
+    previous = getattr(frappe.flags, 'relay_endpoint_enrollment', False)
+    try:
+        frappe.flags.relay_endpoint_enrollment = True
+        doc.verified = 0
+        doc.save(ignore_permissions=True)
+    finally:
+        frappe.flags.relay_endpoint_enrollment = previous
+    return {'endpoint': doc.name, 'verified': False}

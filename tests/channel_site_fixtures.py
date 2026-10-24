@@ -33,8 +33,12 @@ def user(email, manager=False):
     if not frappe.db.exists('User', email):
         roles = ['Relay Communication User', 'Sales User']
         if manager: roles.append('Relay Communication Manager')
-        frappe.get_doc({'doctype':'User', 'email':email, 'first_name':'Local channel fixture',
-            'send_welcome_email':0, 'roles':[{'role':role} for role in roles]}).insert()
+        assert email.endswith('@example.invalid')
+        # Repeated isolated site runs may exceed Frappe's hourly signup limit.
+        # Bypass only fixture provisioning; all Relay permission checks stay real.
+        with patch('frappe.core.doctype.user.user.throttle_user_creation'):
+            frappe.get_doc({'doctype':'User', 'email':email, 'first_name':'Local channel fixture',
+                'send_welcome_email':0, 'roles':[{'role':role} for role in roles]}).insert()
     return email
 
 
