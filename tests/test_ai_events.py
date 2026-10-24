@@ -92,6 +92,33 @@ class MatchingTests(unittest.TestCase):
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_latest_message_does_not_require_ingress_user_read_permission(self):
+        fake = Mock(session=_dict(user='integration@example.invalid'))
+        fake.get_list.side_effect = PermissionError('Ingress cannot read messages')
+        message = _dict(name='MSG-1', relay_contact='contact', channel='channel',
+            conversation_key='conversation', sender_endpoint='sender', business_doctype='Supplier', business_name='SUP-1')
+        with patch.object(service, 'frappe', fake):
+            fake.get_all.return_value = [_dict(name='MSG-1')]
+            self.assertTrue(service.latest_message(message))
+            fake.get_all.assert_called_once_with('Relay Message', filters={
+                'relay_contact': 'contact', 'channel': 'channel', 'direction': 'Incoming',
+                'conversation_key': 'conversation', 'business_doctype': 'Supplier', 'business_name': 'SUP-1'},
+                fields=['name'], order_by='name desc', limit_page_length=1)
+            fake.get_all.return_value = [_dict(name='MSG-2')]
+            self.assertFalse(service.latest_message(message))
+            fake.get_all.return_value = []
+            self.assertFalse(service.latest_message(message))
+        fake.get_list.assert_not_called()
+
+    def test_latest_message_keeps_legacy_sender_scope(self):
+        fake = Mock()
+        fake.get_all.return_value = [_dict(name='MSG-1')]
+        message = _dict(name='MSG-1', relay_contact='contact', channel='channel', sender_endpoint='sender')
+        with patch.object(service, 'frappe', fake):
+            self.assertTrue(service.latest_message(message))
+        self.assertEqual(fake.get_all.call_args.kwargs['filters'], {
+            'relay_contact': 'contact', 'channel': 'channel', 'direction': 'Incoming', 'sender_endpoint': 'sender'})
+
     def setUp(self):
         self.fake = Mock(conf={'relay_automation_enabled':1}, session=_dict(user='Administrator'),
                          PermissionError=PermissionError, ValidationError=ValueError)
@@ -106,7 +133,8 @@ class AdmissionTests(unittest.TestCase):
         self.enterContext(patch.object(service,'frappe',self.fake))
         self.save = self.enterContext(patch.object(service,'internal_save'))
         self.enterContext(patch.object(service,'message_hash',return_value='hash'))
-        self.enterContext(patch.object(service,'lock_contact',return_value=_dict(automation_generation=0)))
+        self.contact = _dict(automation_generation=0, automation_paused=0, save=Mock())
+        self.enterContext(patch.object(service,'lock_contact',return_value=self.contact))
         self.episode = self.enterContext(patch.object(service,'episode',return_value=_dict(name='ticket',ai_disabled=0)))
         self.claims = self.enterContext(patch.object(flows,'claims',return_value=False))
         self.event = self.enterContext(patch.object(flows,'create_event'))
@@ -149,6 +177,13 @@ class AdmissionTests(unittest.TestCase):
         self.message.content='I want a human'
         self.claims.return_value=True
         self.assertEqual(service.create_run(self.message)['status'],'Handoff')
+        self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
+        self.assertEqual(self.contact.automation_paused, 1)
+        self.assertEqual(self.contact.automation_generation, 1)
+        self.contact.save.assert_called_once_with(ignore_permissions=True)
+        self.assertEqual(service.create_run(self.message)['status'], 'Cancelled')
+        self.assertEqual(self.contact.automation_generation, 1)
+        self.contact.save.assert_called_once()
         self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
 
     def test_takeover_and_owner_failure_never_start_handlers(self):
