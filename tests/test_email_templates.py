@@ -3,6 +3,16 @@ from relay_core.email_templates import render, render_text
 
 
 class EmailTemplateTests(unittest.TestCase):
+    def test_sanitized_templates_are_decoded_once_before_html_escaping(self):
+        result = render('Order &quot;{qty}&quot;', 'Local &amp; team &lt;review&gt; {value}',
+            {'qty': 25, 'value': 'A & B <item> "quoted" &amp; literal'},
+            'Support &amp; team &lt;desk&gt; &#x27;reply&#x27;')
+        self.assertEqual(result['subject'], 'Order "25"')
+        self.assertEqual(result['body'], 'Local & team <review> A & B <item> "quoted" &amp; literal\n\nSupport & team <desk> \'reply\'')
+        self.assertIn('Local &amp; team &lt;review&gt;', result['html'])
+        self.assertIn('&amp;amp; literal', result['html'])
+        self.assertNotIn('<item>', result['html'])
+
     def test_subject_text_html_and_signature_are_rendered_without_markup_execution(self):
         values = {'name': '<img src=x onerror=alert(1)>', 'qty': 25}
         result = render('Order {qty}', 'Order {name}\nQuantity {qty}', values, 'A & B <Support>')
