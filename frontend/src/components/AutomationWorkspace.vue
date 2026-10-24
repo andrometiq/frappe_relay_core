@@ -1,9 +1,9 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, toolCount } from '../services/automationEditor'
+import { configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount } from '../services/automationEditor'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
@@ -11,6 +11,9 @@ const props = defineProps({ kind: String })
 const capabilities = inject('relayCapabilities')
 const skill = computed(() => props.kind === 'skills')
 const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
+const channels = ref([]), editor = ref(null)
+const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
+const variant = provider => !!draft.value?.use_preferences || channelProvider.value === provider
 const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), parameters = ref('')
 const busy = ref(false), error = ref(''), notice = ref(''), message = ref(''), preview = ref(null)
 const enabledFilter = ref('all'), templateBody = ref(''), previewError = ref('')
@@ -30,15 +33,17 @@ async function load(append = false) {
   if (!capabilities.value.configure) return
   const request = ++generation; busy.value = true; error.value = ''
   try {
-    const page = await coreApi(api.value + '.directory', { after: append ? next.value : null })
+    const [page, available] = await Promise.all([coreApi(api.value + '.directory', { after: append ? next.value : null }), coreApi('api.channel_options')]); channels.value = available.items.filter(row => row.enabled)
     if (request === generation) { rows.value = append ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) busy.value = false }
 }
-function edit(row) {
+async function edit(row) {
   draft.value = { ...row }; preview.value = null; notice.value = ''; error.value = ''
   try { tools.value = skill.value ? toolRows(row.allowed_tools) : []; parameters.value = skill.value ? '' : JSON.parse(row.parameter_mapping || '[]').join('\n') }
   catch { error.value = 'This configuration contains invalid JSON. Repair it in Desk before editing.'; draft.value = null }
+  await nextTick()
+  if (window.matchMedia('(max-width: 900px)').matches) editor.value?.scrollIntoView({ block:'start' })
 }
 async function save() {
   busy.value = true; error.value = ''; preview.value = null
@@ -69,16 +74,16 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
           <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading skills…' : 'Loading event rules…'" />
           <button v-for="row in visibleRows" :key="row.name" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
             <div class="automation-card-heading"><strong>{{ row.title }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
-            <template v-if="skill"><span>{{ row.business_doctype }} · {{ row.mode }}</span><span>{{ row.ai_model || 'Choose a model' }}</span><span>{{ toolCount(row.allowed_tools) }} read tools</span></template>
+            <template v-if="skill"><span>{{ row.business_doctype }} · {{ row.mode }} · {{ channels.find(item => item.name === row.channel)?.channel || row.channel }}</span><span>{{ row.ai_model || 'Choose a model' }}</span><span>{{ toolCount(row.allowed_tools) }} read tools</span></template>
             <span v-else>{{ eventDescription(row) }}</span>
           </button>
           <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="skill ? 'No matching skills' : 'No matching event rules'" description="Start with a disabled configuration and enable it when ready." :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New skill' : 'New event rule'" @click="edit(newConfiguration(skill))" /></WorkspaceState>
           <Button v-if="next" label="Load more" :disabled="busy" @click="load(true)" />
         </div>
-        <form v-if="draft" class="workflow-card min-w-0" @submit.prevent="save">
+        <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'skill' : 'event rule' }}</h2><Button label="Dismiss" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="draft.title" label="Title" required :disabled="busy" />
-          <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.business_doctype" label="Business type" placeholder="Supplier or Customer" required :disabled="busy" /><FormControl v-model="draft.channel" label="WhatsApp channel" :required="Boolean(draft.enabled)" :disabled="busy" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
+          <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.business_doctype" label="Business type" placeholder="Supplier or Customer" required :disabled="busy" /><FormControl v-model="draft.channel" label="Channel" type="select" :options="[{value:'',label:'Choose a channel'}, ...channels.map(row => ({value:row.name,label:row.channel + ' · ' + row.name}))]" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy || !!draft.use_preferences" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Instructions</legend><FormControl v-model="draft.instructions" label="Knowledge and instructions" type="textarea" rows="7" required :disabled="busy" /></fieldset>
             <fieldset class="automation-section"><legend>Read tools</legend><p class="text-sm">Each tool is restricted to this conversation’s business record. Use a Link or Dynamic Link field to that business, or name when reading the business itself.</p>
@@ -89,11 +94,17 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             <fieldset class="automation-section"><legend>Model</legend><FormControl v-model="draft.ai_model" label="AI Model" :required="Boolean(draft.enabled)" :disabled="busy" /><div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.mode" label="Mode" type="select" :options="['Shadow', 'Automatic']" :disabled="busy" /><FormControl v-model="draft.daily_limit" label="Daily model limit" type="number" min="1" max="1000" :disabled="busy" /></div></fieldset>
           </template>
           <template v-else>
-            <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.source_doctype" label="Source DocType" placeholder="Delivery Note" required :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><FormControl v-model="draft.recipient_field" label="Recipient business field" placeholder="customer" required :disabled="busy" /><FormControl v-model="draft.template" label="Approved WhatsApp template" :required="Boolean(draft.enabled)" :disabled="busy" /></div>
-            <FormControl v-model="parameters" label="Template parameters in order (one source field per line)" type="textarea" rows="4" :disabled="busy" /><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. The business must have exactly one linked Contact.</p>
+            <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.source_doctype" label="Source DocType" placeholder="Delivery Note" required :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><FormControl v-model="draft.recipient_field" label="Recipient business field" placeholder="customer" required :disabled="busy" /><FormControl v-if="variant('WhatsApp')" v-model="draft.template" label="Approved WhatsApp template" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy" /></div>
+            <FormControl v-model="draft.use_preferences" type="checkbox" label="Use this business/person’s consent and channel priorities" :disabled="busy" />
+            <FormControl v-model="draft.contact" label="Explicit Contact (required when several people are linked)" :disabled="busy" />
+            <FormControl v-if="variant('Telegram')" v-model="draft.telegram_body" label="Telegram template" type="textarea" rows="4" :disabled="busy" />
+            <template v-if="variant('Email')"><FormControl v-model="draft.email_subject" label="Email subject template" :disabled="busy" /><FormControl v-model="draft.email_body" label="Email body template" type="textarea" rows="5" :disabled="busy" /><FormControl v-model="draft.email_signature" label="Email signature" type="textarea" :disabled="busy" maxlength="2000" /></template>
+            <FormControl v-model="parameters" label="Template parameters in order (one source field per line)" type="textarea" rows="4" :disabled="busy" /><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. Choose a Contact when several people belong to the business. Telegram and email use {field} placeholders from this list; email content is escaped. Consent is required. An uncertain send never switches channels.</p>
           </template>
           <fieldset class="automation-section"><legend>Run-as user</legend><FormControl v-model="draft.run_as_user" label="User email" :required="Boolean(draft.enabled)" :disabled="busy" /><p class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
-          <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ livePreview || 'Choose an approved template to preview its wording.' }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>
+          <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ variant('WhatsApp') ? livePreview : '' }}</p><p v-if="variant('Telegram')" class="whitespace-pre-wrap">Telegram: {{ variantPreview(draft.telegram_body, parameters) }}</p><p v-if="variant('Email')" class="whitespace-pre-wrap">Email: {{ variantPreview(draft.email_subject, parameters) }}
+{{ variantPreview(draft.email_body, parameters) }}
+{{ draft.email_signature }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>
           <Button type="submit" label="Save" variant="solid" :loading="busy" />
           <div v-if="skill && draft.name" class="border-t pt-4 space-y-3"><h3 class="font-semibold">Test skill</h3><p class="text-sm">Tests the saved skill against an incoming conversation message. No reply is sent and no ticket or pause is created.</p><FormControl v-model="message" label="Incoming message reference" placeholder="RELAY-MSG-…" :disabled="busy" /><Button label="Run shadow test" :disabled="busy || !message" @click="test" /><div v-if="preview" role="status" class="automation-preview space-y-2"><Badge label="Shadow result" theme="blue" /><strong>{{ preview.handoff ? 'Would hand off' : 'Would reply' }}</strong><p class="whitespace-pre-wrap">{{ preview.reply }}</p><p>{{ preview.reason }}</p></div></div>
         </form><WorkspaceState v-else :title="skill ? 'A focused assistant' : 'Messages at the right moment'" description="Select a card to review its configuration." :icon="skill ? 'bot' : 'zap'" />

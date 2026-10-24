@@ -1,7 +1,7 @@
 export function newConfiguration(skill) {
   const common = { title: '', enabled: 0, channel: '', business_doctype: '', run_as_user: '' }
   return skill ? { ...common, ai_model: '', handoff_owner: '', mode: 'Shadow', daily_limit: 100, instructions: '', allowed_tools: '[]' }
-    : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]' }
+    : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]', contact: '', use_preferences: 0, telegram_body: '', email_subject: '', email_body: '', email_signature: '' }
 }
 export function toolRows(value) {
   return JSON.parse(value || '[]').map(row => ({ ...row, fields: row.fields.join(', ') }))
@@ -12,7 +12,7 @@ export function configurationValues(draft, skill, tools, parameters) {
   if (skill) {
     values.daily_limit = Number(values.daily_limit)
     values.allowed_tools = JSON.stringify(tools.map(row => ({ ...row, fields: row.fields.split(',').map(field => field.trim()).filter(Boolean) })))
-  } else values.parameter_mapping = JSON.stringify(parameters.split('\n').map(field => field.trim()).filter(Boolean))
+  } else { values.use_preferences = Number(Boolean(values.use_preferences)); values.parameter_mapping = JSON.stringify(parameters.split('\n').map(field => field.trim()).filter(Boolean)) }
   return values
 }
 export function eventDescription(row) {
@@ -25,4 +25,9 @@ export function messagePreview(body, parameters) {
 }
 export function toolCount(value) {
   try { const rows = JSON.parse(value || '[]'); return Array.isArray(rows) ? rows.length : 0 } catch { return 0 }
+}
+
+export function variantPreview(body, parameters) {
+  const fields = parameters.split('\n').map(field => field.trim()).filter(Boolean)
+  return String(body || '').replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_, field) => fields.includes(field) ? `[${field}]` : `[Undeclared: ${field}]`)
 }

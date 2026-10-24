@@ -10,13 +10,14 @@ import SavedRepliesWorkspace from './SavedRepliesWorkspace.vue'
 import WhatsAppIdentity from './WhatsAppIdentity.vue'
 const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: false })
 const capabilities = inject('relayCapabilities')
+const channels = ref([])
 const config = ref({}), channel = ref(null), types = ref([]), loaded = ref(false), verified = ref(false)
 const token = ref(''), callbackSecret = ref(''), tab = ref('setup')
 const { busy, error, notice, run } = useTask()
 async function load() {
   loaded.value = false
-  const [connection, whatsapp, businessTypes] = await Promise.all([coreApi('settings.connection'), coreApi('whatsapp.connection'), coreApi('api.business_types')])
-  config.value = connection; channel.value = whatsapp; types.value = businessTypes; loaded.value = true
+  const [connection, whatsapp, businessTypes, available] = await Promise.all([coreApi('settings.connection'), coreApi('whatsapp.connection'), coreApi('api.business_types'), coreApi('api.channel_options')])
+  channels.value = available.items; config.value = connection; channel.value = whatsapp; types.value = businessTypes; loaded.value = true
 }
 async function save() {
   verified.value = false
@@ -27,9 +28,10 @@ async function verify() { verified.value = false; await coreApi('settings.verify
 const checklist = computed(() => [
   { label: 'Hub binding', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Verified this session' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · verify connection' : 'Needs setup', href: '#hub-connection' },
   { label: 'Callback signing secret', icon: 'lock', ready: config.value.callback_configured, state: !loaded.value ? 'Not checked' : config.value.callback_configured ? 'Configured · receipt not verified' : 'Missing', href: '#hub-connection' },
+  ...['Telegram', 'Email'].map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? 'Enabled locally · confirm receipts in Activity' : 'Needs setup', href: '/desk/relay-channel' })),
   { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '/desk/relay-channel' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '/desk/relay-contact-type' },
-  { label: 'Contacts and links', icon: 'users', state: 'Review phone numbers and permitted links', href: '#/contacts' },
+  { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },
   { label: 'Teams and access', icon: 'user-check', state: 'Review membership and permissions', href: '#/teams' },
   { label: 'Callback processing and recovery', icon: 'activity', state: 'Review received events and recovery', href: '#/activity' },
 ])
@@ -53,6 +55,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
         </template><p v-else>A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
       </form>
       <div class="workflow-card"><h2 class="font-semibold">Account and sending number</h2><p>Account: {{ config.account || 'Not configured' }}</p><WhatsAppIdentity v-if="channel?.configured" /><p v-else>Enable this account’s WhatsApp channel to read its identity.</p></div>
+      <div class="workflow-card"><h2 class="font-semibold">Channel readiness</h2><p>Identity credentials and provider verification are configured in Hub. Local enablement does not confirm callback delivery.</p><p v-for="item in channels" :key="item.name">{{ item.channel }} · {{ item.name }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a class="underline" href="#/activity">Review callback and delivery evidence</a></div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/relay-channel">Configure channel</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Review endpoint bindings</a></div>
     </div>
   </section>
