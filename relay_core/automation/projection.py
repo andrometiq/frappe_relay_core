@@ -4,7 +4,7 @@ import json
 import time
 from datetime import timezone
 import frappe
-from relay_core.automation.provenance import conversation_key, telegram_message
+from relay_core.automation.provenance import conversation_key, telegram_message, email_context
 from relay_core.message_types import normalize, preview
 from relay_core.message_updates import apply_updates, provider_key
 
@@ -31,9 +31,13 @@ def extract_messages(payload):
                 raw = payload['payload']['message']
                 row['message_data'] = normalize(row['type'], raw.get(row['type'], {}), provider='Telegram', body=body)
         if payload['channel']=='Email':
+            from relay_core.email import recipients
+            from relay_core.identity import normalize as normalize_identity
             raw=payload.get('payload') or {}
-            row['provider_context']={'provider':'Email','subject':payload.get('subject',''),'message_id':raw.get('message_id'),'references':raw.get('references',[]),'auto_submitted':raw.get('auto_submitted',False)}
-            row['message_data']={'kind':'text','text':body,'email':{'subject':payload.get('subject',''),'html':raw.get('html',''),'attachments':raw.get('attachments',[])}}
+            row['from']=normalize_identity('Email', sender)
+            row['provider_context']=email_context(raw, payload.get('subject',''), provider_id)
+            row['message_data']={'kind':'text','text':body,'email':{'subject':payload.get('subject',''),'html':raw.get('html',''),'attachments':raw.get('attachments',[]),
+                'to':recipients(raw.get('to')), 'cc':recipients(raw.get('cc'))}}
         return [row]
     result = []
     for entry in payload.get('entry', []):

@@ -9,14 +9,28 @@ from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
 
 
-def create(state, choices):
+def create(state, choices, context=None):
+    context = context or {'provider': 'WhatsApp'}
     body = 'Which business is this conversation about?'
     arguments = {'operation': 'messages.interactive', 'to': state.endpoint, 'interactive': {
         'type': 'list', 'body': {'text': body}, 'action': {'button': 'Choose business',
         'sections': [{'title': 'Your businesses', 'rows': [
             {key: item[key] for key in ('id', 'title', 'description')} for item in choices
         ]}]}}}
-    payload = {'routing': state.conversation_key, 'tool': 'whatsapp.execute',
+    tool = 'whatsapp.execute'
+    if context['provider'] in ('Telegram', 'Email'):
+        body += '\nReply with one exact choice below within 24 hours:\n' + '\n'.join(
+            item['doctype'] + ': ' + item['name'] + '\n' + item['id'] for item in choices)
+        if context['provider'] == 'Telegram':
+            tool = 'telegram.message'
+            arguments = {'operation': 'text', 'chat_id': context['chat_id'], 'text': body,
+                         'reply_to': context['message_id']}
+        else:
+            tool = 'email.send'
+            arguments = {'to': [state.endpoint], 'subject': 'Re: ' + context.get('subject', '')[:990],
+                         'body': body, 'in_reply_to': context['message_id'], 'auto_submitted': True,
+                         'references': list(dict.fromkeys([*context.get('references', []), context['message_id']]))[-20:]}
+    payload = {'routing': state.conversation_key, 'tool': tool, 'context': context,
                'arguments': arguments, 'content': {'kind': 'text', 'text': body}}
     encoded = json.dumps(payload, sort_keys=True)
     action = frappe.get_doc({'doctype': 'Relay Message Action', 'owner': 'Administrator',
@@ -43,11 +57,13 @@ def target(action):
     binding = frappe.db.get_value('Relay Contact Endpoint',
         {'channel': state.channel, 'endpoint': state.endpoint, 'verified': 1}, 'relay_contact')
     channel = frappe.get_doc('Relay Channel', state.channel)
-    if (binding != state.relay_contact or not channel.enabled or channel.channel != 'WhatsApp'
+    payload = json.loads(action.payload)
+    context = payload.get('context') or {'provider': 'WhatsApp'}
+    if (binding != state.relay_contact or not channel.enabled or channel.channel != context['provider']
             or channel.account != connection_value('relay_hub_account')):
         raise ValueError('Business prompt destination is unavailable')
     source = frappe._dict(relay_contact=state.relay_contact, channel=state.channel, sender_endpoint=state.endpoint)
-    return source, channel, {'provider': channel.channel}
+    return source, channel, context
 
 
 def prepared(action):
