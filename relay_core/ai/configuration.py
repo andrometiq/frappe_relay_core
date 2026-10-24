@@ -8,6 +8,11 @@ FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as
           'handoff_owner', 'mode', 'daily_limit', 'instructions', 'allowed_tools')
 
 
+def skill_conflict(channel, business_doctype, names):
+    return (f'Disable the existing skill for {channel} / {business_doctype} first. '
+            f'Conflicting enabled skills: {", ".join(names)}. Only one skill may be enabled in this scope.')
+
+
 def validate_skill(doc):
     require_access(configure=True)
     if not doc.instructions or len(doc.instructions) > 8000 or not 1 <= int(doc.daily_limit or 0) <= 1000:
@@ -31,7 +36,7 @@ def validate_skill(doc):
         names = frappe.get_all('Relay AI Skill', filters={'channel': doc.channel,
             'business_doctype': doc.business_doctype, 'enabled': 1}, pluck='name')
         if any(name != doc.name for name in names):
-            raise ValueError('Disable the existing skill for this channel and business type first')
+            raise ValueError(skill_conflict(doc.channel, doc.business_doctype, [name for name in names if name != doc.name]))
         model = frappe.get_doc('AI Model', doc.ai_model)
         if not model.enabled or not frappe.get_doc('AI Provider Account', model.account).enabled:
             raise ValueError('Choose an enabled AI Model and provider account')
