@@ -1,3 +1,4 @@
+from site_labels import run_label
 import os,time,json
 from pathlib import Path
 root=Path(__file__).resolve().parents[1];sites=root/'.runtime/automation-bench/sites'
@@ -7,7 +8,7 @@ from relay_core import cases,teams
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator')
 contact=frappe.db.get_value('Relay Contact',{'display_name':['like','Inbox %']},'name');assert contact
-suffix=str(time.time_ns());created=None
+suffix = run_label();created=None
 schema={'fields':{'type':'object','properties':{'note':{'type':'string'},'completion_evidence':{'type':'string'}}},'priority':'High','initial_stage':'open','stages':[{'key':'open','label':'Open','state':'open'},{'key':'completed','label':'Completed','state':'done','required_fields':['completion_evidence']}]}
 kind=frappe.get_doc({'doctype':'Relay Case Type','type_key':'fixture.'+suffix,'title':'Fixture callback','enabled':1,'definition':json.dumps(schema)}).insert();frappe.db.commit()
 def rejected(fn):

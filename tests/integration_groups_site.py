@@ -3,6 +3,7 @@
 Use RELAY_AUTOMATION_TEST_SITES and the installed Frappe Python exactly as for
 integration_channels_site.py. Creates only synthetic records in the guarded DB.
 """
+from site_labels import run_label
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import hmac
@@ -37,7 +38,7 @@ frappe.conf.relay_automation_enabled = 1
 frappe.reload_doc('relay_core', 'doctype', 'relay_message', force=True)
 frappe.db.add_index('Relay Message', ['conversation_key', 'name'], 'relay_conversation_history')
 frappe.db.commit()
-run_id = str(time.time_ns()); account = 'groups-sim-' + run_id
+run_id = run_label(); account = 'groups-sim-' + run_id
 frappe.conf.relay_hub_account = account
 secret = 'synthetic-group-callback-' + run_id
 frappe.conf.relay_callback_secret = secret

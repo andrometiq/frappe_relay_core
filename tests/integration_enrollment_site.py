@@ -1,4 +1,5 @@
 """Authenticated-event enrollment with no external messaging."""
+from site_labels import run_label
 import json,os,time
 from pathlib import Path
 from unittest.mock import patch
@@ -8,7 +9,7 @@ import frappe
 from relay_core import enrollment,whatsapp
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
-run=str(time.time_ns());account='enrollment-'+run
+run = run_label();account='enrollment-'+run
 contacts=frappe.get_all('Relay Contact',filters={'display_name':['like','Inbox %']},pluck='name',limit_page_length=2);assert len(contacts)==2
 channel=frappe.get_doc(dict(doctype='Relay Channel',channel='Telegram',account=account,enabled=1)).insert()
 payload={'channel':'Telegram','direction':'inbound','provider_id':'17','sender':'9123456','body':'Unlinked fixture','payload':{'update_id':17,'message':{'message_id':19,'date':1700000000,'chat':{'id':9123456,'type':'private'},'from':{'id':9123456,'is_bot':False},'text':'Unlinked fixture'}}}

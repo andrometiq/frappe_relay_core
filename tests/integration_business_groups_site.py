@@ -1,4 +1,5 @@
 """Grouped inbox, business association and claim isolation on the synthetic site."""
+from site_labels import run_label, phone as fixture_phone
 import os,time
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from relay_core import business_groups,business_inbox,teams
 from relay_core.business_access import allowed
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922'
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
-stamp=str(time.time_ns());phone='91'+stamp[-10:];dt='Relay Inbox Simulation Business';user='relay-agent-a@example.invalid'
+stamp = run_label();phone=fixture_phone(stamp);dt='Relay Inbox Simulation Business';user='relay-agent-a@example.invalid'
 try:
  config=frappe.get_doc('Relay Contact Type',{'business_doctype':dt});config.grouping_field='title';config.save()
  a=frappe.get_doc({'doctype':dt,'title':'Group A '+stamp}).insert();b=frappe.get_doc({'doctype':dt,'title':'Group B '+stamp}).insert()

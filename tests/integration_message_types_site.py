@@ -3,6 +3,7 @@
 Run after integration_channels_site.py. Every provider call goes through the
 real HubClient to a loopback fixture; no external provider credentials are used.
 """
+from site_labels import run_label
 import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -33,7 +34,7 @@ frappe.connect(); frappe.clear_cache(); frappe.set_user('Administrator'); frappe
 for doctype in ('relay_message', 'relay_automation_run', 'relay_message_action', 'relay_canned_reply', 'relay_saved_reply_action'):
     frappe.reload_doc('relay_core', 'doctype', doctype, force=True)
 frappe.conf.relay_automation_enabled = 1
-run_id = str(time.time_ns()); account = 'types-' + run_id
+run_id = run_label(); account = 'types-' + run_id
 frappe.conf.relay_hub_account = account
 actor = 'channels-executor@example.invalid'
 if not frappe.db.exists('Relay Contact Type', {'business_doctype': 'Relay Channel Simulation Business'}):

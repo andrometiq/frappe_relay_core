@@ -1,4 +1,5 @@
 """Email scope, MIME arguments, signatures and automatic-reply safety in fixture DB."""
+from site_labels import run_label
 import base64
 import json
 import time
@@ -7,7 +8,7 @@ import frappe
 from channel_site_fixtures import init, business as fixture_business, user as fixture_user, push_status
 from relay_core import email,email_preferences,messaging,attachments
 init()
-stamp=str(time.time_ns());actor='relay-mail-executor@example.invalid'
+stamp = run_label();actor='relay-mail-executor@example.invalid'
 fixture_user(actor,manager=True)
 business=fixture_business('Mail '+stamp);business_type=business.doctype
 person=frappe.get_doc({'doctype':'Contact','first_name':'Mail '+stamp,'links':[{'link_doctype':business_type,'link_name':business.name}]}).insert()

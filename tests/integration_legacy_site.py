@@ -3,6 +3,7 @@
 No source writes, source schemas, migrations or external effects. Records are
 clearly labelled local-only and retained for review (no destructive cleanup).
 """
+from site_labels import run_label
 import hashlib
 import io
 import json
@@ -38,7 +39,7 @@ def main():
             return str(storage/str(doc.file_url).lstrip('/'))
         return full_path(doc)
     file_patch=patch.object(File,'get_full_path',local_full_path);file_patch.start()
-    run = str(time.time_ns()); site = 'local-only-relay-cutover-' + run
+    run = run_label(); site = 'local-only-relay-cutover-' + run
     customer = 'Local-only Relay migration ' + run
     direct_document('Customer', dict(customer_name=customer, customer_type='Company'), customer)
     from relay_core.permissions import sequential_name

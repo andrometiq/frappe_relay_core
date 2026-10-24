@@ -1,4 +1,5 @@
 """Call history/signaling boundaries in the guarded synthetic Frappe site."""
+from site_labels import run_label
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import frappe
 from relay_core import call_records, teams, whatsapp
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922'
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
-run=str(time.time_ns());users=['relay-agent-a@example.invalid','relay-agent-b@example.invalid']
+run = run_label();users=['relay-agent-a@example.invalid','relay-agent-b@example.invalid']
 # These users and business permissions are installed by the inbox suite.
 for user in users:assert frappe.db.exists('User',user)
 business_type='Relay Inbox Simulation Business';account='call-fixture-'+run

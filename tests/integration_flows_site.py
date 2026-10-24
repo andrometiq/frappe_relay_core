@@ -1,4 +1,5 @@
 """Guarded flow persistence/replay/input/scope checks; all provider sends mocked."""
+from site_labels import run_label
 import os,time,json
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +11,7 @@ assert Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()==sites.resolve(
 os.chdir(sites);frappe.init(site='relay-ai-test.local');frappe.connect()
 assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.set_user('Administrator');frappe.flags.mute_emails=True
-run=str(time.time_ns());actor='automation-test@example.invalid';business_type='Relay Inbox Simulation Business'
+run = run_label();actor='automation-test@example.invalid';business_type='Relay Inbox Simulation Business'
 from frappe.permissions import add_permission
 add_permission(business_type,'Relay Communication Manager',0);add_permission('Contact','Relay Communication Manager',0)
 business=frappe.get_doc({'doctype':business_type,'title':'Flow '+run}).insert()

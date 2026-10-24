@@ -1,4 +1,5 @@
 """Independent translation queue with real database/permissions and fixture AI."""
+from site_labels import run_label
 import os,json,time
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +16,7 @@ for name in ('relay_automation_policy','relay_automation_run','relay_message_tra
  frappe.reload_doc('relay_core','doctype',name,force=True)
 frappe.clear_cache();frappe.conf.relay_automation_enabled=1
 assert 'relay_core.translations.on_message' in frappe.get_hooks('doc_events')['Relay Message']['after_insert']
-run=str(time.time_ns());actor='automation-test@example.invalid'
+run = run_label();actor='automation-test@example.invalid'
 person=frappe.get_doc({'doctype':'Contact','first_name':'Translation '+run,'links':[{'link_doctype':'Relay Test Business','link_name':'Synthetic Customer'}]}).insert()
 contact=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,'display_name':'Translation '+run}).insert()
 channel=frappe.get_doc({'doctype':'Relay Channel','channel':'Telegram','account':'translate-'+run,'enabled':1}).insert()

@@ -1,4 +1,5 @@
 """AI conversation summaries with a fixture model and real authorization/database."""
+from site_labels import run_label
 import os,time
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +12,7 @@ frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_te
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
 frappe.reload_doc('relay_core','doctype','relay_conversation_summary',force=True)
 frappe.reload_doc('relay_core','doctype','relay_message',force=True)
-run=str(time.time_ns());actor='summary-executor@example.invalid';requester='relay-agent-a@example.invalid'
+run = run_label();actor='summary-executor@example.invalid';requester='relay-agent-a@example.invalid'
 if not frappe.db.exists('User',actor):frappe.get_doc(dict(doctype='User',email=actor,first_name='Summary fixture',send_welcome_email=0,roles=[{'role':'Relay Communication Manager'}])).insert()
 for doctype in ('Contact','Relay Inbox Simulation Business'):add_permission(doctype,'Relay Communication Manager',0)
 business=frappe.get_doc({'doctype':'Relay Inbox Simulation Business','title':'Summary report '+run}).insert()

@@ -1,4 +1,5 @@
 """Overview counts only permitted recent non-archival conversation rows."""
+from site_labels import run_label
 import os,time
 from pathlib import Path
 root=Path(__file__).resolve().parents[1];sites=root/'.runtime/automation-bench/sites'
@@ -7,7 +8,7 @@ import frappe
 from relay_core import overview,teams
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True;frappe.conf.relay_automation_enabled=0
-run=str(time.time_ns());user='overview-'+run+'@example.invalid'
+run = run_label();user='overview-'+run+'@example.invalid'
 frappe.get_doc(dict(doctype='User',email=user,first_name='Overview fixture',send_welcome_email=0,roles=[{'role':'Relay Communication User'}])).insert()
 business=frappe.get_all('Relay Inbox Simulation Business',pluck='name',limit_page_length=1)[0]
 person=frappe.get_doc(dict(doctype='Contact',first_name='Overview '+run,links=[dict(link_doctype='Relay Inbox Simulation Business',link_name=business)])).insert()

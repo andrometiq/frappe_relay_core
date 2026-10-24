@@ -1,4 +1,5 @@
 """Real assignment isolation and per-user state in the guarded synthetic site."""
+from site_labels import run_label
 import os
 from pathlib import Path
 import time
@@ -16,7 +17,7 @@ frappe.init(site='relay-ai-test.local')
 assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
 frappe.reload_doc('relay_core','doctype','relay_conversation_state',force=True)
-run=str(time.time_ns());users=[f'relay-inbox-agent-a-{run}@example.invalid',f'relay-inbox-agent-b-{run}@example.invalid']
+run = run_label();users=[f'relay-inbox-agent-a-{run}@example.invalid',f'relay-inbox-agent-b-{run}@example.invalid']
 for user in users:
  if not frappe.db.exists('User',user):frappe.get_doc({'doctype':'User','email':user,'first_name':'Synthetic agent','send_welcome_email':0,'roles':[{'role':'Relay Communication User'}]}).insert()
 business_type='Relay Inbox Simulation Business'
