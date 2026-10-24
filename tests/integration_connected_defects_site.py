@@ -43,17 +43,20 @@ def main():
                 assert frappe.session.user == service
                 choice = next(row for row in json.loads(state.choices) if row['doctype'] == 'Customer')
                 identifier = '903' if provider == 'Telegram' else '<choice-' + fixture.stamp + '@example.invalid>'
-                raw = telegram_raw(int(address),903,choice['id'],reply=902) if provider == 'Telegram' else email_raw(identifier,parent='<prompt-reply-' + fixture.stamp + '@example.invalid>')
-                selected, _ = incoming(fixture, provider, address, choice['id'], raw=raw, identifier=identifier)
+                answer = str(json.loads(state.choices).index(choice) + 1)
+                raw = telegram_raw(int(address),903,answer,reply=902) if provider == 'Telegram' else email_raw(identifier,parent='<prompt-reply-' + fixture.stamp + '@example.invalid>')
+                selected, _ = incoming(fixture, provider, address, answer, raw=raw, identifier=identifier)
                 assert selected.projection_status == 'Projected', selected.routing_decisions
+                projected = frappe.get_doc('Relay Message', {'provider_id':identifier, 'channel':fixture.channels[provider].name})
+                assert projected.content.startswith('Chose: Customer') and 'relay-business:' not in projected.content
                 frappe.set_user('Administrator')
                 print('PASS',provider,'service-user prompt ownership, dispatch and sender choice')
 
             # A separate single-Customer identity must obey the same authentication boundary.
-            person = frappe.get_doc(dict(doctype='Contact',first_name='Local C3 single ' + fixture.stamp,
+            person = frappe.get_doc(dict(doctype='Contact',first_name='Sim Single Contact ' + fixture.stamp,
                 links=[dict(link_doctype='Customer',link_name=fixture.customer.name)])).insert()
             contact = frappe.get_doc(dict(doctype='Relay Contact',contact=person.name,
-                display_name='Local C3 single ' + fixture.stamp)).insert()
+                display_name='Sim Single Contact ' + fixture.stamp)).insert()
             address = 'single-' + fixture.stamp + '@example.invalid'
             endpoint(fixture,'Email',address,contact.name); frappe.db.commit()
             for status in ('fail','unverified'):
@@ -70,7 +73,9 @@ def main():
             print('PASS failed-auth single-Customer email triage and authenticated happy path')
             verify_projection_conflict(fixture, address)
     finally:
-        frappe.db.rollback(); frappe.destroy()
+        from channel_identity_fixtures import cleanup
+        cleanup(fixture)
+        frappe.destroy()
 
 
 def verify_projection_conflict(fixture, address):

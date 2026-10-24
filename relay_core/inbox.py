@@ -148,7 +148,11 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
 
 
 def directory_preview(message):
-    """Use the same plain text as the thread, before Long Text HTML sanitization."""
+    """Use the thread's plain text, with legacy content decoded for text rendering."""
+    from relay_core.message_display import business_choice_label
+    label = business_choice_label(message)
+    if label:
+        return label
     from relay_core.messaging import object_value
     from relay_core.message_types import preview
     data = object_value(message.get('message_data') or {})

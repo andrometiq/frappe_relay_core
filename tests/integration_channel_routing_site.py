@@ -26,7 +26,7 @@ try:
         client.return_value.call_tool.side_effect = [{'deliveries': []}, {'pending': True, 'state': 'queued'}]
         assert business_routing_prompt.dispatch(action.name)['status'] == 'Queued'
         args = client.return_value.call_tool.call_args.args[1]
-        assert args['reply_to'] == 501 and choice['id'] in args['text']
+        assert args['reply_to'] == 501 and 'Supplier' in args['text'] and 'relay-business:' not in args['text']
         for number in range(520, 532):
             burst = receive(number, 'Pending quantity ' + str(number))
             assert 'triage_prompt_pending' in burst.routing_decisions
@@ -39,6 +39,7 @@ try:
         assert chosen.projection_status == 'Projected'
         message = frappe.get_doc('Relay Message', {'channel': binding.channel, 'provider_id': '503'})
         assert message.business_name == fixture.supplier.name
+        assert message.content.startswith('Chose: Supplier')
         projection.project(first.name); frappe.db.commit(); first.reload()
         assert first.projection_status == 'Projected'
         stale = receive(504, choice['id'])
@@ -73,4 +74,6 @@ try:
         frappe.set_user('Administrator')
         print('PASS Telegram durable text choices, callback completion, replay/expiry, group triage, reply/topic isolation and restricted history')
 finally:
+    from channel_identity_fixtures import cleanup
+    if "fixture" in globals(): cleanup(fixture)
     frappe.destroy()
