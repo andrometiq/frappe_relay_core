@@ -24,6 +24,7 @@ export function startRealtime() {
     const kind = { Contact: 'contacts', 'Relay Contact Endpoint': 'contacts', 'Relay Team': 'teams', 'Relay Conversation Assignment': 'inbox', 'Relay Canned Reply': 'canned_replies' }[event?.doctype]
     if (kind) for (const fn of listeners) fn({ kind })
   })
+  socket.on('update_user_permissions',()=>{for(const fn of listeners)fn({kind:'permissions'})})
   socket.on('relay_changed',event=>{for(const fn of listeners)fn(event)})
   return socket
 }

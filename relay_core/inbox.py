@@ -81,7 +81,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
     assignment=frappe.qb.DocType('Relay Conversation Assignment');message=frappe.qb.DocType('Relay Message')
     filters={}
-    if medium not in (None, 'WhatsApp'):frappe.throw('Invalid medium')
+    if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Invalid medium')
     activity=Coalesce(contact.last_message_at,contact.creation)
     search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters=filters,
                                ignore_permissions=False,order_by='',limit=31)
@@ -131,21 +131,34 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         except frappe.PermissionError:continue
         latest_filters={'relay_contact':row.name}
         if medium:latest_filters['channel']=['in',channel_names]
-        latest=page_query(['name','content','channel','creation','sent_at'],latest_filters,1).run(as_dict=True)
+        latest=page_query(['name','content','message_data','channel','creation','sent_at','business_doctype','business_name'],latest_filters,1).run(as_dict=True)
         state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(row.name)},['last_read','starred','folder'],as_dict=True) or {}
         unread=unread_count(row.name, channels=channel_names)
         last=latest[0] if latest else {}
         if last and not frappe.get_doc('Relay Channel',last.channel).has_permission('read'):last={}
-        business = next(({'doctype': link.link_doctype, 'name': link.link_name}
-                         for link in person.links if link.link_doctype in configured
-                         and frappe.get_doc(link.link_doctype, link.link_name).has_permission('read')), None)
+        business = ({'doctype': last['business_doctype'], 'name': last['business_name']}
+                    if last.get('business_doctype') in configured and last.get('business_name') else None)
         assigned = frappe.db.get_value('Relay Conversation Assignment', {'relay_contact': row.name},
                                       ['team', 'assigned_to'], as_dict=True) or {}
-        items.append(dict(row,business=business,assignment=assigned,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
-                          latest_preview=(last.get('content') or '')[:200],latest_at=last.get('sent_at') or last.get('creation'),
+        items.append(dict(row,provider=frappe.db.get_value('Relay Channel',last.channel,'channel') if last else None,business=business,assignment=assigned,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
+                          latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
                           unread=unread,unread_more=False))
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+def directory_preview(message):
+    """Use the same plain text as the thread, before Long Text HTML sanitization."""
+    from relay_core.messaging import object_value
+    from relay_core.message_types import preview
+    data = object_value(message.get('message_data') or {})
+    if data.get('kind'):
+        return preview(data)[:200]
+    # Older messages have only sanitized HTML content. Decode after stripping tags;
+    # API consumers must render this plain-text preview as text, never as HTML.
+    from html import unescape
+    from frappe.utils import strip_html
+    return unescape(strip_html(message.get('content') or ''))[:200]
 
 
 @frappe.whitelist(methods=['GET'])

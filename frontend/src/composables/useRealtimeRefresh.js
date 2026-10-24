@@ -5,7 +5,7 @@ export function useRealtimeRefresh(doctypes, kinds, refresh) {
   let off, leave=[]
   const queue = realtimeRefreshQueue(refresh, () => document.visibilityState === 'visible')
   function changed(event) {
-    if (event?.kind === 'reconnect' || kinds.includes(event?.kind)) queue.schedule(event.kind)
+    if (event?.kind === 'reconnect' || event?.kind === 'permissions' || kinds.includes(event?.kind)) queue.schedule(event.kind)
   }
   function visible() {
     if (document.visibilityState === 'visible') queue.schedule('visible')

@@ -4,13 +4,14 @@ import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
 import { Button, FormControl, Dropdown } from "@relay/ui";
-import SendChannel from "./SendChannel.vue";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
-const { identity } = useWhatsAppIdentity();
+const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
 const showReplies=ref(false);
 
+import { compositionScope, telegramLimit } from '../../services/channelComposition';
+import { useStoredDraft } from '../../composables/useStoredDraft';
 import { messagesKey } from "../../composables/messagesContext";
 const {
   selected,
@@ -36,6 +37,12 @@ const {
   send,
 } = inject(messagesKey);
 const attachmentInput = ref(null);
+const draftScope = computed(() => compositionScope(source.value, document.getElementById('app')?.dataset.user));
+useStoredDraft(() => draftScope.value,
+  () => ({body:body.value,kind:kind.value,attachment:attachment.value}),
+  saved => { body.value=saved.body || ''; kind.value=saved.kind || 'text'; attachment.value=saved.attachment || null; });
+const limit = computed(() => sourceContext.value.provider === 'Telegram' ? telegramLimit(kind.value) : null);
+watch(() => sourceContext.value.provider, provider => { if(provider === 'WhatsApp' && !identity.value) loadIdentity(); }, {immediate:true});
 const draftInput = ref(null);
 const requestedAttachmentKind = ref("document");
 function applySavedReply(item) {
@@ -125,6 +132,7 @@ onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); });
 const canSend = computed(
   () =>
     !busy.value &&
+    (!limit.value || [...body.value].length <= limit.value) &&
     windowState.value.open &&
     (kind.value === "text"
       ? !!body.value.trim()
@@ -204,9 +212,10 @@ function keydown(event) {
       Topic {{ sourceContext.message_thread_id }}
     </div>
     <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-    <details class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+    <details v-if="sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+    <p v-if="limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
     <div class="composer-toolbar">
-      <SendChannel whatsapp-only /><Button label="Template" :disabled="busy" @click="emit('template')" />
+      <Button v-if="sourceContext.provider === 'WhatsApp'" label="Template" :disabled="busy" @click="emit('template')" />
       <Dropdown :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
       <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
       <Button icon="zap" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />

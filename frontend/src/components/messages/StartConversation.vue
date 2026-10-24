@@ -4,6 +4,7 @@ import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } fro
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
+import { useStoredDraft } from '../../composables/useStoredDraft';
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import {
   templateParameterDescriptors,
@@ -19,6 +20,7 @@ const shown = ref(true),
   error = ref(""),
   notice = ref(""),
   body = ref(""),
+  subject = ref(""),
   kind = ref("text");
 const contactQuery = ref(""), contactOptions = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const templates = ref([]),
@@ -65,7 +67,7 @@ async function searchContacts() {
   }
 }
 function chooseContact(row) {
-  if (busy.value || pending.value || !row.has_phone) return;
+  if (busy.value || pending.value) return;
   contact.value = row.value;
 }
 watch(() => props.contacts, resetContacts, { immediate: true, deep: true });
@@ -100,25 +102,25 @@ async function destinations() {
         business_doctype:props.businessDoctype,business_name:props.businessName },
     );
     if (current !== generation) return;
-    endpoints.value = props.businessName ? result.filter(row=>row.provider==='WhatsApp') : result;
+    endpoints.value = result.map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
     endpoint.value = endpoints.value[0]?.value || "";
   } catch (e) {
     if (current === generation) error.value = e.message;
   }
 }
 watch(contact, () => {
+  endpoint.value = '';
   pending.value = null;
   body.value = "";
+  subject.value = "";
   if (contact.value) destinations();
-});
-watch(endpoint, () => {
-  kind.value =
-    destination.value?.provider === "WhatsApp" && !destination.value.window.open
-      ? "template"
-      : "text";
-  pending.value = null;
-});
-watch(templateId, () => (parameters.value = {}));
+}, {flush:'sync'});
+watch(templateId, () => (parameters.value = {}), {flush:'sync'});
+const clearDraft = useStoredDraft(
+  () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
+  () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value}),
+  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; },
+  () => ({body:'',subject:'',kind:destination.value?.provider === 'Email' ? 'email' : destination.value?.provider === 'WhatsApp' && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 async function loadTemplates(next = false) {
   await run(async () => {
     const result = await coreApi(
@@ -149,7 +151,7 @@ async function send() {
       );
     } else {
       const data =
-        kind.value === "text"
+        kind.value === "email" ? {subject:subject.value,body:body.value} : kind.value === "text"
           ? { text: body.value }
           : {
               name: template.value?.name,
@@ -177,7 +179,7 @@ async function send() {
       result = await coreApi(
         props.businessName ? "conversation_start.send_business" : "conversation_start.send",
         props.businessName
-          ? { contact:contact.value, channel:endpoint.value, kind:kind.value, data,
+          ? { contact:contact.value, channel:destination.value.channel, endpoint:endpoint.value, kind:kind.value, data,
               business_doctype:props.businessDoctype,business_name:props.businessName,request_key:key }
           : { ...payload, request_key: key },
         true,
@@ -185,7 +187,8 @@ async function send() {
       if (["Submitted", "Queued"].includes(result.status)) sessionStorage.removeItem(storage);
     }
     if (["Submitted", "Queued"].includes(result.status)) {
-      notice.value = result.status === "Queued" ? "Queued for sending" : "Sent";
+      clearDraft();
+      notice.value = result.status === "Queued" ? "Queued for sending" : destination.value?.provider === "Email" ? "SMTP accepted" : destination.value?.provider === "Telegram" ? "Bot accepted" : "Sent";
       emit("sent", { contact: contact.value,
       business_doctype:props.businessDoctype,business_name:props.businessName, message: result.message, status: result.status });
       shown.value = false;
@@ -215,11 +218,11 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           </TextInput>
           <div class="start-contact-results" role="listbox" aria-label="Linked business contacts">
             <button v-for="row in contactOptions" :key="row.value" type="button" role="option"
-              :aria-selected="contact === row.value" :disabled="busy || !!pending || !row.has_phone"
+              :aria-selected="contact === row.value" :disabled="busy || !!pending"
               :class="{ selected: contact === row.value }" @click="chooseContact(row)">
               <span class="contact-chip-avatar" aria-hidden="true">{{ row.label.slice(0, 1).toUpperCase() }}</span>
               <span class="start-contact-copy"><strong>{{ row.label }}</strong>
-                <small>{{ row.has_phone ? (row.description || "WhatsApp contact") : "WhatsApp number missing" }}</small></span>
+                <small>{{ row.description || "Review verified channels" }}</small></span>
               <FeatherIcon v-if="contact === row.value" name="check" class="h-4 w-4" />
             </button>
             <p v-if="contactsBusy" role="status">Searching contacts…</p>
@@ -237,8 +240,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
         />
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
           {{ businessName
-            ? "No WhatsApp channel is available for this contact. Configure or enable the channel in Frappe Desk."
-            : "No eligible WhatsApp endpoint is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
+            ? "No verified channel is available for this contact. Enroll an authenticated identity in Contacts & links."
+            : "No eligible channel identity is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
         </p>
         <template v-if="destination">
           <p v-if="destination.provider === 'WhatsApp'" class="text-sm">
@@ -260,8 +263,10 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
               { value: 'template', label: 'Approved template' },
             ]"
           />
+          <FormControl v-if="kind === 'email'" v-model="subject" label="Subject" :disabled="busy || !!pending" maxlength="998" />
+          <p v-if="destination.provider === 'Telegram'" class="text-xs">Private Telegram chat · {{ [...body].length }} / 4096 characters</p>
           <FormControl
-            v-if="kind === 'text'"
+            v-if="kind !== 'template'"
             label="Message"
             type="textarea"
             v-model="body"
@@ -300,7 +305,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           :loading="busy"
           :disabled="
             !destination ||
-            (!pending && (kind === 'text' ? !body.trim() : !template))
+            (!pending && (kind !== 'template' ? (!body.trim() || (kind === 'email' && !subject.trim()) || (destination.provider === 'Telegram' && [...body].length > 4096)) : !template))
           "
           @click="send"
         />

@@ -13,10 +13,12 @@ import MessageThread from "./messages/MessageThread.vue";
 import StartConversation from "./messages/StartConversation.vue";
 import BusinessMessageSearch from "./messages/BusinessMessageSearch.vue";
 import ConversationSummary from "./messages/ConversationSummary.vue";
+import EmailComposer from "./messages/EmailComposer.vue";
+import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
 import { useMessages } from "../composables/useMessages";
 import { useConversationPresence } from "../composables/useConversationPresence";
-import { coreApi, frappeRequest } from "../services/coreApi";
+import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
 
 const state = useMessages();
@@ -24,7 +26,7 @@ const deliveriesOpen = ref(false), contactRecord = ref(null);
 const notesOpen = ref(false), contextOpen = ref(false), noteMessages = ref([]), noteContact = ref('');
 const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
 const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
-const isWhatsApp = row => objectValue(row.provider_context).provider === 'WhatsApp' && !objectValue(row.provider_context).group_id;
+
 provide(messagesKey, state);
 const {
   businessType, businessName, businessContext, openBusiness,
@@ -53,7 +55,7 @@ const messagesByContact = computed(() => {
   return result;
 });
 const visibleRows = computed(() => {
-  const all = state.displayRows.value.filter(isWhatsApp);
+  const all = state.displayRows.value;
   if (!activeBusinessContact.value) return all;
   const target = messagesByContact.value.get(activeBusinessContact.value);
   if (!target) return [];
@@ -96,7 +98,7 @@ function chooseContact(contact, updateRoute = true) {
   closeNotes();
   activeBusinessContact.value = contact;
   const message = messagesByContact.value.get(contact);
-  if (message && isWhatsApp(message)) state.selectRecipient(message);
+  if (message) state.selectRecipient(message);
   if (updateRoute) contactRoute(contact);
 }
 function showAllContacts() {
@@ -129,8 +131,7 @@ function openNote(message) {
   notesOpen.value = !!noteContact.value;
 }
 watch(source, value => {
-  if (value && !isWhatsApp(value)) state.clearRecipient();
-  else if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
+  if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
 });
 function clearRecipient() {
   activeBusinessContact.value = "";
@@ -155,7 +156,7 @@ watch(selected, async contact => {
   contactRecord.value = null; closeNotes(); deliveriesOpen.value = false;
   lastVisible.value = ''; visibleMessages.value = [];
   if (!contact) return;
-  try { const record = await frappeRequest('frappe.client.get', { doctype: 'Relay Contact', name: contact }); if (selected.value === contact) contactRecord.value = record; }
+  try { const record = await coreApi('api.contact_profile', { contact }); if (selected.value === contact) contactRecord.value = record; }
   catch (e) { if (selected.value === contact) contactsError.value = e.message; }
 }, { immediate: true });
 watch([businessType, businessName], () => {
@@ -228,7 +229,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           :aria-pressed="activeBusinessContact === contact.value" :class="{ active: activeBusinessContact === contact.value }"
           :disabled="busy" @click="chooseContact(contact.value)">
           <span class="contact-chip-avatar">{{ contact.label.slice(0, 1).toUpperCase() }}</span>
-          <span class="contact-chip-copy"><strong>{{ contact.label }}</strong><small>{{ contact.description || "No WhatsApp number" }}</small></span>
+          <span class="contact-chip-copy"><strong>{{ contact.label }}</strong><small>{{ contact.description || "Review channel identities" }}</small></span>
         </button>
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
       </nav>
@@ -251,14 +252,18 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         @visible-messages="visibleMessages = $event" @older="run(() => history(true))" @reply="reply"
         @quote="openQuote" @reconcile="state.checkPending" @send="send" />
 
+      <Button v-if="state.pendingCursor.value" label="More queued attempts" :disabled="busy" @click="state.loadPending" />
       <Button v-if="newer || state.newArrivals.value" class="jump-latest" icon-left="arrow-down"
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
+      <div class="conversation-compose-context"><SendChannel />
       <div v-if="source" class="business-recipient-bar">
         <span>To</span><strong>{{ recipientLabel }} · {{ source.sender_endpoint }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button>
       </div>
-      <MessageComposer v-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')" />
+      </div>
+      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email'" :key="source.name" />
+      <MessageComposer v-else-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')" />
       <div v-else-if="active" class="business-compose-start">
         <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
           :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
@@ -272,3 +277,11 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
     </div>
   </section>
 </template>
+
+<style scoped>
+.conversation-compose-context { display:flex; align-items:center; gap:8px; padding:6px 16px; border-top:1px solid var(--outline-gray-2); }
+.conversation-compose-context > :first-child { flex-shrink:0; }
+.conversation-compose-context .business-recipient-bar { flex:1; flex-wrap:nowrap; min-width:0; padding:0; border:0; }
+.business-recipient-bar strong { flex:1; }
+.business-recipient-bar button { flex-shrink:0; min-height:36px; }
+</style>

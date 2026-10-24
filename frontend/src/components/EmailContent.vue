@@ -20,6 +20,8 @@ function attachment(index) {
 </script>
 <template>
   <div class="space-y-2">
+    <p v-if="email.to?.length" class="text-xs break-words">To: {{ email.to.join(', ') }}</p>
+    <p v-if="email.cc?.length" class="text-xs break-words">CC: {{ email.cc.join(', ') }}</p>
     <strong v-if="email.subject">{{ email.subject }}</strong>
     <div v-if="email.html">
       <Button

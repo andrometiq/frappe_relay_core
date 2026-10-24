@@ -1,7 +1,7 @@
 import { resetRecipient } from '../services/recipientContext.js';
 import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { sha256Hex, randomUUID } from '../services/crypto.js';
-import { computed, onMounted, onBeforeUnmount, ref, watch, reactive } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { coordinates } from "../components/formValidation";
 import { coreApi } from "../services/coreApi";
 import { messageData, objectValue } from "../components/messageContent";
@@ -15,7 +15,7 @@ export function useMessages() {
     more = ref(false);
   const ingestionCursor = ref('RELAY-MSG-0000000000');
   const attachment = ref(null);
-  const pendingMessages=ref([]), pendingCursor=ref(null), emailDrafts=reactive(new Map());
+  const pendingMessages=ref([]), pendingCursor=ref(null);
   const displayRows=computed(()=>[...rows.value,...pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))]);
   function beginEmail(message, values, key) {
     const name='pending:email:'+key;
@@ -66,14 +66,15 @@ export function useMessages() {
   let pendingSequence = 0;
   async function restorePending(older=false) {
     const sequence = ++pendingSequence;
-    const contact=selected.value;
-    if(!contact)return;
-    const result=await coreApi('messaging.pending_messages',{contact,...(older&&pendingCursor.value?{before:pendingCursor.value}:{})});
-    if(selected.value!==contact || sequence!==pendingSequence)return;
+    const scope=selected.value || (businessName.value ? businessType.value+':'+businessName.value : '');
+    if(!scope)return;
+    const values=businessName.value ? {business_doctype:businessType.value,business_name:businessName.value} : {contact:selected.value};
+    const result=await coreApi('messaging.pending_messages',{...values,...(older&&pendingCursor.value?{before:pendingCursor.value}:{})});
+    if((selected.value || businessType.value+':'+businessName.value)!==scope || sequence!==pendingSequence)return;
     const items=result.items||[];
     pendingCursor.value=result.next||null;
     // Keep unresolved local HTTP attempts. Never turn recovery into another send.
-    pendingMessages.value=[...pendingMessages.value.filter(row=>row.scope!==contact || (!row.action&&!items.some(item=>item.emailRequest&&item.emailRequest===row.emailRequest)) || (older&&row.action&&!items.some(item=>item.action===row.action))),
+    pendingMessages.value=[...pendingMessages.value.filter(row=>row.scope!==scope || (!row.action&&!items.some(item=>item.emailRequest&&item.emailRequest===row.emailRequest)) || (older&&row.action&&!items.some(item=>item.action===row.action))),
       ...items].sort((a,b)=>String(a.creation).localeCompare(String(b.creation)));
   }
   function retireAction(state) {
@@ -96,6 +97,8 @@ export function useMessages() {
     const items=pendingMessages.value.filter(row=>row.scope===scope&&row.action).slice(0,50);
     if(!items.length)return;
     const result=await coreApi('messaging.action_snapshots',{names:JSON.stringify(items.map(row=>row.action))});
+    const readableActions=new Set(result.items.map(item=>item.action));
+    pendingMessages.value=pendingMessages.value.filter(row=>!items.includes(row)||readableActions.has(row.action));
     for(const state of result.items){
       const row=items.find(item=>item.action===state.action);if(!row)continue;
       row.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[state.status]||state.status;
@@ -104,7 +107,7 @@ export function useMessages() {
   }
   async function refreshMetadata() {
     const contact=selected.value;if(!contact)return;
-    try {const result=await coreApi('api.conversation_channels',{contact});if(selected.value===contact)channels.value=result.items;}catch{}
+    try {const result=await coreApi('api.conversation_channels',{contact});if(selected.value===contact)channels.value=result.items;}catch(e){if([401,403].includes(e.status)){channels.value=[];rows.value=[];clearRecipient();windows.clear();}}
   }
   const businessType = ref(""),
     businessName = ref(""),
@@ -116,7 +119,6 @@ export function useMessages() {
     return businessName.value
       ? coreApi("business_inbox.messages", {
           doctype: businessType.value,
-          medium: 'WhatsApp',
           name: businessName.value,
           ...values,
         })
@@ -227,11 +229,15 @@ export function useMessages() {
       }
       if (generation !== requestSequence || identity !== conversationIdentity()) return;
       if (rows.value.length) {
-        const start=Math.max(0,rows.value.findIndex(row=>row.name===viewPosition.value?.name)-10);
-        const names=JSON.stringify(rows.value.slice(start,start+50).filter(row=>!row._pending).map(row=>row.name));
-        const snapshots = businessName.value
-          ? await historyRequest({names,limit:50})
-          : await coreApi('api.message_snapshots',{contact:selected.value,names});
+        const names = JSON.stringify(rows.value.filter(row=>!row._pending).map(row=>row.name));
+        const snapshots = {items:[]};
+        const allNames = JSON.parse(names);
+        for(let offset=0;offset<allNames.length;offset+=50){
+          const batchNames=JSON.stringify(allNames.slice(offset,offset+50));
+          const batch=businessName.value ? await historyRequest({names:batchNames,limit:50})
+            : await coreApi('api.message_snapshots',{contact:selected.value,names:batchNames});
+          snapshots.items.push(...batch.items);
+        }
         if (generation !== requestSequence || identity !== conversationIdentity()) return;
         const updated = new Map(snapshots.items.map(row=>[row.name,row]));
         const checked = new Set(JSON.parse(names));
@@ -253,15 +259,19 @@ export function useMessages() {
     } catch (err) {
       if (generation === requestSequence) {
         connectionError.value = err.message || 'Live updates unavailable.';
-        if([401,403].includes(err.status)){rows.value=[];source.value=null;windows.clear();}
+        if([401,403].includes(err.status)){rows.value=[];pendingMessages.value=[];clearRecipient();windows.clear();}
       }
     } finally { refreshing = false; }
   }
-  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions'],async({kinds})=>{
+  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
+    if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearRecipient();}
     if(busy.value){actionRefreshPending=true;return;}
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) await restorePending();
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) await refreshPendingStatuses();
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('message_actions')) await refreshVisible();
+    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) {
+      windows.clear();
+      try { await restorePending(); } catch(e) { if([401,403].includes(e.status)){pendingMessages.value=[];rows.value=[];clearRecipient();} }
+    }
+    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) await refreshPendingStatuses().catch(()=>{});
+    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('permissions') || kinds.has('message_actions')) await refreshVisible();
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('contacts')) await refreshMetadata();
   });
   let actionRefreshPending = false;
@@ -450,6 +460,7 @@ export function useMessages() {
     return run(async()=>{
       businessContext.value=await coreApi('business_inbox.context',{doctype,name});
       if(!cached)await restoreSavedView();
+      await restorePending();
     });
   }
   async function loadNewer() {
@@ -663,7 +674,7 @@ export function useMessages() {
 
 
   return {
-    beginEmail, finishEmail, checkPending, pendingCursor, loadPending:()=>run(()=>restorePending(true)), displayRows, emailDrafts, viewPosition, rememberPosition, newArrivals, latest,
+    beginEmail, finishEmail, checkPending, pendingCursor, loadPending:()=>run(()=>restorePending(true)), displayRows, viewPosition, rememberPosition, newArrivals, latest,
     clearSelection, clearRecipient,
     businessType,
     businessName,

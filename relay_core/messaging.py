@@ -415,11 +415,19 @@ def sticker(message):
 
 
 @frappe.whitelist(methods=['GET'])
-def pending_messages(contact, before=None):
+def pending_messages(contact=None, before=None, business_doctype=None, business_name=None):
     """Restore the caller's durable, unresolved sends without re-submitting them."""
     require_access()
-    validate_reference(contact, 'CON')
-    readable_contact(contact)
+    business = (business_doctype, business_name) if business_doctype or business_name else None
+    if business:
+        from relay_core.business_inbox import check_type
+        check_type(business_doctype)
+        if not isinstance(business_name, str) or not business_name or len(business_name) > 140:
+            frappe.throw('Choose a business record')
+        frappe.get_doc(business_doctype, business_name).check_permission('read')
+    if contact or not business:
+        validate_reference(contact, 'CON')
+        readable_contact(contact)
     if before:
         validate_reference(before, 'MA')
     from pypika import Order
@@ -430,8 +438,17 @@ def pending_messages(contact, before=None):
                 action.preview, action.creation, action.target_channel)
         .where((action.owner == frappe.session.user)
                & action.status.isin(['Dispatching', 'Queued', 'Uncertain', 'Rejected'])
-               & (action.operation != 'reaction')
-               & ((message.relay_contact == contact) | (action.start_contact == contact))))
+               & (action.operation != 'reaction')))
+    if contact:
+        query = query.where((message.relay_contact == contact) | (action.start_contact == contact))
+    if business:
+        from pypika import CustomFunction
+        extract = CustomFunction('JSON_EXTRACT', ['document', 'path'])
+        unquote = CustomFunction('JSON_UNQUOTE', ['value'])
+        snapshot = ((unquote(extract(action.payload, '$.business[0]')) == business_doctype)
+                    & (unquote(extract(action.payload, '$.business[1]')) == business_name))
+        legacy = (message.business_doctype == business_doctype) & (message.business_name == business_name)
+        query = query.where(snapshot | legacy)
     if before:
         query = query.where(action.name < before)
     records = query.orderby(action.name, order=Order.desc).limit(51).run(as_dict=True)
@@ -441,10 +458,15 @@ def pending_messages(contact, before=None):
             doc = frappe.get_doc('Relay Message Action', row.name)
             doc.check_permission('read')
             source, channel, context = action_target(doc)
+            if business and (source.get('business_doctype'), source.get('business_name')) != business:
+                continue
         except (frappe.PermissionError, frappe.DoesNotExistError, ValueError):
             continue
         items.append({'name': 'pending:' + row.name, 'action': row.name,
-            'contact': contact, 'scope': contact, 'channel': channel.name,
+            'contact': source.relay_contact, 'relay_contact': source.relay_contact,
+            'frappe_contact': frappe.db.get_value('Relay Contact', source.relay_contact, 'contact'),
+            'sender_endpoint': source.sender_endpoint,
+            'scope': ':'.join(business) if business else contact, 'channel': channel.name,
             'provider_context': {'provider': channel.channel}, 'direction': 'Outgoing',
             'content': row.preview or 'Outgoing message', 'creation': row.creation, 'error': action_error(doc),
             'status': {'Dispatching': 'Sending', 'Uncertain': 'Unconfirmed',

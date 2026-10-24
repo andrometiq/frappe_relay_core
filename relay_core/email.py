@@ -364,10 +364,13 @@ def send_status(message, request_key):
         raise ValueError('Invalid email request')
     keys=history_keys(channel.account,request_key)
     filters={'source_key':['in',keys],'owner':frappe.session.user,'channel':source.channel}
-    anchored=frappe.db.exists('Relay Message Action', {'request_key':['in',keys],
-        'owner':frappe.session.user,'source_message':source.name,'operation':'email'})
+    anchored=frappe.db.get_value('Relay Message Action', {'request_key':['in',keys],
+        'owner':frappe.session.user,'source_message':source.name,'operation':'email'}, 'name')
+    if anchored:
+        from relay_core.messaging import action_result
+        action=frappe.get_doc('Relay Message Action',anchored);action.check_permission('read')
     if not anchored:filters['relay_contact']=source.relay_contact
     name=frappe.db.get_value('Relay Message', filters, 'name')
-    if not name:return {'status':'Unconfirmed'}
+    if not name:return action_result(action) if anchored else {'status':'Unconfirmed'}
     doc=frappe.get_doc('Relay Message',name);doc.check_permission('read')
     return {'status':doc.status,'message':doc.name}
