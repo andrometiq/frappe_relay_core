@@ -105,7 +105,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
         self.reads = [{'tool': 'ledger', 'arguments': {'name': 'LED-1'},
             'digest': tools.fingerprint({'name': 'LED-1', 'amount': 1250})}]
         self.run = _dict(name='run', skill='skill', skill_version='v1', generation=1, message_hash='hash',
-            decision=json.dumps({'user': 'partner', 'reads': self.reads}))
+            decision=json.dumps({'user': 'partner', 'reads': self.reads, 'scope': tools.fingerprint({'company': 'Sim Company'})}))
         self.action = _dict(name='action', status='Dispatching', reload=Mock())
         self.hub = Mock()
         self.committed = False
@@ -125,7 +125,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
         def context(skill, message):
             self.assertTrue(self.committed)
             if self.denied: raise PermissionError('Linked user lost access to SUP-A')
-            return 'partner', ('Supplier', 'SUP-A')
+            return 'partner', ('Supplier', 'SUP-A'), {'company': 'Sim Company'}
         self.recheck = Mock()
         for fixture in (
             patch.object(messaging, 'frappe', self.fake), patch.object(service, 'frappe', self.fake),
@@ -150,7 +150,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
 
     def test_initial_submission_rechecks_after_commit_and_sends_once(self):
         self.assertEqual(self.send()['status'], 'Submitted')
-        self.recheck.assert_called_once_with(self.skill, 'partner', ('Supplier', 'SUP-A'), self.reads)
+        self.recheck.assert_called_once_with(self.skill, 'partner', ('Supplier', 'SUP-A'), self.reads, {'company': 'Sim Company'})
         self.hub.call_tool.assert_called_once()
 
     def test_changes_at_journal_commit_block_initial_submission(self):
@@ -229,8 +229,10 @@ class IncomingBusinessTests(unittest.TestCase):
         event=_dict(name='event',account='fixture',payload=json.dumps(payload),projection_status='Pending')
         db=Mock();db.exists.return_value=False;db.get_value.return_value='contact'
         fake=SimpleNamespace(db=db,get_doc=Mock(return_value=event),get_all=Mock(return_value=['channel']))
-        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch('relay_core.business_routing.resolve',return_value=(None,'triage_window_closed')),patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'):
+        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch('relay_core.business_routing.resolve',return_value=(None,'triage_window_closed')),patch('relay_core.tickets.ensure_episode') as triage,patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'):
             projection.project('event')
+        triage.assert_called_once()
+        self.assertEqual(triage.call_args.kwargs['event'], event)
         fake.get_doc.assert_called_once_with('Relay Hub Event','event')
         db.set_value.assert_called_with('Relay Hub Event','event','projection_status','Uncategorized')
 

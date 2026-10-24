@@ -272,9 +272,10 @@ class RoutingBoundaryTests(unittest.TestCase):
             return doc
         db = Mock()
         db.exists.return_value = False
-        db.get_value.return_value = 'contact'
+        db.get_value.side_effect = lambda dt, *args, **kwargs: None if dt == 'Relay Ticket' else 'contact'
         fake = SimpleNamespace(db=db, get_doc=get_doc, get_all=Mock(return_value=['channel']))
         with patch.object(projection, 'frappe', fake), patch.object(projection, 'apply_updates', return_value='Ignored'), \
+             patch('relay_core.tickets.source_episode', return_value=('provider-key', 'source-action')), \
              patch.object(whatsapp_templates, 'project', return_value=False), \
              patch.object(routing, 'resolve', side_effect=[(('Supplier', 'supplier'), 'sender_choice'),
                                                           (('Supplier', 'supplier'), 'conversation')]) as decide, \
@@ -405,3 +406,166 @@ class ChannelRoutingTests(RoutingFixtures, unittest.TestCase):
         row = {'id': 'selection', 'text': {'body': token}}
         self.assertEqual(routing.resolve('contact', 'channel', '15550000001', self.telegram(participant_id=22), row,
             _dict(name='selection', creation=self.now)), (None, 'triage_invalid_choice'))
+
+
+class TriageEpisodeTests(unittest.TestCase):
+    def setUp(self):
+        from relay_core import tickets
+        self.tickets = tickets
+        self.channel = _dict(name='channel', account='account', enabled=1, company='Company North', triage_owner='primary')
+        self.event = _dict(name='event', account='account')
+        self.row = {'id':'provider-one', 'from':'sender@example.invalid', 'provider_context':{},
+                    'text':{'body':'Private amount 1250, never copy to triage'}}
+        self.created = []
+        self.insert_error = None
+        self.existing = None
+        self.db = Mock()
+        self.db.get_value.side_effect = lambda dt, *a, **kw: self.existing if dt == 'Relay Ticket' else True
+        def get_doc(dt, name=None, **kwargs):
+            if dt == 'Relay Channel': return self.channel
+            if dt == 'Relay Ticket': return self.created[0]
+            doc = _dict(dt); doc.name = 'ticket'; doc.insert = Mock(return_value=doc, side_effect=self.insert_error)
+            self.created.append(doc)
+            return doc
+        self.fake = SimpleNamespace(db=self.db, get_doc=get_doc, local=_dict(site='local.site'),
+            session=_dict(user='callback'), set_user=Mock(),
+            get_single=Mock(return_value=_dict(ai_handoff_owner='backup')),
+            PermissionError=PermissionError, DoesNotExistError=LookupError, ValidationError=ValueError)
+        self.enterContext(patch.object(tickets, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.permissions.require_administrator'))
+        from contextlib import nullcontext
+        self.enterContext(patch('relay_core.ai.tools.as_user', side_effect=lambda user:nullcontext()))
+
+    def test_unknown_source_deduplicates_and_never_copies_payload(self):
+        with patch.object(self.tickets, 'triage_owner', return_value='primary'):
+            first = self.tickets.ensure_episode(event=self.event, channel='channel', row=self.row)
+            self.existing = first.name
+            self.event.name = 'duplicate-hub-event'
+            again = self.tickets.ensure_episode(event=self.event, channel='channel', row=self.row)
+        self.assertIs(again, first)
+        self.assertEqual(first.company, 'Company North')
+        self.assertEqual(first.assigned_to, 'primary')
+        self.assertEqual(first.source_hub_event, 'event')
+        self.assertNotIn('1250', json.dumps({k:v for k,v in first.items() if k != 'insert'}))
+        self.assertEqual(len(self.created), 1)
+        self.assertTrue(any(c.kwargs.get('for_update') for c in self.db.get_value.call_args_list))
+
+    def test_missing_company_or_owner_retains_source_without_ticket(self):
+        with patch.object(self.tickets, 'triage_owner', return_value=None):
+            self.assertIsNone(self.tickets.ensure_episode(event=self.event, channel='channel', row=self.row))
+        self.channel.company = None
+        with patch.object(self.tickets, 'triage_owner') as owner:
+            self.assertIsNone(self.tickets.ensure_episode(event=self.event, channel='channel', row=self.row))
+        owner.assert_not_called()
+        self.assertEqual(self.created, [])
+
+    def test_owner_revoked_during_insert_rolls_back_ticket_not_source(self):
+        self.insert_error = PermissionError('Owner lost company access')
+        with patch.object(self.tickets, 'triage_owner', return_value='primary'):
+            self.assertIsNone(self.tickets.ensure_episode(event=self.event, channel='channel', row=self.row))
+        self.db.rollback.assert_called_once_with(save_point='triage_episode')
+        self.assertEqual(self.fake.set_user.call_args.args, ('callback',))
+
+    def test_company_and_business_denial_selects_backup_or_stops(self):
+        with patch.object(self.tickets, 'require_access'), \
+                patch('relay_core.permissions.company_allowed', side_effect=[False, True]):
+            self.assertEqual(self.tickets.triage_owner(self.channel), 'backup')
+        with patch.object(self.tickets, 'require_access'), \
+                patch('relay_core.permissions.company_allowed', return_value=True), \
+                patch.object(self.tickets, 'episode_owner_allowed', side_effect=[False, True]):
+            self.assertEqual(self.tickets.triage_owner(self.channel, _dict(name='message')), 'backup')
+        self.db.get_value.side_effect = lambda *a, **kw: False
+        self.assertIsNone(self.tickets.triage_owner(self.channel))
+
+    def test_provider_identity_not_body_controls_replay(self):
+        first = self.tickets.source_episode('channel', self.row)
+        self.row['text']['body'] = 'Different untrusted instructions'
+        self.assertEqual(self.tickets.source_episode('channel', self.row), first)
+        self.row['id'] = 'provider-two'
+        self.assertNotEqual(self.tickets.source_episode('channel', self.row), first)
+        self.assertNotEqual(self.tickets.source_episode('other-channel', self.row), first)
+
+    def test_empty_evidence_requires_a_complete_source_and_company(self):
+        doc = _dict(subject='Triage', brief='', category='Support', status='Open', messages=[],
+                    get_doc_before_save=lambda:None)
+        self.fake.throw = Mock(side_effect=ValueError('Invalid ticket'))
+        self.fake.session = _dict(user='Administrator')
+        with patch.object(self.tickets, 'require_access'):
+            with self.assertRaises(ValueError): self.tickets.validate_ticket(doc, check_assignment=False)
+            doc.update(source_hub_event='event', source_provider_message_key='provider',
+                       company='Company North', conversation_key='conversation')
+            token = self.tickets._episode_transition.set(doc)
+            try:
+                self.tickets.validate_ticket(doc, check_assignment=False)
+            finally:
+                self.tickets._episode_transition.reset(token)
+            with self.assertRaises(ValueError): self.tickets.validate_ticket(doc, check_assignment=False)
+
+
+class TriageEnrollmentTests(unittest.TestCase):
+    def setUp(self):
+        from relay_core import enrollment
+        self.api = enrollment
+        self.event = _dict(name='event', account='account', creation='today', payload=json.dumps({
+            'channel':'Email', 'direction':'inbound', 'provider_id':'provider', 'sender':'sender@example.invalid',
+            'body':'Private 1250'}))
+        self.channel = _dict(name='channel', company='Company North', check_permission=Mock())
+        self.db = Mock()
+        self.db.get_value.return_value = None
+        self.db.exists.return_value = False
+        self.fake = SimpleNamespace(get_doc=lambda dt, name: self.event if dt == 'Relay Hub Event' else self.channel,
+            get_all=Mock(return_value=['channel']), db=self.db, PermissionError=PermissionError,
+            ValidationError=ValueError, throw=lambda *a: (_ for _ in ()).throw(PermissionError()))
+        self.enterContext(patch.object(enrollment, 'frappe', self.fake))
+        self.enterContext(patch.object(enrollment, 'require_access'))
+        self.enterContext(patch.object(enrollment, 'connection_value', return_value='account'))
+
+    def test_event_rows_require_company_and_account_scope(self):
+        with patch('relay_core.permissions.company_allowed', return_value=True):
+            event, channel, medium, rows = self.api.event_rows('event')
+            self.assertEqual((event.name, channel, medium), ('event', 'channel', 'Email'))
+            self.assertEqual(rows[0]['id'], 'provider')
+        with patch('relay_core.permissions.company_allowed', return_value=False):
+            with self.assertRaises(PermissionError): self.api.event_rows('event')
+        self.event.account = 'other'
+        with self.assertRaises(PermissionError): self.api.event_rows('event')
+
+    def test_pending_sanitizes_body_and_omits_other_company(self):
+        rows = self.api.extract_messages(json.loads(self.event.payload))
+        self.fake.get_all.return_value = [_dict(name='event')]
+        with patch.object(self.api, 'event_rows', return_value=(self.event,'channel','Email',rows)), \
+                patch('relay_core.tickets.source_episode', return_value=('provider-key','action-key')):
+            result = self.api.pending()
+        self.assertEqual(set(result), {'items','next'})
+        self.assertEqual(result['items'][0]['preview'], 'Incoming conversation needs triage')
+        self.assertNotIn('1250', json.dumps(result))
+        with patch.object(self.api, 'event_rows', side_effect=PermissionError):
+            self.assertEqual(self.api.pending(), {'items':[], 'next':None})
+
+    def test_reassigned_channel_cannot_expose_or_bind_saved_source_company(self):
+        rows = self.api.extract_messages(json.loads(self.event.payload))
+        self.fake.get_all.return_value = [_dict(name='event')]
+        self.channel.company = 'Company South'
+        self.db.get_value.return_value = _dict(name='ticket', company='Company North')
+        with patch('relay_core.permissions.company_allowed', side_effect=lambda company: company == 'Company South'), \
+                patch('relay_core.tickets.source_episode', return_value=('provider-key','action-key')), \
+                patch.object(self.api, 'readable_contact'):
+            self.assertEqual(self.api.pending(), {'items':[], 'next':None})
+            with self.assertRaises(PermissionError):
+                self.api.bind('event', 'provider', 'contact', 'Customer', 'Sim Customer')
+
+    def test_ticket_permission_requires_company_for_source_only_records(self):
+        from relay_core import tickets
+        doc = _dict(owner='Administrator', assigned_to='staff', company='Company North', messages=[],
+            source_hub_event='event', source_provider_message_key='provider', conversation_key='conversation')
+        fake = SimpleNamespace(get_roles=lambda user:[], session=_dict(user='staff'))
+        with patch.object(tickets, 'frappe', fake), patch('relay_core.permissions.company_allowed', return_value=True):
+            self.assertTrue(tickets.permission(doc))
+            doc.source_hub_event = None
+            self.assertFalse(tickets.permission(doc))
+            doc.source_hub_event = 'event'
+            doc.business_doctype = 'Customer'
+            self.assertFalse(tickets.permission(doc), 'Partial business scope must deny before contact fallback')
+            doc.business_doctype = None
+        with patch.object(tickets, 'frappe', fake), patch('relay_core.permissions.company_allowed', return_value=False):
+            self.assertFalse(tickets.permission(doc))
