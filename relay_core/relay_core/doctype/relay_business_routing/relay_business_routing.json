@@ -35,7 +35,8 @@
       "label": "Endpoint",
       "fieldtype": "Data",
       "read_only": 1,
-      "reqd": 1
+      "reqd": 1,
+      "length": 200
     },
     {
       "fieldname": "business_doctype",
@@ -124,5 +125,6 @@
       "role": "Relay Communication Manager",
       "read": 1
     }
-  ]
+  ],
+  "modified": "2026-10-25 12:00:01.000000"
 }

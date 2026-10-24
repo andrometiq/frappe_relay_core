@@ -7,6 +7,7 @@ from relay_core.ai.tools import as_user
 from relay_core.permissions import require_access
 from relay_core.business_references import RELAY_DOCTYPES
 from relay_core.automation.service import internal_save
+from relay_core.inbound import retry_callback
 
 FIELDS = ('title', 'enabled', 'source_doctype', 'event', 'recipient_field', 'business_doctype',
           'channel', 'run_as_user', 'template', 'parameter_mapping', 'contact',
@@ -106,10 +107,7 @@ def readable_parameters(rule, source, payload):
 
 
 def log_failure(context=''):
-    try:
-        frappe.log_error(title='Relay business event failed', message='Business transaction retained; review event rule and delivery configuration. ' + context)
-    except Exception:
-        pass
+    frappe.log_error(title='Relay business event failed', message='Business transaction retained; review event rule and delivery configuration. ' + context)
 
 
 def clear_rule_cache():
@@ -122,7 +120,7 @@ def enabled_rule_pairs():
     if pairs is None:
         pairs = {(row.source_doctype, row.event) for row in frappe.get_all(
             'Relay Business Event Rule', filters={'enabled': 1}, fields=['source_doctype', 'event'])}
-        frappe.cache.set_value(RULE_PAIRS_CACHE_KEY, pairs)
+        frappe.cache.set_value(RULE_PAIRS_CACHE_KEY, pairs, expires_in_sec=60)
     return pairs
 
 
@@ -141,12 +139,11 @@ def on_event(doc, method=None):
             try:
                 frappe.db.savepoint('relay_business_event')
                 capture(frappe.get_doc('Relay Business Event Rule', name), doc, method)
-            except Exception:
-                try: frappe.db.rollback(save_point='relay_business_event')
-                except Exception: pass
+            except frappe.QueryDeadlockError:
+                raise
+            except (ValueError, frappe.ValidationError, frappe.DoesNotExistError, frappe.PermissionError):
+                frappe.db.rollback(save_point='relay_business_event')
                 log_failure(f'{doc.doctype}/{doc.name}; {method}; rule {name}')
-    except Exception:
-        log_failure(f'{doc.doctype}/{doc.name}; {method}')
     finally:
         frappe.flags.relay_business_event = False
 
@@ -224,6 +221,7 @@ def enqueue_delivery(name):
         log_failure()
 
 
+@retry_callback
 def dispatch(name):
     frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
     delivery = frappe.get_doc('Relay Business Event Delivery', name)
@@ -258,6 +256,8 @@ def dispatch(name):
             delivery.status = delivery_status(result['status'])
         delivery.action = result.get('action')
         internal_save(delivery); frappe.db.commit()
+    except frappe.QueryDeadlockError:
+        raise
     except Exception as exc:
         frappe.db.rollback()
         frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)

@@ -70,6 +70,12 @@ def extract_messages(payload):
     return result
 
 
+def set_status(name, status):
+    frappe.db.set_value('Relay Hub Event', name, 'projection_status', status)
+    from relay_core.realtime import incoming_changed
+    incoming_changed()
+
+
 def project(name, business_overrides=None):
     frappe.db.get_value('Relay Hub Event', name, 'name', for_update=True)
     event = frappe.get_doc('Relay Hub Event', name)
@@ -83,14 +89,14 @@ def project(name, business_overrides=None):
         if medium not in ('WhatsApp', 'Telegram', 'Email'):
             raise ValueError('Unsupported channel')
     except (ValueError, TypeError):
-        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Failed'); return
+        set_status(name, 'Failed'); return
     if 'channel_statuses' in payload:
         from relay_core.channel_statuses import project_batch
         project_batch(event, payload['channel_statuses'])
         return
     channels = frappe.get_all('Relay Channel', filters={'account': event.account, 'channel': medium, 'enabled': 1}, pluck='name', limit_page_length=2)
     if len(channels) != 1:
-        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized'); return
+        set_status(name, 'Uncategorized'); return
     channel = channels[0]
     try:
         from relay_core.whatsapp_templates import project as project_templates
@@ -100,7 +106,7 @@ def project(name, business_overrides=None):
         from relay_core.call_records import ingest as ingest_calls
         if medium == "WhatsApp" and ingest_calls(payload,channel):update_status="Uncategorized"
     except (ValueError, TypeError, AttributeError):
-        frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Failed'); return
+        set_status(name, 'Failed'); return
     unresolved = update_status == 'Uncategorized'
     decisions = json.loads(event.get('routing_decisions') or '{}')
     for position, row in enumerate(incoming):

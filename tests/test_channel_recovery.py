@@ -62,7 +62,7 @@ class TelegramAdmissionTests(unittest.TestCase):
             payload=json.dumps(self.payload),source_message='source',check_permission=Mock())
         self.source=_dict(name='source',business_doctype='Customer',business_name='original')
         self.hub=Mock();self.finish=Mock(return_value={'status':'Queued'})
-        for boundary in (patch.object(messaging,'frappe',SimpleNamespace(get_doc=Mock(return_value=self.action))),
+        for boundary in (patch.object(messaging,'frappe',SimpleNamespace(get_doc=Mock(return_value=self.action), PermissionError=PermissionError, DoesNotExistError=LookupError)),
                          patch.object(messaging,'readable_source',return_value=(self.source,_dict(channel='Telegram'),{})),
                          patch.object(messaging.whatsapp,'client',return_value=self.hub),patch.object(messaging,'finish',self.finish)):
             boundary.start();self.addCleanup(boundary.stop)
