@@ -58,6 +58,8 @@ class PermissionsTest(unittest.TestCase):
                 self.assertFalse(doc['permissions'])
                 key=next(field for field in doc['fields'] if field['fieldname']=='receipt_key')
                 self.assertTrue(key['unique'] and key['read_only'] and key['reqd'])
+            elif doc['name']=='Relay Business Event Delivery':
+                self.assertEqual(doc['autoname'],'format:RELAY-BED-{event_key}')
             elif doc['name'] in field_names:
                 field = field_names[doc['name']]
                 self.assertEqual(doc['autoname'], 'field:' + field)

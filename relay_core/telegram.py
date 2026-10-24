@@ -23,7 +23,6 @@ ARGUMENTS = {'chat_id', 'user_id', 'message_thread_id', 'message_id', 'title', '
 
 @frappe.whitelist(methods=['POST'])
 def groups(operation, arguments=None):
-    # Group administration is account-wide and is restricted to managers.
     require_access(manage=True)
     if not isinstance(operation, str) or operation not in OPERATIONS:
         frappe.throw('Unsupported Telegram group operation')
@@ -34,6 +33,8 @@ def groups(operation, arguments=None):
     integer(arguments.get('chat_id'))
     if arguments['chat_id'] >= 0:
         frappe.throw('Select a Telegram group or supergroup')
+    contact, _ = group_binding(arguments['chat_id'])
+    authorize_group(contact)
     result = client().telegram_groups(operation, **arguments)
     from relay_core.telegram_topics import action
     try:action(operation, arguments, result)
@@ -60,6 +61,21 @@ def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, busin
             integer(value, positive=True)
         elif type(value) is not int:
             frappe.throw('Invalid Telegram message reference')
+    contact, channel = group_binding(chat_id)
+    from relay_core.telegram_delivery import send_group
+    return send_group(contact, channel, chat_id, text, reply_to, message_thread_id, request_key, business_doctype, business_name)
+
+
+def authorize_group(contact):
+    # Telegram topic metadata has no authoritative business ownership.
+    if frappe.session.user == 'Administrator': return
+    from relay_core.business_access import candidates
+    targets = candidates(contact)
+    if not targets or any(not frappe.get_doc(*target).has_permission('read') for target in targets):
+        frappe.throw('Group administration requires access to every linked business', frappe.PermissionError)
+
+
+def group_binding(chat_id):
     account = connection_value('relay_hub_account')
     if not account:
         frappe.throw('Configure the Relay Hub account first')
@@ -73,8 +89,7 @@ def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, busin
     from relay_core.permissions import readable_contact
     readable_contact(contact)
     frappe.get_doc('Relay Channel', channels[0]).check_permission('read')
-    from relay_core.telegram_delivery import send_group
-    return send_group(contact, channels[0], chat_id, text, reply_to, message_thread_id, request_key, business_doctype, business_name)
+    return contact, channels[0]
 
 
 

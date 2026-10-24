@@ -1,7 +1,7 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
-from relay_core.permissions import require_access, readable_contact
+from relay_core.permissions import require_access, readable_contact, contact_query
 
 
 def validate_reference(value, prefix):
@@ -107,10 +107,15 @@ def contacts(query='', before=None, after=None, limit=50):
     needle = query.strip()
     pattern = '%' + '%'.join('\\' + c if c in '%_\\' else c for c in needle) + '%'
     options = dict(filters=filters, fields=['name', 'contact', 'display_name'],
-                   order_by='name desc' if before else 'name asc', page_length=limit + 1)
+                   order_by='name desc' if before else 'name asc', limit=limit + 1)
     if needle:
         options['or_filters'] = [[field, 'like', pattern] for field in ('display_name', 'name')]
-    rows = frappe.get_list('Relay Contact', **options)
+    from pypika.terms import LiteralValue
+    search = frappe.qb.get_query('Relay Contact', ignore_permissions=False, **options)
+    scope = contact_query()
+    if scope:
+        search = search.where(LiteralValue('(' + scope + ')'))
+    rows = search.run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]
     if before:

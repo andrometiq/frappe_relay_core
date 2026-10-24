@@ -25,6 +25,8 @@ def _messages(contact, names):
 
 
 def _view(doc):
+    from relay_core.collaboration import authorize
+    authorize(doc)
     names = doc.messages if isinstance(doc.messages, list) else json.loads(doc.messages or '[]')
     # Recheck message/channel access: a topic must not bypass later permission changes.
     _messages(doc.relay_contact, names)
@@ -40,7 +42,11 @@ def directory(contact, after=None):
     if after:
         filters['name'] = ['<', after]
     rows = frappe.get_all('Relay Conversation Topic', filters=filters, pluck='name', order_by='name desc', limit_page_length=31)
-    return {'items': [_view(frappe.get_doc('Relay Conversation Topic', name)) for name in rows[:30]],
+    items=[]
+    for name in rows[:30]:
+        try: items.append(_view(frappe.get_doc('Relay Conversation Topic', name)))
+        except frappe.PermissionError: continue
+    return {'items': items,
             'next': rows[29] if len(rows) > 30 else None}
 
 
@@ -50,7 +56,7 @@ def save(contact, values, name=None, request_key=None):
     readable_contact(contact)
     if isinstance(values, str):
         values = frappe.parse_json(values)
-    if not isinstance(values, dict) or set(values) - {'title', 'summary', 'category', 'status', 'messages', 'modified'}:
+    if not isinstance(values, dict) or set(values) - {'title', 'summary', 'category', 'status', 'messages', 'modified', 'business_doctype', 'business_name'}:
         frappe.throw('Unsupported topic fields')
     if request_key is not None and (not isinstance(request_key, str) or not 1 <= len(request_key) <= 140):
         frappe.throw('Invalid topic request key')
@@ -77,13 +83,18 @@ def upsert(contact, values, *, name=None, source='Flow', source_key=None):
     if status not in STATUSES:
         frappe.throw('Unsupported topic status')
     names = _messages(contact, values.get('messages', []))
-    intent = hashlib.sha256(json.dumps([title.strip(), summary.strip(), category.strip(), status, sorted(names)], ensure_ascii=False).encode()).hexdigest()
+    from relay_core.collaboration import business_scope, authorize
+    business = business_scope(contact, names, values.get('business_doctype'), values.get('business_name'))
+    intent = hashlib.sha256(json.dumps([title.strip(), summary.strip(), category.strip(), status, sorted(names), business], ensure_ascii=False).encode()).hexdigest()
     key = hashlib.sha256(json.dumps([contact, source, source_key or str(uuid.uuid4())]).encode()).hexdigest()
     # Serialize topic membership updates across both human and automation requests.
     with frappe.cache.lock('relay-topics-' + hashlib.sha256(contact.encode()).hexdigest(), timeout=30, blocking_timeout=5):
         existing = name or frappe.db.get_value('Relay Conversation Topic', {'topic_key': key}, 'name')
         doc = frappe.get_doc('Relay Conversation Topic', existing) if existing else frappe.new_doc('Relay Conversation Topic')
         if existing:
+            authorize(doc)
+            if (doc.get('business_doctype'), doc.get('business_name')) != business:
+                frappe.throw('Topic belongs to another business', frappe.PermissionError)
             if doc.relay_contact != contact:
                 frappe.throw('Topic belongs to another conversation', frappe.PermissionError)
             if source != 'Manual' and doc.topic_key != key:
@@ -108,6 +119,7 @@ def upsert(contact, values, *, name=None, source='Flow', source_key=None):
         # A message belongs to one topic within its contact, matching legacy behavior.
         if membership_conflict(contact,names,exclude=doc.name):
             frappe.throw('A selected message already belongs to another topic')
+        doc.business_doctype, doc.business_name = business
         doc.title = title.strip()
         doc.summary = summary.strip()
         doc.category = category.strip()

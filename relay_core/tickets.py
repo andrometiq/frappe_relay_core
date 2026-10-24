@@ -81,8 +81,6 @@ def read(name):
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name)
     doc.check_permission('read')
-    # Recheck message access at read time: permissions may have changed since creation.
-    validate_ticket(doc, check_assignment=False)
     links = []
     for row in doc.messages:
         message = frappe.get_doc('Relay Message', row.message)
@@ -108,17 +106,46 @@ def assign(name, user=''):
 
 
 def permission(doc, user=None, permission_type=None):
+    from relay_core.permissions import can_read_contact_as
+    from relay_core.business_access import allowed, reference
     user = user or frappe.session.user
-    return bool(user in (doc.owner, doc.get('assigned_to')) or
-                set(frappe.get_roles(user)).intersection({'System Manager','Relay Communication Manager'}))
+    if user == 'Administrator': return True
+    if not (user in (doc.owner, doc.get('assigned_to')) or
+            set(frappe.get_roles(user)).intersection({'System Manager', 'Relay Communication Manager'})):
+        return False
+    if not doc.messages: return False
+    if (doc.get('business_doctype') or doc.get('business_name')) and not allowed(doc, user): return False
+    try:
+        for row in doc.messages:
+            message = frappe.get_doc('Relay Message', row.message)
+            if not message.has_permission('read', user=user) or not can_read_contact_as(message.relay_contact, user):
+                return False
+            if doc.get('business_name') and reference(message) != (doc.business_doctype, doc.business_name):
+                return False
+        return True
+    except frappe.DoesNotExistError:
+        return False
 
 
 def query_condition(user=None):
+    from relay_core.business_access import explicit_condition
     user = user or frappe.session.user
-    if set(frappe.get_roles(user)).intersection({'System Manager','Relay Communication Manager'}):
-        return ''
+    if user == 'Administrator': return ''
     quoted = frappe.db.escape(user)
-    return f'(`tabRelay Ticket`.owner={quoted} OR `tabRelay Ticket`.assigned_to={quoted})'
+    gate = '1=1' if set(frappe.get_roles(user)).intersection({'System Manager', 'Relay Communication Manager'}) else (
+        f'(`tabRelay Ticket`.owner={quoted} OR `tabRelay Ticket`.assigned_to={quoted})')
+    messages = frappe.qb.get_query('Relay Message', fields=['name'], ignore_permissions=False,
+                                   user=user, order_by='').get_sql()
+    contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
+                                   user=user, order_by='').get_sql()
+    links = "t.parent=`tabRelay Ticket`.name AND t.parenttype='Relay Ticket'"
+    return f"""({gate}) AND ({explicit_condition('Relay Ticket', user, allow_empty=True)})
+        AND EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links})
+        AND NOT EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links}
+          AND NOT EXISTS (SELECT 1 FROM `tabRelay Message` m WHERE m.name=t.message
+            AND m.name IN ({messages}) AND m.relay_contact IN ({contacts})
+            AND (COALESCE(`tabRelay Ticket`.business_name,'')='' OR
+                 (m.business_doctype=`tabRelay Ticket`.business_doctype AND m.business_name=`tabRelay Ticket`.business_name))))"""
 
 
 @frappe.whitelist(methods=['GET'])

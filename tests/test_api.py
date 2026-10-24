@@ -19,6 +19,11 @@ class ApiTests(unittest.TestCase):
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
         self.api.require_access=Mock();self.api.readable_contact=Mock()
+        self.api.contact_query=Mock(return_value='independent_business_scope')
+        self.f.qb=Mock()
+        search=self.f.qb.get_query.return_value
+        search.where.return_value=search
+        search.run.side_effect=lambda **kwargs:self.f.get_list.return_value
 
     def test_write_is_post_only_and_requires_config_access(self):
         self.assertEqual(self.api.update_channel.allowed_methods,['POST'])
@@ -62,9 +67,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(result['items']),50)
         self.assertIsNone(result['previous'])
         self.assertEqual(result['next'],{'after':'RELAY-CON-0000000050'})
-        args=self.f.get_list.call_args
+        args=self.f.qb.get_query.call_args
         self.assertEqual(args.args,('Relay Contact',))
-        self.assertEqual(args.kwargs['page_length'],51)
+        self.assertFalse(args.kwargs['ignore_permissions'])
+        self.assertEqual(args.kwargs['limit'],51)
+        self.assertEqual(self.f.qb.get_query.return_value.where.call_args.args[0].get_sql(),'(independent_business_scope)')
         self.assertEqual(args.kwargs['or_filters'][0],['display_name','like','%a%\\%%\\_%'])
 
     def test_contact_reverse_page_and_invalid_input(self):

@@ -222,3 +222,28 @@ def action_query(user=None):
               f"AND {table}.source_message IN (SELECT name FROM `tabRelay Message` "
               f"WHERE COALESCE(legacy_triage,0)=0 AND name IN ({sources}))")
     return f'{table}.owner={frappe.db.escape(user)} AND ({scope} OR ({legacy}))'
+
+
+def explicit_condition(doctype, user=None, *, allow_empty=False):
+    user = user or frappe.session.user
+    if user == 'Administrator': return ''
+    table = '`tab' + doctype + '`'
+    clauses = []
+    for dt in frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'):
+        if not frappe.has_permission(dt, 'read', user=user): continue
+        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=False, user=user, order_by='').get_sql()
+        clauses.append(f'({table}.business_doctype={frappe.db.escape(dt)} AND {table}.business_name IN ({query}))')
+    if allow_empty:
+        clauses.append(f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='')")
+    return '(' + ' OR '.join(clauses) + ')' if clauses else '1=0'
+
+
+def readable_business(doc, user=None):
+    from relay_core.permissions import readable_contact, can_read_contact_as
+    if user is None:
+        readable_contact(doc.relay_contact)
+    elif not can_read_contact_as(doc.relay_contact, user):
+        frappe.throw('Conversation is not accessible', frappe.PermissionError)
+    if not allowed(doc, user):
+        frappe.throw('Business record is not accessible', frappe.PermissionError)
+    return reference(doc)

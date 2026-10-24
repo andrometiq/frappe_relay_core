@@ -24,7 +24,6 @@ def validate_text(value):
 
 
 def key(doctype, field, value):
-    import json
     return hashlib.sha256(json.dumps([doctype,field,value]).encode()).hexdigest()
 
 
@@ -61,6 +60,7 @@ def directory(doctype, query='', after=None, include_all=0):
 
 @frappe.whitelist(methods=['GET'])
 def records(doctype, group='', query='', start=0):
+    require_access()
     field=configuration(doctype);validate_text(group);validate_text(query)
     if isinstance(start,bool) or not str(start).isdigit() or not 0<=int(start)<=100000:frappe.throw('Invalid page')
     from frappe.desk.search import search_widget, build_for_autosuggest
@@ -102,7 +102,9 @@ def records(doctype, group='', query='', start=0):
         items.append({'name':row['value'],'label':label,'description':description})
     names=[item['name'] for item in items]
     if names:
-        activity=frappe.db.sql("""
+        from relay_core.permissions import message_query
+        permitted = (message_query() or '1=1').replace('`tabRelay Message`', 'm')
+        activity=frappe.db.sql(f"""
             SELECT m.business_name,
                    SUM(CASE WHEN m.direction='Incoming' AND (s.last_read IS NULL OR m.name>s.last_read) THEN 1 ELSE 0 END) AS unread,
                    MAX(COALESCE(m.sent_at,m.creation)) AS last_activity
@@ -110,29 +112,33 @@ def records(doctype, group='', query='', start=0):
             JOIN `tabRelay Channel` c ON c.name=m.channel AND c.channel='WhatsApp'
             LEFT JOIN `tabRelay Business Conversation State` s
               ON s.business_doctype=m.business_doctype AND s.business_name=m.business_name AND s.user=%(user)s
-            WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s
+            WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND ({permitted})
             GROUP BY m.business_name
         """,{'user':frappe.session.user,'doctype':doctype,'names':tuple(names)},as_dict=True)
-        latest=frappe.db.sql("""
+        latest=frappe.db.sql(f"""
             WITH ranked AS (
                 SELECT m.business_name,m.content,COALESCE(m.sent_at,m.creation) AS last_activity,
                        ROW_NUMBER() OVER(PARTITION BY m.business_name ORDER BY COALESCE(m.sent_at,m.creation) DESC,m.name DESC) AS relay_rank
                 FROM `tabRelay Message` m
                 JOIN `tabRelay Channel` c ON c.name=m.channel AND c.channel='WhatsApp'
-                WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s
+                WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND ({permitted})
             )
             SELECT business_name,content,last_activity FROM ranked WHERE relay_rank=1
         """,{'doctype':doctype,'names':tuple(names)},as_dict=True)
         summaries=frappe.get_all('Relay Conversation Summary',filters={'business_doctype':doctype,
-            'business_name':['in',names],'status':'Ready'},fields=['business_name','result','modified'],
+            'business_name':['in',names],'status':'Ready'},fields=['name','business_name'],
             order_by='modified desc',limit_page_length=300)
         activity_by={row.business_name:row for row in activity}
         latest_by={row.business_name:row for row in latest}
         summary_by={}
         for row in summaries:
             if row.business_name in summary_by:continue
-            try:summary_by[row.business_name]=(json.loads(row.result) if isinstance(row.result,str) else row.result).get('overview','')
-            except (TypeError,ValueError,AttributeError):summary_by[row.business_name]=''
+            from relay_core.summaries import read as read_summary
+            try:
+                result = read_summary(row.name)['result']
+            except (frappe.PermissionError, ValueError):
+                continue
+            if result: summary_by[row.business_name] = result.get('overview', '')
         for item in items:
             current=activity_by.get(item['name'],{});recent=latest_by.get(item['name'],{})
             item.update(unread=int(current.get('unread') or 0),last_activity=str(recent.get('last_activity') or ''),

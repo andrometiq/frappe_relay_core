@@ -1,11 +1,11 @@
 import frappe
-from relay_core.permissions import require_access
+from relay_core.permissions import require_administrator
 from relay_core.whatsapp import client, deliveries
 
 
 @frappe.whitelist(methods=['POST'])
 def page(channel='WhatsApp', after=None, cancel_id=None):
-    require_access(manage=True)
+    require_administrator()
     for value in (after,cancel_id):
         if value is not None and (isinstance(value,bool) or not str(value).isdigit()):frappe.throw('Invalid delivery cursor')
     if channel=='WhatsApp':return deliveries(after=str(after or ''),cancel_id=str(cancel_id) if cancel_id is not None else None)
@@ -15,7 +15,7 @@ def page(channel='WhatsApp', after=None, cancel_id=None):
 
 @frappe.whitelist(methods=['POST'])
 def resolve(delivery_id, outcome, note, channel="Telegram and email", provider_id=""):
-    require_access(manage=True)
+    require_administrator()
     if isinstance(delivery_id, bool) or not str(delivery_id).isdigit() or int(delivery_id)<1:
         frappe.throw('Invalid delivery ID')
     if outcome not in ('submitted','rejected') or not isinstance(note,str) or not 10<=len(note.strip())<=2000:

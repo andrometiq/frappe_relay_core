@@ -15,7 +15,9 @@
     "deleted",
     "assigned_to",
     "task_status",
-    "mentions"
+    "mentions",
+    "business_doctype",
+    "business_name"
   ],
   "fields": [
     {
@@ -72,6 +74,19 @@
       "fieldname": "mentions",
       "label": "Mentioned colleagues",
       "fieldtype": "JSON"
+    },
+    {
+      "fieldname": "business_doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "label": "Business Type",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "fieldtype": "Data",
+      "label": "Business Record",
+      "read_only": 1
     }
   ],
   "permissions": [
@@ -79,5 +94,6 @@
       "role": "System Manager",
       "read": 1
     }
-  ]
+  ],
+  "modified": "2026-10-25 12:00:00.000000"
 }

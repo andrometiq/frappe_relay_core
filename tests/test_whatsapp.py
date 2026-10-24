@@ -58,9 +58,12 @@ class WhatsAppTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.api.execute(operation)
         self.hub.call_tool.assert_not_called()
 
-    def test_account_delivery_list_requires_manager(self):
-        self.api.deliveries()
-        self.api.require_access.assert_called_with(manage=True)
+    def test_account_delivery_list_requires_administrator(self):
+        with patch('relay_core.permissions.require_administrator') as gate:
+            self.api.deliveries()
+            gate.assert_called_once()
+            gate.side_effect=PermissionError
+            with self.assertRaises(PermissionError): self.api.deliveries()
 
     def test_template_sample_upload_is_manager_scoped(self):
         args={'media_type':'document','filename':'sample.pdf','mime_type':'application/pdf','content_base64':'JVBERi0xLjc='}

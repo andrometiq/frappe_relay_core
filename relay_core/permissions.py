@@ -17,16 +17,30 @@ def readable_contact(name):
     """A Relay label alone never grants access to a business conversation."""
     import frappe
     relay = frappe.get_doc('Relay Contact', name); relay.check_permission('read')
-    if not assignment_allowed(name): frappe.throw('This conversation is not assigned to you', frappe.PermissionError)
-    person = frappe.get_doc('Contact', relay.contact); person.check_permission('read')
-    if not person.links or len(person.links) > 50:
-        frappe.throw('A readable business contact link is required', frappe.PermissionError)
-    configured = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1,
-        'business_doctype': ['in', list({link.link_doctype for link in person.links})]}, pluck='business_doctype'))
-    for link in person.links:
-        if link.link_doctype in configured and frappe.get_doc(link.link_doctype, link.link_name).has_permission('read'):
-            return relay, person
-    frappe.throw('A configured and readable business contact link is required', frappe.PermissionError)
+    if not assignment_allowed(name) or not contact_business_allowed(relay):
+        frappe.throw('Business conversation is not accessible', frappe.PermissionError)
+    return relay, frappe.get_doc('Contact', relay.contact)
+
+
+def contact_business_allowed(relay, user=None):
+    import frappe
+    user = user or frappe.session.user
+    if user == 'Administrator': return True
+    try:
+        person = frappe.get_doc('Contact', relay.contact)
+        if not person.has_permission('read', user=user) or not 1 <= len(person.links) <= 50:
+            return False
+        from relay_core.business_access import candidates
+        return any(frappe.get_doc(*target).has_permission('read', user=user)
+                   for target in candidates(relay.name))
+    except frappe.DoesNotExistError:
+        return False
+
+
+def require_administrator():
+    import frappe
+    if frappe.session.user != 'Administrator':
+        frappe.throw('Account-wide operations require Administrator', frappe.PermissionError)
 
 
 def require_access(*, configure=False, manage=False):
@@ -100,7 +114,7 @@ def assignment_allowed(contact, user=None):
 
 
 def contact_permission(doc, user=None, permission_type=None):
-    return assignment_allowed(doc.name, user)
+    return assignment_allowed(doc.name, user) and contact_business_allowed(doc, user)
 
 
 def message_permission(doc, user=None, permission_type=None):
@@ -123,7 +137,24 @@ def assignment_condition(user=None, *, message=False):
     return '('+direct+' OR '+responsibility_condition(user,contact)+')'
 
 
-def contact_query(user=None): return assignment_condition(user)
+def contact_query(user=None):
+    import frappe
+    user = user or frappe.session.user
+    if user == 'Administrator': return ''
+    people = frappe.qb.get_query('Contact', fields=['name'], ignore_permissions=False,
+                                user=user, order_by='').get_sql()
+    clauses = []
+    for dt in frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'):
+        if not frappe.has_permission(dt, 'read', user=user): continue
+        business = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=False,
+                                      user=user, order_by='').get_sql()
+        clauses.append(f"(l.link_doctype={frappe.db.escape(dt)} AND l.link_name IN ({business}))")
+    scope = ' OR '.join(clauses) or '1=0'
+    return f"""({assignment_condition(user) or '1=1'}) AND `tabRelay Contact`.contact IN ({people})
+        AND (SELECT COUNT(*) FROM `tabDynamic Link` x WHERE x.parent=`tabRelay Contact`.contact
+             AND x.parenttype='Contact' AND x.parentfield='links') BETWEEN 1 AND 50
+        AND EXISTS (SELECT 1 FROM `tabDynamic Link` l WHERE l.parent=`tabRelay Contact`.contact
+                    AND l.parenttype='Contact' AND l.parentfield='links' AND ({scope}))"""
 
 def message_query(user=None):
     from relay_core.business_access import query_condition
@@ -149,10 +180,7 @@ def has_app_permission():
 def can_read_contact_as(name,user):
     """Check a collaboration recipient without impersonating or granting access."""
     import frappe
-    if not frappe.db.get_value('User',user,'enabled') or not assignment_allowed(name,user):return False
-    relay=frappe.get_doc('Relay Contact',name)
-    if not relay.has_permission('read',user=user):return False
-    person=frappe.get_doc('Contact',relay.contact)
-    if not person.has_permission('read',user=user) or not person.links or len(person.links)>50:return False
-    configured=set(frappe.get_all('Relay Contact Type',filters={'enabled':1,'business_doctype':['in',list({link.link_doctype for link in person.links})]},pluck='business_doctype'))
-    return any(link.link_doctype in configured and frappe.get_doc(link.link_doctype,link.link_name).has_permission('read',user=user) for link in person.links)
+    if not frappe.db.get_value('User',user,'enabled'):return False
+    relay = frappe.get_doc('Relay Contact', name)
+    return (assignment_allowed(name, user) and contact_business_allowed(relay, user)
+            and relay.has_permission('read', user=user))
