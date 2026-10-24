@@ -1,6 +1,7 @@
 """Pure validation at the untrusted model boundary; no model-authored tools."""
 import hashlib
 import json
+from datetime import date
 
 CATEGORIES = ('Query', 'Payment evidence', 'Support', 'Other')
 
@@ -35,6 +36,46 @@ def validate_decision(value, allowed_replies, *, allow_ticket, allow_report=Fals
 
 
 def action_key(message, slot):
-    if slot not in ('ticket', 'reply'):
+    if slot not in ('ticket', 'reply', 'search', 'event_reply_0', 'event_reply_1', 'event_reply_2', 'event_reply_3'):
         raise ValueError('Unknown action slot')
     return 'relay_ai_' + event_key(message) + '_' + slot
+
+
+def validate_search(value, references):
+    """A declaration can only narrow one owner-declared read contract."""
+    if not isinstance(value, dict) or set(value) != {'purpose', 'reference', 'fields', 'arguments'}:
+        raise ValueError('Invalid search declaration')
+    if not isinstance(value['purpose'], str) or not 1 <= len(value['purpose'].strip()) <= 300:
+        raise ValueError('State the search purpose')
+    contract = next((row for row in references if row['name'] == value['reference']), None)
+    if not contract or value['fields'] != contract['fields']:
+        raise ValueError('Search fields must match the declared reference')
+    args = value['arguments']
+    if not isinstance(args, dict):
+        raise ValueError('Invalid search arguments')
+    if contract['method'] == 'get_doc':
+        if set(args) != {'name'} or not isinstance(args['name'], str) or not 1 <= len(args['name']) <= 140:
+            raise ValueError('Declare a document name')
+    else:
+        if set(args) - {'filters', 'limit'} or not isinstance(args.get('filters', {}), dict):
+            raise ValueError('Invalid search filters')
+        if type(args.get('limit', 20)) is not int or not 1 <= args.get('limit', 20) <= 20:
+            raise ValueError('Invalid search limit')
+        for key, operand in args.get('filters', {}).items():
+            if key not in contract['fields']:
+                raise ValueError('Undeclared search field')
+            valid = isinstance(operand, str) and len(operand) <= 140
+            if isinstance(operand, list) and len(operand) == 2 and operand[0] in ('=', '>=', '<=', 'between'):
+                bound = operand[1]
+                valid = (isinstance(bound, str) and len(bound) <= 140 if operand[0] != 'between' else
+                    isinstance(bound, list) and len(bound) == 2 and all(isinstance(v, str) and len(v) <= 140 for v in bound))
+            if not valid:
+                raise ValueError('Invalid search filter')
+    if 'Ledger' in contract['doctype'] or contract['doctype'] == 'GL Entry':
+        bound = args.get('filters', {}).get('posting_date')
+        if not isinstance(bound, list) or len(bound) != 2 or bound[0] != 'between' or not isinstance(bound[1], list) or len(bound[1]) != 2:
+            raise ValueError('Ledger searches require an explicit date range')
+        start, end = bound[1]
+        if date.fromisoformat(start).isoformat() != start or date.fromisoformat(end).isoformat() != end or start > end:
+            raise ValueError('Invalid ledger date range')
+    return json.loads(canonical(value))

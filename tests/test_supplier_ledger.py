@@ -43,22 +43,26 @@ class LedgerTests(unittest.TestCase):
         f.db.exists.return_value = 'sample'
         sample = module('relay_core/ai/samples.py', f)
         for changes, upgraded in [({}, True),
-                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL])}, False),
+                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL])}, True),
                 ({'allowed_tools': json.dumps([{**sample.LEGACY_LEDGER_TOOL, 'fields': ['remarks']}])}, False),
                 ({'allowed_tools': 'invalid'}, False),
                 ({'instructions': 'Customer instructions'}, False),
-                ({'business_doctype': 'Customer'}, False)]:
+                ({'business_doctype': 'Customer'}, False),
+                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'execution_policy': 'Ticket only'}, False),
+                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'allowed_actions': '[{"action":"reply"}]'}, False)]:
             with self.subTest(changes=changes):
                 skill = Doc(business_doctype='Supplier', instructions=sample.INSTRUCTIONS,
                     allowed_tools=json.dumps([sample.LEGACY_LEDGER_TOOL]), enabled=1, mode='Automatic',
-                    channel='local-channel', run_as_user='local-user', daily_limit=7)
+                    channel='local-channel', run_as_user='local-user', daily_limit=7, execution_policy='Execute')
                 skill.update(changes)
                 before = dict(skill)
                 f.get_doc.return_value = skill
                 with patch.object(Doc, 'save') as save:
                     sample.install_samples()
                     self.assertEqual(save.call_count, int(upgraded))
-                    expected = before | ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'enabled': 0} if upgraded else {})
+                    expected = before | ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]),
+                        'allowed_actions': '[{"action":"reply"}]',
+                        'enabled': 0} if upgraded else {})
                     self.assertEqual(skill, expected)
                     sample.install_samples()
                     self.assertEqual(save.call_count, int(upgraded), 'Upgrade must be idempotent')
