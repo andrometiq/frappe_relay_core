@@ -25,7 +25,11 @@
     "report_scope",
     "transcript_metadata",
     "skill",
-    "skill_version"
+    "skill_version",
+    "stage",
+    "scope_fingerprint",
+    "match_result",
+    "search_plan"
   ],
   "fields": [
     {
@@ -143,6 +147,32 @@
       "fieldname": "skill_version",
       "label": "Skill Version",
       "fieldtype": "Data"
+    },
+    {
+      "fieldname": "stage",
+      "fieldtype": "Data",
+      "label": "Stage",
+      "read_only": 1
+    },
+    {
+      "fieldname": "scope_fingerprint",
+      "fieldtype": "Data",
+      "label": "Scope fingerprint",
+      "read_only": 1
+    },
+    {
+      "fieldname": "match_result",
+      "fieldtype": "JSON",
+      "label": "Match result",
+      "permlevel": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "search_plan",
+      "fieldtype": "JSON",
+      "label": "Search plan",
+      "permlevel": 1,
+      "read_only": 1
     }
   ],
   "permissions": [
@@ -159,5 +189,6 @@
       "read": 1,
       "write": 1
     }
-  ]
+  ],
+  "modified": "2026-10-25 02:45:50.808988"
 }

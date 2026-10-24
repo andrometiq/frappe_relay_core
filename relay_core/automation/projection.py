@@ -109,6 +109,7 @@ def project(name, business_overrides=None):
         set_status(name, 'Failed'); return
     unresolved = update_status == 'Uncategorized'
     decisions = json.loads(event.get('routing_decisions') or '{}')
+    from relay_core.tickets import ensure_episode, source_episode, triage_owner
     for position, row in enumerate(incoming):
         key = hashlib.sha256((event.account + ':' + channel + ':' + row['id']).encode()).hexdigest()
         context = row.get('provider_context', {})
@@ -119,13 +120,16 @@ def project(name, business_overrides=None):
         contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
         if not contact:
             decisions[row['id']] = 'triage_unverified'
+            ensure_episode(event=event, channel=channel, row=row)
             unresolved = True; continue
         from relay_core.business_routing import resolve
+        was_triage = decisions.get(row['id'], '').startswith('triage_')
         business, rule = resolve(contact, channel, row['from'], context, row, event,
                                  (business_overrides or {}).get(row['id']), position=position)
         decisions[row['id']] = rule
         context['business_rule'] = rule
         if not business:
+            ensure_episode(event=event, channel=channel, row=row)
             unresolved = True
             continue
         kind = row.get('type', 'unknown')
@@ -139,13 +143,41 @@ def project(name, business_overrides=None):
         if kind in ('interactive','button') and data.get('kind')=='text' and rule != 'sender_choice':
             context['original_message_type']=kind;kind='text'
         from relay_core.timeline import provider_time
-        frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
+        _, source_action = source_episode(channel, row)
+        ticket = frappe.db.get_value('Relay Ticket', {'source_action_key': source_action}, 'name')
+        if was_triage and not ticket:
+            intent = ensure_episode(event=event, channel=channel, row=row)
+            if not intent:
+                decisions[row['id']] = 'triage_owner_unavailable'
+                unresolved = True
+                continue
+            ticket = intent.name
+        message = frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
             'business_doctype': business[0], 'business_name': business[1],
             'direction': 'Incoming', 'status': 'Delivered', 'sent_at': provider_time(payload, row), 'content': text, 'sender_endpoint': row['from'], 'source_key': key,
             'provider_id': row['id'], 'message_type': kind,
             'provider_context': json.dumps(context, sort_keys=True),
             'message_data': json.dumps(data, ensure_ascii=False), 'provider_message_key': message_key,
-            'conversation_key': conversation_key(channel, row['from'], context)}).insert(ignore_permissions=True)
+            'conversation_key': conversation_key(channel, row['from'], context), 'ticket': ticket})
+        if ticket:
+            frappe.db.savepoint('triage_projection')
+            actor = frappe.session.user
+            try:
+                frappe.set_user('Administrator')
+                owner = triage_owner(frappe.get_doc('Relay Channel', channel), message)
+                if not owner:
+                    raise ValueError('Triage owner unavailable')
+                message.insert(ignore_permissions=True)
+                ensure_episode(message, owner=owner)
+            except (ValueError, frappe.PermissionError, frappe.ValidationError):
+                frappe.db.rollback(save_point='triage_projection')
+                decisions[row['id']] = 'triage_scope_or_owner_conflict'
+                unresolved = True
+                continue
+            finally:
+                frappe.set_user(actor)
+        else:
+            message.insert(ignore_permissions=True)
     frappe.db.set_value('Relay Hub Event', name, 'routing_decisions', json.dumps(decisions, sort_keys=True))
     frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or update_status == 'Projected' else 'Ignored')
     from relay_core.realtime import changed

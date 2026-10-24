@@ -8,48 +8,60 @@ from relay_core.settings import value as connection_value
 
 
 def event_rows(name):
+    require_access(manage=True)
     event=frappe.get_doc('Relay Hub Event',name)
-    event.check_permission('read')
     if event.account!=connection_value('relay_hub_account'):frappe.throw('Event belongs to another Hub account',frappe.PermissionError)
     payload=json.loads(event.payload);medium=payload.get('channel','WhatsApp')
     channels=frappe.get_all('Relay Channel',filters={'account':event.account,'channel':medium,'enabled':1},pluck='name',limit_page_length=2)
     if len(channels)!=1:frappe.throw('Configure one enabled channel for this account in Desk')
-    frappe.get_doc('Relay Channel',channels[0]).check_permission('read')
+    channel = frappe.get_doc('Relay Channel',channels[0])
+    channel.check_permission('read')
+    from relay_core.permissions import company_allowed
+    if not company_allowed(channel.get('company')):
+        frappe.throw('Triage company is not accessible', frappe.PermissionError)
     return event,channels[0],medium,extract_messages(payload)
+
+
+def source_ticket(channel, row):
+    """The saved source company remains authoritative after channel reassignment."""
+    from relay_core.tickets import source_episode
+    from relay_core.permissions import company_allowed
+    _, action = source_episode(channel, row)
+    ticket = frappe.db.get_value('Relay Ticket', {'source_action_key': action}, ['name', 'company'], as_dict=True)
+    if ticket and not company_allowed(ticket.company):
+        frappe.throw('Source company is not accessible', frappe.PermissionError)
+    return ticket
 
 
 @frappe.whitelist(methods=['GET'])
 def pending(after=None):
     # Unprojected events have no trustworthy business owner yet.
-    require_access(configure=True)
+    require_access(manage=True)
     filters={'projection_status':'Uncategorized','account':connection_value('relay_hub_account')}
     if after:
         from relay_core.api import validate_reference
         validate_reference(after,'EVT');filters['name']=['>',after]
-    events=frappe.get_list('Relay Hub Event',filters=filters,fields=['name'],order_by='name asc',limit_page_length=21)
+    events=frappe.get_all('Relay Hub Event',filters=filters,fields=['name'],order_by='name asc',limit_page_length=21)
     items=[]
     for event in events[:20]:
         try:doc,channel,medium,rows=event_rows(event.name)
+        except frappe.PermissionError:
+            continue
         except (ValueError,frappe.ValidationError):
-            items.append({'event':event.name,'configuration_required':True});continue
+            continue
         for row in rows:
+            try:
+                ticket = source_ticket(channel, row)
+            except frappe.PermissionError:
+                continue
             key=hashlib.sha256((channel+':'+row['from']).encode()).hexdigest()
             contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key':key}, 'relay_contact')
-            if contact:
-                from relay_core.business_access import candidates
-                try:
-                    readable_contact(contact)
-                    # No selected owner exists: every possible business must be readable.
-                    for business in candidates(contact):
-                        frappe.get_doc(*business).check_permission('read')
-                except (frappe.PermissionError, frappe.DoesNotExistError):
-                    continue
-            from relay_core.message_updates import provider_key
-            if frappe.db.exists('Relay Message', {'provider_message_key': provider_key(channel, row['from'], row['id'])}): continue
-            data=row.get('message_data') or {};detail=row.get('text') or {}
+            from relay_core.tickets import source_episode
+            message_key, _ = source_episode(channel, row)
+            if frappe.db.exists('Relay Message', {'provider_message_key': message_key}): continue
             items.append({'event':doc.name,'channel':channel,'medium':medium,'provider_id':row['id'],
-                          'endpoint':row['from'],'preview':str(data.get('text') or data.get('caption') or detail.get('body') or '['+row.get('type','message')+']')[:300],
-                          'received_at':doc.creation,'contact':contact,'ambiguous':bool(contact),
+                          'endpoint':row['from'],'preview':'Incoming conversation needs triage', 'ticket':ticket.name if ticket else None,
+                          'received_at':doc.creation,'contact':None,'ambiguous':bool(contact),
                           'routing_rule':json.loads(doc.get('routing_decisions') or '{}').get(row['id'])})
     return {'items':items,'next':events[19].name if len(events)>20 else None}
 
@@ -60,6 +72,9 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
     doc,channel,medium,rows=event_rows(event)
     matches=[row for row in rows if row['id']==provider_id]
     if len(matches)!=1:frappe.throw('Select a sender from the authenticated incoming event')
+    ticket = source_ticket(channel, matches[0])
+    if ticket and ticket.company != frappe.db.get_value('Relay Channel', channel, 'company'):
+        frappe.throw('Source company no longer matches the channel', frappe.PermissionError)
     from relay_core.business_access import candidates
     links = candidates(contact)
     business = (business_doctype, business_name) if business_doctype or business_name else links[0] if len(links) == 1 else None

@@ -1,7 +1,217 @@
 """Ticket actions shared by Desk/API; all message references checked server-side."""
+import hashlib
+import json
+from contextvars import ContextVar
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
+
+_episode_transition = ContextVar('relay_episode_transition', default=None)
+
+
+def _save_episode(doc, *, new=False):
+    """Only server-owned admission may establish or advance episode scope."""
+    from relay_core.permissions import require_administrator
+    require_administrator()
+    token = _episode_transition.set(doc)
+    try:
+        return doc.insert(ignore_permissions=True) if new else doc.save(ignore_permissions=True)
+    finally:
+        _episode_transition.reset(token)
+
+
+def episode_owner_allowed(user, message):
+    from relay_core.ai.tools import as_user
+    from relay_core.permissions import company_allowed
+    if not user or user == 'Guest' or not frappe.db.get_value('User', user, 'enabled'):
+        return False
+    try:
+        with as_user(user):
+            require_access()
+            message.check_permission('read')
+            readable_contact(message.relay_contact)
+            company = frappe.db.get_value('Relay Channel', message.channel, 'company')
+            return company_allowed(company)
+    except (frappe.PermissionError, frappe.DoesNotExistError):
+        return False
+
+
+def _episode_scope(message):
+    from relay_core.business_access import reference
+    from relay_core.automation.provenance import context_of, conversation_key
+    business = reference(message)
+    company = frappe.db.get_value('Relay Channel', message.channel, 'company')
+    conversation = message.get('conversation_key') or conversation_key(
+        message.channel, message.sender_endpoint, context_of(message))
+    if not company or not business or not message.sender_endpoint:
+        raise ValueError('Episode requires a company and a resolved conversation')
+    values = [frappe.local.site, company, message.channel, conversation, message.relay_contact, *business]
+    key = hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
+    return dict(company=company, conversation_key=conversation, business_doctype=business[0],
+                business_name=business[1]), key
+
+
+def _lock_episode_routing(message, conversation):
+    """Reuse the routing row as the transaction mutex, including its first insert."""
+    from relay_core.automation.service import internal_save
+    filters = {'conversation_key': conversation}
+    name = frappe.db.get_value('Relay Business Routing', filters, 'name')
+    if not name:
+        frappe.db.savepoint('episode_routing')
+        try:
+            row = frappe.get_doc(dict(doctype='Relay Business Routing', **filters,
+                relay_contact=message.relay_contact, channel=message.channel, endpoint=message.sender_endpoint))
+            internal_save(row, new=True)
+            name = row.name
+        except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+            frappe.db.rollback(save_point='episode_routing')
+            name = frappe.db.get_value('Relay Business Routing', filters, 'name', for_update=True)
+    row = frappe.get_doc('Relay Business Routing', name, for_update=True)
+    if (row.relay_contact, row.channel, row.endpoint) != (
+            message.relay_contact, message.channel, message.sender_endpoint):
+        raise ValueError('Conversation routing identity changed')
+
+
+def triage_owner(channel, message=None):
+    """No invented assignee: an unavailable primary must have an eligible backup."""
+    from relay_core.ai.tools import as_user
+    from relay_core.permissions import company_allowed
+    fallback = frappe.get_single('Relay Settings').get('ai_handoff_owner')
+    for user in (channel.get('triage_owner'), fallback):
+        if not user or user in ('Guest', 'Administrator') or not frappe.db.get_value('User', user, 'enabled'):
+            continue
+        try:
+            with as_user(user):
+                require_access()
+                if company_allowed(channel.get('company')) and (not message or episode_owner_allowed(user, message)):
+                    return user
+        except (ValueError, frappe.PermissionError, frappe.DoesNotExistError):
+            continue
+    return None
+
+
+def source_episode(channel, row):
+    """Stable provider identity survives Hub retries and later enrollment."""
+    from relay_core.message_updates import provider_key
+    context = row.get('provider_context') or {}
+    key = provider_key(channel, row['from'], context.get('message_id') or row['id'])
+    action = hashlib.sha256(json.dumps(['triage', frappe.local.site, channel, key]).encode()).hexdigest()
+    return key, action
+
+
+def _ensure_triage(event, channel, row):
+    """Keep raw data in the internal Hub event; expose only a company-scoped intent."""
+    from relay_core.automation.provenance import conversation_key
+    # Serializes duplicate provider messages delivered under different Hub event IDs.
+    channel = frappe.get_doc('Relay Channel', channel, for_update=True)
+    if channel.account != event.account or not channel.enabled or not channel.get('company'):
+        return None
+    key, action = source_episode(channel.name, row)
+    existing = frappe.db.get_value('Relay Ticket', {'source_action_key': action}, 'name', for_update=True)
+    if existing:
+        return frappe.get_doc('Relay Ticket', existing)
+    owner = triage_owner(channel)
+    if not owner:
+        return None  # Uncategorized Hub event remains the recoverable intent.
+    actor = frappe.session.user
+    frappe.db.savepoint('triage_episode')
+    try:
+        frappe.set_user('Administrator')
+        doc = frappe.get_doc(dict(doctype='Relay Ticket', subject='Incoming conversation needs triage',
+            brief='Resolve the authenticated sender and business before continuing.', category='Support',
+            status='Open', assigned_to=owner, company=channel.company,
+            conversation_key=conversation_key(channel.name, row['from'], row.get('provider_context') or {}),
+            source_action_key=action, source_hub_event=event.name, source_provider_message_key=key))
+        _save_episode(doc, new=True)
+    except (frappe.PermissionError, frappe.ValidationError):
+        # An owner can lose access between selection and controller validation.
+        # Preserve the source intent and retry it through projection recovery.
+        frappe.db.rollback(save_point='triage_episode')
+        return None
+    finally:
+        frappe.set_user(actor)
+    return doc
+
+
+def ensure_episode(message=None, *, owner=None, skill=None, run=None, subject='Conversation needs attention',
+                   reason='', event=None, channel=None, row=None):
+    """Internal, atomic admission shared by automation paths; caller owns commit.
+
+    A message's stored ticket wins over current active state, even after release.
+    New messages reuse the active scope; only a new message reopens a closed hold.
+    """
+    if message is None:
+        return _ensure_triage(event, channel, row)
+    from relay_core.permissions import require_administrator
+    require_administrator()
+    frappe.db.savepoint('ensure_episode')
+    try:
+        scope, active_key = _episode_scope(message)
+        _lock_episode_routing(message, scope['conversation_key'])
+        message = frappe.get_doc('Relay Message', message.name, for_update=True)
+        if _episode_scope(message) != (scope, active_key):
+            raise ValueError('Message scope changed during episode admission')
+        if run and (run.message != message.name or (run.get('ticket') and message.get('ticket')
+                and run.ticket != message.ticket)):
+            raise ValueError('Automation run belongs to another source or episode')
+        source = message.get('provider_message_key') or message.get('source_key') or message.name
+        episode_key = hashlib.sha256(json.dumps([active_key, source], separators=(',', ':')).encode()).hexdigest()
+        linked = message.get('ticket') or (run.get('ticket') if run else None)
+        existing = linked or frappe.db.get_value('Relay Ticket', {'source_action_key': episode_key}, 'name', for_update=True)
+        existing = existing or frappe.db.get_value('Relay Ticket', {'active_scope_key': active_key}, 'name', for_update=True)
+        if existing:
+            ticket = frappe.get_doc('Relay Ticket', existing, for_update=True)
+            if not episode_owner_allowed(ticket.assigned_to, message):
+                raise ValueError('Episode owner is unavailable; an authorized assignment is required')
+            if linked and ticket.get('source_hub_event') and not ticket.get('business_name'):
+                if (ticket.company != scope['company'] or ticket.conversation_key != scope['conversation_key']
+                        or ticket.source_provider_message_key != message.get('provider_message_key')):
+                    raise ValueError('Triage source scope changed')
+                active = frappe.db.get_value('Relay Ticket', {'active_scope_key': active_key}, 'name', for_update=True)
+                if active and active != ticket.name:
+                    raise ValueError('Triage conflicts with an existing episode')
+                ticket.update(scope)
+                ticket.active_scope_key = active_key
+                ticket.append('messages', {'message': message.name})
+            if linked and not ticket.get('conversation_key'):
+                # Recover pre-episode handoffs without replacing their durable key.
+                if not ticket.messages or any(_episode_scope(frappe.get_doc('Relay Message', row.message))[0] != scope
+                                               for row in ticket.messages):
+                    raise ValueError('Legacy ticket scope no longer matches the message')
+                ticket.update(scope)
+                if not frappe.db.get_value('Relay Ticket', {'active_scope_key': active_key}, 'name', for_update=True):
+                    ticket.active_scope_key = active_key
+            if any(ticket.get(key) != value for key, value in scope.items()):
+                raise ValueError('Episode scope no longer matches the message')
+            if not linked and ticket.status in ('Closed', 'Resolved'):
+                ticket.status = 'Open'
+        else:
+            if not episode_owner_allowed(owner, message):
+                raise ValueError('Configure an accessible episode owner or fallback owner')
+            ticket = frappe.get_doc(dict(doctype='Relay Ticket', **scope, subject=subject,
+                brief=reason[:500], category='Support', status='Open', assigned_to=owner,
+                source_action_key=episode_key, active_scope_key=active_key,
+                source_provider_message_key=message.get('provider_message_key'),
+                source_run=run.name if run else None, messages=[{'message': message.name}]))
+        if skill and not linked:
+            ticket.skill = skill.name
+            ticket.skill_version = run.get('skill_version') if run else str(skill.modified)
+        if reason:
+            ticket.handoff_reason = reason[:500]
+        _save_episode(ticket, new=not existing)
+        if message.get('ticket') != ticket.name:
+            # Advance modified so an older loaded message cannot erase this link.
+            frappe.db.set_value('Relay Message', message.name, 'ticket', ticket.name)
+        if run:
+            frappe.db.set_value('Relay Automation Run', run.name, 'ticket', ticket.name, update_modified=False)
+            run.ticket = ticket.name
+        return ticket
+    except frappe.QueryDeadlockError:
+        # Frappe already rolled back the entire transaction; the worker retries it.
+        raise
+    except Exception:
+        frappe.db.rollback(save_point='ensure_episode')
+        raise
 
 
 def validate_ticket(doc, check_assignment=True):
@@ -14,8 +224,21 @@ def validate_ticket(doc, check_assignment=True):
         frappe.throw('Invalid ticket category')
     if doc.status not in ('Open', 'In progress', 'Resolved', 'Closed'):
         frappe.throw('Invalid ticket status')
-    if not doc.messages or len(doc.messages) > 50:
+    previous = doc.get_doc_before_save()
+    if any(record and any(record.get(key) for key in
+            ('company', 'conversation_key', 'active_scope_key', 'source_hub_event'))
+            for record in (doc, previous)):
+        protected = ('company', 'conversation_key', 'source_hub_event', 'source_provider_message_key',
+                     'source_action_key', 'business_doctype', 'business_name', 'active_scope_key',
+                     'source_run', 'skill', 'skill_version', 'ai_disabled', 'generation', 'pending_run')
+        if _episode_transition.get() is not doc and (not previous or any(
+                doc.get(key) != previous.get(key) for key in protected)):
+            frappe.throw('Episode scope can only be changed by an internal transition', frappe.PermissionError)
+    if (not doc.messages and not (doc.get('source_hub_event') and doc.get('source_provider_message_key')
+            and doc.get('company') and doc.get('conversation_key'))) or len(doc.messages) > 50:
         frappe.throw('Link between 1 and 50 messages')
+    if doc.get('active_scope_key') == '':
+        doc.active_scope_key = None
     seen = set()
     for row in doc.messages:
         validate_reference(row.message, 'MSG')
@@ -25,13 +248,16 @@ def validate_ticket(doc, check_assignment=True):
         message = frappe.get_doc('Relay Message', row.message)
         message.check_permission('read')
         readable_contact(message.relay_contact)
+        if doc.get('conversation_key'):
+            scope, _ = _episode_scope(message)
+            if any(doc.get(key) != value for key, value in scope.items()):
+                frappe.throw('Ticket scope must match its conversation')
         if doc.get('business_doctype') or doc.get('business_name'):
             from relay_core.business_access import reference
             if reference(message) != (doc.get('business_doctype'), doc.get('business_name')):
                 frappe.throw('Ticket business must match its conversation')
     if not check_assignment:
         return
-    previous = doc.get_doc_before_save()
     if check_assignment and (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
         require_access(manage=True)
         if doc.assigned_to:
@@ -41,6 +267,10 @@ def validate_ticket(doc, check_assignment=True):
             try:
                 frappe.set_user(doc.assigned_to)
                 require_access()
+                if doc.get('company'):
+                    from relay_core.permissions import company_allowed
+                    if not company_allowed(doc.company):
+                        frappe.throw('Ticket company is not accessible', frappe.PermissionError)
                 for row in doc.messages:
                     message = frappe.get_doc('Relay Message', row.message)
                     message.check_permission('read')
@@ -84,6 +314,8 @@ def read(name):
     links = []
     for row in doc.messages:
         message = frappe.get_doc('Relay Message', row.message)
+        message.check_permission('read')
+        readable_contact(message.relay_contact)
         links.append({'message': message.name, 'contact': message.relay_contact,
                       'channel': message.channel})
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief,
@@ -91,7 +323,43 @@ def read(name):
             'assigned_to': doc.get('assigned_to'),
             'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),
             'handoff_reason': doc.get('handoff_reason'), 'source_run': doc.get('source_run'),
+            'company': doc.get('company'), 'conversation_key': doc.get('conversation_key'),
+            'skill': doc.get('skill'), 'skill_version': doc.get('skill_version'),
+            'ai_disabled': bool(doc.get('ai_disabled')), 'generation': doc.get('generation') or 0,
             'can_assign': bool(set(frappe.get_roles()).intersection({'System Manager','Relay Communication Manager'}))}
+
+
+@frappe.whitelist(methods=['GET'])
+def transcript(name, after=None, limit=50):
+    """Bounded transcript pages are independent of the selected evidence table."""
+    require_access()
+    validate_reference(name, 'TKT')
+    if isinstance(limit, bool) or not isinstance(limit, (str, int)) or not str(limit).isdigit() or not 1 <= int(limit) <= 100:
+        frappe.throw('Limit must be between 1 and 100')
+    ticket = frappe.get_doc('Relay Ticket', name)
+    ticket.check_permission('read')
+    filters = {'ticket': name}
+    if after:
+        validate_reference(after, 'MSG')
+        anchor = frappe.get_doc('Relay Message', after)
+        anchor.check_permission('read')
+        if anchor.get('ticket') != name:
+            frappe.throw('Transcript cursor belongs to another episode', frappe.PermissionError)
+        filters['name'] = ['>', after]
+    rows = frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name asc', page_length=int(limit)+1)
+    items = []
+    fields = ('name', 'content', 'direction', 'status', 'creation', 'sent_at', 'message_type', 'channel')
+    for row in rows[:int(limit)]:
+        message = frappe.get_doc('Relay Message', row.name)
+        message.check_permission('read')
+        readable_contact(message.relay_contact)
+        frappe.get_doc('Relay Channel', message.channel).check_permission('read')
+        if message.get('ticket') != name or any(message.get(key) != ticket.get(key)
+                for key in ('conversation_key', 'business_doctype', 'business_name')):
+            frappe.throw('Transcript scope changed', frappe.PermissionError)
+        message.apply_fieldlevel_read_permissions()
+        items.append({key: message.get(key) for key in fields})
+    return {'items': items, 'next': {'after': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
 
 
 @frappe.whitelist(methods=['POST'])
@@ -106,15 +374,20 @@ def assign(name, user=''):
 
 
 def permission(doc, user=None, permission_type=None):
-    from relay_core.permissions import can_read_contact_as
+    from relay_core.permissions import can_read_contact_as, company_allowed
     from relay_core.business_access import allowed, reference
     user = user or frappe.session.user
     if user == 'Administrator': return True
     if not (user in (doc.owner, doc.get('assigned_to')) or
             set(frappe.get_roles(user)).intersection({'System Manager', 'Relay Communication Manager'})):
         return False
-    if not doc.messages: return False
-    if (doc.get('business_doctype') or doc.get('business_name')) and not allowed(doc, user): return False
+    if doc.get('company') and not company_allowed(doc.company, user): return False
+    if doc.get('business_doctype') or doc.get('business_name'):
+        if not (doc.get('business_doctype') and doc.get('business_name')) or not allowed(doc, user):
+            return False
+    if not doc.messages:
+        return bool(doc.get('source_hub_event') and doc.get('source_provider_message_key')
+                    and doc.get('company') and doc.get('conversation_key') and not doc.get('business_name'))
     try:
         for row in doc.messages:
             message = frappe.get_doc('Relay Message', row.message)
@@ -129,6 +402,7 @@ def permission(doc, user=None, permission_type=None):
 
 def query_condition(user=None):
     from relay_core.business_access import explicit_condition
+    from relay_core.permissions import company_condition
     user = user or frappe.session.user
     if user == 'Administrator': return ''
     quoted = frappe.db.escape(user)
@@ -139,8 +413,13 @@ def query_condition(user=None):
     contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
                                    user=user, order_by='').get_sql()
     links = "t.parent=`tabRelay Ticket`.name AND t.parenttype='Relay Ticket'"
-    return f"""({gate}) AND ({explicit_condition('Relay Ticket', user, allow_empty=True)})
-        AND EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links})
+    return f"""({gate}) AND ({company_condition('Relay Ticket', user)}) AND ({explicit_condition('Relay Ticket', user, allow_empty=True)})
+        AND (EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links}) OR
+             (COALESCE(`tabRelay Ticket`.source_hub_event,'')!=''
+              AND COALESCE(`tabRelay Ticket`.source_provider_message_key,'')!=''
+              AND COALESCE(`tabRelay Ticket`.company,'')!=''
+              AND COALESCE(`tabRelay Ticket`.conversation_key,'')!=''
+              AND COALESCE(`tabRelay Ticket`.business_name,'')=''))
         AND NOT EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links}
           AND NOT EXISTS (SELECT 1 FROM `tabRelay Message` m WHERE m.name=t.message
             AND m.name IN ({messages}) AND m.relay_contact IN ({contacts})
