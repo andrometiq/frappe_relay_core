@@ -6,7 +6,7 @@ USER = 'Relay Communication User'
 def internal_record_permission(doc=None, user=None, permission_type=None):
     import frappe
     user = user or frappe.session.user
-    return user == 'Administrator' or 'System Manager' in frappe.get_roles(user)
+    return user == 'Administrator'
 
 
 def internal_record_query(user=None):

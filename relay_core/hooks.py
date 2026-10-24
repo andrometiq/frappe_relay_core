@@ -15,9 +15,11 @@ scheduler_events = {"cron": {"* * * * *": ["relay_core.automation.service.recove
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
 has_permission = {'Relay Contact':'relay_core.permissions.contact_permission', 'Relay Message':'relay_core.permissions.message_permission', 'Relay Ticket':'relay_core.tickets.permission'}
-for _doctype in ('Relay Automation Run', 'Relay Business Event Delivery'):
+for _doctype in ('Relay Automation Run', 'Relay Business Event Delivery', 'Relay Hub Event', 'Relay Business Routing'):
     has_permission[_doctype] = 'relay_core.permissions.internal_record_permission'
     permission_query_conditions[_doctype] = 'relay_core.permissions.internal_record_query'
+has_permission['Relay Message Action'] = 'relay_core.business_access.action_permission'
+permission_query_conditions['Relay Message Action'] = 'relay_core.business_access.action_query'
 
 app_home = "/relay"
 add_to_apps_screen = [{"name":"relay_core","title":"Relay Core",

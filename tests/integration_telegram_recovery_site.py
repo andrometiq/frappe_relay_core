@@ -56,6 +56,16 @@ try:
   assert frappe.db.count('Relay Message',{'relay_contact':contact.name})==before
   from relay_core import telegram,telegram_delivery
   group_endpoint=frappe.get_doc({'doctype':'Relay Contact Endpoint','channel':channel.name,'relay_contact':contact.name,'endpoint':'-100123456','verified':1}).insert();frappe.db.commit()
+  from relay_core.automation.provenance import conversation_key
+  from relay_core.message_updates import provider_key
+  for message_id,topic in ((10,7),(11,8)):
+   context={'provider':'Telegram','chat_id':-100123456,'chat_type':'supergroup','message_id':message_id,'message_thread_id':topic}
+   frappe.get_doc({'doctype':'Relay Message','relay_contact':contact.name,'channel':channel.name,
+    'sender_endpoint':'-100123456','direction':'Incoming','status':'Delivered','content':'Local reply quantity 25',
+    'provider_id':str(message_id),'provider_context':json.dumps(context),
+    'provider_message_key':provider_key(channel.name,'-100123456',message_id),
+    'conversation_key':conversation_key(channel.name,'-100123456',context)}).insert()
+  frappe.db.commit()
   with patch.object(telegram,'connection_value',return_value=channel.account),patch.object(telegram_delivery,'connection_value',return_value=channel.account):
    client.return_value.call_tool.side_effect=TimeoutError('Group response lost')
    group=telegram.send(-100123456,'Group recovery fixture',reply_to=10,message_thread_id=7,request_key='group-'+stamp)
@@ -183,7 +193,7 @@ try:
   # Explicit chat/topic sends share the same admission recovery.
   with patch.object(telegram,'connection_value',return_value=channel.account),patch.object(telegram_delivery,'connection_value',return_value=channel.account):
    client.return_value.call_tool.side_effect=SystemExit('Group admission crash')
-   try:telegram.send(-100123456,'Group admission quantity 12',message_thread_id=7,request_key='group-crash-'+stamp)
+   try:telegram.send(-100123456,'Group admission quantity 12',message_thread_id=7,request_key='group-crash-'+stamp,business_doctype=business.doctype,business_name=business.name)
    except SystemExit:pass
    group_key=__import__('hashlib').sha256(('Administrator:group-crash-'+stamp).encode()).hexdigest()
    group_action=frappe.get_doc('Relay Message Action',{'request_key':group_key})

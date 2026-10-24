@@ -32,7 +32,7 @@ def project_batch(event, rows):
                 medium={'telegram.message':'Telegram','email.send':'Email','whatsapp.execute':'WhatsApp'}[row['operation']]
                 if channel.channel!=medium or channel.account!=event.account:
                     raise ValueError('Status receipt channel mismatch')
-                if medium=='Email':
+                if medium=='Email' and action.operation != 'business_prompt':
                     apply_email(action,row)
                     continue
                 content=messaging.object_value(action.payload).get('content')

@@ -260,4 +260,6 @@ try:
  from channel_site_fixtures import check_business_lifecycle
  check_business_lifecycle(business)
  print('PASS business update and delete/cancel link guards remain independent of Relay history')
+ from channel_email_cases import run as channel_email_cases
+ channel_email_cases()
 finally:frappe.destroy()

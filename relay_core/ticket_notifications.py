@@ -7,6 +7,7 @@ from relay_core import tickets
 
 
 outgoing_notification = ContextVar('relay_ticket_notification', default=None)
+message_ownership = ContextVar('relay_notification_message_ownership', default=None)
 
 def digest(*parts):
     return hashlib.sha256(':'.join(parts).encode()).hexdigest()
@@ -138,8 +139,64 @@ def authorized(row):
         raise frappe.PermissionError('Subscription disabled')
     if frappe.session.user != sub.user:
         raise frappe.PermissionError('Subscription owner changed')
-    tickets.read(row.ticket)
-    return destination(sub.destination)
+    endpoint, channel = destination(sub.destination)
+    return endpoint, channel, business_context(row)
+
+
+def business_context(row):
+    """Resolve one readable ticket business, including pre-snapshot tickets."""
+    from relay_core.business_access import reference
+    ticket = tickets.read(row.ticket)
+    businesses = {reference(frappe.get_doc('Relay Message', item['message'])) for item in ticket['messages']}
+    explicit = (ticket.get('business_doctype'), ticket.get('business_name'))
+    if any(explicit):
+        businesses.add(explicit)
+    if len(businesses) != 1 or None in businesses:
+        raise frappe.PermissionError('Ticket must have one business for notifications')
+    business = next(iter(businesses))
+    if not all(business):raise frappe.PermissionError('Ticket business is incomplete')
+    frappe.get_doc(*business).check_permission('read')
+    return business
+
+
+def recipient_business(contact, channel, address, doctype=None, name=None, notification=None, *, snapshot=False):
+    """A subscription authorizes its own recipient independently of ticket ownership."""
+    notification = notification or outgoing_notification.get()
+    if not notification:
+        from relay_core.business_access import choose_business
+        return choose_business(contact, doctype, name)
+    row = frappe.get_doc('Relay Ticket Notification', notification)
+    if snapshot and doctype and name:
+        # Recording a provider receipt must survive unsubscribe or a late success after rejection.
+        sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)
+        if sub.user != frappe.session.user:
+            raise frappe.PermissionError('Notification owner changed')
+        frappe.get_doc(doctype, name).check_permission('read')
+        return doctype, name
+    if row.status != 'Pending':raise frappe.PermissionError('Notification is no longer pending')
+    endpoint, target, business = authorized(row)
+    if (endpoint.relay_contact, target.name, endpoint.endpoint) != (contact, channel, address):
+        raise frappe.PermissionError('Notification destination changed')
+    if (doctype or name) and (doctype, name) != business:
+        raise frappe.PermissionError('Notification business changed')
+    return business
+
+
+def insert_message(doc, action):
+    """Only a validated durable notification may cross contact business links."""
+    from relay_core.messaging import object_value
+    payload = object_value(action.payload)
+    if payload.get('notification'):
+        business = recipient_business(doc.relay_contact, doc.channel, doc.sender_endpoint,
+            doc.business_doctype, doc.business_name, payload['notification'], snapshot=True)
+        if list(business) != payload.get('business'):
+            raise frappe.PermissionError('Notification snapshot changed')
+        token = message_ownership.set((doc.relay_contact, doc.channel, doc.sender_endpoint, *business))
+        try:
+            return doc.insert(ignore_permissions=True)
+        finally:
+            message_ownership.reset(token)
+    return doc.insert(ignore_permissions=True)
 
 
 def authorize_action(action):
@@ -149,7 +206,9 @@ def authorize_action(action):
     if not name: return
     row = frappe.get_doc('Relay Ticket Notification', name)
     if row.status != 'Pending': raise frappe.PermissionError('Notification is no longer pending')
-    endpoint, channel = authorized(row)
+    endpoint, channel, business = authorized(row)
+    if payload.get('business') and tuple(payload['business']) != business:
+        raise frappe.PermissionError('Notification business changed')
     recipient = payload['email_values']['to'][0] if action.operation == 'email' else str(payload['group']['chat_id'])
     if channel.name != action.target_channel or endpoint.endpoint != recipient:
         raise frappe.PermissionError('Notification destination changed')
@@ -189,7 +248,7 @@ def dispatch(name):
         token = outgoing_notification.set(name)
         try:
             frappe.set_user(sub.user)
-            endpoint, channel = authorized(row)
+            endpoint, channel, (business_doctype, business_name) = authorized(row)
             key = 'ticket-'+row.event_key
             keys = [digest(sub.user, key), digest('email', sub.user, key), key]
             existing = frappe.db.get_value('Relay Message Action', {'request_key':['in',keys], 'owner':sub.user}, 'name')
@@ -200,10 +259,12 @@ def dispatch(name):
                 result = messaging.reconcile(existing)
             elif channel.channel == 'Email':
                 from relay_core.email import send
-                result = send([endpoint.endpoint], 'Ticket update: '+row.ticket, row.body, request_key=key, auto_submitted=1)
+                result = send([endpoint.endpoint], 'Ticket update: '+row.ticket, row.body, request_key=key, auto_submitted=1,
+                    channel_name=channel.name, business_doctype=business_doctype, business_name=business_name)
             else:
                 from relay_core.telegram import send
-                result = send(int(endpoint.endpoint), row.body, request_key=key)
+                result = send(int(endpoint.endpoint), row.body, request_key=key,
+                    business_doctype=business_doctype, business_name=business_name)
             status = result.get('status')
             if status in ('Submitted','Rejected'):
                 set_outcome(name,status)
