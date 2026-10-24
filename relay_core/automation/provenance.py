@@ -6,6 +6,7 @@ Contact; the participant is deliberately kept separate from that destination.
 """
 import hashlib
 import json
+import re
 
 
 def integer(value, *, positive=False):
@@ -94,8 +95,30 @@ def context_of(message):
 
 
 def conversation_key(channel, destination, context):
-    thread = context.get('message_thread_id', 0)
+    thread = context.get('email_thread_id') if context.get('provider') == 'Email' else context.get('message_thread_id', 0)
+    if context.get('provider') == 'Email' and not thread:
+        thread = context.get('message_id') or context.get('in_reply_to')
     return hashlib.sha256(json.dumps([channel, destination, thread], separators=(',', ':')).encode()).hexdigest()
+
+
+def email_context(raw, subject, event_id):
+    if not isinstance(raw, dict) or not isinstance(raw.get('authentication') or {}, dict):
+        raise ValueError('Invalid email provenance')
+    refs = raw.get('references') or []
+    if not isinstance(refs, list) or len(refs) > 100:
+        raise ValueError('Invalid email references')
+    refs = [value for value in refs if email_message_id(value)][-20:]
+    parent = email_message_id(raw.get('in_reply_to'))
+    message = email_message_id(raw.get('message_id'))
+    return {'provider': 'Email', 'subject': subject, 'message_id': message,
+            'in_reply_to': parent, 'reply_to_message_id': parent, 'references': refs,
+            'email_thread_id': next(iter(refs), None) or parent or message or event_id,
+            'auto_submitted': bool(raw.get('auto_submitted')),
+            'authentication': raw.get('authentication') or {}}
+
+
+def email_message_id(value):
+    return value if isinstance(value, str) and re.fullmatch(r'<[^<>\s@]{1,120}@[^<>\s@]{1,120}>', value) else None
 
 
 def telegram_route(message, body):

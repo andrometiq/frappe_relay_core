@@ -50,7 +50,7 @@ def execute(operation, arguments=None):
 
 
 @frappe.whitelist(methods=['POST'])
-def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None):
+def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, business_doctype=None, business_name=None):
     require_access()
     integer(chat_id)
     if not isinstance(text, str) or not 1 <= len(text) <= 4096:
@@ -74,7 +74,7 @@ def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None):
     readable_contact(contact)
     frappe.get_doc('Relay Channel', channels[0]).check_permission('read')
     from relay_core.telegram_delivery import send_group
-    return send_group(contact, channels[0], chat_id, text, reply_to, message_thread_id, request_key)
+    return send_group(contact, channels[0], chat_id, text, reply_to, message_thread_id, request_key, business_doctype, business_name)
 
 
 

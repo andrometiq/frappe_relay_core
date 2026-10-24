@@ -12,14 +12,16 @@ class PermissionsTest(unittest.TestCase):
         for role in (MANAGER, USER, 'Guest', 'System Manager'):
             fake = types.SimpleNamespace(get_roles=lambda user: [role], session=types.SimpleNamespace(user='reader'))
             with patch.dict(sys.modules, frappe=fake):
-                self.assertEqual(permissions.internal_record_permission(user='reader'), role == 'System Manager')
-                self.assertEqual(permissions.internal_record_query('reader'), '' if role == 'System Manager' else '1=0')
+                self.assertFalse(permissions.internal_record_permission(user='reader'))
+                self.assertEqual(permissions.internal_record_query('reader'), '1=0')
+                self.assertEqual(permissions.internal_record_query('Administrator'), '')
                 self.assertTrue(permissions.internal_record_permission(user='Administrator'))
-        for doctype in ('Relay Automation Run', 'Relay Business Event Delivery'):
+        for doctype in ('Relay Automation Run', 'Relay Business Event Delivery', 'Relay Hub Event', 'Relay Business Routing'):
             slug = doctype.lower().replace(' ', '_')
             meta = json.loads(Path(f'relay_core/relay_core/doctype/{slug}/{slug}.json').read_text())
             self.assertTrue(meta['permissions'])
-            self.assertTrue(all(row['role'] == 'System Manager' for row in meta['permissions']))
+            if doctype in ('Relay Automation Run', 'Relay Business Event Delivery'):
+                self.assertTrue(all(row['role'] == 'System Manager' for row in meta['permissions']))
             self.assertEqual(hooks.has_permission[doctype], 'relay_core.permissions.internal_record_permission')
             self.assertEqual(hooks.permission_query_conditions[doctype], 'relay_core.permissions.internal_record_query')
 

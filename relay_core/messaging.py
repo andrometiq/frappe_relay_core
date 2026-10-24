@@ -272,7 +272,8 @@ def admission_scope(action):
     authorize_action(action)
     source, channel, context = action_target(action)
     payload = object_value(action.payload)
-    if payload.get('business') and payload['business'] != [source.get('business_doctype'), source.get('business_name')]:
+    business = payload.get('business') or []
+    if any(business) and (not all(business) or business != [source.get('business_doctype'), source.get('business_name')]):
         raise ValueError('Message business changed before recovery')
     return source, channel, context
 
@@ -293,8 +294,11 @@ def finish(action, source, channel, context, content, result, *, commit=True):
     frappe.db.get_value('Relay Message Action', action.name, 'name', for_update=True)
     action.reload()
     status = receipt_status(result)
-    provider_id = result.get('message_id') if channel.channel == 'Telegram' else next((row.get('id') for row in result.get('messages', []) if isinstance(row, dict)), None)
+    provider_id = result.get('message_id') if channel.channel in ('Telegram', 'Email') else next((row.get('id') for row in result.get('messages', []) if isinstance(row, dict)), None)
     accepted = not status and isinstance(provider_id, (str, int)) and not isinstance(provider_id, bool) and bool(str(provider_id))
+    if channel.channel == 'Email':
+        from relay_core.automation.provenance import email_message_id
+        accepted = accepted and bool(email_message_id(provider_id))
     if action.operation == 'reaction' and channel.channel == 'WhatsApp' and not status:
         accepted = accepted or result.get('success') is True or result.get('manually_reconciled') is True
     if action.operation == 'reaction' and channel.channel == 'Telegram':
@@ -321,7 +325,10 @@ def finish(action, source, channel, context, content, result, *, commit=True):
         changed(source)
     elif action.operation != 'business_prompt':
         stored = object_value(action.payload)
-        business = stored.get('business') or [source.get('business_doctype'), source.get('business_name')]
+        business = stored.get('business')
+        if not any(business or []):
+            from relay_core.business_access import reference
+            business = reference(source) or [None, None]
         outgoing_context = dict(context)
         outgoing_context.pop('reply_to_message_id', None)
         reply_to = object_value(action.payload).get('arguments', {}).get('reply_to')
@@ -337,7 +344,9 @@ def finish(action, source, channel, context, content, result, *, commit=True):
             'provider_context': json.dumps(outgoing_context), 'source_key': action.request_key,
             'business_doctype':business[0], 'business_name':business[1],
             'conversation_key': conversation_key(source.channel, source.sender_endpoint, context),
-            'provider_message_key': provider_key(source.channel, source.sender_endpoint, provider_id) if provider_id else None}).insert(ignore_permissions=True)
+            'provider_message_key': provider_key(source.channel, source.sender_endpoint, provider_id) if provider_id else None})
+        from relay_core.ticket_notifications import insert_message
+        insert_message(outgoing, action)
         if channel.channel == 'WhatsApp':
             from relay_core.whatsapp_receipts import apply_pending
             apply_pending(outgoing)
@@ -452,7 +461,7 @@ def reconcile(action):
     if channel.channel == 'Email' and doc.operation == 'email':
         from relay_core.email import reconcile_action
         return reconcile_action(doc)
-    if channel.channel not in ('WhatsApp','Telegram') or doc.status not in ('Dispatching','Queued','Uncertain'):
+    if channel.channel not in ('WhatsApp','Telegram','Email') or doc.status not in ('Dispatching','Queued','Uncertain'):
         return {'action': doc.name, 'status': doc.status, 'message': doc.outbound_message, **({'error': action_error(doc)} if action_error(doc) else {})}
     payload = object_value(doc.payload)
     # Older actions were sent directly and cannot be looked up in the Hub journal.

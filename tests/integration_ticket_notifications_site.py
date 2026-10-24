@@ -198,6 +198,10 @@ try:
     assert frappe.db.get_value('Relay Ticket Notification',name,'status')=='Submitted'
   print('PASS legacy unjournaled notifications adopt raw provider keys for accepted/pending/uncertain/rejected intents without resending')
 
+ from channel_notification_cases import run as shared_identity_notifications
+ shared_identity_notifications()
+ shared_identity_notifications(separate_contact=True)
+
 finally:
  queue_patch.stop()
  frappe.db.rollback();frappe.destroy()

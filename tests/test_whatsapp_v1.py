@@ -2,6 +2,7 @@
 import hashlib
 import json
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import frappe
@@ -373,6 +374,7 @@ class OutgoingProjectionTests(unittest.TestCase):
             'Relay Message Action':None, 'Relay Contact':'person', 'Relay Message':'quoted',
         }[dt]
         fake = SimpleNamespace(db=db, get_doc=get_doc, session=SimpleNamespace(user='sender'),
+                               cache=SimpleNamespace(lock=lambda *a, **kw: nullcontext()),
                                PermissionError=PermissionError, ValidationError=ValueError)
         hub = Mock()
         hub.call_tool.return_value = {'success':True}

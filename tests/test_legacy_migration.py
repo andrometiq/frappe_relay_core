@@ -200,12 +200,13 @@ class MigrationTests(unittest.TestCase):
             with self.assertRaises(legacy_media.TargetDatabaseError):
                 legacy.media_for(self.row(), job, 'message', {'kind': 'text'})
 
-    def test_triage_is_restricted_to_system_managers(self):
+    def test_triage_is_restricted_to_administrator(self):
         doc = frappe._dict(legacy_triage=1, relay_contact='contact')
-        for roles, expected in [(['System Manager'], True), (['Relay Communication Manager'], False), (['Relay Communication User'], False)]:
+        for roles, expected in [(['System Manager'], False), (['Relay Communication Manager'], False), (['Relay Communication User'], False)]:
             fake = SimpleNamespace(get_roles=lambda user: roles)
             with patch.object(business_access, 'frappe', fake):
                 self.assertEqual(business_access.allowed(doc, user='reader'), expected)
+                self.assertTrue(business_access.allowed(doc, user='Administrator'))
 
     def test_live_hooks_skip_history(self):
         from relay_core.automation import service
