@@ -76,6 +76,42 @@ def inputs(value, schema, answers):
     return validate(resolved, schema)
 
 
+def ai_contract(action):
+    """Only reviewed Core draft/reply handlers can enter the AI registry."""
+    if (not action or action.get('ai_safe') is not True
+            or 'ai' not in action.get('contexts', ['flow'])
+            or not action.get('method', '').startswith('relay_core.')
+            or action.get('effect') not in ('reply', 'create_draft')
+            or action.get('approval_policy') not in ('None', 'Required')
+            or not isinstance(action.get('permissions'), dict) or not action['permissions']
+            or any(permission not in ('read', 'create') for permission in action['permissions'].values())):
+        raise ValueError('Only explicitly AI-safe Core reply or draft actions are allowed')
+    check_schema(action.get('parameters'))
+    check_schema(action.get('output'))
+    if (action['parameters']['type'] != 'object'
+            or action['parameters'].get('additionalProperties', False) is not False):
+        raise ValueError('Action parameters must be a closed object')
+    return action
+
+
+def ai_inputs(value, action, declaration):
+    """Model values are literal data, never flow variable references."""
+    ai_contract(action)
+    value = resolve(value, {}, references=False)
+    if len(json.dumps(value, allow_nan=False)) > 20000:
+        raise ValueError('Action input exceeds 20,000 characters')
+    validate(value, action['parameters'])
+    if action['effect'] == 'create_draft':
+        schema = (action.get('targets') or {}).get(declaration.get('doctype'))
+        check_schema(schema)
+        if (schema['type'] != 'object' or schema.get('additionalProperties', False) is not False
+                or not isinstance(value, dict) or set(value) - set(declaration.get('fields', []))
+                or action['permissions'].get(declaration.get('doctype')) != 'create'):
+            raise ValueError('Action target or fields are not declared')
+        validate(value, schema)
+    return value
+
+
 def check_schema(schema, *, depth=0):
     """Reject unsupported contracts instead of silently ignoring their constraints."""
     if depth > 8 or not isinstance(schema, dict):

@@ -9,7 +9,17 @@
     "run",
     "action",
     "input_hash",
-    "result"
+    "result",
+    "automation_run",
+    "ticket",
+    "step",
+    "input_snapshot",
+    "status",
+    "scope_snapshot",
+    "scope_fingerprint",
+    "approval_evidence",
+    "target_doctype",
+    "target_name"
   ],
   "fields": [
     {
@@ -26,7 +36,7 @@
       "fieldtype": "Link",
       "read_only": 1,
       "options": "Relay Flow Run",
-      "reqd": 1
+      "reqd": 0
     },
     {
       "fieldname": "action",
@@ -45,7 +55,71 @@
       "label": "Result",
       "fieldtype": "Long Text",
       "read_only": 1
+    },
+    {
+      "fieldname": "automation_run",
+      "label": "Automation Run",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Automation Run"
+    },
+    {
+      "fieldname": "ticket",
+      "label": "Episode Ticket",
+      "fieldtype": "Link",
+      "read_only": 1,
+      "options": "Relay Ticket"
+    },
+    {
+      "fieldname": "step",
+      "label": "Step",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "input_snapshot",
+      "label": "Typed Input",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "read_only": 1,
+      "options": "Pending\nAwaiting approval\nApproved\nCompleted"
+    },
+    {
+      "fieldname": "scope_snapshot",
+      "label": "Scope and Versions",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "scope_fingerprint",
+      "label": "Scope Fingerprint",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "approval_evidence",
+      "label": "Approval Evidence",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "target_doctype",
+      "label": "Draft DocType",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "target_name",
+      "label": "Draft Name",
+      "fieldtype": "Data",
+      "read_only": 1
     }
   ],
-  "permissions": []
+  "permissions": [],
+  "modified": "2026-10-25 04:02:52.925542"
 }
