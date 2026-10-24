@@ -56,6 +56,19 @@ def main():
                     email_signature='Local <Support> & team')).insert()
                 rules.append(rule)
                 frappe.db.commit()
+                # Revoked execution-user access must not roll back the business insert.
+                from channel_site_fixtures import business
+                denied_customer=business('Event denied '+fixture.stamp+' '+provider)
+                permission=frappe.get_doc('User Permission',{'user':fixture.actor,'allow':'Customer'})
+                permission.for_value=denied_customer.name;permission.save();frappe.db.commit();frappe.clear_cache(user=fixture.actor)
+                denied_order=frappe.get_doc(dict(doctype='Sales Order', customer=fixture.customer.name,
+                    company=company.name,currency=company.default_currency,transaction_date=frappe.utils.nowdate(),
+                    delivery_date=frappe.utils.add_days(frappe.utils.nowdate(),7),
+                    items=[dict(item_code=item.name,qty=25,rate=50,delivery_date=frappe.utils.add_days(frappe.utils.nowdate(),7))])).insert()
+                frappe.db.commit()
+                assert frappe.db.exists('Sales Order',denied_order.name)
+                assert not frappe.db.exists('Relay Business Event Delivery',{'rule':rule.name,'source_name':denied_order.name})
+                permission.for_value=fixture.customer.name;permission.save();frappe.db.commit();frappe.clear_cache(user=fixture.actor)
                 # Real source insertion invokes the transaction hook and captures after-commit work.
                 order = frappe.get_doc(dict(doctype='Sales Order', customer=fixture.customer.name,
                     company=company.name,currency=company.default_currency,transaction_date=frappe.utils.nowdate(),
@@ -63,6 +76,7 @@ def main():
                     items=[dict(item_code=item.name,qty=25,rate=50,delivery_date=frappe.utils.add_days(frappe.utils.nowdate(),7))])).insert()
                 name = frappe.db.get_value('Relay Business Event Delivery',{'rule':rule.name,'source_name':order.name},'name')
                 assert name, 'Business insertion must capture a real delivery intent'
+                assert name=='RELAY-BED-'+frappe.db.get_value('Relay Business Event Delivery',name,'event_key')
                 delivery = frappe.get_doc('Relay Business Event Delivery',name)
                 original = delivery.payload
                 assert '1250' in original and '25' in original
@@ -155,7 +169,7 @@ def main():
                 assert transient.status == 'Pending' and not transient.action
                 client.return_value.call_tool.return_value = {'message_id':923 if provider=='Telegram' else '<conflict-' + fixture.stamp + '@example.invalid>'}
                 business_events.dispatch(transient.name); transient.reload()
-                assert transient.status == 'Submitted'
+                assert transient.status == 'Submitted', (transient.name,transient.status,transient.action)
 
                 # A burst of independent pending deliveries completes through signed receipts.
                 burst = []

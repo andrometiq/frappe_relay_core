@@ -28,6 +28,7 @@ def project_batch(event, rows):
                 unresolved = True
                 continue
             frappe.set_user(action.owner)
+            frappe.db.savepoint('relay_status_row')
             try:
                 action.check_permission('read')
                 source,channel,context=messaging.action_target(action)
@@ -50,13 +51,18 @@ def project_batch(event, rows):
                     receipt['messages'] = [{'id': str(receipt['message_id'])}]
                 receipt['_relay_status_id']=row['id']
                 messaging.finish(action,source,channel,context,content,receipt,commit=False)
-            except (frappe.PermissionError,frappe.DoesNotExistError):
+            except frappe.QueryDeadlockError:
+                raise
+            except (frappe.PermissionError, frappe.DoesNotExistError, frappe.ValidationError, ValueError):
+                frappe.db.rollback(save_point='relay_status_row')
                 unresolved=True
             finally:
                 frappe.set_user(original)
     finally:
         frappe.set_user(original)
-    frappe.db.set_value('Relay Hub Event',event.name,'projection_status','Uncategorized' if unresolved else 'Projected')
+    frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Uncategorized' if unresolved else 'Projected')
+    from relay_core.realtime import incoming_changed
+    incoming_changed()
 
 
 def apply_email(action,row):

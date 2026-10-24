@@ -80,7 +80,8 @@
       "fieldname": "provider_id",
       "label": "Provider Id",
       "fieldtype": "Data",
-      "read_only": 1
+      "read_only": 1,
+      "length": 300
     },
     {
       "fieldname": "reason",
@@ -117,5 +118,6 @@
       "read": 1
     }
   ],
-  "track_changes": 1
+  "track_changes": 1,
+  "modified": "2026-10-25 12:00:01.000000"
 }

@@ -3,8 +3,8 @@
   "name": "Relay Business Event Delivery",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-BED-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "format:RELAY-BED-{event_key}",
+  "naming_rule": "Expression",
   "track_changes": 1,
   "field_order": [
     "event_key",
@@ -107,7 +107,8 @@
       "fieldname": "endpoint",
       "label": "Endpoint Snapshot",
       "fieldtype": "Data",
-      "read_only": 1
+      "read_only": 1,
+      "length": 200
     },
     {
       "fieldname": "payload_hash",
@@ -129,5 +130,6 @@
       "write": 1,
       "create": 1
     }
-  ]
+  ],
+  "modified": "2026-10-25 18:00:01.000000"
 }

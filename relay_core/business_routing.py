@@ -55,6 +55,8 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                 business, rule = (selected['doctype'], selected['name']), 'sender_choice'
             else:
                 rule = 'triage_invalid_choice'
+        elif context.get('reply_to_message_id'):
+            rule = 'triage_unresolved_reference'
         elif len(links) == 1:
             business, rule = links[0], 'single_link'
         elif (state.business_doctype, state.business_name) in links and state.selected_at and (

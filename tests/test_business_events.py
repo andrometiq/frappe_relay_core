@@ -10,6 +10,7 @@ class BusinessEventTests(unittest.TestCase):
     def setUp(self):
         self.f = framework(); self.intents = []
         self.f.ValidationError = ValueError
+        self.f.QueryDeadlockError = type('QueryDeadlockError', (Exception,), {})
         self.f.DoesNotExistError = LookupError
         self.f.TimestampMismatchError = type('TimestampMismatchError',(ValueError,),{})
         self.f.cache = Mock()
@@ -74,7 +75,7 @@ class BusinessEventTests(unittest.TestCase):
                 self.f.get_all.return_value = rows
                 self.service.on_event(self.source, 'on_submit')
                 pairs = {(row.source_doctype, row.event) for row in rows}
-                self.f.cache.set_value.assert_called_with(self.service.RULE_PAIRS_CACHE_KEY, pairs)
+                self.f.cache.set_value.assert_called_with(self.service.RULE_PAIRS_CACHE_KEY, pairs, expires_in_sec=60)
                 self.f.cache.get_value.return_value = pairs
                 self.service.on_event(self.source, 'on_submit')
                 self.f.get_all.assert_called_once_with('Relay Business Event Rule',
@@ -133,15 +134,30 @@ class BusinessEventTests(unittest.TestCase):
         self.f.get_all.return_value = ['PERSON-B']; self.service.capture(self.rule, self.source, 'on_submit')
         self.assertEqual(len({row.event_key for row in self.intents}), 5)
 
-    def test_event_failures_never_escape_business_transaction_even_logging_failure(self):
-        self.f.get_all.return_value = ['RULE-1']; self.f.get_doc.side_effect = RuntimeError('Invalid template')
-        self.f.log_error.side_effect = RuntimeError('Log failure')
+    def test_validation_failure_rolls_back_but_database_and_logging_errors_escape(self):
+        self.f.get_all.return_value = ['RULE-1']; self.f.get_doc.side_effect = ValueError('Invalid template')
         self.service.on_event(self.source, 'on_submit')
         self.f.db.rollback.assert_called_once_with(save_point='relay_business_event')
         self.f.db.commit.assert_not_called()
         self.assertFalse(self.f.flags.relay_business_event)
         self.f.get_all.side_effect = RuntimeError('Missing table')
-        self.service.on_event(self.source, 'on_submit')
+        with self.assertRaises(RuntimeError): self.service.on_event(self.source, 'on_submit')
+        self.f.get_all.side_effect = None
+        self.f.log_error.side_effect = RuntimeError('Log failure')
+        with self.assertRaises(RuntimeError): self.service.on_event(self.source, 'on_submit')
+
+    def test_deadlock_and_savepoint_failure_escape_without_partial_success(self):
+        self.f.get_all.return_value=['RULE-1']
+        self.f.get_doc.side_effect=None
+        self.f.get_doc.return_value=self.rule
+        for where in ('get_all','capture'):
+            with self.subTest(where=where):
+                with patch.object(self.f if where=='get_all' else self.service,where,side_effect=self.f.QueryDeadlockError):
+                    with self.assertRaises(self.f.QueryDeadlockError):self.service.on_event(self.source,'on_submit')
+                self.assertFalse(self.f.flags.relay_business_event)
+        self.f.get_doc.side_effect=ValueError('invalid rule')
+        self.f.db.rollback.side_effect=RuntimeError('Savepoint no longer exists')
+        with self.assertRaises(RuntimeError):self.service.on_event(self.source,'on_submit')
 
     def test_ambiguous_recipient_never_creates_delivery(self):
         self.f.get_all.return_value = ['PERSON-A', 'PERSON-B']
@@ -166,7 +182,6 @@ class BusinessEventTests(unittest.TestCase):
     def test_after_commit_queue_failure_is_recovered_without_raising(self):
         self.service.capture(self.rule, self.source, 'on_submit')
         self.f.enqueue.side_effect = RuntimeError('Redis unavailable')
-        self.f.log_error.side_effect = RuntimeError('Logging unavailable')
         self.f.db.after_commit.add.call_args.args[0]()
         self.assertEqual(self.intents[0].status, 'Pending')
 
@@ -195,6 +210,16 @@ class BusinessEventTests(unittest.TestCase):
             self.service.dispatch(delivery.name)
             self.assertEqual(delivery.status,'Pending')
             self.assertIsNone(delivery.action)
+
+    def test_delivery_deadlock_reaches_whole_transaction_retry(self):
+        self.rule.update(enabled=1,run_as_user='service',channel='CH-1')
+        self.service.capture(self.rule,self.source,'on_submit')
+        delivery = self.intents[0]
+        self.f.get_doc.side_effect = lambda dt,name:delivery if dt=='Relay Business Event Delivery' else self.rule
+        self.service.delivery_scope=Mock(side_effect=self.f.QueryDeadlockError)
+        with self.assertRaises(self.f.QueryDeadlockError):self.service.dispatch.__wrapped__(delivery.name)
+        self.assertEqual(delivery.status,'Pending')
+        self.f.db.set_value.assert_not_called()
 
     def test_missing_rules_fail_and_do_not_starve_later_pending_deliveries(self):
         rows = [Doc(name=f'DELIVERY-{i}', rule='deleted', status='Pending') for i in range(21)]
