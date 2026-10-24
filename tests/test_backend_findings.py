@@ -204,18 +204,13 @@ class BackendFindings(unittest.TestCase):
             with self.assertRaises(ValueError): messaging.automation_scope(action,_dict(name='source'))
             scope.assert_not_called()
 
-    def test_flow_ticket_is_assigned_scoped_and_idempotent(self):
-        f=self.fake(); f.db.get_value.return_value=None
+    def test_flow_ticket_reuses_shared_episode(self):
+        f=self.fake()
         source=_dict(name='message',business_doctype='Customer',business_name='customer')
-        with patch.object(flows,'frappe',f):
-            flows.flow_ticket(_dict(start_message='message'),source,'Needs help','key','Support')
-            fields=f.get_doc.call_args.args[0]
-            self.assertEqual(fields['assigned_to'],'manager');self.assertEqual(fields['business_name'],'customer')
-            self.assertEqual(fields['messages'],[{'message':'message'}])
-            f.db.get_value.return_value='ticket';f.get_doc.reset_mock()
-            with patch.object(tickets,'read',return_value={'name':'ticket'}):
-                self.assertEqual(flows.flow_ticket(_dict(),source,'Needs help','key','Support'),{'name':'ticket'})
-            f.get_doc.assert_not_called()
+        with patch.object(flows,'frappe',f), patch.object(tickets,'ensure_episode',return_value={'name':'ticket'}) as ensure:
+            self.assertEqual(flows.flow_ticket(source,'Needs help'), {'name':'ticket'})
+        ensure.assert_called_once_with(source,owner='manager',subject='Needs help',reason='Needs help')
+        f.get_doc.assert_not_called()
 
     def test_fixed_email_intent_is_written_before_hook_acknowledgement(self):
         f=self.fake(); f.db.exists.return_value=True

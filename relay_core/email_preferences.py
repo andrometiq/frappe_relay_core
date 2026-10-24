@@ -116,11 +116,11 @@ def automatic_allowed(context):
 
 
 def skill_claims(message):
-    from relay_core.ai.service import skill_for
+    from relay_core.ai.matching import candidates
     from relay_core.automation.contracts import event_key
     if frappe.db.get_value('Relay Automation Run', {'event_key': event_key(message.name)}, 'name', for_update=True):
         return True
-    return bool(frappe.conf.get('relay_automation_enabled') and skill_for(message))
+    return bool(frappe.conf.get('relay_automation_enabled') and candidates(message))
 
 
 def automatic_reply_exists(message):

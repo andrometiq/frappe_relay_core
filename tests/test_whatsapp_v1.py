@@ -4,7 +4,7 @@ import json
 import unittest
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 import frappe
 from frappe import _dict
 
@@ -150,7 +150,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
 
     def test_initial_submission_rechecks_after_commit_and_sends_once(self):
         self.assertEqual(self.send()['status'], 'Submitted')
-        self.recheck.assert_called_once_with(self.skill, 'partner', ('Supplier', 'SUP-A'), self.reads, {'company': 'Sim Company'})
+        self.recheck.assert_called_once_with(self.skill, 'partner', ('Supplier', 'SUP-A'), self.reads, {'company': 'Sim Company'}, authorize=ANY)
         self.hub.call_tool.assert_called_once()
 
     def test_changes_at_journal_commit_block_initial_submission(self):

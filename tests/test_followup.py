@@ -8,7 +8,6 @@ from unittest.mock import Mock, patch
 
 from frappe import _dict
 from relay_core.automation import queue, service
-from relay_core.ai import configuration
 from relay_core.inbox import directory_preview
 from relay_core.relay_core.doctype.relay_message.relay_message import RelayMessage
 import test_business_routing as routing_tests
@@ -20,15 +19,13 @@ class FollowupTests(unittest.TestCase):
         fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(1,)]
         fake.get_all.side_effect = [['bad-config', 'healthy-channel'], []]
-        error = ValueError(configuration.skill_conflict('Support', 'Customer', ['Primary', 'Backup']))
+        error = ValueError('Event scope configuration is invalid')
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process', side_effect=[error, None]) as process, \
                 patch.object(queue, 'recover'), patch.object(service, 'configuration_failure') as failure:
             self.assertEqual(queue.drain(), 2)
         failure.assert_called_once_with('bad-config', error)
         self.assertEqual([call.args[0] for call in process.call_args_list], ['bad-config', 'healthy-channel'])
         fake.db.rollback.assert_called_once()
-        self.assertIn('Support / Customer', str(error))
-        self.assertIn('Primary, Backup', str(error))
         fake.db.set_value.assert_called_once_with('Relay Message', 'bad-config', 'automation_status', 'Complete', update_modified=False)
 
     def test_configuration_failure_marks_existing_pending_run_once(self):
@@ -36,12 +33,12 @@ class FollowupTests(unittest.TestCase):
         fake.db.get_value.return_value = 'run'
         run = _dict(name='run', status='Pending')
         fake.get_doc.side_effect = [_dict(name='message'), run, _dict(name='message'), run]
-        with patch.object(service, 'frappe', fake), patch.object(service, 'internal_save') as save:
+        with patch.object(service, 'frappe', fake), patch.object(service, 'internal_save') as save, patch.object(service, 'episode'):
             service.configuration_failure('message', ValueError('Competing enabled skills'))
             self.assertEqual(run.status, 'Handoff')
-            self.assertIn('Competing enabled skills', run.reason)
+            self.assertEqual(run.reason, 'Automation configuration requires review')
             service.configuration_failure('message', ValueError('Replay'))
-        save.assert_called_once_with(run, new=False)
+        save.assert_called_once_with(run)
 
     def test_new_plain_text_preview_preserves_literal_entities_and_markup(self):
         content = 'Quantity 30 Total 1500 Local & team <review> "yes" \'ok\' &amp; literal <script>alert(1)</script>'
