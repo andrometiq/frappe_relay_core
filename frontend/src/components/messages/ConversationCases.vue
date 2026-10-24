@@ -1,4 +1,5 @@
 <script setup>
+import { businessScope } from "../../services/businessScope.js";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { ref, computed, onMounted, watch } from "vue";
@@ -6,7 +7,7 @@ import { Dialog, Button, FormControl, ErrorMessage } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
 import { randomUUID } from "../../services/crypto.js";
 import { coreApi } from "../../services/coreApi";
-const props = defineProps({ contact: String, initialCase: String });
+const props = defineProps({ contact: String, businessDoctype: String, businessName: String, initialCase: String });
 const emit = defineEmits(["close"]);
 const shown = ref(true),
   rows = ref([]),
@@ -192,6 +193,7 @@ async function save() {
       ? await coreApi(
           "cases.create_manual",
           {
+            ...businessScope(props),
             case_type: newType.value,
             contact: props.contact,
             title: newTitle.value,

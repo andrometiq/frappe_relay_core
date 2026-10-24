@@ -49,8 +49,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(result['items']),100);self.assertTrue(result['has_more'])
         self.assertEqual(result['first'],'RELAY-MSG-0000000002')
         self.assertEqual(page_query.call_args_list[1].args[2],101)
+        self.assertTrue({'relay_contact','business_doctype','business_name'}.issubset(page_query.call_args_list[1].args[0]))
         self.api.readable_contact.assert_called_with('RELAY-CON-0000000001')
         self.f.get_doc.return_value.check_permission.assert_called_with('read')
+
+    def test_message_business_context_is_not_returned_without_contact_access(self):
+        self.api.readable_contact.side_effect = PermissionError('private conversation')
+        with self.assertRaises(PermissionError):
+            self.api.messages('RELAY-CON-0000000001')
+        self.f.get_doc.assert_not_called()
 
     def test_invalid_cursors_rejected_before_query(self):
         for kwargs in [{'contact':None},{'contact':{}},{'contact':'RELAY-CON-0000000001','before':'x'}, {'contact':'RELAY-CON-0000000001','limit':'bad'}, {'contact':'RELAY-CON-0000000001','before':'x','after':'y'}]:

@@ -1,4 +1,5 @@
 <script setup>
+import { businessScope } from "../../services/businessScope.js";
 import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { Button, Dialog, FormControl, ErrorMessage } from "@relay/ui";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
@@ -7,6 +8,8 @@ import { randomUUID } from "../../services/crypto.js";
 import { coreApi } from "../../services/coreApi";
 const props = defineProps({
   contact: String,
+  businessDoctype: String,
+  businessName: String,
   messages: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["close", "open"]);
@@ -81,6 +84,7 @@ async function save() {
         name: d.name,
         request_key: d.request_key,
         values: {
+          ...businessScope(d.name ? { businessDoctype: d.business_doctype, businessName: d.business_name } : props),
           title: d.title,
           summary: d.summary,
           category: d.category,
