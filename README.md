@@ -1,50 +1,47 @@
 # Relay Core
 
-Relay Core is a Frappe app for business conversations across WhatsApp, Telegram,
-and email. It links messages to existing Frappe Contacts and business records.
-The separate [Relay Hub](https://github.com/andrometiq/relay_hub) Go service owns
-provider credentials, delivery, and provider callbacks.
+Relay Core is a Frappe app for business conversations across WhatsApp, Telegram and email. It links verified identities to existing Contacts and business records. One person can link to both Supplier and Customer. Reply context, sender choice and triage select the business; permissions remain business-scoped.
 
-Core uses the site's Frappe login, users, permissions, and API credentials. It
-does not add a second login system. All app DocTypes and roles use Relay names.
+[Relay Hub](https://github.com/andrometiq/relay_hub) is the separate Go service for provider credentials, delivery and callbacks. Core uses the site's Frappe login, users and permissions. It does not add a second login system.
 
-## Start here
+The installed workspace includes Telegram and email composers, durable send recovery, AI skills with `get_doc`/`get_list` only, one-ticket handoff and business-event delivery after commit. Channel preferences record business/person consent. Relay history does not block business update, cancel or delete. Live updates use Socket.IO over WebSocket with no periodic HTTP polling fallback.
 
-- [Documentation](docs/README.md): installation, guides, references, and tests.
-- [Install on a test site](docs/core-installation.md).
-- [Reply, react, and view message content](docs/messaging.md).
-- [API and MCP reference](docs/api-reference.md).
-- [Current support and limitations](docs/implementation-status.md).
+| Task | Documentation |
+| --- | --- |
+| Browse guides | [Documentation](docs/README.md) |
+| Install on a test site | [Installation](docs/core-installation.md) |
+| Understand identity and automation | [Business communication](docs/communication-expansion.md) |
+| Compose email | [Email composition](docs/chat-email-recipients.md) |
+| Recover Telegram sends | [Telegram recovery](docs/telegram-connection-repair.md) |
+| Integrate APIs | [API and MCP reference](docs/api-reference.md) |
+| Check support and evidence | [Implementation status](docs/implementation-status.md) |
 
-For the installed UI, build `frontend` with `npm run build:site` and open `/relay`
-on the Frappe site. See the installation guide for account connection settings.
+The 2026-10-24 connected checkpoint passes 10/10 WhatsApp, 11/11 Telegram and 13/13 email cases. The drivers use local fake providers with real Hub/Core APIs and Socket.IO. They do not prove browser rendering, live provider acceptance, bulk campaign support or production capacity.
 
 ## Development
 
-From `frontend/`, install locked dependencies, build, and start a local preview:
+For the installed UI, build from `frontend/` and open `/relay` on the Frappe site:
 
 ```sh
 npm ci
+npm run build:site
+```
+
+For a standalone preview, run from `frontend/`:
+
+```sh
 npm run build
 npm run preview -- --port 18082
 ```
 
-Open the URL printed by Vite. The WhatsApp v1 screens require same-origin Frappe APIs; the standalone preview does not provide
-an authenticated Frappe site. See the [frontend guide](frontend/README.md).
-
-Run backend contracts and frontend data tests as described in the
-[testing guide](docs/testing.md). Database simulations use a separate Frappe test
-site and local provider fixtures; they do not establish live-provider acceptance.
-
-## Repository layout
+Connected screens require same-origin Frappe APIs. The preview does not provide an authenticated site. See the [frontend guide](frontend/README.md) and [testing guide](docs/testing.md).
 
 | Directory | Purpose |
 | --- | --- |
-| `relay_core/` | Frappe APIs, permissions, channel projection, automation, and DocTypes |
-| `frontend/` | Vue components and connected WhatsApp v1 workspaces |
-| `tests/` | Backend contracts and isolated Frappe/database simulations |
-| `specifications/` | Original behavior specifications |
-| `docs/` | User/developer documentation and dated design records |
+| `relay_core/` | Frappe APIs, permissions, channel projection, automation and DocTypes |
+| `frontend/` | Vue components and connected communication workspaces |
+| `tests/` | Backend contracts and isolated site/database tests |
+| `specifications/` | Behavior specifications |
+| `docs/` | User and developer documentation |
 
-Development stays on `develop`. The user reviews and merges into `main`. Keep
-tokens, `.env` files, site configuration, and real business data out of Git.
+Development stays on `develop`. The user reviews and merges into `main`. Keep credentials, site configuration and real business data out of Git.
