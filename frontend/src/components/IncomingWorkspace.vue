@@ -79,7 +79,6 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
   <section class="incoming-workspace">
     <header>
       <div>
-        <h2>Unlinked/ambiguous</h2>
         <p>
           Link incoming messages to the right business contact so your team can
           handle them.

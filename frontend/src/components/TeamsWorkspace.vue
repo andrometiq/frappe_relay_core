@@ -125,7 +125,7 @@ onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(rec
 <template>
   <section class="team-workspace" :class="{ 'has-selection': selected }" aria-label="Business responsibility groups">
     <aside class="team-groups">
-      <header><div><h2>Business groups</h2><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
+      <header><div><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
       <div class="team-filters">
         <RelaySelect v-if="types.length > 1" label="Business type" v-model="doctype" :options="types" :disabled="busy" />
         <TextInput v-model="groupQuery" type="search" placeholder="Search business groups" aria-label="Search business groups"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>

@@ -31,7 +31,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Hub Event'], ['messages', 'incoming'
     <nav class="v1-tabs" aria-label="Activity sections"><Button label="Health & failures" :variant="tab === 'health' ? 'solid' : 'ghost'" @click="tab = 'health'" /><Button label="Delivery & uncertain sends" :variant="tab === 'delivery' ? 'solid' : 'ghost'" @click="tab = 'delivery'" /></nav>
     <DeliveryWorkspace v-if="tab === 'delivery'" />
     <div v-else class="v1-content space-y-5">
-      <WorkspaceHeading title="Activity & health" description="Monitor delivery, callback receipts and recovery in one place."><Button label="Refresh health" icon-left="refresh-cw" :loading="busy" @click="load" /></WorkspaceHeading>
+      <WorkspaceHeading description="Monitor delivery, callback receipts and recovery in one place."><Button label="Refresh health" icon-left="refresh-cw" :loading="busy" @click="load" /></WorkspaceHeading>
       <ErrorMessage :message="error" />
       <LoadingRows v-if="busy && !callbacks && !recovery" :count="3" label="Reading health…" />
       <div class="v1-card-grid health-overview">

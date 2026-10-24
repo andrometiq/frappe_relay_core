@@ -1,9 +1,9 @@
 <script setup>
-defineProps({ title: String, description: String })
+defineProps({ description: String })
 </script>
 <template>
-  <header class="workspace-heading">
-    <div class="workspace-heading-copy"><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
+  <header v-if="description || $slots.default" class="workspace-heading" :class="{ 'workspace-heading--description': !$slots.default }">
+    <p v-if="description" class="workspace-heading-copy">{{ description }}</p>
     <div v-if="$slots.default" class="workspace-heading-actions"><slot /></div>
   </header>
 </template>

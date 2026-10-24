@@ -41,7 +41,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
-    <WorkspaceHeading title="Tickets" description="Review handoffs, assign an owner and follow each conversation." />
+    <WorkspaceHeading description="Review handoffs, assign an owner and follow each conversation." />
     <form class="automation-filter-bar" @submit.prevent="load()">
       <div class="automation-chips" role="group" aria-label="Ticket status">
         <button v-for="value in ['', 'Open', 'In progress', 'Resolved', 'Closed']" :key="value" type="button" class="automation-chip" :aria-pressed="filters.status === value" :disabled="busy" @click="status(value)">{{ value || 'All tickets' }}</button>
@@ -52,7 +52,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
       <Button type="submit" label="Apply" :loading="busy" />
     </form>
     <ErrorMessage :message="error" />
-    <div class="v1-detail-grid">
+    <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
       <div class="space-y-3">
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
         <button v-for="row in page.items" :key="row.name" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
@@ -68,7 +68,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
         <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
         <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><FormControl v-model="owner" label="Assign to user" placeholder="User email" /><Button type="submit" label="Assign" :disabled="busy" /></form>
         <div class="flex flex-wrap gap-3"><Button label="Start work" :disabled="busy || selected.status === 'In progress'" @click="update('update_status', { status: 'In progress' })" /><Button label="Close ticket" :disabled="busy || selected.status === 'Closed'" @click="update('update_status', { status: 'Closed' })" /></div>
-      </article><WorkspaceState v-else compact title="Your next conversation" description="Select a ticket to review its conversation and assignment." icon="message-circle" />
+      </article>
     </div>
   </div></section>
 </template>
