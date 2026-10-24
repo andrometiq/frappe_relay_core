@@ -120,7 +120,7 @@ Call a typed reply:
 | `relay.contacts.list`, `relay.conversation.read` | Business-contact lookup and WhatsApp history |
 | `relay.tickets.create`, `relay.tickets.read`, `relay.tickets.update_status` | Ticket creation/read/status; status updates do not send notifications |
 | `relay.automation.enqueue`, `relay.automation.runs`, `relay.automation.takeover` | Configured automation and human control |
-| `relay.flows.providers`, `relay.flows.references`, `relay.flows.actions` | Discover AI providers and permission-safe workflow inputs |
+| `relay.flows.providers`, `relay.flows.references`, `relay.flows.actions` | Discover AI Models and permission-safe workflow inputs |
 | `relay.flows.generate`, `relay.flows.validate`, `relay.flows.save` | Generate, dry-validate, and persist an AI-authored disabled draft |
 | `relay.flows.publish`, `relay.flows.set_enabled` | Publish an immutable workflow version, then explicitly activate or disable it |
 | `relay.flows.list`, `relay.flows.read`, `relay.flows.runs`, `relay.flows.cancel` | Inspect definitions and permission-checked executions |
@@ -135,6 +135,14 @@ enables, or executes a workflow.
 `relay.telegram.execute` is an alias for the group-operation facade, not arbitrary
 Telegram API execution. MCP preserves Core's role/document checks; it cannot call
 arbitrary Python functions.
+
+For contacts linked to multiple businesses, creation requests must carry the
+active `business_doctype` and `business_name`: top-level arguments for
+`relay_core.collaboration.add` and `relay_core.cases.create_manual`, and fields
+inside `values` for `relay_core.topics.save`. Message references must belong to
+that same business. A note reply can inherit its authorized parent's business
+when no explicit pair is supplied. Unreferenced notes, manual cases and empty
+topics require the active pair; the server never chooses among shared businesses.
 
 ## Errors and limits
 

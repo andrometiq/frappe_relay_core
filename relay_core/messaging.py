@@ -3,6 +3,8 @@
 The browser chooses content, never a provider recipient, group or topic. A
 durable per-user request key prevents resending after ambiguous HTTP failures.
 """
+from contextvars import ContextVar
+
 import base64
 import binascii
 import hashlib
@@ -18,6 +20,9 @@ from relay_core.hub import HubError
 from relay_core.message_types import contacts, location, normalize, preview, text, telegram_vcard
 from relay_core.message_updates import provider_key
 from relay_core.permissions import require_access, readable_contact
+
+
+outgoing_flow = ContextVar('relay_outgoing_flow', default=None)
 
 
 def object_value(value):
@@ -175,7 +180,7 @@ def send(message, kind, data, request_key, quote=1):
         raise ValueError('A stable request key is required')
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
     encoded = json.dumps({'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
-        'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get()}, sort_keys=True, separators=(',', ':'))
+        'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(json.dumps({'tool':tool,'arguments':arguments,'source':source.name}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     key = hashlib.sha256((frappe.session.user + ':' + request_key).encode()).hexdigest()
     existing = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'payload_hash', 'status', 'outbound_message'], as_dict=True, for_update=True)
@@ -195,6 +200,8 @@ def send(message, kind, data, request_key, quote=1):
             raise ValueError('Message business changed before sending')
         if fresh_tool != tool or fresh_arguments != arguments:
             raise ValueError('Conversation changed before sending')
+        if outgoing_flow.get():
+            automation_scope(action, fresh_source)
         if outgoing_run.get():
             run = frappe.get_doc('Relay Automation Run', outgoing_run.get())
             if not frappe.conf.get('relay_automation_enabled'):
@@ -281,6 +288,17 @@ def admission_scope(action):
 
 def automation_scope(action, source):
     payload = object_value(action.payload)
+    if payload.get('flow_run'):
+        from relay_core.flows.service import scope as flow_scope
+        marker = payload['flow_run']
+        run = frappe.get_doc('Relay Flow Run', marker['name'])
+        if run.version != marker['version'] or int(run.generation or 0) != marker['generation']:
+            raise ValueError('Flow provenance changed')
+        actor = frappe.session.user
+        try:
+            flow_scope(run, source, handoff=marker.get('handoff', False))
+        finally:
+            frappe.set_user(actor)
     if payload.get('automation_run'):
         from relay_core.automation.service import scope
         run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
@@ -518,7 +536,12 @@ def reconcile(action):
     receipt = delivery_receipt(doc, channel)
     if receipt is None and doc.status == 'Dispatching':
         # Only a successful empty lookup proves admission can safely resume.
-        source, channel, context = admission_scope(doc)
+        try:
+            source, channel, context = admission_scope(doc)
+        except (ValueError, frappe.PermissionError, frappe.DoesNotExistError):
+            if not payload.get('flow_run'): raise
+            doc.status = 'Rejected'; internal_save(doc); frappe.db.commit()
+            return {'action': doc.name, 'status': doc.status, 'message': None}
         if channel.channel == 'WhatsApp' and context.get('group_id'): raise ValueError('WhatsApp group sending is unavailable in v1')
         if payload.get('routing'):
             from relay_core.business_routing_prompt import prepared as prepare_prompt
