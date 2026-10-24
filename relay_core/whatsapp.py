@@ -83,9 +83,8 @@ def checked_client():
 
 @frappe.whitelist(methods=['POST'])
 def deliveries(after='',cancel_id=None):
-    # Account-wide delivery results are manager-only. Sending remains available
-    # to users through permission-checked business records and contacts.
-    require_access(manage=True)
+    from relay_core.permissions import require_administrator
+    require_administrator()
     if not isinstance(after,str) or (after and not after.isdigit()):frappe.throw('Invalid cursor')
     if cancel_id is not None and (not isinstance(cancel_id,str) or not cancel_id.isdigit()):frappe.throw('Invalid delivery ID')
     try:

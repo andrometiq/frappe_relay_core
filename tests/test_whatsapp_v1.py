@@ -19,7 +19,7 @@ class DispatchRecoveryTests(unittest.TestCase):
         self.channel = _dict(channel='WhatsApp',name='channel')
         self.hub = Mock()
         self.finish = Mock(return_value={'status':'Submitted'})
-        for fixture in (patch.object(messaging,'frappe',SimpleNamespace(get_doc=Mock(return_value=self.action))),
+        for fixture in (patch.object(messaging,'frappe',SimpleNamespace(get_doc=Mock(return_value=self.action), PermissionError=PermissionError, DoesNotExistError=LookupError)),
                         patch.object(messaging,'readable_source',return_value=(self.source,self.channel,{})),
                         patch.object(messaging,'require_reply_window'),patch.object(messaging.whatsapp,'client',return_value=self.hub),
                         patch.object(messaging,'finish',self.finish)):
@@ -425,8 +425,10 @@ class OutgoingProjectionTests(unittest.TestCase):
         row={'id':1,'request_key':'key','operation':'whatsapp.execute','state':'submitted','receipt':{'message_id':'provider'}}
         def finish(*args,**kwargs):action.status='Submitted'
         with patch.object(channel_statuses,'frappe',fake),patch.object(channel_statuses,'connection_value',return_value='fixture'),patch.object(messaging,'readable_source',return_value=(source,channel,{})),patch.object(messaging,'finish',side_effect=finish) as project,patch.object(messaging.whatsapp,'client') as hub:
-            channel_statuses.project_batch(_dict(name='event',account='fixture'),[row])
-            channel_statuses.project_batch(_dict(name='event',account='fixture'),[row])
+            with patch('relay_core.realtime.incoming_changed'):
+                channel_statuses.project_batch(_dict(name='event',account='fixture'),[row])
+            with patch('relay_core.realtime.incoming_changed'):
+                channel_statuses.project_batch(_dict(name='event',account='fixture'),[row])
         project.assert_called_once()
         self.assertEqual(project.call_args.args[-1]['messages'],[{'id':'provider'}])
         self.assertFalse(project.call_args.kwargs['commit'])

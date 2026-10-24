@@ -18,7 +18,9 @@
     "source_flow",
     "closed_at",
     "intent_hash",
-    "assigned_to"
+    "assigned_to",
+    "business_doctype",
+    "business_name"
   ],
   "fields": [
     {
@@ -96,7 +98,21 @@
       "label": "Assigned To",
       "fieldtype": "Link",
       "options": "User"
+    },
+    {
+      "fieldname": "business_doctype",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "label": "Business Type",
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "fieldtype": "Data",
+      "label": "Business Record",
+      "read_only": 1
     }
   ],
-  "permissions": []
+  "permissions": [],
+  "modified": "2026-10-25 12:00:00.000000"
 }

@@ -295,6 +295,8 @@ def takeover(contact, paused=1):
     require_access(manage=True)
     if str(paused) not in ('0', '1'):
         frappe.throw('Paused must be 0 or 1')
+    from relay_core.permissions import readable_contact
+    readable_contact(contact)
     doc = lock_contact(contact); doc.check_permission('read')
     doc.automation_generation = int(doc.automation_generation or 0) + 1
     doc.automation_paused = int(paused)
@@ -344,14 +346,14 @@ def runs(query='', before=None, after=None):
     if query.strip():
         pattern = '%' + '%'.join('\\' + c if c in '%_\\' else c for c in query.strip()) + '%'
         options['or_filters'] = [[field, 'like', pattern] for field in ('name', 'status', 'message')]
-    rows = frappe.get_list('Relay Automation Run', filters=filters,
+    rows = frappe.get_all('Relay Automation Run', filters=filters,
         fields=['name', 'message', 'status', 'ticket', 'reason', 'creation'],
         order_by='name desc' if before else 'name asc', page_length=51, **options)
     more = len(rows) > 50; rows = rows[:50]
     if before: rows.reverse()
     delivery = {}
     if rows:
-        delivery = {row.run: row.status for row in frappe.get_list('Relay Automation Outbox', filters={'run': ['in', [row.name for row in rows]]}, fields=['run', 'status'], page_length=50)}
+        delivery = {row.run: row.status for row in frappe.get_all('Relay Automation Outbox', filters={'run': ['in', [row.name for row in rows]]}, fields=['run', 'status'], page_length=50)}
     from relay_core.permissions import readable_contact
     items=[]
     for row in rows:

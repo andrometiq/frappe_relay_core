@@ -62,7 +62,8 @@ class TicketTests(unittest.TestCase):
         result=self.module.read(self.doc.name)
         self.assertEqual(result['creation'], self.doc.creation)
         self.assertEqual(result['messages'][0]['message'],self.message.name)
-        self.module.readable_contact.side_effect=PermissionError
+        self.doc.check_permission.assert_called_once_with('read')
+        self.doc.check_permission.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.module.read(self.doc.name)
 
 
