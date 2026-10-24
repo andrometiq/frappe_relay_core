@@ -10,6 +10,8 @@
     "channel",
     "account",
     "enabled",
+    "company",
+    "triage_owner",
     "configuration",
     "endpoint",
     "api_secret",
@@ -74,6 +76,20 @@
       "permlevel": 1,
       "depends_on": "eval:doc.channel=='Email'",
       "description": "Trusted configured mailbox identity. Aliases may be comma or newline separated."
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company",
+      "description": "Exactly one company is required before activating AI events."
+    },
+    {
+      "fieldname": "triage_owner",
+      "label": "Triage owner",
+      "fieldtype": "Link",
+      "options": "User",
+      "description": "Enabled Relay staff responsible for unmatched or unresolved messages."
     }
   ],
   "permissions": [
@@ -106,5 +122,5 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-25 12:00:00.000000"
+  "modified": "2026-10-25 12:00:02.000001"
 }

@@ -1,5 +1,4 @@
 """Durable skill decisions; all outbound text uses the message action journal."""
-import hashlib
 import json
 import frappe
 from relay_core.automation.queue import QUEUE
@@ -52,48 +51,83 @@ def context(skill, message):
         raise ValueError('Business identity is missing or ambiguous')
     contact = frappe.get_doc('Relay Contact', message.relay_contact)
     person = frappe.get_doc('Contact', contact.contact)
-    key = hashlib.sha256((message.channel + ':' + (message.sender_endpoint or '')).encode()).hexdigest()
-    if frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact') != contact.name:
-        raise ValueError('Endpoint verification is missing or revoked')
     channel = frappe.get_doc('Relay Channel', message.channel)
     if message.channel != skill.channel or channel.channel not in ('WhatsApp', 'Telegram', 'Email') or not channel.enabled:
         raise ValueError('Skill channel is unavailable')
     if message.direction != 'Incoming' or message.message_type not in ('text', '', None):
         raise ValueError('This skill requires an incoming text message')
-    from relay_core.automation.provenance import context_of, telegram_route
-    from relay_core.email_preferences import automatic_allowed
-    provenance = context_of(message)
-    if provenance and provenance.get('provider') != channel.channel:
-        raise ValueError('Channel provider changed')
-    if channel.channel == 'Telegram':
-        telegram_route(message, '')
-    if channel.channel == 'Email' and (provenance.get('provider') != 'Email' or not automatic_allowed(provenance)):
-        raise ValueError('Automatic email replies are suppressed')
+    from relay_core.identity import authenticated_sender
+    from relay_core.automation.provenance import context_of, conversation_key
+    sender = authenticated_sender(message, channel)
+    conversation = conversation_key(message.channel, message.sender_endpoint, context_of(message))
+    if message.get('conversation_key') != conversation or not channel.get('company'):
+        raise ValueError('Conversation or company scope is missing')
     # A linked but disabled/denied user must never fall back to a broader identity.
     user = person.get('user') or skill.run_as_user
+    from relay_core.permissions import company_allowed
     with as_user(user):
         frappe.get_doc(*business).check_permission('read')
-    return user, business
+        if not company_allowed(channel.company):
+            raise frappe.PermissionError('Conversation company is not accessible')
+    scope = dict(sender, site=frappe.local.site, company=channel.company,
+        channel=message.channel, conversation=conversation, message=message.name,
+        contact=contact.name, person=person.name, business=list(business), user=user)
+    return user, business, scope
 
 
 def decide(skill, message, run_id=None):
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
-    user, business = context(skill, message)
+    from relay_core.ai.tools import fingerprint
+    user, business, scope = context(skill, message)
     text = message.content or ''
     if any(phrase in text.casefold() for phrase in ('talk to a human', 'talk to a person', 'speak to a human', 'hand this to a person')):
         return {'handoff': True, 'reply': '', 'reason': 'Sender requested a person', 'user': user, 'reads': []}
-    # Bounded history lets a sender agree to a previously offered date range.
-    history = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
-        'business_doctype': business[0], 'business_name': business[1], 'name': ['<', message.name]},
-        fields=['direction', 'content'], order_by='name desc', page_length=6) if message.get('conversation_key') else []
-    history = list(reversed(history))
+    history = conversation_history(skill, message, user, business, scope)
     while True:
         prompt = json.dumps({'history': history, 'incoming': text}, default=str)
         if len(prompt) <= MAX_PROMPT_LENGTH:
-            return complete(skill, user, business, prompt, run_id)
+            decision = complete(skill, user, business, prompt, run_id, scope=scope)
+            return dict(decision, scope=fingerprint(scope))
         if not history:
             raise ValueError('Incoming message exceeds the skill prompt budget')
         history.pop(0)
+
+
+def conversation_history(skill, message, user, business, scope):
+    """Keep scoped announcements; old business results require a fresh authorized read."""
+    from relay_core.ai.tools import fingerprint
+    history = []
+    try:
+        with as_user(user):
+            sources = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
+                'business_doctype': business[0], 'business_name': business[1], 'direction': 'Incoming',
+                'name': ['<', message.name]}, fields=['name', 'content'], order_by='name desc', page_length=3)
+            for source in reversed(sources):
+                source = frappe.get_doc('Relay Message', source.name)
+                source.check_permission('read')
+                source.apply_fieldlevel_read_permissions()
+                # The journal is internal coordination metadata. Only a reply with
+                # no business reads and this exact permission-checked source scope
+                # may cross into history; audit records themselves stay private.
+                stored = frappe.db.get_value('Relay Automation Run', {'message': source.name,
+                    'skill': skill.name, 'skill_version': str(skill.modified), 'status': 'Completed'},
+                    'decision')
+                try:
+                    decision = json.loads(stored)
+                except (TypeError, ValueError):
+                    continue
+                if (not isinstance(decision, dict) or decision.get('reads') != [] or decision.get('handoff')
+                        or decision.get('user') != user
+                        or decision.get('scope') != fingerprint(dict(scope, message=source.name))
+                        or not isinstance(decision.get('reply'), str) or len(decision['reply']) > 2000):
+                    continue
+                if not isinstance(source.get('content'), str):
+                    continue
+                history.extend([{'direction': 'Incoming', 'content': source.content},
+                    {'direction': 'Outgoing', 'content': decision['reply']}])
+    except frappe.PermissionError:
+        return []  # Optional history never borrows the run-as user's broader access.
+    return history
 
 
 class Superseded(ValueError):
@@ -183,12 +217,12 @@ def process(name):
 
 
 def delivery_scope(run, skill, message, decision=None):
-    from relay_core.ai.tools import recheck
+    from relay_core.ai.tools import recheck, fingerprint
     decision = decision if decision is not None else json.loads(run.decision)
-    user, business = current(run, skill, message)
-    if decision.get('user') != user:
-        raise ValueError('Conversation user changed')
-    recheck(skill, user, business, decision.get('reads', []))
+    user, business, scope = current(run, skill, message)
+    if decision.get('user') != user or decision.get('scope') != fingerprint(scope):
+        raise ValueError('Conversation scope changed')
+    recheck(skill, user, business, decision.get('reads', []), scope)
 
 
 def send_reply(message, reply):

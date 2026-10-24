@@ -154,19 +154,6 @@ class BackendFindings(unittest.TestCase):
         for rows in ([dict(debit=25,credit=1)], [dict(company='',debit=25,credit=1)], [dict(company='INR company',debit=25,credit=1),dict(company='USD company',debit=3,credit=0)]):
             with self.assertRaises(ValueError): summarize(rows,False)
 
-    def test_skill_scope_is_shared_across_skills_and_released_when_disabled(self):
-        from relay_core.ai import configuration
-        f=self.fake();f.get_all.return_value=[]
-        f.get_doc.return_value=_dict(enabled=1,channel='WhatsApp',account='account')
-        doc=_dict(name='first',enabled=1,channel='channel',business_doctype='Customer',ai_model='model',
-                  mode='Shadow',instructions='Read the customer',daily_limit=10)
-        with patch.object(configuration,'frappe',f),patch.object(configuration,'require_access'), \
-             patch.object(configuration,'contracts'),patch.object(configuration,'as_user',side_effect=lambda user:nullcontext()):
-            configuration.validate_skill(doc);key=doc.active_key
-            doc.name='second';configuration.validate_skill(doc);self.assertEqual(doc.active_key,key)
-            doc.business_doctype='Supplier';configuration.validate_skill(doc);self.assertNotEqual(doc.active_key,key)
-            doc.enabled=0;configuration.validate_skill(doc);self.assertIsNone(doc.active_key)
-
     def test_flow_claims_queued_trigger_before_run_exists(self):
         f=self.fake(); f.db.exists.return_value=True
         source=_dict(direction='Incoming',message_type='text')

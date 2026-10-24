@@ -24,7 +24,8 @@ def contracts(skill):
         raise ValueError('Choose at most 12 read tools')
     names = set()
     for row in value:
-        if not isinstance(row, dict) or set(row) != {'name', 'method', 'doctype', 'fields', 'scope_field'}:
+        required = {'name', 'method', 'doctype', 'fields', 'scope_field'}
+        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field'}:
             raise ValueError('Each tool needs name, method, doctype, fields and scope_field')
         if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', row['name']) or row['name'] in names:
             raise ValueError('Tool names must be distinct lowercase identifiers')
@@ -65,8 +66,9 @@ def schema(contract):
 
 
 class Reader:
-    def __init__(self, skill, user, business):
+    def __init__(self, skill, user, business, scope=None):
         self.skill, self.user, self.business = skill, user, business
+        self.scope = dict(scope) if scope else None
         self.failed = False
         self.evidence = []
         self.ledger_results = []
@@ -75,7 +77,8 @@ class Reader:
         try:
             with as_user(self.user):
                 result = self._read(contract, arguments)
-                self.evidence.append({'tool': contract['name'], 'arguments': arguments, 'digest': fingerprint(result)})
+                self.evidence.append({'tool': contract['name'], 'arguments': arguments,
+                    'scope': fingerprint(self.scope), 'digest': fingerprint(result)})
                 return result
         except Exception:
             self.failed = True
@@ -84,22 +87,34 @@ class Reader:
 
     def _read(self, contract, arguments):
         from frappe_tools.ai.tools import get_readable_meta, get_readable_columns
-        if contract not in contracts(self.skill) or self.business[0] != self.skill.business_doctype:
+        from relay_core.ai.configuration import read_contracts
+        from relay_core.business_access import scoped_document
+        self.check_scope()
+        if (contract not in read_contracts(self.skill, self.scope['provider'])
+                or not {'identity_anchor', 'identity_fields', 'company_field'} <= contract.keys()
+                or self.business[0] != self.skill.business_doctype):
             raise ValueError('Tool is outside the skill')
         doctype, field = contract['doctype'], contract['scope_field']
         meta = get_readable_meta(doctype)
         columns = get_readable_columns(meta)
         if not set(contract['fields']).issubset(columns):
             raise ValueError('Unreadable fields')
-        frappe.get_doc(*self.business).check_permission('read')
+        identity_field = contract['identity_fields'][self.scope['provider']]
+        anchor_filters = {identity_field: self.scope['endpoint']}
+        scoped_document(*self.business, anchor_filters)
         filters = {field: self.business[1]}
+        filters[contract['company_field']] = self.scope['company']
+        if doctype == self.business[0]:
+            filters[identity_field] = self.scope['endpoint']
         scope_meta = meta.get_field(field)
         if scope_meta and scope_meta.fieldtype == 'Dynamic Link':
             filters[scope_meta.options] = self.business[0]
         if doctype == 'GL Entry':
             filters['is_cancelled'] = 0
+        fixed = dict(filters)
         if contract['method'] == 'get_doc':
-            if set(arguments) != {'name'} or not isinstance(arguments['name'], str):
+            if (set(arguments) != {'name'} or not isinstance(arguments['name'], str)
+                    or not 1 <= len(arguments['name']) <= 140):
                 raise ValueError('A document name is required')
             # get_list enforces query hooks as well as get_doc's document hooks.
             filters['name'] = arguments['name']
@@ -127,20 +142,16 @@ class Reader:
         ledger = doctype == 'GL Entry' and contract['method'] == 'get_list' and {'debit', 'credit'}.issubset(contract['fields'])
         fields = list(contract['fields'])
         if ledger and 'company' not in fields:
-            if 'company' not in columns:
-                raise ValueError('Ledger company is not readable')
-            fields.append('company')
+            raise ValueError('Ledger company must be a declared readable field')
         names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit + int(ledger), order_by='name asc')
         if not names:
             raise ValueError('No readable business data; hand off for review')
         result = []
         for row in names[:limit]:
-            doc = frappe.get_doc(doctype, row.name)
-            doc.check_permission('read')
-            if doc.get(field) != self.business[1] or scope_meta and scope_meta.fieldtype == 'Dynamic Link' and doc.get(scope_meta.options) != self.business[0]:
-                raise ValueError('Document scope changed')
-            doc.apply_fieldlevel_read_permissions()
+            doc = scoped_document(doctype, row.name, fixed, fields)
             result.append({key: doc.get(key) for key in fields})
+        self.check_scope()
+        scoped_document(*self.business, anchor_filters)
         if contract['method'] == 'get_doc':
             return result[0]
         if ledger:
@@ -149,15 +160,27 @@ class Reader:
             self.ledger_results.append(result)
         return result
 
+    def check_scope(self):
+        from relay_core.ai.service import context
+        if not self.scope:
+            raise ValueError('Authenticated read scope is required')
+        message = frappe.get_doc('Relay Message', self.scope['message'])
+        user, business, scope = context(self.skill, message)
+        if user != self.user or business != self.business or scope != self.scope:
+            raise ValueError('Sender scope changed')
+
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, separators=(',', ':')).encode()).hexdigest()
 
 
-def recheck(skill, user, business, evidence):
+def recheck(skill, user, business, evidence, scope=None):
     allowed = {row['name']: row for row in contracts(skill)}
-    reader = Reader(skill, user, business)
+    reader = Reader(skill, user, business, scope)
+    reader.check_scope()
     for entry in evidence:
+        if entry.get('scope') != fingerprint(scope):
+            raise ValueError('Read scope changed before delivery')
         result = reader.read(allowed[entry['tool']], **entry['arguments'])
         if fingerprint(result) != entry['digest']:
             raise ValueError('Business data changed before delivery')
