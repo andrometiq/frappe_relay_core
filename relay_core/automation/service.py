@@ -138,6 +138,22 @@ def enqueue(message):
     return create_run(doc)
 
 
+def configuration_failure(message, error):
+    """Record a terminal triage outcome without choosing a competing skill."""
+    doc = frappe.get_doc('Relay Message', message, for_update=True)
+    existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(message)}, 'name', for_update=True)
+    run = frappe.get_doc('Relay Automation Run', existing, for_update=True) if existing else frappe.get_doc({
+        'doctype': 'Relay Automation Run', 'event_key': event_key(message),
+        'message': message, 'execution_user': frappe.session.user,
+        'message_hash': message_hash(doc),
+    })
+    if existing and run.status not in ('Pending', 'Deciding'):
+        return
+    run.status = 'Handoff'
+    run.reason = f'Automation configuration requires review: {error}'
+    internal_save(run, new=not existing)
+
+
 def create_run(doc):
     if doc.get('legacy_source') or doc.direction != 'Incoming' or not frappe.conf.get('relay_automation_enabled'):
         return {'status': 'Ignored'}

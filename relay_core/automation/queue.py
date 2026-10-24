@@ -5,6 +5,7 @@ from functools import wraps
 from uuid import uuid4
 
 import frappe
+from frappe import ValidationError
 from frappe.utils.background_jobs import (
     RQ_JOB_FAILURE_TTL, RQ_RESULTS_TTL, create_job_id, get_queue, truncate_failed_registry,
 )
@@ -147,7 +148,15 @@ def drain(token=None):
             if not messages:
                 break
             for message in messages:
-                _process(message)
+                try:
+                    _process(message)
+                except (ValueError, ValidationError) as error:
+                    # Configuration failures belong to this message, not the site.
+                    # Roll back partial hook intents before recording triage.
+                    frappe.db.rollback()
+                    from relay_core.automation.service import configuration_failure
+                    configuration_failure(message, error)
+                    frappe.db.set_value('Relay Message', message, 'automation_status', 'Complete', update_modified=False)
                 frappe.db.commit()
                 count += 1
                 if time.monotonic() >= deadline:

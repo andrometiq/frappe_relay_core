@@ -18,7 +18,8 @@ def skill_for(message):
     names = frappe.get_all('Relay AI Skill', filters={'channel': message.channel,
         'business_doctype': business[0], 'enabled': 1}, pluck='name', limit_page_length=2)
     if len(names) > 1:
-        raise ValueError('Only one enabled skill is allowed per channel and business type')
+        from relay_core.ai.configuration import skill_conflict
+        raise ValueError(skill_conflict(message.channel, business[0], names))
     return frappe.get_doc('Relay AI Skill', names[0]) if names else None
 
 
