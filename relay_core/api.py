@@ -68,7 +68,8 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     watermark = page_query(['name'], filters, 1, contact=contact, ingestion=True).run(as_dict=True) if not since else []
     rows = page_query(
         ['name', 'channel', 'content', 'direction', 'status', 'creation', 'sent_at', 'provider_context',
-         'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint', 'legacy_author'],
+         'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint', 'legacy_author',
+         'relay_contact', 'business_doctype', 'business_name'],
         filters, limit+1, before, since or after, contact, ingestion=bool(since)).run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]

@@ -1,4 +1,5 @@
 <script setup>
+import { businessScope } from "../../services/businessScope.js";
 import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
@@ -7,6 +8,8 @@ import { coreApi } from "../../services/coreApi";
 import { stableSubmission } from "../../services/submission";
 const props = defineProps({
   contact: String,
+  businessDoctype: String,
+  businessName: String,
   messages: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["close", "open", "clear-messages"]);
@@ -90,6 +93,7 @@ async function submit() {
       );
     else {
       const payload = {
+        ...businessScope(props),
         contact: props.contact,
         body: body.value,
         messages: props.messages.map((m) => m.name),

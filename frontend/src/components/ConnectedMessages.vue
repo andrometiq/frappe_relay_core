@@ -8,6 +8,8 @@ import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
 import ConversationDeliveries from "./messages/ConversationDeliveries.vue";
 import MessageSearch from "./messages/MessageSearch.vue";
+import ConversationCases from "./messages/ConversationCases.vue";
+import ConversationTopics from "./messages/ConversationTopics.vue";
 import InternalNotes from "./messages/InternalNotes.vue";
 import ContactDetails from "./ContactDetails.vue";
 import { objectValue } from './messageContent';
@@ -25,7 +27,15 @@ import { messagesKey } from "../composables/messagesContext";
 
 const state = useMessages();
 const deliveriesOpen = ref(false), contactRecord = ref(null);
+const casesOpen = ref(false), topicsOpen = ref(false);
+const activeBusiness = computed(() => ({
+  businessDoctype: businessType.value || source.value?.business_doctype || "",
+  businessName: businessName.value || source.value?.business_name || "",
+}));
 const notesOpen = ref(false), contextOpen = ref(false), noteMessages = ref([]), noteContact = ref('');
+const noteBusiness = computed(() => noteMessages.value[0]?.business_name
+  ? { businessDoctype: noteMessages.value[0].business_doctype, businessName: noteMessages.value[0].business_name }
+  : activeBusiness.value);
 const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
 const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
 
@@ -126,7 +136,7 @@ async function started(result) {
   }
 }
 function historyRoute(contact) { window.history.pushState(null, '', '#/messages?contact=' + encodeURIComponent(contact)); }
-function closeNotes() { notesOpen.value = false; noteMessages.value = []; noteContact.value = ''; }
+function closeNotes() { casesOpen.value = false; topicsOpen.value = false; notesOpen.value = false; noteMessages.value = []; noteContact.value = ''; }
 function openNote(message) {
   noteContact.value = message ? message.relay_contact : conversationContact.value;
   noteMessages.value = message ? [message] : [];
@@ -217,7 +227,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <div class="conversation-heading-actions">
           <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" />
           <Dropdown :options="[
-            ...(conversationContact ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen = true}, {label:'Internal notes',icon:'message-square',onClick:() => openNote()}] : []),
+            ...(conversationContact ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen = true}, {label:'Internal notes',disabled:busy,icon:'message-square',onClick:() => openNote()}, {label:'Cases',disabled:busy,icon:'briefcase',onClick:() => casesOpen = true}, {label:'Topics',disabled:busy,icon:'list',onClick:() => topicsOpen = true}] : []),
             ...(frappeContact ? [{label:'Business context',icon:'info',onClick:() => contextOpen = !contextOpen}] : []),
             ...(businessName ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen = !summaryOpen}] : []),
             {label:'Search conversation',icon:'search',onClick:() => searchOpen = !searchOpen}
@@ -239,7 +249,9 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
       </nav>
 
       <div v-if="contextOpen && frappeContact" class="v1-context"><ContactDetails :contact="frappeContact" /></div>
-      <InternalNotes v-if="notesOpen && noteContact" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" />
+      <ConversationCases v-if="casesOpen && conversationContact" :key="conversationContact" :contact="conversationContact" v-bind="activeBusiness" @close="casesOpen = false" />
+      <ConversationTopics v-if="topicsOpen && conversationContact" :key="conversationContact" :contact="conversationContact" v-bind="activeBusiness" :messages="contactRows" @close="topicsOpen = false" @open="focusMessage" />
+      <InternalNotes v-bind="noteBusiness" v-if="notesOpen && noteContact" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" />
       <ConversationDeliveries v-if="deliveriesOpen && conversationContact" :key="conversationContact" :contact="conversationContact" @close="deliveriesOpen = false" @open="focusMessage" />
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="searchOpen = false" @open="searchOpen = false; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
