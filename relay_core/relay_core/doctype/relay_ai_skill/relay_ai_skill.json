@@ -18,7 +18,8 @@
     "daily_limit",
     "instructions",
     "allowed_tools",
-    "sample_key"
+    "sample_key",
+    "active_key"
   ],
   "fields": [
     {
@@ -102,6 +103,15 @@
       "hidden": 1,
       "unique": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "active_key",
+      "fieldtype": "Data",
+      "label": "Active Scope",
+      "unique": 1,
+      "hidden": 1,
+      "read_only": 1,
+      "length": 64
     }
   ],
   "permissions": [
@@ -117,5 +127,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-25 12:00:00.000000"
+  "modified": "2026-10-25 12:00:01.000000"
 }

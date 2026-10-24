@@ -11,8 +11,8 @@ from relay_core.ai.ledger import summarize, reply
 
 class LedgerTests(unittest.TestCase):
     def test_decimal_totals_partial_note_and_bounded_reply(self):
-        rows = [dict(posting_date='2026-10-01', voucher_type='Journal Entry', voucher_no='SIM-1', debit=.1, credit=0, remarks='fixture'),
-                dict(posting_date='2026-10-02', voucher_type='Journal Entry', voucher_no='SIM-2', debit=.2, credit=.05, remarks='fixture')]
+        rows = [dict(company='Local Company', posting_date='2026-10-01', voucher_type='Journal Entry', voucher_no='SIM-1', debit=.1, credit=0, remarks='fixture'),
+                dict(company='Local Company', posting_date='2026-10-02', voucher_type='Journal Entry', voucher_no='SIM-2', debit=.2, credit=.05, remarks='fixture')]
         result = summarize(rows, False)
         self.assertEqual(result['totals'], dict(debit='0.3', credit='0.05', net_debit='0.25'))
         self.assertIn('not an opening or closing balance', reply(result))
@@ -25,7 +25,7 @@ class LedgerTests(unittest.TestCase):
 
     def test_non_finite_amounts_are_rejected(self):
         for value in ('NaN', 'Infinity', '-Infinity'):
-            with self.assertRaises(ValueError): summarize([dict(debit=value, credit=0)], False)
+            with self.assertRaises(ValueError): summarize([dict(company='Local Company', debit=value, credit=0)], False)
 
     def test_installer_is_disabled_idempotent_and_preserves_existing_sample(self):
         f = framework()
@@ -47,12 +47,12 @@ class LedgerTests(unittest.TestCase):
 class LedgerContractTests(unittest.TestCase):
     def setUp(self):
         test_ai_skills.ScopedToolTests.setUp(self)
-        self.contract.update(doctype='GL Entry', fields=['name', 'debit', 'credit', 'posting_date'])
+        self.contract.update(doctype='GL Entry', fields=['name', 'company', 'debit', 'credit', 'posting_date'])
         self.skill.allowed_tools = json.dumps([self.contract])
         for row in self.records:
-            row.debit, row.credit, row.is_cancelled = row.amount, 0, 0
-        self.records.append(Doc(name='LED-4', party='SUP-A', party_type='Supplier', debit=50, credit=10, is_cancelled=0))
-        fields = {'party': Doc(fieldtype='Dynamic Link', options='party_type'),
+            row.debit, row.credit, row.is_cancelled, row.company = row.amount, 0, 0, 'Local Company'
+        self.records.append(Doc(name='LED-4', company='Local Company', party='SUP-A', party_type='Supplier', debit=50, credit=10, is_cancelled=0))
+        fields = {'company': Doc(fieldtype='Link'), 'party': Doc(fieldtype='Dynamic Link', options='party_type'),
             'debit': Doc(fieldtype='Currency'), 'credit': Doc(fieldtype='Currency'), 'posting_date': Doc(fieldtype='Date')}
         meta = Doc(get_field=lambda key: fields.get(key))
         shared = types.SimpleNamespace(get_readable_meta=lambda dt: meta, is_sensitive_field=lambda name: False,
@@ -80,11 +80,22 @@ class LedgerContractTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in result['rows']], ['LED-4'])
         self.assertEqual(result['totals'], dict(debit='50', credit='10', net_debit='40'))
         self.assertFalse(result['truncated'])
-        self.records.append(Doc(name='LED-5', party='SUP-A', party_type='Supplier', debit=100, credit=0, is_cancelled=0))
+        self.records.append(Doc(name='LED-5', company='Local Company', party='SUP-A', party_type='Supplier', debit=100, credit=0, is_cancelled=0))
         partial = self.reader.read(self.contract, limit=1)
         self.assertTrue(partial['truncated'])
         self.assertEqual(partial['totals'], result['totals'])
         self.assertIn('Partial totals', reply(partial))
+
+    def test_old_persisted_contract_gets_permission_checked_company(self):
+        self.contract['fields'].remove('company')
+        self.skill.allowed_tools = json.dumps([self.contract])
+        result = self.reader.read(self.contract, limit=1)
+        self.assertEqual(result['totals']['debit'], '1250')
+        self.assertEqual(result['rows'][0]['company'], 'Local Company')
+        self.assertNotIn('company', json.loads(self.skill.allowed_tools)[0]['fields'])
+        shared = sys.modules['frappe_tools.ai.tools']
+        with patch.object(shared, 'get_readable_columns', return_value=set(self.contract['fields'])):
+            with self.assertRaises(ValueError): self.reader.read(self.contract)
 
     def test_model_cannot_include_cancelled_entries(self):
         self.contract['fields'].append('is_cancelled')

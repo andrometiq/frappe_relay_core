@@ -125,6 +125,11 @@ class Reader:
             if type(limit) is not int or not 1 <= limit <= 20:
                 raise ValueError('Invalid row limit')
         ledger = doctype == 'GL Entry' and contract['method'] == 'get_list' and {'debit', 'credit'}.issubset(contract['fields'])
+        fields = list(contract['fields'])
+        if ledger and 'company' not in fields:
+            if 'company' not in columns:
+                raise ValueError('Ledger company is not readable')
+            fields.append('company')
         names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit + int(ledger), order_by='name asc')
         if not names:
             raise ValueError('No readable business data; hand off for review')
@@ -135,7 +140,7 @@ class Reader:
             if doc.get(field) != self.business[1] or scope_meta and scope_meta.fieldtype == 'Dynamic Link' and doc.get(scope_meta.options) != self.business[0]:
                 raise ValueError('Document scope changed')
             doc.apply_fieldlevel_read_permissions()
-            result.append({key: doc.get(key) for key in contract['fields']})
+            result.append({key: doc.get(key) for key in fields})
         if contract['method'] == 'get_doc':
             return result[0]
         if ledger:

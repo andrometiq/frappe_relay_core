@@ -8,6 +8,9 @@ def summarize(rows, truncated):
         if not number.is_finite():
             raise ValueError('Invalid ledger amount')
         return number
+    companies = {row.get('company') for row in rows}
+    if len(companies) > 1 or any(not company for company in companies):
+        raise ValueError('Choose one company before totaling ledger entries')
     debit = sum((amount(row['debit']) for row in rows), Decimal(0))
     credit = sum((amount(row['credit']) for row in rows), Decimal(0))
     return {'rows': rows, 'totals': {'debit': str(debit), 'credit': str(credit), 'net_debit': str(debit - credit)},

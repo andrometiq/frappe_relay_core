@@ -1,4 +1,5 @@
 """Permission-checked skill configuration and non-sending previews."""
+import hashlib
 import frappe
 from relay_core.permissions import require_access
 from relay_core.ai.tools import contracts, as_user
@@ -20,14 +21,13 @@ def validate_skill(doc):
         with as_user(doc.handoff_owner):
             require_access()
     contracts(doc)
+    doc.active_key = hashlib.sha256((str(doc.channel) + ':' + str(doc.business_doctype)).encode()).hexdigest() if doc.enabled else None
     if doc.enabled:
         if not doc.channel or not doc.ai_model:
             raise ValueError('Choose a channel and AI Model before enabling the skill')
         channel = frappe.get_doc('Relay Channel', doc.channel)
         if not channel.enabled or channel.channel not in ('WhatsApp', 'Telegram', 'Email'):
             raise ValueError('Choose an enabled WhatsApp, Telegram or email channel')
-        # Serialize activation so two skills cannot own the same channel/business.
-        frappe.db.get_value('Relay Channel', doc.channel, 'name', for_update=True)
         names = frappe.get_all('Relay AI Skill', filters={'channel': doc.channel,
             'business_doctype': doc.business_doctype, 'enabled': 1}, pluck='name')
         if any(name != doc.name for name in names):
