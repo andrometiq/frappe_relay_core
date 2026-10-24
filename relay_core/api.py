@@ -214,7 +214,7 @@ def conversation_channels(contact):
 
 @frappe.whitelist(methods=['GET'])
 def contact_details(contact):
-    """Read permitted business links and WhatsApp endpoint provenance for a Contact."""
+    """Read permitted business links and channel endpoint provenance for a Contact."""
     require_access()
     person = frappe.get_doc('Contact', contact)
     person.check_permission('read')
@@ -232,7 +232,8 @@ def contact_details(contact):
                              limit_page_length=100)
         for row in rows:
             channel = frappe.get_doc('Relay Channel', row.channel)
-            if channel.channel == 'WhatsApp' and channel.has_permission('read'):
+            if channel.has_permission('read'):
+                row.provider = channel.channel
                 endpoints.append(row)
     return {'name': person.name, 'label': person.full_name or person.name,
             'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
