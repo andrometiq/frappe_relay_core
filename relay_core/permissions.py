@@ -184,3 +184,29 @@ def can_read_contact_as(name,user):
     relay = frappe.get_doc('Relay Contact', name)
     return (assignment_allowed(name, user) and contact_business_allowed(relay, user)
             and relay.has_permission('read', user=user))
+
+
+def company_allowed(company, user=None):
+    """Company keys are snapshots, but still require current query/document access."""
+    import frappe
+    user = user or frappe.session.user
+    if not company or not frappe.has_permission('Company', 'read', user=user):
+        return False
+    query = frappe.qb.get_query('Company', filters={'name': company}, fields=['name'],
+                                ignore_permissions=False, user=user, limit=1)
+    return bool(query.run()) and frappe.get_doc('Company', company).has_permission('read', user=user)
+
+
+def company_condition(doctype, user=None):
+    import frappe
+    user = user or frappe.session.user
+    if user == 'Administrator':
+        return '1=1'
+    table = '`tab' + doctype + '`'
+    legacy = f"COALESCE({table}.company,'')=''"
+    if not frappe.has_permission('Company', 'read', user=user):
+        return legacy
+    companies = frappe.qb.get_query('Company', fields=['name'], ignore_permissions=False,
+                                    user=user, order_by='').get_sql()
+    # Existing manual tickets predate company snapshots.
+    return f"({legacy} OR {table}.company IN ({companies}))"

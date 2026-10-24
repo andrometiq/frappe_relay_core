@@ -58,7 +58,7 @@ class LedgerTests(unittest.TestCase):
                 with patch.object(Doc, 'save') as save:
                     sample.install_samples()
                     self.assertEqual(save.call_count, int(upgraded))
-                    expected = before | ({'allowed_tools': json.dumps([sample.LEDGER_TOOL])} if upgraded else {})
+                    expected = before | ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'enabled': 0} if upgraded else {})
                     self.assertEqual(skill, expected)
                     sample.install_samples()
                     self.assertEqual(save.call_count, int(upgraded), 'Upgrade must be idempotent')
@@ -70,17 +70,16 @@ class LedgerContractTests(unittest.TestCase):
         self.contract.update(doctype='GL Entry', fields=['name', 'company', 'debit', 'credit', 'posting_date'])
         self.skill.allowed_tools = json.dumps([self.contract])
         for row in self.records:
-            row.debit, row.credit, row.is_cancelled, row.company = row.amount, 0, 0, 'Local Company'
-        self.records.append(Doc(name='LED-4', company='Local Company', party='SUP-A', party_type='Supplier', debit=50, credit=10, is_cancelled=0))
-        fields = {'company': Doc(fieldtype='Link'), 'party': Doc(fieldtype='Dynamic Link', options='party_type'),
+            row.debit, row.credit, row.is_cancelled = row.amount, 0, 0
+        self.records.append(Doc(name='LED-5', company='Sim Company', party='SUP-A', party_type='Supplier', debit=50, credit=10, is_cancelled=0))
+        fields = {'company': Doc(fieldtype='Link', options='Company'), 'phone': Doc(fieldtype='Data'),
+            'party_type': Doc(fieldtype='Link', options='DocType'), 'is_cancelled': Doc(fieldtype='Check'), 'party': Doc(fieldtype='Dynamic Link', options='party_type'),
             'debit': Doc(fieldtype='Currency'), 'credit': Doc(fieldtype='Currency'), 'posting_date': Doc(fieldtype='Date')}
         meta = Doc(get_field=lambda key: fields.get(key))
         shared = types.SimpleNamespace(get_readable_meta=lambda dt: meta, is_sensitive_field=lambda name: False,
             get_readable_columns=lambda meta: {'name', *fields})
-        self.patch.stop()
-        self.patch = patch.dict(sys.modules, {'frappe_tools.ai.tools': shared})
-        self.patch.start()
-        self.addCleanup(self.patch.stop)
+        extra = patch.dict(sys.modules, {'frappe_tools.ai.tools': shared})
+        extra.start(); self.addCleanup(extra.stop)
         listing = self.f.get_list.side_effect
         self.f.get_list.side_effect = lambda dt, filters, **kw: listing(dt, filters, **kw)[:kw['page_length']]
 
@@ -89,33 +88,27 @@ class LedgerContractTests(unittest.TestCase):
         self.assertEqual(result['totals'], dict(debit='1250', credit='0', net_debit='1250'))
         self.assertTrue(result['truncated'])
         self.assertEqual([row['name'] for row in result['rows']], ['LED-1'])
-        self.assertEqual(self.f.get_list.call_args.kwargs['page_length'], 2)
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'party': 'SUP-A', 'party_type': 'Supplier', 'is_cancelled': 0})
+        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['page_length'], 2)
+        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters'], {'party': 'SUP-A', 'party_type': 'Supplier', 'is_cancelled': 0, 'company': 'Sim Company'})
         self.assertEqual(self.reader.ledger_results, [result])
         self.assertEqual(len(self.reader.evidence), 1)
 
     def test_cancelled_rows_do_not_consume_limit_or_inflate_totals_or_truncation(self):
         self.records[0].is_cancelled = 1  # Previously contributed 1,250 before the limit.
         result = self.reader.read(self.contract, limit=1)
-        self.assertEqual([row['name'] for row in result['rows']], ['LED-4'])
+        self.assertEqual([row['name'] for row in result['rows']], ['LED-5'])
         self.assertEqual(result['totals'], dict(debit='50', credit='10', net_debit='40'))
         self.assertFalse(result['truncated'])
-        self.records.append(Doc(name='LED-5', company='Local Company', party='SUP-A', party_type='Supplier', debit=100, credit=0, is_cancelled=0))
+        self.records.append(Doc(name='LED-6', company='Sim Company', party='SUP-A', party_type='Supplier', debit=100, credit=0, is_cancelled=0))
         partial = self.reader.read(self.contract, limit=1)
         self.assertTrue(partial['truncated'])
         self.assertEqual(partial['totals'], result['totals'])
         self.assertIn('Partial totals', reply(partial))
 
-    def test_old_persisted_contract_gets_permission_checked_company(self):
+    def test_ledger_cannot_return_undeclared_company(self):
         self.contract['fields'].remove('company')
         self.skill.allowed_tools = json.dumps([self.contract])
-        result = self.reader.read(self.contract, limit=1)
-        self.assertEqual(result['totals']['debit'], '1250')
-        self.assertEqual(result['rows'][0]['company'], 'Local Company')
-        self.assertNotIn('company', json.loads(self.skill.allowed_tools)[0]['fields'])
-        shared = sys.modules['frappe_tools.ai.tools']
-        with patch.object(shared, 'get_readable_columns', return_value=set(self.contract['fields'])):
-            with self.assertRaises(ValueError): self.reader.read(self.contract)
+        with self.assertRaises(ValueError): self.reader.read(self.contract, limit=1)
 
     def test_model_cannot_include_cancelled_entries(self):
         self.contract['fields'].append('is_cancelled')

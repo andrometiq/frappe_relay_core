@@ -2,6 +2,40 @@
 import re
 
 
+def authenticated_sender(message, channel):
+    """Resolve a private sender from persisted transport evidence, never message text."""
+    import hashlib
+    import frappe
+    from relay_core.automation.provenance import context_of, telegram_route
+    from relay_core.email_preferences import automatic_allowed
+
+    provider = channel.channel
+    evidence = context_of(message)
+    endpoint = normalize(provider, message.sender_endpoint)
+    if evidence.get('provider') != provider:
+        raise ValueError('Authenticated sender evidence is required')
+    if provider == 'Telegram':
+        telegram_route(message, '')
+        if (evidence.get('chat_type') != 'private' or evidence.get('sender_chat_id')
+                or str(evidence.get('participant_id')) != endpoint):
+            raise ValueError('Personal records require a private sender')
+    elif provider == 'WhatsApp':
+        if (not endpoint.isdigit() or evidence.get('group_id')
+                or normalize(provider, evidence.get('participant_id')) != endpoint):
+            raise ValueError('Personal records require a private sender')
+    elif not automatic_allowed(evidence):
+        raise ValueError('Authenticated email sender is required')
+    key = hashlib.sha256((message.channel + ':' + endpoint).encode()).hexdigest()
+    # Canonical enrollment keys are indexed and unique. Legacy aliases need explicit
+    # enrollment repair; reading never scans records to discover matching numbers.
+    binding = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key},
+        ['name', 'channel', 'endpoint', 'relay_contact', 'verified'], as_dict=True)
+    if (not binding or not binding.verified or binding.channel != message.channel
+            or binding.endpoint != endpoint or binding.relay_contact != message.relay_contact):
+        raise ValueError('Endpoint verification is missing or revoked')
+    return {'provider': provider, 'endpoint': endpoint, 'binding': binding.name}
+
+
 def normalize(provider, value):
     if not isinstance(value, str) or not value or len(value) > 200 or any(ord(c) < 32 for c in value):
         raise ValueError('Invalid endpoint')

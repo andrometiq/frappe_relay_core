@@ -3,6 +3,29 @@ import json
 import frappe
 
 
+def scoped_document(doctype, name, filters, fields=()):
+    """Read one name through query hooks, then recheck fixed scope and fields."""
+    from frappe_tools.ai.tools import get_readable_meta, get_readable_columns
+    meta = get_readable_meta(doctype)
+    required = set(fields) | set(filters)
+    if not required.issubset(get_readable_columns(meta)):
+        raise ValueError('Unreadable scope or result fields')
+    if 'name' in filters and filters['name'] != name:
+        raise ValueError('Document is outside the selected scope')
+    if not frappe.get_list(doctype, filters=dict(filters, name=name), fields=['name'], page_length=1):
+        raise ValueError('No readable scoped document')
+    doc = frappe.get_doc(doctype, name)
+    doc.check_permission('read')
+    if any(doc.get(key) != value for key, value in filters.items()):
+        raise ValueError('Document scope changed')
+    if not required.issubset(get_readable_columns(meta)):
+        raise ValueError('Field access changed')
+    doc.apply_fieldlevel_read_permissions()
+    if any(doc.get(key) != value for key, value in filters.items()):
+        raise ValueError('Document scope is not readable')
+    return doc
+
+
 def candidates(contact):
     person=frappe.db.get_value('Relay Contact',contact,'contact')
     if not person:return []

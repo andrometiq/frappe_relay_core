@@ -22,13 +22,13 @@ def route(ai_model):
     return account, model, agent.get_known_secrets(account), options
 
 
-def complete(skill, user, business, text, run_id=None):
+def complete(skill, user, business, text, run_id=None, *, scope=None):
     if len(text) > MAX_PROMPT_LENGTH:
         raise ValueError('Incoming message exceeds the skill prompt budget')
     from frappe_tools.ai import agent
     from frappe_tools.utils import llm
     account, model, secrets, options = route(skill.ai_model)
-    reader = Reader(skill, user, business)
+    reader = Reader(skill, user, business, scope)
     tools = [agent.Tool(row['name'], f"{row['method']} {row['doctype']} within this conversation's business",
         schema(row), partial(reader.read, row)) for row in contracts(skill)]
     class SkillRun(agent.AgentRun):

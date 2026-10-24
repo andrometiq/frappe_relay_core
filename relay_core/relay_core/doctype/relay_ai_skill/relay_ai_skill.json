@@ -16,8 +16,14 @@
     "handoff_owner",
     "mode",
     "daily_limit",
+    "target",
+    "reply_style",
+    "search_confirmation",
+    "exact_trigger",
+    "execution_policy",
     "instructions",
     "allowed_tools",
+    "allowed_actions",
     "sample_key",
     "active_key"
   ],
@@ -85,16 +91,18 @@
     },
     {
       "fieldname": "instructions",
-      "label": "Instructions",
+      "label": "Memory and rules",
       "fieldtype": "Long Text",
-      "reqd": 1
+      "reqd": 1,
+      "ignore_xss_filter": 1
     },
     {
       "fieldname": "allowed_tools",
-      "label": "Allowed Tools",
+      "label": "Read references",
       "fieldtype": "JSON",
       "default": "[]",
-      "reqd": 1
+      "reqd": 1,
+      "description": "One contract store: get_doc/get_list, fields, business scope_field, identity_anchor, provider identity_fields and company_field."
     },
     {
       "fieldname": "sample_key",
@@ -107,11 +115,53 @@
     {
       "fieldname": "active_key",
       "fieldtype": "Data",
-      "label": "Active Scope",
+      "label": "Legacy active scope",
       "unique": 1,
       "hidden": 1,
       "read_only": 1,
       "length": 64
+    },
+    {
+      "fieldname": "target",
+      "label": "Target",
+      "fieldtype": "Small Text",
+      "mandatory_depends_on": "eval:doc.enabled",
+      "ignore_xss_filter": 1
+    },
+    {
+      "fieldname": "reply_style",
+      "label": "Reply style",
+      "fieldtype": "Small Text",
+      "ignore_xss_filter": 1
+    },
+    {
+      "fieldname": "search_confirmation",
+      "label": "Search confirmation",
+      "fieldtype": "Select",
+      "options": "Always\nWhen required",
+      "default": "Always",
+      "description": "Ledger searches always require date-range confirmation. Other searches must be announced before reading."
+    },
+    {
+      "fieldname": "exact_trigger",
+      "label": "Exact trigger",
+      "fieldtype": "Data",
+      "length": 140
+    },
+    {
+      "fieldname": "execution_policy",
+      "label": "Execution policy",
+      "fieldtype": "Select",
+      "options": "Ticket only\nExecute",
+      "default": "Ticket only",
+      "description": "Execute follows the written steps in order. Business documents stay draft and must link to the episode ticket; staff submit them."
+    },
+    {
+      "fieldname": "allowed_actions",
+      "label": "Allowed actions",
+      "fieldtype": "JSON",
+      "default": "[]",
+      "description": "Registered AI-safe Core actions. Each draft action selects its permitted DocType and typed fields; no submission actions."
     }
   ],
   "permissions": [
@@ -127,5 +177,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-25 12:00:01.000000"
+  "modified": "2026-10-25 12:00:02.000001"
 }
