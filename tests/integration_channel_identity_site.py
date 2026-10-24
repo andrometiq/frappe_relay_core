@@ -35,9 +35,9 @@ try:
         duplicate = frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': email_binding.channel,
             'relay_contact': fixture.contact.name, 'endpoint': email_binding.endpoint.upper(), 'verified': 1})
         fails(lambda: duplicate.insert(), (frappe.UniqueValidationError, frappe.DuplicateEntryError))
-        other_person = frappe.get_doc({'doctype': 'Contact', 'first_name': 'Local C2 other ' + fixture.stamp,
+        other_person = frappe.get_doc({'doctype': 'Contact', 'first_name': 'Sim Other Contact ' + fixture.stamp,
             'links': [{'link_doctype': fixture.customer.doctype, 'link_name': fixture.customer.name}]}).insert()
-        other = frappe.get_doc({'doctype': 'Relay Contact', 'contact': other_person.name, 'display_name': 'Local C2 other'}).insert()
+        other = frappe.get_doc({'doctype': 'Relay Contact', 'contact': other_person.name, 'display_name': 'Sim Other Contact'}).insert()
         frappe.db.commit()
         fails(lambda: enrollment.bind(event.name, identifier, other.name, fixture.customer.doctype, fixture.customer.name))
         email_binding.reload(); email_binding.relay_contact = other.name
@@ -85,4 +85,6 @@ try:
         check_business_lifecycle(fixture.customer)
         print('PASS one person across three channels; normalized conflicts, immutable ownership, revocation, callback replay and business lifecycle')
 finally:
+    from channel_identity_fixtures import cleanup
+    if "fixture" in globals(): cleanup(fixture)
     frappe.destroy()

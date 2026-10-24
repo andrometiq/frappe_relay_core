@@ -40,14 +40,14 @@ def main():
             company_name = frappe.db.get_value('Fiscal Year Company',{'parent':fiscal_year},'company')
             company = frappe.get_doc('Company',company_name or frappe.db.get_value('Company',{},'name'))
             item = frappe.get_doc(dict(doctype='Item',item_code='LOCAL-C3-' + fixture.stamp,
-                item_name='Local C3 fabric',item_group=frappe.db.get_value('Item Group',{'is_group':0},'name'),
+                item_name='Sim Fabric ' + fixture.stamp,item_group=frappe.db.get_value('Item Group',{'is_group':0},'name'),
                 stock_uom=frappe.db.get_value('UOM',{},'name'),is_stock_item=0,
                 gst_hsn_code=frappe.db.get_value('GST HSN Code',{},'name'))).insert()
             frappe.db.commit()
             for provider,binding in (('Telegram',tg),('Email',em)):
                 prefs[0].priority = 1 if provider == 'Telegram' else 20
                 prefs[0].save(); frappe.db.commit()
-                rule = frappe.get_doc(dict(doctype='Relay Business Event Rule', title='Local C3 ' + provider,
+                rule = frappe.get_doc(dict(doctype='Relay Business Event Rule', title='Sim ' + provider + ' Event ' + fixture.stamp,
                     enabled=1, use_preferences=1, source_doctype='Sales Order', event='after_insert', recipient_field='customer',
                     business_doctype='Customer', contact=fixture.person.name, channel=binding.channel,
                     run_as_user=fixture.actor, parameter_mapping=json.dumps(['name','total_qty','grand_total']),
@@ -96,8 +96,8 @@ def main():
                 args = client.return_value.call_tool.call_args.args[1]
                 assert '25' in args.get('text',args.get('body',''))
                 if provider == 'Email':
-                    from html import escape
-                    assert escape(rule.email_signature) in args['html'], repr(args['html'])
+                    from html import escape, unescape
+                    assert escape(unescape(rule.email_signature)) in args['html'], repr(args['html'])
                     assert args['html'] == json.loads(original)['data']['html']
                     assert args['subject'] == 'Order ' + order.name
                 action = frappe.get_doc('Relay Message Action',delivery.action)

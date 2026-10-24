@@ -3,6 +3,7 @@
 Requires migrated Core metadata and the existing Relay Test Business fixture.
 No migration, configuration writes, cleanup or external delivery is performed.
 """
+from site_labels import run_label
 import hashlib
 import hmac
 import json
@@ -27,7 +28,7 @@ frappe.db.sql('select 1')
 frappe.set_user('Administrator')
 frappe.flags.mute_emails = True
 frappe.conf.relay_automation_enabled = 0
-stamp = str(time.time_ns())
+stamp = run_label()
 account, secret = 'wa-v1-' + stamp, 'local-only-callback-secret-' + stamp
 connection = lambda key: {'relay_hub_account':account,'relay_callback_secret':secret}.get(key)
 patches = [patch.object(module,'connection_value',side_effect=connection)

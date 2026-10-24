@@ -81,7 +81,8 @@ def main():
         with configured(fixture_data):
             channel_ai_cases(fixture_data)
     finally:
-        frappe.db.rollback()
+        from channel_identity_fixtures import cleanup
+        cleanup(fixture_data)
         frappe.destroy()
 
 
@@ -98,7 +99,7 @@ def channel_ai_cases(fixture):
     from relay_core.message_updates import provider_key
 
     frappe.set_user('Administrator')
-    fixture.customer.customer_details = 'Local C3 order quantity 25, amount 1250'
+    fixture.customer.customer_details = 'Sim Order quantity 25, amount 1250'
     fixture.customer.save(); frappe.db.commit()
     contract = dict(name='customer', method='get_doc', doctype='Customer',
                     fields=['name', 'customer_details'], scope_field='name')
@@ -119,10 +120,10 @@ def channel_ai_cases(fixture):
         assert '1250' in str(rows)
         return dict(reply='Order quantity 25, amount 1250', handoff=False, reason='', user=user, reads=reader.evidence)
 
-    for provider, address in [('Telegram', '-9555000418'), ('Email', 'ai-' + fixture.stamp + '@example.invalid')]:
+    for provider, address in [('Telegram', '-9555000418'), ('Email', 'ai-' + fixture.stamp.lower() + '@example.invalid')]:
         binding = endpoint(fixture, provider, address)
         skill = frappe.get_doc(dict(doctype='Relay AI Skill', name='LOCAL-C3-AI-' + provider + '-' + fixture.stamp,
-            title='Local C3 channel skill', enabled=1, ai_model=model_record.name, channel=binding.channel, business_doctype='Customer',
+            title='Sim ' + provider + ' Skill ' + fixture.stamp, enabled=1, ai_model=model_record.name, channel=binding.channel, business_doctype='Customer',
             run_as_user=fixture.actor, handoff_owner=fixture.actor, mode='Automatic', daily_limit=100,
             instructions='Read this customer only. Hand off anything outside the skill.', allowed_tools=json.dumps([contract])))
         # No model account or credentials: the external AI boundary is replaced below.
@@ -137,7 +138,7 @@ def channel_ai_cases(fixture):
                 context.update(chat_id=int(address), chat_type='supergroup', message_id=provider_counter, message_thread_id=topic)
             else:
                 context.update(message_id=identifier, email_thread_id='<thread-' + fixture.stamp + '@example.invalid>',
-                    subject='Local C3 order 25', references=['<thread-' + fixture.stamp + '@example.invalid>'],
+                    subject='Sim Order 25', references=['<thread-' + fixture.stamp + '@example.invalid>'],
                     authentication={'status':'pass'}, auto_submitted=automatic)
             doc = frappe.get_doc(dict(doctype='Relay Message', relay_contact=fixture.contact.name, channel=binding.channel,
                 sender_endpoint=address, direction='Incoming', content=body, message_type='text', status='Sent',
@@ -168,7 +169,7 @@ def channel_ai_cases(fixture):
                 assert args['chat_id'] == int(address) and args['message_thread_id'] == 7
                 assert '1250' in args['text']
             else:
-                assert args['subject'] == 'Re: Local C3 order 25'
+                assert args['subject'] == 'Re: Sim Order 25'
                 assert args['in_reply_to'] == context['message_id'] and args['references'][-1] == context['message_id']
                 assert args['auto_submitted'] is True and args['cc'] == [] and args['bcc'] == []
                 outgoing = frappe.get_doc('Relay Message',action.outbound_message)

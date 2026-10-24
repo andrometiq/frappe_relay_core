@@ -1,4 +1,5 @@
 """Representative local people, businesses and authenticated channel callbacks."""
+from site_labels import run_label
 import hashlib
 import hmac
 import json
@@ -15,18 +16,18 @@ from relay_core.permissions import sequential_name
 
 
 def scenario():
-    stamp = str(time.time_ns())
-    customer = business('C2 customer ' + stamp)
-    supplier = frappe.get_doc({'doctype': 'Supplier', 'supplier_name': 'Local Relay C2 ' + stamp,
+    stamp = run_label()
+    customer = business('Customer ' + stamp)
+    supplier = frappe.get_doc({'doctype': 'Supplier', 'supplier_name': 'Sim Supplier ' + stamp,
         'supplier_group': frappe.db.get_value('Supplier Group', {'is_group': 0}, 'name'),
         'supplier_type': 'Company'}).insert()
     for doc in (customer, supplier):
         if not frappe.db.exists('Relay Contact Type', {'business_doctype': doc.doctype, 'enabled': 1}):
             raise AssertionError('Enable the existing business type for local channel validation: ' + doc.doctype)
-    person = frappe.get_doc({'doctype': 'Contact', 'first_name': 'Local C2 ' + stamp,
+    person = frappe.get_doc({'doctype': 'Contact', 'first_name': 'Sim Shared Contact ' + stamp,
         'links': [{'link_doctype': doc.doctype, 'link_name': doc.name} for doc in (customer, supplier)]}).insert()
     contact = frappe.get_doc({'doctype': 'Relay Contact', 'contact': person.name,
-        'display_name': 'Local C2 ' + stamp}).insert()
+        'display_name': 'Sim Shared Contact ' + stamp}).insert()
     account = 'c2-' + stamp
     channels = {provider: frappe.get_doc({'doctype': 'Relay Channel', 'channel': provider,
         'account': account, 'enabled': 1}).insert(set_name=sequential_name('channel'))
@@ -35,7 +36,7 @@ def scenario():
     frappe.get_doc({'doctype': 'User Permission', 'user': actor, 'allow': 'Customer',
                    'for_value': customer.name, 'apply_to_all_doctypes': 1}).insert()
     allowed_supplier = frappe.copy_doc(supplier)
-    allowed_supplier.supplier_name = 'Local C2 unrelated supplier ' + stamp
+    allowed_supplier.supplier_name = 'Sim Unrelated Supplier ' + stamp
     allowed_supplier.insert()
     frappe.get_doc({'doctype': 'User Permission', 'user': actor, 'allow': 'Supplier',
                    'for_value': allowed_supplier.name, 'apply_to_all_doctypes': 1}).insert()
@@ -65,7 +66,7 @@ def incoming(fixture, provider, sender, body, *, raw=None, identifier=None):
             'type': 'text', 'timestamp': str(int(time.time())), 'text': {'body': body}}]}}]}]}
     else:
         payload = {'channel': provider, 'direction': 'inbound', 'provider_id': identifier,
-                   'sender': sender, 'body': body, 'subject': 'Local C2 quantity 25', 'payload': raw or {}}
+                   'sender': sender, 'body': body, 'subject': 'Sim Shared Contact quantity 25', 'payload': raw or {}}
     secret = 'local-c2-callback-fixture-secret-only'
     data = json.dumps({'account': fixture.account, 'events': [{'id': event_id, 'payload': payload}]}).encode()
     timestamp = str(int(time.time()))
@@ -105,3 +106,21 @@ def fails(call, exceptions=(frappe.PermissionError, frappe.ValidationError, Valu
         frappe.db.rollback()
     else:
         raise AssertionError('Unauthorized or invalid operation succeeded')
+
+
+def cleanup(fixture):
+    """Disable only this scenario's local configuration; retain its evidence."""
+    frappe.db.rollback()
+    frappe.set_user('Administrator')
+    channels = [channel.name for channel in fixture.channels.values()]
+    for doctype in ('Relay AI Skill', 'Relay Flow', 'Relay Email Rule', 'Relay Business Event Rule'):
+        for name in frappe.get_all(doctype, filters={'channel': ['in', channels]}, pluck='name'):
+            values = {'enabled': 0}
+            if doctype == 'Relay AI Skill':
+                values['active_key'] = None
+            frappe.db.set_value(doctype, name, values)
+    for name in frappe.get_all('Relay Message', filters={'channel':['in',channels], 'automation_status':'Pending'}, pluck='name'):
+        frappe.db.set_value('Relay Message', name, 'automation_status', 'Complete', update_modified=False)
+    for channel in channels:
+        frappe.db.set_value('Relay Channel', channel, 'enabled', 0)
+    frappe.db.commit()

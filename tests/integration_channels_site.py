@@ -10,6 +10,7 @@ deterministic fixtures; HubClient performs its real HTTP handshake and send
 against a loopback MCP simulator. No provider credentials or external delivery.
 Synthetic records are retained in the isolated database for inspection.
 """
+from site_labels import run_label
 
 from contextlib import contextmanager
 import hashlib
@@ -67,7 +68,7 @@ if not frappe.get_meta('Relay Automation Run').has_field('message_hash'):
     frappe.reload_doc('relay_core', 'doctype', 'relay_automation_run', force=True)
 frappe.db.commit()
 
-RUN = str(time.time_ns())
+RUN = run_label()
 ACCOUNT = 'channels-sim-' + RUN
 SECRET = 'synthetic-callback-secret-' + RUN
 TOKEN = 'synthetic-hub-token-' + RUN + '-not-valid-externally'

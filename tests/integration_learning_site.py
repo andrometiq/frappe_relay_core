@@ -1,4 +1,5 @@
 """Reviewed instructions are evaluated without side effects and published immutably."""
+from site_labels import run_label
 import os,time,json
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +11,7 @@ assert Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()==sites.resolve(
 os.chdir(sites);frappe.init(site='relay-ai-test.local');frappe.connect()
 assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.set_user('Administrator');frappe.flags.mute_emails=True;frappe.conf.relay_automation_enabled=1
-run=str(time.time_ns());actor='automation-test@example.invalid'
+run = run_label();actor='automation-test@example.invalid'
 channel=frappe.get_doc(dict(doctype='Relay Channel',channel='Telegram',account='learning-'+run,enabled=1)).insert()
 provider=frappe.get_doc(dict(doctype='Relay AI Provider',provider='OpenAI',model='fixture',api_key='synthetic-key',enabled=1)).insert()
 policy=frappe.get_doc(dict(doctype='Relay Automation Policy',channel=channel.name,provider=provider.name,execution_user=actor,business_doctype='Relay Test Business',enabled=1,mode='Shadow',daily_limit=100)).insert();frappe.db.commit()

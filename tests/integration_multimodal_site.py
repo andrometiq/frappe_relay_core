@@ -54,7 +54,10 @@ def main():
                 service.takeover(f.contact.name,0);frappe.db.commit()
             frappe.db.set_value('Relay AI Skill',skill.name,'enabled',0);frappe.db.commit()
             print('PASS unsupported media creates one assigned business handoff without model/download; historical transcript denies other business')
-    finally:frappe.db.rollback();frappe.destroy()
+    finally:
+        from channel_identity_fixtures import cleanup
+        cleanup(f)
+        frappe.destroy()
 
 
 if __name__=='__main__':main()

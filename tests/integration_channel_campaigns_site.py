@@ -1,4 +1,5 @@
 """Telegram/email campaign recovery using the guarded database and fake Hub boundary."""
+from site_labels import run_label
 import os,json,time
 from pathlib import Path
 from unittest.mock import patch
@@ -9,7 +10,7 @@ from relay_core import campaigns,whatsapp
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator')
 frappe.reload_doc('relay_core','doctype','relay_campaign',force=True)
-stamp=str(time.time_ns());account='multi-campaign-'+stamp
+stamp = run_label();account='multi-campaign-'+stamp
 business=frappe.get_doc({'doctype':'Relay Inbox Simulation Business','title':'Multi campaign '+stamp}).insert()
 person=frappe.get_doc({'doctype':'Contact','first_name':'Multi campaign '+stamp,'links':[{'link_doctype':business.doctype,'link_name':business.name}]}).insert()
 contact=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,'display_name':'Campaign fixture'}).insert()

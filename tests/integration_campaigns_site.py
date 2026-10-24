@@ -1,4 +1,5 @@
 """Campaign batching, lost-admission recovery and cancellation on the guarded DB."""
+from site_labels import run_label
 import os,time,json
 from pathlib import Path
 from unittest.mock import patch
@@ -8,7 +9,7 @@ import frappe
 from relay_core import campaigns,whatsapp
 frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
-run=str(time.time_ns());account='campaign-'+run
+run = run_label();account='campaign-'+run
 business=frappe.get_all('Relay Inbox Simulation Business',pluck='name',limit_page_length=1)[0]
 channel=frappe.get_doc(dict(doctype='Relay Channel',channel='WhatsApp',account=account,enabled=1)).insert()
 contacts=[]

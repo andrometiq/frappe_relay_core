@@ -1,4 +1,5 @@
 """Durable Telegram rejection and recovery against isolated Frappe database/Redis."""
+from site_labels import run_label
 import json,time
 from unittest.mock import patch
 import frappe
@@ -7,7 +8,7 @@ from relay_core import messaging,whatsapp
 init()
 try:
  assert messaging.action_error(frappe._dict(status='Dispatching',result=None)) is None
- stamp=str(time.time_ns());business=fixture_business('Telegram '+stamp)
+ stamp = run_label();business=fixture_business('Telegram '+stamp)
  person=frappe.get_doc({'doctype':'Contact','first_name':'Typing '+stamp,'links':[{'link_doctype':business.doctype,'link_name':business.name}]}).insert()
  contact=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,'display_name':'Typing fixture'}).insert()
  channel=frappe.get_doc({'doctype':'Relay Channel','channel':'Telegram','account':'typing-'+stamp,'enabled':1}).insert()

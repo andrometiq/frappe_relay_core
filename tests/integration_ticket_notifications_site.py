@@ -1,11 +1,12 @@
 """Ticket assignment, subscriber ownership and durable notification retries."""
+from site_labels import run_label
 import time
 from unittest.mock import patch
 import frappe
 from relay_core import tickets, ticket_notifications as notifications, teams, email, telegram
 from channel_site_fixtures import init, business as fixture_business, user as fixture_user
 init()
-run=str(time.time_ns());user='relay-agent-a@example.invalid';other='relay-agent-b@example.invalid'
+run = run_label();user='relay-agent-a@example.invalid';other='relay-agent-b@example.invalid'
 fixture_user(user);fixture_user(other)
 business=fixture_business('Notification '+run);business_type=business.doctype
 person=frappe.get_doc({'doctype':'Contact','first_name':'Notification '+run,'email_ids':[{'email_id':user,'is_primary':1}], 'links':[{'link_doctype':business_type,'link_name':business.name}]}).insert()

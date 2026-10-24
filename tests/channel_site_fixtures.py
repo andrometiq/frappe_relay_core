@@ -31,6 +31,7 @@ def init():
 
 
 def user(email, manager=False):
+    email = email.lower()
     if not frappe.db.exists('User', email):
         roles = ['Relay Communication User', 'Sales User']
         if manager: roles.append('Relay Communication Manager')
@@ -38,7 +39,7 @@ def user(email, manager=False):
         # Repeated isolated site runs may exceed Frappe's hourly signup limit.
         # Bypass only fixture provisioning; all Relay permission checks stay real.
         with patch('frappe.core.doctype.user.user.throttle_user_creation'):
-            frappe.get_doc({'doctype':'User', 'email':email, 'first_name':'Local channel fixture',
+            frappe.get_doc({'doctype':'User', 'email':email, 'first_name':'Sim Channel Operator',
                 'send_welcome_email':0, 'roles':[{'role':role} for role in roles]}).insert()
     return email
 
@@ -46,7 +47,7 @@ def user(email, manager=False):
 def business(title):
     if frappe.local.site != 'yrp.site':
         return frappe.get_doc({'doctype':'Relay Inbox Simulation Business','title':title}).insert()
-    return frappe.get_doc({'doctype':'Customer', 'customer_name':'Local Relay C1 '+title,
+    return frappe.get_doc({'doctype':'Customer', 'customer_name':'Sim '+title,
         'customer_type':'Company',
         'customer_group':frappe.db.get_value('Customer Group', {'is_group':0}, 'name'),
         'territory':frappe.db.get_value('Territory', {'is_group':0}, 'name')}).insert()

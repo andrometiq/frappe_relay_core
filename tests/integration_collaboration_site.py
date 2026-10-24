@@ -1,4 +1,5 @@
 """Guarded database acceptance for internal conversation discussion."""
+from site_labels import run_label
 from unittest.mock import patch
 import os,time
 from pathlib import Path
@@ -13,7 +14,7 @@ contacts=frappe.get_all('Relay Contact',filters={'display_name':['like','Inbox %
 assert len(contacts)==2,'Run inbox integration first'
 contact=contacts[0].name;other=contacts[1].name
 message=frappe.db.get_value('Relay Message',{'relay_contact':contact},'name');wrong=frappe.db.get_value('Relay Message',{'relay_contact':other},'name')
-run=str(time.time_ns());team=teams.save('Discussion '+run,users);teams.assign(contact,team['name']);frappe.db.commit()
+run = run_label();team=teams.save('Discussion '+run,users);teams.assign(contact,team['name']);frappe.db.commit()
 def denied(fn):
  try:fn()
  except frappe.PermissionError:frappe.db.rollback()

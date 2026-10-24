@@ -10,7 +10,7 @@ init()
 try:
     fixture = scenario()
     with configured(fixture), patch.object(whatsapp, 'client') as client:
-        for provider, address in [('Telegram', '9555000321'), ('Email', 'start-' + fixture.stamp + '@example.invalid')]:
+        for provider, address in [('Telegram', '9555000321'), ('Email', 'start-' + fixture.stamp.lower() + '@example.invalid')]:
             binding = endpoint(fixture, provider, address); frappe.db.commit()
             kind = 'text' if provider == 'Telegram' else 'email'
             data = {'text': 'Order quantity 25'} if provider == 'Telegram' else {'subject': 'Order 25', 'body': 'Quantity 25'}
@@ -97,4 +97,6 @@ try:
         check_business_lifecycle(fixture.customer)
         print('PASS Telegram/email starts, explicit business, immutable replay, admission recovery, revoked/denied destinations and topic isolation')
 finally:
+    from channel_identity_fixtures import cleanup
+    if "fixture" in globals(): cleanup(fixture)
     frappe.destroy()

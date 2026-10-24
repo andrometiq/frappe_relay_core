@@ -1,5 +1,6 @@
 """Backend review acceptance on yrp.site, with local records and mocked delivery."""
 import json
+from site_labels import phone
 import os
 from pathlib import Path
 import secrets
@@ -43,9 +44,9 @@ def main():
     schema={'fields':{'type':'object','properties':{'quantity':{'type':'number'}}},'initial_stage':'open',
             'stages':[{'key':'open','label':'Open','state':'open'},{'key':'done','label':'Done','state':'done'}]}
     kind=frappe.get_doc(dict(doctype='Relay Case Type',type_key='local.be.'+f.stamp,title='Local backend cases '+f.stamp,enabled=1,definition=json.dumps(schema))).insert()
-    sender='919555'+f.stamp[-7:]
+    sender=phone(f.stamp)
     endpoint(f,'WhatsApp',sender)
-    flow=frappe.get_doc(dict(doctype='Relay Flow',title='Local backend flow '+f.stamp,command='/be'+f.stamp[-12:],
+    flow=frappe.get_doc(dict(doctype='Relay Flow',title='Local backend flow '+f.stamp,command='/sim' + f.stamp.split('-')[1],
                            channel=f.channels['WhatsApp'].name,business_doctype='Customer',execution_user=f.actor,
                            enabled=0,nodes=json.dumps([{'id':'end','kind':'end','text':'Done'}]))).insert()
     version=frappe.get_doc(dict(doctype='Relay Flow Version',flow=flow.name,channel=flow.channel,business_doctype='Customer',
@@ -82,7 +83,7 @@ def main():
     for dt,values in [('Relay Automation Outbox',{'payload':'{"amount":4500}','run':'local-old-run'}),
                       ('Relay Message Translation',{'result':'{"text":"PRIVATE Supplier"}','message':sources['Supplier'].name})]:
         doc=frappe.get_doc(dict(doctype=dt,name='LOCAL-BE-'+dt.replace(' ','-')+'-'+f.stamp,**values));doc.db_insert();auxiliary.append(doc)
-    notification=frappe.get_doc(dict(doctype='Relay Notification',name='RELAY-NOTIFY-'+f.stamp[-10:],user=f.actor,
+    notification=frappe.get_doc(dict(doctype='Relay Notification',name='Sim Notification ' + f.stamp,user=f.actor,
         relay_contact=f.contact.name,comment=notes['Supplier']['name'],kind='Mention',event_key='local-be-'+f.stamp));notification.db_insert()
     # Framework insert validates and stores full email identities.
     long_id='<'+('a'*120)+'@'+('b'*120)+'>'
@@ -97,8 +98,8 @@ def main():
     person=frappe.get_doc(dict(doctype='Contact',first_name='Local hidden backend '+f.stamp,
         links=[dict(link_doctype='Supplier',link_name=f.supplier.name)])).insert()
     hidden=frappe.get_doc(dict(doctype='Relay Contact',contact=person.name,display_name='Local hidden backend '+f.stamp)).insert()
-    group=endpoint(f,'Telegram','-'+f.stamp[-12:],contact=hidden.name)
-    shared_group=endpoint(f,'Telegram','-8'+f.stamp[-12:])
+    group=endpoint(f,'Telegram','-' + phone(f.stamp + 'hidden'),contact=hidden.name)
+    shared_group=endpoint(f,'Telegram','-' + phone(f.stamp + 'shared'))
     frappe.db.commit()
     server=None
     class Quiet(WSGIRequestHandler):
@@ -217,7 +218,9 @@ def main():
         print('PASS native contact discovery and cross-business notification recipient deny; long identifiers inserted intact')
     finally:
         if server:server.shutdown();server.server_close()
-        frappe.db.rollback();frappe.destroy()
+        from channel_identity_fixtures import cleanup
+        cleanup(f)
+        frappe.destroy()
 
 
 def runtime_cases(f, flow, sender):
@@ -273,7 +276,7 @@ def runtime_cases(f, flow, sender):
     flow.nodes=json.dumps([{'id':'wait','kind':'wait','text':'','seconds':86400},
                            {'id':'handoff','kind':'handoff','text':'A person will help'}])
     flow.save();flows.publish(flow.name);flow.reload();frappe.db.commit()
-    closed_sender='91888'+f.stamp[-9:];endpoint(f,'WhatsApp',closed_sender)
+    closed_sender=phone(f.stamp + 'closed');endpoint(f,'WhatsApp',closed_sender)
     trigger=source(flow.command,address=closed_sender);queue._process(trigger.name);frappe.db.commit()
     event=frappe.db.get_value('Relay Flow Event',{'message':trigger.name},'name')
     flows.process(event)
@@ -291,7 +294,7 @@ def runtime_cases(f, flow, sender):
     assert not frappe.db.exists('Relay Message Action',{'source_message':trigger.name})
     print('PASS burst flow input, assigned business handoff replay, and cancelled-flow journal recovery')
     frappe.set_user('Administrator')
-    address='local-be-auto-'+f.stamp+'@example.invalid';endpoint(f,'Email',address)
+    address='sim-auto-'+f.stamp.lower()+'@example.invalid';endpoint(f,'Email',address)
     rule=frappe.get_doc(dict(doctype='Relay Email Rule',channel=f.channels['Email'].name,execution_user=f.actor,
         enabled=1,subject='Local acknowledgement',body='We received quantity 25')).insert();frappe.db.commit()
     message=source('Local fixed acknowledgement',provider='Email',address=address)
@@ -406,7 +409,7 @@ def concurrent_skills(f, model):
     barrier=threading.Barrier(2)
     names=[]
     for index in range(2):
-        skill=frappe.get_doc(dict(doctype='Relay AI Skill',title='Local competing skill '+str(index)+' '+f.stamp,enabled=0,
+        skill=frappe.get_doc(dict(doctype='Relay AI Skill',title='Sim ' + ('Primary' if index == 0 else 'Backup') + ' Skill ' + f.stamp,enabled=0,
             channel=f.channels['WhatsApp'].name,business_doctype='Customer',ai_model=model.name,run_as_user=f.actor,
             handoff_owner=f.actor,mode='Shadow',daily_limit=10,instructions='Read this customer only.',
             allowed_tools=json.dumps([dict(name='customer',method='get_doc',doctype='Customer',fields=['name'],scope_field='name')]))).insert()
@@ -424,12 +427,14 @@ def concurrent_skills(f, model):
                 assert isinstance(error,(frappe.DuplicateEntryError,frappe.UniqueValidationError)) or 'Disable the existing skill' in str(error)
                 frappe.db.rollback();return 'denied'
         finally:frappe.destroy()
-    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(enable,names))
-    assert sorted(results)==['denied','enabled'],results
-    frappe.db.rollback()
-    for name in names:
-        doc=frappe.get_doc('Relay AI Skill',name);doc.enabled=0;doc.save()
-    frappe.db.commit()
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(enable,names))
+        assert sorted(results)==['denied','enabled'],results
+    finally:
+        frappe.db.rollback()
+        for name in names:
+            doc=frappe.get_doc('Relay AI Skill',name);doc.enabled=0;doc.save()
+        frappe.db.commit()
     print('PASS concurrent skill activation from stale snapshots permits exactly one owner')
 
 

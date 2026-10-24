@@ -129,4 +129,6 @@ try:
         print('PASS admin-only unresolved previews; shared Customer/Supplier revocation filters pending payloads')
         print('PASS legacy WhatsApp actions restore/read/reconcile through source permissions and fail closed on ambiguity')
 finally:
+    from channel_identity_fixtures import cleanup
+    if "fixture" in globals(): cleanup(fixture)
     frappe.destroy()
