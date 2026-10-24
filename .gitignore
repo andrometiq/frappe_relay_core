@@ -12,3 +12,4 @@ frontend/.scroll-test-dist/
 
 /.runtime/
 /relay_core/public/relay/
+*.egg-info/
