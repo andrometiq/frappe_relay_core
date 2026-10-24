@@ -1,4 +1,6 @@
 <script setup>
+import { recordTitle } from '../services/recordTitle'
+import { linkedTitle } from '../services/linkedTitle'
 import { inject, ref, watch } from 'vue'
 import { Avatar, Button, Badge, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { relativeTime } from './relativeTime'
@@ -7,7 +9,8 @@ import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import ChannelPreferences from './ChannelPreferences.vue'
 const capabilities = inject('relayCapabilities')
-const props = defineProps({ contact: String })
+const props = defineProps({ contact: String, dismissible: Boolean })
+const emit = defineEmits(['close'])
 const detail = ref(null), busy = ref(false), error = ref('')
 let generation = 0
 const desk = (doctype, name) => '/desk/' + doctype.toLowerCase().replaceAll(' ', '-') + '/' + encodeURIComponent(name)
@@ -34,12 +37,12 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
     <LoadingRows v-if="busy" :count="2" label="Loading contact details…" />
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
-      <header class="contact-detail-heading"><Avatar :label="detail.label" /><div><h3>{{ detail.label }}</h3><p>Contact details</p></div></header>
+      <header class="contact-detail-heading"><Button v-if="dismissible" icon="arrow-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div><h3>{{ recordTitle(detail, 'Contact') }}</h3><p>Contact details</p></div></header>
       <p>{{ detail.phone || 'No phone number' }} <Badge :label="/^[0-9]{7,15}$/.test((detail.phone || '').replace(/[ +()\-]/g, '')) ? 'Phone format valid' : 'Country code and number required'" /></p>
       <a class="underline" :href="desk('Contact', detail.name)">Edit Contact and business links in Desk</a>
       <h4 class="font-medium">Permitted business links</h4>
       <div v-for="link in detail.links" :key="link.doctype + link.name" class="flex flex-wrap gap-3">
-        <a class="underline" :href="desk(link.doctype, link.name)">{{ link.doctype }} · {{ link.name }}</a>
+        <a class="underline" :href="desk(link.doctype, link.name)">{{ link.doctype }} · {{ linkedTitle(link.doctype, link.name) }}</a>
         <a class="underline" :href="conversation(link)">Open conversation</a>
       </div>
       <p v-if="!detail.links.length">No accessible, configured business links. Add a link in Contact and enable its business type in Settings.</p>

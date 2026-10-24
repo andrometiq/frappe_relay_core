@@ -1,4 +1,5 @@
 <script setup>
+import { readableName } from '../../services/recordTitle'
 import { channelStatus } from '../../services/channelComposition';
 import { useMessageInfo } from "../../composables/useMessageInfo";
 import LoadingRows from "../LoadingRows.vue";
@@ -292,7 +293,7 @@ function actions(message) {
         :data-message="message._pending ? null : message.name"
       >
         <div v-if="message.contact_label" class="message-sender">
-          {{ message.direction === "Outgoing" ? "To " + message.contact_label : message.contact_label }}
+          {{ message.direction === "Outgoing" ? "To " + readableName(message.contact_label, "Contact") : readableName(message.contact_label, "Contact") }}
         </div>
         <button
           v-if="objectValue(message.provider_context).reply_to_message_id"

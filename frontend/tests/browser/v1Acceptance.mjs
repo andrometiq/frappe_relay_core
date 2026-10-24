@@ -20,6 +20,8 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
     requests.push({ method, args })
     let data
     switch (method) {
+      case 'relay_core.display.titles': data = {items: JSON.parse(args.records).map(row => ({...row, title:row.name}))}; break
+      case 'relay_core.api.channel_options': data = {items:[{name:channel,channel:'WhatsApp',enabled:1}]}; break
       case 'relay_core.api.capabilities': data = { manage: true, configure: true }; break
       case 'relay_core.collaboration.notifications': data = { items: [{ name: 'V1 Notification', relay_contact: secondContact, contact_name: 'V1 Bala', body: 'V1 note for Bala', kind: 'Mention', is_read: 0 }] }; break
       case 'relay_core.collaboration.mark_notification': data = {}; break
@@ -30,6 +32,10 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
       case 'relay_core.business_inbox.context': data = { title: 'V1 Customer', contact_count: 3 }; break
       case 'relay_core.business_inbox.contacts': data = { items: [{ value: 'V1 Asha', label: 'V1 Asha', has_phone: true, description: '+15550000001' }, { value: 'V1 Bala', label: 'V1 Bala', has_phone: true, description: '+15550000002' }, { value: 'V1 New contact', label: 'V1 New contact', has_phone: true, description: '+15550000003' }] }; break
       case 'relay_core.business_inbox.messages': data = { items: [message, secondMessage], first: message.name, last: secondMessage.name, ingestion_cursor: secondMessage.name, has_more: false }; break
+      case 'relay_core.api.contact_profile': data = {name:args.contact, contact:args.contact === secondContact ? 'V1 Bala' : 'V1 Asha', display_name:args.contact === secondContact ? 'V1 Bala' : 'V1 Asha'}; break
+      case 'relay_core.api.contact_directory':
+        if (args.query === 'failure') { await route.fulfill({status:417,json:{_server_messages:JSON.stringify([JSON.stringify({message:'Contact search is temporarily unavailable'})])}}); return }
+        data = {items:args.query === 'no-match' ? [] : [{name:'V1 Asha',full_name:'V1 Asha',mobile_no:'+15550000001'}]}; break
       case 'relay_core.api.messages': {
         const row = args.contact === secondContact ? secondMessage : message
         if (args.contact === secondContact) await new Promise(resolve => setTimeout(resolve, 120))
@@ -114,8 +120,9 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
   assert.equal(await page.getByLabel('Message', { exact: true }).count(), 0)
   await page.getByRole('button', { name: 'Message V1 New contact', exact: true }).waitFor()
   await page.getByRole('button', { name: 'V1 Asha', exact: false }).click()
-  assert.equal(await page.getByLabel('Message', { exact: true }).inputValue(), '')
-  await page.getByRole('button', { name: 'Delivery failures and retry', exact: true }).click()
+  assert.equal(await page.getByLabel('Message', { exact: true }).inputValue(), 'Never send this to the new contact')
+  await page.getByRole('button', { name: 'Conversation actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Delivery failures and retry', exact: true }).click()
   await page.getByRole('button', { name: 'Review retry', exact: true }).click()
   await page.getByRole('button', { name: 'Retry rejected send', exact: true }).click()
   await page.getByText('Message status: Queued', { exact: true }).waitFor()
@@ -152,6 +159,7 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
   await page.locator('.directory-contact').filter({ hasText: 'V1 Asha' }).click()
   await page.getByRole('heading', { name: 'V1 Asha', exact: true }).waitFor()
   assert.equal(await page.getByRole('heading', { name: 'V1 Customer', exact: true }).count(), 0)
+  await page.getByLabel('Message', { exact:true }).focus()
   await page.locator('.business-recipient-bar').getByRole('button', { name: 'Change', exact: true }).click()
   await page.getByRole('button', { name: 'New message', exact: true }).click()
   const dialog = page.getByRole('dialog')

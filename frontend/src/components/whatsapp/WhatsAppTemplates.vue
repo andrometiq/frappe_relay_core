@@ -1,4 +1,5 @@
 <script setup>
+import { recordTitle } from '../../services/recordTitle'
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { Badge, Button, FeatherIcon, TextInput } from "@relay/ui";
 import FrappeFormSection from "../frappe/FrappeFormSection.vue";
@@ -252,7 +253,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
       <RelaySelect v-model="category" label="Category" :options="[{ value: 'ALL', label: 'All categories' }, 'UTILITY', 'MARKETING', 'AUTHENTICATION']" />
       <RelaySelect v-model="language" label="Language" :options="[{ value: 'ALL', label: 'All languages' }, ...new Set(templates.map(row => row.language).filter(Boolean))]" />
     </template>
-    <template #cell-name="{ item }"><strong>{{ item.name }}</strong><small>{{ item.id }}</small></template>
+    <template #cell-name="{ item }"><strong>{{ recordTitle(item, 'Template') }}</strong></template>
     <template #cell-status="{ item }"><Badge :label="item.status || 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
     <template #cell-category="{ item }">{{ item.category || "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>

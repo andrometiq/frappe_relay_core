@@ -8,7 +8,8 @@ import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
-const showReplies=ref(false);
+const showReplies=ref(false), focused=ref(false);
+const expanded = computed(() => focused.value || !!body.value || quoting.value || kind.value !== 'text');
 
 import { compositionScope, telegramLimit } from '../../services/channelComposition';
 import { useStoredDraft } from '../../composables/useStoredDraft';
@@ -186,7 +187,8 @@ function keydown(event) {
 }
 </script>
 <template>
-  <form class="message-composer" @submit.prevent="canSend && send()">
+  <form class="message-composer compact-composer" :class="{'is-expanded': expanded}" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="canSend && send()">
+    <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
     <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
     <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
     <div v-else-if="!windowState.open" class="composer-window-notice">
@@ -212,9 +214,9 @@ function keydown(event) {
       Topic {{ sourceContext.message_thread_id }}
     </div>
     <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-    <details v-if="sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
-    <p v-if="limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
-    <div class="composer-toolbar">
+    <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+    <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
+    <div v-show="expanded" class="composer-toolbar">
       <Button v-if="sourceContext.provider === 'WhatsApp'" label="Template" :disabled="busy" @click="emit('template')" />
       <Dropdown :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
       <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
@@ -225,6 +227,7 @@ function keydown(event) {
     </div>
     <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
       :accept="attachmentAccept(sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
+    <span class="composer-channel"><slot name="channel" /></span>
     <textarea ref="draftInput"
       v-if="kind === 'text'"
       v-model="body"
@@ -280,7 +283,7 @@ function keydown(event) {
       variant="solid"
       :disabled="!canSend"
     />
-    <span v-if="kind === 'text'" class="composer-keyboard-hint"
+    <span v-if="expanded && kind === 'text'" class="composer-keyboard-hint"
       >Enter to send · Shift+Enter for a new line</span
     >
   </form>

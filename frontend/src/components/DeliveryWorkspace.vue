@@ -94,7 +94,7 @@ useRealtimeRefresh([], ["messages"], () => run(() => load()));
         :key="row.id"
         class="flex flex-wrap items-center gap-3 border-b py-3"
       >
-        <span class="text-sm">#{{ row.id }}</span
+        <details class="text-sm"><summary>Delivery reference</summary>{{ row.id }}</details
         ><span class="text-sm">{{ row.operation || "WhatsApp" }}</span
         ><Badge :label="row.delivery_status || row.state" /><span
           class="text-xs text-ink-gray-5 flex-1"

@@ -1,7 +1,7 @@
 <script setup>
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Button, FormControl, ErrorMessage } from "@relay/ui";
+import { Button, Dialog, FormControl, ErrorMessage } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import { useConversationPresence } from "../../composables/useConversationPresence";
 import { useTask } from "../../composables/useTask";
@@ -116,10 +116,10 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
         icon="check" aria-label="Mark read" title="Mark read"
         :disabled="busy || !lastMessage"
         @click="run(() => update({ last_read: lastMessage }))"
-      /><span class="text-xs text-ink-gray-5"
+      /><span class="conversation-unread text-xs text-ink-gray-5"
         >{{ state.unread || 0 }}{{ state.unread_more ? "+" : "" }} unread</span
       ><Button
-        label="Details" icon-left="sidebar" aria-label="Organize conversation"
+        icon="sidebar" aria-label="Organize conversation" title="Organize conversation"
         :disabled="busy"
         @click="
           expanded = !expanded;
@@ -127,6 +127,7 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
         "
       />
     </div>
+    <Dialog v-model="expanded" :options="{title:'Organize conversation'}">
     <p v-if="people.length" class="text-xs text-ink-gray-5">
       Viewing:
       {{ people.map((person) => (person.full_name || person.name) + (person.typing ? ' is typing…' : '')).join(", ") }}
@@ -134,7 +135,7 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
     <ErrorMessage :message="error" />
     <p v-if="notice" role="status" class="text-xs">{{ notice }}</p>
     <p v-if="assignmentChanged" role="status" class="text-xs">Assignment changed elsewhere. Your edits are preserved; saving will replace the current assignment.</p>
-    <div v-if="expanded" class="grid sm:grid-cols-2 gap-3 mt-3">
+    <div class="grid sm:grid-cols-2 gap-3 mt-3">
       <div class="flex items-end gap-2">
         <FormControl
           label="Folder"
@@ -153,5 +154,7 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
           @click="run(assign)"
       /></template>
     </div>
+    </Dialog>
+    <ErrorMessage v-if="!expanded" :message="error" />
   </div>
 </template>

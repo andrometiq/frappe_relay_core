@@ -1,4 +1,6 @@
 <script setup>
+import { linkedTitle } from '../../services/linkedTitle'
+import { recordTitle } from '../../services/recordTitle'
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import { TextInput, ErrorMessage, FeatherIcon } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
@@ -126,7 +128,7 @@ onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
         :field="{ label: 'Business team', method: 'business_groups.directory', params: { doctype, include_all: 1 }, placeholder: 'Search teams…', readOnly: busy || loading }"
         @update:model-value="loadRecords(true)" />
       <div v-if="groupField && records.length" class="business-group-owner">
-        <span>{{ owner ? "Handled by " + owner : "Unclaimed group" }}</span>
+        <span>{{ owner ? 'Handled by ' + linkedTitle('User', owner, 'Team member') : "Unclaimed group" }}</span>
         <button v-if="!owner" :disabled="loading" @click="claim()">Take group</button>
         <button v-else-if="owner === user" :disabled="loading" @click="claim(true)">Release</button>
       </div>
@@ -137,9 +139,9 @@ onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
     <template #item="{ item: record }">
       <button :key="record.name" class="directory-contact" :class="{ selected: selected === record.name }"
         @click="emit('select', doctype, record)">
-        <span class="business-avatar" aria-hidden="true">{{ (record.label || record.name).slice(0, 1).toUpperCase() }}</span>
+        <span class="business-avatar" aria-hidden="true">{{ recordTitle(record, 'Business').slice(0, 1).toUpperCase() }}</span>
         <span class="directory-contact-copy">
-          <span class="directory-contact-top"><strong>{{ record.label }}</strong><time v-if="record.last_activity">{{ timeLabel(record.last_activity) }}</time></span>
+          <span class="directory-contact-top"><strong>{{ recordTitle(record, 'Business') }}</strong><time v-if="record.last_activity">{{ timeLabel(record.last_activity) }}</time></span>
           <span class="directory-contact-bottom"><small>{{ record.last_message || record.summary || record.description || "No WhatsApp messages yet" }}</small><span v-if="record.unread" class="directory-unread">{{ record.unread > 99 ? "99+" : record.unread }}</span></span>
         </span>
       </button>

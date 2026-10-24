@@ -177,7 +177,7 @@ watch(
                   ><span class="block text-xs text-ink-gray-5"
                     >{{ message.direction || "History" }} ·
                     {{
-                      message.sent_at || message.creation || message.name
+                      message.sent_at || message.creation || 'Message'
                     }}</span
                   >{{ (message.content || "Attachment").slice(0, 250) }}</label
                 >

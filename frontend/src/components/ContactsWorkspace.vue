@@ -1,4 +1,5 @@
 <script setup>
+import { recordTitle } from '../services/recordTitle'
 import { inject, onMounted, onBeforeUnmount, ref } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
@@ -30,17 +31,17 @@ useRealtimeRefresh(['Contact'], ['contacts', 'incoming'], () => load())
     <nav class="v1-tabs" aria-label="Contact views"><Button label="Contacts" :variant="tab === 'contacts' ? 'solid' : 'ghost'" @click="tab = 'contacts'" /><Button v-if="capabilities.manage" label="Unlinked / ambiguous senders" :variant="tab === 'unlinked' ? 'solid' : 'ghost'" @click="tab = 'unlinked'" /></nav>
     <IncomingWorkspace v-if="tab === 'unlinked' && capabilities.manage" />
     <div v-else class="v1-content">
-      <WorkspaceHeading title="Your contacts" description="Customer details, channel identities and connected business records." icon="users"><a class="relay-button relay-button--solid" href="/desk/contact/new"><FeatherIcon name="plus" />New Contact in Desk</a></WorkspaceHeading>
+      <WorkspaceHeading title="Your contacts" description="Customer details, channel identities and connected business records."><a class="relay-button relay-button--solid" href="/desk/contact/new"><FeatherIcon name="plus" />New Contact in Desk</a></WorkspaceHeading>
       <form class="workspace-search" role="search" @submit.prevent="load()"><TextInput v-model="query" aria-label="Search Frappe Contacts" placeholder="Search contacts by name" type="search"><template #prefix><FeatherIcon name="search" /></template></TextInput><Button type="submit" label="Search" :loading="busy" /></form>
       <ErrorMessage :message="error" />
       <div class="v1-detail-grid">
         <div class="workspace-records">
           <LoadingRows v-if="busy && !rows.length" label="Loading contacts…" />
-          <button v-for="row in rows" :key="row.name" class="workspace-person-row" :aria-pressed="selected === row.name" @click="selected = row.name"><Avatar :label="row.full_name || row.name" /><span><strong>{{ row.full_name || row.name }}</strong><small>{{ row.mobile_no || 'No mobile number' }}</small></span><FeatherIcon name="chevron-right" /></button>
+          <button v-for="row in rows" :key="row.name" class="workspace-person-row" :aria-pressed="selected === row.name" @click="selected = row.name"><Avatar :label="recordTitle(row, 'Contact')" /><span><strong>{{ recordTitle(row, 'Contact') }}</strong><small>{{ row.mobile_no || 'No mobile number' }}</small></span><FeatherIcon name="chevron-right" /></button>
           <WorkspaceState v-if="!busy && !rows.length && !error" compact title="No contacts match this search." description="Try another name or create a contact in Desk." icon="users"><Button v-if="query" label="Clear search" @click="query = ''; load()" /><a v-else class="relay-button" href="/desk/contact/new">New Contact in Desk</a></WorkspaceState>
           <Button v-if="error" label="Retry contacts" @click="load()" /><Button v-if="more" label="More contacts" :loading="busy" @click="load(true)" />
         </div>
-        <ContactDetails v-if="selected" :key="selected" :contact="selected" /><WorkspaceState v-else compact title="Contact details at a glance" description="Select a contact to review channel identities and business links." icon="user" />
+        <ContactDetails v-if="selected" :key="selected" :contact="selected" dismissible @close="selected = ''" /><WorkspaceState v-else compact title="Contact details at a glance" description="Select a contact to review channel identities and business links." icon="user" />
       </div>
     </div>
   </section>

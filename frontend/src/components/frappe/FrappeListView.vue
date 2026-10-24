@@ -1,4 +1,5 @@
 <script setup>
+import { recordTitle } from '../../services/recordTitle'
 import LoadingRows from "../LoadingRows.vue";
 import WorkspaceState from "../WorkspaceState.vue";
 
@@ -44,7 +45,7 @@ function onScroll(event) {
         </div>
         <button v-for="item in items" :key="item.id || item.name" type="button" class="frappe-list-row" role="row" :style="grid.value" @click="emit('open', item)">
           <span v-for="column in columns" :key="column.key" role="cell" :data-label="column.label">
-            <slot :name="`cell-${column.key}`" :item="item"><span :title="String(item[column.key] ?? '')">{{ item[column.key] }}</span></slot>
+            <slot :name="`cell-${column.key}`" :item="item"><span :title="String(column.key === 'name' ? recordTitle(item) : item[column.key] ?? '')">{{ column.key === 'name' ? recordTitle(item) : item[column.key] }}</span></slot>
           </span>
         </button>
       </div>

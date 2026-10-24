@@ -13,7 +13,8 @@ onBeforeUnmount(() => { active = false })
 const anchor = source.value
 const draft = reactive(emailComposition(anchor))
 const error = ref(''), notice = ref(''), sending = ref(false), fileInput = ref(null)
-const recipientsOpen = ref(false)
+const recipientsOpen = ref(false), focused = ref(false)
+const expanded = computed(() => focused.value || !!draft.body || !!draft.request || recipientsOpen.value)
 watch(() => [draft.cc, draft.bcc], ([cc, bcc]) => { if (cc || bcc) recipientsOpen.value = true }, { immediate:true })
 const locked = computed(() => !!draft.request)
 const disabled = computed(() => busy.value || sending.value || locked.value)
@@ -108,13 +109,14 @@ onMounted(async () => {
 useRealtimeRefresh([],['message_actions'],check)
 </script>
 <template>
-  <form class="message-composer email-composer" aria-label="Email composer" @submit.prevent="send">
-    <div class="flex flex-wrap gap-2" role="group" aria-label="Email action"><Button v-for="[value,label] in [['reply','Reply'],['reply-all','Reply all'],['forward','Forward']]" :key="value" :label="label" :variant="draft.mode===value?'solid':'ghost'" :disabled="disabled" @click="modeChanged(value)" /></div>
-    <div class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" size="xs" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
+  <form class="message-composer email-composer compact-composer" :class="{'is-expanded': expanded}" aria-label="Email composer" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="send">
+    <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
+    <div v-if="expanded" class="flex flex-wrap gap-2" role="group" aria-label="Email action"><Button v-for="[value,label] in [['reply','Reply'],['reply-all','Reply all'],['forward','Forward']]" :key="value" :label="label" :variant="draft.mode===value?'solid':'ghost'" :disabled="disabled" @click="modeChanged(value)" /></div>
+    <div v-if="expanded" class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" aria-label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" size="xs" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
     <div v-if="recipientsOpen" class="grid gap-2 sm:grid-cols-2"><FormControl v-model="draft.cc" label="CC" :disabled="disabled" /><FormControl v-model="draft.bcc" label="BCC (private delivery audit only)" :disabled="disabled" /></div>
-    <FormControl v-model="draft.subject" class="email-inline-field" label="Subject" maxlength="998" :disabled="disabled" required />
-    <FormControl v-model="draft.body" class="email-body" label="Message" type="textarea" rows="2" placeholder="Write a message…" auto-resize :disabled="disabled" required />
-    <div class="email-footer"><details><summary>Signature &amp; sender</summary><p class="text-xs">From the configured email account · {{ anchor.channel }}. Review recipients before sending.</p><FormControl v-model="draft.signature" label="Signature" type="textarea" maxlength="2000" :disabled="disabled" /><Button label="Save my signature" :disabled="disabled" @click="saveSignature" /></details>
+    <FormControl v-if="expanded" v-model="draft.subject" class="email-inline-field" label="Subject" aria-label="Subject" maxlength="998" :disabled="disabled" required />
+    <div class="email-input-row"><slot name="channel" /><FormControl v-model="draft.body" class="email-body" label="Message" aria-label="Message" type="textarea" rows="1" placeholder="Write an email…" :disabled="disabled" required /></div>
+    <div v-if="expanded" class="email-footer"><details><summary>Signature &amp; sender</summary><p class="text-xs">From {{ anchor.channel_title || 'the configured email account' }}. Review recipients before sending.</p><FormControl v-model="draft.signature" label="Signature" type="textarea" maxlength="2000" :disabled="disabled" /><Button label="Save my signature" :disabled="disabled" @click="saveSignature" /></details>
     <div class="flex flex-wrap gap-2"><Button label="Attach files" icon-left="paperclip" :disabled="disabled" @click="fileInput.click()" /><input ref="fileInput" type="file" multiple hidden @change="attach" /><span v-for="(file,index) in draft.attachments" :key="file.name" class="break-all">{{ file.filename }} <Button label="Remove" :disabled="disabled" @click="draft.attachments.splice(index,1)" /></span></div>
     <Button v-if="!locked" type="submit" label="Send email" variant="solid" :disabled="disabled" :loading="sending" /></div>
     <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
@@ -126,13 +128,16 @@ useRealtimeRefresh([],['message_actions'],check)
 </template>
 
 <style scoped>
-.message-composer.email-composer { display:flex; flex-direction:column; gap:6px; flex-shrink:0; max-height:35%; overflow-y:auto; min-width:0; }
+.message-composer.email-composer { display:flex; flex-direction:column; gap:6px; flex-shrink:0; max-height:40%; overflow-y:auto; min-width:0; }
+.email-input-row { display:flex; align-items:center; gap:8px; min-width:0; }
+.email-input-row > .email-body { flex:1; min-width:0; }
+.is-expanded .email-body :deep(textarea) { min-height:64px; }
 .email-address-row,.email-footer { display:flex; align-items:center; gap:8px; min-width:0; }
 .email-address-row > .relay-field { flex:1; min-width:0; }
 .email-inline-field { display:grid; grid-template-columns:58px minmax(0,1fr); align-items:center; gap:8px; }
 .email-inline-field :deep(.relay-field__label) { margin:0; }
 .email-body :deep(.relay-field__label) { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-.email-body :deep(textarea) { min-height:56px; max-height:100px; overflow-y:auto !important; }
+.email-body :deep(textarea) { min-height:40px; max-height:100px; overflow-y:auto !important; }
 .email-footer { flex-wrap:wrap; }
 .email-footer details { flex:1; min-width:0; font-size:12px; }
 .email-footer details[open] { flex-basis:100%; }

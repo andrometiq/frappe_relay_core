@@ -234,7 +234,7 @@ onMounted(() => (props.initialCase ? open(props.initialCase) : load()));
             " />
           <h3 class="font-medium">{{ record.title }}</h3>
           <p class="text-sm text-ink-gray-5">
-            {{ record.priority }} priority · {{ record.name }}
+            {{ record.priority }} priority
           </p>
           <p v-if="!record.isNew" class="text-sm text-ink-gray-5">
             Assigned to {{ record.assigned_to || "Unassigned" }}

@@ -1,4 +1,6 @@
 <script setup>
+import { recordTitle } from '../services/recordTitle'
+import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
@@ -33,7 +35,7 @@ async function load(append = false) {
   if (!capabilities.value.configure) return
   const request = ++generation; busy.value = true; error.value = ''
   try {
-    const [page, available] = await Promise.all([coreApi(api.value + '.directory', { after: append ? next.value : null }), coreApi('api.channel_options')]); channels.value = available.items.filter(row => row.enabled)
+    const [page, available] = await Promise.all([coreApi(api.value + '.directory', { after: append ? next.value : null }), coreApi('api.channel_options')]); channels.value = available.items
     if (request === generation) { rows.value = append ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) busy.value = false }
@@ -67,14 +69,14 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
   <section class="v1-screen"><div class="v1-content space-y-4">
     <p v-if="!capabilities.configure">A System Manager role is required to configure automation.</p>
     <template v-else>
-      <WorkspaceHeading :title="skill ? 'AI & skills' : 'Business events'" :description="skill ? 'Give each assistant a clear purpose, safe read tools and a human owner.' : 'Keep customers informed when business documents change.'" :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New skill' : 'New event rule'" :disabled="busy" @click="edit(newConfiguration(skill))" /></WorkspaceHeading><div v-if="skill" class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/ai-model">Manage AI Models & provider accounts</a><a v-if="skill" class="v1-link" href="/desk/relay-settings">Set fallback handoff owner</a></div>
-      <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p><div class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div>
+      <WorkspaceHeading :title="skill ? 'AI & skills' : 'Business events'" :description="skill ? 'Give each assistant a clear purpose, safe read tools and a human owner.' : 'Keep customers informed when business documents change.'"><Button :label="skill ? 'New skill' : 'New event rule'" :disabled="busy" @click="edit(newConfiguration(skill))" /></WorkspaceHeading><div class="workspace-toolbar"><div v-if="skill" class="workspace-secondary-links"><a class="v1-link" href="/desk/ai-model">Manage AI Models & provider accounts</a><a v-if="skill" class="v1-link" href="/desk/relay-settings">Set fallback handoff owner</a></div>
+      <div class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div></div><ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
       <div class="v1-detail-grid">
         <div class="space-y-3">
           <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading skills…' : 'Loading event rules…'" />
           <button v-for="row in visibleRows" :key="row.name" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
-            <div class="automation-card-heading"><strong>{{ row.title }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
-            <template v-if="skill"><span>{{ row.business_doctype }} · {{ row.mode }} · {{ channels.find(item => item.name === row.channel)?.channel || row.channel }}</span><span>{{ row.ai_model || 'Choose a model' }}</span><span>{{ toolCount(row.allowed_tools) }} read tools</span></template>
+            <div class="automation-card-heading"><strong>{{ recordTitle(row, skill ? 'Skill' : 'Event rule') }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
+            <span v-if="skill">{{ row.business_doctype }} · {{ row.mode }} · {{ linkedTitle('Relay Channel', row.channel, 'Choose a channel') }} · {{ toolCount(row.allowed_tools) }} tools</span>
             <span v-else>{{ eventDescription(row) }}</span>
           </button>
           <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="skill ? 'No matching skills' : 'No matching event rules'" description="Start with a disabled configuration and enable it when ready." :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New skill' : 'New event rule'" @click="edit(newConfiguration(skill))" /></WorkspaceState>
@@ -83,7 +85,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'skill' : 'event rule' }}</h2><Button label="Dismiss" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="draft.title" label="Title" required :disabled="busy" />
-          <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.business_doctype" label="Business type" placeholder="Supplier or Customer" required :disabled="busy" /><FormControl v-model="draft.channel" label="Channel" type="select" :options="[{value:'',label:'Choose a channel'}, ...channels.map(row => ({value:row.name,label:row.channel + ' · ' + row.name}))]" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy || !!draft.use_preferences" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
+          <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.business_doctype" label="Business type" placeholder="Supplier or Customer" required :disabled="busy" /><FormControl v-model="draft.channel" label="Channel" type="select" :options="[{value:'',label:'Choose a channel'}, ...channels.map(row => ({value:row.name,label:linkedTitle('Relay Channel', row.name, row.channel)}))]" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy || !!draft.use_preferences" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Instructions</legend><FormControl v-model="draft.instructions" label="Knowledge and instructions" type="textarea" rows="7" required :disabled="busy" /></fieldset>
             <fieldset class="automation-section"><legend>Read tools</legend><p class="text-sm">Each tool is restricted to this conversation’s business record. Use a Link or Dynamic Link field to that business, or name when reading the business itself.</p>
@@ -107,7 +109,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
 {{ draft.email_signature }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>
           <Button type="submit" label="Save" variant="solid" :loading="busy" />
           <div v-if="skill && draft.name" class="border-t pt-4 space-y-3"><h3 class="font-semibold">Test skill</h3><p class="text-sm">Tests the saved skill against an incoming conversation message. No reply is sent and no ticket or pause is created.</p><FormControl v-model="message" label="Incoming message reference" placeholder="RELAY-MSG-…" :disabled="busy" /><Button label="Run shadow test" :disabled="busy || !message" @click="test" /><div v-if="preview" role="status" class="automation-preview space-y-2"><Badge label="Shadow result" theme="blue" /><strong>{{ preview.handoff ? 'Would hand off' : 'Would reply' }}</strong><p class="whitespace-pre-wrap">{{ preview.reply }}</p><p>{{ preview.reason }}</p></div></div>
-        </form><WorkspaceState v-else :title="skill ? 'A focused assistant' : 'Messages at the right moment'" description="Select a card to review its configuration." :icon="skill ? 'bot' : 'zap'" />
+        </form><WorkspaceState v-else compact :title="skill ? 'A focused assistant' : 'Messages at the right moment'" description="Select a card to review its configuration." :icon="skill ? 'bot' : 'zap'" />
       </div>
     </template>
   </div></section>

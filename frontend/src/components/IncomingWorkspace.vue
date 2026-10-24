@@ -1,4 +1,6 @@
 <script setup>
+import { recordTitle } from '../services/recordTitle'
+import { linkedTitle } from '../services/linkedTitle'
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { onMounted, ref, watch } from "vue";
 import { Button, ErrorMessage, FormControl } from "@relay/ui";
@@ -135,11 +137,11 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
           :options="
             contacts.map((row) => ({
               value: row.name,
-              label: row.display_name || row.name,
+              label: recordTitle(row, 'Contact'),
             }))
           "
         />
-        <RelaySelect label="Business record" v-model="business" :options="businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:row.doctype+' · '+row.name}))" />
+        <RelaySelect label="Business record" v-model="business" :options="businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:linkedTitle(row.doctype, row.name)}))" />
         <p class="text-xs text-ink-gray-5">
           Missing a contact? Create it and its business link in
           <a href="/desk/relay-contact" target="_blank" rel="noopener"
