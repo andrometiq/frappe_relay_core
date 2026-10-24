@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { configurationValues, newConfiguration, toolRows, variantPreview } from '../src/services/automationEditor.js'
+import { configurationChannels, configurationValues, newConfiguration, toolRows, variantPreview } from '../src/services/automationEditor.js'
 
 test('new skills and event rules are disabled; skills start in shadow', () => {
   assert.equal(newConfiguration(true).mode, 'Shadow')
@@ -37,4 +37,14 @@ test('event edits preserve consent selection and channel variants',()=>{
   const values=configurationValues(draft,false,[],'name\ntotal_qty')
   assert.equal(values.use_preferences,1);assert.equal(values.email_body,draft.email_body);assert.equal(values.contact,'person')
   assert.equal(variantPreview('Order {name}: {secret}', 'name'),'Order [name]: [Undeclared: secret]')
+})
+
+
+test('channel options retain an existing selection outside the current account without duplicates', () => {
+  const available = [{ name: 'current', channel: 'Email', title: 'Sales mailbox' }]
+  assert.deepEqual(configurationChannels(available, 'saved'), [...available, {name: 'saved'}])
+  assert.deepEqual(configurationChannels(available, 'current'), available)
+  assert.deepEqual(configurationChannels(available, ''), available)
+  assert.deepEqual(configurationChannels([], 'saved'), [{name: 'saved'}])
+  assert.equal(available.length, 1)
 })

@@ -54,7 +54,6 @@ useRealtimeRefresh([], ["messages"], () => run(() => load()));
 <template>
   <section class="page-body space-y-5">
     <div>
-      <h2 class="text-xl font-semibold">Delivery</h2>
       <p class="text-sm text-ink-gray-5 mt-2">
         Track queued and submitted messages. Check uncertain outcomes before
         sending again.

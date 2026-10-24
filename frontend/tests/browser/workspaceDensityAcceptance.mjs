@@ -20,11 +20,11 @@ export default async function workspaceDensityAcceptance(browser, origin) {
     switch (method) {
       case 'relay_core.api.capabilities': data = {manage:true, configure:true}; break
       case 'relay_core.collaboration.notifications': data = {items:[]}; break
-      case 'relay_core.display.titles': data = {items:JSON.parse(args.records).map(row => ({...row,title:row.doctype === 'Relay Channel' ? 'Customer support' : 'Maya Rao'}))}; break
-      case 'relay_core.api.channel_options': data = {items:[{name:channel,channel:provider,enabled:1}]}; break
+      case 'relay_core.display.titles': data = {items:JSON.parse(args.records).map(row => ({...row,title:row.doctype === 'Relay Channel' ? (row.name === channel ? 'Customer support' : 'Returns inbox') : 'Maya Rao'}))}; break
+      case 'relay_core.api.channel_options': data = {items:[{name:'another-account-channel',channel:provider,enabled:1}]}; break
       case 'relay_core.ai.configuration.directory': data = {items:Array.from({length:45}, (_,i) => ({name:`RELAY-AIS-${String(i).padStart(10,'0')}`,title:`Order assistance ${i+1}`,business_doctype:'Customer',channel,mode:'Shadow',enabled:0,instructions:'Help with order totals.',allowed_tools:'[]'}))}; break
       case 'relay_core.business_events.directory': data = {items:Array.from({length:45}, (_,i) => ({name:`RELAY-BER-${String(i).padStart(10,'0')}`,title:`Delivery update ${i+1}`,source_doctype:'Delivery Note',business_doctype:'Customer',event:'on_submit',enabled:0,parameter_mapping:'[]'}))}; break
-      case 'relay_core.inbox.directory': data = {items:[{name:contact,display_name:'Maya Rao',provider,latest_preview:'Order 42, amount 1250',unread:2}]}; break
+      case 'relay_core.inbox.directory': data = {items:[{name:contact,display_name:'Maya Rao',provider,latest_preview:'Local & team <review> "quoted" &amp; literal' ,unread:2}]}; break
       case 'relay_core.api.contact_profile': data = {name:contact,display_name:'Maya Rao',contact:'maya'}; break
       case 'relay_core.api.messages': data = {items:Array.from({length:15}, (_,i) => ({...message(),name:`RELAY-MSG-${String(i+1).padStart(10,'0')}`})),has_more:false}; break
       case 'relay_core.api.message_snapshots': data = {items:[]}; break
@@ -51,9 +51,19 @@ export default async function workspaceDensityAcceptance(browser, origin) {
       await page.goto(origin+'/site.html#/'+route)
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
       await page.locator('.v1-list-card').first().waitFor()
-      assert.ok(await page.locator('.v1-list-card').first().evaluate(el => el.clientHeight < 90))
+      assert.equal(await page.locator('.workspace-heading h2').count(), 0)
+      assert.ok(await page.locator('.v1-list-card').first().evaluate(el => el.clientHeight < 90 && el.scrollHeight <= el.clientHeight))
+      assert.ok(await page.locator('.v1-list-card').last().evaluate(el => el.scrollHeight <= el.clientHeight))
       assert.ok(await page.locator('.v1-detail-grid').evaluate(el => el.clientHeight > 650))
       await page.locator('.v1-list-card').first().click()
+      if (route === 'skills') {
+        await page.waitForFunction(() => document.querySelector('[aria-label="Channel"]')?.textContent.includes('Customer support'))
+        await page.getByRole('combobox', {name:'Channel',exact:true}).click()
+        assert.equal(await page.getByRole('option',{name:'Customer support',exact:true}).getAttribute('aria-selected'), 'true')
+        await page.getByRole('option',{name:'Returns inbox',exact:true}).click()
+        assert.equal((await page.getByRole('combobox',{name:'Channel',exact:true}).textContent()).trim(), 'Returns inbox')
+        await page.keyboard.press('Escape')
+      }
       const bounds = await page.locator('.v1-detail-grid').evaluate(el => [...el.children].map(child => ({height:child.clientHeight,scroll:child.scrollHeight,overflow:getComputedStyle(child).overflowY})))
       assert.ok(bounds.every(pane => pane.height > 650 && pane.overflow === 'auto'))
       assert.ok(bounds[0].scroll > bounds[0].height)
@@ -67,8 +77,18 @@ export default async function workspaceDensityAcceptance(browser, origin) {
         await page.setViewportSize({width,height:844})
         await page.goto(origin+'/site.html?density='+provider+width+theme+'#/messages')
         await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+        await page.locator('.directory-contact').waitFor()
+        assert.ok((await page.locator('.directory-contact').innerText()).includes('Local & team <review> "quoted" &amp; literal'))
+        assert.equal(await page.locator('.directory-contact review').count(), 0)
+        assert.equal(await page.locator('.v1-queues').evaluate(el => el.scrollWidth > el.clientWidth || el.clientHeight > 52), false)
+        await page.getByRole('button',{name:'More inbox views'}).click()
+        assert.equal(await page.getByRole('menuitem',{name:'Businesses',exact:true}).isVisible(),true)
+        assert.equal(await page.getByRole('menuitem',{name:'Unlinked senders',exact:true}).isVisible(),true)
+        await page.keyboard.press('Escape')
         await page.locator('.directory-contact').click()
         await page.getByLabel('Message',{exact:true}).waitFor({timeout:5000}).catch(error => { console.error({provider,width,theme,errors}); throw error })
+        assert.equal(await page.getByLabel('Message',{exact:true}).getAttribute('placeholder'), provider === 'Email' ? 'Write an email…' : 'Reply on Telegram…')
+        await page.getByRole('button', {name:'Reply channel: Customer support',exact:true}).waitFor()
         const header = await page.locator('.conversation-heading').boundingBox()
         const composer = await page.locator('.message-composer').boundingBox()
         const thread = await page.locator('.message-thread').boundingBox()

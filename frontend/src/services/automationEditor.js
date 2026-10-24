@@ -3,6 +3,14 @@ export function newConfiguration(skill) {
   return skill ? { ...common, ai_model: '', handoff_owner: '', mode: 'Shadow', daily_limit: 100, instructions: '', allowed_tools: '[]' }
     : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]', contact: '', use_preferences: 0, telegram_body: '', email_subject: '', email_body: '', email_signature: '' }
 }
+
+// Existing configurations can reference a channel outside the current account's
+// options. Keep that selection visible without offering other hidden channels.
+export function configurationChannels(channels, selected) {
+  return selected && !channels.some(row => row.name === selected)
+    ? [...channels, { name: selected }]
+    : channels
+}
 export function toolRows(value) {
   return JSON.parse(value || '[]').map(row => ({ ...row, fields: row.fields.join(', ') }))
 }

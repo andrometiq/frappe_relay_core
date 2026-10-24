@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onErrorCaptured, onMounted, provide, ref, watch, nextTick } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
+import { linkedTitle } from './services/linkedTitle'
 import { coreApi, frappeRequest } from './services/coreApi'
 import { realtimeStatus, startRealtime } from './services/realtime'
 import LoadingRows from './components/LoadingRows.vue'
@@ -38,6 +39,7 @@ const capabilities = ref({ manage: false, configure: false }), ready = ref(false
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
+const userTitle = computed(() => linkedTitle('User', user, 'Account'))
 provide('relayCapabilities', capabilities)
 async function initialize() {
   error.value = ''
@@ -84,7 +86,7 @@ onErrorCaptured(e => {
       </nav>
       <div class="relay-nav-footer">
         <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" />Frappe Desk</a>
-        <div class="relay-account"><Avatar :label="user" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="user">{{ user }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+        <div class="relay-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
     <main class="workspace" :inert="mobile || undefined">

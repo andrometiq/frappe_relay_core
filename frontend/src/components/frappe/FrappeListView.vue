@@ -32,9 +32,9 @@ function onScroll(event) {
 </script>
 
 <template>
-  <section class="frappe-list-view">
+  <section class="frappe-list-view" :aria-label="title">
     <header class="frappe-list-toolbar">
-      <div><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
+      <p v-if="description">{{ description }}</p>
       <div class="frappe-list-actions"><slot name="actions" /></div>
     </header>
     <div v-if="$slots.filters" class="frappe-list-filters"><slot name="filters" /></div>

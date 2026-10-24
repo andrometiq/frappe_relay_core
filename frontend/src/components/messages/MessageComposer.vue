@@ -233,7 +233,7 @@ function keydown(event) {
       v-model="body"
       class="chat-draft"
       aria-label="Message"
-      placeholder="Write a message…"
+      :placeholder="sourceContext.provider ? 'Reply on ' + sourceContext.provider + '…' : 'Write a message…'"
       rows="1"
       @keydown="keydown"
       @input="resizeDraft();typing()"

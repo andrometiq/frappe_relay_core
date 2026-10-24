@@ -1,8 +1,8 @@
 <script setup>
 import { recordTitle } from '../../services/recordTitle'
 import { linkedTitle } from '../../services/linkedTitle'
-import { inject, onMounted, ref, watch } from 'vue'
-import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput, FormControl } from '@relay/ui'
+import { computed, inject, onMounted, ref, watch } from 'vue'
+import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon, TextInput, FormControl } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { relativeTime } from '../relativeTime'
@@ -14,6 +14,10 @@ const emit = defineEmits(['select', 'business'])
 const capabilities = inject('relayCapabilities')
 const medium = ref('all');
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
+const moreQueues = computed(() => [
+  { label: 'Businesses', onClick: () => { mode.value = 'business' } },
+  ...(capabilities.value.manage ? [{ label: 'Unlinked senders', onClick: () => { location.hash = '/contacts?tab=unlinked' } }] : []),
+])
 let generation = 0, searchTimer
 async function load(cursor = {}) {
   clearTimeout(searchTimer)
@@ -35,11 +39,9 @@ onMounted(() => load())
 useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'], () => load())
 </script>
 <template>
-  <header class="inbox-directory-heading"><div><h2>Conversations</h2><p>Stay close to every customer</p></div><FeatherIcon name="message-circle" :size="20" /></header>
   <nav class="v1-queues" aria-label="Inbox queues">
     <button v-for="[value, label] in [['all','All'],['mine','Mine'],['unread','Unread'],['unassigned','Unassigned']]" :key="value" :aria-pressed="mode === value" @click="mode = value">{{ label }}</button>
-    <a v-if="capabilities.manage" href="#/contacts?tab=unlinked">Unlinked</a>
-    <button :aria-pressed="mode === 'business'" @click="mode = 'business'">Businesses</button>
+    <Dropdown :options="moreQueues"><Button label="More" icon-right="chevron-down" :aria-pressed="mode === 'business'" aria-label="More inbox views" /></Dropdown>
   </nav>
   <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
   <template v-else>
