@@ -1,53 +1,62 @@
-# Relay communication expansion
+# Business communication
 
-Implementation contract from Telegram message 11593. This is planned scope, not a statement that these services are live.
+Relay Core supports business conversations through WhatsApp, Telegram and email. Core owns identity, business permissions, conversations, tickets, AI skills and business-event rules. Relay Hub is a Go service that owns provider credentials, transport, durable sends and callbacks.
 
-## Ownership
+## Identity and business context
 
-Hub owns provider credentials, channel adapters, delivery queues, webhook verification, provider events and account-scoped MCP services. Core owns business-record permissions, conversations, ticketing, canned replies, AI policies and team workflows. AI services live in Core, without I2A. Core credentials never authorize another Hub account.
+A standard Frappe Contact can link to both a Supplier and a Customer. Verified WhatsApp, Telegram and email endpoints can identify the same person. Core keeps the selected business on each message and conversation. A shared identity does not give access to every linked business.
 
-## Data and UI
+| Routing condition | Current behavior |
+| --- | --- |
+| Valid reply context | Use the business of the referenced conversation. Email checks thread ancestry; Telegram keeps chat/topic scope. |
+| One linked business | Use that business after endpoint and sender-authentication checks. |
+| Valid saved sender choice | Reuse the choice within its conversation scope. |
+| Several businesses without a resolved context | Ask the sender to choose when the channel and conversation permit it. |
+| Missing, conflicting, expired or untrusted context | Keep the event in triage for review. Do not guess a business. |
 
-A business record can link many existing Contacts, each with multiple channel endpoints. A Contact can link multiple business records. Do not duplicate a person's messages for each link; represent associations separately and enforce the selected business context before any report/action. Unknown endpoints remain uncategorized. Telegram IDs come from verified incoming updates, not guessed phone mappings.
+Telegram and email choices use expiring `relay-business:` text tokens. Telegram prompts require a private chat whose sender matches the chat. Email prompts require authenticated, non-automatic mail with a valid Message-ID. Choices expire after 24 hours and cannot be replayed into another conversation. Unrelated email threads from the same person retain separate business choices. Unknown or revoked endpoints remain in triage.
 
-Use sequential Relay-prefixed document names. Persist Relay Ticket with linked Relay Ticket Message child rows, category, brief, status, assignee and business reference. Each message link includes its conversation and exact message cursor. Opening a link fetches a bounded window around that message. Never preload a conversation to find it.
+## Permissions and business lifecycle
 
-Expose a generic Calls interface with WhatsApp as the first provider. Do not imply Google Meet is implemented. Email conversations retain provider thread references, sender, recipients, CC/BCC and attachment metadata. Load attachment bytes only on preview/download, through permission-checked access. Sanitize email HTML and isolate active document content in viewers.
+Core uses Frappe users, roles, User Permissions and document permissions. Message queries apply business access before pagination. Direct reads and actions recheck access. A readable Contact is not permission to read another linked Supplier or Customer conversation. Attachments and message-linked tickets use the same message access checks.
 
-## Ticketing and automation
+Relay messages do not place a business record in a locked state. Relay history does not block update, cancel or delete. Delete/cancel hooks exclude Relay references from lifecycle link checks. Delivery and automation still use short database locks to protect their own state. Other apps and normal Frappe business rules retain their checks.
 
-Manual ticket creation accepts one or multiple accessible messages. Automatic creation from queries/payment screenshots requires an enabled policy, stable event idempotency key, category and brief; a screenshot is evidence to review, not proof of payment. Ticket updates enqueue email or Telegram notifications only. No WhatsApp ticket-update notifications in this phase.
+## AI skills and handoff
 
-Canned replies have type, language, allowed channels, enabled state and explicit AI-use permission. Policies separately allow ticket creation, reply selection and approved report actions. AI output cannot grant itself a permission. If no suitable approved response exists, use the configured acknowledgement and hand off. Even acknowledgements obey provider messaging rules.
+Enabled AI skills handle incoming text on WhatsApp, Telegram and email. Each skill is scoped to one channel and business DocType. Reads run as the linked Contact user or the configured non-administrator execution user. Missing or revoked access cannot fall back to a broader identity.
 
-Report execution resolves identity and business record on the server, enforces action/report allowlists and date/size limits, and fixes the supplier/customer filter server-side. A prompt is never the security boundary. Unresolved or ambiguous business identity requires handoff. Human guidance becomes a versioned draft workflow; only an authorized published workflow may execute automatically.
+| Control | Behavior |
+| --- | --- |
+| Tools | Only configured `get_doc` and `get_list` read contracts are allowed. The server fixes business filters and readable fields. Model arguments can only narrow that scope. |
+| Limits | At most 12 read tools, 20 selected fields per tool and 20 returned rows per list read. |
+| Delivery | Replies use the durable action journal. Core rechecks permissions and read evidence before delivery. |
+| Handoff | An explicit request for a person or a decision/authorization failure creates or reuses one assigned ticket for the conversation, business and automation generation. |
+| Pause | Handoff pauses contact automation. Paused messages do not create another AI reply or ticket. |
+| Email loops | Automatic mail, bulk/list mail and reports cannot start automatic replies. AI and fixed email rules check for an existing automatic reply. |
 
-Provider adapters for OpenRouter, Gemini, OpenAI/Codex and Anthropic/Claude must declare actual capabilities (text, vision, transcription, structured actions), timeouts and usage limits. Do not assume a local CLI session is a production API credential. Model output is validated against the same Core action schemas and permissions as human/API requests. Preserve original language and audit actions without logging credentials.
+The handoff owner must be enabled and able to read the conversation. If no eligible owner exists, the run remains recoverable for configuration review. Read-only AI tool scope does not allow arbitrary document writes or arbitrary report execution. Published conversational flows remain limited to private WhatsApp conversations.
 
-## Bounded loading
+## Business events and channel consent
 
-Core `relay_core.api.contacts` now supplies a permission-filtered database subsequence search and keyset pages capped at 50. `contactPageSource` implements its browser contract with cancellation. Hub user/token search already executes in PostgreSQL. These searches are subsequence matches, not typo-tolerant indexed ranking. Leading-wildcard searches can scan many rows: bounded result size does not prove bounded database CPU. Benchmark representative data before choosing an indexed search strategy. No claim of million-record search performance yet.
+Business-event rules support `after_insert`, `on_submit` and `on_cancel`. The source transaction stores an immutable delivery intent. Provider work is enqueued after commit. A Hub outage leaves the intent available for recovery. Capture failures are logged without rejecting the business transaction.
 
-The current Core preview still uses sample contacts and local adapters. Production wiring, business grouping, message projection, tickets, channel adapters and AI services remain to be integrated; do not disguise missing APIs by falling back to sample data.
+| Channel | Event content |
+| --- | --- |
+| WhatsApp | Approved template and captured parameters |
+| Telegram | Captured plain text |
+| Email | Captured subject, text/escaped HTML and signature |
 
-## Acceptance gates
+Rules select an explicit Contact or require exactly one linked Contact. Preference-based selection ranks verified, available endpoints for that person and business. Only Granted consent qualifies. Equal priorities require an explicit choice. Telegram/email event selection uses these consent checks even when a rule fixes the channel. Fixed-channel WhatsApp template rules retain their direct template path.
 
-- Real Frappe permission tests: agents cannot read another agent's restricted messages, tickets, attachments or reports through UI, direct API or MCP.
-- Database searches with large realistic datasets: query plans, p95/p99 latency, memory, concurrent requests, cancellation and forward/reverse cursors.
-- Duplicate and out-of-order provider events: one message/ticket/notification, durable retry and no duplicate sends on ambiguous failure.
-- Customer with several Contacts and channels; same Contact linked to supplier and customer; unknown endpoint categorization.
-- Email CC/BCC round trip, threading and permission-checked attachment previews; Telegram receiving/replies; WhatsApp call lifecycle with real provider configuration.
-- AI failure, invalid action, cross-business report request, unsupported language/audio and human handoff. Published guidance cannot broaden permissions.
-- Mobile layout, fixed-size page cache, virtual rows and lazy viewer loading under long browsing sessions.
+Core saves the chosen channel, endpoint and content with preference-based deliveries. It rechecks binding, consent and access before sending those deliveries. The preference resolver allows another selection only before admission or after confirmed rejection/failure. An admitted or uncertain outcome cannot trigger channel fallback.
 
-## Local implementation checkpoint
+## Installed UI and evidence
 
-Added source metadata/controllers for Relay Ticket and Relay Ticket Message, both with sequential names. Ticket services create, read and update status using normal Frappe permissions. Communication Users have owner-only ticket access; Communication Managers have team-wide ticket access. Ticket validation checks each message and its contact, rejects duplicates and caps links at 50. Read API rechecks referenced message access. Core MCP exposes the same three services. These DocTypes have not been migrated onto a site. Assignment-specific sharing, notifications, automatic ticket creation, UI navigation and idempotent AI actions are still outstanding. Do not enable AI ticket automation against the manual create method without durable event deduplication.
+The installed `/relay` workspace uses the site's Frappe login and same-origin APIs. It includes business conversations, Telegram and email composers, tickets, automation and settings. Telegram preserves reply/topic context. Email provides Reply, Reply all, Forward, To/CC/BCC, signatures and bounded attachments. Drafts retain stable request keys.
 
-Validation: 39 Python tests run, 37 passed and 2 live integration tests skipped; 7 frontend tests passed. Frappe services were exercised with isolated mocks, not a live installed site.
+Live updates use Socket.IO over WebSocket only. Payload-free invalidations trigger permission-checked reads. Reconnect and visibility changes refresh bounded state. There is no periodic HTTP polling fallback.
 
-## Frappe installation contract
+The 2026-10-24 connected reports pass 10/10 WhatsApp, 11/11 Telegram and 13/13 email cases. They include shared identities, business-scoped AI ledger reads, one-ticket handoff and business-event outage isolation. Single inbound checkpoint p50/p95 values are approximately 270/295 ms, 105/123 ms and 107/119 ms. Browser rendering, bulk campaigns, live providers and Telegram/email receipt-storm capacity are outside this evidence. See [implementation status](implementation-status.md) and Hub [release evidence](https://github.com/andrometiq/relay_hub/blob/develop/docs/simulation-validation.md).
 
-Relay Core does not provide a login page or a second user/session system. Installed sites use Frappe authentication, API keys, roles, User Permissions and CSRF handling. The standalone preview is only a visual development fixture and must not be treated as a production Core login.
-
-`Relay Contact Type` lets a System Manager configure which business DocTypes (Customer, Supplier, Employee or site-specific DocTypes) Relay may resolve through standard Frappe `Contact` Dynamic Links. Core refuses an unconfigured business DocType. Existing Contacts and their links remain the source of truth; Relay does not duplicate business records.
+Source: `relay_core/business_routing.py`, `relay_core/business_access.py`, `relay_core/business_references.py`, `relay_core/hooks.py`, `relay_core/ai/{tools,service,handoff}.py`, `relay_core/business_events.py`, `relay_core/channel_preferences.py`, `relay_core/email_templates.py` and `frontend/src/services/realtime.js`.
