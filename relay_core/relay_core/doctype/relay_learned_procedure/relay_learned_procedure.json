@@ -3,8 +3,8 @@
   "name": "Relay Learned Procedure",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-PROC-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "format:{title}-{###}",
+  "naming_rule": "Expression",
   "field_order": [
     "title",
     "policy",
@@ -57,5 +57,7 @@
       "role": "System Manager",
       "read": 1
     }
-  ]
+  ],
+  "title_field": "title",
+  "modified": "2026-10-25 12:00:00.000000"
 }

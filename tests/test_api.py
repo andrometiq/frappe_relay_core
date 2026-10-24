@@ -29,12 +29,15 @@ class ApiTests(unittest.TestCase):
         doc.check_permission.assert_any_call('write');doc.save.assert_called_once()
 
     def test_invalid_input_does_not_write(self):
-        for name,account,enabled in [('bad','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:
+        for name,account,enabled in [('','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:
             with self.assertRaises(ValueError):self.api.update_channel(name,account,enabled)
         self.f.get_doc.return_value.save.assert_not_called()
 
     def test_paging_is_bounded_ordered_and_permission_aware(self):
-        self.f.get_list.return_value=[types.SimpleNamespace(name=f'RELAY-MSG-{i:010}',channel='RELAY-CH-0000000001') for i in range(101,0,-1)]
+        class Row(dict):
+            __getattr__ = dict.get
+        self.f.get_list.return_value=[Row(name=f'RELAY-MSG-{i:010}',channel='RELAY-CH-0000000001') for i in range(101,0,-1)]
+        self.f.get_doc.return_value.get.side_effect = lambda key: {'channel': 'Telegram'}.get(key)
         page_query=Mock();page_query.return_value.run.return_value=self.f.get_list.return_value
         with patch.dict(sys.modules,**{'relay_core.timeline':types.SimpleNamespace(page_query=page_query)}):
             result=self.api.messages('RELAY-CON-0000000001',limit=9999)
@@ -171,3 +174,37 @@ class ChannelUITests(unittest.TestCase):
             self.f.db.get_value.return_value='person';binding.verified=0
             with self.assertRaises(ValueError): self.api.save_contact_preference('person','Customer','local','endpoint','Granted',2)
         self.assertEqual(self.api.save_contact_preference.allowed_methods,['POST'])
+
+
+class MessageDisplayApiTests(unittest.TestCase):
+    setUp = ApiTests.setUp
+
+    def test_snapshots_and_context_decorate_even_the_anchor(self):
+        class Row(dict):
+            __getattr__ = dict.get
+        row = Row(name='RELAY-MSG-0000000001', channel='Customer support-001', relay_contact='RELAY-CON-0000000001',
+                  provider_context={'provider':'Email', 'mailbox_addresses':['forged@example.invalid']})
+        channel = Mock()
+        channel.get.side_effect = {'title':'Customer support','channel':'Email','mailbox_address':'support@example.invalid'}.get
+        self.f.get_doc.return_value = channel
+        self.f.get_list.return_value = [row]
+        result = self.api.message_snapshots(row.relay_contact, [row.name])
+        self.assertEqual(result['items'][0]['provider_context']['mailbox_addresses'], ['support@example.invalid'])
+        channel.check_permission.assert_called_with('read')
+        doc = Mock(channel=row.channel, relay_contact=row.relay_contact)
+        doc.get.side_effect = row.get
+        self.f.get_doc.side_effect = lambda doctype, name: doc if doctype == 'Relay Message' else channel
+        self.api.messages = Mock(return_value={'items':[],'first':None,'last':None,'has_more':False})
+        result = self.api.message_context(row.name)
+        self.assertEqual(result['items'][0]['channel_title'], 'Customer support')
+        self.assertEqual(result['items'][0]['provider_context']['mailbox_addresses'], ['support@example.invalid'])
+        self.api.require_access.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.api.message_context(row.name)
+        with self.assertRaises(PermissionError): self.api.message_snapshots(row.relay_contact, [row.name])
+
+    def test_channel_names_accept_new_and_legacy_names_without_relaxing_message_ids(self):
+        for value in ('Customer support-001','RELAY-CH-0000000001'):
+            self.api.validate_reference(value, 'CH')
+        for value in ('', None, 'line\nbreak', 'x'*141):
+            with self.assertRaises(ValueError): self.api.validate_reference(value, 'CH')
+        with self.assertRaises(ValueError): self.api.validate_reference('Customer support-001', 'MSG')

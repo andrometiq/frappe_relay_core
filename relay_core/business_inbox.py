@@ -247,7 +247,7 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     rows=query.where(message.relay_contact.isin(linked)).where(scope).run(as_dict=True)
     more=len(rows)>limit;page=rows[:limit]
     if not after and not since:page.reverse()
-    readable={};items=[]
+    readable={};items=[];channel_docs={}
     for row in page:
         if row.relay_contact not in readable:
             try:
@@ -259,9 +259,13 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
             except frappe.PermissionError:
                 readable[row.relay_contact]=None
         if readable[row.relay_contact] is None:continue
-        frappe.get_doc('Relay Channel',row.channel).check_permission('read')
+        if row.channel not in channel_docs:
+            channel_docs[row.channel] = frappe.get_doc('Relay Channel', row.channel)
+            channel_docs[row.channel].check_permission('read')
         identity=readable[row.relay_contact]
         items.append(dict(row,contact_label=identity['label'],frappe_contact=identity['frappe_contact']))
+    from relay_core.message_display import decorate_messages
+    decorate_messages(items, channel_docs)
     cursor = page[-1].name if since and page else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
     return {'items':items,'has_more':more,'ingestion_cursor':cursor,'first':page[0].name if page else None,'last':page[-1].name if page else None}
 

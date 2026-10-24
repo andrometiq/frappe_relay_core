@@ -3,8 +3,8 @@
   "name": "Relay Team",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-TEAM-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "format:{title}-{###}",
+  "naming_rule": "Expression",
   "fields": [
     {
       "fieldname": "title",
@@ -40,5 +40,7 @@
       "delete": 1
     }
   ],
-  "track_changes": 1
+  "track_changes": 1,
+  "title_field": "title",
+  "modified": "2026-10-25 12:00:00.000000"
 }
