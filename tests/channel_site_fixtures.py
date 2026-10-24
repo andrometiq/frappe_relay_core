@@ -23,6 +23,7 @@ def init():
     frappe.conf.relay_automation_enabled = 0
     # All jobs and provider sends stay in this process under explicit test control.
     patch.object(frappe, 'enqueue').start()
+    patch('relay_core.automation.queue.wake').start()
     patch.object(frappe, 'publish_realtime').start()
     from relay_core import whatsapp
     patch.object(whatsapp, 'client', side_effect=AssertionError('Unexpected external Hub call')).start()
@@ -70,13 +71,15 @@ def push_status(account, rows):
             signature = hmac.new(secret.encode(), timestamp.encode()+b'.'+raw, hashlib.sha256).hexdigest()
             request = SimpleNamespace(get_data=lambda:raw, headers={'X-Relay-Timestamp':timestamp,'X-Relay-Signature':signature})
             settings = lambda key: {'relay_hub_account':account,'relay_callback_secret':secret}.get(key)
+            # Each simulated HTTP callback starts a fresh transaction.
+            frappe.db.commit()
             with patch.object(inbound,'connection_value',side_effect=settings), patch.object(frappe,'request',request):
                 assert inbound.receive_channel_statuses()['accepted'] == 1
             key = 'channel-statuses:'+hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
             name = frappe.db.get_value('Relay Hub Event', {'event_key':key}, 'name')
             frappe.db.commit()
             with patch.object(channel_statuses,'connection_value',return_value=account):
-                projection.project(name)
+                projection.project_queued(name, submitted_ns=time.time_ns())
             frappe.db.commit()
             assert frappe.db.get_value('Relay Hub Event',name,'projection_status') == 'Projected'
     finally:

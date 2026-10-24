@@ -11,6 +11,7 @@ import frappe
 from channel_site_fixtures import business, user
 from relay_core import inbound
 from relay_core.automation import projection
+from relay_core.permissions import sequential_name
 
 
 def scenario():
@@ -28,7 +29,8 @@ def scenario():
         'display_name': 'Local C2 ' + stamp}).insert()
     account = 'c2-' + stamp
     channels = {provider: frappe.get_doc({'doctype': 'Relay Channel', 'channel': provider,
-        'account': account, 'enabled': 1}).insert() for provider in ('WhatsApp', 'Telegram', 'Email')}
+        'account': account, 'enabled': 1}).insert(set_name=sequential_name('channel'))
+        for provider in ('WhatsApp', 'Telegram', 'Email')}
     actor = user('relay-c2-reader-' + stamp + '@example.invalid', manager=True)
     frappe.get_doc({'doctype': 'User Permission', 'user': actor, 'allow': 'Customer',
                    'for_value': customer.name, 'apply_to_all_doctypes': 1}).insert()
