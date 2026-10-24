@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from frappe import _dict
 from relay_core.automation import queue
@@ -51,23 +51,56 @@ class AutomationQueueTests(unittest.TestCase):
             self.assertEqual(doc.automation_status, expected)
 
     def test_signal_coalesces_300_arrivals_and_uses_default(self):
-        fake = Mock()
-        fake.cache.set.side_effect = [True] + [False] * 299
-        with patch.object(queue, 'frappe', fake):
+        fake = Mock(conf={})
+        rq = MagicMock()
+        pipe = rq.connection.pipeline.return_value.__enter__.return_value
+        pipe.get.side_effect = [None] + [b'waiting'] * 299
+        with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq) as get_queue, \
+                patch.object(queue, 'create_job_id', side_effect=lambda value: value):
             for _ in range(300):
                 queue.wake()
-        fake.enqueue.assert_called_once()
-        self.assertEqual(fake.enqueue.call_args.kwargs['queue'], 'default')
-        self.assertEqual(fake.cache.set.call_args.kwargs, {'nx': True, 'ex': queue.WAKE_TTL})
+        rq.enqueue_call.assert_called_once()
+        self.assertEqual(get_queue.call_args.args, ('default',))
+        self.assertIs(rq.enqueue_call.call_args.kwargs['pipeline'], pipe)
+        pipe.execute.assert_called_once()
+        self.assertEqual(pipe.set.call_args.kwargs, {'ex': queue.WAKE_TTL})
 
-    def test_enqueue_failure_leaves_durable_work_for_recovery(self):
-        fake = Mock()
-        fake.enqueue.side_effect = ConnectionError()
-        with patch.object(queue, 'frappe', fake), patch.object(queue, '_release_signal') as release:
+    def test_interrupted_enqueue_does_not_publish_an_orphan_reservation(self):
+        fake = Mock(conf={})
+        rq = MagicMock()
+        pipe = rq.connection.pipeline.return_value.__enter__.return_value
+        pipe.get.return_value = None
+        rq.enqueue_call.side_effect = ConnectionError()
+        with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq), \
+                patch.object(queue, 'create_job_id', side_effect=lambda value: value):
             queue.wake()
-        release.assert_called_once()
+            pipe.set.assert_called_once()  # Staged only; invisible to competing wakes.
+            pipe.execute.assert_not_called()
+            rq.enqueue_call.side_effect = None
+            self.assertIs(queue.wake(), rq.enqueue_call.return_value)
+        pipe.execute.assert_called_once()  # Recovery can publish immediately, no TTL wait.
         fake.log_error.assert_called_once()
         fake.db.set_value.assert_not_called()
+
+    def test_competing_wake_retries_watch_conflict_and_keeps_winners_job(self):
+        fake = Mock(conf={})
+        rq = MagicMock()
+        pipe = rq.connection.pipeline.return_value.__enter__.return_value
+        pipe.get.side_effect = [None, b'winner']
+        pipe.execute.side_effect = queue.WatchError()
+        with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq), \
+                patch.object(queue, 'create_job_id', side_effect=lambda value: value):
+            queue.wake()
+        rq.enqueue_call.assert_called_once()
+        fake.log_error.assert_not_called()
+
+    def test_expired_jobs_cannot_release_a_successors_signal(self):
+        rq = Mock()
+        with patch.object(queue, 'get_queue', return_value=rq), patch.object(queue, '_signal_key', return_value='key'):
+            queue._release_signal('old-token')
+        args = rq.connection.eval.call_args.args
+        self.assertIn("redis.call('get', KEYS[1]) == ARGV[1]", args[0])
+        self.assertEqual(args[1:], (1, 'key', 'old-token'))
 
     def test_one_drain_processes_300_in_order_and_commits_each(self):
         fake = Mock(local=SimpleNamespace(site='test'))
@@ -84,9 +117,12 @@ class AutomationQueueTests(unittest.TestCase):
     def test_concurrent_drain_cannot_run_hooks(self):
         fake = Mock(local=SimpleNamespace(site='test'))
         fake.db.sql.return_value = [(0,)]
-        with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process:
-            self.assertEqual(queue.drain(), 0)
+        with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
+                patch.object(queue, '_release_signal') as release, patch.object(queue, 'wake') as wake:
+            self.assertEqual(queue.drain(token='consumed'), 0)
         process.assert_not_called()
+        release.assert_called_once_with('consumed')
+        wake.assert_called_once()  # Final-empty-read race must retain a successor.
 
     def test_crash_rolls_back_and_releases_lock_without_retry_spin(self):
         fake = Mock(local=SimpleNamespace(site='test'))
@@ -107,11 +143,12 @@ class AutomationQueueTests(unittest.TestCase):
         fake.get_all.return_value = ['one', 'two']
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
                 patch.object(queue, '_release_signal') as release, \
+                patch.object(queue, 'wake') as wake, \
                 patch.object(queue.time, 'monotonic', side_effect=[0, 0, 6, 6]):
             self.assertEqual(queue.drain(token='signal'), 1)
         release.assert_called_once_with('signal')
         process.assert_called_once_with('one')
-        fake.enqueue.assert_called_once()  # Pending tail is signalled after unlocking.
+        wake.assert_called_once()  # Pending tail is signalled after unlocking.
 
     def test_completed_message_is_not_replayed_and_pause_only_skips_ai(self):
         fake = Mock(conf={'relay_automation_enabled': 1})
