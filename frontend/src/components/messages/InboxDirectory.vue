@@ -53,7 +53,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry queue" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
       <LoadingRows v-if="loading && !rows.length" label="Loading conversations…" />
-      <button v-for="row in rows" :key="row.name" class="directory-contact" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
+      <button v-for="row in rows" :key="row.name" type="button" :aria-label="'Open conversation: ' + recordTitle(row, 'Contact')" class="directory-contact" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
         <span class="directory-avatar"><Avatar :label="recordTitle(row, 'Contact')" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
         <span class="directory-contact-copy">
           <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ relativeTime(row.latest_at) }}</time></span>

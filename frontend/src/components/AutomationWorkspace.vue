@@ -82,7 +82,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
       <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !draft }">
         <div class="space-y-3">
           <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading skills…' : 'Loading event rules…'" />
-          <button v-for="row in visibleRows" :key="row.name" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
+          <button v-for="row in visibleRows" :key="row.name" type="button" :aria-label="(skill ? 'Open skill: ' : 'Open event rule: ') + row.title" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
             <div class="automation-card-heading"><strong>{{ recordTitle(row, skill ? 'Skill' : 'Event rule') }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
             <span v-if="skill">{{ row.business_doctype }} · {{ row.mode }} · {{ linkedTitle('Relay Channel', row.channel, 'Choose a channel') }} · {{ toolCount(row.allowed_tools) }} {{ toolCount(row.allowed_tools) === 1 ? 'tool' : 'tools' }}</span>
             <span v-else>{{ eventDescription(row) }}</span>

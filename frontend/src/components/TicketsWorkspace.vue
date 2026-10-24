@@ -55,7 +55,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
     <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
       <div class="space-y-3">
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
-        <button v-for="row in page.items" :key="row.name" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
+        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + row.subject" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
           <div class="automation-card-heading"><strong>{{ recordTitle(row, 'Ticket') }}</strong><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></div>
           <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? linkedTitle(row.business_doctype, row.business_name) : 'Conversation'" /><span>{{ row.category }} · {{ linkedTitle('User', row.assigned_to, 'Unassigned') }} · {{ relativeTime(row.creation) }}</span></div>
         </button>
