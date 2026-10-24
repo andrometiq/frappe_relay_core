@@ -30,7 +30,10 @@
     "legacy_author",
     "legacy_checksum",
     "legacy_triage",
-    "automation_status"
+    "automation_status",
+    "email_reply_status",
+    "email_reply_attempts",
+    "email_reply_next_attempt"
   ],
   "fields": [
     {
@@ -72,12 +75,14 @@
       "label": "Provider message ID",
       "fieldtype": "Data",
       "ignore_xss_filter": 1,
-      "read_only": 1
+      "read_only": 1,
+      "length": 300
     },
     {
       "fieldname": "sender_endpoint",
       "label": "Sender Endpoint",
-      "fieldtype": "Data"
+      "fieldtype": "Data",
+      "length": 200
     },
     {
       "fieldname": "source_key",
@@ -196,6 +201,29 @@
       "read_only": 1,
       "hidden": 1,
       "search_index": 1
+    },
+    {
+      "fieldname": "email_reply_status",
+      "fieldtype": "Select",
+      "label": "Automatic Email Reply",
+      "options": "\nPending\nComplete\nFailed",
+      "read_only": 1,
+      "hidden": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "email_reply_attempts",
+      "label": "Automatic Email Attempts",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "hidden": 1
+    },
+    {
+      "fieldname": "email_reply_next_attempt",
+      "label": "Automatic Email Next Attempt",
+      "fieldtype": "Datetime",
+      "read_only": 1,
+      "hidden": 1
     }
   ],
   "permissions": [
@@ -221,5 +249,6 @@
   ],
   "sort_field": "creation",
   "sort_order": "DESC",
-  "track_changes": 1
+  "track_changes": 1,
+  "modified": "2026-10-25 18:00:00.000000"
 }

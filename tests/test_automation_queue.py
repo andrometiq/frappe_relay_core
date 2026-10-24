@@ -14,6 +14,9 @@ from relay_core import translations
 
 
 class AutomationQueueTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch('relay_core.email_preferences.recover'))
+
     def test_every_inbound_hook_defers_policy_reads_and_redis_until_commit(self):
         callbacks = []
         fake = SimpleNamespace(db=SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append)))
@@ -104,6 +107,7 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_one_drain_processes_300_in_order_and_commits_each(self):
         fake = Mock(local=SimpleNamespace(site='test'))
+        fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(1,)]
         fake.get_all.side_effect = [list(range(n, n + 100)) for n in (0, 100, 200)] + [[]]
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
@@ -114,8 +118,38 @@ class AutomationQueueTests(unittest.TestCase):
         self.assertEqual(fake.get_all.call_args.kwargs['order_by'], 'creation asc, name asc')
         recover.assert_called_once()
 
+    def test_postgres_session_lock_survives_commits_and_releases_on_failure(self):
+        for fail in (False, True):
+            fake = Mock(local=SimpleNamespace(site='test'))
+            fake.db.db_type = 'postgres'
+            fake.db.sql.return_value = [(True,)]
+            fake.get_all.side_effect = [['first', 'second'], []]
+            with patch.object(queue, 'frappe', fake), patch.object(queue, 'recover'), \
+                    patch.object(queue, '_process', side_effect=RuntimeError if fail else None):
+                if fail:
+                    with self.assertRaises(RuntimeError): queue.drain()
+                    fake.db.rollback.assert_called_once()
+                else:
+                    self.assertEqual(queue.drain(), 2)
+                    self.assertEqual(fake.db.commit.call_count, 3)
+            acquire, release = fake.db.sql.call_args_list
+            self.assertEqual(acquire.args[0], 'select pg_try_advisory_lock(%s)')
+            self.assertEqual(release.args[0], 'select pg_advisory_unlock(%s)')
+            self.assertEqual(acquire.args[1], release.args[1])
+            self.assertIsInstance(acquire.args[1][0], int)
+
+    def test_postgres_contended_lock_reschedules_without_unlocking_owner(self):
+        fake = Mock(local=SimpleNamespace(site='test'))
+        fake.db.db_type = 'postgres'; fake.db.sql.return_value = [(False,)]
+        with patch.object(queue, 'frappe', fake), patch.object(queue, 'wake') as wake:
+            self.assertEqual(queue.drain(), 0)
+        self.assertEqual(fake.db.sql.call_count, 1)
+        wake.assert_called_once()
+        fake.get_all.assert_not_called()
+
     def test_concurrent_drain_cannot_run_hooks(self):
         fake = Mock(local=SimpleNamespace(site='test'))
+        fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(0,)]
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
                 patch.object(queue, '_release_signal') as release, patch.object(queue, 'wake') as wake:
@@ -126,6 +160,7 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_crash_rolls_back_and_releases_lock_without_retry_spin(self):
         fake = Mock(local=SimpleNamespace(site='test'))
+        fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(1,)]
         fake.get_all.return_value = ['oldest', 'newer']
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process', side_effect=RuntimeError), \
@@ -139,6 +174,7 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_tail_arrival_and_bounded_turn_schedule_successor(self):
         fake = Mock(local=SimpleNamespace(site='test'))
+        fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(1,)]
         fake.get_all.return_value = ['one', 'two']
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \

@@ -5,8 +5,8 @@ It publishes an authenticated `/relay` workspace; automatic replies remain off.
 
 ## Prerequisites
 
-- An existing development Bench with a disposable Frappe site. Integration
-  simulations use Frappe v16 and PostgreSQL. Other combinations need validation.
+- An existing development Bench with a disposable Frappe v16 site on MariaDB.
+  The automation drain uses session locks on MariaDB and PostgreSQL. Production runs MariaDB.
 - A running Relay Hub with one account whose site URL matches this Frappe site.
 - A Hub API token granted to that account, with the scopes your operations need.
   See [authentication](authentication.md).
