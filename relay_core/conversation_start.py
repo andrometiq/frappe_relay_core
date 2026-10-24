@@ -8,7 +8,6 @@ from relay_core.settings import value as connection_value
 from relay_core import messaging, whatsapp, service_window
 from relay_core.automation.service import internal_save
 from relay_core.message_types import text
-from relay_core.hub import HubError
 
 
 def business_contact(contact, business_doctype, business_name):
@@ -20,26 +19,17 @@ def business_contact(contact, business_doctype, business_name):
     person=frappe.get_doc('Contact',contact);person.check_permission('read')
     if not any(link.link_doctype==business_doctype and link.link_name==business_name for link in person.links):
         frappe.throw('Contact is not linked to this business',frappe.PermissionError)
-    number=re.sub(r'[ +()\-]', '', person.mobile_no or person.phone or '')
-    if not re.fullmatch(r'[0-9]{7,15}',number):
-        frappe.throw('This contact needs a WhatsApp number with country code')
-    return person,number
+    return person
 
 
 def business_channels(contact, business_doctype, business_name):
-    person,number=business_contact(contact,business_doctype,business_name)
-    account=connection_value('relay_hub_account')
-    rows=frappe.get_all('Relay Channel',filters={'channel':'WhatsApp','enabled':1,'account':account},fields=['name'],limit_page_length=10)
-    relay=frappe.db.get_value('Relay Contact',{'contact':person.name},'name')
-    result=[]
-    for row in rows:
-        channel=frappe.get_doc('Relay Channel',row.name)
-        try:channel.check_permission('read')
-        except frappe.PermissionError:continue
-        endpoint=frappe.db.get_value('Relay Contact Endpoint',{'channel':channel.name,'endpoint':number,'verified':1},'name') if relay else None
-        window=service_window.status(relay,channel.name,number) if relay and endpoint else {'open':False,'expires_at':None}
-        result.append({'value':channel.name,'label':'WhatsApp · '+number,'provider':'WhatsApp','window':window})
-    return result
+    person = business_contact(contact, business_doctype, business_name)
+    relay = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
+    if not relay:
+        return []
+    rows = options(relay, business_doctype, business_name)
+    return [dict(row, endpoint=row['value'], value=frappe.db.get_value(
+        'Relay Contact Endpoint', row['value'], 'channel')) for row in rows]
 
 
 @frappe.whitelist(methods=['GET'])
@@ -47,32 +37,19 @@ def business_options(contact, business_doctype, business_name):
     return business_channels(contact,business_doctype,business_name)
 
 
-def ensure_business_binding(contact, channel_name, business_doctype, business_name):
-    person,number=business_contact(contact,business_doctype,business_name)
-    allowed={row['value'] for row in business_channels(contact,business_doctype,business_name)}
-    if channel_name not in allowed:frappe.throw('Choose an available WhatsApp channel',frappe.PermissionError)
-    relay=frappe.db.get_value('Relay Contact',{'contact':person.name},'name')
-    if not relay:
-        relay=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,
-            'display_name':person.full_name or person.name}).insert(ignore_permissions=True).name
-    key=hashlib.sha256((channel_name+':'+number).encode()).hexdigest()
-    existing=frappe.db.get_value('Relay Contact Endpoint',{'endpoint_key':key},['name','relay_contact','verified'],as_dict=True)
-    if existing:
-        if existing.relay_contact!=relay:frappe.throw('This WhatsApp number belongs to another contact')
-        if not existing.verified:frappe.throw('This WhatsApp destination was revoked and needs administrator review')
-        return relay,existing.name
-    previous=getattr(frappe.flags,'relay_business_contact_sync',False);frappe.flags.relay_business_contact_sync=True
-    try:
-        endpoint=frappe.get_doc({'doctype':'Relay Contact Endpoint','channel':channel_name,
-            'endpoint':number,'relay_contact':relay,'verified':1}).insert(ignore_permissions=True)
-    finally:frappe.flags.relay_business_contact_sync=previous
-    return relay,endpoint.name
+def ensure_business_binding(contact, channel_name, business_doctype, business_name, endpoint=None):
+    choices = [row for row in business_channels(contact, business_doctype, business_name)
+               if row['value'] == channel_name and (endpoint is None or row['endpoint'] == endpoint)]
+    if len(choices) != 1:
+        frappe.throw('Choose one verified endpoint for this business', frappe.PermissionError)
+    binding = frappe.get_doc('Relay Contact Endpoint', choices[0]['endpoint'])
+    return binding.relay_contact, binding.name
 
 
 @frappe.whitelist(methods=['POST'])
-def send_business(contact, channel, kind, data, request_key, business_doctype, business_name):
-    relay,endpoint=ensure_business_binding(contact,channel,business_doctype,business_name)
-    return send(relay,endpoint,kind,data,request_key,business_doctype,business_name)
+def send_business(contact, channel, kind, data, request_key, business_doctype, business_name, endpoint=None):
+    relay, endpoint = ensure_business_binding(contact, channel, business_doctype, business_name, endpoint)
+    return send(relay, endpoint, kind, data, request_key, business_doctype, business_name)
 
 
 def target(contact, endpoint, business_doctype=None, business_name=None):
@@ -81,21 +58,16 @@ def target(contact, endpoint, business_doctype=None, business_name=None):
     if binding.relay_contact!=contact or not binding.verified:
         frappe.throw('Choose a verified endpoint for this contact',frappe.PermissionError)
     channel=frappe.get_doc('Relay Channel',binding.channel);channel.check_permission('read')
-    if not channel.enabled or channel.account!=connection_value('relay_hub_account') or channel.channel!='WhatsApp':
+    if not channel.enabled or channel.account!=connection_value('relay_hub_account') or channel.channel not in ('WhatsApp','Telegram','Email'):
         frappe.throw('The channel is unavailable',frappe.PermissionError)
-    if not re.fullmatch(r'[0-9]{1,16}',binding.endpoint or '') or int(binding.endpoint)<=0:
+    if channel.channel != 'Email' and (not re.fullmatch(r'[0-9]{1,16}',binding.endpoint or '') or int(binding.endpoint)<=0):
         frappe.throw('Use Groups to start a group conversation')
-    context={'provider':'WhatsApp'}
+    context={'provider':channel.channel}
+    if channel.channel == 'Telegram':
+        context.update(chat_id=int(binding.endpoint),chat_type='private')
     source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=binding.endpoint)
-    from relay_core.business_access import candidates
-    links=candidates(contact)
-    if business_doctype or business_name:
-        if (business_doctype,business_name) not in links:frappe.throw('Contact is not linked to this business',frappe.PermissionError)
-        frappe.get_doc(business_doctype,business_name).check_permission('read')
-        source.business_doctype=business_doctype;source.business_name=business_name
-    elif len(links)==1:
-        source.business_doctype,source.business_name=links[0]
-    else:frappe.throw('Choose the business record for this conversation')
+    from relay_core.business_access import choose_business
+    source.business_doctype,source.business_name=choose_business(contact,business_doctype,business_name)
     return source,channel,context
 
 
@@ -115,7 +87,7 @@ def options(contact, business_doctype=None, business_name=None):
 def prepared(contact, endpoint, kind, data, business_doctype=None, business_name=None):
     source,channel,context=target(contact,endpoint,business_doctype,business_name)
     data=messaging.object_value(data)
-    if kind=='whatsapp':
+    if kind=='whatsapp' and channel.channel=='WhatsApp':
         if set(data) != {'operation', 'arguments'} or data['operation'] not in whatsapp.SEND:
             raise ValueError('Invalid WhatsApp message')
         person = frappe.db.get_value('Relay Contact', contact, 'contact')
@@ -137,7 +109,7 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
         elif content['kind'] == 'reaction':
             raise ValueError('A reaction requires a reply target')
         tool = 'whatsapp.execute'
-    elif kind=='text':
+    elif kind=='text' and channel.channel in ('WhatsApp','Telegram'):
         if set(data)!={'text'}:raise ValueError('Unexpected message fields')
         content={'kind':'text','text':text(data.get('text'),4096,required=True)}
         if channel.channel=='WhatsApp':
@@ -158,13 +130,30 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
 @frappe.whitelist(methods=['POST'])
 def send(contact, endpoint, kind, data, request_key, business_doctype=None, business_name=None):
     if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}',request_key):raise ValueError('A stable request key is required')
+    key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
+    with frappe.cache.lock('relay-start:'+key,timeout=120,blocking_timeout=3):
+        return send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
+
+
+def send_locked(contact, endpoint, kind, data, request_key, business_doctype, business_name):
     # Repeated attempts look up the original action even if its 24-hour window has elapsed.
     source,channel,context=target(contact,endpoint,business_doctype,business_name)
     data=messaging.object_value(data)
+    key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
+    email_key=hashlib.sha256(('email:'+frappe.session.user+':'+request_key).encode()).hexdigest()
+    other_key=key if channel.channel == 'Email' else email_key
+    if frappe.db.get_value('Relay Message Action',{'request_key':other_key},'name',for_update=True):
+        raise ValueError('Request key already belongs to another channel')
+    if channel.channel == 'Email':
+        if kind != 'email' or set(data) - {'subject','body','html'}:
+            raise ValueError('Provide an email subject and body')
+        from relay_core.email import send as send_email
+        return send_email([source.sender_endpoint], data.get('subject'), data.get('body'),
+            html=data.get('html'), request_key=request_key, channel_name=channel.name,
+            business_doctype=source.business_doctype, business_name=source.business_name)
     intent={'contact':contact,'endpoint':endpoint,'destination':source.sender_endpoint,'channel':channel.name,'kind':kind,'data':data,'business_doctype':source.get('business_doctype'),'business_name':source.get('business_name')}
     digest=hashlib.sha256(json.dumps(intent,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-    key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
-    existing=frappe.db.get_value('Relay Message Action',{'request_key':key},['name','payload_hash'],as_dict=True)
+    existing=frappe.db.get_value('Relay Message Action',{'request_key':key},['name','payload_hash'],as_dict=True,for_update=True)
     if existing:
         if existing.payload_hash!=digest:raise ValueError('Request key already belongs to different content')
         return messaging.reconcile(existing.name)
