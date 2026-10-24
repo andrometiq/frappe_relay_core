@@ -25,9 +25,11 @@ export function emailComposition(message, mode = 'reply') {
   const context = objectValue(message.provider_context), data = objectValue(message.message_data)
   const email = data.email || data
   const subject = email.subject || context.subject || ''
-  const to = mode === 'forward' ? [] : [message.sender_endpoint]
+  const to = mode === 'forward' ? [] : [String(message.sender_endpoint || '').trim().toLowerCase()]
+  const excluded = new Set([...to, ...(context.mailbox_addresses || [])].map(value => value.trim().toLowerCase()))
   const cc = mode === 'reply-all' ? [...(context.to || email.to || []), ...(context.cc || email.cc || [])]
-    .filter(value => typeof value === 'string' && !to.includes(value)) : []
+    .filter(value => typeof value === 'string').map(value => value.trim().toLowerCase())
+    .filter(value => value && !excluded.has(value)) : []
   return { mode, to: to.join(', '), cc: [...new Set(cc)].join(', '), bcc: '',
     subject: (mode === 'forward' ? /^fwd?:/i : /^re:/i).test(subject) ? subject : (mode === 'forward' ? 'Fwd: ' : 'Re: ') + subject,
     body: mode === 'forward' ? 'Forwarded message:\n' + (message.content || '') : '', attachments: [], signature: '', request: null }
