@@ -34,7 +34,7 @@ async function run(fn) {
 }
 async function load(after) {
   const result = await coreApi("enrollment.pending", { after });
-  rows.value = result.items.filter(row => row.configuration_required || row.medium === 'WhatsApp');
+  rows.value = result.items;
   next.value = result.next;
 }
 async function search() {
