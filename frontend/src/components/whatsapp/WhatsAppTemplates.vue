@@ -257,7 +257,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <template #cell-category="{ item }">{{ item.category || "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
     <template #cell-message="{ item }">{{ templateBody(item) || "No message body" }}</template>
-    <template #empty-action><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
-    <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} loaded templates</span><span v-if="templateCursor">More templates load as you scroll</span></template>
+    <template #empty-action><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
+    <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} loaded templates</span><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /></template>
   </FrappeListView>
 </template>
