@@ -31,6 +31,8 @@ add_to_apps_screen = [{"name":"relay_core","title":"Relay Core",
 # Registered adapters are explicit; case definitions remain Desk configuration.
 from relay_core.flows.retailer import ACTION as _retailer_action
 relay_flow_actions = {'retailer.create_follow_up': _retailer_action}
+from relay_core.ai.actions import CREATE_DRAFT as _draft_action, REPLY as _reply_action
+relay_flow_actions.update({'create_draft': _draft_action, 'reply': _reply_action})
 
 # Realtime invalidations contain no record payload; browser reads recheck permissions.
 from relay_core.realtime import RESOURCES as _realtime_resources

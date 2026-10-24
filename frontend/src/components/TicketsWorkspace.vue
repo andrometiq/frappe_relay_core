@@ -65,6 +65,14 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
       <article v-if="selected" class="workflow-card">
         <div class="automation-card-heading"><h2 class="font-semibold">{{ selected.subject }}</h2><Button label="Dismiss" @click="selected = null" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
         <p class="ticket-business-name">{{ linkedTitle(selected.business_doctype, selected.business_name) }}</p><p v-if="selected.handoff_reason">{{ selected.handoff_reason }}</p>
+        <div v-if="selected.linked_drafts?.length" class="space-y-2">
+          <h3 class="font-semibold">Documents for review</h3>
+          <a v-for="draft in selected.linked_drafts" :key="draft.doctype + ':' + draft.name" class="v1-link block"
+            :href="'/app/' + encodeURIComponent(draft.doctype.toLowerCase().replaceAll(' ', '-')) + '/' + encodeURIComponent(draft.name)">
+            {{ draft.doctype }} · {{ draft.name }} · {{ ['Draft', 'Submitted', 'Cancelled'][draft.docstatus] }}
+          </a>
+          <p>Open each draft, check the details and submit when ready.</p>
+        </div>
         <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
         <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><FormControl v-model="owner" label="Assign to user" placeholder="User email" /><Button type="submit" label="Assign" :disabled="busy" /></form>
         <div class="flex flex-wrap gap-3"><Button label="Start work" :disabled="busy || selected.status === 'In progress'" @click="update('update_status', { status: 'In progress' })" /><Button label="Close ticket" :disabled="busy || selected.status === 'Closed'" @click="update('update_status', { status: 'Closed' })" /></div>
