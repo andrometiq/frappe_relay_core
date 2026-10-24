@@ -15,7 +15,7 @@ contact=frappe.get_doc({'doctype':'Relay Contact','contact':person.name,'display
 channel=frappe.get_doc({'doctype':'Relay Channel','channel':'Email','account':'mail-'+stamp,'enabled':1}).insert()
 address='sender-'+stamp+'@example.invalid'
 endpoint=frappe.get_doc({'doctype':'Relay Contact Endpoint','channel':channel.name,'relay_contact':contact.name,'endpoint':address,'verified':1}).insert()
-context={'provider':'Email','message_id':'<source@example.invalid>','references':['<root@example.invalid>'],'subject':'Question','auto_submitted':False}
+context={'provider':'Email','message_id':'<source@example.invalid>','references':['<root@example.invalid>'],'subject':'Question','auto_submitted':False,'authentication':{'status':'pass'}}
 source=frappe.get_doc({'doctype':'Relay Message','relay_contact':contact.name,'channel':channel.name,'sender_endpoint':address,'direction':'Incoming','content':'Question','status':'Sent','message_type':'text','provider_context':json.dumps(context),'message_data':json.dumps({'kind':'text','text':'Question','email':{'subject':'Question','attachments':[{'filename':'document.pdf'}]}}),'provider_id':'fixture-mail-'+stamp}).insert()
 rule=frappe.get_doc({'doctype':'Relay Email Rule','channel':channel.name,'enabled':1,'execution_user':actor,'subject':'Request received','body':'An agent will review your request.'}).insert()
 frappe.db.commit()
@@ -58,6 +58,25 @@ try:
   email.send([address],'Fwd: Question','Forward',message=source.name,forward=1)
   assert 'in_reply_to' not in client.return_value.call_tool.call_args.args[1]
   print('PASS email reply threads and private attachments reach Hub; forwarding starts a separate thread')
+  alias='alias-00-'+stamp+'@example.invalid'
+  identifier='<dsn-'+stamp+'@example.invalid>'
+  client.return_value.call_tool.return_value={'sent':True,'message_id':identifier}
+  dsn_send=email.send([address],'Local DSN quantity 25','Delivery evidence',cc=[alias],message=source.name,request_key='dsn-'+stamp)
+  dsn_action=frappe.get_doc('Relay Message Action',dsn_send['action'])
+  client.reset_mock()
+  def evidence(number,recipient,state,code):
+   return dict(id=number,delivery_id=1001,request_key=dsn_action.request_key,operation='email.send',state=state,
+    receipt=dict(message_id=identifier,recipient=recipient,delivery_status=state,status_code=code),occurred_at='2026-10-24T00:00:00Z')
+  bounce=evidence(1002,address,'bounced','5.1.1')
+  for row,expected in ((bounce,'Failed'),(bounce,'Failed'),(evidence(1001,address,'delayed','4.2.0'),'Failed'),
+                       (evidence(1003,alias,'delivered','2.0.0'),'Failed'),(evidence(1004,address,'delivered','2.0.0'),'Delivered'),
+                       (evidence(1005,address,'bounced','5.1.1'),'Delivered')):
+   push_status(channel.account,[row])
+   assert frappe.db.get_value('Relay Message',dsn_send['message'],'status')==expected
+   dsn_action.reload();assert dsn_action.status=='Submitted'
+  assert len(messaging.object_value(dsn_action.result)['_relay_email_receipts'])==2
+  client.return_value.call_tool.assert_not_called()
+  print('PASS signed DSN bounce, replay, delay ordering, recipient-specific evidence and positive delivery precedence')
   client.reset_mock();client.return_value.call_tool.return_value={'sent':True,'message_id':'<auto-'+stamp+'@example.invalid>'}
   email_preferences.auto_reply(source.name);email_preferences.auto_reply(source.name)
   calls=client.return_value.call_tool.call_args_list

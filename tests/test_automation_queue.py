@@ -144,9 +144,11 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_recovery_runs_even_when_ai_is_disabled(self):
         fake = SimpleNamespace(conf={})
-        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover') as recover:
+        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover') as recover, \
+                patch.object(skills, 'recover_deliveries') as deliveries:
             service.recover()
         recover.assert_called_once()
+        deliveries.assert_called_once()
 
     def test_ai_creation_and_recovery_keep_work_off_both_projection_queues(self):
         fake = SimpleNamespace(get_doc=Mock(return_value=_dict(name='run', status='Pending')), enqueue=Mock())
@@ -161,7 +163,7 @@ class AutomationQueueTests(unittest.TestCase):
 
         fake = SimpleNamespace(conf={'relay_automation_enabled': 1}, enqueue=Mock(),
             get_all=Mock(side_effect=[[], [_dict(name='run')], [_dict(name='outbox')]]))
-        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'):
+        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'), patch.object(skills, 'recover_deliveries'):
             service.recover()
         self.assertEqual([c.kwargs['queue'] for c in fake.enqueue.call_args_list], ['default', 'default'])
 

@@ -9,6 +9,8 @@ from relay_core.automation.contracts import event_key, action_key
 
 
 def skill_for(message):
+    if not frappe.db.exists('Relay AI Skill', {'channel': message.channel, 'enabled': 1}):
+        return None
     from relay_core.business_access import reference
     business = reference(message)
     if not business:
@@ -21,6 +23,15 @@ def skill_for(message):
 
 
 def create_run(message, skill):
+    from relay_core.email_preferences import automatic_allowed
+    from relay_core.automation.provenance import context_of
+    provenance = context_of(message)
+    if not automatic_allowed(provenance):
+        return {'status': 'Ignored'}
+    if provenance.get('provider') == 'Email':
+        from relay_core.email_preferences import automatic_reply_exists
+        if automatic_reply_exists(message):
+            return {'status': 'Ignored'}
     contact = lock_contact(message.relay_contact)
     if contact.automation_paused:
         return {'status': 'Paused'}
@@ -44,10 +55,19 @@ def context(skill, message):
     if frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact') != contact.name:
         raise ValueError('Endpoint verification is missing or revoked')
     channel = frappe.get_doc('Relay Channel', message.channel)
-    if message.channel != skill.channel or channel.channel != 'WhatsApp' or not channel.enabled:
+    if message.channel != skill.channel or channel.channel not in ('WhatsApp', 'Telegram', 'Email') or not channel.enabled:
         raise ValueError('Skill channel is unavailable')
     if message.direction != 'Incoming' or message.message_type not in ('text', '', None):
         raise ValueError('This skill requires an incoming text message')
+    from relay_core.automation.provenance import context_of, telegram_route
+    from relay_core.email_preferences import automatic_allowed
+    provenance = context_of(message)
+    if provenance and provenance.get('provider') != channel.channel:
+        raise ValueError('Channel provider changed')
+    if channel.channel == 'Telegram':
+        telegram_route(message, '')
+    if channel.channel == 'Email' and (provenance.get('provider') != 'Email' or not automatic_allowed(provenance)):
+        raise ValueError('Automatic email replies are suppressed')
     # A linked but disabled/denied user must never fall back to a broader identity.
     user = person.get('user') or skill.run_as_user
     with as_user(user):
@@ -59,6 +79,8 @@ def decide(skill, message, run_id=None):
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
     user, business = context(skill, message)
     text = message.content or ''
+    if any(phrase in text.casefold() for phrase in ('talk to a human', 'talk to a person', 'speak to a human', 'hand this to a person')):
+        return {'handoff': True, 'reply': '', 'reason': 'Sender requested a person', 'user': user, 'reads': []}
     # Bounded history lets a sender agree to a previously offered date range.
     history = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
         'business_doctype': business[0], 'business_name': business[1], 'name': ['<', message.name]},
@@ -124,16 +146,17 @@ def process(name):
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
             else:
                 delivery_scope(run, skill, message, decision)
-                from relay_core.messaging import send
                 token = outgoing_run.set(run.name)
                 try:
-                    result = send(message.name, 'text', {'text': decision['reply']}, action_key(message.name, 'reply'), quote=0)
+                    result = send_reply(message, decision['reply'])
                 finally:
                     outgoing_run.reset(token)
                 if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
                     raise ValueError('Reply delivery requires review')
-                run.status = 'Completed'
-                internal_save(run)
+                run = lock_run(name)
+                if run.status in ('Pending', 'Deciding'):
+                    run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
+                    internal_save(run)
             frappe.db.commit()
     except Superseded:
         frappe.db.rollback()
@@ -153,15 +176,7 @@ def process(name):
                 handoff(run, skill, 'Decision, delivery or authorization failed; review required')
             except Exception:
                 # Leave the run recoverable if every configured owner is unavailable.
-                frappe.db.rollback()
-                contact = lock_contact(frappe.get_doc('Relay Message', run.message).relay_contact)
-                if not contact.automation_paused:
-                    contact.automation_generation = int(contact.automation_generation or 0) + 1
-                contact.automation_paused = 1
-                contact.save(ignore_permissions=True)
-                run.reason = 'Handoff owner unavailable; automation paused pending recovery'
-                internal_save(run); frappe.db.commit()
-                frappe.log_error(title='Relay handoff unavailable', message='Configure an enabled owner with conversation access')
+                defer_handoff(run.name)
                 return
         frappe.db.commit()
 
@@ -173,3 +188,74 @@ def delivery_scope(run, skill, message, decision=None):
     if decision.get('user') != user:
         raise ValueError('Conversation user changed')
     recheck(skill, user, business, decision.get('reads', []))
+
+
+def send_reply(message, reply):
+    from relay_core.automation.provenance import context_of
+    context = context_of(message)
+    key = action_key(message.name, 'reply')
+    if context.get('provider') == 'Email':
+        from relay_core.email import send
+        subject = context.get('subject') or 'Reply'
+        if not subject.lower().startswith('re:'):
+            subject = 'Re: ' + subject
+        return send([message.sender_endpoint], subject, reply, request_key=key,
+                    message=message.name, auto_submitted=1)
+    from relay_core.messaging import send
+    return send(message.name, 'text', {'text': reply}, key, quote=0)
+
+
+def complete(action):
+    if action.status in ('Submitted', 'Rejected') and json.loads(action.payload).get('automation_run'):
+        frappe.enqueue('relay_core.ai.service.complete_delivery', action=action.name,
+                       queue=QUEUE, enqueue_after_commit=True)
+
+
+def complete_delivery(action):
+    from relay_core.ai.handoff import handoff
+    frappe.db.get_value('Relay Message Action', action, 'name', for_update=True)
+    action = frappe.get_doc('Relay Message Action', action)
+    name = json.loads(action.payload).get('automation_run')
+    if not name or action.status not in ('Submitted', 'Rejected'):
+        return
+    run = lock_run(name)
+    if (not run.get('skill') or run.message != action.source_message
+            or run.status not in ('Pending', 'Deciding', 'Delivering', 'Completed')):
+        return
+    if action.status == 'Submitted':
+        run.status = 'Completed'
+        internal_save(run)
+    else:
+        skill = frappe.get_doc('Relay AI Skill', run.skill)
+        try:
+            handoff(run, skill, 'Reply delivery rejected; review required')
+        except Exception:
+            defer_handoff(run.name)
+            return
+    frappe.db.commit()
+
+
+def recover_deliveries():
+    run = frappe.qb.DocType('Relay Automation Run')
+    action = frappe.qb.DocType('Relay Message Action')
+    rows = (frappe.qb.from_(run).join(action).on(run.message == action.source_message)
+        .select(action.name).where(run.skill.isnotnull())
+        .where(action.payload.like('%"automation_run":%'))
+        .where(((run.status == 'Delivering') & action.status.isin(['Submitted', 'Rejected']))
+               | ((run.status == 'Completed') & (action.status == 'Rejected')))
+        .orderby(run.modified).limit(20).run(as_dict=True))
+    for row in rows:
+        frappe.enqueue('relay_core.ai.service.complete_delivery', action=row.name, queue=QUEUE)
+
+
+def defer_handoff(name):
+    frappe.db.rollback()
+    run = lock_run(name)
+    contact = lock_contact(frappe.get_doc('Relay Message', run.message).relay_contact)
+    if not contact.automation_paused:
+        contact.automation_generation = int(contact.automation_generation or 0) + 1
+    contact.automation_paused = 1
+    contact.save(ignore_permissions=True)
+    run.reason = 'Handoff owner unavailable; automation paused pending recovery'
+    internal_save(run); frappe.db.commit()
+    frappe.log_error(title='Relay handoff unavailable', message='Configure an enabled owner with conversation access')

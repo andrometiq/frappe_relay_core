@@ -1,4 +1,4 @@
-"""Business transactions capture intents; workers deliver approved templates."""
+"""Business transactions capture immutable intents; workers use the action journal."""
 from contextvars import ContextVar
 import hashlib
 import json
@@ -9,7 +9,8 @@ from relay_core.business_references import RELAY_DOCTYPES
 from relay_core.automation.service import internal_save
 
 FIELDS = ('title', 'enabled', 'source_doctype', 'event', 'recipient_field', 'business_doctype',
-          'channel', 'run_as_user', 'template', 'parameter_mapping')
+          'channel', 'run_as_user', 'template', 'parameter_mapping', 'contact',
+          'use_preferences', 'telegram_body', 'email_subject', 'email_body', 'email_signature')
 EVENTS = ('after_insert', 'on_submit', 'on_cancel')
 RULE_PAIRS_CACHE_KEY = 'relay_business_event_rule_pairs'
 outgoing_event = ContextVar('relay_outgoing_business_event', default=None)
@@ -49,7 +50,29 @@ def validate_rule(rule):
     mapping(rule)
     if rule.enabled:
         with as_user(rule.run_as_user): require_access(manage=True)
-        approved(rule)
+        if rule.use_preferences:
+            if not any((rule.template, rule.telegram_body, rule.email_body)):
+                raise ValueError('Configure content for at least one channel')
+        else:
+            channel = frappe.get_doc('Relay Channel', rule.channel)
+            if not channel.enabled:
+                raise ValueError('Choose an enabled channel')
+            if channel.channel == 'WhatsApp':
+                approved(rule)
+            elif channel.channel == 'Telegram':
+                if not rule.telegram_body:
+                    raise ValueError('Configure Telegram text')
+            elif channel.channel == 'Email':
+                if not rule.email_subject or not rule.email_body:
+                    raise ValueError('Configure an email subject and body')
+            else:
+                raise ValueError('Unsupported event channel')
+        values = {key: 'sample' for key in mapping(rule)}
+        from relay_core.email_templates import render, render_text
+        if rule.telegram_body:
+            render_text(rule.telegram_body, values, limit=4096)
+        if rule.email_body:
+            render(rule.email_subject, rule.email_body, values, rule.email_signature or '')
 
 
 def parameters(rule, doc):
@@ -75,7 +98,10 @@ def readable_parameters(rule, source, payload):
         child_fields = set(frappe.get_meta(child_type).get_permitted_fieldnames(parenttype=rule.source_doctype, permission_type='read'))
         if not {'item_name', 'item_code', 'qty', 'uom'}.issubset(child_fields):
             raise ValueError('Item fields are not readable')
-    if parameters(rule, source) != json.loads(payload)['components'][0]['parameters']:
+    snapshot = json.loads(payload)
+    if 'selection' in snapshot:
+        return
+    if parameters(rule, source) != snapshot['components'][0]['parameters']:
         raise ValueError('Source data changed before delivery')
 
 
@@ -129,21 +155,65 @@ def capture(rule, doc, event):
     business = doc.get(rule.recipient_field)
     if not business: raise ValueError('Business recipient is missing')
     # No guessing among several contacts. Configuration can be corrected and replayed.
-    people = frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
+    people = [rule.contact] if rule.get('contact') else frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
         'link_doctype': rule.business_doctype, 'link_name': business}, pluck='parent', distinct=True, limit_page_length=2)
     if len(people) != 1: raise ValueError('Business needs exactly one recipient contact')
     key = hashlib.sha256(json.dumps([frappe.local.site, doc.doctype, doc.name, event, rule.name, people[0]], separators=(',', ':')).encode()).hexdigest()
     # The business document transaction serializes lifecycle callbacks; unique key is final protection.
     if frappe.db.exists('Relay Business Event Delivery', {'event_key': key}): return
-    template = approved(rule)
-    payload = {'name': template.template_name, 'language': template.language,
-        'components': [{'type': 'body', 'parameters': parameters(rule, doc)}]}
+    payload = snapshot(rule, doc, people[0], business)
     delivery = frappe.get_doc({'doctype': 'Relay Business Event Delivery', 'event_key': key,
         'rule': rule.name, 'rule_version': str(rule.modified), 'source_doctype': doc.doctype,
         'source_name': doc.name, 'event': event, 'business_doctype': rule.business_doctype,
-        'business_name': business, 'contact': people[0], 'payload': json.dumps(payload), 'status': 'Pending'})
+        'business_name': business, 'contact': people[0], 'payload': json.dumps(payload),
+        'payload_hash': hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
+        'execution_user': rule.run_as_user,
+        'channel': payload.get('selection', {}).get('channel') or rule.channel,
+        'endpoint': payload.get('selection', {}).get('endpoint'), 'status': 'Pending'})
     internal_save(delivery, new=True)
     frappe.db.after_commit.add(lambda: enqueue_delivery(delivery.name))
+
+
+def snapshot(rule, source, contact, business):
+    provider = frappe.db.get_value('Relay Channel', rule.channel, 'channel') if rule.channel else None
+    if not rule.get('use_preferences') and provider == 'WhatsApp':
+        template = approved(rule)
+        return {'name': template.template_name, 'language': template.language,
+                'components': [{'type': 'body', 'parameters': parameters(rule, source)}]}
+    from relay_core.channel_preferences import resolve
+    from relay_core.email_templates import render, render_text
+    with as_user(rule.run_as_user):
+        source.check_permission('read')
+        selection = resolve(contact, rule.business_doctype, business,
+                            channels=None if rule.get('use_preferences') else [rule.channel],
+                            providers=[provider for provider, content in (('WhatsApp', rule.template),
+                                ('Telegram', rule.telegram_body), ('Email', rule.email_body)) if content])
+        values = {key: value['text'] for key, value in zip(mapping(rule), parameters(rule, source))}
+        payload = {'selection': selection}
+        readable_parameters(rule, source, json.dumps(payload))
+        provider = selection['provider']
+        if provider == 'Telegram':
+            payload.update(kind='text', data={'text': render_text(rule.telegram_body, values, limit=4096)})
+        elif provider == 'Email':
+            payload.update(kind='email', data=render(rule.email_subject, rule.email_body, values, rule.email_signature or ''))
+        elif provider == 'WhatsApp':
+            selected_rule = frappe._dict(rule.as_dict())
+            selected_rule.channel = selection['channel']
+            template = approved(selected_rule)
+            payload.update(kind='template', data={'name': template.template_name, 'language': template.language,
+                'components': [{'type': 'body', 'parameters': parameters(rule, source)}]})
+        else:
+            raise ValueError('Unsupported event channel')
+        return payload
+
+
+def action_key(delivery, rule):
+    prefix = 'email:' if json.loads(delivery.payload).get('kind') == 'email' else ''
+    return hashlib.sha256((prefix + (delivery.get('execution_user') or rule.run_as_user) + ':' + delivery.event_key).encode()).hexdigest()
+
+
+def delivery_status(status):
+    return {'Submitted': 'Submitted', 'Queued': 'Queued', 'Rejected': 'Failed'}.get(status, 'Uncertain')
 
 
 def enqueue_delivery(name):
@@ -158,44 +228,91 @@ def dispatch(name):
     frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
     delivery = frappe.get_doc('Relay Business Event Delivery', name)
     if delivery.status != 'Pending': return
+    key = None
     try:
-        rule = delivery_scope(delivery)
-        with as_user(rule.run_as_user):
-            from relay_core.conversation_start import send_business
-            token = outgoing_event.set(delivery.name)
-            try:
-                result = send_business(delivery.contact, rule.channel, 'template', json.loads(delivery.payload),
-                    delivery.event_key, delivery.business_doctype, delivery.business_name)
-            finally:
-                outgoing_event.reset(token)
-        delivery.status = 'Submitted' if result['status'] == 'Submitted' else 'Uncertain'
+        rule = frappe.get_doc('Relay Business Event Rule', delivery.rule)
+        key = action_key(delivery, rule)
+        existing = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'status'], as_dict=True)
+        if existing:
+            result = {'action': existing.name, 'status': existing.status}
+            if existing.status == 'Dispatching':
+                from relay_core.messaging import reconcile
+                with as_user(delivery.get('execution_user') or rule.run_as_user):
+                    result = reconcile(existing.name)
+        else:
+            rule = delivery_scope(delivery)
+            with as_user(rule.run_as_user):
+                from relay_core.conversation_start import send_business
+                token = outgoing_event.set(delivery.name)
+                try:
+                    payload = json.loads(delivery.payload)
+                    selection = payload.get('selection', {})
+                    result = send_business(delivery.contact, selection.get('channel') or rule.channel,
+                        payload.get('kind', 'template'), payload.get('data', payload), delivery.event_key,
+                        delivery.business_doctype, delivery.business_name, **({'endpoint': selection['endpoint']} if selection else {}))
+                finally:
+                    outgoing_event.reset(token)
+        frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
+        delivery.reload()
+        if delivery.status != 'Submitted':
+            delivery.status = delivery_status(result['status'])
         delivery.action = result.get('action')
         internal_save(delivery); frappe.db.commit()
-    except Exception:
+    except Exception as exc:
         frappe.db.rollback()
-        # Recover an existing journal entry rather than resending an uncertain send.
+        frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
         delivery.reload()
-        key = hashlib.sha256((rule.run_as_user + ':' + delivery.event_key).encode()).hexdigest() if 'rule' in locals() else None
-        action = frappe.db.get_value('Relay Message Action', {'request_key': key}, 'name') if key else None
-        delivery.status, delivery.action = ('Uncertain' if action else 'Failed'), action
-        internal_save(delivery); log_failure(); frappe.db.commit()
+        action = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'status'], as_dict=True) if key else None
+        terminal = (isinstance(exc, (ValueError, frappe.ValidationError, frappe.PermissionError, frappe.DoesNotExistError))
+                    and not isinstance(exc, frappe.TimestampMismatchError))
+        delivery.status = delivery_status(action.status) if action else ('Failed' if terminal else 'Pending')
+        delivery.action = action.name if action else None
+        frappe.db.set_value('Relay Business Event Delivery', name,
+                            {'status': delivery.status, 'action': delivery.action})
+        log_failure(type(exc).__name__); frappe.db.commit()
 
 
 def delivery_scope(delivery):
     rule = frappe.get_doc('Relay Business Event Rule', delivery.rule)
-    if not rule.enabled or str(rule.modified) != delivery.rule_version:
+    if (not rule.enabled or str(rule.modified) != delivery.rule_version
+            or delivery.get('execution_user') and delivery.execution_user != rule.run_as_user):
         raise ValueError('Rule changed')
+    payload = json.loads(delivery.payload)
+    if delivery.get('payload_hash') and hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest() != delivery.payload_hash:
+        raise ValueError('Delivery content changed')
     with as_user(rule.run_as_user):
         source = frappe.get_doc(delivery.source_doctype, delivery.source_name)
         source.check_permission('read')
         readable_parameters(rule, source, delivery.payload)
         if source.get(rule.recipient_field) != delivery.business_name:
             raise ValueError('Business changed')
-        approved(rule)
+        if payload.get('selection'):
+            from relay_core.channel_preferences import recheck
+            recheck(delivery.contact, delivery.business_doctype, delivery.business_name, payload['selection'])
+        else:
+            approved(rule)
     return rule
 
 
+def complete(action):
+    name = json.loads(action.payload).get('business_event')
+    if not name or action.status == 'Dispatching':
+        return
+    status = frappe.db.get_value('Relay Business Event Delivery', name, 'status', for_update=True)
+    if status and status != 'Submitted':
+        frappe.db.set_value('Relay Business Event Delivery', name,
+            {'status': delivery_status(action.status), 'action': action.name})
+
+
 def recover():
+    delivery = frappe.qb.DocType('Relay Business Event Delivery')
+    action = frappe.qb.DocType('Relay Message Action')
+    # Only finished actions need repair; unresolved rows cannot starve later receipts.
+    rows = (frappe.qb.from_(delivery).join(action).on(delivery.action == action.name)
+        .select(action.name).where(delivery.status.isin(['Queued', 'Uncertain']))
+        .where(action.status.isin(['Submitted', 'Rejected'])).limit(20).run(as_dict=True))
+    for row in rows:
+        complete(frappe.get_doc('Relay Message Action', row.name))
     for name in frappe.get_all('Relay Business Event Delivery', filters={'status': 'Pending'},
         pluck='name', order_by='creation asc', limit_page_length=20):
         enqueue_delivery(name)

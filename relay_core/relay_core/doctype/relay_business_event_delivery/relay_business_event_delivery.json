@@ -18,7 +18,11 @@
     "contact",
     "payload",
     "status",
-    "action"
+    "action",
+    "channel",
+    "endpoint",
+    "payload_hash",
+    "execution_user"
   ],
   "fields": [
     {
@@ -84,7 +88,7 @@
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
-      "options": "Pending\nSubmitted\nUncertain\nFailed",
+      "options": "Pending\nQueued\nSubmitted\nUncertain\nFailed",
       "default": "Pending"
     },
     {
@@ -92,6 +96,30 @@
       "label": "Action",
       "fieldtype": "Link",
       "options": "Relay Message Action"
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel Snapshot",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "endpoint",
+      "label": "Endpoint Snapshot",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "payload_hash",
+      "label": "Payload Hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "execution_user",
+      "label": "Execution User Snapshot",
+      "fieldtype": "Data",
+      "read_only": 1
     }
   ],
   "permissions": [

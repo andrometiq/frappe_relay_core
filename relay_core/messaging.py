@@ -275,7 +275,33 @@ def admission_scope(action):
     business = payload.get('business') or []
     if any(business) and (not all(business) or business != [source.get('business_doctype'), source.get('business_name')]):
         raise ValueError('Message business changed before recovery')
+    automation_scope(action, source)
     return source, channel, context
+
+
+def automation_scope(action, source):
+    payload = object_value(action.payload)
+    if payload.get('automation_run'):
+        from relay_core.automation.service import scope
+        run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
+        if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
+        if run.get('skill'):
+            from relay_core.ai.service import delivery_scope, Superseded
+            skill = frappe.get_doc('Relay AI Skill', run.skill)
+            try:
+                delivery_scope(run, skill, source)
+            except Superseded:
+                raise
+            except Exception:
+                from relay_core.ai.handoff import handoff
+                handoff(run, skill, 'Reply recovery authorization failed; review required')
+                frappe.db.commit()
+                raise
+        else:
+            scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+    if payload.get('business_event'):
+        from relay_core.business_events import delivery_scope as event_delivery_scope
+        event_delivery_scope(frappe.get_doc('Relay Business Event Delivery', payload['business_event']))
 
 
 def record_submission_error(action, exc):
@@ -472,27 +498,6 @@ def reconcile(action):
         # Only a successful empty lookup proves admission can safely resume.
         source, channel, context = admission_scope(doc)
         if channel.channel == 'WhatsApp' and context.get('group_id'): raise ValueError('WhatsApp group sending is unavailable in v1')
-        if payload.get('automation_run'):
-            from relay_core.automation.service import scope
-            run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
-            if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
-            if run.get('skill'):
-                from relay_core.ai.service import delivery_scope, Superseded
-                skill = frappe.get_doc('Relay AI Skill', run.skill)
-                try:
-                    delivery_scope(run, skill, source)
-                except Superseded:
-                    raise
-                except Exception:
-                    from relay_core.ai.handoff import handoff
-                    handoff(run, skill, 'Reply recovery authorization failed; review required')
-                    frappe.db.commit()
-                    raise
-            else:
-                scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
-        if payload.get('business_event'):
-            from relay_core.business_events import delivery_scope as event_delivery_scope
-            event_delivery_scope(frappe.get_doc('Relay Business Event Delivery', payload['business_event']))
         if payload.get('routing'):
             from relay_core.business_routing_prompt import prepared as prepare_prompt
             try:
@@ -580,7 +585,7 @@ def actions(contact, before=None):
         retryable=row.status=='Rejected' and row.owner==frappe.session.user and row.operation!='business_prompt'
         if retryable:
             payload=object_value(frappe.get_doc('Relay Message Action',row.name).payload)
-            retryable=not payload.get('notification') and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
+            retryable=not any(payload.get(key) for key in ('notification', 'automation_run', 'business_event')) and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
         items.append({'name':row.name,'operation':row.operation,'status':row.status,'creation':row.creation,
                       'preview':(row.preview or '')[:300], 'message':row.outbound_message,
                       'can_retry':retryable, 'error':action_error(row)})
@@ -603,8 +608,8 @@ def retry(action):
     # that child is a separate reviewed action with its own retry identity.
     key=retry_key(doc.name)
     payload=object_value(doc.payload)
-    if payload.get('notification'):
-        frappe.throw('Ticket notifications cannot be retried from the inbox',frappe.PermissionError)
+    if any(payload.get(key) for key in ('notification', 'automation_run', 'business_event')):
+        frappe.throw('Automated messages cannot be retried from the inbox',frappe.PermissionError)
     if payload.get('group'):
         from relay_core.telegram import send as group_send
         return group_send(**payload['group'],request_key=key)

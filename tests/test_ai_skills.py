@@ -7,6 +7,12 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
+# Load native framework dependencies outside temporary sys.modules replacements.
+try:
+    import frappe.utils
+except ImportError:
+    pass
+
 
 class Doc(dict):
     def __getattr__(self, key): return self.get(key)
@@ -235,7 +241,7 @@ class SkillDeliveryTests(unittest.TestCase):
     def test_durable_queued_reply_does_not_trigger_handoff(self):
         self.send.return_value = {'status': 'Queued', 'action': 'ACTION-1'}
         self.service.process('RUN-1')
-        self.assertEqual(self.run.status, 'Completed')
+        self.assertEqual(self.run.status, 'Delivering')
         self.handoff.assert_not_called()
 
 
@@ -363,7 +369,7 @@ class ConversationIdentityTests(unittest.TestCase):
 
     def test_prompt_budget_counts_json_escaping_and_never_truncates_incoming(self):
         self.message.conversation_key = 'CHAT-1'
-        self.message.content = 'தமிழ் "Please hand this to a person"'
+        self.message.content = 'தமிழ் "Please show my balance"'
         self.f.get_list.return_value = [Doc(direction='Incoming', content='"\\தமிழ்' * 2500)]
         complete = Mock()
         adapter = types.SimpleNamespace(complete=complete, MAX_PROMPT_LENGTH=12000)
@@ -372,7 +378,88 @@ class ConversationIdentityTests(unittest.TestCase):
             self.assertEqual(json.loads(complete.call_args.args[3]),
                 {'history': [], 'incoming': self.message.content})
             complete.reset_mock()
-            self.message.content = 'x' * 12000 + ' hand this to a person'
+            self.message.content = 'x' * 12000 + ' show my balance'
             with self.assertRaisesRegex(ValueError, 'budget'):
                 self.service.decide(self.skill, self.message)
             complete.assert_not_called()
+
+
+class ChannelAutomationTests(unittest.TestCase):
+    def setUp(self):
+        from contextvars import ContextVar
+        self.f = framework()
+        self.f.conf = Doc(relay_automation_enabled=1)
+        automation = types.SimpleNamespace(internal_save=Mock(), lock_run=Mock(), lock_contact=Mock(),
+            message_hash=Mock(), latest_message=Mock(), outgoing_run=ContextVar('channel_run',default=None))
+        self.tools = module('relay_core/ai/tools.py', self.f)
+        self.service = module('relay_core/ai/service.py',self.f,
+            {'relay_core.ai.tools':self.tools,'relay_core.automation.service':automation})
+        self.email_rules = module('relay_core/email_preferences.py',self.f)
+        self.message = Doc(name='MSG-CHANNEL',sender_endpoint='person@example.invalid',
+            provider_context=json.dumps(dict(provider='Email',subject='Order 25',message_id='<one@example.invalid>',
+                authentication={'status':'pass'},auto_submitted=False)))
+
+    def test_email_reply_is_durable_sender_only_with_original_subject(self):
+        send = Mock(return_value={'status':'Queued'})
+        with patch.dict(sys.modules,{'relay_core.email':types.SimpleNamespace(send=send)}):
+            self.service.send_reply(self.message,'Quantity 25')
+            first = send.call_args
+            self.service.send_reply(self.message,'Quantity 25')
+        self.assertEqual(first,send.call_args)
+        self.assertEqual(first.args,(['person@example.invalid'],'Re: Order 25','Quantity 25'))
+        self.assertEqual(first.kwargs['message'],'MSG-CHANNEL')
+        self.assertEqual(first.kwargs['auto_submitted'],1)
+        self.assertNotIn('cc',first.kwargs)
+
+    def test_email_suppresses_automatic_mail_unverified_authentication_and_missing_ids(self):
+        context = json.loads(self.message.provider_context)
+        self.assertTrue(self.email_rules.automatic_allowed(context))
+        for changes in ({'auto_submitted':True},{'authentication':{'status':'unverified'}},
+                        {'authentication':{'status':'fail'}},{'message_id':None}):
+            with self.subTest(changes=changes):
+                self.assertFalse(self.email_rules.automatic_allowed(context | changes))
+        self.assertTrue(self.email_rules.automatic_allowed({'provider':'Telegram'}))
+
+    def test_disabled_or_paused_skill_does_not_fall_through_after_claim(self):
+        self.f.db.exists.return_value = True
+        self.f.conf.relay_automation_enabled = 0
+        with patch.dict(sys.modules,{'relay_core.ai.service':types.SimpleNamespace(skill_for=Mock())}):
+            self.assertTrue(self.email_rules.skill_claims(self.message))
+
+    def test_telegram_reply_preserves_channel_routing_and_stable_journal_key(self):
+        self.message.provider_context = json.dumps(dict(provider='Telegram',chat_id=-123,message_id=12,message_thread_id=7))
+        send = Mock(return_value={'status':'Uncertain'})
+        with patch.dict(sys.modules,{'relay_core.messaging':types.SimpleNamespace(send=send)}):
+            self.service.send_reply(self.message,'Quantity 25')
+        self.assertEqual(send.call_args.args[:3],('MSG-CHANNEL','text',{'text':'Quantity 25'}))
+
+    def test_no_matching_skill_avoids_channel_document_contact_lock_and_journal_work(self):
+        service = module('relay_core/automation/service.py',self.f,
+            {'frappe.utils':types.SimpleNamespace(now_datetime=Mock(),add_to_date=Mock())})
+        access = module('relay_core/business_access.py', self.f)
+        self.f.db.exists.return_value = False
+        self.f.get_all.return_value = [Doc(link_doctype='Customer', link_name=str(i)) for i in range(50)]
+        create = Mock()
+        self.message.direction = 'Incoming'
+        with patch.dict(sys.modules,{'relay_core.ai.service':types.SimpleNamespace(skill_for=self.service.skill_for,create_run=create),
+                                     'relay_core.business_access':access}):
+            for _ in range(100):
+                self.assertEqual(service.create_run(self.message),{'status':'Disabled'})
+        self.f.get_doc.assert_not_called()
+        self.f.db.get_value.assert_not_called()
+        create.assert_not_called()
+        self.f.get_all.assert_not_called()
+        self.assertEqual(self.f.db.exists.call_count, 100)
+        self.f.db.exists.assert_called_with('Relay AI Skill', {'channel':self.message.channel,'enabled':1})
+
+    def test_business_destination_and_topic_changes_invalidate_a_pending_decision(self):
+        service = module('relay_core/automation/service.py',self.f,
+            {'frappe.utils':types.SimpleNamespace(now_datetime=Mock(),add_to_date=Mock())})
+        self.message.update(content='Order 25',message_type='text',business_doctype='Customer',business_name='C1',
+                            channel='CH',relay_contact='PERSON',conversation_key='TOPIC1')
+        original = service.message_hash(self.message)
+        for field,value in [('business_name','C2'),('business_doctype','Supplier'),('sender_endpoint','other@example.invalid'),
+                            ('channel','OTHER'),('conversation_key','TOPIC2')]:
+            with self.subTest(field=field):
+                changed=Doc(self.message);changed[field]=value
+                self.assertNotEqual(service.message_hash(changed),original)
