@@ -50,7 +50,7 @@ async function completed(result) {
   }
 }
 async function check() {
-  if (!draft.request || sending.value) return
+  if (!draft.request || draft.request.status === 'Rejected' || sending.value) return
   sending.value = true; error.value = ''
   try {
     const result = draft.request.action
@@ -61,10 +61,23 @@ async function check() {
   finally { sending.value = false }
 }
 async function recover() {
-  if (!draft.request?.values || sending.value) return
+  if (!draft.request?.values || draft.request.status === 'Rejected' || sending.value) return
   sending.value=true; error.value=''
   try { await completed(await coreApi('email.send',draft.request.values,true)) }
-  catch(e){error.value=e.message} finally{sending.value=false}
+  catch(e){await failedSend(e)} finally{sending.value=false}
+}
+async function failedSend(e) {
+  error.value = e.message
+  if (!draft.request) return
+  await completed({status:'Uncertain'})
+  const validation = (e.status >= 400 && e.status < 500 && ['ValidationError','ValueError','PermissionError'].includes(e.exceptionType))
+    || (e.status === 500 && e.exceptionType === 'ValueError')
+  if (draft.request.action || !validation) return
+  try {
+    const result = await coreApi('email.send_status', {message:anchor.name,request_key:draft.request.key})
+    await completed(result.status === 'Unconfirmed' && !result.action && !result.message
+      ? {status:'Rejected'} : result)
+  } catch (statusError) { error.value = e.message + ' ' + statusError.message }
 }
 async function send() {
   if (disabled.value) return
@@ -80,7 +93,7 @@ async function send() {
     draft.request = {key,status:'Queued',values}; sending.value = true
     beginEmail(anchor,values,key)
     await completed(await coreApi('email.send',values,true))
-  } catch(e) { error.value=e.message; if(draft.request) draft.request.status='Uncertain' }
+  } catch(e) { await failedSend(e) }
   finally { sending.value=false }
 }
 async function saveSignature() {
@@ -106,8 +119,8 @@ useRealtimeRefresh([],['message_actions'],check)
     <Button v-if="!locked" type="submit" label="Send email" variant="solid" :disabled="disabled" :loading="sending" /></div>
     <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="locked" role="status">{{ channelStatus({status:draft.request.status,provider_context: { provider: 'Email' } }) }} · This attempt is saved. Checking its status does not send another email.</p>
-    <Button v-if="locked" label="Check status" :loading="sending" @click="check" />
-    <Button v-if="locked && !draft.request.action" label="Recover saved attempt" :disabled="sending" @click="recover" />
+    <Button v-if="locked && draft.request.status!=='Rejected'" label="Check status" :loading="sending" @click="check" />
+    <Button v-if="locked && draft.request.status!=='Rejected' && !draft.request.action" label="Recover saved attempt" :disabled="sending" @click="recover" />
     <Button v-if="draft.request?.status==='Rejected'" label="Edit rejected draft" :disabled="sending" @click="draft.request=null" />
   </form>
 </template>

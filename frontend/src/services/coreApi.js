@@ -45,13 +45,15 @@ export async function frappeRequest(
     body.exception ||
     !("message" in body)
   ) {
-    if (response.status === 401)
-      throw Object.assign(Error("Your session has expired. Sign in again to continue."), {status:401});
-    if (response.status === 403)
-      throw Object.assign(Error(serverError(body, "You do not have permission for this action.")), {status:403});
-    throw Error(
-      serverError(body, "Action was not confirmed. Check the channel configuration and permissions before retrying."),
-    );
+    const message = response.status === 401
+      ? "Your session has expired. Sign in again to continue."
+      : serverError(body, response.status === 403
+        ? "You do not have permission for this action."
+        : "Action was not confirmed. Check the channel configuration and permissions before retrying.");
+    throw Object.assign(Error(message), {
+      status: response.status,
+      exceptionType: typeof body?.exc_type === 'string' ? body.exc_type : '',
+    });
   }
   return body.message;
 }
