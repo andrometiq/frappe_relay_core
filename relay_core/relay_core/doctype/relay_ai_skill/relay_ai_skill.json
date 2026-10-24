@@ -161,7 +161,7 @@
       "label": "Allowed actions",
       "fieldtype": "JSON",
       "default": "[]",
-      "description": "Registered AI-safe Core actions. Each draft action selects its permitted DocType and typed fields; no submission actions."
+      "description": "Ordered AI-safe Core execution steps. Each action runs once, in this order; include a reply step to send a business reply. Draft actions declare their DocType and typed fields; staff submit drafts."
     }
   ],
   "permissions": [
@@ -177,5 +177,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-25 12:00:02.000001"
+  "modified": "2026-10-25 04:09:58.311496"
 }

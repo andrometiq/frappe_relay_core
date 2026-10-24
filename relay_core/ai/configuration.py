@@ -12,12 +12,6 @@ READ_FIELDS = {'name', 'method', 'doctype', 'fields', 'scope_field'}
 SCOPE_FIELDS = {'identity_anchor', 'identity_fields', 'company_field'}
 
 
-def skill_conflict(channel, business_doctype, names):
-    # The legacy runtime fails closed until event matching replaces skill_for.
-    return (f'Event matching is required for {channel} / {business_doctype}. '
-            f'Multiple enabled events: {", ".join(names)}.')
-
-
 def _list(value, label):
     if not isinstance(value, str) or len(value) > 20000:
         raise ValueError(f'{label} must be bounded JSON')
@@ -66,6 +60,8 @@ def read_contracts(doc, provider=None):
 def action_contracts(doc):
     """An event selects installed contracts, never arbitrary methods or schemas."""
     actions = _list(doc.get('allowed_actions') or '[]', 'allowed actions')
+    if len(actions) > 4:
+        raise ValueError('Declare at most four ordered actions')
     keys = []
     for row in actions:
         if not isinstance(row, dict) or not isinstance(row.get('action'), str):
@@ -78,19 +74,11 @@ def action_contracts(doc):
     if not actions:
         return actions
     from relay_core.flows.actions import definitions
-    from relay_core.flows.action_contracts import check_schema
+    from relay_core.flows.action_contracts import check_schema, ai_contract
     registered = definitions()
     for row in actions:
         action = registered.get(row['action'])
-        if (not action or action.get('ai_safe') is not True
-                or not action.get('method', '').startswith('relay_core.')
-                or action.get('effect') not in ('reply', 'create_draft')
-                or action.get('approval_policy') not in ('None', 'Required')
-                or not isinstance(action.get('permissions'), dict) or not action['permissions']
-                or any(permission not in ('read', 'create') for permission in action['permissions'].values())):
-            raise ValueError('Only explicitly AI-safe Core reply or draft actions are allowed')
-        check_schema(action.get('parameters'))
-        check_schema(action.get('output'))
+        ai_contract(action)
         if action['effect'] == 'reply':
             if set(row) != {'action'}:
                 raise ValueError('Reply destinations are supplied by Core')

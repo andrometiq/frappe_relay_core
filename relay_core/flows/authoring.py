@@ -27,6 +27,6 @@ def draft(requirement, provider):
     nodes=definition(result.get('nodes'))
     if len(nodes)>20 or any(n['kind'] not in {'input','reply','action','handoff','condition','wait','end'} for n in nodes):
         frappe.throw('AI draft must contain up to 20 supported business chat steps')
-    registered=definitions()
+    registered=definitions(context='flow')
     if any(n['kind']=='action' and n['action'] not in registered for n in nodes):frappe.throw('AI requested an unavailable business action')
     return {'title':result['title'],'command':result['command'],'nodes':nodes,'enabled':0}
