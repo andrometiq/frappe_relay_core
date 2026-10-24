@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { configurationValues, newConfiguration, toolRows } from '../src/services/automationEditor.js'
+import { configurationValues, newConfiguration, toolRows, variantPreview } from '../src/services/automationEditor.js'
 
 test('new skills and event rules are disabled; skills start in shadow', () => {
   assert.equal(newConfiguration(true).mode, 'Shadow')
@@ -30,4 +30,11 @@ test('message preview replaces numbered parameters in order and preserves missin
   assert.equal(messagePreview('Plain wording', ''), 'Plain wording')
   assert.equal(toolCount('invalid'), 0)
   assert.equal(toolCount('[{},{}]'), 2)
+})
+
+test('event edits preserve consent selection and channel variants',()=>{
+  const draft={...newConfiguration(false),use_preferences:true,contact:'person',telegram_body:'Order {name}',email_subject:'Order {name}',email_body:'Quantity {total_qty}',email_signature:'Regards'}
+  const values=configurationValues(draft,false,[],'name\ntotal_qty')
+  assert.equal(values.use_preferences,1);assert.equal(values.email_body,draft.email_body);assert.equal(values.contact,'person')
+  assert.equal(variantPreview('Order {name}: {secret}', 'name'),'Order [name]: [Undeclared: secret]')
 })
