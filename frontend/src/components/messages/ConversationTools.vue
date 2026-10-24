@@ -1,11 +1,11 @@
 <script setup>
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
-import { ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Button, FormControl, ErrorMessage } from "@relay/ui";
-import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
 import { useConversationPresence } from "../../composables/useConversationPresence";
 import { useTask } from "../../composables/useTask";
+import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 const props = defineProps({
   contact: String,
   lastMessage: String,
@@ -15,22 +15,32 @@ const props = defineProps({
 const { busy, error, notice, run } = useTask(),
   state = ref({}),
   folder = ref(""),
+  savedFolder = ref(""),
   team = ref(""),
   agent = ref(""),
-  teams = ref([]),
-  agents = ref([]),
   expanded = ref(false);
-const { people } = useConversationPresence(props, (value) => {
+const assignment = ref({team:'', assigned_to:''}), assignmentChanged = ref(false);
+const assignmentDirty = computed(() => team.value !== assignment.value.team || agent.value !== assignment.value.assigned_to);
+function receiveState(value) {
+  if (folder.value === savedFolder.value) folder.value = value.folder || "";
+  savedFolder.value = value.folder || "";
   state.value = value;
-});
-let generation = 0;
+}
+const { people } = useConversationPresence(props, receiveState);
+let generation = 0, contactGeneration = 0;
 async function load(current = ++generation) {
   const result = await coreApi("inbox.read", { contact: props.contact });
   if (current !== generation) return;
-  state.value = result;
-  folder.value = result.folder || "";
-  team.value = result.assignment?.team || "";
-  agent.value = result.assignment?.assigned_to || "";
+  receiveState(result);
+  const next = {team:result.assignment?.team || "", assigned_to:result.assignment?.assigned_to || ""};
+  if (assignmentDirty.value) {
+    assignmentChanged.value = next.team !== assignment.value.team || next.assigned_to !== assignment.value.assigned_to;
+  } else {
+    assignment.value = next;
+    team.value = next.team;
+    agent.value = next.assigned_to;
+    assignmentChanged.value = false;
+  }
 }
 async function update(values) {
   const current = generation;
@@ -40,15 +50,19 @@ async function update(values) {
     true,
   );
   if (current !== generation) return;
-  state.value = result;
+  receiveState(result);
   notice.value = "Conversation preferences saved";
 }
 async function assign() {
+  const current = contactGeneration, contact = props.contact;
   await coreApi(
     "teams.assign",
-    { contact: props.contact, team: team.value, assigned_to: agent.value },
+    { contact, team: team.value, assigned_to: agent.value },
     true,
   );
+  if (current !== contactGeneration) return;
+  assignment.value = {team:team.value, assigned_to:agent.value};
+  assignmentChanged.value = false;
   notice.value = "Assignment saved";
   await load();
 }
@@ -56,11 +70,15 @@ watch(
   () => props.contact,
   () => {
     const current = ++generation;
+    ++contactGeneration;
     expanded.value = false;
     state.value = {};
     folder.value = "";
+    savedFolder.value = "";
     team.value = "";
     agent.value = "";
+    assignment.value = {team:'', assigned_to:''};
+    assignmentChanged.value = false;
     error.value = "";
     notice.value = "";
     if (props.contact)
@@ -70,6 +88,20 @@ watch(
   },
   { immediate: true },
 );
+useRealtimeRefresh(['Relay Conversation Assignment'], ['inbox'], async () => {
+  if (!props.contact) return;
+  const current = ++generation;
+  try { await load(current); }
+  catch (err) {
+    if (current !== generation) return;
+    error.value = err.message;
+    if ([401,403].includes(err.status)) {
+      state.value = {}; team.value = ''; agent.value = '';
+      assignment.value = {team:'', assigned_to:''}; assignmentChanged.value = false;
+    }
+  }
+});
+onBeforeUnmount(() => { ++generation; ++contactGeneration; });
 </script>
 <template>
   <div class="conversation-tools">
@@ -101,6 +133,7 @@ watch(
     </p>
     <ErrorMessage :message="error" />
     <p v-if="notice" role="status" class="text-xs">{{ notice }}</p>
+    <p v-if="assignmentChanged" role="status" class="text-xs">Assignment changed elsewhere. Your edits are preserved; saving will replace the current assignment.</p>
     <div v-if="expanded" class="grid sm:grid-cols-2 gap-3 mt-3">
       <div class="flex items-end gap-2">
         <FormControl
