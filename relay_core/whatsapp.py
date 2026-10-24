@@ -122,25 +122,39 @@ def conversation(contact, business_doctype, business_name, after=None, before=No
     if before is not None and after is not None:frappe.throw('Use one history cursor')
     for cursor in (before,after):
         if cursor is not None and (not isinstance(cursor,str) or not cursor.isdigit()):frappe.throw('Invalid cursor')
-    query={'operation':'messages.history','to':recipient}
-    if before is not None:query['before']=before
-    if after is not None:query['after']=after
-    try:
-        hub,_=checked_client()
-        page=hub.execute(query)
-    except (HubError,ValueError):
-        frappe.throw('Could not load conversation updates')
-    messages=[]
-    for row in page.get('messages',[]):
-        message=row.get('payload',{})
-        if message.get('from')!=recipient:continue
-        kind=message.get('type','unknown')
-        detail=message.get(kind,{})
-        if not isinstance(detail,dict):detail={}
-        messages.append({'id':row.get('id'),'cursor':row.get('cursor'),'type':kind,'timestamp':message.get('timestamp'),
-                         'text':detail.get('body') or detail.get('caption') or detail.get('emoji') or kind,
-                         'reply_to':message.get('context',{}).get('id')})
-    return {'messages':messages,'first':page.get('first'),'next':page.get('last') or after or '0','has_more':page.get('has_more',False)}
+    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
+    if not relay:
+        return {'messages': [], 'first': None, 'next': after or '0', 'has_more': False}
+    from relay_core.permissions import readable_contact
+    from relay_core.business_access import candidates
+    readable_contact(relay)
+    channels = frappe.get_list('Relay Channel', filters={'channel': 'WhatsApp',
+        'account': connection_value('relay_hub_account')}, pluck='name')
+    # Apply both selected ownership and Frappe permissions before pagination.
+    filters = {'relay_contact': relay, 'sender_endpoint': recipient, 'channel': ['in', channels]}
+    from pypika import Criterion
+    query = frappe.qb.get_query('Relay Message', fields=['name', 'provider_id', 'message_type',
+        'sent_at', 'creation', 'content', 'provider_context'], filters=filters,
+        ignore_permissions=False, order_by='name asc' if after else 'name desc', limit=51)
+    table = frappe.qb.DocType('Relay Message')
+    ownership = (table.business_doctype == business_doctype) & (table.business_name == business_name)
+    if candidates(relay) == [(business_doctype, business_name)]:
+        ownership |= Criterion.all([(field.isnull() | (field == '')) for field in
+                                    (table.business_doctype, table.business_name)])
+    query = query.where(ownership).where(table.legacy_triage.isnull() | (table.legacy_triage == 0))
+    if before or after:
+        anchor = 'RELAY-MSG-' + (before or after).zfill(10)
+        query = query.where(table.name < anchor if before else table.name > anchor)
+    rows = query.run(as_dict=True)
+    page = rows[:50]
+    if not after: page.reverse()
+    from relay_core.automation.provenance import context_of
+    messages = [{'id': row.provider_id or row.name, 'cursor': row.name.rsplit('-', 1)[-1],
+                 'type': row.message_type, 'timestamp': row.sent_at or row.creation,
+                 'text': row.content, 'reply_to': context_of(row).get('reply_to_message_id')}
+                for row in page]
+    return {'messages': messages, 'first': messages[0]['cursor'] if messages else None,
+            'next': messages[-1]['cursor'] if messages else after or '0', 'has_more': len(rows) > 50}
 
 
 @frappe.whitelist(methods=['POST'])
@@ -157,11 +171,13 @@ def send(message):
     if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', key):
         raise ValueError('A stable request key is required')
     scope = {field: message.get(field) for field in ('contact', 'business_doctype', 'business_name')}
-    prepare(message['operation'], message.get('arguments'), **scope)
-    channels = business_channels(**scope)
+    destination = prepare(message['operation'], message.get('arguments'), **scope)['to']
+    from relay_core.identity import normalize
+    channels = [row for row in business_channels(**scope) if row['provider'] == 'WhatsApp'
+                and normalize('WhatsApp', frappe.get_doc('Relay Contact Endpoint', row['endpoint']).endpoint) == destination]
     if len(channels) != 1:
         raise ValueError('Configure one available WhatsApp channel')
-    return send_business(**scope, channel=channels[0]['value'], kind='whatsapp',
+    return send_business(**scope, channel=channels[0]['value'], endpoint=channels[0]['endpoint'], kind='whatsapp',
                          data={'operation': message['operation'], 'arguments': message.get('arguments') or {}},
                          request_key=key)
 

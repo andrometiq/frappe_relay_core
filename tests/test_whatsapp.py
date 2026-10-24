@@ -39,10 +39,14 @@ class WhatsAppTests(unittest.TestCase):
     def test_public_send_uses_durable_action_and_stable_key(self):
         doc=types.SimpleNamespace(check_permission=Mock(),links=[types.SimpleNamespace(link_doctype='Customer',link_name='CUST-1')],mobile_no='+91 99999 99999')
         self.f.get_doc.return_value=doc
-        target=types.SimpleNamespace(business_channels=Mock(return_value=[{'value':'channel'}]),send_business=Mock(return_value={'action':'action','status':'Queued'}))
+        target=types.SimpleNamespace(business_channels=Mock(return_value=[{'value':'channel','provider':'WhatsApp','endpoint':'first'}, {'value':'channel','provider':'WhatsApp','endpoint':'second'}, {'value':'telegram','provider':'Telegram'}, {'value':'email','provider':'Email'}]),send_business=Mock(return_value={'action':'action','status':'Queued'}))
+        self.f.get_doc.side_effect = lambda dt, name: (types.SimpleNamespace(endpoint='919999999999' if name == 'second' else '919888888888')
+            if dt == 'Relay Contact Endpoint' else doc)
         with patch.dict(sys.modules, **{'relay_core.conversation_start':target}):
             result=self.api.execute('messages.send',{'body':'Hello'},'Contact-B','Customer','CUST-1',request_key='retry-1')
         self.assertEqual(result['action'],'action')
+        self.assertEqual(target.send_business.call_args.kwargs['channel'],'channel')
+        self.assertEqual(target.send_business.call_args.kwargs['endpoint'],'second')
         self.assertEqual(target.send_business.call_args.kwargs['request_key'],'retry-1')
         self.assertEqual(target.send_business.call_args.kwargs['business_name'],'CUST-1')
         self.hub.call_tool.assert_not_called()
