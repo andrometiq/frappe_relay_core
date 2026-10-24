@@ -1,5 +1,6 @@
 """Per-user signatures and explicitly enabled, loop-safe automatic replies."""
 import hashlib
+from requests.exceptions import RequestException
 from relay_core.automation.provenance import context_of, email_message_id
 import frappe
 from relay_core.automation.queue import QUEUE, after_message_commit
@@ -42,17 +43,53 @@ def on_message(doc,method=None):
         if not automatic_allowed(context_of(doc)) or skill_claims(doc):return
         from relay_core.flows.service import claims
         if claims(doc):return
-        frappe.enqueue('relay_core.email_preferences.auto_reply',message=doc.name,queue=QUEUE,timeout=60,enqueue_after_commit=True)
+        frappe.db.set_value('Relay Message', doc.name, 'email_reply_status', 'Pending', update_modified=False)
+
+
+def recover():
+    for name in frappe.get_all('Relay Message', filters={'email_reply_status': 'Pending'}, pluck='name',
+                              or_filters=[['email_reply_next_attempt', 'is', 'not set'],
+                                          ['email_reply_next_attempt', '<=', frappe.utils.now_datetime()]],
+                              order_by='email_reply_attempts asc, creation asc, name asc', limit_page_length=30):
+        frappe.enqueue('relay_core.email_preferences.auto_reply', message=name, queue=QUEUE,
+                       timeout=60, job_id='relay-email-reply-' + name, deduplicate=True)
 
 
 def auto_reply(message):
+    row = frappe.db.get_value('Relay Message', message,
+        ['email_reply_status', 'email_reply_attempts', 'email_reply_next_attempt'], as_dict=True, for_update=True)
+    if not row or row.email_reply_status != 'Pending': return
+    if row.email_reply_next_attempt and row.email_reply_next_attempt > frappe.utils.now_datetime(): return
+    attempts = int(row.email_reply_attempts or 0) + 1
+    try:
+        result = deliver_reply(message)
+    except frappe.QueryDeadlockError:
+        raise
+    except (frappe.PermissionError, frappe.DoesNotExistError):
+        frappe.db.rollback()
+        frappe.db.set_value('Relay Message', message,
+            {'email_reply_status': 'Failed', 'email_reply_attempts': attempts}, update_modified=False)
+    except (ValueError, frappe.ValidationError, RuntimeError, OSError, RequestException):
+        frappe.db.rollback()
+        frappe.db.set_value('Relay Message', message, {
+            'email_reply_status': 'Failed' if attempts >= 6 else 'Pending',
+            'email_reply_attempts': attempts,
+            'email_reply_next_attempt': frappe.utils.add_to_date(frappe.utils.now_datetime(), minutes=2 ** attempts),
+        }, update_modified=False)
+    else:
+        frappe.db.set_value('Relay Message', message, 'email_reply_status', 'Complete', update_modified=False)
+        return result
+
+
+def deliver_reply(message):
     original=frappe.session.user
     try:
         frappe.db.get_value('Relay Message',message,'name',for_update=True)
         source=frappe.get_doc('Relay Message',message)
         names=frappe.get_all('Relay Email Rule',filters={'channel':source.channel,'enabled':1},pluck='name',limit_page_length=2)
         if len(names)!=1 or source.get('legacy_source') or source.direction!='Incoming':return
-        if skill_claims(source):return
+        from relay_core.flows.service import claims
+        if skill_claims(source) or claims(source):return
         rule=frappe.get_doc('Relay Email Rule',names[0])
         from relay_core.automation.service import check_actor
         from relay_core import messaging,email
@@ -61,11 +98,11 @@ def auto_reply(message):
         if channel.channel!='Email' or not automatic_allowed(context):return
         # Fixed daily recipient key means event replay or an email loop cannot
         # produce repeated automatic replies. The Hub journal owns ambiguity.
-        identity=':'.join((source.channel,source.sender_endpoint.lower(),source.business_doctype or '',source.business_name or '',frappe.utils.nowdate()))
+        identity=':'.join((source.channel,source.sender_endpoint.lower(),source.business_doctype or '',source.business_name or '',str(source.creation)[:10]))
         key='email_auto_'+hashlib.sha256(identity.encode()).hexdigest()
+        journal_key = hashlib.sha256(('email:' + frappe.session.user + ':' + key).encode()).hexdigest()
+        if frappe.db.exists('Relay Message Action', {'request_key': journal_key}): return
         return email.send([source.sender_endpoint],rule.subject,rule.body,request_key=key,auto_submitted=1,message=source.name)
-    except Exception:
-        frappe.log_error(title='Relay automatic email reply requires review',message='An automatic reply could not be confirmed. Review the Hub delivery journal before retrying.')
     finally:frappe.set_user(original)
 
 

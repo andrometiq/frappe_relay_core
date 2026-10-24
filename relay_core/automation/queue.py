@@ -90,6 +90,8 @@ def wake():
 
 
 def recover():
+    from relay_core.email_preferences import recover as recover_email
+    recover_email()
     if frappe.db.exists('Relay Message', {'automation_status': 'Pending'}):
         wake()
 
@@ -119,12 +121,19 @@ def _process(message):
 
 
 def drain(token=None):
+    if frappe.db.db_type not in ('mariadb', 'postgres'):
+        raise RuntimeError('Relay automation drain supports MariaDB and PostgreSQL only')
     if token:
         # Clear at START, not completion: an arrival during the final empty
         # read can always reserve a successor. Its job ID differs from ours.
         _release_signal(token)
     lock = _lock_name()
-    if not frappe.db.sql('select get_lock(%s, 1)', (lock,))[0][0]:
+    if frappe.db.db_type == 'postgres':
+        lock = int.from_bytes(hashlib.sha256(lock.encode()).digest()[:8], 'big', signed=True)
+        acquire, release = 'select pg_try_advisory_lock(%s)', 'select pg_advisory_unlock(%s)'
+    else:
+        acquire, release = 'select get_lock(%s, 1)', 'select release_lock(%s)'
+    if not frappe.db.sql(acquire, (lock,))[0][0]:
         # This job consumed its signal. The owner may already have done its
         # final empty read, so it cannot be relied on to notice this arrival.
         wake()
@@ -151,7 +160,7 @@ def drain(token=None):
         # retries; do not spin a poison message through the default queue.
         raise
     finally:
-        frappe.db.sql('select release_lock(%s)', (lock,))
+        frappe.db.sql(release, (lock,))
     recover()
     return count
 
