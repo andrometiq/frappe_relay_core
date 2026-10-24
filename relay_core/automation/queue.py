@@ -5,6 +5,11 @@ from functools import wraps
 from uuid import uuid4
 
 import frappe
+from frappe.utils.background_jobs import (
+    RQ_JOB_FAILURE_TTL, RQ_RESULTS_TTL, create_job_id, get_queue, truncate_failed_registry,
+)
+from redis.exceptions import WatchError
+from rq import Callback
 
 
 QUEUE = 'default'
@@ -34,12 +39,13 @@ def after_message_commit(handler):
 
 
 def _signal_key():
-    return frappe.cache.make_key('relay-message-automation-wake')
+    # Versioned because old producers put non-atomic reservations in cache Redis.
+    return frappe.cache.make_key('relay-message-automation-wake:v2')
 
 
 def _release_signal(token):
     # An expired enqueue reservation must not remove its successor's signal.
-    frappe.cache.eval("""
+    get_queue(QUEUE).connection.eval("""
         if redis.call('get', KEYS[1]) == ARGV[1] then
             return redis.call('del', KEYS[1])
         end
@@ -48,17 +54,34 @@ def _release_signal(token):
 
 
 def wake():
-    """Reserve one waiting job per site; pending SQL rows survive Redis failure."""
-    token = uuid4().hex
+    """Publish the reservation and RQ job in one Redis transaction."""
     try:
-        if not frappe.cache.set(_signal_key(), token, nx=True, ex=WAKE_TTL):
-            return
-        try:
-            return frappe.enqueue('relay_core.automation.queue.drain', token=token,
-                queue=QUEUE, timeout=120, job_id=f'relay-message-automation-drain:{token}')
-        except Exception:
-            _release_signal(token)
-            raise
+        queue = get_queue(QUEUE)
+        key = _signal_key()
+        with queue.connection.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(key)
+                    if pipe.get(key):
+                        return
+                    token = uuid4().hex
+                    pipe.multi()
+                    pipe.set(key, token, ex=WAKE_TTL)
+                    # frappe.enqueue has no pipeline argument. Keep its worker
+                    # entry point/user context, but atomically publish via RQ.
+                    job = queue.enqueue_call('frappe.utils.background_jobs.execute_job',
+                        kwargs=dict(site=frappe.local.site, user=frappe.session.user,
+                            method='relay_core.automation.queue.drain', event=None,
+                            job_name='relay_core.automation.queue.drain', is_async=True,
+                            kwargs={'token': token}),
+                        timeout=120, job_id=create_job_id(f'relay-message-automation-drain:{token}'),
+                        failure_ttl=frappe.conf.get('rq_job_failure_ttl') or RQ_JOB_FAILURE_TTL,
+                        result_ttl=frappe.conf.get('rq_results_ttl') or RQ_RESULTS_TTL,
+                        on_failure=Callback(truncate_failed_registry), pipeline=pipe)
+                    pipe.execute()
+                    return job
+                except WatchError:
+                    continue
     except Exception:
         # Message projection has already committed. The scheduler retries the
         # durable marker; a Redis outage must not fail the inbound HTTP request.
@@ -101,7 +124,10 @@ def drain(token=None):
         # read can always reserve a successor. Its job ID differs from ours.
         _release_signal(token)
     lock = _lock_name()
-    if not frappe.db.sql('select get_lock(%s, 0)', (lock,))[0][0]:
+    if not frappe.db.sql('select get_lock(%s, 1)', (lock,))[0][0]:
+        # This job consumed its signal. The owner may already have done its
+        # final empty read, so it cannot be relied on to notice this arrival.
+        wake()
         return 0
     count = 0
     deadline = time.monotonic() + TURN_SECONDS
