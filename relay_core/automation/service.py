@@ -88,7 +88,10 @@ def latest_message(message):
         filters['sender_endpoint'] = message.sender_endpoint
     if message.get('business_doctype') and message.get('business_name'):
         filters.update(business_doctype=message.business_doctype, business_name=message.business_name)
-    rows = frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name desc', page_length=1)
+    # Supersession is internal coordination, including during admission by an
+    # ingress-only user. Content and business reads have separate scope checks.
+    # A newer message must cancel this turn even if the actor cannot read it.
+    rows = frappe.get_all('Relay Message', filters=filters, fields=['name'], order_by='name desc', limit_page_length=1)
     return bool(rows and rows[0].name == message.name)
 
 
@@ -161,6 +164,11 @@ def triage(run, message, reason):
         run.stage, run.status = 'Triage', 'Pending'
         run.reason = 'Triage owner unavailable; review required'
     else:
+        contact = lock_contact(message.relay_contact)
+        if not contact.automation_paused:
+            contact.automation_paused = 1
+            contact.automation_generation = int(contact.automation_generation or 0) + 1
+            contact.save(ignore_permissions=True)
         run.stage, run.status = 'Triage', 'Handoff'
     internal_save(run)
 
