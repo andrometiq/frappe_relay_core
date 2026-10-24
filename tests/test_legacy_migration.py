@@ -12,6 +12,9 @@ from relay_core import legacy, legacy_bundle, legacy_media, business_access
 
 
 class MigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(legacy.frappe.utils, 'get_system_timezone', return_value='UTC'))
+
     def row(self, **kw):
         return frappe._dict(dict(name='z9', creation='2020-01-01 10:00:00', modified='2020-01-01 10:00:00',
             channel='old-channel', conversation='old-conversation', message_type='text', content='{}', body='Hello',
@@ -145,8 +148,8 @@ class MigrationTests(unittest.TestCase):
                 for row in values:
                     record = dict(zip(fields, row)); records[record['name']] = record
         fake = SimpleNamespace(db=Database(), session=SimpleNamespace(user='importer'),
-            utils=SimpleNamespace(now_datetime=lambda: '2026-01-01 00:00:00'), _dict=frappe._dict)
-        manifest = dict(source_site='site', source_channel='old-channel', endpoint='123', identifier_type='Phone')
+            utils=SimpleNamespace(get_system_timezone=lambda:'UTC', get_datetime=__import__('datetime').datetime.fromisoformat, now_datetime=lambda: '2026-01-01 00:00:00'), _dict=frappe._dict)
+        manifest = dict(watermark='2026-01-01', source_site='site', source_channel='old-channel', endpoint='123', identifier_type='Phone')
         def job(): return frappe._dict(channel='channel', relay_contact='contact', flags=frappe._dict(legacy_bundle={'files': {}}))
         row = self.row()
         with patch.object(legacy, 'frappe', fake), patch('relay_core.permissions.sequential_name', return_value='message'):
@@ -154,10 +157,16 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(first.imported, 1); self.assertEqual(len(result['mismatches']), 1)
             again = job(); legacy.import_rows(again, manifest, [row]); self.assertEqual(again.skipped, 1)
             sent = frappe._dict(dict(row, delivery_status='Sent', provider_message_id='final-provider'))
+            snapshot = dict(manifest)
+            manifest['watermark'] = '2026-01-02'
             completed = legacy.import_rows(job(), manifest, [sent])
             self.assertEqual(completed['updated'], 1)
             self.assertEqual(records['message']['status'], 'Sent')
             self.assertEqual(records['message']['provider_id'], 'final-provider')
+            stale_pass = legacy.import_rows(job(), snapshot, [row])
+            self.assertEqual(stale_pass['mismatches'][0]['kind'], 'conflict')
+            self.assertEqual(records['message']['provider_id'], 'final-provider')
+            manifest['watermark'] = '2026-01-03'
             cached = frappe._dict(dict(sent, content=json.dumps({'_media_cache': {'status': 'stored', 'file': 'cached'}})))
             completed = legacy.import_rows(job(), manifest, [cached])
             self.assertEqual(completed['updated'], 1)
