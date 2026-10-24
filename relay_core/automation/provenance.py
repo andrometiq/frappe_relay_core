@@ -118,7 +118,7 @@ def email_context(raw, subject, event_id):
 
 
 def email_message_id(value):
-    return value if isinstance(value, str) and re.fullmatch(r'<[^<>\s@]{1,120}@[^<>\s@]{1,120}>', value) else None
+    return value if isinstance(value, str) and re.fullmatch(r'<[^<>\s@\x00-\x1f\x7f]{1,120}@[^<>\s@\x00-\x1f\x7f]{1,120}>', value) else None
 
 
 def telegram_route(message, body):

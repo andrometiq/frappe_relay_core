@@ -71,6 +71,7 @@
       "fieldname": "provider_id",
       "label": "Provider message ID",
       "fieldtype": "Data",
+      "ignore_xss_filter": 1,
       "read_only": 1
     },
     {
