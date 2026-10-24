@@ -62,6 +62,10 @@ class PermissionsTest(unittest.TestCase):
                 field = field_names[doc['name']]
                 self.assertEqual(doc['autoname'], 'field:' + field)
                 self.assertTrue(next(row for row in doc['fields'] if row['fieldname'] == field)['reqd'])
+            elif doc['name'] in {'Relay Channel', 'Relay AI Skill', 'Relay Business Event Rule', 'Relay Canned Reply', 'Relay Team', 'Relay Case Type', 'Relay Learned Procedure'}:
+                self.assertEqual(doc['autoname'], 'format:{title}-{###}')
+                self.assertEqual(doc['title_field'], 'title')
+                self.assertTrue(doc.get('modified'))
             elif not doc.get('issingle'):
                 self.assertTrue(doc['autoname'].endswith('.##########'))
             if doc['name'] in ('Relay Channel', 'Relay Settings'):

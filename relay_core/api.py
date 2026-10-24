@@ -5,6 +5,10 @@ from relay_core.permissions import require_access, readable_contact
 
 
 def validate_reference(value, prefix):
+    if prefix == 'CH':
+        if not isinstance(value, str) or not value.strip() or len(value) > 140 or any(ord(c) < 32 for c in value):
+            frappe.throw('Invalid Relay channel reference')
+        return
     if not isinstance(value, str) or not re.fullmatch(r'RELAY-' + prefix + r'-[0-9]{10}', value):
         frappe.throw('Invalid Relay record reference')
 
@@ -42,8 +46,8 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
         frappe.throw('Use one history cursor at a time')
     validate_reference(contact, 'CON')
     for value, prefix in ((channel, 'CH'), (before, 'MSG'), (after, 'MSG'), (since, 'MSG')):
-        if value is not None and (not isinstance(value, str) or not re.fullmatch(r'RELAY-' + prefix + r'-[0-9]{10}', value)):
-            frappe.throw('Invalid Relay record reference')
+        if value is not None:
+            validate_reference(value, prefix)
     if isinstance(limit, bool) or not isinstance(limit, (str, int)) or not str(limit).isdigit() or int(limit) < 1:
         frappe.throw('Limit must be a positive integer')
     limit = min(int(limit), 100)
@@ -68,8 +72,12 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
         filters, limit+1, before, since or after, contact, ingestion=bool(since)).run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]
+    channels = {}
     for channel_name in {row.channel for row in rows}:
-        frappe.get_doc('Relay Channel', channel_name).check_permission('read')
+        channels[channel_name] = frappe.get_doc('Relay Channel', channel_name)
+        channels[channel_name].check_permission('read')
+    from relay_core.message_display import decorate_messages
+    decorate_messages(rows, channels)
     if not after and not since:
         rows.reverse()
     cursor = rows[-1].name if since and rows else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
@@ -150,6 +158,8 @@ def message_context(message, channel=None):
     later=messages(doc.relay_contact,after=message,limit=25,channel=channel)
     fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author']
     row={key:doc.get(key) for key in fields}
+    from relay_core.message_display import decorate_messages
+    decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)})
     return {'contact':doc.relay_contact,'items':earlier['items']+[row]+later['items'],'first':earlier['first'] or message,'has_more':earlier['has_more'],'has_newer':later['has_more'],'last':later['last'] or message,'anchor':message}
 
 
@@ -182,7 +192,11 @@ def message_snapshots(contact, names):
     rows=frappe.get_list('Relay Message',filters={'relay_contact':contact,'name':['in',names]},
         fields=['name','channel','content','direction','status','creation','sent_at','provider_context',
                 'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author'],page_length=50)
-    for channel in {row.channel for row in rows}:frappe.get_doc('Relay Channel',channel).check_permission('read')
+    channels = {row.channel: frappe.get_doc('Relay Channel', row.channel) for row in rows}
+    for channel in channels.values():
+        channel.check_permission('read')
+    from relay_core.message_display import decorate_messages
+    decorate_messages(rows, channels)
     return {'items':rows}
 
 

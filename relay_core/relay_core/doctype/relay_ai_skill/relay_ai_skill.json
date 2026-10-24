@@ -3,8 +3,8 @@
   "name": "Relay AI Skill",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-AIS-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "format:{title}-{###}",
+  "naming_rule": "Expression",
   "track_changes": 1,
   "field_order": [
     "title",
@@ -115,5 +115,7 @@
       "role": "Relay Communication Manager",
       "read": 1
     }
-  ]
+  ],
+  "title_field": "title",
+  "modified": "2026-10-25 12:00:00.000000"
 }

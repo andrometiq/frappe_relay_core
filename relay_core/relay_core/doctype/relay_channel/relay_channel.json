@@ -2,18 +2,27 @@
   "doctype": "DocType",
   "name": "Relay Channel",
   "module": "Relay Core",
-  "autoname": "RELAY-CH-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "format:{title}-{###}",
+  "naming_rule": "Expression",
   "engine": "InnoDB",
   "field_order": [
+    "title",
     "channel",
     "account",
     "enabled",
     "configuration",
     "endpoint",
-    "api_secret"
+    "api_secret",
+    "mailbox_address",
+    "mailbox_aliases"
   ],
   "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
     {
       "fieldname": "channel",
       "label": "Channel",
@@ -49,6 +58,22 @@
       "label": "API secret",
       "fieldtype": "Password",
       "permlevel": 1
+    },
+    {
+      "fieldname": "mailbox_address",
+      "label": "Mailbox address",
+      "fieldtype": "Data",
+      "permlevel": 1,
+      "depends_on": "eval:doc.channel=='Email'",
+      "description": "Trusted configured mailbox identity. Aliases may be comma or newline separated."
+    },
+    {
+      "fieldname": "mailbox_aliases",
+      "label": "Mailbox aliases",
+      "fieldtype": "Small Text",
+      "permlevel": 1,
+      "depends_on": "eval:doc.channel=='Email'",
+      "description": "Trusted configured mailbox identity. Aliases may be comma or newline separated."
     }
   ],
   "permissions": [
@@ -79,5 +104,7 @@
   ],
   "sort_field": "creation",
   "sort_order": "DESC",
-  "track_changes": 1
+  "track_changes": 1,
+  "title_field": "title",
+  "modified": "2026-10-25 12:00:00.000000"
 }

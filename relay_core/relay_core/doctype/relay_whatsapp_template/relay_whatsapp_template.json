@@ -71,5 +71,7 @@
     "status",
     "reason",
     "hub_event_id"
-  ]
+  ],
+  "title_field": "template_name",
+  "modified": "2026-10-25 12:00:00.000000"
 }

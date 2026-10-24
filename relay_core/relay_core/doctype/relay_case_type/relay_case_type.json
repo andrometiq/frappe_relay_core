@@ -3,7 +3,7 @@
   "name": "Relay Case Type",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-CT-.##########",
+  "autoname": "format:{title}-{###}",
   "track_changes": 1,
   "field_order": [
     "type_key",
@@ -47,5 +47,8 @@
       "create": 1,
       "delete": 1
     }
-  ]
+  ],
+  "title_field": "title",
+  "naming_rule": "Expression",
+  "modified": "2026-10-25 12:00:00.000000"
 }
