@@ -103,7 +103,7 @@ def merge_projection(doctype, current, baseline, values):
 
 
 def import_metadata(job, manifest, report):
-    from relay_core.legacy import source_key, object_value
+    from relay_core.legacy import source_key, object_value, source_datetime
     metadata = manifest.get('metadata', {})
     users = object_value(job.user_mapping); teams = object_value(job.team_mapping)
     site = manifest['source_site']; contact = job.relay_contact
@@ -137,13 +137,18 @@ def import_metadata(job, manifest, report):
             if baseline:
                 mismatch('collaboration_conflict', row, doctype + ': locally removed record retained')
                 return None
-            name = direct_document(doctype, dict(values, owner=owner or frappe.session.user, creation=row.get('creation')),
+            name = direct_document(doctype, dict(values, owner=owner or frappe.session.user, creation=source_datetime(row.get('creation'), metadata.get('timezone'))),
                 None if collaboration else name).name
             projections[identity] = {
                 'name': name, 'fields': frappe.db.get_value(doctype, name, list(values), as_dict=True)}
         else:
             current = frappe.db.get_value(doctype, existing, list(values), as_dict=True, for_update=True)
             fields = baseline.get('fields', {}) if baseline.get('name') == existing else {}
+            if collaboration and baseline.get('name') == existing and not current.get('business_doctype') and not current.get('business_name'):
+                # This source-key baseline proves ownership of pre-scope imports.
+                for field in ('business_doctype', 'business_name'):
+                    if field in values and field not in fields:
+                        fields[field] = current.get(field)
             updates, conflicts = merge_projection(doctype, current, fields, values)
             if updates:
                 frappe.db.set_value(doctype, existing, updates, update_modified=False)
@@ -166,7 +171,7 @@ def import_metadata(job, manifest, report):
             from relay_core.inbox import state_key
             key = state_key(contact, reader)
             upsert('Relay Conversation State', {'state_key': key}, dict(state_key=key, user=reader, relay_contact=contact,
-                last_read=target, last_seen=row.get('last_opened_at'), exact_reads=1), row, owner=reader)
+                last_read=target, last_seen=source_datetime(row.get('last_opened_at'), metadata.get('timezone')), exact_reads=1), row, owner=reader)
     old = metadata.get('conversation', {})
     assigned = user(old['assigned_user'], old) if old.get('assigned_user') else None
     team = teams.get(old.get('assigned_team'))
@@ -186,7 +191,7 @@ def import_metadata(job, manifest, report):
             except ValueError: refs = []
         mapped = [message(ref) for ref in refs if isinstance(ref, str)] if isinstance(refs, list) else []
         note_key = source_key(site, 'note:' + row['name'])
-        note_names[row['name']] = upsert('Relay Internal Comment', {'request_key': note_key}, dict(relay_contact=contact, body=row.get('content'),
+        note_names[row['name']] = upsert('Relay Internal Comment', {'request_key': note_key}, dict(relay_contact=contact, business_doctype=job.business_doctype, business_name=job.business_name, body=row.get('content'),
             messages=bundles.canonical([m for m in mapped if m]),
             request_key=note_key, assigned_to=user(row['assigned_to'], row) if row.get('assigned_to') else None,
             task_status='Done' if row.get('status') == 'Resolved' else 'Open', mentions='[]'), row, owner=author)
@@ -204,7 +209,7 @@ def import_metadata(job, manifest, report):
     for row in metadata.get('topics', []):
         refs = [message(r['message']) for r in metadata.get('topic_messages', []) if r.get('topic') == row['name']]
         topic_key = source_key(site, 'topic:' + row['name'])
-        upsert('Relay Conversation Topic', {'topic_key': topic_key}, dict(relay_contact=contact, topic_key=topic_key,
+        upsert('Relay Conversation Topic', {'topic_key': topic_key}, dict(relay_contact=contact, business_doctype=job.business_doctype, business_name=job.business_name, topic_key=topic_key,
             title=row.get('title'), summary=row.get('summary'), category=row.get('category'), status=row.get('status'), source='Import',
             messages=bundles.canonical([m for m in refs if m]), attributes=bundles.canonical({'legacy': row})), row)
 

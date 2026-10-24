@@ -139,12 +139,37 @@ def projection(row, job, manifest):
         provider_context=bundles.canonical(context),
         provider_message_key=provider_key(job.channel, manifest['endpoint'], row.provider_message_id) if row.provider_message_id else None,
         conversation_key=conversation_key(job.channel, manifest['endpoint'], context),
-        sent_at=row.provider_timestamp or row.creation, source_key=key, legacy_source=row.name,
+        sent_at=source_datetime(row.provider_timestamp or row.creation, manifest.get('metadata', {}).get('timezone')), source_key=key, legacy_source=row.name,
         legacy_author=row.owner, legacy_checksum=bundles.checksum(row),
-        legacy_data=bundles.canonical({'source_site': manifest['source_site'], 'row': row}),
+        legacy_data=bundles.canonical({'source_site': manifest['source_site'], 'watermark': manifest.get('watermark'), 'row': row}),
         legacy_triage=0 if job.business_doctype and job.business_name else 1,
         business_doctype=job.business_doctype or None, business_name=job.business_name or None)
     return values, data, warnings
+
+
+def source_datetime(value, timezone_name=None):
+    if not value: return None
+    from zoneinfo import ZoneInfo
+    target = ZoneInfo(frappe.utils.get_system_timezone())
+    stamp = frappe.utils.get_datetime(value)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=ZoneInfo(timezone_name) if timezone_name else target)
+    return stamp.astimezone(target).replace(tzinfo=None)
+
+
+def check_revision(existing, row, manifest):
+    prior = object_value(existing.legacy_data)
+    old = prior.get('row', {}).get('modified')
+    new = row.get('modified')
+    if old and new and frappe.utils.get_datetime(old) > frappe.utils.get_datetime(new):
+        raise ValueError('Stale source revision; newer imported history retained')
+    previous, current = prior.get('watermark'), manifest.get('watermark')
+    if existing.legacy_checksum == bundles.checksum(row):
+        return previous if previous and (not current or frappe.utils.get_datetime(previous) > frappe.utils.get_datetime(current)) else current
+    if not old or not new or frappe.utils.get_datetime(old) == frappe.utils.get_datetime(new):
+        if not previous or not current or frappe.utils.get_datetime(current) <= frappe.utils.get_datetime(previous):
+            raise ValueError('Conflicting source revision; existing history retained')
+    return current
 
 
 def reaction_timestamp(value, timezone_name=None):
@@ -228,9 +253,8 @@ def import_rows(job, manifest, rows):
                     values.update(business_doctype=existing.business_doctype, business_name=existing.business_name, legacy_triage=0)
                 elif existing.business_name and (existing.business_doctype, existing.business_name) != (values['business_doctype'], values['business_name']):
                     raise ValueError('Business mapping conflicts with imported history')
-                prior = object_value(existing.legacy_data).get('row', {})
-                if prior.get('modified') and row.get('modified') and str(prior['modified']) > str(row.modified):
-                    raise ValueError('Stale source revision; newer imported history retained')
+                watermark = check_revision(existing, row, manifest)
+                values['legacy_data'] = bundles.canonical(dict(object_value(values['legacy_data']), watermark=watermark))
             name = existing.name if existing else sequential_name('message')
             attachments = media_for(row, job, name, data)
             if existing and not any(a['availability'] == 'available' for a in attachments):
@@ -262,7 +286,7 @@ def import_rows(job, manifest, rows):
             for item in attachments:
                 if item['availability'] != 'available': report['mismatches'].append({'source': row.name, 'kind': 'media', 'detail': item.get('reason', 'Source unavailable')})
         except ValueError as exc:
-            report['mismatches'].append({'source': row.name, 'kind': 'mapping', 'detail': str(exc),
+            report['mismatches'].append({'source': row.name, 'kind': 'conflict' if str(exc).startswith('Conflicting') else 'mapping', 'detail': str(exc),
                                          'original': dict(row), 'sha256': bundles.checksum(row)})
         job.last_creation, job.last_source = bundles.order_key(row)
         report['checked'] += 1
