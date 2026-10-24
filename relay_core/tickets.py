@@ -193,7 +193,7 @@ def ensure_episode(message=None, *, owner=None, skill=None, run=None, subject='C
                 source_action_key=episode_key, active_scope_key=active_key,
                 source_provider_message_key=message.get('provider_message_key'),
                 source_run=run.name if run else None, messages=[{'message': message.name}]))
-        if skill and not linked:
+        if skill and not ticket.get('ai_disabled'):
             ticket.skill = skill.name
             ticket.skill_version = run.get('skill_version') if run else str(skill.modified)
         if reason:
@@ -318,7 +318,25 @@ def read(name):
         readable_contact(message.relay_contact)
         links.append({'message': message.name, 'contact': message.relay_contact,
                       'channel': message.channel})
-    return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief,
+    drafts = []
+    for row in frappe.get_all('Relay Flow Action', filters={'ticket': doc.name, 'status': 'Completed',
+            'target_doctype': ['is', 'set'], 'target_name': ['is', 'set']},
+            fields=['target_doctype', 'target_name'], order_by='creation asc', limit_page_length=100):
+        try:
+            target = frappe.get_doc(row.target_doctype, row.target_name)
+            target.check_permission('read')
+            if not any(target.get(f.fieldname) == doc.company for f in target.meta.fields
+                    if f.fieldtype == 'Link' and f.options == 'Company'):
+                continue
+            if not any(target.get(f.fieldname) == doc.business_name for f in target.meta.fields
+                    if f.fieldtype == 'Link' and f.options == doc.business_doctype
+                    or f.fieldtype == 'Dynamic Link' and target.get(f.options) == doc.business_doctype):
+                continue
+            # No snapshot of accounting fields is disclosed through the ticket.
+            drafts.append(dict(doctype=target.doctype, name=target.name, docstatus=int(target.docstatus)))
+        except (frappe.PermissionError, frappe.DoesNotExistError):
+            continue
+    return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief, 'linked_drafts': drafts,
             'category': doc.category, 'status': doc.status, 'messages': links, 'creation': doc.creation,
             'assigned_to': doc.get('assigned_to'),
             'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),

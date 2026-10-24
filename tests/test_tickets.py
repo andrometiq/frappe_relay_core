@@ -31,6 +31,8 @@ class TicketTests(unittest.TestCase):
         self.doc.get_doc_before_save=lambda:None
         self.doc.get=lambda key:getattr(self.doc,key,None)
         self.f.PermissionError = PermissionError
+        self.f.DoesNotExistError = LookupError
+        self.f.get_all = Mock(return_value=[])
 
     def test_each_link_requires_message_and_contact_read_permission(self):
         self.module.validate_ticket(self.doc)
@@ -73,6 +75,29 @@ class TicketTests(unittest.TestCase):
         self.module.directory(business_doctype='Supplier', business_name='SUP-A', assigned_to='agent', category='Support', status='Open')
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(business_doctype='Supplier',
             business_name='SUP-A', assigned_to='agent', category='Support', status='Open'))
+
+    def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
+        self.doc.name = 'RELAY-TKT-0000000001'
+        self.doc.check_permission = Mock()
+        self.doc.creation = '2026-10-25'
+        self.doc.company, self.doc.business_doctype, self.doc.business_name = 'Sim Company', 'Supplier', 'Sim Supplier'
+        fields = [Record(fieldname='company', fieldtype='Link', options='Company'),
+                  Record(fieldname='party', fieldtype='Dynamic Link', options='party_type')]
+        target = Record(doctype='Payment Entry', name='Sim Draft', docstatus=0,
+            company='Sim Company', party_type='Supplier', party='Sim Supplier', paid_amount=1250,
+            meta=Record(fields=fields), check_permission=Mock())
+        self.f.get_all.return_value = [Record(target_doctype=target.doctype, target_name=target.name)]
+        self.f.get_doc.side_effect = lambda dt, name: self.doc if dt == 'Relay Ticket' else self.message if dt == 'Relay Message' else target
+        result = self.module.read(self.doc.name)
+        self.assertEqual(result['linked_drafts'], [dict(doctype='Payment Entry', name='Sim Draft', docstatus=0)])
+        target.check_permission.assert_called_once_with('read')
+        target.company = 'Sim Other Company'
+        self.assertEqual(self.module.read(self.doc.name)['linked_drafts'], [])
+        target.company, target.party = 'Sim Company', 'Sim Other Supplier'
+        self.assertEqual(self.module.read(self.doc.name)['linked_drafts'], [])
+        target.party = 'Sim Supplier'
+        target.check_permission.side_effect = PermissionError
+        self.assertEqual(self.module.read(self.doc.name)['linked_drafts'], [])
 
     def test_business_tag_cannot_differ_from_linked_conversation(self):
         self.doc.business_doctype = 'Supplier'; self.doc.business_name = 'SUP-B'
