@@ -20,7 +20,7 @@ def retry_callback(method):
     callbacks can advance tabSeries after our first read, before naming an
     event. Retrying only the insert or a savepoint cannot refresh that snapshot.
     Rollback also discards projection/wake/realtime callbacks from the attempt.
-    Use only on ingress boundaries, never inside another write transaction.
+    Use only on ingress or job boundaries, never inside another write transaction.
     """
     @wraps(method)
     def receive(*args, **kwargs):
@@ -228,11 +228,24 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
             raise ValueError('Invalid delivery identity')
         if not isinstance(row['request_key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', row['request_key']):
             raise ValueError('Invalid delivery request key')
-        if row['operation'] not in ('telegram.message','email.send','whatsapp.execute') or row['state'] not in ('submitted','rejected','uncertain','cancelled'):
+        delivery_evidence = row['operation'] == 'email.send' and row['state'] in ('delayed', 'bounced', 'delivered')
+        if row['operation'] not in ('telegram.message','email.send','whatsapp.execute') or (row['state'] not in ('submitted','rejected','uncertain','cancelled') and not delivery_evidence):
             raise ValueError('Invalid channel delivery state')
         receipt = row['receipt']
-        if not isinstance(receipt, dict) or set(receipt)-{'message_id','chat_id','operation','sent','result','manually_reconciled','messages'}:
+        allowed = {'message_id', 'recipient', 'delivery_status', 'status_code'} if delivery_evidence else {'message_id','chat_id','operation','sent','result','manually_reconciled','messages'}
+        if not isinstance(receipt, dict) or set(receipt)-allowed:
             raise ValueError('Invalid compact receipt')
+        if delivery_evidence:
+            from relay_core.automation.provenance import email_message_id
+            recipient = receipt.get('recipient')
+            code = receipt.get('status_code')
+            if (set(receipt) != allowed or not email_message_id(receipt.get('message_id'))
+                    or not isinstance(recipient, str) or not 1 <= len(recipient) <= 254
+                    or '@' not in recipient or any(c.isspace() or ord(c) < 32 for c in recipient)
+                    or receipt['delivery_status'] != row['state']
+                    or not isinstance(code, str) or not re.fullmatch(r'[245]\.[0-9]{1,3}\.[0-9]{1,3}', code)
+                    or code[0] != {'delayed': '4', 'bounced': '5', 'delivered': '2'}[row['state']]):
+                raise ValueError('Invalid email delivery evidence')
         if 'messages' in receipt:
             messages = receipt['messages']
             if row['operation'] != 'whatsapp.execute' or not isinstance(messages, list) or len(messages) != 1 or not isinstance(messages[0], dict) or set(messages[0]) != {'id'} or not isinstance(messages[0]['id'], str) or not 1 <= len(messages[0]['id']) <= 300:

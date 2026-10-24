@@ -38,7 +38,12 @@ def create(state, choices, context=None):
         'operation': 'business_prompt', 'payload': encoded,
         'payload_hash': hashlib.sha256(encoded.encode()).hexdigest(), 'status': 'Dispatching',
         'start_contact': state.relay_contact, 'target_channel': state.channel, 'preview': body})
-    internal_save(action, new=True)
+    original = frappe.session.user
+    try:
+        frappe.set_user('Administrator')
+        internal_save(action, new=True)
+    finally:
+        frappe.set_user(original)
     frappe.enqueue('relay_core.business_routing_prompt.dispatch', action=action.name, queue='short', enqueue_after_commit=True)
     return action.name
 

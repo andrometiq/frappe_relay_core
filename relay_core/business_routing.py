@@ -19,7 +19,7 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
     links = candidates(contact)
     if override is not None and tuple(override) not in links:
         raise ValueError('Choose a linked business record')
-    if (override is None and len(links) > 1 and context.get('provider') == 'Email'
+    if (override is None and context.get('provider') == 'Email'
             and context.get('authentication', {}).get('status') != 'pass'):
         return None, 'triage_unverified_sender'
     business = incoming_reference(contact, channel, endpoint, context, links=links)

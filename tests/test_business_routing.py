@@ -16,10 +16,11 @@ class RoutingFixtures:
         self.verified = True
         self.db = Mock()
         self.db.get_value.side_effect = self.get_value
-        self.fake = SimpleNamespace(db=self.db, get_doc=self.get_doc, enqueue=Mock(), _dict=_dict,
+        self.fake = SimpleNamespace(session=_dict(user='callback-service'), db=self.db, get_doc=self.get_doc, enqueue=Mock(), _dict=_dict,
             utils=SimpleNamespace(now_datetime=lambda: self.now,
                 get_datetime=lambda value: value if isinstance(value, datetime) else datetime.fromisoformat(value),
                 convert_utc_to_system_timezone=lambda value: value))
+        self.fake.set_user = lambda user: setattr(self.fake.session, 'user', user)
         for module in (business_access, routing, prompts):
             self.enterContext(patch.object(module, 'frappe', self.fake))
         for module in (business_access, routing, prompts):
@@ -58,6 +59,7 @@ class RoutingFixtures:
             doc.name = doc.conversation_key
             self.states[doc.name] = doc
         else:
+            doc.owner = self.fake.session.user
             doc.name = 'action-' + str(len(self.actions) + 1)
             self.actions[doc.name] = doc
         return doc
@@ -75,10 +77,20 @@ class RoutingFixtures:
 
 
 class RoutingTests(RoutingFixtures, unittest.TestCase):
+    def test_unverified_email_never_uses_single_link_or_reply_context(self):
+        self.links = self.links[:1]
+        for status in ('fail', 'unverified', None):
+            self.assertEqual(self.resolve(context={'provider':'Email', 'authentication':{'status':status},
+                'in_reply_to':'<known@example.invalid>'}), (None, 'triage_unverified_sender'))
+        self.assertEqual(self.states, {})
+        self.assertEqual(self.actions, {})
+
     def test_prompt_once_even_across_replay_and_message_burst(self):
         for index in range(100):
             self.assertEqual(self.resolve(str(index)), (None, 'triage_prompt_pending'))
         self.assertEqual(len(self.actions), 1)
+        self.assertEqual(next(iter(self.actions.values())).owner, 'Administrator')
+        self.assertEqual(self.fake.session.user, 'callback-service')
         self.fake.enqueue.assert_called_once()
         self.assertTrue(self.fake.enqueue.call_args.kwargs['enqueue_after_commit'])
         choices = json.loads(self.state().choices)

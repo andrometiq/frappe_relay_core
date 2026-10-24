@@ -78,6 +78,13 @@ class CallbackTests(unittest.TestCase):
             self.raw=json.dumps({'account':account,'statuses':rows}).encode()
             return self.api.validate_channel_status_callback(self.raw,str(now),self.sign(now),self.secret,'site-a')
         self.assertEqual(len(check([dict(row,id=i+1) for i in range(500)])['statuses']),500)
+        dsn = dict(row, operation='email.send', state='bounced', receipt={'message_id':'<id@example.invalid>',
+            'recipient':'a@example.invalid', 'delivery_status':'bounced', 'status_code':'5.1.1'})
+        self.assertEqual(check([dsn])['statuses'][0], dsn)
+        for changed in (dict(dsn,operation='telegram.message'), dict(dsn,receipt=dict(dsn['receipt'],recipient='')),
+                        dict(dsn,receipt=dict(dsn['receipt'],status_code='2.1.1')),
+                        dict(dsn,receipt=dict(dsn['receipt'],delivery_status='delivered'))):
+            with self.assertRaises(ValueError): check([changed])
         whatsapp=dict(row,operation='whatsapp.execute',receipt={'messages':[{'id':'wamid.fixture'}]})
         self.assertEqual(check([whatsapp])['statuses'][0],whatsapp)
         with self.assertRaises(ValueError):check([dict(whatsapp,receipt={'messages':[{'id':''}]})])

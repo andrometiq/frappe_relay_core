@@ -115,3 +115,28 @@ class ProjectionLatencyTests(unittest.TestCase):
         self.assertEqual(timing['worker_setup_ms'], 1000)
         self.assertEqual(timing['projection_ms'], 1000)
         job.save_meta.assert_called_once()
+
+
+class ProjectionRetryTests(unittest.TestCase):
+    def test_background_projection_retries_whole_transaction_and_discards_failed_callbacks(self):
+        class Conflict(Exception):
+            pass
+        callbacks = []
+        db = Mock()
+        db.after_commit.add.side_effect = callbacks.append
+        db.rollback.side_effect = callbacks.clear
+        attempts = []
+        def project(name):
+            attempts.append(name)
+            callbacks.append('attempt')
+            if len(attempts) == 1:
+                raise Conflict(1020)
+        fake = SimpleNamespace(db=db, QueryDeadlockError=Conflict)
+        with patch.object(inbound, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(projection, 'project', side_effect=project), patch.object(inbound.time, 'sleep'), \
+                patch('rq.get_current_job', return_value=None):
+            projection.project_queued('event', submitted_ns=1)
+        self.assertEqual(attempts, ['event', 'event'])
+        self.assertEqual(callbacks, ['attempt'])
+        db.rollback.assert_called_once()
+        db.commit.assert_not_called()
