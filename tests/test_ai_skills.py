@@ -298,7 +298,7 @@ class SharedAdapterTests(unittest.TestCase):
 
     def test_ledger_reply_ignores_model_arithmetic(self):
         from relay_core.ai.ledger import summarize
-        ledger = summarize([dict(debit='100.10', credit='40.05', posting_date='2026-10-01',
+        ledger = summarize([dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
             voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')], False)
         reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
         self.attempt.return_value = self.outcome({'reply': 'Invented total 999999', 'handoff': False, 'reason': ''})

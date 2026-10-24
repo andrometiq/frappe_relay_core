@@ -3,7 +3,7 @@ import json
 import frappe
 
 LEDGER_TOOL = {'name': 'supplier_ledger', 'method': 'get_list', 'doctype': 'GL Entry',
-    'scope_field': 'party', 'fields': ['posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit', 'remarks']}
+    'scope_field': 'party', 'fields': ['company', 'posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit', 'remarks']}
 INSTRUCTIONS = """Help suppliers with questions about their ledger.
 Supplier types we manage: configure this text to describe your supplier groups and what your team handles.
 For a ledger doubt, offer an explicit start and end date and ask the supplier to confirm.
