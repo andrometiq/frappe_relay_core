@@ -1,4 +1,6 @@
 <script setup>
+import { recordTitle } from '../../services/recordTitle'
+import { linkedTitle } from '../../services/linkedTitle'
 import { inject, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput, FormControl } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
@@ -50,11 +52,11 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
     <div class="directory-rows" :aria-busy="loading">
       <LoadingRows v-if="loading && !rows.length" label="Loading conversations…" />
       <button v-for="row in rows" :key="row.name" class="directory-contact" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
-        <span class="directory-avatar"><Avatar :label="row.display_name || row.name" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
+        <span class="directory-avatar"><Avatar :label="recordTitle(row, 'Contact')" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
         <span class="directory-contact-copy">
-          <span class="directory-contact-top"><strong>{{ row.display_name || row.name }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ relativeTime(row.latest_at) }}</time></span>
+          <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ relativeTime(row.latest_at) }}</time></span>
           <span class="directory-contact-bottom"><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
-          <span class="directory-contact-context"><span v-if="row.business" class="directory-business" :title="row.business.doctype + ' · ' + row.business.name">{{ row.business.name }}</span><span class="directory-assignee"><FeatherIcon name="user" :size="12" />{{ row.assignment?.assigned_to || row.assignment?.team || 'Unassigned' }}</span></span>
+          <span class="directory-contact-context"><span v-if="row.business" class="directory-business" :title="linkedTitle(row.business.doctype, row.business.name)">{{ linkedTitle(row.business.doctype, row.business.name) }}</span><span class="directory-assignee"><FeatherIcon name="user" :size="12" />{{ row.assignment?.assigned_to ? linkedTitle('User', row.assignment.assigned_to, 'Assigned') : linkedTitle('Relay Team', row.assignment?.team, 'Unassigned') }}</span></span>
         </span>
       </button>
       <WorkspaceState v-if="!loading && !rows.length && !error" compact :title="query ? 'No conversations found' : mode === 'unread' ? 'You’re all caught up' : 'No conversations yet'" :description="query ? 'Try a different name or clear your search.' : 'Browse your businesses to start a conversation.'"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else label="Browse businesses" @click="mode = 'business'" /></WorkspaceState>

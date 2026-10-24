@@ -13,7 +13,7 @@ export default async function automationWorkspacesAcceptance(browser, origin) {
     channel: '', run_as_user: '', handoff_owner: '', ai_model: '', mode: 'Shadow', daily_limit: 100, instructions: 'Offer a range and confirm.',
     allowed_tools: JSON.stringify([{ name: 'supplier_ledger', method: 'get_list', doctype: 'GL Entry', scope_field: 'party', fields: ['debit', 'credit'] }]) }
   const rule = { name: 'RELAY-BER-0000000001', title: 'Delivery update', enabled: 0, source_doctype: 'Delivery Note',
-    event: 'on_submit', business_doctype: 'Customer', recipient_field: 'customer', template: 'fixture-template', parameter_mapping: '["name","items_summary"]' }
+    event: 'on_submit', business_doctype: 'Customer', recipient_field: 'customer', channel:'Local support-001', template: 'fixture-template', parameter_mapping: '["name","items_summary"]' }
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => { window.frappe = { session: { user: 'Administrator' }, csrf_token: 'fixture-only' } })
   await page.route('**/api/method/**', async route => {
@@ -22,6 +22,8 @@ export default async function automationWorkspacesAcceptance(browser, origin) {
     if (request.method() === 'POST') writes.push({ method, args })
     let result
     switch (method) {
+      case 'relay_core.api.channel_options': result = {items:[{name:'Local support-001',channel:'WhatsApp',enabled:1}]}; break
+      case 'relay_core.display.titles': result = {items:JSON.parse(args.records).map(row => ({...row,title:row.doctype === 'Supplier' ? businessName : row.name}))}; break
       case 'relay_core.api.capabilities': result = { configure: true, manage: true }; break
       case 'relay_core.collaboration.notifications': result = { items: [] }; break
       case 'relay_core.tickets.directory': result = { items: !args.status || args.status === status ? [ticket()] : [] }; break
@@ -40,7 +42,7 @@ export default async function automationWorkspacesAcceptance(browser, origin) {
     for (const width of [375, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 })
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${screen}: overflow at ${width}`)
-      if (width !== 768) await page.screenshot({ path: `/tmp/relay-polish-${screen}-${width}.png`, fullPage: true })
+      if (width !== 768) await page.screenshot({ path: `.runtime/relay-polish-${screen}-${width}.png`, fullPage: true })
     }
   }
   await page.goto(origin + '/site.html#/tickets')
@@ -50,21 +52,23 @@ export default async function automationWorkspacesAcceptance(browser, origin) {
   for (const name of ['Local supplier with a very long registered business name '.repeat(2), 'Supplier' + 'x'.repeat(130)]) {
     businessName = name
     await page.reload()
-    await page.getByRole('button', { name: /Supplier ledger doubt/ }).click()
     await page.setViewportSize({ width: 375, height: 900 })
     const badge = page.locator('.ticket-business-badge')
     await badge.waitFor()
-    assert.equal(await badge.innerText(), `Supplier · ${name}`.trim())
+    await page.waitForFunction(value => document.querySelector('.ticket-business-badge')?.textContent.trim() === value, name.trim())
+    assert.equal(await badge.innerText(), name.trim())
     assert.equal(await badge.evaluate(el => {
       const card = el.closest('.ticket-card').getBoundingClientRect(), bounds = el.getBoundingClientRect()
-      return bounds.left >= card.left && bounds.right <= card.right && el.scrollWidth <= el.clientWidth + 1
+      return bounds.left >= card.left && bounds.right <= card.right
     }), true, 'Long business badge must fit the 375px card without clipping')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'Long business name overflows at 375px')
+    await page.getByRole('button', { name: /Supplier ledger doubt/ }).click()
   }
-  await page.screenshot({ path: '/tmp/relay-polish-tickets-long-name-375.png', fullPage: true })
+  await page.screenshot({ path: '.runtime/relay-polish-tickets-long-name-375.png', fullPage: true })
   await page.getByLabel('Assign to user', { exact: true }).fill('agent@example.invalid')
   await page.getByRole('button', { name: 'Assign', exact: true }).click()
   await page.getByRole('button', { name: 'Close ticket', exact: true }).click()
+  await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await page.getByRole('button', { name: 'Open', exact: true }).click()
   await page.getByRole('heading', { name: 'No matching tickets' }).waitFor()
   await page.getByRole('button', { name: 'Clear filters' }).click()

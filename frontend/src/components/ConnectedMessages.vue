@@ -1,6 +1,8 @@
 <script setup>
 import { provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
-import { Avatar, Button, ErrorMessage } from "@relay/ui";
+import { Avatar, Button, Dropdown, ErrorMessage } from "@relay/ui";
+import { recordTitle } from '../services/recordTitle';
+import { linkedTitle } from '../services/linkedTitle';
 import WorkspaceState from "./WorkspaceState.vue";
 import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
@@ -41,7 +43,7 @@ const activeBusinessContact = ref("");
 let contactRequest = 0;
 
 const active = computed(() => selected.value || businessName.value);
-const title = computed(() => businessContext.value?.title || businessName.value || contactRecord.value?.display_name || "Conversation");
+const title = computed(() => (businessContext.value?.title ? recordTitle(businessContext.value) : '') || (businessName.value ? linkedTitle(businessType.value, businessName.value) : recordTitle(contactRecord.value, 'Conversation')));
 const groupLabel = computed(() => businessContext.value?.grouping_value || "");
 const contactCount = computed(() => {
   const count = businessContext.value?.contact_count;
@@ -65,7 +67,7 @@ const visibleRows = computed(() => {
 const recipientLabel = computed(() => {
   if (!source.value) return "";
   const linked = linkedContacts.value.find(item => item.value === source.value.frappe_contact);
-  return linked?.label || source.value.contact_label || contactRecord.value?.display_name || "Contact";
+  return recordTitle(linked?.label || source.value.contact_label || contactRecord.value?.display_name, "Contact");
 });
 
 async function loadBusinessContacts() {
@@ -213,11 +215,13 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           </div>
         </div>
         <div class="conversation-heading-actions">
-          <Button v-if="conversationContact" icon="activity" aria-label="Delivery failures and retry" title="Delivery failures and retry" @click="deliveriesOpen = true" />
-          <Button v-if="frappeContact" icon="info" aria-label="Business context" title="Business context" @click="contextOpen = !contextOpen" />
-          <Button v-if="conversationContact" icon="message-square" aria-label="Internal notes" title="Internal notes" @click="openNote()" />
-          <Button v-if="businessName" icon="file-text" aria-label="Conversation summary" title="Conversation summary" @click="summaryOpen = !summaryOpen" />
-          <Button icon="search" aria-label="Search conversation" title="Search conversation" @click="searchOpen = !searchOpen" />
+          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" />
+          <Dropdown :options="[
+            ...(conversationContact ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen = true}, {label:'Internal notes',icon:'message-square',onClick:() => openNote()}] : []),
+            ...(frappeContact ? [{label:'Business context',icon:'info',onClick:() => contextOpen = !contextOpen}] : []),
+            ...(businessName ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen = !summaryOpen}] : []),
+            {label:'Search conversation',icon:'search',onClick:() => searchOpen = !searchOpen}
+          ]"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
         </div>
       </header>
 
@@ -229,12 +233,11 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           :aria-pressed="activeBusinessContact === contact.value" :class="{ active: activeBusinessContact === contact.value }"
           :disabled="busy" @click="chooseContact(contact.value)">
           <span class="contact-chip-avatar">{{ contact.label.slice(0, 1).toUpperCase() }}</span>
-          <span class="contact-chip-copy"><strong>{{ contact.label }}</strong><small>{{ contact.description || "Review channel identities" }}</small></span>
+          <span class="contact-chip-copy"><strong>{{ recordTitle(contact, 'Contact') }}</strong><small>{{ contact.description || "Review channel identities" }}</small></span>
         </button>
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
       </nav>
 
-      <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" />
       <div v-if="contextOpen && frappeContact" class="v1-context"><ContactDetails :contact="frappeContact" /></div>
       <InternalNotes v-if="notesOpen && noteContact" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" />
       <ConversationDeliveries v-if="deliveriesOpen && conversationContact" :key="conversationContact" :contact="conversationContact" @close="deliveriesOpen = false" @open="focusMessage" />
@@ -257,13 +260,14 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <div class="conversation-compose-context"><SendChannel />
-      <div v-if="source" class="business-recipient-bar">
-        <span>To</span><strong>{{ recipientLabel }} · {{ source.sender_endpoint }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button>
-      </div>
-      </div>
-      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email'" :key="source.name" />
-      <MessageComposer v-else-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')" />
+      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email'" :key="source.name">
+        <template #channel><SendChannel /></template>
+        <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+      </EmailComposer>
+      <MessageComposer v-else-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')">
+        <template #channel><SendChannel /></template>
+        <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+      </MessageComposer>
       <div v-else-if="active" class="business-compose-start">
         <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
           :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
