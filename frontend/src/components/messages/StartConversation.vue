@@ -27,7 +27,8 @@ const templates = ref([]),
   templateId = ref(""),
   parameters = ref({}),
   cursor = ref(""),
-  pending = ref(null);
+  pending = ref(null),
+  renewRequestKey = ref(false);
 const destination = computed(() =>
   endpoints.value.find((row) => row.value === endpoint.value),
 );
@@ -111,6 +112,7 @@ async function destinations() {
 watch(contact, () => {
   endpoint.value = '';
   pending.value = null;
+  renewRequestKey.value = false;
   body.value = "";
   subject.value = "";
   if (contact.value) destinations();
@@ -118,8 +120,8 @@ watch(contact, () => {
 watch(templateId, () => (parameters.value = {}), {flush:'sync'});
 const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
-  () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value}),
-  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; },
+  () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
+  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
   () => ({body:'',subject:'',kind:destination.value?.provider === 'Email' ? 'email' : destination.value?.provider === 'WhatsApp' && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 async function loadTemplates(next = false) {
   await run(async () => {
@@ -140,9 +142,29 @@ async function loadTemplates(next = false) {
     templateId.value = templates.value[0]?.id || "";
   });
 }
+function sendPayload() {
+  const data = kind.value === "email" ? {subject:subject.value, body:body.value}
+    : kind.value === "text" ? {text:body.value}
+    : {name:template.value?.name, language:template.value?.language,
+        components:buildTemplateComponents(descriptors.value, parameters.value)};
+  return {
+    contact:contact.value,
+    business_doctype:props.businessDoctype, business_name:props.businessName,
+    endpoint:endpoint.value, kind:kind.value, data,
+  };
+}
+function editRejected() {
+  if (busy.value || pending.value?.status !== "Rejected") return;
+  if (pending.value.storage) sessionStorage.removeItem(pending.value.storage);
+  // Old drafts have no storage key and their template metadata may not be loaded.
+  renewRequestKey.value = true;
+  pending.value = null;
+  notice.value = "";
+}
 async function send() {
+  if (pending.value?.status === "Rejected") return;
   await run(async () => {
-    let result;
+    let result, storage = pending.value?.storage;
     if (pending.value) {
       result = await coreApi(
         "messaging.reconcile",
@@ -150,32 +172,17 @@ async function send() {
         true,
       );
     } else {
-      const data =
-        kind.value === "email" ? {subject:subject.value,body:body.value} : kind.value === "text"
-          ? { text: body.value }
-          : {
-              name: template.value?.name,
-              language: template.value?.language,
-              components: buildTemplateComponents(
-                descriptors.value,
-                parameters.value,
-              ),
-            };
-      if (kind.value === "template" && !template.value)
-        throw Error("Choose an approved template");
-      const payload = {
-        contact: contact.value,
-      business_doctype:props.businessDoctype,business_name:props.businessName,
-        endpoint: endpoint.value,
-        kind: kind.value,
-        data,
-      };
-      const storage = "relay-start-" + sha256Hex(JSON.stringify(payload));
+      if (kind.value === "template" && !template.value) throw Error("Choose an approved template");
+      const payload = sendPayload();
+      const data = payload.data;
+      storage = "relay-start-" + sha256Hex(JSON.stringify(payload));
+      if (renewRequestKey.value) sessionStorage.removeItem(storage);
       let key = sessionStorage.getItem(storage);
       if (!key) {
         key = randomUUID();
         sessionStorage.setItem(storage, key);
       }
+      renewRequestKey.value = false;
       result = await coreApi(
         props.businessName ? "conversation_start.send_business" : "conversation_start.send",
         props.businessName
@@ -184,16 +191,16 @@ async function send() {
           : { ...payload, request_key: key },
         true,
       );
-      if (["Submitted", "Queued"].includes(result.status)) sessionStorage.removeItem(storage);
     }
     if (["Submitted", "Queued"].includes(result.status)) {
+      if (storage) sessionStorage.removeItem(storage);
       clearDraft();
       notice.value = result.status === "Queued" ? "Queued for sending" : destination.value?.provider === "Email" ? "SMTP accepted" : destination.value?.provider === "Telegram" ? "Bot accepted" : "Sent";
       emit("sent", { contact: contact.value,
       business_doctype:props.businessDoctype,business_name:props.businessName, message: result.message, status: result.status });
       shown.value = false;
     } else {
-      pending.value = result;
+      pending.value = {...result, storage};
       notice.value = result.error || (
         result.status === "Rejected"
           ? "Delivery was rejected. Review the channel and message before preparing another send."
@@ -299,7 +306,9 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
         </template>
         <ErrorMessage :message="error" />
         <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
+        <Button v-if="pending?.status === 'Rejected'" label="Edit message" :disabled="busy" @click="editRejected" />
         <Button
+          v-else
           :label="pending ? 'Check delivery' : 'Send message'"
           variant="solid"
           :loading="busy"
