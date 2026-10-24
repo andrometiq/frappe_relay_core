@@ -30,17 +30,27 @@ def install_samples():
             tools = json.loads(skill.allowed_tools or '[]')
         except (TypeError, ValueError):
             return
+        changed = False
         if (skill.business_doctype == 'Supplier' and skill.instructions == INSTRUCTIONS
                 and tools == [LEGACY_LEDGER_TOOL]):
             skill.allowed_tools = json.dumps([LEDGER_TOOL])
             # Old samples have no authenticated identity/company contract. Keep
             # the editable draft, but require explicit owner configuration to enable it.
             skill.enabled = 0
+            changed = True
+        if (skill.business_doctype == 'Supplier' and skill.instructions == INSTRUCTIONS
+                and tools in ([LEDGER_TOOL], [LEGACY_LEDGER_TOOL])
+                and skill.get('execution_policy') == 'Execute'
+                and skill.get('allowed_actions') in (None, '', '[]')):
+            skill.allowed_actions = '[{"action":"reply"}]'
+            skill.enabled = 0
+            changed = True
+        if changed:
             skill.save(ignore_permissions=True)
         return
     frappe.get_doc({'doctype': 'Relay AI Skill', 'title': 'Supplier ledger',
         'sample_key': 'supplier_ledger', 'enabled': 0, 'mode': 'Shadow', 'daily_limit': 100,
         'business_doctype': 'Supplier', 'target': TARGET, 'instructions': INSTRUCTIONS,
         'reply_style': REPLY_STYLE, 'search_confirmation': 'Always',
-        'execution_policy': 'Execute', 'allowed_actions': '[]',
+        'execution_policy': 'Execute', 'allowed_actions': '[{"action":"reply"}]',
         'allowed_tools': json.dumps([LEDGER_TOOL])}).insert(ignore_permissions=True)

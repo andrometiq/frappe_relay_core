@@ -52,31 +52,23 @@ def contracts(skill):
     return value
 
 
-def schema(contract):
-    if contract['method'] == 'get_doc':
-        properties = {'name': {'type': 'string', 'maxLength': 140}}
-        required = ['name']
-    else:
-        properties = {'filters': {'type': 'object', 'additionalProperties': False,
-            'properties': {field: {'oneOf': [{'type': 'string', 'maxLength': 140},
-                {'type': 'array', 'minItems': 2, 'maxItems': 2, 'items': {}}]} for field in contract['fields']}},
-            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 20}}
-        required = []
-    return {'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False}
-
-
 class Reader:
-    def __init__(self, skill, user, business, scope=None):
+    def __init__(self, skill, user, business, scope=None, *, authorize=None):
         self.skill, self.user, self.business = skill, user, business
         self.scope = dict(scope) if scope else None
         self.failed = False
         self.evidence = []
         self.ledger_results = []
+        self.authorize = authorize
 
     def read(self, contract, **arguments):
         try:
+            if not self.authorize:
+                raise ValueError('A delivered search declaration is required')
+            self.authorize(contract, arguments)
             with as_user(self.user):
                 result = self._read(contract, arguments)
+                self.authorize(contract, arguments)
                 self.evidence.append({'tool': contract['name'], 'arguments': arguments,
                     'scope': fingerprint(self.scope), 'digest': fingerprint(result)})
                 return result
@@ -174,9 +166,9 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, separators=(',', ':')).encode()).hexdigest()
 
 
-def recheck(skill, user, business, evidence, scope=None):
+def recheck(skill, user, business, evidence, scope=None, *, authorize=None):
     allowed = {row['name']: row for row in contracts(skill)}
-    reader = Reader(skill, user, business, scope)
+    reader = Reader(skill, user, business, scope, authorize=authorize)
     reader.check_scope()
     for entry in evidence:
         if entry.get('scope') != fingerprint(scope):
