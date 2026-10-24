@@ -81,6 +81,8 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
     from relay_core import messaging
     from relay_core.automation.service import internal_save
     from relay_core.ticket_notifications import outgoing_notification
+    from relay_core.automation.service import outgoing_run
+    from relay_core.business_events import outgoing_event
     recipient_lists(to, cc, bcc)
     values=dict(to=to,subject=subject,body=body,cc=cc,bcc=bcc,message=message,
         html=html,attachment_ids=attachment_ids,forward=forward,auto_submitted=auto_submitted)
@@ -113,7 +115,8 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
         payload={'email_request':request_key,'email_values':values,
             'business':[source.get('business_doctype'),source.get('business_name')],
             'destination':[source.relay_contact,source.channel,source.sender_endpoint],
-            'notification':notification}
+            'notification':notification, 'automation_run':outgoing_run.get(),
+            'business_event':outgoing_event.get()}
         action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,
             'source_message':message,'start_contact':None if message else source.relay_contact,
             'operation':'email','target_channel':channel.name,

@@ -167,6 +167,7 @@ def send_locked(contact, endpoint, kind, data, request_key, business_doctype, bu
     try:
         _,_,_,fresh_tool,fresh_args,_=prepared(contact,endpoint,kind,data,business_doctype,business_name)
         if fresh_tool!=tool or fresh_args!=args:raise ValueError('Conversation changed before sending')
+        messaging.automation_scope(action, source)
     except (frappe.PermissionError,frappe.ValidationError,ValueError):
         action.status='Rejected';internal_save(action);frappe.db.commit()
         return {'action':action.name,'status':'Rejected','message':None}

@@ -64,7 +64,7 @@
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
-      "options": "Pending\nDeciding\nCompleted\nHandoff\nShadow\nCancelled",
+      "options": "Pending\nDeciding\nDelivering\nCompleted\nHandoff\nShadow\nCancelled",
       "default": "Pending"
     },
     {

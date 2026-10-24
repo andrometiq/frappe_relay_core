@@ -17,7 +17,13 @@
     "run_as_user",
     "template",
     "parameter_mapping",
-    "sample_key"
+    "sample_key",
+    "contact",
+    "use_preferences",
+    "telegram_body",
+    "email_subject",
+    "email_body",
+    "email_signature"
   ],
   "fields": [
     {
@@ -87,6 +93,37 @@
       "label": "Sample Key",
       "fieldtype": "Data",
       "unique": 1
+    },
+    {
+      "fieldname": "contact",
+      "label": "Recipient Person",
+      "fieldtype": "Link",
+      "options": "Contact"
+    },
+    {
+      "fieldname": "use_preferences",
+      "label": "Use Channel Preferences",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "telegram_body",
+      "label": "Telegram Text",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "email_subject",
+      "label": "Email Subject",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "email_body",
+      "label": "Email Text",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "email_signature",
+      "label": "Email Signature",
+      "fieldtype": "Small Text"
     }
   ],
   "permissions": [

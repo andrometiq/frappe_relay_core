@@ -9,6 +9,9 @@ from test_ai_skills import Doc, framework, module
 class BusinessEventTests(unittest.TestCase):
     def setUp(self):
         self.f = framework(); self.intents = []
+        self.f.ValidationError = ValueError
+        self.f.DoesNotExistError = LookupError
+        self.f.TimestampMismatchError = type('TimestampMismatchError',(ValueError,),{})
         self.f.cache = Mock()
         self.f.cache.get_value.return_value = {('Delivery Note', 'on_submit')}
         automation = types.SimpleNamespace(internal_save=lambda doc, **kw: self.intents.append(doc))
@@ -16,13 +19,14 @@ class BusinessEventTests(unittest.TestCase):
         self.service = module('relay_core/business_events.py', self.f,
             {'relay_core.ai.tools': tools, 'relay_core.automation.service': automation})
         self.rule = Doc(name='RULE-1', modified='v1', recipient_field='customer', business_doctype='Customer',
-            parameter_mapping='["name", "items_summary"]', source_doctype='Delivery Note', template='TPL-1')
+            parameter_mapping='["name", "items_summary"]', source_doctype='Delivery Note', template='TPL-1', channel='CH-1')
         self.source = Doc(doctype='Delivery Note', name='DN-1', customer='CUST-A',
             items=[Doc(item_name='Cloth', qty=12, uom='Metre')])
         self.f.get_meta.return_value = Doc(get_field=lambda key: Doc(fieldtype='Table') if key == 'items' else None)
         self.service.approved = Mock(return_value=Doc(template_name='delivery_notice', language='en'))
         self.f.get_all.return_value = ['PERSON-A']
         self.f.get_doc.side_effect = lambda values: Doc(values, name='DELIVERY-1')
+        self.f.db.get_value.side_effect = lambda dt, *args, **kwargs: 'WhatsApp' if dt == 'Relay Channel' else (1 if dt == 'User' else None)
         self.f.db.exists.side_effect = lambda dt, filters: any(d.event_key == filters['event_key'] for d in self.intents)
 
     def test_preview_uses_template_permissions_and_paginated_hub_wording(self):
@@ -173,12 +177,42 @@ class BusinessEventTests(unittest.TestCase):
         self.source.denied = True
         self.f.get_doc.side_effect = lambda dt, name: {'Relay Business Event Delivery': delivery,
             'Relay Business Event Rule': self.rule, 'Delivery Note': self.source}[dt]
+        self.f.db.get_value.side_effect = None
         self.f.db.get_value.return_value = None
         send = Mock()
         with patch.dict(sys.modules, {'relay_core.conversation_start': types.SimpleNamespace(send_business=send)}):
             self.service.dispatch(delivery.name)
         send.assert_not_called()
         self.assertEqual(delivery.status, 'Failed')
+
+    def test_unexpected_failure_before_journaling_leaves_a_recoverable_intent(self):
+        self.service.capture(self.rule,self.source,'on_submit')
+        delivery = self.intents[0]
+        self.rule.update(enabled=1,run_as_user='service',channel='CH-1')
+        self.f.get_doc.side_effect = lambda dt,name:delivery if dt=='Relay Business Event Delivery' else self.rule
+        for error in (RuntimeError, self.f.TimestampMismatchError):
+            self.service.delivery_scope = Mock(side_effect=error('Transient database failure'))
+            self.service.dispatch(delivery.name)
+            self.assertEqual(delivery.status,'Pending')
+            self.assertIsNone(delivery.action)
+
+    def test_missing_rules_fail_and_do_not_starve_later_pending_deliveries(self):
+        rows = [Doc(name=f'DELIVERY-{i}', rule='deleted', status='Pending') for i in range(21)]
+        def get_doc(dt, name):
+            if dt == 'Relay Business Event Rule':
+                raise self.f.DoesNotExistError('Deleted rule')
+            return next(row for row in rows if row.name == name)
+        self.f.get_doc.side_effect = get_doc
+        self.f.get_all.side_effect = lambda *a, **kw: [row.name for row in rows if row.status == 'Pending'][:20]
+        self.f.qb = Mock()
+        query = self.f.qb.from_.return_value.join.return_value.on.return_value.select.return_value
+        query.where.return_value.where.return_value.limit.return_value.run.return_value = []
+        self.service.enqueue_delivery = self.service.dispatch
+        self.service.recover()
+        self.assertEqual([row.status for row in rows], ['Failed'] * 20 + ['Pending'])
+        self.service.recover()
+        self.assertTrue(all(row.status == 'Failed' for row in rows))
+        self.f.db.get_value.assert_any_call('Relay Business Event Delivery', 'DELIVERY-20', 'name', for_update=True)
 
     def test_samples_are_disabled_and_install_idempotently(self):
         samples = []
@@ -190,3 +224,78 @@ class BusinessEventTests(unittest.TestCase):
         self.assertEqual(len(samples), 2)
         self.assertTrue(all(not row.enabled for row in samples))
         self.assertEqual({row.source_doctype for row in samples}, {'Delivery Note', 'Sales Order'})
+
+
+class ChannelEventTests(unittest.TestCase):
+    def setUp(self):
+        self.f = framework()
+        self.tools = module('relay_core/ai/tools.py',self.f)
+        self.service = module('relay_core/business_events.py',self.f,
+            {'relay_core.ai.tools':self.tools,'relay_core.automation.service':types.SimpleNamespace(internal_save=Mock())})
+        self.rule = Doc(name='RULE',enabled=1,modified='v1',channel='TG',run_as_user='worker',business_doctype='Customer',
+            source_doctype='Sales Order',recipient_field='customer',parameter_mapping='["name", "total_qty"]',
+            template=None,telegram_body='Order {name}: {total_qty}',email_subject='Order {name}',email_body='Qty {total_qty}',
+            email_signature='Local <Support>',use_preferences=1)
+        self.source = Doc(name='SO-1',customer='C1',total_qty=25)
+        self.selection = dict(channel='TG',endpoint='END1',preference='P1',provider='Telegram')
+        self.resolve = Mock(return_value=self.selection)
+        self.recheck = Mock()
+        self.f.get_meta.return_value = Doc(get_field=lambda key:Doc(fieldtype='Data'),
+            get_permitted_fieldnames=lambda **kw:['name','total_qty'])
+        self.patch = patch.dict(sys.modules,{'relay_core.channel_preferences':types.SimpleNamespace(resolve=self.resolve,recheck=self.recheck)})
+        self.patch.start();self.addCleanup(self.patch.stop)
+
+    def test_telegram_snapshot_has_explicit_preference_and_immutable_values(self):
+        payload = self.service.snapshot(self.rule,self.source,'PERSON','C1')
+        self.assertEqual(payload['data'],{'text':'Order SO-1: 25'})
+        self.assertEqual(payload['selection'],self.selection)
+        self.source.total_qty = 99
+        self.service.readable_parameters(self.rule,self.source,json.dumps(payload))
+        self.assertEqual(payload['data']['text'],'Order SO-1: 25')
+        self.resolve.assert_called_once_with('PERSON','Customer','C1',channels=None,providers=['Telegram','Email'])
+
+    def test_email_snapshot_renders_safe_html_and_no_business_field_read_bypass(self):
+        self.selection.update(provider='Email',channel='EM')
+        payload = self.service.snapshot(self.rule,self.source,'PERSON','C1')
+        self.assertEqual(payload['data']['subject'],'Order SO-1')
+        self.assertIn('Local &lt;Support&gt;',payload['data']['html'])
+        self.f.get_meta.return_value.get_permitted_fieldnames = lambda **kw:['name']
+        with self.assertRaisesRegex(ValueError,'readable'):
+            self.service.snapshot(self.rule,self.source,'PERSON','C1')
+
+    def test_delivery_rechecks_original_consent_without_selecting_another_channel(self):
+        payload = self.service.snapshot(self.rule,self.source,'PERSON','C1')
+        delivery = Doc(rule='RULE',rule_version='v1',payload=json.dumps(payload),source_doctype='Sales Order',
+            source_name='SO-1',business_doctype='Customer',business_name='C1',contact='PERSON')
+        self.f.get_doc.side_effect = lambda dt,name:self.rule if dt=='Relay Business Event Rule' else self.source
+        self.resolve.reset_mock()
+        self.service.delivery_scope(delivery)
+        self.recheck.assert_called_once_with('PERSON','Customer','C1',self.selection)
+        self.resolve.assert_not_called()
+        self.recheck.side_effect = ValueError('Consent revoked')
+        with self.assertRaisesRegex(ValueError,'Consent revoked'):self.service.delivery_scope(delivery)
+
+    def test_mutated_snapshot_is_rejected_and_email_action_keys_match_email_journal(self):
+        import hashlib
+        payload = self.service.snapshot(self.rule,self.source,'PERSON','C1')
+        digest = hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+        delivery = Doc(rule='RULE',rule_version='v1',event_key='EVENT',payload_hash=digest)
+        payload['data']['text']='Changed';delivery.payload=json.dumps(payload)
+        self.f.get_doc.return_value=self.rule
+        with self.assertRaisesRegex(ValueError,'content changed'):self.service.delivery_scope(delivery)
+        delivery.payload=json.dumps(dict(kind='email'))
+        self.assertEqual(self.service.action_key(delivery,self.rule),hashlib.sha256(b'email:worker:EVENT').hexdigest())
+
+    def test_callback_completion_is_monotonic_and_unrelated_actions_do_no_database_work(self):
+        action = Doc(name='ACTION',payload=json.dumps({'business_event':'EVENT'}),status='Submitted')
+        self.f.db.get_value.return_value='Queued'
+        self.service.complete(action)
+        self.f.db.set_value.assert_called_once_with('Relay Business Event Delivery','EVENT',
+            {'status':'Submitted','action':'ACTION'})
+        self.f.db.reset_mock()
+        self.f.db.get_value.return_value='Submitted';action.status='Rejected'
+        self.service.complete(action)
+        self.f.db.set_value.assert_not_called()
+        self.f.db.reset_mock();action.payload='{}'
+        self.service.complete(action)
+        self.assertEqual(self.f.db.mock_calls,[])

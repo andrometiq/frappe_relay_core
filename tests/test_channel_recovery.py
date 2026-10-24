@@ -83,3 +83,40 @@ class TelegramAdmissionTests(unittest.TestCase):
         self.action.status='Uncertain';self.hub.call_tool.return_value={'deliveries':[]}
         with self.assertRaises(ValueError):messaging.reconcile('action')
         self.hub.call_tool.assert_called_once_with('channels.deliveries',{'request_key':'original-key'})
+
+
+class AutomatedRetryTests(unittest.TestCase):
+    def test_ai_and_business_events_cannot_be_retried_without_provenance(self):
+        for operation in ('text', 'email'):
+            for provenance in ('automation_run', 'business_event'):
+                action = _dict(name='action', owner='sender', status='Rejected', operation=operation,
+                    payload=json.dumps({provenance:'origin', 'email_values':{'to':['a@example.invalid']}}),
+                    check_permission=Mock())
+                with self.subTest(operation=operation, provenance=provenance), \
+                        patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=action), \
+                        patch.object(frappe, 'session', _dict(user='sender')), \
+                        patch.object(frappe, 'throw', side_effect=frappe.PermissionError), \
+                        patch.object(messaging, 'send') as send, patch('relay_core.email.send') as email_send:
+                    with self.assertRaises(frappe.PermissionError):
+                        messaging.retry(action.name)
+                    send.assert_not_called()
+                    email_send.assert_not_called()
+
+
+class EmailDeliveryEvidenceTests(unittest.TestCase):
+    def test_dsn_waits_for_submission_and_rejects_mismatched_recipient_or_message(self):
+        from relay_core import channel_statuses
+        action = _dict(name='action', operation='email', status='Queued', outbound_message=None,
+            payload=json.dumps({'email_values':{'to':['a@example.invalid']}}))
+        row = dict(id=1, receipt=dict(message_id='<id@example.invalid>', recipient='a@example.invalid',
+                                    delivery_status='bounced', status_code='5.1.1'))
+        self.assertFalse(channel_statuses.apply_email_evidence(action, row))
+        row['receipt']['recipient'] = 'other@example.invalid'
+        with self.assertRaisesRegex(ValueError, 'recipient mismatch'):
+            channel_statuses.apply_email_evidence(action, row)
+        row['receipt']['recipient'] = 'a@example.invalid'
+        action.outbound_message = 'message'
+        message = _dict(name='message', provider_context=json.dumps({'provider':'Email','message_id':'<other@example.invalid>'}))
+        with patch.object(frappe, 'get_doc', return_value=message):
+            with self.assertRaisesRegex(ValueError, 'message mismatch'):
+                channel_statuses.apply_email_evidence(action, row)

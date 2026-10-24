@@ -23,6 +23,9 @@ def validate_skill(doc):
     if doc.enabled:
         if not doc.channel or not doc.ai_model:
             raise ValueError('Choose a channel and AI Model before enabling the skill')
+        channel = frappe.get_doc('Relay Channel', doc.channel)
+        if not channel.enabled or channel.channel not in ('WhatsApp', 'Telegram', 'Email'):
+            raise ValueError('Choose an enabled WhatsApp, Telegram or email channel')
         # Serialize activation so two skills cannot own the same channel/business.
         frappe.db.get_value('Relay Channel', doc.channel, 'name', for_update=True)
         names = frappe.get_all('Relay AI Skill', filters={'channel': doc.channel,

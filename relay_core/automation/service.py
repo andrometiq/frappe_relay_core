@@ -53,7 +53,9 @@ def message_hash(message):
             except ValueError: return value
         return value
     return hashlib.sha256(canonical({'content': message.content, 'type': message.message_type,
-        'context': parsed(message.get('provider_context')), 'data': parsed(message.get('message_data'))}).encode()).hexdigest()
+        'context': parsed(message.get('provider_context')), 'data': parsed(message.get('message_data')),
+        'business': [message.get('business_doctype'), message.get('business_name')],
+        'destination': [message.get('relay_contact'), message.get('channel'), message.get('sender_endpoint'), message.get('conversation_key')]}).encode()).hexdigest()
 
 
 def business_scope(policy, contact, message=None):
@@ -84,6 +86,8 @@ def latest_message(message):
         filters['conversation_key'] = message.conversation_key
     elif message.sender_endpoint:
         filters['sender_endpoint'] = message.sender_endpoint
+    if message.get('business_doctype') and message.get('business_name'):
+        filters.update(business_doctype=message.business_doctype, business_name=message.business_name)
     rows = frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name desc', page_length=1)
     return bool(rows and rows[0].name == message.name)
 
@@ -137,19 +141,16 @@ def enqueue(message):
 def create_run(doc):
     if doc.get('legacy_source') or doc.direction != 'Incoming' or not frappe.conf.get('relay_automation_enabled'):
         return {'status': 'Ignored'}
-    try:
-        if frappe.get_doc('Relay Channel',doc.channel).channel!='WhatsApp':return {'status':'Ignored'}
-    except frappe.DoesNotExistError:return {'status':'Ignored'}
-    # Lock the source message to serialize initial event replay.
-    frappe.db.get_value('Relay Message', doc.name, 'name', for_update=True)
-    existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(doc.name)}, ['name', 'status'], as_dict=True)
-    if existing:
-        return dict(existing)
     from relay_core.ai.service import skill_for, create_run as create_skill_run
     skill = skill_for(doc)
-    if skill:
-        return create_skill_run(doc, skill)
-    return {'status': 'Disabled'}
+    if not skill:
+        return {'status': 'Disabled'}
+    # Lock the source message to serialize initial event replay.
+    frappe.db.get_value('Relay Message', doc.name, 'name', for_update=True)
+    existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(doc.name)}, ['name', 'status'], as_dict=True, for_update=True)
+    if existing:
+        return dict(existing)
+    return create_skill_run(doc, skill)
 
 
 @after_message_commit
@@ -263,6 +264,8 @@ def dispatch(name):
 def recover():
     from relay_core.automation.queue import recover as recover_messages
     recover_messages()
+    from relay_core.ai.service import recover_deliveries
+    recover_deliveries()
     if not frappe.conf.get('relay_automation_enabled'):
         return
     # Core owns delivery recovery; the outbox follows its action without resending.
