@@ -140,6 +140,7 @@ export function useMessages() {
     last = ref(null),
     restored = ref("");
   const windows = new Map(), preferredChannels = new Map();
+  let restoredRefreshPending = false;
   const viewPosition = ref(null), newArrivals = ref(0);
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
@@ -166,6 +167,7 @@ export function useMessages() {
     ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
     viewPosition.value=saved.position;restored.value=saved.position?.name||'';
     if(!businessName.value && !source.value)source.value=rows.value.at(-1)||null;
+    restoredRefreshPending = true;
     return true;
   }
   let positionTimer, pendingPosition;
@@ -216,6 +218,7 @@ export function useMessages() {
     if (refreshing || busy.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
     const generation = requestSequence, identity = conversationIdentity();
     refreshing = true;
+    restoredRefreshPending = false;
     try {
       if(!last.value){await history();return;}
       const page = {items:[]};
@@ -261,7 +264,10 @@ export function useMessages() {
         connectionError.value = err.message || 'Live updates unavailable.';
         if([401,403].includes(err.status)){rows.value=[];pendingMessages.value=[];clearRecipient();windows.clear();}
       }
-    } finally { refreshing = false; }
+    } finally {
+      refreshing = false;
+      if (restoredRefreshPending) await refreshVisible();
+    }
   }
   useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
     if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearRecipient();}
@@ -324,6 +330,7 @@ export function useMessages() {
       error.value = e.message;
     } finally {
       busy.value = false;
+      if (restoredRefreshPending) await refreshVisible();
     }
   }
   const previousContacts = ref(null),
@@ -354,7 +361,7 @@ export function useMessages() {
     channel.value=value;rows.value=[];source.value=null;quoting.value=false;
     restored.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
     clearRecipient();
-    if(!restoreWindow())run(restoreSavedView);
+    return restoreWindow() ? refreshVisible() : run(restoreSavedView);
   }
 
   async function history(older = false) {
@@ -391,6 +398,7 @@ export function useMessages() {
   function open(contact) {
     if (busy.value || !contact) return;
     clearRecipient();saveWindow();
+    ++requestSequence;
     businessName.value = "";
     businessType.value = "";
     businessContext.value = null;
@@ -456,10 +464,9 @@ export function useMessages() {
     channels.value = [];
     clearRecipient();
     if(updateRoute)businessRoute(doctype,name);
-    const cached=restoreWindow();
     return run(async()=>{
       businessContext.value=await coreApi('business_inbox.context',{doctype,name});
-      if(!cached)await restoreSavedView();
+      if(!restoreWindow())await restoreSavedView();
       await restorePending();
     });
   }
@@ -538,6 +545,8 @@ export function useMessages() {
     data = null,
   ) {
     if (!message) return;
+    const submitted = {scope:windowKey(), body:body.value, attachment:attachment.value,
+      quoting:quoting.value, source:source.value};
     if (!data) {
       if (["photo", "video", "audio", "voice", "document"].includes(action)) {
         if (!attachment.value) {
@@ -621,9 +630,11 @@ export function useMessages() {
           : result.status === "Queued" ? "" : result.status === "Rejected" ? "Message was not sent. Review Message activity for retry options." : "Delivery not confirmed. Review the action before retrying.");
       if (['Submitted','Queued'].includes(result.status)) {
         if(result.status==='Submitted')sessionStorage.removeItem(storage);
-        quoting.value = false;
-        body.value = "";
-        attachment.value = null;
+        if (action !== 'reaction' && windowKey() === submitted.scope) {
+          if (quoting.value === submitted.quoting && source.value === submitted.source) quoting.value = false;
+          if (body.value === submitted.body) body.value = "";
+          if (attachment.value === submitted.attachment) attachment.value = null;
+        }
       }
       restored.value = "";
       await history();
