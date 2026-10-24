@@ -107,6 +107,10 @@ def channel_ai_cases(fixture):
     restriction = frappe.get_doc(dict(doctype='User Permission', user=partner, allow='Customer',
         for_value=fixture.customer.name, apply_to_all_doctypes=1)).insert()
     frappe.db.commit()
+    account=frappe.get_doc(dict(doctype='AI Provider Account',name='Local skill account '+fixture.stamp,
+        account_label='Local skill account '+fixture.stamp,provider='OpenRouter',enabled=1));account.db_insert()
+    model_record=frappe.get_doc(dict(doctype='AI Model',name='Local skill model '+fixture.stamp,model_label='Local skill model '+fixture.stamp,
+        account=account.name,provider='OpenRouter',model_id='local-no-network',enabled=1));model_record.db_insert()
     provider_counter = 700
     context = {}
     def model(skill, user, business, prompt, run_id):
@@ -118,7 +122,7 @@ def channel_ai_cases(fixture):
     for provider, address in [('Telegram', '-9555000418'), ('Email', 'ai-' + fixture.stamp + '@example.invalid')]:
         binding = endpoint(fixture, provider, address)
         skill = frappe.get_doc(dict(doctype='Relay AI Skill', name='LOCAL-C3-AI-' + provider + '-' + fixture.stamp,
-            title='Local C3 channel skill', enabled=1, channel=binding.channel, business_doctype='Customer',
+            title='Local C3 channel skill', enabled=1, ai_model=model_record.name, channel=binding.channel, business_doctype='Customer',
             run_as_user=fixture.actor, handoff_owner=fixture.actor, mode='Automatic', daily_limit=100,
             instructions='Read this customer only. Hand off anything outside the skill.', allowed_tools=json.dumps([contract])))
         # No model account or credentials: the external AI boundary is replaced below.
@@ -182,6 +186,7 @@ def channel_ai_cases(fixture):
                 # A fixed reply admitted before a skill is enabled owns this source forever.
                 frappe.db.set_value('Relay AI Skill',skill.name,'enabled',0); frappe.db.commit()
                 fixed_source = source()
+                queue._process(fixed_source.name); frappe.db.commit()
                 client.return_value.call_tool.return_value = {'message_id':'<fixed-' + fixture.stamp + '@example.invalid>'}
                 assert email_preferences.auto_reply(fixed_source.name)['status'] == 'Submitted'
                 assert frappe.db.exists('Relay Message Action', {'source_message':fixed_source.name})
