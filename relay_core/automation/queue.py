@@ -19,7 +19,6 @@ TURN_SECONDS = 5
 WAKE_TTL = 120
 HANDLERS = (
     'relay_core.translations.on_message',
-    'relay_core.flows.service.on_message',
     'relay_core.automation.service.on_message',
     'relay_core.email_preferences.on_message',
 )
@@ -110,13 +109,6 @@ def _process(message):
     doc = frappe.get_doc('Relay Message', message)
     if doc.direction == 'Incoming' and not doc.get('legacy_source'):
         for handler in HANDLERS:
-            # Pause only suppresses AI. Translation, flow and email keep their
-            # independent guards (in particular translation still works paused).
-            if handler == 'relay_core.automation.service.on_message' and (
-                not frappe.conf.get('relay_automation_enabled') or
-                frappe.db.get_value('Relay Contact', doc.relay_contact, 'automation_paused')
-            ):
-                continue
             frappe.get_attr(handler)(doc)
     frappe.db.set_value('Relay Message', message, 'automation_status', 'Complete', update_modified=False)
 

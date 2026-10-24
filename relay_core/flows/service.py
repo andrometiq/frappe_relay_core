@@ -22,7 +22,7 @@ def validate_flow(doc):
         frappe.throw('Choose a slash command such as /support')
     validated=definition(doc.nodes)
     from relay_core.flows.actions import definitions
-    registered=definitions()
+    registered=definitions(context='flow')
     if any(node['kind']=='action' and node['action'] not in registered for node in validated):
         frappe.throw('Choose an installed, replay-safe business action')
     check_actor(doc)
@@ -209,7 +209,12 @@ def claims(message):
 
 @after_message_commit
 def on_message(doc,method=None):
-    if not claims(doc):return
+    from relay_core.automation.service import create_run
+    return create_run(doc)
+
+
+def create_event(doc):
+    """Internal flow intent; only the shared inbound admission calls this."""
     if frappe.db.exists('Relay Flow Event',{'message':doc.name}):return
     event=frappe.get_doc({'doctype':'Relay Flow Event','message':doc.name,'message_hash':message_hash(doc),
                           'conversation_key':route(doc),'status':'Pending'})
@@ -243,6 +248,8 @@ def scope(run,message, *, handoff=False):
     if source.direction!='Incoming' or channel.name!=version.channel or route(source)!=run.conversation_key:
         raise ValueError('Flow conversation changed')
     contact,_=readable_contact(source.relay_contact)
+    if source.get('ticket') and frappe.db.get_value('Relay Ticket', source.ticket, 'ai_disabled'):
+        raise ValueError('Episode is owned by staff')
     generation = int(run.generation or 0) + int(handoff)
     if bool(contact.automation_paused) != handoff or int(contact.automation_generation or 0) != generation:
         raise ValueError('A human has taken ownership of this conversation')
@@ -272,18 +279,14 @@ def send(run,event,source,channel,text,key):
         if result.get('status')!='Submitted':raise RuntimeError('Delivery not confirmed')
 
 
-def flow_ticket(run, source, text, key, category):
-    from relay_core.business_access import reference
-    from relay_core.tickets import read as read_ticket
-    business = reference(source)
-    if not business: raise ValueError('Flow ticket needs a business record')
-    action = digest(key)
-    existing = frappe.db.get_value('Relay Ticket', {'source_action_key': action}, 'name')
-    if existing: return read_ticket(existing)
-    return frappe.get_doc({'doctype': 'Relay Ticket', 'subject': text[:140] or 'Conversation needs a person',
-        'brief': text, 'category': category, 'status': 'Open', 'source_action_key': action,
-        'assigned_to': frappe.session.user, 'business_doctype': business[0], 'business_name': business[1],
-        'messages': [{'message': name} for name in dict.fromkeys([run.start_message, source.name])]}).insert()
+def flow_ticket(source, text):
+    from relay_core.tickets import ensure_episode
+    actor = frappe.session.user
+    try:
+        frappe.set_user('Administrator')
+        return ensure_episode(source, owner=actor, subject=text[:140] or 'Conversation needs a person', reason=text)
+    finally:
+        frappe.set_user(actor)
 
 
 def next_step(nodes,index):
@@ -364,7 +367,7 @@ def _process(event):
         if node['kind']=='reply':
             send(run,event,source,channel,text,key)
         elif node['kind']=='ticket':
-            flow_ticket(run, source, text, key, node.get('category', 'Query'))
+            flow_ticket(source, text)
         elif node['kind']=='action':
             from relay_core.flows.actions import execute
             execute(run,node,values,key)
@@ -376,7 +379,7 @@ def _process(event):
                 'summary':text,'category':node.get('category',''),'status':node.get('status','Open'),
                 'messages':list(dict.fromkeys([run.start_message]+sources))},source='Flow',source_key=key)
         elif node['kind']=='handoff':
-            flow_ticket(run, source, text, key, 'Support')
+            flow_ticket(source, text)
             from relay_core.automation.service import takeover
             takeover(source.relay_contact,paused=1)
             run.status='Handoff';internal_save(run);finish(event)
@@ -493,7 +496,7 @@ def preview_legacy(graph):
     from relay_core.flows.legacy_graph import convert
     from relay_core.flows.actions import definitions
     result=convert(graph)
-    registered=definitions()
+    registered=definitions(context='flow')
     missing=sorted({node['action'] for node in result['nodes'] if node['kind']=='action' and node['action'] not in registered})
     triggers=result['triggers']
     commands=[row.get('match') for row in triggers if isinstance(row,dict) and row.get('type')=='command']

@@ -186,7 +186,7 @@ class AutomationQueueTests(unittest.TestCase):
         process.assert_called_once_with('one')
         wake.assert_called_once()  # Pending tail is signalled after unlocking.
 
-    def test_completed_message_is_not_replayed_and_pause_only_skips_ai(self):
+    def test_completed_message_is_not_replayed_and_pause_is_checked_by_admission(self):
         fake = Mock(conf={'relay_automation_enabled': 1})
         fake.db.get_value.return_value = 'Complete'
         with patch.object(queue, 'frappe', fake):
@@ -197,7 +197,7 @@ class AutomationQueueTests(unittest.TestCase):
         with patch.object(queue, 'frappe', fake):
             queue._process('paused')
         self.assertEqual([c.args[0] for c in fake.get_attr.call_args_list],
-                         [p for p in queue.HANDLERS if p != 'relay_core.automation.service.on_message'])
+                         list(queue.HANDLERS))
         fake.db.set_value.assert_called_once_with('Relay Message', 'paused', 'automation_status',
                                                  'Complete', update_modified=False)
 
@@ -223,17 +223,7 @@ class AutomationQueueTests(unittest.TestCase):
         recover.assert_called_once()
         deliveries.assert_called_once()
 
-    def test_ai_creation_and_recovery_keep_work_off_both_projection_queues(self):
-        fake = SimpleNamespace(get_doc=Mock(return_value=_dict(name='run', status='Pending')), enqueue=Mock())
-        message = _dict(name='message', relay_contact='contact')
-        skill = _dict(name='skill', modified='version', run_as_user='operator')
-        with patch.object(skills, 'frappe', fake), patch.object(skills, 'lock_contact',
-                return_value=_dict(automation_paused=0, automation_generation=0)), \
-                patch.object(skills, 'internal_save'), patch.object(skills, 'message_hash', return_value='hash'):
-            self.assertEqual(skills.create_run(message, skill)['name'], 'run')
-        self.assertEqual(fake.enqueue.call_args.kwargs['queue'], 'default')
-        self.assertTrue(fake.enqueue.call_args.kwargs['enqueue_after_commit'])
-
+    def test_ai_recovery_keeps_work_off_both_projection_queues(self):
         fake = SimpleNamespace(conf={'relay_automation_enabled': 1}, enqueue=Mock(),
             get_all=Mock(side_effect=[[], [_dict(name='run')], [_dict(name='outbox')]]))
         with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'), patch.object(skills, 'recover_deliveries'):

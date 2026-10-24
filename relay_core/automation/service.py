@@ -138,44 +138,100 @@ def enqueue(message):
     return create_run(doc)
 
 
+def episode(run, message, skill=None):
+    """Create the assigned episode before either flows or event tools execute."""
+    from relay_core.tickets import ensure_episode, triage_owner
+    actor = frappe.session.user
+    try:
+        frappe.set_user('Administrator')
+        channel = frappe.get_doc('Relay Channel', message.channel)
+        owner = triage_owner(channel, message)
+        ticket = ensure_episode(message, owner=owner, skill=skill, run=run)
+        return ticket
+    finally:
+        frappe.set_user(actor)
+
+
+def triage(run, message, reason):
+    run.reason = reason[:500]
+    try:
+        episode(run, message)
+    except (ValueError, frappe.PermissionError, frappe.ValidationError):
+        # The run is the durable intent when the configured owner loses access.
+        run.stage, run.status = 'Triage', 'Pending'
+        run.reason = 'Triage owner unavailable; review required'
+    else:
+        run.stage, run.status = 'Triage', 'Handoff'
+    internal_save(run)
+
+
 def configuration_failure(message, error):
-    """Record a terminal triage outcome without choosing a competing skill."""
+    """Drain failures retain a ticket or a recoverable triage intent."""
     doc = frappe.get_doc('Relay Message', message, for_update=True)
     existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(message)}, 'name', for_update=True)
     run = frappe.get_doc('Relay Automation Run', existing, for_update=True) if existing else frappe.get_doc({
         'doctype': 'Relay Automation Run', 'event_key': event_key(message),
-        'message': message, 'execution_user': frappe.session.user,
-        'message_hash': message_hash(doc),
-    })
+        'message': message, 'execution_user': frappe.session.user, 'message_hash': message_hash(doc)})
     if existing and run.status not in ('Pending', 'Deciding'):
         return
-    run.status = 'Handoff'
-    run.reason = f'Automation configuration requires review: {error}'
-    internal_save(run, new=not existing)
+    if not existing:
+        internal_save(run, new=True)
+    triage(run, doc, 'Automation configuration requires review')
 
 
 def create_run(doc):
-    if doc.get('legacy_source') or doc.direction != 'Incoming' or not frappe.conf.get('relay_automation_enabled'):
+    """The sole admission transaction for automatic inbound handlers and APIs."""
+    if doc.get('legacy_source') or doc.direction != 'Incoming':
         return {'status': 'Ignored'}
-    from relay_core.ai.service import skill_for, create_run as create_skill_run
-    skill = skill_for(doc)
-    if not skill:
-        return {'status': 'Disabled'}
-    # Lock the source message to serialize initial event replay.
+    from relay_core.flows.service import claims, create_event
+    from relay_core.ai.matching import human_request
+    from relay_core.email_preferences import automatic_allowed, automatic_reply_exists
+    from relay_core.automation.provenance import context_of
+    # A shared source lock serializes flow/API/drain replay and email rules.
     frappe.db.get_value('Relay Message', doc.name, 'name', for_update=True)
     existing = frappe.db.get_value('Relay Automation Run', {'event_key': event_key(doc.name)}, ['name', 'status'], as_dict=True, for_update=True)
     if existing:
         return dict(existing)
-    return create_skill_run(doc, skill)
+    provenance = context_of(doc)
+    if not automatic_allowed(provenance) or provenance.get('provider') == 'Email' and automatic_reply_exists(doc):
+        return {'status': 'Ignored'}
+    flow = claims(doc) and not human_request(doc.content)
+    if not flow and not frappe.conf.get('relay_automation_enabled'):
+        return {'status': 'Disabled'}
+    contact = lock_contact(doc.relay_contact)
+    run = frappe.get_doc({'doctype': 'Relay Automation Run', 'event_key': event_key(doc.name),
+        'message': doc.name, 'execution_user': frappe.session.user, 'message_hash': message_hash(doc),
+        'status': 'Pending', 'stage': 'Matching', 'generation': int(contact.automation_generation or 0)})
+    internal_save(run, new=True)
+    try:
+        ticket = episode(run, doc)
+    except (ValueError, frappe.PermissionError, frappe.ValidationError):
+        triage(run, doc, 'Episode admission requires review')
+        return {'name': run.name, 'status': run.status}
+    if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled'):
+        from relay_core.ai.service import continue_search
+        try:
+            flow = not continue_search(run, doc)
+        except (ValueError, frappe.PermissionError, frappe.ValidationError):
+            triage(run, doc, 'Search confirmation or authorization failed; review required')
+            return {'name': run.name, 'status': run.status}
+    if contact.automation_paused or ticket.ai_disabled:
+        run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
+    elif human_request(doc.content):
+        triage(run, doc, 'Sender requested a person')
+    elif flow:
+        create_event(doc)
+        run.stage, run.status = 'Flow', 'Completed'
+    else:
+        frappe.enqueue('relay_core.automation.service.process', name=run.name, queue=QUEUE,
+                       timeout=90, enqueue_after_commit=True)
+    internal_save(run)
+    return {'name': run.name, 'status': run.status}
 
 
 @after_message_commit
 def on_message(doc, method=None):
-    if frappe.conf.get('relay_automation_enabled'):
-        from relay_core.flows.service import claims
-        if claims(doc):
-            return
-        create_run(doc)
+    return create_run(doc)
 
 
 def reserve_attempt(policy):
@@ -200,6 +256,13 @@ def _process(name):
     run = lock_run(name)
     if run.status not in ('Pending', 'Deciding'):
         return
+    if run.get('stage') == 'Triage':
+        triage(run, frappe.get_doc('Relay Message', run.message), run.reason)
+        frappe.db.commit()
+        return
+    if run.get('stage') == 'Matching':
+        from relay_core.ai.service import admit
+        return admit(run)
     if run.get('skill'):
         from relay_core.ai.service import process as process_skill
         return process_skill(name)
