@@ -15,6 +15,17 @@ def text_payload():
         {'id': 'local-text', 'from': '919999999999', 'type': 'text', 'text': {'body': 'Hello'}}]}}]}]}
 
 
+def channel_text(channel):
+    payload = dict(channel=channel, direction='inbound', provider_id='123', sender='1234', body='Quantity 12')
+    if channel == 'Email':
+        payload.update(sender='person@example.invalid', provider_id='<local@example.invalid>',
+            payload={'message_id': '<local@example.invalid>', 'authentication': {'status': 'pass'}})
+    else:
+        payload['payload'] = {'update_id': 123, 'message': {'message_id': 456,
+            'chat': {'id': 1234, 'type': 'private'}, 'from': {'id': 1234}, 'text': payload['body']}}
+    return payload
+
+
 class ProjectionLatencyTests(unittest.TestCase):
     def test_receive_bounds_inline_work_and_replays_do_not_project_twice(self):
         for count in (1, 2):
@@ -49,6 +60,41 @@ class ProjectionLatencyTests(unittest.TestCase):
         for value in variants:
             with self.subTest(value=str(value)[:80]):
                 self.assertFalse(inbound.single_text(value))
+
+    def test_telegram_and_email_single_text_share_size_and_batch_bounds(self):
+        for channel in ('Telegram', 'Email'):
+            payload = channel_text(channel)
+            self.assertTrue(inbound.single_text(payload))
+            for changes in ({'body': 'x' * 16384}, {'direction': 'outbound'}, {'body': None},
+                            {'channel_statuses': []}, {'provider_id': ''}):
+                self.assertFalse(inbound.single_text(dict(payload, **changes)))
+            fake = SimpleNamespace(get_roles=lambda user: ['Relay Hub Service'], session=_dict(user='service'),
+                request=Mock(), db=Mock(), publish_realtime=Mock())
+            fake.db.get_value.return_value = None
+            for count in (1, 2):
+                batch = {'account': 'local', 'events': [{'id': i + 1, 'payload': payload} for i in range(count)]}
+                with patch.object(inbound, 'frappe', fake), patch.object(inbound, 'connection_value'), \
+                        patch.object(inbound, 'validate_callback', return_value=batch), \
+                        patch.object(inbound, 'insert_event', return_value=_dict(flags=_dict())) as insert:
+                    inbound.receive()
+                self.assertEqual(insert.call_count, count)
+                self.assertEqual(insert.call_args.kwargs['inline'], count == 1)
+
+    def test_channel_media_edits_reactions_and_dsns_stay_background(self):
+        payload = channel_text('Email')
+        payload['payload']['attachments'] = [{'filename': 'invoice.pdf', 'size': 12}]
+        self.assertFalse(inbound.single_text(payload))
+        payload = channel_text('Telegram')
+        message = payload['payload'].pop('message')
+        for key in ('edited_message', 'message_reaction'):
+            payload['payload'] = {'update_id': 123, key: message}
+            self.assertFalse(inbound.single_text(payload))
+        message.pop('text')
+        message['photo'] = [{'file_id': 'local-photo'}]
+        message['caption'] = payload['body']
+        payload['payload'] = {'update_id': 123, 'message': message}
+        self.assertFalse(inbound.single_text(payload))
+        self.assertFalse(inbound.single_text({'channel': 'Email', 'channel_statuses': [{'state': 'bounced'}]}))
 
     def test_inline_runs_in_current_transaction_without_queue_or_commit(self):
         doc = _dict(name='event', payload=json.dumps(text_payload()), flags=_dict(relay_inline_projection=True))

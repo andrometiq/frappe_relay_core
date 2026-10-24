@@ -122,8 +122,19 @@ def receive(**_ignored):
 
 
 def single_text(payload):
-    """Only a small, unmixed WhatsApp text envelope can bypass the worker."""
+    """Only one small text message can bypass the projection worker."""
     try:
+        if len(json.dumps(payload).encode()) > 16384:
+            return False
+        if payload.get('channel') in ('Telegram', 'Email'):
+            from relay_core.automation.projection import extract_messages
+            if 'channel_statuses' in payload or payload.get('direction') != 'inbound':
+                return False
+            raw = payload.get('payload') or {}
+            if payload['channel'] == 'Email' and raw.get('attachments'):
+                return False
+            rows = extract_messages(payload)
+            return len(rows) == 1 and rows[0]['type'] == 'text'
         if payload.get('channel', 'WhatsApp') != 'WhatsApp' or len(payload['entry']) != 1:
             return False
         changes = payload['entry'][0]['changes']
@@ -134,9 +145,8 @@ def single_text(payload):
             return False
         messages = value['messages']
         return (len(messages) == 1 and messages[0].get('type') == 'text'
-                and isinstance(messages[0]['text']['body'], str)
-                and len(json.dumps(payload).encode()) <= 16384)
-    except (KeyError, TypeError, AttributeError):
+                and isinstance(messages[0]['text']['body'], str))
+    except (KeyError, TypeError, AttributeError, ValueError):
         return False
 
 
