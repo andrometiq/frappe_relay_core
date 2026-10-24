@@ -19,8 +19,8 @@ def create(state, choices, context=None):
         ]}]}}}
     tool = 'whatsapp.execute'
     if context['provider'] in ('Telegram', 'Email'):
-        body += '\nReply with one exact choice below within 24 hours:\n' + '\n'.join(
-            item['doctype'] + ': ' + item['name'] + '\n' + item['id'] for item in choices)
+        body += '\nReply with a number below within 24 hours:\n' + '\n'.join(
+            f"{number}. {item['doctype']}: {item['title']}" for number, item in enumerate(choices, 1))
         if context['provider'] == 'Telegram':
             tool = 'telegram.message'
             arguments = {'operation': 'text', 'chat_id': context['chat_id'], 'text': body,

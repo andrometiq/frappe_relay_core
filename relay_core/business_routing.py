@@ -39,12 +39,14 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
     elif business:
         rule = rule or 'reply_context'
     else:
+        choices = json.loads(state.choices or '[]')
         choice_id = (row.get('message_data') or {}).get('selection_id')
         if context.get('provider') in ('Telegram', 'Email'):
             body = (row.get('text') or {}).get('body', '').strip()
             if body.startswith('relay-business:'):
                 choice_id = body
-        choices = json.loads(state.choices or '[]')
+            elif not state.selected_at and body.isascii() and body.isdigit() and len(body) <= 2 and 1 <= int(body) <= len(choices):
+                choice_id = choices[int(body) - 1]['id']
         selected = next((item for item in choices if item['id'] == choice_id), None)
         if choice_id and str(choice_id).startswith('relay-business:'):
             if (selected and (selected['doctype'], selected['name']) in links and not state.selected_at
@@ -53,6 +55,9 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                     and frappe.utils.get_datetime(event.creation) < frappe.utils.get_datetime(state.prompt_expires_at)
                     and choice_scope(context)):
                 business, rule = (selected['doctype'], selected['name']), 'sender_choice'
+                row['type'] = 'text'
+                row['text'] = {'body': 'Chose: ' + selected['doctype'] + ' — ' + selected.get('title', selected['name'])}
+                row['message_data'] = {'kind': 'text', 'text': row['text']['body']}
             else:
                 rule = 'triage_invalid_choice'
         elif context.get('reply_to_message_id'):
