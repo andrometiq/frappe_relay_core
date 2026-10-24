@@ -15,6 +15,9 @@ class RelayMessage(Document):
             frappe.throw('Invalid provider message ID')
 
     def before_insert(self):
+        # Content is plain text. JSON also keeps previews independent of legacy HTML.
+        if not self.get('message_data') and self.get('message_type') in (None, '', 'text'):
+            self.message_data = frappe.as_json({'kind': 'text', 'text': self.get('content') or ''})
         # Atomic with the message: even death before after_commit is recoverable.
         self.automation_status = (
             'Pending' if self.direction == 'Incoming' and not self.get('legacy_source') else ''
