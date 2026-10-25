@@ -3,7 +3,7 @@ import hashlib
 import json
 import frappe
 from relay_core.automation.provenance import integer, telegram_message
-from relay_core.message_types import normalize, preview, text
+from relay_core.message_types import meta_error, normalize, preview, text
 from relay_core.receipt_order import advances
 
 
@@ -76,9 +76,14 @@ def extract_updates(payload):
                 if participant is not None:
                     participant=text(participant,200,required=True)
                     if status.get('recipient_type')!='group':raise ValueError('Invalid group receipt')
-                result.append({'participant':participant,'kind':'delivery','destination':destination,'target':target,'status':state,
-                               'event_id':target+':'+state+':'+str(timestamp),'timestamp':timestamp})
+                update={'participant':participant,'kind':'delivery','destination':destination,'target':target,'status':state,
+                        'event_id':target+':'+state+':'+str(timestamp),'timestamp':timestamp}
+                if state=='Failed' and status.get('errors'):
+                    update['error']=delivery_error(status['errors'])
+                result.append(update)
             for message in change.get('value', {}).get('messages', []):
+                if message.get('type') in ('edit', 'revoke'):
+                    result.append(whatsapp_change(message)); continue
                 if message.get('type') != 'reaction': continue
                 value = message.get('reaction', {}); emoji = text(value.get('emoji', ''), 100)
                 result.append({'kind': 'reaction', 'destination': message.get('group_id') or message.get('from'),
@@ -86,6 +91,31 @@ def extract_updates(payload):
                     'event_id': text(message.get('id'), 300, required=True), 'timestamp': int(message.get('timestamp', 0)),
                     'items': [{'type': 'emoji', 'emoji': emoji}] if emoji else []})
     return result
+
+
+def delivery_error(errors):
+    """Meta's failure title, details and code as one readable line."""
+    error = meta_error(errors)
+    title = error.get('title') or 'Delivery failed'
+    line = title + (': ' + error['details'] if error.get('details') and error['details'] != title else '')
+    return (line + (' (code %d)' % error['code'] if 'code' in error else ''))[:1000]
+
+
+def whatsapp_change(message):
+    """A Coexistence edit replaces the target's content; a revoke clears it."""
+    kind = message['type']; value = message.get(kind)
+    if not isinstance(value, dict): raise ValueError('Invalid message change')
+    if kind == 'edit':
+        edited = value.get('message')
+        if not isinstance(edited, dict): raise ValueError('Invalid edited message')
+        inner = edited.get('type'); detail = edited.get(inner, {})
+        body = (detail.get('body') if inner == 'text' else detail.get('caption', '')) if isinstance(detail, dict) else ''
+        data = normalize(inner, detail, provider='WhatsApp', body=body or '')
+    else:
+        data = {'kind': 'revoked'}
+    return {'kind': 'edit', 'destination': text(message.get('group_id') or message.get('from'), 200, required=True),
+            'target': text(value.get('original_message_id'), 300, required=True), 'data': data,
+            'event_id': text(message.get('id'), 300, required=True), 'timestamp': int(message.get('timestamp', 0))}
 
 
 def apply_updates(payload, channel, event):
@@ -135,7 +165,8 @@ def apply_updates(payload, channel, event):
             values={'status':update['status']}
         elif update['kind'] == 'edit':
             values = {'message_data': json.dumps(update['data'], ensure_ascii=False), 'content': preview(update['data']),
-                      'message_type': update['data']['kind'], 'edited_at': frappe.utils.now_datetime()}
+                      'message_type': update['data']['kind'], 'edited_at': frappe.utils.now_datetime(),
+                      'transcript': '', 'transcript_status': '', 'transcript_details': None}
         else:
             state = doc.get('reactions') or {}
             if isinstance(state, str): state = json.loads(state)

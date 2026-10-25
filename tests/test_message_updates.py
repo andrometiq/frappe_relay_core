@@ -135,6 +135,42 @@ class DeliveryReceiptTests(unittest.TestCase):
         self.apply('sent',30)
         self.assertEqual(self.doc.status,'Read')
 
+    def test_failed_receipt_keeps_meta_error_on_message(self):
+        payload=self.receipt('failed',30)
+        payload['entry'][0]['changes'][0]['value']['statuses'][0]['errors']=[{'code':131049,
+            'title':'This message was not delivered to maintain healthy ecosystem engagement.',
+            'message':'This message was not delivered to maintain healthy ecosystem engagement.',
+            'error_data':{'details':'In order to maintain a healthy ecosystem engagement, the message failed to be delivered.'}}]
+        self.module.apply_updates(payload,'channel','event')
+        self.assertEqual(self.doc.status,'Failed')
+        self.assertEqual(self.doc.delivery_error,'This message was not delivered to maintain healthy ecosystem engagement.: '
+            'In order to maintain a healthy ecosystem engagement, the message failed to be delivered. (code 131049)')
+        self.apply('read',40)
+        self.assertEqual((self.doc.status,self.doc.delivery_error),('Read',''))
+
+    def messages(self, *messages):
+        return self.module.extract_updates({'entry':[{'changes':[{'value':{'messages':list(messages)}}]}]})
+
+    def test_reaction_removal_clears_the_actor_reaction(self):
+        added,removed=self.messages(
+            {'from':'15551234567','id':'wamid.r1','timestamp':'10','type':'reaction','reaction':{'message_id':'wamid.test','emoji':'👍'}},
+            {'from':'15551234567','id':'wamid.r2','timestamp':'11','type':'reaction','reaction':{'message_id':'wamid.test'}})
+        self.assertEqual((added['target'],added['items']),('wamid.test',[{'type':'emoji','emoji':'👍'}]))
+        self.assertEqual((removed['actor'],removed['items']),('15551234567',[]))
+
+    def test_coexistence_edit_and_revoke_target_the_original(self):
+        edit,revoke=self.messages(
+            {'from':'16505551234','id':'wamid.e','timestamp':'1749854575','type':'edit','edit':{'original_message_id':'wamid.test',
+                'message':{'context':{'id':'M0'},'type':'image','image':{'caption':'Updated image caption','mime_type':'image/jpeg','id':'1234567890','url':'https://media.invalid/x'}}}},
+            {'from':'16505551234','id':'wamid.v','timestamp':'1749854576','type':'revoke','revoke':{'original_message_id':'wamid.test'}})
+        self.assertEqual((edit['kind'],edit['target'],edit['destination']),('edit','wamid.test','16505551234'))
+        self.assertEqual(edit['data'],{'kind':'image','media':{'id':'1234567890','mime_type':'image/jpeg'},'caption':'Updated image caption'})
+        self.assertEqual((revoke['kind'],revoke['data']),('edit',{'kind':'revoked'}))
+        from relay_core.message_types import preview
+        self.assertEqual(preview(revoke['data']),'Message deleted by sender')
+        with self.assertRaises(ValueError):
+            self.messages({'from':'1','id':'wamid.x','type':'revoke','revoke':{}})
+
     def test_collapse_is_independent_of_batch_order(self):
         rows=[{'destination':'one','target':'id','status':state,'timestamp':stamp} for state,stamp in [('Sent',30),('Failed',40),('Read',10),('Delivered',20)]]
         self.assertEqual(self.batch.collapse(rows),self.batch.collapse(list(reversed(rows))))

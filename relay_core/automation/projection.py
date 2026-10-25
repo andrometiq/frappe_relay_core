@@ -5,7 +5,7 @@ import time
 from datetime import timezone
 import frappe
 from relay_core.automation.provenance import conversation_key, telegram_message, email_context
-from relay_core.message_types import normalize, preview
+from relay_core.message_types import normalize, preview, referral
 from relay_core.message_updates import apply_updates, provider_key
 from relay_core.inbound import retry_callback
 
@@ -47,14 +47,14 @@ def extract_messages(payload):
             for message in value.get('messages', []):
                 if len(result) >= 50:
                     raise ValueError('Message projection batch exceeds limit')
-                if not isinstance(message, dict) or not isinstance(message.get('id'), str) or not isinstance(message.get('from'), str):
+                if not isinstance(message, dict) or not isinstance(message.get('id'), str):
                     raise ValueError('Invalid incoming message')
-                if not 1 <= len(message['id']) <= 300 or not 1 <= len(message['from']) <= 200:
+                row = dict(message, **{'from': whatsapp_sender(message)})
+                if not 1 <= len(message['id']) <= 300 or not isinstance(row['from'], str) or not 1 <= len(row['from']) <= 200:
                     raise ValueError('Invalid incoming identity')
-                row = dict(message)
-                if message.get('type') == 'reaction':
+                if message.get('type') in ('reaction', 'edit', 'revoke'):
                     continue  # Applied to the original message, never inserted as a new turn.
-                context = {'provider': 'WhatsApp', 'participant_id': message['from'], 'message_id': message['id'],
+                context = {'provider': 'WhatsApp', 'participant_id': row['from'], 'message_id': message['id'],
                            'reply_to_message_id': (message.get('context') or {}).get('id')}
                 row['provider_context'] = context
                 if message.get('group_id'):
@@ -64,10 +64,18 @@ def extract_messages(payload):
                     row['from'] = group_id
                     context['group_id'] = group_id
                 kind = message.get('type', 'unsupported'); detail = message.get(kind, {})
-                row['message_data'] = normalize(kind, detail, provider='WhatsApp',
+                row['message_data'] = normalize(kind, detail, provider='WhatsApp', errors=message.get('errors'),
                     body=(detail.get('body') if kind == 'text' else detail.get('caption', '')) if isinstance(detail, dict) else '')
+                if isinstance(message.get('referral'), dict):
+                    row['message_data']['referral'] = referral(message['referral'])
                 result.append(row)
     return result
+
+
+def whatsapp_sender(message):
+    """Phone first; a username user has only a business-scoped user ID."""
+    system = message.get('system') if isinstance(message.get('system'), dict) else {}
+    return message.get('from') or message.get('from_user_id') or system.get('previous_user_id') or system.get('user_id')
 
 
 def set_status(name, status):
@@ -138,8 +146,10 @@ def project(name, business_overrides=None):
         if not isinstance(text, str) or len(text) > 12000:
             text = '[Message exceeds automation input limit]'; kind = 'unsupported'
         data = row.get('message_data') or {'kind': kind, 'text': text}
-        if kind != 'unsupported':
+        if kind != 'unsupported' or data.get('unsupported'):
             text = preview(data)
+        if data.get('kind') in ('system', 'unsupported'):
+            kind = data['kind']
         if kind in ('interactive','button') and data.get('kind')=='text' and rule != 'sender_choice':
             context['original_message_type']=kind;kind='text'
         from relay_core.timeline import provider_time

@@ -22,6 +22,10 @@
     "reactions",
     "message_updates",
     "edited_at",
+    "transcript",
+    "transcript_status",
+    "transcript_details",
+    "delivery_error",
     "sent_at",
     "legacy_source",
     "legacy_data",
@@ -143,6 +147,31 @@
       "read_only": 1
     },
     {
+      "fieldname": "transcript",
+      "label": "Transcript",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "transcript_status",
+      "label": "Transcript status",
+      "fieldtype": "Select",
+      "options": "\nPending\nCompleted\nUnavailable\nFailed",
+      "read_only": 1
+    },
+    {
+      "fieldname": "transcript_details",
+      "label": "Transcript details",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "delivery_error",
+      "label": "Delivery error",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
       "fieldname": "sent_at",
       "label": "Message time",
       "fieldtype": "Datetime",
@@ -260,5 +289,5 @@
   "sort_field": "creation",
   "sort_order": "DESC",
   "track_changes": 1,
-  "modified": "2026-10-25 02:45:50.808836"
+  "modified": "2026-10-25 23:30:00.000000"
 }
