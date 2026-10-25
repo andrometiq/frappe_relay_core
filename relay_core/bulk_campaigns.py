@@ -14,10 +14,14 @@ from relay_core.settings import value as connection_value
 RECIPIENT = 'Relay Campaign Recipient'
 BATCH = 50
 CHUNK = 1000
-HIGH_WATER = 500
-LOW_WATER = 250
+HIGH_WATER = 1000
+LOW_WATER = 500
 DEFAULT_RATE = 50
-SEND_SECONDS = 50 * 60
+SLICE_SECONDS = 45
+JOB_TIMEOUT = 1800  # A 100,000-row import; a send slice ends long before.
+RETRY_SECONDS = 60
+WAIT = 'relay-bulk-wait:'
+CANCEL_AFTER = 'relay-bulk-cancel-after:'
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 
@@ -140,9 +144,12 @@ def import_rows(name, mapping):
     return read(name)
 
 
-def enqueue(method, name):
-    frappe.enqueue(f'relay_core.bulk_campaigns.{method}', name=name, queue='long', timeout=SEND_SECONDS + 600,
-                   job_id=f'relay-bulk-{method}:{name}', deduplicate=True, enqueue_after_commit=True)
+def enqueue(method, name, step=0):
+    """Short jobs at the back of the queue. A slice continues under the other of two job IDs,
+    because its own ID is still running and deduplication would drop it."""
+    frappe.enqueue(f'relay_core.bulk_campaigns.{method}', name=name, queue='long', timeout=JOB_TIMEOUT,
+                   job_id=f'relay-bulk-{method}:{name}:{step % 2}', deduplicate=True, enqueue_after_commit=True,
+                   **({'step': step} if step else {}))
 
 
 def import_job(name):
@@ -265,51 +272,81 @@ def control(name, action):
         frappe.throw('Invalid campaign action')
     allowed, target = transitions[action]
     require_access(manage=True)
+    if target == 'Running':
+        check_ready(bulk(name, allowed))  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
         doc = bulk(name, allowed)
         if target == 'Running':
-            whatsapp_channel(doc.channel)
-            if doc.status == 'Draft' and doc.last_error:
-                frappe.throw('The last import failed. Fix the file and import the recipients again')
-            if not frappe.db.exists(RECIPIENT, {'campaign': name, 'status': 'Pending'}):
-                frappe.throw('Import recipients with at least one valid row first')
-            try:
-                hub, _ = whatsapp.checked_client()
-                approved_template(hub, doc.template_name, doc.language)
-            except whatsapp.HubError as exc:
-                frappe.throw(whatsapp.failure_message(exc))
             doc.execution_user, doc.started_at = frappe.session.user, doc.started_at or frappe.utils.now_datetime()
             from relay_core.bulk_updates import open_reply_window
             open_reply_window(doc.reply_window_hours)
         doc.status, doc.last_error = target, ''
         internal_save(doc)
-        if target in ('Running', 'Cancelling'):
-            enqueue('send_job', name)
+    if target in ('Running', 'Cancelling'):
+        enqueue('send_job', name)
     return read(name)
 
 
-def send_job(name):
+def check_ready(doc):
+    whatsapp_channel(doc.channel)
+    if doc.status == 'Draft' and doc.last_error:
+        frappe.throw('The last import failed. Fix the file and import the recipients again')
+    if not frappe.db.exists(RECIPIENT, {'campaign': doc.name, 'status': 'Pending'}):
+        frappe.throw('Import recipients with at least one valid row first')
     try:
-        with frappe.cache.lock('relay-bulk-send:' + name, timeout=SEND_SECONDS + 300, blocking_timeout=1):
+        hub, _ = whatsapp.checked_client()
+        approved_template(hub, doc.template_name, doc.language)
+    except whatsapp.HubError as exc:
+        frappe.throw(whatsapp.failure_message(exc))
+
+
+def send_job(name, step=0):
+    """One slice of at most SLICE_SECONDS; it enqueues the next slice instead of sleeping."""
+    deadline, more = time.monotonic() + SLICE_SECONDS, False
+    try:
+        with frappe.cache.lock('relay-bulk-send:' + name, timeout=SLICE_SECONDS + 300, blocking_timeout=1):
             doc = frappe.get_doc('Relay Campaign', name)
             if doc.status == 'Cancelling':
-                cancel_remaining(doc)
-            elif doc.status == 'Running':
-                push(doc, time.monotonic() + SEND_SECONDS)
+                more = cancel_remaining(doc, deadline)
+            elif doc.status == 'Running' and is_due(name):
+                frappe.cache.delete_value(WAIT + name)
+                more = push(doc, deadline)
     except LockError:
         return  # Another worker owns this campaign.
     from relay_core.bulk_updates import changed
     changed(name)
+    if more:
+        enqueue('send_job', name, step + 1)
+    frappe.db.commit()
+
+
+def is_due(name):
+    return frappe.utils.flt(frappe.cache.get_value(WAIT + name)) <= time.time()
+
+
+def wait(name, seconds):
+    """Backpressure and retry: the next Hub progress update or recovery run after this time resumes sending."""
+    frappe.cache.set_value(WAIT + name, time.time() + seconds, expires_in_sec=int(seconds) + 3600)
+
+
+def resume(name):
+    """Called when Hub reports progress for this campaign; restarts a waiting campaign once it is due."""
+    if frappe.cache.get_value(WAIT + name) and is_due(name):
+        frappe.cache.delete_value(WAIT + name)
+        enqueue('send_job', name)
 
 
 def push(doc, deadline):
+    """Push Pending rows 50 at a time. True when the slice ran out of time with rows left."""
     snapshot = json.loads(doc.arguments)
     hub = whatsapp.client()
-    while time.monotonic() < deadline and frappe.db.get_value('Relay Campaign', doc.name, 'status') == 'Running':
+    while time.monotonic() < deadline:
+        if frappe.db.get_value('Relay Campaign', doc.name, 'status') != 'Running':
+            return False
         rows = frappe.db.sql(f'''SELECT name, request_key, destination, arguments FROM `tab{RECIPIENT}`
             WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
-            return
+            return False
         messages = [{'key': row.request_key, 'message': {'operation': 'templates.send', 'to': row.destination,
                      'name': doc.template_name, 'language': doc.language,
                      'components': bulk_sheet.build_components(snapshot['fields'], json.loads(row.arguments)['values'])}}
@@ -317,16 +354,24 @@ def push(doc, deadline):
         try:
             result = hub.call_tool('whatsapp.bulk', {'messages': messages})
         except whatsapp.HubError as exc:
-            # Same keys are pushed again on recovery; Hub returns the rows it already holds.
+            # Same keys are pushed again after the wait; Hub returns the rows it already holds.
             frappe.db.set_value('Relay Campaign', doc.name, 'last_error', whatsapp.failure_message(exc)[:500],
                                 update_modified=False)
-            frappe.db.commit()
-            return
+            wait(doc.name, RETRY_SECONDS)
+            return False
         admit(rows, result.get('deliveries') or [])
+        if doc.last_error:  # Hub accepted again after a retry.
+            frappe.db.set_value('Relay Campaign', doc.name, 'last_error', '', update_modified=False)
+            doc.last_error = ''
         frappe.db.commit()
         from relay_core.bulk_updates import changed
         changed(doc.name)
-        pause(result)
+        queued = frappe.utils.cint(result.get('queued'))
+        if queued >= HIGH_WATER:
+            rate = frappe.utils.cint(result.get('messages_per_second')) or DEFAULT_RATE
+            wait(doc.name, (queued - LOW_WATER) / rate)
+            return False
+    return True
 
 
 def admit(rows, deliveries):
@@ -342,27 +387,32 @@ def admit(rows, deliveries):
             (status, str((delivery or {}).get('id') or ''), reason, row.name))
 
 
-def pause(result):
-    queued = frappe.utils.cint(result.get('queued'))
-    if queued >= HIGH_WATER:
-        rate = frappe.utils.cint(result.get('messages_per_second')) or DEFAULT_RATE
-        time.sleep(min(10, (queued - LOW_WATER) / rate))
-
-
-def cancel_remaining(doc):
+def cancel_remaining(doc, deadline):
+    """Cancel every row Hub still holds, paging past rows Hub already sends. True when time ran out."""
     in_chunks(doc.name, 'Pending', lambda names: frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Cancelled',
         modified=NOW(6) WHERE name IN %s AND status='Pending' ''', (names,)))
-    queued = frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'status': 'Queued', 'delivery_id': ['!=', '']},
-                            fields=['name', 'delivery_id'], limit_page_length=1000)
-    hub = whatsapp.client() if queued else None
-    for row in queued:
-        try:
-            if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
-                frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
-        except whatsapp.HubError:
-            continue  # Already sending; its Hub update records the real outcome.
+    hub = whatsapp.client()
+    while True:
+        after = frappe.cache.get_value(CANCEL_AFTER + doc.name) or ''
+        rows = frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'status': 'Queued', 'delivery_id': ['!=', ''],
+                              'name': ['>', after]}, fields=['name', 'delivery_id'],
+                              order_by='name asc', limit_page_length=CHUNK)
+        if not rows:
+            break
+        for row in rows:
+            if time.monotonic() >= deadline:
+                return True
+            try:
+                if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
+                    frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
+            except whatsapp.HubError:
+                pass  # Already sending; its Hub update records the real outcome.
+            frappe.cache.set_value(CANCEL_AFTER + doc.name, row.name, expires_in_sec=86400)
+            frappe.db.commit()
+    frappe.cache.delete_value(CANCEL_AFTER + doc.name)
     frappe.db.set_value('Relay Campaign', doc.name, {'status': 'Cancelled', 'finished_at': frappe.utils.now_datetime()})
     frappe.db.commit()
+    return False
 
 
 def recover():
@@ -370,3 +420,5 @@ def recover():
                               'status': ['in', ['Importing', 'Running', 'Cancelling']]}, fields=['name', 'status'],
                               order_by='modified asc', limit_page_length=20):
         enqueue('import_job' if row.status == 'Importing' else 'send_job', row.name)
+    from relay_core.bulk_updates import recover as publish_marked
+    publish_marked()

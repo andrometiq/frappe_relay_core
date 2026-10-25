@@ -10,6 +10,8 @@ STATE = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Sent', 'rejec
          'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 PROGRESS_SECONDS = 3
 REPLY_GATE = 'relay-bulk-reply-until'
+DIRTY = 'relay-bulk-dirty'
+PUBLISHED = 'relay-bulk-progress-at:'
 
 
 def target(row):
@@ -44,8 +46,10 @@ def project_batch(event, rows):
     names = frappe.get_all(RECIPIENT, filters={'request_key': ['in', [row['key'] for row in rows]]},
                            pluck='campaign', distinct=True, limit_page_length=0)
     frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
+    from relay_core.bulk_campaigns import resume
     for name in names:
         changed(name)
+        resume(name)  # Hub progress means queue room: a campaign waiting on backpressure may continue.
 
 
 def open_reply_window(hours):
@@ -86,23 +90,29 @@ def link_reply(row):
 
 
 def changed(name):
-    frappe.cache.set_value(f'relay-bulk-dirty:{name}', 1, expires_in_sec=3600)
-    frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='long', timeout=300,
+    frappe.cache.sadd(DIRTY, name)
+    frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120,
                    job_id=f'relay-bulk-progress:{name}', deduplicate=True, enqueue_after_commit=True)
 
 
 def refresh(name):
-    """Single owner of campaign counters, completion and progress events."""
-    dirty, last = f'relay-bulk-dirty:{name}', f'relay-bulk-progress-at:{name}'
-    for _ in range(100):
-        if not frappe.cache.get_value(dirty):
-            return
-        frappe.cache.delete_value(dirty)
-        wait = PROGRESS_SECONDS - (time.time() - frappe.utils.flt(frappe.cache.get_value(last)))
-        if wait > 0:
-            time.sleep(wait)
-        publish(name, recount(name))
-        frappe.cache.set_value(last, time.time(), expires_in_sec=60)
+    """Single owner of campaign counters, completion and progress events, at most one per PROGRESS_SECONDS.
+    A change inside that time stays marked; the next change, slice or recovery run publishes it."""
+    if not frappe.cache.sismember(DIRTY, name):
+        return
+    if time.time() - frappe.utils.flt(frappe.cache.get_value(PUBLISHED + name)) < PROGRESS_SECONDS:
+        return
+    frappe.cache.srem(DIRTY, name)
+    publish(name, recount(name))
+    frappe.cache.set_value(PUBLISHED + name, time.time(), expires_in_sec=60)
+
+
+def recover():
+    """Publish changes a throttled refresh left marked."""
+    for name in list(frappe.cache.smembers(DIRTY))[:50]:
+        name = name.decode() if isinstance(name, bytes) else name
+        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120,
+                       job_id=f'relay-bulk-progress:{name}', deduplicate=True)
 
 
 def tally(rows):
