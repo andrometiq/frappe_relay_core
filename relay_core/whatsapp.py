@@ -67,8 +67,9 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
         doc=frappe.get_doc('Contact',contact);doc.check_permission('read')
         require_business_assignment(contact)
         if not any(link.link_doctype==business_doctype and link.link_name==business_name for link in doc.links):frappe.throw('Contact is not linked to this business record')
-        number=re.sub(r'[ +()\-]', '', doc.mobile_no or doc.phone or '')
-        if not re.fullmatch(r'[0-9]{7,15}',number):frappe.throw('Contact needs a phone number with country code')
+        from relay_core.identity import contact_number
+        number=contact_number(doc.mobile_no or doc.phone or '')
+        if not number:frappe.throw('Contact needs a phone number with country code')
         payload['to']=number
     return payload
 
