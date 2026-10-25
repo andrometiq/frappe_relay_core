@@ -6,10 +6,10 @@ import {sha256Hex} from '../src/services/crypto.js'
 import {useStoredDraft} from '../src/composables/useStoredDraft.js'
 import {templateParameterDescriptors,buildTemplateComponents} from '../src/services/templateParameters.js'
 const source=(await readFile(new URL('../src/components/messages/StartConversation.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm,'')
-const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useStoredDraft',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates};')
+const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates};')
 for(const status of ['Queued','Submitted','Uncertain'])test(`conversation start ${status}`,async()=>{
  const events=[],calls=[],storage=new Map()
- const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>{})
+ const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{})
  state.endpoints.value=[{value:'endpoint',provider:'Telegram'}];state.endpoint.value='endpoint';state.body.value='Hello'
  await state.send()
  assert.equal(calls.length,1)
@@ -34,7 +34,7 @@ for (const reconcile of [false, true]) test(`old template draft renews its actua
  function mount() {
    const scope = effectScope(); scopes.push(scope)
    const state = scope.run(()=>make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer'}),()=>()=>{},api,
-     sha256Hex,()=> 'request-'+ ++keys,templateParameterDescriptors,buildTemplateComponents,sessionStorage,AbortController,setTimeout,clearTimeout,useStoredDraft))
+     sha256Hex,()=> 'request-'+ ++keys,templateParameterDescriptors,buildTemplateComponents,sessionStorage,AbortController,setTimeout,clearTimeout,()=>()=>true,useStoredDraft))
    state.endpoints.value = [{value:'endpoint',channel:'channel',provider:'WhatsApp',window:{open:false}}]
    state.endpoint.value = 'endpoint'
    return {...state,unmount:()=>scope.stop()}
@@ -75,7 +75,7 @@ for (const viaReconcile of [false, true]) test(`rejected start can be edited and
  const state = make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer'}),()=>()=>{},async(method,args)=>{
    calls.push({method,args})
    return {status:viaReconcile && calls.length === 1 ? 'Uncertain' : 'Rejected',action:'rejected-action'}
- },sha256Hex,()=> 'request-'+ ++keys,()=> [],()=> [],{getItem:key=>memory.get(key),setItem:(key,value)=>memory.set(key,value),removeItem:key=>memory.delete(key)},AbortController,setTimeout,clearTimeout,(_scope,_read,write)=>{restore=write;return ()=>{}})
+ },sha256Hex,()=> 'request-'+ ++keys,()=> [],()=> [],{getItem:key=>memory.get(key),setItem:(key,value)=>memory.set(key,value),removeItem:key=>memory.delete(key)},AbortController,setTimeout,clearTimeout,()=>()=>true,(_scope,_read,write)=>{restore=write;return ()=>{}})
  state.endpoints.value=[{value:'endpoint',channel:'channel',provider:'Email'}];state.endpoint.value='endpoint'
  state.body.value='Order quantity 25';state.subject.value='Order';state.parameters.value={number:'25'}
  await state.send()

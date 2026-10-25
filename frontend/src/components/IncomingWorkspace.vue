@@ -6,6 +6,8 @@ import { onMounted, ref, watch } from "vue";
 import { Button, ErrorMessage, FormControl } from "@relay/ui";
 import RelaySelect from "./RelaySelect.vue";
 import { coreApi } from "../services/coreApi";
+import { useEnabledChannels } from '../composables/useEnabledChannels'
+const channelEnabled = useEnabledChannels();
 const businesses = ref([]), business = ref("");
 const rows = ref([]),
   next = ref(null),
@@ -36,7 +38,7 @@ async function run(fn) {
 }
 async function load(after) {
   const result = await coreApi("enrollment.pending", { after });
-  rows.value = result.items;
+  rows.value = result.items.filter(row => channelEnabled(row.medium));
   next.value = result.next;
 }
 async function search() {

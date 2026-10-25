@@ -9,6 +9,7 @@ import LoadingRows from './LoadingRows.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import SavedRepliesWorkspace from './SavedRepliesWorkspace.vue'
 import WhatsAppIdentity from './WhatsAppIdentity.vue'
+import { channelEnabled } from '../services/enabledChannels'
 const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: false })
 const capabilities = inject('relayCapabilities')
 const channels = ref([])
@@ -18,7 +19,7 @@ const { busy, error, notice, run } = useTask()
 async function load() {
   loaded.value = false
   const [connection, whatsapp, businessTypes, available] = await Promise.all([coreApi('settings.connection'), coreApi('whatsapp.connection'), coreApi('api.business_types'), coreApi('api.channel_options')])
-  channels.value = available.items; config.value = connection; channel.value = whatsapp; types.value = businessTypes; loaded.value = true
+  channels.value = available.items.filter(row => channelEnabled(capabilities.value, row.channel)); config.value = connection; channel.value = whatsapp; types.value = businessTypes; loaded.value = true
 }
 async function save() {
   verified.value = false
@@ -29,7 +30,7 @@ async function verify() { verified.value = false; await coreApi('settings.verify
 const checklist = computed(() => [
   { label: 'Hub binding', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Verified this session' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · verify connection' : 'Needs setup', href: '#hub-connection' },
   { label: 'Callback signing secret', icon: 'lock', ready: config.value.callback_configured, state: !loaded.value ? 'Not checked' : config.value.callback_configured ? 'Configured · receipt not verified' : 'Missing', href: '#hub-connection' },
-  ...['Telegram', 'Email'].map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? 'Enabled locally · confirm receipts in Activity' : 'Needs setup', href: '/desk/relay-channel' })),
+  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? 'Enabled locally · confirm receipts in Activity' : 'Needs setup', href: '/desk/relay-channel' })),
   { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '/desk/relay-channel' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '/desk/relay-contact-type' },
   { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },

@@ -8,6 +8,8 @@ import LoadingRows from './LoadingRows.vue'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import ChannelPreferences from './ChannelPreferences.vue'
+import { useEnabledChannels } from '../composables/useEnabledChannels'
+const channelEnabled = useEnabledChannels()
 const capabilities = inject('relayCapabilities')
 const props = defineProps({ contact: String, dismissible: Boolean })
 const emit = defineEmits(['close'])
@@ -18,7 +20,7 @@ const conversation = link => '#/messages?' + new URLSearchParams({ business_doct
 async function load() {
   const ticket = ++generation
   detail.value = null; error.value = ''; busy.value = true
-  try { const data = await coreApi('api.contact_details', { contact: props.contact }); if (ticket === generation) detail.value = data }
+  try { const data = await coreApi('api.contact_details', { contact: props.contact }); if (ticket === generation) detail.value = { ...data, endpoints: data.endpoints.filter(row => channelEnabled(row.provider)) } }
   catch (e) { if (ticket === generation) error.value = e.message }
   finally { if (ticket === generation) busy.value = false }
 }

@@ -29,7 +29,7 @@ const row=(number,time)=>({name:`RELAY-MSG-${String(number).padStart(10,'0')}`,c
 test('manager triage starts, loads pending messages and watches the selected contact',async()=>{
   const text=await readFile(new URL('../src/components/IncomingWorkspace.vue',import.meta.url),'utf8')
   const script=text.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm,'')
-  const make=new Function('useRealtimeRefresh','onMounted','ref','watch','coreApi',
+  const make=new Function('useRealtimeRefresh','onMounted','ref','watch','coreApi','useEnabledChannels',
     '"use strict";\n'+script+'\nreturn {rows,contact,business,businesses,error};')
   const pending={event:'event',contact:'contact',ambiguous:true,medium:'WhatsApp'},businesses=[{doctype:'Customer',name:'customer'}]
   let mount
@@ -41,7 +41,7 @@ test('manager triage starts, loads pending messages and watches the selected con
   }
   const scope=effectScope()
   try{
-    const state=scope.run(()=>make(()=>{},fn=>mount=fn,ref,watch,api))
+    const state=scope.run(()=>make(()=>{},fn=>mount=fn,ref,watch,api,()=>()=>true))
     await mount()
     assert.deepEqual(state.rows.value,[pending])
     state.business.value='previous'

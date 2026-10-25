@@ -24,8 +24,10 @@ import { useMessages } from "../composables/useMessages";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
+import { useEnabledChannels } from "../composables/useEnabledChannels";
 
 const state = useMessages();
+const channelEnabled = useEnabledChannels();
 const deliveriesOpen = ref(false), contactRecord = ref(null);
 const casesOpen = ref(false), topicsOpen = ref(false);
 const activeBusiness = computed(() => ({
@@ -272,11 +274,11 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email'" :key="source.name">
+      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email' && channelEnabled('Email')" :key="source.name">
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')">
+      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')">
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
