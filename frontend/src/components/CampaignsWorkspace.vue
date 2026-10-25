@@ -10,8 +10,8 @@ import { useCampaigns } from "../composables/useCampaigns";
 import { COUNTERS, campaignActions, missingMapping, percent, statusTheme } from "../services/campaignProgress";
 
 const workspace = useCampaigns();
-const { busy, error, items, campaign, sheet, templates } = workspace;
-const creating = ref(false), title = ref(""), template = ref(""), mapping = ref(null), filter = ref("");
+const { busy, error, items, campaign, sheet, templates, filter } = workspace;
+const creating = ref(false), title = ref(""), template = ref(""), mapping = ref(null);
 const columns = [
   { key: "title", label: "Campaign", width: "minmax(200px,1.4fr)" },
   { key: "status", label: "Status", width: "120px" },
