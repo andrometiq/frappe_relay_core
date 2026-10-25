@@ -191,17 +191,19 @@ def recipient_key(campaign, number):
 
 
 def endpoint_facts(channel, destinations):
-    """Linked Contact and opt-out per number, in two indexed queries."""
+    """Linked Contact per verified number and opt-out per number, in indexed queries. An opt-out
+    outlives the Contact link: a number removed from its Contact keeps its Denied preference."""
     if not destinations:
         return {}, set()
     keys = {hashlib.sha256((channel + ':' + number).encode()).hexdigest(): number for number in destinations}
-    endpoints = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(keys)], 'verified': 1},
-                               fields=['name', 'endpoint_key', 'relay_contact'], limit_page_length=0)
-    people = dict(frappe.get_all('Relay Contact', filters={'name': ['in', [e.relay_contact for e in endpoints]]},
-                                 fields=['name', 'contact'], as_list=True, limit_page_length=0)) if endpoints else {}
+    endpoints = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(keys)]},
+                               fields=['name', 'endpoint_key', 'relay_contact', 'verified'], limit_page_length=0)
+    verified = [e for e in endpoints if e.verified]
+    people = dict(frappe.get_all('Relay Contact', filters={'name': ['in', [e.relay_contact for e in verified]]},
+                                 fields=['name', 'contact'], as_list=True, limit_page_length=0)) if verified else {}
     denied = set(frappe.get_all('Relay Channel Preference', filters={'endpoint': ['in', [e.name for e in endpoints]],
                  'consent': 'Denied'}, pluck='endpoint', limit_page_length=0)) if endpoints else set()
-    contacts = {keys[e.endpoint_key]: people.get(e.relay_contact) for e in endpoints}
+    contacts = {keys[e.endpoint_key]: people.get(e.relay_contact) for e in verified}
     return contacts, {keys[e.endpoint_key] for e in endpoints if e.name in denied}
 
 
