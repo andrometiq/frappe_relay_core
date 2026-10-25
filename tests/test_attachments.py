@@ -6,15 +6,15 @@ import unittest
 from unittest.mock import Mock, patch
 
 from relay_core import attachments
-from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES
+from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
 
 
 class WhatsAppAttachmentTests(unittest.TestCase):
     def setUp(self):
-        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', message_type='document',
+        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
             message_data=json.dumps({'kind': 'document', 'media': {'id': '123', 'filename': 'Local fixture.docx'}}))
         self.hub = Mock()
-        def reject(message, *args): raise ValueError(message)
+        def reject(message, *args): raise ValueError(message, *args)
         boundary = SimpleNamespace(db=SimpleNamespace(get_value=lambda *args: None), throw=reject)
         for fixture in (patch.object(attachments, 'frappe', boundary),
                         patch.object(attachments.messaging, 'readable_source', return_value=(self.source, SimpleNamespace(channel='WhatsApp'), {})),
@@ -44,3 +44,17 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         with patch.object(attachments.messaging, 'readable_source', side_effect=PermissionError):
             with self.assertRaises(PermissionError): attachments.read(self.source.name)
         self.hub.call_tool.assert_not_called()
+
+    def rejected(self, check, now):
+        self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': check}})
+        with patch.object(attachments, 'now_datetime', return_value=attachments.get_datetime(now)):
+            with self.assertRaises(ValueError) as failure: attachments.read(self.source.name)
+        return failure.exception.args
+
+    def test_hub_rejections_become_readable_reasons_with_retry_status(self):
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-25 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('ownership', '2026-10-21 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-21 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.assertEqual(self.rejected('capacity', '2026-10-21 10:00:00'), ('Media downloads are busy. Try again shortly.', attachments.MediaRetry))
+        self.assertEqual(attachments.MediaGone.http_status_code, 410)
+        self.assertEqual(attachments.MediaRetry.http_status_code, 503)

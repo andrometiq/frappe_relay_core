@@ -3,11 +3,34 @@ import base64
 import binascii
 import re
 import frappe
+from frappe.utils import get_datetime, now_datetime
 from relay_core import messaging, whatsapp
-from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES
+from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
 
 MAX_BYTES=4*1024*1024
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
+# Meta keeps received media for about 30 days; after that the media ID no longer resolves.
+WHATSAPP_MEDIA_DAYS=30
+
+
+class MediaGone(frappe.ValidationError):
+    http_status_code=410
+
+
+class MediaRetry(frappe.ValidationError):
+    http_status_code=503
+
+
+def whatsapp_media(source,media_id):
+    """Download received WhatsApp media and turn Hub rejections into readable reasons."""
+    try:return whatsapp.client().call_tool('whatsapp.attachment',{'media_id':media_id})
+    except HubError as error:check=error.metadata.get('error',{}).get('check')
+    age=now_datetime()-get_datetime(source.sent_at or source.creation)
+    if check=='provider_metadata' and age.days>=WHATSAPP_MEDIA_DAYS or check=='ownership':
+        frappe.throw('Media no longer available from WhatsApp',MediaGone)
+    if check=='size':frappe.throw('Media is larger than the 16 MiB download limit',MediaGone)
+    if check=='capacity':frappe.throw('Media downloads are busy. Try again shortly.',MediaRetry)
+    frappe.throw('WhatsApp did not return this media. Try again.',MediaRetry)
 
 
 def file_content(name,source):
@@ -103,7 +126,7 @@ def read(message,download=0,index=None):
     if channel.channel=='WhatsApp':
         media=data.get('media') or {};media_id=media.get('id')
         if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
-        result=whatsapp.client().call_tool('whatsapp.attachment',{'media_id':media_id})
+        result=whatsapp_media(source,media_id)
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
         if not 1<=len(raw)<=MAX_WHATSAPP_DOWNLOAD_BYTES:frappe.throw('Attachment exceeds the 16 MiB download limit')
