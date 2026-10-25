@@ -90,8 +90,8 @@ function back() { campaign.value = null; sheet.value = null; workspace.refresh()
       <FrappeFormSection title="Recipients" collapsible>
         <RelaySelect v-model="filter" label="Show" :options="[{ value: '', label: 'All rows' }, 'Pending', 'Skipped', 'Sent', 'Delivered', 'Read', 'Failed']" @update:model-value="workspace.page($event)" />
         <div class="campaign-rows" role="table" aria-label="Campaign recipients">
-          <div v-for="row in campaign.recipients" :key="row.row_number" role="row">
-            <span>Row {{ row.row_number }}</span><span>+{{ row.destination }}</span><Badge :label="row.replied_at ? 'Replied' : row.status" />
+          <div v-for="row in campaign.recipients" :key="row.sheet_row" role="row">
+            <span>Row {{ row.sheet_row }}</span><span>+{{ row.destination }}</span><Badge :label="row.replied_at ? 'Replied' : row.status" />
             <small v-if="row.reason">{{ row.reason }}</small>
           </div>
         </div>
