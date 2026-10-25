@@ -49,7 +49,7 @@ def directory(after=None,query='',status=None):
     pattern=f'%{query}%'
     rows=frappe.get_list('Relay Campaign',filters=filters,
         or_filters=[['Relay Campaign','name','like',pattern],['Relay Campaign','title','like',pattern]] if query else None,
-        fields=['name','title','status','creation'],order_by='name asc',page_length=31)
+        fields=['name','title','status','creation','template_name','total_count','sent_count','replied_count'],order_by='name asc',page_length=31)
     items=[]
     for row in rows[:30]:
         try:campaign(row.name)
