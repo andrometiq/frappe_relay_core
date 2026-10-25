@@ -188,7 +188,10 @@ def main():
                     except ValueError: pass
                     else: raise AssertionError('Undeclared read succeeded')
             def reset_hold():
-                frappe.db.set_value('Relay Contact',contact.name,{'automation_paused':0})
+                from relay_core.tickets import resume_ai
+                for name in frappe.get_all('Relay Ticket', filters={'company':company.name,
+                        'ai_disabled':1, 'active_scope_key':['is','set']}, pluck='name'):
+                    resume_ai(name)
                 frappe.db.commit()
             with patch.object(adapter,'match',side_effect=classify), \
                     patch.object(adapter,'route',return_value=(frappe._dict(provider='Sim'),frappe._dict(model_id='Sim'),[],
