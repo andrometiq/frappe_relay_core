@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from frappe import _dict
-from relay_core import contact_lifecycle as lifecycle, identity
+from relay_core import business_access, contact_lifecycle as lifecycle, identity
 
 
 def person(name='Contact-A', phones=(), emails=()):
@@ -126,6 +126,20 @@ class ContactRemovalTests(unittest.TestCase):
         values = self.fake.db.set_value.call_args.args[2]
         self.assertEqual(values['scope_key'], scope_key('Contact-New', 'Customer', 'Sim Customer'))
         self.assertNotEqual(values['scope_key'], scope_key('Contact-Old', 'Customer', 'Sim Customer'))
+
+
+class LinkedBusinessAccessTests(unittest.TestCase):
+    def test_removed_contact_link_ends_message_access(self):
+        record = Mock(); record.has_permission.return_value = True
+        fake = SimpleNamespace(session=SimpleNamespace(user='reader'), get_doc=Mock(return_value=record),
+                               DoesNotExistError=LookupError)
+        message = _dict(relay_contact='RELAY-CON-A', business_doctype='Customer', business_name='Sim Customer')
+        with patch.object(business_access, 'frappe', fake), \
+                patch.object(business_access, 'candidates', return_value=[('Customer', 'Sim Customer')]) as links:
+            self.assertTrue(business_access.allowed(message))
+            record.has_permission.assert_called_with('read', user=None)
+            links.return_value = [('Supplier', 'Sim Supplier')]
+            self.assertFalse(business_access.allowed(message))
 
 
 if __name__ == '__main__':
