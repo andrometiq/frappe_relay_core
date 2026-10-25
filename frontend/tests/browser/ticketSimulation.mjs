@@ -1,30 +1,97 @@
-export default async function testTickets(page,origin='http://127.0.0.1:18126'){
- const name='RELAY-TKT-0000000001',message='RELAY-MSG-0000000001',requests=[],errors=[]
- let status='Open',assigned='agent@example.invalid',enabled=0
- page.on('pageerror',error=>errors.push(error.message))
- await page.addInitScript(()=>{window.frappe={csrf_token:'synthetic-csrf-token',session:{user:'Administrator'}}})
- await page.route('**/api/method/**',async route=>{
-  const request=route.request(),method=request.url().split('/').at(-1).split('?')[0];let result
-  if(request.method()==='POST')requests.push({method,body:request.postDataJSON(),headers:request.headers()})
-  const ticket={name,subject:'Support request',category:'Support',status,assigned_to:assigned,can_assign:true,messages:[{message,channel:'Email'}]}
-  if(method==='relay_core.tickets.directory')result={items:[{...ticket,id:name}]}
-  else if(method==='relay_core.tickets.read')result=ticket
-  else if(method==='relay_core.teams.agents')result=[{name:'agent@example.invalid',full_name:'Agent One'},{name:'second@example.invalid',full_name:'Agent Two'}]
-  else if(method==='relay_core.tickets.update_status'){status=request.postDataJSON().status;result={status}}
-  else if(method==='relay_core.tickets.assign'){assigned=request.postDataJSON().user;result={}}
-  else if(method==='relay_core.ticket_notifications.subscription')result={enabled,destination:enabled?'RELAY-CE-0000000001':''}
-  else if(method==='relay_core.ticket_notifications.destinations')result={items:[{value:'RELAY-CE-0000000001',label:'Email · agent@example.invalid'}]}
-  else if(method==='relay_core.ticket_notifications.subscribe'){enabled=request.postDataJSON().enabled;result={enabled}}
-  else throw Error('Unexpected '+method)
-  return route.fulfill({json:{message:result}})
- })
- await page.goto(origin+'/relay#/tickets?ticket='+name);await page.getByRole('heading',{name:'Support request',exact:true}).waitFor()
- await page.getByLabel('Ticket status',{exact:true}).selectOption('In progress');await page.getByRole('button',{name:'Update status',exact:true}).click();await page.getByText('Ticket updated',{exact:true}).waitFor()
- await page.getByLabel('Ticket assignee',{exact:true}).selectOption('second@example.invalid');await page.getByRole('button',{name:'Assign ticket',exact:true}).click();await page.getByText('Ticket assignment saved',{exact:true}).waitFor()
- await page.getByLabel('Notification endpoint',{exact:true}).selectOption('RELAY-CE-0000000001');await page.getByRole('button',{name:'Enable notifications',exact:true}).click();await page.getByText('Ticket notifications enabled',{exact:true}).waitFor()
- await page.getByRole('button',{name:'Disable notifications',exact:true}).click();await page.getByText('Ticket notifications disabled',{exact:true}).waitFor()
- const link=page.getByRole('link',{name:message+' · Email',exact:true});if(await link.getAttribute('href')!=='#/messages?message='+message)throw Error('Ticket message link changed')
- for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('Overflow '+width)}
- if(requests.length!==4||requests.some(r=>r.headers['x-frappe-csrf-token']!=='synthetic-csrf-token')||errors.length)throw Error(JSON.stringify({requests,errors}))
- return {passed:true,assignment:true,subscription:true,exactNavigation:true,viewports:[320,390,768,1440]}
+import assert from 'node:assert/strict'
+import { pathToFileURL } from 'node:url'
+
+// Uses the built worktree UI with real yrp.site APIs supplied by the site harness.
+export default async function testTickets(page, fixture) {
+  page.setDefaultTimeout(12000)
+  const errors=[], reads=[]
+  let socket, connections=0, nextConnection
+  page.on('pageerror',error=>errors.push(error.message))
+  page.on('request',request=>{
+    if(request.url().includes('/api/method/relay_core.tickets.'))reads.push(request)
+  })
+  await page.routeWebSocket(/\/socket.io\//,ws=>{
+    socket=ws; connections++; nextConnection?.()
+    ws.send('0'+JSON.stringify({sid:'ticket-local',upgrades:[],pingInterval:25000,pingTimeout:20000}))
+    ws.onMessage(message=>{
+      if(String(message).startsWith('40/yrp.site'))ws.send('40/yrp.site,'+JSON.stringify({sid:'ticket-local'}))
+      if(message==='2')ws.send('3')
+    })
+  })
+  await page.goto(fixture.origin+'/site.html#/tickets')
+  console.log('Browser loaded ticket workspace')
+  await page.getByLabel('Assignee',{exact:true}).fill(fixture.actor)
+  await page.getByRole('button',{name:'Apply',exact:true}).click()
+  const open=page.getByRole('button',{name:'Open ticket: '+fixture.subject,exact:true})
+  await open.waitFor()
+  await open.focus();await page.keyboard.press('Enter')
+  console.log('Browser opened fixture ticket')
+  const detail=page.locator('.ticket-detail'), history=page.getByRole('region',{name:'AI history'})
+  await detail.getByRole('button',{name:'Older AI history',exact:true}).click()
+  await history.getByText(fixture.event,{exact:true}).waitFor()
+  await detail.getByText('AI active',{exact:true}).waitFor()
+  await history.getByText('1 read completed. Raw results are kept private.',{exact:true}).waitFor()
+  assert.ok((await history.innerText()).includes('Create draft · Completed'))
+  assert.ok((await history.innerText()).includes('Reply · Approved'))
+  assert.ok((await history.innerText()).includes('Reply delivery · Uncertain'))
+  const draft=detail.getByRole('link',{name:'Payment Entry · '+fixture.draft+' · Draft',exact:true})
+  assert.equal(await draft.getAttribute('href'),'/app/payment-entry/'+encodeURIComponent(fixture.draft))
+  const transcript=page.getByRole('region',{name:'Episode transcript'})
+  await transcript.getByText('/support',{exact:true}).waitFor()
+  await transcript.getByRole('button',{name:'More messages',exact:true}).click()
+  await transcript.getByText('Sim history line 59',{exact:true}).waitFor()
+  assert.equal(await transcript.locator('li').count(),60)
+  await page.getByRole('region',{name:'Episode deliveries'}).getByText(/Lifecycle notice · Suppressed/).waitFor()
+  assert.ok(!(await detail.innerText()).includes('Sim private accounting values'))
+  for(const width of [320,390,768,1440]) {
+    await page.setViewportSize({width,height:900})
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'overflow '+width)
+  }
+  const deniedClaim='**/api/method/relay_core.tickets.claim'
+  await page.route(deniedClaim,route=>route.fulfill({status:403,json:{exc_type:'PermissionError'}}))
+  await detail.getByRole('button',{name:'Take over',exact:true}).click()
+  await page.getByText('You do not have permission for this action.',{exact:true}).waitFor()
+  await detail.getByText('AI active',{exact:true}).waitFor()
+  await page.unroute(deniedClaim)
+  await detail.getByRole('button',{name:'Take over',exact:true}).focus();await page.keyboard.press('Enter')
+  await detail.getByText('You took over. AI is stopped for this conversation.',{exact:true}).waitFor()
+  await detail.getByText('Staff took over',{exact:true}).waitFor()
+  assert.equal(await detail.getByRole('button',{name:'Take over',exact:true}).count(),0)
+  assert.ok((await history.innerText()).includes('Reply · Stopped'))
+  assert.ok((await history.innerText()).includes('Approval invalidated'))
+  const before=reads.length
+  socket.send('42/yrp.site,'+JSON.stringify(['relay_changed',{kind:'tickets'}]))
+  await page.waitForResponse(response=>response.url().includes('tickets.ai_history')&&response.ok())
+  assert.ok(reads.length>before)
+  await transcript.getByText('Sim history line 59',{exact:true}).waitFor()
+  assert.equal(await transcript.locator('li').count(),60)
+  await history.getByText(fixture.event,{exact:true}).waitFor()
+  await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Start work'&&!b.disabled))
+  const refreshed=page.waitForResponse(response=>response.url().includes('tickets.transcript')&&new URL(response.url()).searchParams.has('after')&&response.ok())
+  const reconnected=new Promise(resolve=>{nextConnection=resolve})
+  socket.close()
+  await Promise.race([reconnected,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Socket reconnect timed out')),10000))])
+  await refreshed
+  await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Start work'&&!b.disabled))
+  await transcript.getByText('Sim history line 59',{exact:true}).waitFor()
+  assert.ok(connections>=2)
+  await page.waitForTimeout(500)
+  const settled=reads.length
+  await page.waitForTimeout(1800)
+  assert.equal(reads.length,settled,'ticket polling is forbidden')
+  // Permission revocation must remove the stale transcript and draft links.
+  await page.route('**/api/method/relay_core.tickets.ai_history*',route=>route.fulfill({status:403,json:{exc_type:'PermissionError'}}))
+  socket.send('42/yrp.site,'+JSON.stringify(['relay_changed',{kind:'tickets'}]))
+  await page.getByText('You do not have permission for this action.',{exact:true}).waitFor()
+  assert.equal(await detail.count(),0)
+  assert.deepEqual(errors,[])
+  console.log('PASS built UI + yrp.site HTTP: history, transcript, draft navigation, keyboard takeover, approval invalidation, 320/390/768/1440px; Socket.IO update/reconnect, no polling, permission-revocation clearing')
+}
+
+if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
+  let input='';for await(const chunk of process.stdin)input+=chunk
+  const {chromium}=await import('../../../.runtime/browser/node_modules/playwright/index.mjs')
+  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']})
+  try {await testTickets(await browser.newPage({viewport:{width:390,height:900}}),JSON.parse(input))}
+  finally {await browser.close()}
 }
