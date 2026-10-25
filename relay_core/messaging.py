@@ -50,7 +50,7 @@ def delivery_episodes(source, context):
     filters = dict(company=company)
     if source.get('business_name'):
         filters.update(business_doctype=source.business_doctype, business_name=source.business_name)
-    if source.get('name') or context.get('provider') != 'Email':
+    if source.get('name') or source.get('conversation_key') or context.get('provider') != 'Email':
         filters['conversation_key'] = conversation
     else:
         conversations = frappe.qb.get_query('Relay Business Routing', filters=dict(channel=source.channel,
@@ -91,6 +91,10 @@ def delivery_snapshot(payload, source, context):
 
 def delivery_fence(action, source, context):
     payload = object_value(action.payload)
+    # Lifecycle notices are not AI work. Keep their automatic provenance for
+    # retry/ownership checks, but staff takeover must not suppress the notice.
+    if payload.get('business_event') and not (payload.get('automation_run') or payload.get('flow_run')):
+        return
     if not automatic_delivery(payload):
         return
     rows = delivery_episodes(source, context)
