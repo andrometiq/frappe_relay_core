@@ -114,10 +114,161 @@ def main():
                 print('PASS direct REST GET/list deny the other-business manager; administrator reads non-zero fixtures')
             frappe.db.rollback()
             with configured(fixture_data):
+                channel_ai_cases(fixture_data)
                 sender_scope_cases(fixture_data)
         finally:
             frappe.db.rollback()
     frappe.destroy()
+
+
+def channel_ai_cases(fixture):
+    """Both channel transports must announce before real, identity-scoped reads."""
+    import frappe
+    from channel_identity_fixtures import endpoint
+    from channel_site_fixtures import user, business
+    from site_labels import phone
+    from relay_core import whatsapp
+    from relay_core.ai import service, adapter
+    from relay_core.ai.tools import Reader, as_user
+    from relay_core.automation import service as automation, queue
+    from relay_core.automation.provenance import conversation_key
+    from relay_core.tickets import resume_ai
+    from relay_core.flows.actions import proposal
+
+    frappe.set_user('Administrator')
+    company = 'Sim Channel Company ' + fixture.stamp
+    frappe.get_doc(dict(doctype='Company', name=company, company_name=company,
+        abbr='SC', default_currency='INR', country='India')).db_insert()
+    other_company = company + ' Other'
+    frappe.get_doc(dict(doctype='Company', name=other_company, company_name=other_company,
+        abbr='SO', default_currency='INR', country='India')).db_insert()
+    fixture.customer.customer_details = 'Sim Order quantity 25, amount 1250'
+    fixture.customer.save()
+    partner = user('sim-channel-partner-' + fixture.stamp + '@example.invalid', manager=True)
+    unrelated = business('Channel denied ' + fixture.stamp)
+    restriction = frappe.get_doc(dict(doctype='User Permission', user=partner, allow='Customer',
+        for_value=fixture.customer.name, apply_to_all_doctypes=1)).insert()
+    contract = dict(name='customer', method='get_doc', doctype='Customer',
+        fields=['name', 'customer_details'], scope_field='name', identity_anchor='Customer',
+        identity_fields={'Telegram':'alias', 'Email':'alias'}, company_field='represents_company')
+    counter = 0
+    for provider, address in [('Telegram', phone(fixture.stamp)), ('Email', 'sim-ai-'+fixture.stamp.lower()+'@example.invalid')]:
+        binding = endpoint(fixture, provider, address)
+        frappe.db.set_value('Relay Channel', binding.channel, dict(company=company, triage_owner=fixture.actor))
+        frappe.db.set_value('Customer', fixture.customer.name, dict(alias=address, represents_company=company))
+        skill = frappe.get_doc(dict(doctype='Relay AI Skill', name='Sim '+provider+' Read '+fixture.stamp,
+            title='Sim '+provider+' Read', enabled=1, channel=binding.channel, business_doctype='Customer',
+            run_as_user=fixture.actor, handoff_owner=fixture.actor, mode='Automatic', daily_limit=100,
+            target='Confirm my order quantity and amount', exact_trigger='/order', execution_policy='Execute',
+            search_confirmation='Always', instructions='Read only the authenticated sender in this company.',
+            allowed_tools=json.dumps([contract]), allowed_actions='[{"action":"reply"}]'))
+        skill.db_insert(); frappe.db.commit()
+        frappe.conf.relay_automation_enabled = 1
+        plan = dict(reference='customer', purpose='confirm your quantity and amount', fields=contract['fields'],
+            arguments={'name':fixture.customer.name})
+        reads, outbound = [], []
+        revoke = False
+        def source(body='/order', automatic=False):
+            nonlocal counter
+            counter += 1
+            context = dict(provider=provider, message_id=counter)
+            if provider == 'Telegram':
+                context.update(chat_id=int(address), chat_type='private', participant_id=int(address))
+            else:
+                context.update(message_id=f'<sim-ai-{counter}-{fixture.stamp}@example.invalid>',
+                    email_thread_id='<sim-thread-'+fixture.stamp+'@example.invalid>', subject='Sim Order 25',
+                    authentication={'status':'pass'}, auto_submitted=automatic)
+            doc = frappe.get_doc(dict(doctype='Relay Message', relay_contact=fixture.contact.name,
+                channel=binding.channel, sender_endpoint=address, direction='Incoming', message_type='text',
+                content=body, status='Sent', business_doctype='Customer', business_name=fixture.customer.name,
+                provider_context=json.dumps(context), conversation_key=conversation_key(binding.channel,address,context))).insert()
+            frappe.db.commit()
+            return doc
+        def run(message):
+            queue._process(message.name); frappe.db.commit()
+            name=frappe.db.get_value('Relay Automation Run', {'message':message.name}, 'name')
+            assert name, provider+' event was not admitted'
+            automation.process(name)
+            return frappe.get_doc('Relay Automation Run',name)
+        def deny(call):
+            try: call()
+            except (ValueError,frappe.PermissionError): return
+            raise AssertionError('Out-of-scope channel read succeeded')
+        def reader(event, actor, business, scope, run_id):
+            return Reader(event,actor,business,scope,
+                authorize=lambda ref,args:service.authorize_search(run_id,event,ref,args))
+        def model(event, actor, business, prompt, run_id, *, scope, search=None, **kwargs):
+            if search is None:
+                deny(lambda:reader(event,actor,business,scope,run_id).read(contract,**plan['arguments']))
+                return dict(reply='',handoff=False,reason='',user=actor,reads=[],search=plan)
+            assert search==plan
+            assert outbound and 'I will search customer' in outbound[-1]['text' if provider=='Telegram' else 'body']
+            # The declaration journal is real; it cannot authorize another name.
+            deny(lambda:reader(event,actor,business,scope,run_id).read(contract,name=unrelated.name))
+            # Probe actual identity/company checks with the same authorized plan.
+            for field, wrong, original in [('alias','wrong@example.invalid',address),
+                    ('represents_company',other_company,company)]:
+                frappe.db.set_value('Customer',fixture.customer.name,field,wrong)
+                deny(lambda:reader(event,actor,business,scope,run_id).read(contract,**plan['arguments']))
+                frappe.db.set_value('Customer',fixture.customer.name,field,original)
+            current=reader(event,actor,business,scope,run_id)
+            result=current.read(contract,**plan['arguments'])
+            assert result=={'name':fixture.customer.name,'customer_details':'Sim Order quantity 25, amount 1250'}
+            reads.append(result)
+            if revoke:
+                previous=frappe.session.user
+                frappe.set_user('Administrator')
+                restriction.for_value=unrelated.name; restriction.save(); frappe.db.commit()
+                frappe.clear_cache(user=partner);frappe.set_user(previous)
+            return dict(reply='',handoff=False,reason='',user=actor,reads=current.evidence,
+                actions=[proposal(event,'reply',{'text':'Order quantity 25, amount 1250'})])
+        def transport(tool, arguments):
+            outbound.append(arguments)
+            return {'message_id':901+len(outbound) if provider=='Telegram' else f'<sim-reply-{len(outbound)}-{fixture.stamp}@example.invalid>'}
+        def reset_hold():
+            frappe.set_user('Administrator')
+            for name in frappe.get_all('Relay Ticket', filters={'company':company,'ai_disabled':1,'active_scope_key':['is','set']},pluck='name'):
+                resume_ai(name)
+            frappe.db.commit()
+        with patch.object(adapter,'complete',side_effect=model), patch.object(whatsapp,'client') as client:
+            client.return_value.call_tool.side_effect=transport
+            first=source(); offer=run(first)
+            assert offer.status=='Completed' and offer.stage=='Search' and not reads and len(outbound)==1, (provider,offer.status,offer.reason)
+            assert json.loads(offer.decision)['reads']==[]
+            with as_user(fixture.actor):
+                actor,business_ref,scope=service.context(skill,first)
+                deny(lambda:reader(skill,actor,business_ref,scope,offer.name).read(contract,**plan['arguments']))
+            confirmed=source('yes'); result=run(confirmed)
+            assert result.status=='Completed' and result.ticket and len(reads)==1 and len(outbound)==2, (provider,result.status,result.reason)
+            assert json.loads(result.decision)['reads'][0]['tool']=='customer'
+            args=outbound[-1]
+            if provider=='Telegram':
+                assert args['chat_id']==int(address) and 'message_thread_id' not in args and '1250' in args['text']
+            else:
+                context=json.loads(confirmed.provider_context)
+                assert args['subject']=='Re: Sim Order 25' and args['in_reply_to']==context['message_id']
+                assert args['auto_submitted'] is True and args['cc']==[] and args['bcc']==[]
+                suppressed=source(automatic=True);queue._process(suppressed.name);frappe.db.commit()
+                assert not frappe.db.exists('Relay Automation Run',{'message':suppressed.name})
+            automation.process(result.name)
+            assert len(outbound)==2 and len(reads)==1
+            # Revoke the real linked user's permission after reading; the worker
+            # must hand off rather than dispatch a now-unauthorized result.
+            fixture.person.user=partner;fixture.person.save();frappe.db.commit()
+            run(source()); calls=len(outbound);revoke=True
+            failed=run(source('yes'))
+            assert failed.status=='Handoff' and failed.ticket and len(outbound)==calls, (provider,failed.status,failed.reason)
+            automation.process(failed.name);assert len(outbound)==calls
+            fixture.person.user=None;fixture.person.save()
+            restriction.for_value=fixture.customer.name;restriction.save();frappe.clear_cache(user=partner)
+            frappe.db.commit();reset_hold();revoke=False
+            with patch.object(adapter,'complete',side_effect=AssertionError('Human request must bypass model')):
+                human=run(source('Talk to a human'))
+            assert human.status=='Handoff' and human.ticket and len(outbound)==calls
+            reset_hold()
+        frappe.db.set_value('Relay AI Skill',skill.name,'enabled',0);frappe.db.commit()
+        print('PASS',provider,'declared search and confirmation, identity/company/business read scope, non-zero reply, transport shape, replay, revoked-user and human handoff')
+    frappe.conf.relay_automation_enabled=0
 
 
 def sender_scope_cases(fixture):
