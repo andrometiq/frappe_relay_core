@@ -46,7 +46,9 @@ def tool_detail(result):
     structured = result.get('structuredContent')
     error = structured.get('error') if isinstance(structured, dict) else None
     if isinstance(error, dict):
-        parts += [error.get('error_user_title'), error.get('error_user_msg')]
+        parts += [error.get('error_user_title'), error.get('error_user_msg'), error.get('title'), error.get('message')]
+        if error.get('code'):
+            parts.append(f"code {error['code']}")
     return ' · '.join(dict.fromkeys(text for text in map(safe_text, parts) if text))
 
 
@@ -69,8 +71,28 @@ class HubError(RuntimeError):
                 safe[key] = value
         if type(source.get('outcome_unknown')) is bool:
             safe['outcome_unknown'] = source['outcome_unknown']
+        if metadata['provider'] == 'WhatsApp':
+            for key in ('title', 'message'):
+                text = one_line(source.get(key))
+                if text:
+                    safe[key] = text
         if safe:
             self.metadata = {'provider': metadata['provider'], 'error': safe}
+
+
+def one_line(value, limit=300):
+    if not isinstance(value, str):
+        return ''
+    return ' '.join(''.join(c if c.isprintable() else ' ' for c in value).split())[:limit]
+
+
+def whatsapp_rejection(error):
+    """Meta's own user-facing reason, e.g. 'WhatsApp rejected this request (code 132001): ...'."""
+    detail = ': '.join(error[key] for key in ('title', 'message') if error.get(key))
+    if not detail and not error.get('code'):
+        return ''
+    code = f" (code {error['code']})" if error.get('code') else ''
+    return one_line(f'WhatsApp rejected this request{code}' + (f': {detail}' if detail else ''))
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -161,6 +183,8 @@ class HubClient:
             check = error.metadata.get('error', {}).get('check')
             if check:
                 error.args = (f"Hub {name} rejected at {check}: {MEDIA_CHECKS[check]}",)
+            elif error.metadata.get('provider') == 'WhatsApp' and whatsapp_rejection(error.metadata['error']):
+                error.args = (whatsapp_rejection(error.metadata['error']),)
             raise error
         payload = result.get("structuredContent")
         if not isinstance(payload, dict):

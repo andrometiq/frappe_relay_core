@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,6 +8,23 @@ from relay_core.config import load_env
 from relay_core.hub import HubClient, HubError
 
 class ConfigTests(unittest.TestCase):
+    def test_whatsapp_rejection_text_is_safe_and_one_line(self):
+        hub = HubClient('http://127.0.0.1:1234/mcp', 'x' * 64)
+        hub.protocol = '2025-06-18'
+        content = {'provider': 'WhatsApp', 'error': {'http_status': 400, 'code': 132001, 'title': 'Template name does not exist',
+                   'message': 'Template winter_offer\nis not in en', 'access_token': 'never-expose'}}
+        with patch.object(hub, '_request', return_value={'isError': True, 'structuredContent': content}):
+            with self.assertRaises(HubError) as caught:
+                hub.execute({'operation': 'templates.send'})
+        self.assertEqual(str(caught.exception), 'WhatsApp rejected this request (code 132001): '
+                         'Template name does not exist: Template winter_offer is not in en')
+        self.assertEqual(caught.exception.metadata['error']['code'], 132001)
+        self.assertNotIn('never-expose', json.dumps(caught.exception.metadata))
+        with patch.object(hub, '_request', return_value={'isError': True, 'structuredContent': {'provider': 'WhatsApp', 'error': {}}}):
+            with self.assertRaises(HubError) as caught:
+                hub.execute({'operation': 'templates.send'})
+        self.assertIn('Hub operation was rejected', str(caught.exception))
+
     def test_group_send_preserves_queue_receipt(self):
         hub=HubClient('http://127.0.0.1:1234/mcp','x'*64)
         receipt={'delivery':{'state':'queued','key':'group-test'}}
