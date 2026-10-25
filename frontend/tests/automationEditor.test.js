@@ -8,7 +8,7 @@ test('new skills and event rules are disabled; skills start in shadow', () => {
 })
 test('skill saves only editable configuration and preserves explicit read scope', () => {
   const draft = { ...newConfiguration(true), name: 'SKILL-1', owner: 'other', daily_limit: '25', enabled: true }
-  const tools = [{ name: 'ledger', method: 'get_list', doctype: 'Payment Ledger Entry', fields: 'name, amount, posting_date', scope_field: 'party' }]
+  const tools = [{ name: 'ledger', method: 'get_list', doctype: 'Payment Ledger Entry', fields: ['name', 'amount', 'posting_date'], scope_field: 'party', identity_fields: {} }]
   const result = configurationValues(draft, true, tools, '')
   assert.equal(result.owner, undefined); assert.equal(result.name, undefined)
   assert.equal(result.daily_limit, 25); assert.equal(result.enabled, 1)
@@ -47,4 +47,35 @@ test('channel options retain an existing selection outside the current account w
   assert.deepEqual(configurationChannels(available, ''), available)
   assert.deepEqual(configurationChannels([], 'saved'), [{name: 'saved'}])
   assert.equal(available.length, 1)
+})
+
+test('event text and identity contracts survive round trips without changing provider mappings', () => {
+  const draft = {...newConfiguration(true), target:'Explain my ledger', instructions:'Only my records', reply_style:'Brief', exact_trigger:'/ledger', search_confirmation:'Always', execution_policy:'Execute'}
+  const tools = [{name:'ledger',method:'get_list',doctype:'GL Entry',fields:['debit','credit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{WhatsApp:'phone',Email:'email'},company_field:'company'}]
+  const actions = [{action:'create_draft',doctype:'Payment Entry',fields:['paid_amount']},{action:'reply'}]
+  const values = configurationValues(draft,true,tools,'',actions)
+  assert.deepEqual(toolRows(values.allowed_tools),tools)
+  assert.deepEqual(JSON.parse(values.allowed_actions),actions)
+  for (const key of ['target','instructions','reply_style','exact_trigger','search_confirmation','execution_policy']) assert.equal(values[key],draft[key])
+  draft.execution_policy='Ticket only'
+  assert.deepEqual(JSON.parse(configurationValues(draft,true,tools,'',actions).allowed_actions),[])
+})
+test('ordered actions can move only inside the sequence', async () => {
+  const {moveAction} = await import('../src/services/automationEditor.js')
+  const actions=[{action:'create_draft'},{action:'reply'}]
+  moveAction(actions,0,-1);assert.equal(actions[0].action,'create_draft')
+  moveAction(actions,1,-1);assert.equal(actions[0].action,'reply')
+  moveAction(actions,1,1);assert.equal(actions[1].action,'create_draft')
+})
+test('save validation requires complete sender and company scope and bounded owner text', async () => {
+  const {eventErrors} = await import('../src/services/automationEditor.js')
+  const draft={...newConfiguration(true),title:'Ledger',business_doctype:'Supplier',instructions:'Only this sender'}
+  assert.deepEqual(eventErrors(draft,[],[],'Email'),[])
+  assert.ok(eventErrors({...draft,enabled:1},[],[],'Email').length)
+  assert.ok(eventErrors({...draft,reply_style:'x'.repeat(2001)},[],[],'Email').length)
+  const reference={name:'ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
+  assert.deepEqual(eventErrors(draft,[reference],[],'Email'),[])
+  assert.ok(eventErrors(draft,[reference],[],'WhatsApp').length)
+  assert.ok(eventErrors({...draft,business_doctype:'Customer'},[reference],[],'Email').length)
+  assert.ok(eventErrors(draft,[reference,reference],[],'Email').length)
 })
