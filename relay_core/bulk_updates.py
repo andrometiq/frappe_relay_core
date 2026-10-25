@@ -50,10 +50,8 @@ def project_batch(event, rows):
     from relay_core.bulk_timeline import apply
     apply(timeline)
     frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
-    from relay_core.bulk_campaigns import resume
     for name in names:
-        changed(name)
-        resume(name)  # Hub progress means queue room: a campaign waiting on backpressure may continue.
+        changed(name)  # Also after cancel: rows Hub still sent keep moving, and so do the counters.
 
 
 def open_reply_window(hours):
