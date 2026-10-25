@@ -173,14 +173,14 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(counts, {'total': 12, 'skipped': 3, 'queued': 2, 'sent': 9, 'delivered': 5, 'read': 5,
                                   'failed': 1, 'replied': 2})
 
-    def test_project_batch_uses_sql_guards_and_resumes_each_campaign_once(self):
+    def test_project_batch_uses_sql_guards_updates_the_timeline_and_resumes_each_campaign_once(self):
         db = Mock()
         fake = SimpleNamespace(db=db, get_all=Mock(return_value=['Winter launch']))
         rows = [dict(UpdateContractTests.row, key='b'), dict(UpdateContractTests.row, id=2, key='a', state='rejected',
                 status='', message_id='', error={'code': 132001, 'title': 'Template missing'})]
         with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'changed') as changed, \
                 patch.object(bulk_updates, 'connection_value', return_value='site-a'), \
-                patch('relay_core.bulk_campaigns.resume') as resume:
+                patch('relay_core.bulk_timeline.apply') as timeline, patch('relay_core.bulk_campaigns.resume') as resume:
             bulk_updates.project_batch(_dict(name='event', account='site-a'), rows)
             with self.assertRaises(ValueError):
                 bulk_updates.project_batch(_dict(name='event', account='other'), rows)
@@ -188,6 +188,9 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual([p['key'] for p in params], ['a', 'b'])
         self.assertEqual((params[0]['status'], params[0]['code'], params[0]['failed']), ('Failed', 132001, True))
         self.assertEqual(params[1]['lower'], ('Pending', 'Queued', 'Uncertain', 'Cancelled', 'Sent', 'Failed'))
+        self.assertEqual(timeline.call_args.args[0], [
+            {'key': 'a', 'status': 'Failed', 'message_id': '', 'reason': 'Meta error 132001: Template missing'},
+            {'key': 'b', 'status': 'Delivered', 'message_id': 'wamid.one', 'reason': ''}])
         changed.assert_called_once_with('Winter launch')
         resume.assert_called_once_with('Winter launch')
 
@@ -292,6 +295,7 @@ class SenderTests(unittest.TestCase):
         self.db.get_value.return_value = 'Running'
         self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
+        self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
         self.enterContext(patch('relay_core.bulk_updates.changed'))
         self.doc = _dict(name='Winter launch', template_name='notice', language='en_US', status='Running',
                          arguments=json.dumps({'template': POSITIONAL, 'fields': [{'key': 'body:1', 'component': 'body', 'name': None}]}))
@@ -309,7 +313,7 @@ class SenderTests(unittest.TestCase):
     def selects(self, batches):
         self.db.sql.side_effect = lambda query, *args, **kwargs: batches.pop(0) if query.lstrip().startswith('SELECT') else None
 
-    def test_push_sends_fifty_per_call_with_stable_keys(self):
+    def test_push_sends_fifty_per_call_with_stable_keys_and_records_the_timeline(self):
         self.selects([self.rows(50), self.rows(10, 50), []])
         hub = self.hub(states={1: 'rejected'})
         with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
@@ -322,6 +326,9 @@ class SenderTests(unittest.TestCase):
                          'language': 'en_US', 'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha'}]}]})
         updates = [c for c in self.db.sql.call_args_list if c.args[0].lstrip().startswith('UPDATE')]
         self.assertEqual(len(updates), 60)
+        recorded = self.timeline.call_args_list[0].args[2]
+        self.assertEqual(len(recorded), 49)  # The rejected row never reaches the timeline.
+        self.assertNotIn('bulk-k-1', [row.request_key for row in recorded])
         self.assertEqual(self.db.commit.call_count, 2)
 
     def test_a_later_accepted_batch_clears_the_retry_error(self):
@@ -383,12 +390,13 @@ class SenderTests(unittest.TestCase):
         self.assertEqual(self.fake.enqueue.call_args.kwargs['job_id'], 'relay-bulk-send_job:Winter launch:0')
         self.assertNotIn(bulk_campaigns.WAIT + 'Winter launch', self.cache.values)
 
-    def test_admission_mapping(self):
-        bulk_campaigns.admit(self.rows(3), [{'key': 'bulk-k-0', 'id': '7', 'state': 'queued'},
+    def test_admission_mapping_returns_the_rows_hub_holds(self):
+        held = bulk_campaigns.admit(self.rows(3), [{'key': 'bulk-k-0', 'id': '7', 'state': 'queued'},
                                     {'key': 'bulk-k-1', 'id': '', 'state': 'rejected', 'error': 'valid recipient required'}])
         params = [c.args[1] for c in self.db.sql.call_args_list]
         self.assertEqual([(p[0], p[1]) for p in params], [('Queued', '7'), ('Failed', ''), ('Uncertain', '')])
         self.assertEqual(params[1][2], 'valid recipient required')
+        self.assertEqual(held, {'bulk-k-0', 'bulk-k-2'})
 
     def test_cancel_pages_through_every_queued_row_and_resumes_after_a_deadline(self):
         pages = [[_dict(name=f'q{i:04d}', delivery_id=str(i), request_key=f'k{i}') for i in range(start, start + size)]
@@ -396,9 +404,11 @@ class SenderTests(unittest.TestCase):
         self.fake.get_all = Mock(side_effect=lambda *args, **kwargs: pages.pop(0))
         hub = Mock()
         hub.call_tool.side_effect = lambda tool, args: {'cancelled': int(args['cancel_id']) % 2 == 0}
-        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns, 'in_chunks'):
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns, 'in_chunks'), \
+                patch('relay_core.bulk_timeline.cancelled') as cancelled:
             self.assertFalse(bulk_campaigns.cancel_remaining(self.doc, time.monotonic() + 30))
         self.assertEqual(hub.call_tool.call_count, 1500)
+        self.assertEqual(cancelled.call_count, 750)
         afters = [c.kwargs['filters']['name'][1] for c in self.fake.get_all.call_args_list]
         self.assertEqual(afters, ['', 'q0999', 'q1499'])
         self.assertEqual(self.db.set_value.call_args.args[2]['status'], 'Cancelled')
@@ -499,6 +509,55 @@ class ImportTests(unittest.TestCase):
         with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(get_all=Mock(side_effect=get_all))):
             contacts, opted_out = bulk_campaigns.endpoint_facts('WA', [number])
         self.assertEqual((contacts, opted_out), ({}, {number}))
+
+
+class TimelineTests(unittest.TestCase):
+    def test_admitted_rows_with_a_relay_contact_become_one_rendered_batch(self):
+        from relay_core import bulk_timeline
+        doc = _dict(name='Winter launch', channel='WA', template_name='notice', language='en_US')
+        template = dict(POSITIONAL, components=[*POSITIONAL['components'], {'type': 'FOOTER', 'text': 'Reply STOP to opt out'},
+                        {'type': 'BUTTONS', 'buttons': [{'type': 'QUICK_REPLY', 'text': 'Stop'}]}])
+        components = [{'type': 'header', 'parameters': [{'type': 'text', 'text': 'Asha'}]},
+                      {'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha'}, {'type': 'text', 'text': 'Ten'}]}]
+        rows = [_dict(request_key=f'bulk-k-{i}', destination=f'91987654321{i}', components=components) for i in range(3)]
+        db = Mock()
+        fake = SimpleNamespace(db=db, session=_dict(user='manager@example.invalid'), _dict=_dict, publish_realtime=Mock(),
+                               get_all=Mock(return_value=[]),
+                               utils=SimpleNamespace(now_datetime=lambda: '2026-10-26 10:00:00'),
+                               realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
+        with patch.object(bulk_timeline, 'frappe', fake), patch.object(bulk_timeline, 'getseries', return_value='0000000041'), \
+                patch('relay_core.whatsapp_receipts.lock_endpoints', return_value={'919876543210': 'RELAY-CON-A', '919876543212': 'RELAY-CON-B'}), \
+                patch('relay_core.inbox.message_created') as activity:
+            bulk_timeline.record(doc, {'template': template}, rows)
+        self.assertEqual(db.sql.call_args.args[1], (1, 'RELAY-MSG-'))
+        values = db.bulk_insert.call_args.args[2]
+        self.assertTrue(db.bulk_insert.call_args.kwargs['ignore_duplicates'])
+        self.assertEqual([(v[0], v[6], v[16]) for v in values], [('RELAY-MSG-0000000041', 'RELAY-CON-A', 'bulk-k-0'),
+                                                                 ('RELAY-MSG-0000000042', 'RELAY-CON-B', 'bulk-k-2')])
+        data = json.loads(values[0][12])
+        self.assertEqual(values[0][10], 'Ten and Asha')
+        self.assertEqual((data['campaign'], data['template']['header'], data['template']['footer'], data['template']['buttons']),
+                         ('Winter launch', 'Hello Asha', 'Reply STOP to opt out', ['Stop']))
+        self.assertEqual(activity.call_count, 2)
+        fake.publish_realtime.assert_called_once_with('relay_changed', {'kind': 'messages'}, room='doctype:Relay Message', after_commit=True)
+
+    def test_bulk_updates_move_timeline_messages_forward_with_quote_keys(self):
+        from relay_core import bulk_timeline
+        from relay_core.message_updates import provider_key
+        db = Mock()
+        messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210'),
+                    _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211')]
+        fake = SimpleNamespace(db=db, get_all=Mock(return_value=messages), publish_realtime=Mock(),
+                               realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
+        with patch.object(bulk_timeline, 'frappe', fake):
+            bulk_timeline.apply([{'key': 'a', 'status': 'Read', 'message_id': 'wamid.a', 'reason': ''},
+                                 {'key': 'b', 'status': 'Cancelled', 'message_id': '', 'reason': ''},
+                                 {'key': 'c', 'status': 'Queued', 'message_id': '', 'reason': ''}])
+        first, second = [call.args[1] for call in db.sql.call_args_list]
+        self.assertEqual((first['status'], first['id'], first['key'], first['lower']),
+                         ('Read', 'wamid.a', provider_key('WA', '919876543210', 'wamid.a'), ('Pending', 'Sent', 'Failed', 'Delivered')))
+        self.assertEqual((second['status'], second['error'], second['lower']), ('Failed', 'Cancelled before sending', ('Pending', 'Sent')))
+        fake.publish_realtime.assert_called_once()
 
 
 if __name__ == '__main__':

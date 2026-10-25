@@ -33,10 +33,12 @@ def project_batch(event, rows):
     """Monotonic per-row apply; the status guard lives in SQL so replays and races cannot regress."""
     if event.account != connection_value('relay_hub_account'):
         raise ValueError('Bulk updates belong to another account')
+    timeline = []
     for row in sorted(rows, key=lambda item: item['key']):
         status = target(row)
         error = row.get('error') or {}
         failed = status == 'Failed'
+        timeline.append({'key': row['key'], 'status': status, 'message_id': row['message_id'], 'reason': reason(error)})
         frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status=%(status)s,
             provider_id=IF(%(message)s='', provider_id, %(message)s), delivery_id=%(delivery)s,
             error_code=IF(%(failed)s, %(code)s, error_code), reason=IF(%(failed)s, %(reason)s, reason), modified=NOW(6)
@@ -45,6 +47,8 @@ def project_batch(event, rows):
                  code=error.get('code') or 0, reason=reason(error), key=row['key'], lower=lower(status)))
     names = frappe.get_all(RECIPIENT, filters={'request_key': ['in', [row['key'] for row in rows]]},
                            pluck='campaign', distinct=True, limit_page_length=0)
+    from relay_core.bulk_timeline import apply
+    apply(timeline)
     frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
     from relay_core.bulk_campaigns import resume
     for name in names:

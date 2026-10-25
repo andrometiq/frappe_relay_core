@@ -1,0 +1,80 @@
+"""Campaign sends in contact timelines: one outgoing template message per admitted row, written per batch."""
+import frappe
+from frappe.model.naming import getseries
+from relay_core.automation.contracts import canonical
+from relay_core.automation.provenance import conversation_key
+
+SERIES = 'RELAY-MSG-'
+FIELDS = ('name', 'creation', 'modified', 'owner', 'modified_by', 'docstatus', 'relay_contact', 'channel', 'direction',
+          'status', 'content', 'message_type', 'message_data', 'sender_endpoint', 'provider_context',
+          'conversation_key', 'source_key')
+STATUS = {'Queued': 'Pending', 'Uncertain': 'Pending', 'Sent': 'Sent', 'Failed': 'Failed', 'Cancelled': 'Failed',
+          'Delivered': 'Delivered', 'Read': 'Read'}
+RANK = {'Pending': 0, 'Sent': 1, 'Failed': 2, 'Delivered': 3, 'Read': 4}
+CANCELLED = 'Cancelled before sending'
+
+
+def record(doc, snapshot, rows):
+    """Insert the rendered template for rows whose number belongs to a Relay Contact; one realtime event."""
+    from relay_core.inbox import message_created
+    from relay_core.whatsapp_receipts import lock_endpoints
+    from relay_core.whatsapp_templates import message_content
+    people = lock_endpoints(doc.channel, sorted({row.destination for row in rows})) if rows else {}
+    rows = [row for row in rows if row.destination in people]
+    if rows:  # A repeated push of the same keys writes nothing.
+        known = set(frappe.get_all('Relay Message', filters={'source_key': ['in', [row.request_key for row in rows]]},
+                                   pluck='source_key', limit_page_length=0))
+        rows = [row for row in rows if row.request_key not in known]
+    if not rows:
+        return
+    first = int(getseries(SERIES, 10))  # Locks the series row; reserve the rest of the block in one update.
+    frappe.db.sql('UPDATE `tabSeries` SET `current`=`current`+%s WHERE `name`=%s', (len(rows) - 1, SERIES))
+    now, user, context = frappe.utils.now_datetime(), frappe.session.user, {'provider': 'WhatsApp'}
+    values, latest = [], {}
+    for index, row in enumerate(rows):
+        name = f'{SERIES}{first + index:010d}'
+        content = message_content({'name': doc.template_name, 'language': doc.language, 'components': row.components},
+                                  snapshot['template'])
+        content['campaign'] = doc.name
+        values.append((name, now, now, user, user, 0, people[row.destination], doc.channel, 'Outgoing', 'Pending',
+                       content['text'], 'text', canonical(content), row.destination, canonical(context),
+                       conversation_key(doc.channel, row.destination, context), row.request_key))
+        latest[people[row.destination]] = name
+    frappe.db.bulk_insert('Relay Message', FIELDS, values, ignore_duplicates=True)
+    for contact in sorted(latest):
+        message_created(frappe._dict(relay_contact=contact, creation=now, name=latest[contact]))
+    changed()
+
+
+def apply(rows):
+    """Bulk update rows -> timeline message status, provider ID and failure reason. Monotonic in SQL."""
+    from relay_core.message_updates import provider_key
+    if not rows:
+        return
+    messages = frappe.get_all('Relay Message', filters={'source_key': ['in', [row['key'] for row in rows]]},
+                              fields=['name', 'source_key', 'channel', 'sender_endpoint'], limit_page_length=0)
+    by_key = {message.source_key: message for message in messages}
+    for row in rows:
+        message, status = by_key.get(row['key']), STATUS[row['status']]
+        if message and status != 'Pending':
+            identifier = row.get('message_id') or ''
+            frappe.db.sql('''UPDATE `tabRelay Message` SET status=%(status)s,
+                provider_id=IF(%(id)s='', provider_id, %(id)s),
+                provider_message_key=IF(%(id)s='', provider_message_key, %(key)s),
+                delivery_error=IF(%(status)s='Failed', %(error)s, '') WHERE name=%(name)s AND status IN %(lower)s''',
+                dict(status=status, id=identifier, name=message.name,
+                     error=row['reason'] or (CANCELLED if row['status'] == 'Cancelled' else ''),
+                     key=provider_key(message.channel, message.sender_endpoint, identifier) if identifier else None,
+                     lower=tuple(name for name, rank in RANK.items() if rank < RANK[status])))
+    if messages:
+        changed()
+
+
+def cancelled(request_key):
+    frappe.db.sql('''UPDATE `tabRelay Message` SET status='Failed', delivery_error=%s
+        WHERE source_key=%s AND status='Pending' ''', (CANCELLED, request_key))
+
+
+def changed():
+    frappe.publish_realtime('relay_changed', {'kind': 'messages'},
+                            room=frappe.realtime.get_doctype_room('Relay Message'), after_commit=True)

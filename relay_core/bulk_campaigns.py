@@ -347,9 +347,10 @@ def push(doc, deadline):
             WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
             return False
+        for row in rows:
+            row.components = bulk_sheet.build_components(snapshot['fields'], json.loads(row.arguments)['values'])
         messages = [{'key': row.request_key, 'message': {'operation': 'templates.send', 'to': row.destination,
-                     'name': doc.template_name, 'language': doc.language,
-                     'components': bulk_sheet.build_components(snapshot['fields'], json.loads(row.arguments)['values'])}}
+                     'name': doc.template_name, 'language': doc.language, 'components': row.components}}
                     for row in rows]
         try:
             result = hub.call_tool('whatsapp.bulk', {'messages': messages})
@@ -359,7 +360,9 @@ def push(doc, deadline):
                                 update_modified=False)
             wait(doc.name, RETRY_SECONDS)
             return False
-        admit(rows, result.get('deliveries') or [])
+        admitted = admit(rows, result.get('deliveries') or [])
+        from relay_core.bulk_timeline import record
+        record(doc, snapshot, [row for row in rows if row.request_key in admitted])
         if doc.last_error:  # Hub accepted again after a retry.
             frappe.db.set_value('Relay Campaign', doc.name, 'last_error', '', update_modified=False)
             doc.last_error = ''
@@ -375,16 +378,21 @@ def push(doc, deadline):
 
 
 def admit(rows, deliveries):
+    """Store each row's admission; returns the keys Hub holds (queued or uncertain)."""
     by_key = {row.get('key'): row for row in deliveries if isinstance(row, dict)}
+    held = set()
     for row in rows:
         delivery = by_key.get(row.request_key)
         status = ADMISSION.get((delivery or {}).get('state'), 'Uncertain')
         reason = '' if delivery else 'Hub did not confirm admission; the same key is kept'
         if status == 'Failed':
             reason = str(delivery.get('error') or 'Hub refused this row')[:500]
+        if status in ('Queued', 'Uncertain'):
+            held.add(row.request_key)
         frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status=%s, delivery_id=%s, reason=%s, attempted=1,
             modified=NOW(6) WHERE name=%s AND status='Pending' ''',
             (status, str((delivery or {}).get('id') or ''), reason, row.name))
+    return held
 
 
 def cancel_remaining(doc, deadline):
@@ -392,10 +400,11 @@ def cancel_remaining(doc, deadline):
     in_chunks(doc.name, 'Pending', lambda names: frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Cancelled',
         modified=NOW(6) WHERE name IN %s AND status='Pending' ''', (names,)))
     hub = whatsapp.client()
+    from relay_core.bulk_timeline import cancelled
     while True:
         after = frappe.cache.get_value(CANCEL_AFTER + doc.name) or ''
         rows = frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'status': 'Queued', 'delivery_id': ['!=', ''],
-                              'name': ['>', after]}, fields=['name', 'delivery_id'],
+                              'name': ['>', after]}, fields=['name', 'delivery_id', 'request_key'],
                               order_by='name asc', limit_page_length=CHUNK)
         if not rows:
             break
@@ -405,6 +414,7 @@ def cancel_remaining(doc, deadline):
             try:
                 if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
                     frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
+                    cancelled(row.request_key)
             except whatsapp.HubError:
                 pass  # Already sending; its Hub update records the real outcome.
             frappe.cache.set_value(CANCEL_AFTER + doc.name, row.name, expires_in_sec=86400)
