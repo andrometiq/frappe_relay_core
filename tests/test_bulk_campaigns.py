@@ -233,6 +233,9 @@ class ApplyTests(unittest.TestCase):
         with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'reply_window_open', return_value=True):
             self.assertIsNone(bulk_updates.link_reply(dict(row, provider_context={})))
         self.assertEqual(db.sql.call_args_list[0].args[1], '919876543210')
+        fallback = db.sql.call_args_list[0].args[0]
+        self.assertIn("r.attempted=1 AND r.status IN ('Pending', 'Queued', 'Uncertain', 'Sent', 'Delivered', 'Read')", fallback)
+        self.assertNotIn('provider_id', fallback)  # A reply may arrive before Hub reports the provider ID.
         with patch.object(bulk_updates, 'reply_window_open', return_value=False):
             self.assertIsNone(bulk_updates.link_reply(row))
 
@@ -337,10 +340,25 @@ class SenderTests(unittest.TestCase):
         self.assertEqual(first['message'], {'operation': 'templates.send', 'to': '919876543200', 'name': 'notice',
                          'language': 'en_US', 'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha'}]}]})
         updates = [c for c in self.db.sql.call_args_list if c.args[0].lstrip().startswith('UPDATE')]
-        self.assertEqual(len(updates), 60)
+        attempted = [c.args[1][0] for c in updates if 'SET attempted=1' in c.args[0]]
+        self.assertEqual([len(names) for names in attempted], [50, 10])
+        self.assertEqual(len(updates) - len(attempted), 60)
         recorded = self.timeline.call_args_list[0].args[2]
         self.assertEqual(len(recorded), 49)  # The rejected row never reaches the timeline.
         self.assertNotIn('bulk-k-1', [row.request_key for row in recorded])
+
+    def test_rows_are_attempted_and_committed_before_hub_sends_them(self):
+        order = []
+        self.selects([self.rows(2), []])
+        self.db.commit.side_effect = lambda: order.append('commit')
+        hub = self.hub()
+        send = hub.call_tool.side_effect
+        hub.call_tool.side_effect = lambda tool, args: order.append('hub') or send(tool, args)
+        sql = self.db.sql.side_effect
+        self.db.sql.side_effect = lambda query, *a, **k: (order.append('attempted') if 'attempted=1 WHERE' in query else None) or sql(query, *a, **k)
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
+            bulk_campaigns.push(self.doc, time.monotonic() + 30)
+        self.assertEqual(order[order.index('attempted'):order.index('hub') + 1], ['attempted', 'commit', 'hub'])
 
     def test_a_later_accepted_batch_clears_the_retry_error(self):
         self.selects([self.rows(5), []])
