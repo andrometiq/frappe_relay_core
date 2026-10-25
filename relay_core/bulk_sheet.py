@@ -6,29 +6,48 @@ from relay_core.identity import phone_number
 
 PHONE_COLUMNS = ('phone', 'mobile', 'mobile no', 'mobile number', 'phone number', 'whatsapp', 'number')
 MEDIA_FORMATS = ('IMAGE', 'VIDEO', 'DOCUMENT')
+COMPONENTS = ('HEADER', 'BODY', 'FOOTER', 'BUTTONS')
+BUTTONS = ('QUICK_REPLY', 'URL', 'PHONE_NUMBER', 'COPY_CODE')
 MAX_ROWS = 100000
 MAX_VALUE = 1024
 
 
 def template_fields(template):
-    """Fields a sheet row must supply, in Meta component order."""
+    """Fields a sheet row must supply, in Meta component order. Raises ValueError for parts campaigns cannot fill."""
     named = str(template.get('parameter_format') or 'POSITIONAL').upper() == 'NAMED'
     fields = []
     for component in template.get('components') or []:
         kind = str(component.get('type') or '').upper()
         text = component.get('text') or ''
-        if kind == 'HEADER' and str(component.get('format') or 'TEXT').upper() in MEDIA_FORMATS:
-            fields.append({'key': 'header_media', 'label': 'Header ' + component['format'].lower() + ' URL',
-                           'component': 'header', 'media': component['format'].lower()})
+        header = str(component.get('format') or 'TEXT').upper()
+        if kind not in COMPONENTS:
+            raise ValueError(f'Campaigns cannot send {kind.lower() or "unknown"} templates')
+        if kind == 'HEADER' and header not in (*MEDIA_FORMATS, 'TEXT'):
+            raise ValueError(f'Campaigns cannot send templates with a {header.lower()} header')
+        if kind == 'HEADER' and header in MEDIA_FORMATS:
+            fields.append({'key': 'header_media', 'label': 'Header ' + header.lower() + ' URL',
+                           'component': 'header', 'media': header.lower()})
         elif kind in ('HEADER', 'BODY'):
             for variable in variables(text, named):
                 fields.append({'key': f'{kind.lower()}:{variable}', 'label': f'{kind.capitalize()} value {variable}',
                                'component': kind.lower(), 'name': variable if named else None})
         elif kind == 'BUTTONS':
-            for index, button in enumerate(component.get('buttons') or []):
-                if str(button.get('type') or '').upper() == 'URL' and variables(button.get('url') or '', False):
-                    fields.append({'key': f'button:{index}', 'label': f"{button.get('text') or 'Button'} link value",
-                                   'component': 'button', 'index': index})
+            fields.extend(button_fields(component.get('buttons') or []))
+    return fields
+
+
+def button_fields(buttons):
+    fields = []
+    for index, button in enumerate(buttons):
+        kind = str(button.get('type') or '').upper()
+        if kind not in BUTTONS:
+            raise ValueError(f"Campaigns cannot send templates with {kind.replace('_', ' ') or 'unknown'} buttons")
+        label = button.get('text') or 'Button'
+        if kind == 'URL' and variables(button.get('url') or '', False):
+            fields.append({'key': f'button:{index}', 'label': f'{label} link value', 'component': 'button', 'index': index})
+        elif kind == 'COPY_CODE':
+            fields.append({'key': f'button:{index}', 'label': f'{label} coupon code', 'component': 'button',
+                           'index': index, 'sub_type': 'copy_code'})
     return fields
 
 
@@ -46,8 +65,10 @@ def build_components(fields, values):
     for field in fields:
         value = values[field['key']]
         if field['component'] == 'button':
-            buttons.append({'type': 'button', 'sub_type': 'url', 'index': str(field['index']),
-                            'parameters': [{'type': 'text', 'text': value}]})
+            parameter = ({'type': 'coupon_code', 'coupon_code': value} if field.get('sub_type') == 'copy_code'
+                         else {'type': 'text', 'text': value})
+            buttons.append({'type': 'button', 'sub_type': field.get('sub_type') or 'url', 'index': str(field['index']),
+                            'parameters': [parameter]})
             continue
         target = grouped.setdefault(field['component'], {'type': field['component'], 'parameters': []})
         if field.get('media'):

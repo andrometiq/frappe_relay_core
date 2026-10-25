@@ -83,11 +83,13 @@ def create(title, template_name, language, channel=None, reply_window_hours=72):
     target = whatsapp_channel(channel)
     try:
         hub, _ = whatsapp.checked_client()
-        template = approved_template(hub, template_name, language)
+        snapshot = template_snapshot(approved_template(hub, template_name, language))
     except whatsapp.HubError as exc:
         frappe.throw(str(exc))
+    except ValueError as exc:
+        frappe.throw(str(exc))
     doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation='templates.send',
-        template_name=template_name, language=language, arguments=canonical(template_snapshot(template)),
+        template_name=template_name, language=language, arguments=canonical(snapshot),
         status='Draft', account=connection_value('relay_hub_account'), country=default_region(),
         reply_window_hours=hours, request_key='bulk-' + hashlib.sha256(title.encode()).hexdigest()[:40]))
     internal_save(doc, new=True)
