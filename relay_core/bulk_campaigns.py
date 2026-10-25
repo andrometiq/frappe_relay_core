@@ -149,8 +149,7 @@ def import_job(name):
     doc = frappe.get_doc('Relay Campaign', name)
     if doc.status != 'Importing':
         return
-    in_chunks(name, 'Skipped', lambda names: frappe.db.delete(RECIPIENT, {'name': ['in', names]}))
-    in_chunks(name, 'Pending', lambda names: frappe.db.delete(RECIPIENT, {'name': ['in', names]}))
+    remove_unsent(name)
     mapping, fields = json.loads(doc.column_map), json.loads(doc.arguments)['fields']
     seen, chunk = set(), []
     try:
@@ -167,12 +166,18 @@ def import_job(name):
         doc.last_error = ''
     except ValueError as exc:
         frappe.db.rollback()
+        remove_unsent(name)  # Chunks before the error were committed; none of them may start.
         doc.last_error = str(exc)[:500]
     doc.status = 'Draft'
     internal_save(doc)
     frappe.db.commit()
     from relay_core.bulk_updates import changed
     changed(name)
+
+
+def remove_unsent(campaign):
+    for status in ('Skipped', 'Pending'):
+        in_chunks(campaign, status, lambda names: frappe.db.delete(RECIPIENT, {'name': ['in', names]}))
 
 
 def in_chunks(campaign, status, apply):
@@ -264,6 +269,8 @@ def control(name, action):
         doc = bulk(name, allowed)
         if target == 'Running':
             whatsapp_channel(doc.channel)
+            if doc.status == 'Draft' and doc.last_error:
+                frappe.throw('The last import failed. Fix the file and import the recipients again')
             if not frappe.db.exists(RECIPIENT, {'campaign': name, 'status': 'Pending'}):
                 frappe.throw('Import recipients with at least one valid row first')
             try:

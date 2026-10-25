@@ -317,6 +317,25 @@ class ImportTests(unittest.TestCase):
         self.assertEqual((doc.status, doc.last_error), ('Draft', ''))
         changed.assert_called_once_with('Winter launch')
 
+    def test_failed_import_removes_partial_rows_after_rollback(self):
+        doc = _dict(name='Winter launch', status='Importing', channel='WA', country='IN', source_file='/private/files/a.csv',
+                    column_map=json.dumps({'phone': 'Mobile', 'fields': {}, 'fixed': {}}), arguments=json.dumps({'fields': []}))
+        order = []
+        db = Mock(rollback=Mock(side_effect=lambda: order.append('rollback')))
+        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc))
+
+        def rows(path):
+            yield 2, {'Mobile': '9876543210'}
+            raise ValueError('A campaign supports at most 100000 rows')
+        with patch.object(bulk_campaigns, 'frappe', fake), \
+                patch.object(bulk_campaigns, 'remove_unsent', side_effect=lambda name: order.append('remove')), \
+                patch.object(bulk_campaigns, 'source_path', return_value='/tmp/a.csv'), \
+                patch.object(bulk_campaigns.bulk_sheet, 'read_rows', side_effect=rows), \
+                patch.object(bulk_campaigns, 'internal_save'), patch('relay_core.bulk_updates.changed'):
+            bulk_campaigns.import_job('Winter launch')
+        self.assertEqual(order, ['remove', 'rollback', 'remove'])
+        self.assertEqual((doc.status, doc.last_error), ('Draft', 'A campaign supports at most 100000 rows'))
+
     def test_opt_out_outlives_the_contact_link(self):
         number = '919876543210'
         key = hashlib.sha256(('WA:' + number).encode()).hexdigest()
