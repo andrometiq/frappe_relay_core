@@ -20,7 +20,9 @@ DEFAULT_RATE = 50
 SLICE_SECONDS = 45
 JOB_TIMEOUT = 1800  # A 100,000-row import; a send slice ends long before.
 RETRY_SECONDS = 60
+LOCK_WAIT = 10  # A slice notices a pause or cancel within one Hub call or one second of waiting.
 WAIT = 'relay-bulk-wait:'
+RETRIES = 'relay-bulk-retries:'
 CANCEL_AFTER = 'relay-bulk-cancel-after:'
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
@@ -144,12 +146,12 @@ def import_rows(name, mapping):
     return read(name)
 
 
-def enqueue(method, name, step=0):
-    """Short jobs at the back of the queue. A slice continues under the other of two job IDs,
-    because its own ID is still running and deduplication would drop it."""
+def enqueue(method, name, step=0, slot=None):
+    """Short jobs at the back of the queue. A slice continues under the other of two job IDs, because its own
+    ID is still running and deduplication would drop it; a manager's action uses a third."""
     frappe.enqueue(f'relay_core.bulk_campaigns.{method}', name=name, queue='long', timeout=JOB_TIMEOUT,
-                   job_id=f'relay-bulk-{method}:{name}:{step % 2}', deduplicate=True, enqueue_after_commit=True,
-                   **({'step': step} if step else {}))
+                   job_id=f'relay-bulk-{method}:{name}:{step % 2 if slot is None else slot}', deduplicate=True,
+                   enqueue_after_commit=True, **({'step': step} if step else {}))
 
 
 def import_job(name):
@@ -283,7 +285,8 @@ def control(name, action):
         doc.status, doc.last_error = target, ''
         internal_save(doc)
     if target in ('Running', 'Cancelling'):
-        enqueue('send_job', name)
+        frappe.cache.delete_value(WAIT + name)  # A manager's action tries Hub now, not after a backoff.
+        enqueue('send_job', name, slot='control')
     return read(name)
 
 
@@ -301,16 +304,15 @@ def check_ready(doc):
 
 
 def send_job(name, step=0):
-    """One slice of at most SLICE_SECONDS; it enqueues the next slice instead of sleeping."""
+    """One slice of at most SLICE_SECONDS; it enqueues the next slice instead of running on."""
     deadline, more = time.monotonic() + SLICE_SECONDS, False
     try:
-        with frappe.cache.lock('relay-bulk-send:' + name, timeout=SLICE_SECONDS + 300, blocking_timeout=1):
+        with frappe.cache.lock('relay-bulk-send:' + name, timeout=SLICE_SECONDS + 300, blocking_timeout=LOCK_WAIT):
             doc = frappe.get_doc('Relay Campaign', name)
-            if doc.status == 'Cancelling':
-                more = cancel_remaining(doc, deadline)
-            elif doc.status == 'Running' and is_due(name):
-                frappe.cache.delete_value(WAIT + name)
+            if doc.status == 'Running':
                 more = push(doc, deadline)
+            if not more and current_status(name) == 'Cancelling':
+                more = cancel_remaining(doc, deadline)
     except LockError:
         return  # Another worker owns this campaign.
     from relay_core.bulk_updates import changed
@@ -320,20 +322,33 @@ def send_job(name, step=0):
     frappe.db.commit()
 
 
-def is_due(name):
-    return frappe.utils.flt(frappe.cache.get_value(WAIT + name)) <= time.time()
+def current_status(name):
+    frappe.db.commit()  # A fresh snapshot sees a manager's pause or cancel.
+    return frappe.db.get_value('Relay Campaign', name, 'status')
 
 
 def wait(name, seconds):
-    """Backpressure and retry: the next Hub progress update or recovery run after this time resumes sending."""
+    """Backpressure and retry: the slice, or its successor, sends again after this time."""
     frappe.cache.set_value(WAIT + name, time.time() + seconds, expires_in_sec=int(seconds) + 3600)
 
 
-def resume(name):
-    """Called when Hub reports progress for this campaign; restarts a waiting campaign once it is due."""
-    if frappe.cache.get_value(WAIT + name) and is_due(name):
-        frappe.cache.delete_value(WAIT + name)
-        enqueue('send_job', name)
+def is_waiting(name, deadline):
+    """Sleep up to a second toward the wait time; True while that time is still ahead."""
+    delay = frappe.utils.flt(frappe.cache.get_value(WAIT + name)) - time.time()
+    if delay <= 0:
+        return False
+    time.sleep(max(0, min(delay, 1, deadline - time.monotonic())))
+    return True
+
+
+def retry_later(doc, message):
+    """Show the Hub error and back off 5, 10, 20, 40, then 60 seconds. Self-driving: no scheduler needed."""
+    attempts = frappe.utils.cint(frappe.cache.get_value(RETRIES + doc.name))
+    frappe.cache.set_value(RETRIES + doc.name, attempts + 1, expires_in_sec=3600)
+    wait(doc.name, min(RETRY_SECONDS, 5 * 2 ** attempts))
+    doc.last_error = message[:500]
+    frappe.db.set_value('Relay Campaign', doc.name, 'last_error', doc.last_error, update_modified=False)
+    frappe.db.commit()
 
 
 def push(doc, deadline):
@@ -341,8 +356,10 @@ def push(doc, deadline):
     snapshot = json.loads(doc.arguments)
     hub = whatsapp.client()
     while time.monotonic() < deadline:
-        if frappe.db.get_value('Relay Campaign', doc.name, 'status') != 'Running':
+        if current_status(doc.name) != 'Running':
             return False
+        if is_waiting(doc.name, deadline):
+            continue
         rows = frappe.db.sql(f'''SELECT name, request_key, destination, arguments FROM `tab{RECIPIENT}`
             WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
@@ -355,17 +372,13 @@ def push(doc, deadline):
         try:
             result = hub.call_tool('whatsapp.bulk', {'messages': messages})
         except whatsapp.HubError as exc:
-            # Same keys are pushed again after the wait; Hub returns the rows it already holds.
-            frappe.db.set_value('Relay Campaign', doc.name, 'last_error', whatsapp.failure_message(exc)[:500],
-                                update_modified=False)
-            wait(doc.name, RETRY_SECONDS)
-            return False
+            retry_later(doc, whatsapp.failure_message(exc))  # The same keys go again; Hub returns rows it holds.
+            continue
         admitted = admit(rows, result.get('deliveries') or [])
         from relay_core.bulk_timeline import record
         record(doc, snapshot, [row for row in rows if row.request_key in admitted])
         if doc.last_error:  # Hub accepted again after a retry.
-            frappe.db.set_value('Relay Campaign', doc.name, 'last_error', '', update_modified=False)
-            doc.last_error = ''
+            clear_error(doc)
         frappe.db.commit()
         from relay_core.bulk_updates import changed
         changed(doc.name)
@@ -373,8 +386,13 @@ def push(doc, deadline):
         if queued >= HIGH_WATER:
             rate = frappe.utils.cint(result.get('messages_per_second')) or DEFAULT_RATE
             wait(doc.name, (queued - LOW_WATER) / rate)
-            return False
     return True
+
+
+def clear_error(doc):
+    frappe.cache.delete_value(RETRIES + doc.name)
+    frappe.db.set_value('Relay Campaign', doc.name, 'last_error', '', update_modified=False)
+    doc.last_error = ''
 
 
 def admit(rows, deliveries):

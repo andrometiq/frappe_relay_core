@@ -173,14 +173,14 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(counts, {'total': 12, 'skipped': 3, 'queued': 2, 'sent': 9, 'delivered': 5, 'read': 5,
                                   'failed': 1, 'replied': 2})
 
-    def test_project_batch_uses_sql_guards_updates_the_timeline_and_resumes_each_campaign_once(self):
+    def test_project_batch_uses_sql_guards_updates_the_timeline_and_marks_each_campaign_once(self):
         db = Mock()
         fake = SimpleNamespace(db=db, get_all=Mock(return_value=['Winter launch']))
         rows = [dict(UpdateContractTests.row, key='b'), dict(UpdateContractTests.row, id=2, key='a', state='rejected',
                 status='', message_id='', error={'code': 132001, 'title': 'Template missing'})]
         with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'changed') as changed, \
                 patch.object(bulk_updates, 'connection_value', return_value='site-a'), \
-                patch('relay_core.bulk_timeline.apply') as timeline, patch('relay_core.bulk_campaigns.resume') as resume:
+                patch('relay_core.bulk_timeline.apply') as timeline:
             bulk_updates.project_batch(_dict(name='event', account='site-a'), rows)
             with self.assertRaises(ValueError):
                 bulk_updates.project_batch(_dict(name='event', account='other'), rows)
@@ -192,7 +192,6 @@ class ApplyTests(unittest.TestCase):
             {'key': 'a', 'status': 'Failed', 'message_id': '', 'reason': 'Meta error 132001: Template missing'},
             {'key': 'b', 'status': 'Delivered', 'message_id': 'wamid.one', 'reason': ''}])
         changed.assert_called_once_with('Winter launch')
-        resume.assert_called_once_with('Winter launch')
 
     def test_a_committed_change_enqueues_one_trailing_refresh_that_waits_out_the_throttle(self):
         cache, callbacks = FakeCache(), []
@@ -309,6 +308,7 @@ class SenderTests(unittest.TestCase):
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
         self.enterContext(patch('relay_core.bulk_updates.changed'))
+        self.sleep = self.enterContext(patch.object(bulk_campaigns.time, 'sleep'))
         self.doc = _dict(name='Winter launch', template_name='notice', language='en_US', status='Running',
                          arguments=json.dumps({'template': POSITIONAL, 'fields': [{'key': 'body:1', 'component': 'body', 'name': None}]}))
 
@@ -341,7 +341,6 @@ class SenderTests(unittest.TestCase):
         recorded = self.timeline.call_args_list[0].args[2]
         self.assertEqual(len(recorded), 49)  # The rejected row never reaches the timeline.
         self.assertNotIn('bulk-k-1', [row.request_key for row in recorded])
-        self.assertEqual(self.db.commit.call_count, 2)
 
     def test_a_later_accepted_batch_clears_the_retry_error(self):
         self.selects([self.rows(5), []])
@@ -356,51 +355,54 @@ class SenderTests(unittest.TestCase):
                 patch.object(bulk_campaigns.time, 'monotonic', side_effect=[0, 100]):
             self.assertTrue(bulk_campaigns.push(self.doc, 30))
 
-    def test_backpressure_waits_until_the_low_water_mark_without_sleeping(self):
-        self.selects([self.rows(50)])
-        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=self.hub(queued=1500)), \
-                patch.object(bulk_campaigns.time, 'time', return_value=1000.0):
+    def test_backpressure_waits_inside_the_slice_until_the_low_water_mark(self):
+        self.selects([self.rows(50), self.rows(50, 50), []])
+        clock = iter([1000.0, 1000.0, 1004.0, 1009.5, 1010.0, 1010.0, 1030.0])
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=self.hub(queued=1500)) as client, \
+                patch.object(bulk_campaigns.time, 'time', side_effect=lambda: next(clock)):
             self.assertFalse(bulk_campaigns.push(self.doc, time.monotonic() + 30))
-            self.assertEqual(self.cache.values[bulk_campaigns.WAIT + 'Winter launch'], 1010.0)  # (1500 - 500) / 100
-            self.assertFalse(bulk_campaigns.is_due('Winter launch'))
+        self.assertEqual(client.return_value.call_tool.call_count, 2)  # No scheduler or Hub update needed.
+        self.assertEqual([c.args[0] for c in self.sleep.call_args_list], [1, 0.5])  # (1500 - 500) / 100 s, a second at a time.
 
-    def test_hub_failure_keeps_the_hub_reason_waits_and_keeps_rows_pending(self):
-        self.db.sql.return_value = self.rows(1)
+    def test_hub_failure_shows_the_reason_backs_off_and_retries_the_same_rows_in_the_slice(self):
+        self.selects([self.rows(1), self.rows(1), []])
         hub = Mock()
         error = HubError('Hub could not complete', detail='WhatsApp rejected this request (code 132001): Template missing')
-        hub.call_tool.side_effect = error
+        hub.call_tool.side_effect = [error, {'queued': 1, 'deliveries': [{'id': '7', 'key': 'bulk-k-0', 'state': 'queued'}]}]
+        clock = iter([1000.0, 1000.0, 1006.0, 1006.0])
         with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), \
+                patch.object(bulk_campaigns.time, 'time', side_effect=lambda: next(clock, 1006.0)), \
                 patch.object(bulk_campaigns.whatsapp, 'failure_message', side_effect=manager_text):
             self.assertFalse(bulk_campaigns.push(self.doc, time.monotonic() + 30))
-        self.assertEqual(self.db.set_value.call_args.args[3],
+        self.assertEqual(self.db.set_value.call_args_list[0].args[3],
                          'Hub rejected this operation: WhatsApp rejected this request (code 132001): Template missing')
-        self.assertFalse(bulk_campaigns.is_due('Winter launch'))
-        self.assertFalse([c for c in self.db.sql.call_args_list if c.args[0].lstrip().startswith('UPDATE')])
+        self.assertEqual(self.db.set_value.call_args_list[-1].args[3], '')  # The retry was accepted.
+        self.assertEqual([len(c.args[1]['messages']) for c in hub.call_tool.call_args_list], [1, 1])
+        self.assertNotIn(bulk_campaigns.RETRIES + 'Winter launch', self.cache.values)
 
-    def test_send_job_continues_under_the_other_job_id_and_skips_when_not_due(self):
+    def test_retry_backs_off_to_a_minute(self):
+        delays = []
+        with patch.object(bulk_campaigns, 'wait', side_effect=lambda name, seconds: delays.append(seconds)):
+            for _ in range(6):
+                bulk_campaigns.retry_later(self.doc, 'Hub is unavailable')
+        self.assertEqual(delays, [5, 10, 20, 40, 60, 60])
+        self.assertEqual(self.doc.last_error, 'Hub is unavailable')
+
+    def test_send_job_continues_under_the_other_job_id_and_cancels_after_a_cancel_mid_slice(self):
         self.fake.get_doc = Mock(return_value=self.doc)
-        with patch.object(bulk_campaigns, 'push', return_value=True) as push:
+        with patch.object(bulk_campaigns, 'push', return_value=True), patch.object(bulk_campaigns, 'cancel_remaining') as cancel:
             bulk_campaigns.send_job('Winter launch', step=3)
-            ids = [c.kwargs['job_id'] for c in self.fake.enqueue.call_args_list]
-            self.assertEqual(ids, ['relay-bulk-send_job:Winter launch:0'])
-            self.assertEqual(self.fake.enqueue.call_args.kwargs['step'], 4)
-            bulk_campaigns.wait('Winter launch', 60)
-            self.fake.enqueue.reset_mock(); push.reset_mock()
+            cancel.assert_not_called()
+        ids = [c.kwargs['job_id'] for c in self.fake.enqueue.call_args_list]
+        self.assertEqual(ids, ['relay-bulk-send_job:Winter launch:0'])
+        self.assertEqual(self.fake.enqueue.call_args.kwargs['step'], 4)
+        self.fake.enqueue.reset_mock()
+        self.db.get_value.return_value = 'Cancelling'  # The manager cancelled while this slice pushed.
+        with patch.object(bulk_campaigns, 'push', return_value=False), \
+                patch.object(bulk_campaigns, 'cancel_remaining', return_value=False) as cancel:
             bulk_campaigns.send_job('Winter launch')
-            push.assert_not_called()
-            self.fake.enqueue.assert_not_called()
-
-    def test_resume_restarts_only_a_waiting_campaign_that_is_due(self):
-        bulk_campaigns.resume('Winter launch')
+        cancel.assert_called_once()
         self.fake.enqueue.assert_not_called()
-        with patch.object(bulk_campaigns.time, 'time', return_value=1000.0):
-            bulk_campaigns.wait('Winter launch', 5)
-            bulk_campaigns.resume('Winter launch')
-            self.fake.enqueue.assert_not_called()
-        with patch.object(bulk_campaigns.time, 'time', return_value=1006.0):
-            bulk_campaigns.resume('Winter launch')
-        self.assertEqual(self.fake.enqueue.call_args.kwargs['job_id'], 'relay-bulk-send_job:Winter launch:0')
-        self.assertNotIn(bulk_campaigns.WAIT + 'Winter launch', self.cache.values)
 
     def test_admission_mapping_returns_the_rows_hub_holds(self):
         held = bulk_campaigns.admit(self.rows(3), [{'key': 'bulk-k-0', 'id': '7', 'state': 'queued'},
@@ -441,7 +443,7 @@ class SenderTests(unittest.TestCase):
 class ControlTests(unittest.TestCase):
     def test_start_checks_the_template_before_taking_the_lock_and_rechecks_status_inside(self):
         order = []
-        cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()))
+        cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()), delete_value=Mock())
         fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=cache, utils=UTILS, enqueue=Mock(),
                                session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Draft', channel='WA', template_name='notice', language='en', last_error='',
