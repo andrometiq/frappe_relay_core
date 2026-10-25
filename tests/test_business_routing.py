@@ -16,6 +16,7 @@ class RoutingFixtures:
         self.verified = True
         self.db = Mock()
         self.db.get_value.side_effect = self.get_value
+        self.db.sql.return_value = ()
         self.fake = SimpleNamespace(session=_dict(user='callback-service'), db=self.db, get_doc=self.get_doc, enqueue=Mock(), _dict=_dict,
             utils=SimpleNamespace(now_datetime=lambda: self.now,
                 get_datetime=lambda value: value if isinstance(value, datetime) else datetime.fromisoformat(value),
@@ -77,6 +78,28 @@ class RoutingFixtures:
 
 
 class RoutingTests(RoutingFixtures, unittest.TestCase):
+    def test_campaign_reply_routes_like_a_new_message(self):
+        from relay_core.message_updates import provider_key
+        self.links = self.links[:1]
+        self.db.sql.return_value = ((1,),)
+        # Before Hub reports the send's provider ID, the quoted message is unknown.
+        self.assertEqual(self.resolve(context={'reply_to_message_id': 'wamid.campaign-send'}), (self.links[0], 'single_link'))
+        query, values = self.db.sql.call_args.args
+        self.assertIn('Relay Campaign Recipient', query)
+        self.assertEqual(values, {'channel': 'channel', 'endpoint': '15550000001', 'reply': 'wamid.campaign-send'})
+        # After it, the quoted timeline message has no business of its own.
+        self.references[provider_key('channel', '15550000001', 'wamid.campaign-send')] = _dict(business_doctype=None, business_name=None)
+        self.assertEqual(self.resolve('second', context={'reply_to_message_id': 'wamid.campaign-send'}), (self.links[0], 'single_link'))
+
+    def test_unlinked_reference_outside_campaigns_still_waits_for_triage(self):
+        from relay_core.message_updates import provider_key
+        self.references[provider_key('channel', '15550000001', 'outgoing')] = _dict(business_doctype=None, business_name=None)
+        self.assertEqual(self.resolve(context={'reply_to_message_id': 'outgoing'}), (None, 'triage_unlinked_reference'))
+
+    def test_unknown_reply_reference_still_waits_for_triage(self):
+        self.links = self.links[:1]
+        self.assertEqual(self.resolve(context={'reply_to_message_id': 'wamid.unknown'}), (None, 'triage_unresolved_reference'))
+
     def test_unverified_email_never_uses_single_link_or_reply_context(self):
         self.links = self.links[:1]
         for status in ('fail', 'unverified', None):

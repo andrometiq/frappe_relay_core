@@ -113,9 +113,20 @@ def incoming_reference(contact, channel, endpoint, context, links=None):
         if target and (target.business_doctype, target.business_name) in links:
             context['business_rule'] = 'reply_context'
             return target.business_doctype, target.business_name
+        if target and not target.business_doctype and campaign_send(channel, endpoint, reply):
+            return None  # A campaign send names no business; the sender's links decide.
         if target:
             context['business_rule'] = 'triage_unlinked_reference'
     return None
+
+
+def campaign_send(channel, endpoint, reply):
+    """The reply quotes a bulk campaign send to this number. Hub reports provider IDs in
+    windows, so a sent row whose ID has not arrived yet also counts."""
+    return bool(frappe.db.sql('''SELECT 1 FROM `tabRelay Campaign Recipient` r JOIN `tabRelay Campaign` c ON c.name=r.campaign
+        WHERE c.channel=%(channel)s AND r.destination=%(endpoint)s
+        AND (r.provider_id=%(reply)s OR (r.attempted=1 AND IFNULL(r.provider_id, '')='')) LIMIT 1''',
+        dict(channel=channel, endpoint=endpoint, reply=reply)))
 
 
 def email_reference(contact, channel, endpoint, context, links):

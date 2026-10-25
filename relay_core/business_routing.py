@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import frappe
 from relay_core.automation.provenance import conversation_key
 from relay_core.automation.service import internal_save
-from relay_core.business_access import candidates, incoming_reference
+from relay_core.business_access import campaign_send, candidates, incoming_reference
 
 
 def resolve(contact, channel, endpoint, context, row, event, override=None, position=0):
@@ -60,7 +60,7 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                 row['message_data'] = {'kind': 'text', 'text': row['text']['body']}
             else:
                 rule = 'triage_invalid_choice'
-        elif context.get('reply_to_message_id'):
+        elif context.get('reply_to_message_id') and not campaign_send(channel, endpoint, context['reply_to_message_id']):
             rule = 'triage_unresolved_reference'
         elif len(links) == 1:
             business, rule = links[0], 'single_link'
