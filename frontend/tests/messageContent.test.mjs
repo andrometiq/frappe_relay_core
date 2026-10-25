@@ -17,3 +17,20 @@ test('aggregate reaction counts supersede actor observations without double coun
   assert.deepEqual(reactionLabels({'1':[]}), [])
   assert.equal(reactionLabels({_counts:Array(100).fill({type:{emoji:'👍'},count:1})}).length,20)
 })
+
+test('voice transcripts show stored text or an honest status', async () => {
+  const { transcriptState } = await import('../src/components/messageContent.js')
+  assert.deepEqual(transcriptState({ transcript: 'Send the blue shirts', transcript_status: 'Completed' }), { state: 'available', text: 'Send the blue shirts' })
+  assert.equal(transcriptState({ transcript_status: 'Pending' }).text, 'Transcript pending…')
+  assert.match(transcriptState({ transcript_status: 'Unavailable' }).text, /^Transcript unavailable/)
+  assert.match(transcriptState({ transcript_status: 'Failed' }).text, /failed/)
+  assert.equal(transcriptState({}).state, 'legacy')
+})
+test('unsupported messages show the WhatsApp reason and order lines stay readable', async () => {
+  const { unsupportedNotice, orderLines } = await import('../src/components/messageContent.js')
+  assert.deepEqual(unsupportedNotice({ kind: 'unsupported', unsupported: { reason: 'Poll messages are not supported by WhatsApp Business', details: 'Message type is currently not supported.', code: 131051 } }),
+    { reason: 'Poll messages are not supported by WhatsApp Business', meta: 'Message type is currently not supported. · code 131051' })
+  assert.equal(unsupportedNotice({ kind: 'unsupported' }).reason, 'This message type is not supported')
+  assert.deepEqual(orderLines({ order: { items: [{ product_retailer_id: 'shirt', quantity: 2, item_price: 30, currency: 'INR' }, { product_retailer_id: 'cap' }] } }),
+    ['2 × shirt · INR 30', '1 × cap'])
+})

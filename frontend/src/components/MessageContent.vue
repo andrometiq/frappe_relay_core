@@ -6,6 +6,8 @@ import {
   stickerURL,
   mapURL,
   reactionLabels,
+  unsupportedNotice,
+  orderLines,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
 const chat=inject(messagesKey,null), translationOpen=ref(false);
@@ -171,6 +173,18 @@ const video = computed(
         <pre class="whitespace-pre-wrap break-words">{{ data.vcard }}</pre>
       </details>
     </div>
+    <div v-else-if="data.kind === 'order'" class="rounded border p-3 space-y-1" aria-label="Order">
+      <strong>{{ message.content }}</strong>
+      <p v-for="(line, index) in orderLines(data)" :key="index">{{ line }}</p>
+    </div>
+    <p v-else-if="data.kind === 'system'" class="text-xs text-ink-gray-6 italic" role="note">
+      {{ message.content || "WhatsApp system update" }}
+    </p>
+    <p v-else-if="data.kind === 'revoked'" class="text-ink-gray-5 italic">Message deleted by sender</p>
+    <div v-else-if="data.kind === 'unsupported'" class="space-y-1" role="note">
+      <p class="text-ink-gray-7">{{ unsupportedNotice(data).reason }}</p>
+      <p v-if="unsupportedNotice(data).meta" class="text-xs text-ink-gray-5">WhatsApp: {{ unsupportedNotice(data).meta }}</p>
+    </div>
     <div v-else>
       <p>{{ data.caption || message.content || data.kind }}</p>
       <p v-if="data.media?.file_name || data.media?.filename">
@@ -180,6 +194,12 @@ const video = computed(
     </template>
     <MessageTranslation v-if="translationEnabled && ['text','audio','voice'].includes(data.kind) && !message._pending" :message="message" @visible="translationOpen=$event" />
     <MessageTranscript v-if="['audio','voice'].includes(data.kind) && !message._pending" :message="message" />
+    <p v-if="data.referral" class="text-xs text-ink-gray-5 break-words">
+      From ad{{ data.referral.headline ? ": " + data.referral.headline : "" }}
+    </p>
+    <p v-if="message.status === 'Failed' && message.delivery_error" class="text-xs text-ink-red-3 break-words" role="alert">
+      {{ message.delivery_error }}
+    </p>
     <dl
       v-if="data.form_response"
       class="rounded border p-3 text-sm space-y-2"
