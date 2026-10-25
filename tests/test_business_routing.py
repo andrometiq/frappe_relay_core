@@ -275,6 +275,7 @@ class RoutingBoundaryTests(unittest.TestCase):
         db.get_value.side_effect = lambda dt, *args, **kwargs: None if dt == 'Relay Ticket' else 'contact'
         fake = SimpleNamespace(db=db, get_doc=get_doc, get_all=Mock(return_value=['channel']))
         with patch.object(projection, 'frappe', fake), patch.object(projection, 'apply_updates', return_value='Ignored'), \
+                patch('relay_core.bulk_updates.link_reply'), \
              patch('relay_core.tickets.source_episode', return_value=('provider-key', 'source-action')), \
              patch.object(whatsapp_templates, 'project', return_value=False), \
              patch.object(routing, 'resolve', side_effect=[(('Supplier', 'supplier'), 'sender_choice'),

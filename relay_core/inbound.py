@@ -299,6 +299,70 @@ def receive_channel_statuses(**_ignored):
     return {'accepted':len(payload['statuses'])}
 
 
+BULK_STATES = ('queued', 'submitting', 'submitted', 'rejected', 'uncertain', 'cancelled')
+
+
+def validate_bulk_update_callback(raw, timestamp, signature, secret, expected_account):
+    """Latest-state rows for campaign deliveries, coalesced by Hub."""
+    from datetime import datetime
+    payload = authenticated_payload(raw, timestamp, signature, secret, expected_account)
+    if set(payload) != {'account', 'updates'}:
+        raise ValueError('Invalid bulk update fields')
+    rows = payload['updates']
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 500:
+        raise ValueError('Expected 1 to 500 bulk updates')
+    if len(json.dumps(rows, separators=(',', ':'), ensure_ascii=False).encode()) > 512 * 1024:
+        raise ValueError('Bulk update batch exceeds byte limit')
+    previous = 0
+    for row in rows:
+        if not isinstance(row, dict) or not {'id','key','state','message_id','status','updated_at'} <= set(row) <= {'id','key','state','message_id','status','error','updated_at'}:
+            raise ValueError('Invalid bulk update row')
+        if type(row['id']) is not int or not previous < row['id'] <= 9223372036854775807:
+            raise ValueError('Bulk updates must be ordered by delivery identity')
+        previous = row['id']
+        if not isinstance(row['key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', row['key']):
+            raise ValueError('Invalid bulk request key')
+        if row['state'] not in BULK_STATES or row['status'] not in ('', 'sent', 'delivered', 'read', 'failed'):
+            raise ValueError('Invalid bulk delivery state')
+        if not isinstance(row['message_id'], str) or len(row['message_id']) > 300 or (row['status'] and not row['message_id']):
+            raise ValueError('Invalid provider message identity')
+        error = row.get('error')
+        if error is not None:
+            if not isinstance(error, dict) or set(error) - {'code', 'title', 'message'}:
+                raise ValueError('Invalid provider error')
+            if 'code' in error and (type(error['code']) is not int or not 0 <= error['code'] < 2**31):
+                raise ValueError('Invalid provider error code')
+            for field in ('title', 'message'):
+                if field in error and (not isinstance(error[field], str) or len(error[field]) > 300
+                                       or any(ord(c) < 32 for c in error[field])):
+                    raise ValueError('Invalid provider error text')
+        if not isinstance(row['updated_at'], str) or len(row['updated_at']) > 40:
+            raise ValueError('Invalid update timestamp')
+        if datetime.fromisoformat(row['updated_at'].replace('Z', '+00:00')).tzinfo is None:
+            raise ValueError('Update timestamp requires a timezone')
+    return payload
+
+
+@frappe.whitelist(methods=['POST'])
+@retry_callback
+def receive_bulk_updates(**_ignored):
+    """Store one signed campaign update batch; projection applies it in a worker."""
+    if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
+        frappe.throw('Not permitted',frappe.PermissionError)
+    try:
+        payload = validate_bulk_update_callback(frappe.request.get_data(),
+            frappe.request.headers.get('X-Relay-Timestamp'),frappe.request.headers.get('X-Relay-Signature'),
+            connection_value('relay_callback_secret'),connection_value('relay_hub_account'))
+    except (ValueError,TypeError):
+        frappe.throw('Invalid Relay bulk update callback',frappe.PermissionError)
+    encoded=json.dumps(payload,sort_keys=True,separators=(',',':'))
+    key='bulk-updates:'+hashlib.sha256(encoded.encode()).hexdigest()
+    if not frappe.db.exists('Relay Hub Event',{'event_key':key}):
+        insert_event({'event_key':key,'account':payload['account'],'hub_event_id':str(payload['updates'][-1]['id']),
+            'payload':json.dumps({'bulk_updates':payload['updates']},sort_keys=True,separators=(',',':'))})
+    return {'accepted':len(payload['updates'])}
+
+
 def split_payload(payload):
     """Mixed Meta envelopes get independent fast-message and status jobs."""
     try:

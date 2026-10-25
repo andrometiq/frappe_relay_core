@@ -102,6 +102,13 @@ def project(name, business_overrides=None):
         from relay_core.channel_statuses import project_batch
         project_batch(event, payload['channel_statuses'])
         return
+    if 'bulk_updates' in payload:
+        from relay_core.bulk_updates import project_batch as project_bulk
+        try:
+            project_bulk(event, payload['bulk_updates'])
+        except (ValueError, TypeError, KeyError):
+            set_status(name, 'Failed')
+        return
     channels = frappe.get_all('Relay Channel', filters={'account': event.account, 'channel': medium, 'enabled': 1}, pluck='name', limit_page_length=2)
     if len(channels) != 1:
         set_status(name, 'Uncategorized'); return
@@ -118,6 +125,10 @@ def project(name, business_overrides=None):
     unresolved = update_status == 'Uncategorized'
     decisions = json.loads(event.get('routing_decisions') or '{}')
     from relay_core.tickets import ensure_episode, source_episode, triage_owner
+    if medium == 'WhatsApp' and incoming:
+        from relay_core.bulk_updates import link_reply
+        for row in incoming:
+            link_reply(row)
     for position, row in enumerate(incoming):
         key = hashlib.sha256((event.account + ':' + channel + ':' + row['id']).encode()).hexdigest()
         context = row.get('provider_context', {})
