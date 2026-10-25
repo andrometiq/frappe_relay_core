@@ -1,5 +1,5 @@
 """Bulk campaign reply links and counters on a real site: replies before the provider ID, cancelled campaigns,
-the Redis refresh mark, and the reply lookup plans with the destination + provider ID index on a scratch table.
+the Redis refresh mark, and the reply lookup plans with the real destination + provider ID index on a scratch copy.
 Run from the bench sites folder: PYTHONPATH=<worktree>:<worktree>/tests CI=1 ../env/bin/python -B <this file>
 """
 import json
@@ -93,7 +93,6 @@ try:
     frappe.cache.srem(bulk_updates.DIRTY, title)
 
     frappe.db.sql(f'CREATE TEMPORARY TABLE scratch_recipient LIKE `tab{RECIPIENT}`')
-    frappe.db.sql('ALTER TABLE scratch_recipient DROP INDEX destination_index, ADD INDEX destination_provider (destination, provider_id)')
     frappe.db.sql('''INSERT INTO scratch_recipient (name, creation, modified, campaign, destination, provider_id, attempted, status)
         SELECT CONCAT('scratch-', seq), NOW(6), NOW(6), %s, CONCAT('9190', LPAD(seq MOD 5000, 8, '0')),
         IF(seq MOD 3, CONCAT('wamid.scratch.', seq), ''), 1, 'Read' FROM seq_1_to_20000''', title)
