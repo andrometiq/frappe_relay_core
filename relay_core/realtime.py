@@ -9,6 +9,8 @@ RESOURCES = {
     'Relay Campaign': 'campaigns', 'Relay Campaign Recipient': 'campaigns',
     'Relay Conversation Summary': 'reports', 'Relay Notification': 'notifications',
     'Relay Case': 'cases', 'Relay Flow': 'flows', 'Relay Flow Run': 'flows',
+    'Relay Automation Run': 'tickets', 'Relay Flow Action': 'tickets',
+    'Relay Message Action': 'tickets',
 }
 
 def changed(doc, method=None):
@@ -19,7 +21,10 @@ def changed(doc, method=None):
         return
     # No document IDs, message text, addresses or identities in shared events.
     frappe.publish_realtime('relay_changed', {'kind': kind},
-        room=frappe.realtime.get_doctype_room(doc.doctype), after_commit=True)
+        room=frappe.realtime.get_doctype_room('Relay Ticket' if kind == 'tickets' else doc.doctype), after_commit=True)
+    if doc.doctype == 'Relay Business Event Delivery' or doc.doctype == 'Relay Message' and doc.get('ticket'):
+        frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
+            room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
     contact = doc.get('relay_contact')
     if contact:
         contact_changed(contact, kind)
