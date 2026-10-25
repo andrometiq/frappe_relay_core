@@ -9,3 +9,8 @@ export function mediumOptions(capabilities) {
   const all = ['WhatsApp', 'Telegram', 'Email'].every(provider => enabled.includes(provider))
   return all ? [{ label: 'All channels', value: 'all' }, ...enabled] : enabled
 }
+
+// Message bubbles name their channel only when more than one channel is switched on.
+export function multipleChannels(capabilities) {
+  return (capabilities?.enabled_channels || []).length > 1
+}

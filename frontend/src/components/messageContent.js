@@ -64,3 +64,15 @@ export function orderLines(data) {
     return `${item.quantity ?? 1} × ${item.product_retailer_id || 'Product'}${price}`
   })
 }
+
+// Sent templates keep their rendered parts beside the template name.
+export function templateParts(data) {
+  const template = data?.template
+  if (!template?.name) return null
+  return {
+    header: template.header || '',
+    footer: template.footer || '',
+    buttons: Array.isArray(template.buttons) ? template.buttons : [],
+    caption: typeof data.campaign === 'string' && data.campaign ? `Campaign: ${data.campaign}` : `Template · ${template.name}`,
+  }
+}

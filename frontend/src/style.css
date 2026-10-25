@@ -757,3 +757,29 @@
   .v1-tabs { flex-wrap:wrap; gap:2px; padding:4px 12px; }
   .workspace-heading-actions { margin-left:auto; }
 }
+
+/* WhatsApp-style bubbles: time and ticks sit in the last text line; actions float outside the bubble. */
+.relay-shell .conversation-bubble{padding:6px 9px;outline:none}
+.relay-shell .conversation-bubble:focus-visible{box-shadow:0 0 0 2px var(--outline-blue-2)}
+.relay-shell .conversation-bubble>.message-channel{display:block;margin:0 0 2px;font-size:11px}
+.relay-shell .conversation-bubble .message-content{--message-meta-width:46px}
+.relay-shell .conversation-bubble.ml-auto .message-content{--message-meta-width:64px}
+.relay-shell .conversation-bubble .message-content>p:last-child::after,.relay-shell .conversation-bubble .message-template>:last-child::after{content:"";display:inline-block;width:var(--message-meta-width)}
+.relay-shell .conversation-bubble>.message-footer{position:absolute;right:8px;bottom:3px;gap:4px;margin:0;font-size:11px;line-height:16px}
+.relay-shell .conversation-bubble:not(:has(.message-content>p:last-child,.message-template>:last-child))>.message-footer,.relay-shell .conversation-bubble>.message-footer:has(.pending-status){position:static;margin-top:2px;flex-wrap:wrap;white-space:normal}
+.message-template{display:grid;gap:3px}
+.message-template>strong{font-weight:600}
+.message-template-footer,.message-template-caption{display:block;color:var(--ink-gray-5);font-size:12px}
+.message-template-caption{font-size:11px}
+.message-template-buttons{display:flex;flex-wrap:wrap;gap:4px;margin:3px 0 1px}
+.message-template-buttons>li{padding:3px 10px;border:1px solid var(--outline-gray-2);border-radius:999px;background:var(--surface-white);color:var(--ink-blue-3);font-size:12px}
+.relay-shell .conversation-bubble>.message-actions{margin-top:0!important;position:absolute;top:50%;left:100%;z-index:3;display:flex;padding-left:4px;opacity:0;pointer-events:none;transform:translateY(-50%)}
+.relay-shell .conversation-bubble.ml-auto>.message-actions{left:auto;right:100%;padding:0 4px 0 0}
+.relay-shell .conversation-bubble:is(:hover,:focus-within)>.message-actions{opacity:1;pointer-events:auto}
+@media (max-width:900px),(hover:none){
+  .relay-shell .conversation-bubble>.message-actions,.v1-shell .conversation-bubble>.message-actions{top:auto;bottom:calc(100% + 2px);left:0;padding:0;border:1px solid var(--outline-gray-2);border-radius:8px;background:var(--surface-white);box-shadow:var(--relay-shadow);opacity:0;transform:none}
+  .relay-shell .conversation-bubble.ml-auto>.message-actions{left:auto;right:0}
+  .relay-shell .conversation-bubble:not(:focus-within)>.message-actions{display:none}
+  .relay-shell .conversation-bubble:focus-within>.message-actions{opacity:1;pointer-events:auto}
+}
+

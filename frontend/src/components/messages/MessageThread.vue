@@ -6,11 +6,12 @@ import LoadingRows from "../LoadingRows.vue";
 import ReadByBubble from "./ReadByBubble.vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import ParticipantReceipts from "./ParticipantReceipts.vue";
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } from "vue";
 import { Button, FeatherIcon, Dropdown, Dialog } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL } from "../messageContent";
+import { multipleChannels } from "../../services/enabledChannels";
 const props = defineProps({
   rows: Array,
   contactName: String,
@@ -36,6 +37,8 @@ const emit = defineEmits([
   "quote",
   "note",
 ]);
+const capabilities = inject("relayCapabilities", ref({}));
+const showChannel = computed(() => multipleChannels(capabilities.value));
 const cursorReaders=ref([]);
 let readerGeneration=0;
 const readersByMessage=computed(()=>{const result={};for(const reader of cursorReaders.value)(result[reader.last_read_message]||=[]).push(reader);return result;});
@@ -147,11 +150,17 @@ function trackVisible() {
   }, 400);
 }
 onBeforeUnmount(() => clearTimeout(visibleTimer));
+// Follows the newest message while the reader is at the end, also when media grows the thread.
+let pinned = true;
+function keepPinned() {
+  if (pinned && viewport.value) viewport.value.scrollTop = viewport.value.scrollHeight;
+}
 async function restorePosition() {
   await nextTick();
   const node=viewport.value;if(!node)return;
-  const name=props.position?.name || props.anchor;
+  const name=props.position?.atBottom ? props.anchor : props.position?.name || props.anchor;
   const target=[...node.querySelectorAll('[data-message]')].find(row=>row.dataset.message===name);
+  pinned=!target;
   if(target)node.scrollTop+=target.getBoundingClientRect().top-node.getBoundingClientRect().top-(props.position?.offset??20);
   else node.scrollTop=node.scrollHeight;
   trackVisible();
@@ -210,6 +219,7 @@ watch(
 function scrolled() {
   trackVisible();
   const node = viewport.value;
+  if (node) pinned = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
   if (
     node &&
     node.scrollTop < 32 &&
@@ -267,8 +277,9 @@ function actions(message) {
   <div
     ref="viewport"
     class="message-thread"
-    aria-label="WhatsApp conversation"
+    aria-label="Conversation"
     @scroll.passive="scrolled"
+    @load.capture="keepPinned"
   >
     <LoadingRows v-if="busy && !rows.length" label="Loading messages…" :count="3" />
     <div v-if="!rows.length && !busy" class="conversation-empty">
@@ -291,6 +302,7 @@ function actions(message) {
           'anchored-message': message.name === anchor,
         }"
         :data-message="message._pending ? null : message.name"
+        tabindex="-1"
       >
         <div v-if="message.contact_label" class="message-sender">
           {{ message.direction === "Outgoing" ? "To " + readableName(message.contact_label, "Contact") : readableName(message.contact_label, "Contact") }}
@@ -310,7 +322,7 @@ function actions(message) {
             quoted(message)?.content || "View original message"
           }}</span>
         </button>
-        <span class="text-xs text-ink-gray-5">{{ objectValue(message.provider_context).provider }}</span>
+        <span v-if="showChannel" class="message-channel">{{ objectValue(message.provider_context).provider }}</span>
         <MessageContent :message="message" :show-reply-reference="false" />
         <p v-if="message._pending && message.error" class="text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
         <footer class="message-footer">
@@ -351,24 +363,24 @@ function actions(message) {
           <span v-if="message._pending" class="pending-status">{{channelStatus(message)}}
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
-          <div v-else class="message-actions">
-            <Button v-if="canReact(message)" icon="smile" label="Add reaction" title="Add reaction"
-              :disabled="busy" @click="reactionTarget = reactionTarget === message.name ? null : message.name" />
-            <Button
-              icon="corner-up-left"
-              label="Reply"
-              title="Reply"
-              :disabled="busy"
-              @click="emit('reply', message)"
-            /><Dropdown :options="actions(message)" placement="right"
-              ><Button
-                icon="more-horizontal"
-                label="Message actions"
-                title="Message actions"
-                :disabled="busy"
-            /></Dropdown>
-          </div>
         </footer>
+        <div v-if="!message._pending" class="message-actions">
+          <Button v-if="canReact(message)" icon="smile" label="Add reaction" title="Add reaction"
+            :disabled="busy" @click="reactionTarget = reactionTarget === message.name ? null : message.name" />
+          <Button
+            icon="corner-up-left"
+            label="Reply"
+            title="Reply"
+            :disabled="busy"
+            @click="emit('reply', message)"
+          /><Dropdown :options="actions(message)" placement="right"
+            ><Button
+              icon="more-horizontal"
+              label="Message actions"
+              title="Message actions"
+              :disabled="busy"
+          /></Dropdown>
+        </div>
         <div v-if="reactionTarget === message.name" class="reaction-picker" role="group" aria-label="Choose reaction" @keydown.esc="reactionTarget = null">
           <button v-for="reaction in reactionChoices" :key="reaction" type="button"
             :aria-label="'React ' + reaction" :disabled="busy" @click="react(message, reaction)">{{ reaction }}</button>
