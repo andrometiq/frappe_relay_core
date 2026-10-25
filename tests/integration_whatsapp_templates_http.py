@@ -77,10 +77,24 @@ try:
         rows = frappe.get_all('Relay WhatsApp Template Request', filters={'template_name': template['name']},
                               fields=['owner', 'status', 'error', 'operation'])
         assert rows and rows[0].owner == manager and rows[0].status == 'Failed' and rows[0].error.startswith(detail), rows
+    synced_key = whatsapp_templates.SYNCED + (whatsapp_templates.connection_value('relay_hub_account') or '')
+    previous_sync = frappe.cache.get_value(synced_key)
+    frappe.cache.set_value(synced_key, {'synced_at': '2026-10-26 09:00:00', 'templates': 17})
+    try:
+        status, body = call('whatsapp_templates.sync_status', operator)
+        assert status == 200 and body['message'] == {'synced_at': '2026-10-26 09:00:00', 'templates': 17}, body
+        assert call('whatsapp_templates.sync_status', outsider)[0] == 403
+        assert call('whatsapp_templates.sync_status', operator, write=True)[0] in (403, 405)
+        frappe.cache.delete_value(synced_key)
+        status, body = call('whatsapp_templates.sync_status', manager)
+        assert status == 200 and body['message'] == {'synced_at': None, 'templates': 0}, body
+    finally:
+        if previous_sync: frappe.cache.set_value(synced_key, previous_sync)
     print('template HTTP contracts passed' + ('' if audited else ' (audit persistence untested: DocType not reloaded)'))
 finally:
     if server: server.shutdown()
     patch.stopall()
+    frappe.db.rollback()  # The server thread updated these users after this snapshot.
     if audited:
         frappe.db.delete('Relay WhatsApp Template Request', {'template_name': template['name']})
     for actor in (manager, operator, outsider):

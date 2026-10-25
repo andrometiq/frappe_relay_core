@@ -5,7 +5,7 @@ import re
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
-from relay_core import messaging, whatsapp, service_window
+from relay_core import messaging, whatsapp, service_window, whatsapp_templates
 from relay_core.automation.service import internal_save
 from relay_core.message_types import text
 
@@ -122,7 +122,7 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
             raise ValueError('Choose a valid template')
         if not isinstance(data.get('components',[]),list) or len(json.dumps(data))>32000:raise ValueError('Invalid template parameters')
         tool='whatsapp.execute';args={'operation':'templates.send','to':source.sender_endpoint,**data}
-        content={'kind':'text','text':'Template: '+data['name'],'template':data}
+        content=whatsapp_templates.message_content(data)
     else:raise ValueError('Unsupported starting message')
     return source,channel,context,tool,args,content
 
@@ -211,8 +211,8 @@ def whatsapp_content(args):
     if operation == 'messages.send':
         return {'kind': 'text', 'text': text(args.get('body'), 4096, required=True)}
     if operation == 'templates.send':
-        return {'kind': 'text', 'text': 'Template: ' + text(args.get('name'), 512, required=True),
-                'template': {key: args[key] for key in ('name', 'language', 'components') if key in args}}
+        text(args.get('name'), 512, required=True)
+        return whatsapp_templates.message_content(args)
     if operation == 'messages.react':
         return {'kind': 'reaction', 'emoji': text(args.get('emoji', ''), 100)}
     if operation == 'messages.location':
