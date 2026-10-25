@@ -259,12 +259,14 @@ class SenderTests(unittest.TestCase):
         db.get_value.return_value = 'Running'
         db.sql.return_value = self.rows(1)
         hub = Mock()
-        hub.call_tool.side_effect = HubError('WhatsApp rejected this request (code 132001): Template missing')
+        hub.call_tool.side_effect = HubError('Hub could not complete', detail='WhatsApp rejected this request (code 132001): Template missing')
+        roles = SimpleNamespace(get_roles=lambda: ['Relay Communication Manager'])
         with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(db=db, utils=frappe.utils)), \
-                patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
+                patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns.whatsapp, 'frappe', roles):
             bulk_campaigns.push(doc, time.monotonic() + 30)
         db.set_value.assert_called_once()
-        self.assertIn('132001', db.set_value.call_args.args[3])
+        self.assertEqual(db.set_value.call_args.args[3],
+                         'Hub rejected this operation: WhatsApp rejected this request (code 132001): Template missing')
         self.assertFalse([c for c in db.sql.call_args_list if c.args[0].lstrip().startswith('UPDATE')])
 
     def test_admission_mapping_and_backpressure(self):
