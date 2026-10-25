@@ -3,6 +3,7 @@
 Tokens belong to Hub users, carry explicit scopes and never enter browser code.
 """
 import json
+import re
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
@@ -27,10 +28,33 @@ MEDIA_CHECKS = {
 }
 
 
+SECRET_TEXT = re.compile(r'(?i)\b(?:bearer|oauth)\s+\S+|\b(?:access_token|token|secret|password)=\S+|[A-Za-z0-9_\-]{32,}')
+
+
+def safe_text(value, limit=300):
+    """Readable Hub or Meta wording with credentials and long opaque values removed."""
+    if not isinstance(value, str):
+        return ''
+    text = ' '.join(''.join(char if char.isprintable() else ' ' for char in value).split())
+    text = SECRET_TEXT.sub('[hidden]', text)
+    return text[:limit]
+
+
+def tool_detail(result):
+    """Safe text from a rejected tool result and Meta's user-facing error fields."""
+    parts = [item.get('text') for item in result.get('content') or [] if isinstance(item, dict) and item.get('type') == 'text']
+    structured = result.get('structuredContent')
+    error = structured.get('error') if isinstance(structured, dict) else None
+    if isinstance(error, dict):
+        parts += [error.get('error_user_title'), error.get('error_user_msg')]
+    return ' · '.join(dict.fromkeys(text for text in map(safe_text, parts) if text))
+
+
 class HubError(RuntimeError):
-    def __init__(self, message, metadata=None):
+    def __init__(self, message, metadata=None, detail=''):
         super().__init__(message)
         self.metadata = {}
+        self.detail = detail
         if not isinstance(metadata, dict) or metadata.get('provider') not in ('Telegram','WhatsApp','Hub'):
             return
         source = metadata.get('error')
@@ -133,7 +157,7 @@ class HubClient:
             self.initialize()
         result = self._request("tools/call", {"name": name, "arguments": arguments}, 2)
         if result.get("isError"):
-            error = HubError("Hub operation was rejected; check account capabilities and request details", result.get('structuredContent'))
+            error = HubError("Hub operation was rejected; check account capabilities and request details", result.get('structuredContent'), tool_detail(result))
             check = error.metadata.get('error', {}).get('check')
             if check:
                 error.args = (f"Hub {name} rejected at {check}: {MEDIA_CHECKS[check]}",)
