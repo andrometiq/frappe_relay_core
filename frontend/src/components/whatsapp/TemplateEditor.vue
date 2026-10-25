@@ -9,10 +9,13 @@ import {
   TEMPLATE_BUTTON_TYPES,
   addTemplateButton,
   templateForm,
+  templateIssues,
+  templatePreview,
   templateRequest,
   templateSampleFields,
 } from "../../services/templateAuthoring";
 import TemplateLanguageField from "./TemplateLanguageField.vue";
+import TemplatePreview from "./TemplatePreview.vue";
 
 const props = defineProps({ template: Object, enabled: Boolean });
 const emit = defineEmits(["saved", "cancel"]);
@@ -22,8 +25,24 @@ const form = ref(
     account_name: "current-account",
     template_name: props.template?.name || "",
     language_code: props.template?.language || "en_US",
+    parameter_format: props.template ? props.template.parameter_format : "NAMED",
   }),
 );
+const attempted = ref(false);
+const issues = computed(() => templateIssues(form.value));
+const preview = computed(() => templatePreview(form.value));
+const headerTypes = computed(() => ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", ...(form.value.header_type === "LOCATION" ? ["LOCATION"] : [])]);
+const variableHint = computed(() => `Add variables like ${form.value.parameter_format === "NAMED" ? "{{customer_name}}" : "{{1}}"} with text before and after them.`);
+function addButton() {
+  addTemplateButton(form.value);
+  form.value.buttons.at(-1).type = buttonTypes.value[0].value;
+}
+const buttonTypes = computed(() => {
+  const allowed = form.value.category === "AUTHENTICATION" ? ["OTP"]
+    : ["QUICK_REPLY", "URL", "PHONE_NUMBER", ...(form.value.category === "MARKETING" ? ["COPY_CODE"] : [])];
+  const current = new Set(form.value.buttons.map((button) => button.type));
+  return TEMPLATE_BUTTON_TYPES.filter((option) => allowed.includes(option.value) || current.has(option.value));
+});
 const busy = ref(false);
 const error = ref("");
 const sampleName = ref("");
@@ -89,6 +108,8 @@ async function uploadSample(event) {
 
 async function save() {
   if (!props.enabled || busy.value) return;
+  attempted.value = true;
+  if (issues.value.length) return;
   busy.value = true;
   error.value = "";
   try {
@@ -131,23 +152,27 @@ async function save() {
     >
       <template #actions>
         <Button label="Cancel" :disabled="busy" @click="emit('cancel')" />
-        <Button :label="template?.id ? 'Submit changes' : 'Submit for review'" type="submit" variant="solid" :loading="busy" :disabled="!enabled" />
+        <Button :label="template?.id ? 'Submit changes' : 'Submit for review'" type="submit" variant="solid" :loading="busy" :disabled="!enabled || (attempted && issues.length > 0)" />
       </template>
 
       <ErrorMessage :message="error" />
+      <section v-if="attempted && issues.length" class="template-issues" role="alert" aria-label="Fix before submitting">
+        <strong>Fix before submitting</strong>
+        <ul><li v-for="issue in issues" :key="issue">{{ issue }}</li></ul>
+      </section>
       <FrappeFormSection>
         <div class="frappe-field-grid">
           <FormControl label="Template name" v-model="form.template_name" :disabled="busy || !!template?.id" required />
           <TemplateLanguageField v-model="form.language_code" :disabled="busy || !!template?.id" />
-          <RelaySelect label="Category" v-model="form.category" :options="['UTILITY', 'MARKETING', 'AUTHENTICATION']" :disabled="busy || !!template?.id" />
-          <RelaySelect label="Parameters" v-model="form.parameter_format" :options="[{ value: 'POSITIONAL', label: 'Numbered: {{1}}' }, { value: 'NAMED', label: 'Named: {{customer_name}}' }]" :disabled="busy || !!template?.id" />
+          <RelaySelect label="Category" v-model="form.category" :options="[{ value: 'UTILITY', label: 'Utility' }, { value: 'MARKETING', label: 'Marketing' }, { value: 'AUTHENTICATION', label: 'Authentication' }]" :disabled="busy || !!template?.id" />
+          <RelaySelect label="Parameters" v-model="form.parameter_format" :options="[{ value: 'NAMED', label: 'Named: {{customer_name}}' }, { value: 'POSITIONAL', label: 'Numbered: {{1}}' }]" :disabled="busy || !!template?.id" />
         </div>
       </FrappeFormSection>
 
       <FrappeFormSection title="Message content" description="Compose the message Meta will review.">
         <div class="frappe-field-grid">
-          <RelaySelect label="Header" v-model="form.header_type" :options="['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION']" :disabled="busy" />
-          <FormControl v-if="form.header_type === 'TEXT'" label="Header text" v-model="form.header_text" :disabled="busy" />
+          <RelaySelect label="Header" v-model="form.header_type" :options="headerTypes" :disabled="busy" />
+          <FormControl v-if="form.header_type === 'TEXT'" label="Header text" v-model="form.header_text" maxlength="60" :disabled="busy" />
           <div v-if="['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.header_type)" class="frappe-file-field">
             <label>Header sample<input type="file" :accept="sampleAccept" :disabled="busy || !enabled" @change="uploadSample" /></label>
             <small>Matching file type, up to 4 MiB. Do not include customer information.</small>
@@ -156,8 +181,9 @@ async function save() {
           <div v-if="['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.header_type)" class="frappe-field-advanced">
             <details><summary>Use an existing sample handle</summary><FormControl label="Sample media handle" v-model="form.header_media_example" :disabled="busy" /></details>
           </div>
-          <FormControl class="frappe-grid-wide" label="Message body" type="textarea" :rows="6" v-model="form.body_text" :disabled="busy" required />
-          <FormControl class="frappe-grid-wide" label="Footer" v-model="form.footer_text" :disabled="busy" />
+          <FormControl class="frappe-grid-wide" label="Message body" type="textarea" :rows="6" v-model="form.body_text" :disabled="busy" maxlength="1024" required />
+          <p class="frappe-grid-wide template-field-hint">{{ variableHint }} {{ form.body_text.length }} / 1024</p>
+          <FormControl class="frappe-grid-wide" label="Footer (optional, no variables)" v-model="form.footer_text" maxlength="60" :disabled="busy" />
         </div>
       </FrappeFormSection>
 
@@ -179,9 +205,9 @@ async function save() {
           <article v-for="(button, index) in form.buttons" :key="button._client_key" class="template-editor-button">
             <header><strong>Button {{ index + 1 }}</strong><Button icon="trash" variant="ghost" :aria-label="`Remove button ${index + 1}`" :disabled="busy" @click="form.buttons.splice(index, 1)" /></header>
             <div class="frappe-field-grid">
-              <RelaySelect label="Action" v-model="button.type" :options="TEMPLATE_BUTTON_TYPES" :disabled="busy" />
-              <FormControl label="Button text" v-model="button.text" :disabled="busy" />
-              <FormControl v-if="button.type === 'URL'" label="Website URL" v-model="button.url" :disabled="busy" />
+              <RelaySelect label="Action" v-model="button.type" :options="buttonTypes" :disabled="busy" />
+              <FormControl label="Button text" v-model="button.text" maxlength="25" :disabled="busy" />
+              <FormControl v-if="button.type === 'URL'" label="Website URL" v-model="button.url" placeholder="https://example.com/orders/{{1}}" :disabled="busy" />
               <FormControl v-if="button.type === 'URL'" label="Example URL value" v-model="button.example_value" :disabled="busy" />
               <FormControl v-if="button.type === 'PHONE_NUMBER'" label="Phone number" v-model="button.phone_number" :disabled="busy" />
               <FormControl v-if="button.type === 'COPY_CODE'" label="Example offer code" v-model="button.example_value" :disabled="busy" />
@@ -196,7 +222,7 @@ async function save() {
               <FormControl v-if="button.type === 'VOICE_CALL'" label="Call request validity (minutes)" type="number" v-model="button.ttl_minutes" :disabled="busy" />
             </div>
           </article>
-          <Button label="Add button" icon-left="plus" :disabled="busy || form.buttons.length >= 10" @click="addTemplateButton(form)" />
+          <Button label="Add button" icon-left="plus" :disabled="busy || form.buttons.length >= 10" @click="addButton" />
         </div>
       </FrappeFormSection>
 
@@ -208,19 +234,7 @@ async function save() {
       </FrappeFormSection>
 
       <template #sidebar>
-        <section class="template-side-preview">
-          <h3>Preview</h3>
-          <div class="template-phone-preview">
-            <div class="template-preview-bubble">
-              <strong v-if="form.header_type === 'TEXT'">{{ form.header_text }}</strong>
-              <p>{{ form.body_text || "Your message preview" }}</p>
-              <small v-if="form.footer_text">{{ form.footer_text }}</small>
-              <div v-if="form.buttons.length" class="template-preview-buttons"><span v-for="button in form.buttons" :key="button._client_key">{{ button.text || button.type }}</span></div>
-              <time>12:00</time>
-            </div>
-          </div>
-          <p class="template-preview-note">Preview uses your current unsaved values.</p>
-        </section>
+        <TemplatePreview :preview="preview" note="Preview uses your current unsaved values and examples." />
       </template>
     </FrappeFormView>
   </form>
