@@ -39,6 +39,35 @@ class SheetTests(unittest.TestCase):
                                             {'type': 'text', 'text': '20%', 'parameter_name': 'discount'}]},
             {'type': 'button', 'sub_type': 'url', 'index': '0', 'parameters': [{'type': 'text', 'text': 'winter'}]}])
 
+    def test_coupon_buttons_are_filled_and_unsupported_parts_refused(self):
+        coupon = {'components': [{'type': 'BODY', 'text': 'Your code'},
+                                 {'type': 'BUTTONS', 'buttons': [{'type': 'COPY_CODE', 'example': 'SAVE10'}]}]}
+        fields = bulk_sheet.template_fields(coupon)
+        self.assertEqual(fields, [{'key': 'button:0', 'label': 'Button coupon code', 'component': 'button',
+                                   'index': 0, 'sub_type': 'copy_code'}])
+        self.assertEqual(bulk_sheet.build_components(fields, {'button:0': 'SAVE10'}), [
+            {'type': 'button', 'sub_type': 'copy_code', 'index': '0', 'parameters': [{'type': 'coupon_code', 'coupon_code': 'SAVE10'}]}])
+        refused = {'OTP buttons': {'type': 'BUTTONS', 'buttons': [{'type': 'OTP', 'otp_type': 'COPY_CODE'}]},
+                   'location header': {'type': 'HEADER', 'format': 'LOCATION'},
+                   'carousel templates': {'type': 'CAROUSEL', 'cards': []}}
+        for message, component in refused.items():
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                bulk_sheet.template_fields({'components': [component]})
+
+    def test_create_refuses_unsupported_templates_with_the_reason(self):
+        hub = Mock()
+        hub.execute.return_value = {'data': [{'name': 'login_code', 'language': 'en', 'status': 'APPROVED',
+                                              'components': [{'type': 'BUTTONS', 'buttons': [{'type': 'OTP'}]}]}]}
+        def throw(message):
+            raise frappe.ValidationError(message)
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), utils=frappe.utils, throw=throw)
+        with patch.object(bulk_campaigns, 'require_access'), patch.object(bulk_campaigns, 'whatsapp_channel', return_value='WA'), \
+                patch.object(bulk_campaigns, 'frappe', fake), \
+                patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(hub, {})), \
+                patch('relay_core.whatsapp_templates.overlay', side_effect=lambda page: page):
+            with self.assertRaisesRegex(frappe.ValidationError, 'OTP buttons'):
+                bulk_campaigns.create('Login codes', 'login_code', 'en')
+
     def test_sheet_numbers_use_the_shared_phone_helper(self):
         self.assertEqual(bulk_sheet.phone_number('98765 43210', 'IN'), '919876543210')
         self.assertEqual(bulk_sheet.phone_number('+91 98765-43210', ''), '919876543210')
