@@ -13,6 +13,26 @@ export function applyProgress(campaign, event) {
   return { ...campaign, status: event.status || campaign.status, counts: { ...campaign.counts, ...event.counts } };
 }
 
+// A progress event re-reads the open campaign; rows the user paged past the first page stay.
+export function mergeCampaign(current, fresh) {
+  if (!current || !fresh || current.name !== fresh.name) return current;
+  const paged = (current.recipients?.length || 0) > 50;
+  return paged ? { ...fresh, recipients: current.recipients, next: current.next } : fresh;
+}
+
+// Every approved template across Hub pages (at most 20 pages of 50, like the server check).
+export async function approvedTemplates(listPage) {
+  const rows = [];
+  let after = "";
+  for (let index = 0; index < 20; index += 1) {
+    const page = await listPage(after);
+    rows.push(...(page.data || []));
+    after = page.paging?.cursors?.after || "";
+    if (!page.paging?.has_more || !after) break;
+  }
+  return rows.filter((row) => row.status === "APPROVED");
+}
+
 export function campaignActions(status) {
   return {
     Draft: ["start", "cancel"], Running: ["pause", "cancel"], Paused: ["resume", "cancel"],
