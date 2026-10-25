@@ -369,6 +369,9 @@ def push(doc, deadline):
         messages = [{'key': row.request_key, 'message': {'operation': 'templates.send', 'to': row.destination,
                      'name': doc.template_name, 'language': doc.language, 'components': row.components}}
                     for row in rows]
+        # Attempted before Hub sends: a reply can arrive before this batch's admission commits.
+        frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET attempted=1 WHERE name IN %s", (tuple(row.name for row in rows),))
+        frappe.db.commit()
         try:
             result = hub.call_tool('whatsapp.bulk', {'messages': messages})
         except whatsapp.HubError as exc:

@@ -8,6 +8,7 @@ RANK = {'Pending': 0, 'Queued': 1, 'Uncertain': 1, 'Cancelled': 2, 'Sent': 3, 'F
 STATUS = {'sent': 'Sent', 'delivered': 'Delivered', 'read': 'Read', 'failed': 'Failed'}
 STATE = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Sent', 'rejected': 'Failed',
          'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
+REACHABLE = "('Pending', 'Queued', 'Uncertain', 'Sent', 'Delivered', 'Read')"  # Rows a reply may answer once attempted.
 PROGRESS_SECONDS = 3
 REPLY_GATE = 'relay-bulk-reply-until'
 DIRTY = 'relay-bulk-dirty'
@@ -71,7 +72,9 @@ def reply_window_open():
 
 
 def link_reply(row):
-    """Link an inbound WhatsApp message to the campaign row it answers: one indexed lookup."""
+    """Link an inbound WhatsApp message to the campaign row it answers: the row whose provider ID it quotes,
+    else the newest row Hub holds or sent to that number in an open reply window. A reply can arrive before
+    Hub reports the provider ID; recount counts it once that ID is known."""
     if not reply_window_open():
         return None
     reply_to = (row.get('provider_context') or {}).get('reply_to_message_id')
@@ -80,7 +83,7 @@ def link_reply(row):
         match = frappe.db.sql(f'SELECT name, campaign FROM `tab{RECIPIENT}` WHERE provider_id=%s LIMIT 1', reply_to, as_dict=True)
     if not match:
         match = frappe.db.sql(f'''SELECT r.name, r.campaign FROM `tab{RECIPIENT}` r JOIN `tabRelay Campaign` c ON c.name=r.campaign
-            WHERE r.destination=%s AND r.provider_id IS NOT NULL AND r.provider_id!=''
+            WHERE r.destination=%s AND r.attempted=1 AND r.status IN {REACHABLE}
             AND c.started_at >= NOW() - INTERVAL c.reply_window_hours HOUR ORDER BY r.creation DESC LIMIT 1''',
             row['from'], as_dict=True)
     if not match:
@@ -134,7 +137,9 @@ def tally(rows):
 
 
 def recount(name):
-    rows = frappe.db.sql(f'''SELECT status, COUNT(*), CAST(SUM(replied_at IS NOT NULL) AS SIGNED)
+    # A reply counts once Hub reports the provider ID of a send that did not fail.
+    rows = frappe.db.sql(f'''SELECT status, COUNT(*), CAST(SUM(replied_at IS NOT NULL AND IFNULL(provider_id, '')!=''
+        AND status NOT IN ('Failed', 'Rejected')) AS SIGNED)
         FROM `tab{RECIPIENT}` WHERE campaign=%s GROUP BY status''', name)
     counts = tally([(status, int(total), int(replied or 0)) for status, total, replied in rows])
     values = {key + '_count': value for key, value in counts.items()}
