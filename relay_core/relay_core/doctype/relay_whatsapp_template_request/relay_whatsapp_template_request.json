@@ -1,0 +1,87 @@
+{
+  "doctype": "DocType",
+  "name": "Relay WhatsApp Template Request",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-WTR-.##########",
+  "in_create": 1,
+  "track_changes": 0,
+  "fields": [
+    {
+      "fieldname": "operation",
+      "label": "Operation",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "template_name",
+      "label": "Template name",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "language",
+      "label": "Language",
+      "fieldtype": "Data",
+      "in_list_view": 0
+    },
+    {
+      "fieldname": "account",
+      "label": "Account",
+      "fieldtype": "Data",
+      "in_list_view": 0,
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "reqd": 1,
+      "options": "Succeeded\nFailed"
+    },
+    {
+      "fieldname": "request",
+      "label": "Request",
+      "fieldtype": "JSON",
+      "in_list_view": 0
+    },
+    {
+      "fieldname": "result",
+      "label": "Result",
+      "fieldtype": "JSON",
+      "in_list_view": 0
+    },
+    {
+      "fieldname": "error",
+      "label": "Error",
+      "fieldtype": "Small Text",
+      "in_list_view": 0
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1
+    }
+  ],
+  "field_order": [
+    "operation",
+    "template_name",
+    "language",
+    "account",
+    "status",
+    "request",
+    "result",
+    "error"
+  ],
+  "title_field": "template_name",
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "modified": "2026-10-25 23:30:00.000000"
+}

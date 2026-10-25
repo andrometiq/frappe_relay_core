@@ -8,10 +8,12 @@ from unittest.mock import Mock, patch
 class WhatsAppTests(unittest.TestCase):
     def setUp(self):
         def throw(message,*args):raise ValueError(message)
-        self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'))
+        self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),db=Mock(),get_roles=Mock(return_value=['Relay Communication Manager']),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'))
         spec=importlib.util.spec_from_file_location('wa_test',Path('relay_core/whatsapp.py'));self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
         self.api.require_business_assignment=Mock();self.api.require_access=Mock();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
+        self.audit=patch.multiple('relay_core.whatsapp_templates',record_request=Mock(),apply_request=Mock(),overlay=Mock(side_effect=lambda page:page))
+        self.audit.start();self.addCleanup(self.audit.stop)
     def test_multiple_contacts_are_returned(self):
         self.f.get_list.return_value=[{'name':'Contact-A'},{'name':'Contact-B'}]
         result=self.api.business_contacts('Customer','CUST-1')
@@ -81,3 +83,30 @@ class WhatsAppTests(unittest.TestCase):
         self.hub.execute.return_value={'site':'https://other.site'}
         with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'JVBERi0xLjc=','mime_type':'application/pdf'})
         self.assertEqual(self.hub.execute.call_count,1)
+
+    def test_manager_sees_redacted_hub_rejection_and_request_is_audited(self):
+        from relay_core import whatsapp_templates
+        from relay_core.hub import HubError
+        detail="Variables can't be at the start or end of the template"
+        self.hub.execute.side_effect=[{'site':'http://yrp.site:8002'},HubError('rejected',detail=detail)]
+        args={'name':'order_update','language':'en_US','category':'UTILITY','components':[{'type':'BODY','text':'Hi'}]}
+        with self.assertRaisesRegex(ValueError,'Hub rejected this operation: '+detail):self.api.execute('templates.create',args)
+        whatsapp_templates.record_request.assert_called_once_with('templates.create',args,error=detail)
+        self.f.db.commit.assert_called_once()
+        whatsapp_templates.apply_request.assert_not_called()
+
+    def test_non_manager_sees_generic_hub_rejection(self):
+        from relay_core import whatsapp_templates
+        from relay_core.hub import HubError
+        self.f.get_roles.return_value=['Relay Communication User']
+        self.hub.execute.side_effect=[{'site':'http://yrp.site:8002'},HubError('rejected',detail='templates are not enabled')]
+        with self.assertRaises(ValueError) as caught:self.api.execute('templates.list')
+        self.assertEqual(str(caught.exception),self.api.FAILURE)
+        whatsapp_templates.record_request.assert_not_called()
+
+    def test_successful_management_is_audited_and_applied(self):
+        from relay_core import whatsapp_templates
+        self.hub.execute.side_effect=[{'site':'http://yrp.site:8002'},{'id':'101','status':'PENDING'}]
+        self.api.execute('templates.delete',{'name':'order_update','id':'101'})
+        whatsapp_templates.record_request.assert_called_once_with('templates.delete',{'name':'order_update','id':'101'},result={'id':'101','status':'PENDING'})
+        whatsapp_templates.apply_request.assert_called_once()

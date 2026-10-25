@@ -112,14 +112,22 @@ def execute(operation, arguments=None, contact=None, business_doctype=None, busi
         return send(dict(key=request_key, operation=operation, arguments=arguments, contact=contact,
                          business_doctype=business_doctype, business_name=business_name))
     payload=prepare(operation,arguments,contact,business_doctype,business_name)
+    from relay_core import whatsapp_templates
+    requested={key:value for key,value in payload.items() if key!='operation'}
     try:
         hub,capabilities=checked_client()
         result=capabilities if operation=='capabilities' else hub.execute(payload)
     except (HubError, ValueError) as error:
-        frappe.throw(failure_message(error))
+        message=failure_message(error)
+        if operation in MANAGE:
+            whatsapp_templates.record_request(operation,requested,error=getattr(error,'detail','') or message)
+            frappe.db.commit()  # The audit row must survive the rejected request.
+        frappe.throw(message)
+    if operation in MANAGE:
+        whatsapp_templates.record_request(operation,requested,result=result)
+        whatsapp_templates.apply_request(operation,requested,result)
     if operation == 'templates.list':
-        from relay_core.whatsapp_templates import overlay
-        result = overlay(result)
+        result = whatsapp_templates.overlay(result)
     return result
 
 

@@ -35,6 +35,16 @@
       "fieldtype": "Data"
     },
     {
+      "fieldname": "category",
+      "label": "Category",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "quality",
+      "label": "Quality",
+      "fieldtype": "Data"
+    },
+    {
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Data",
@@ -68,10 +78,12 @@
     "template_id",
     "template_name",
     "language",
+    "category",
+    "quality",
     "status",
     "reason",
     "hub_event_id"
   ],
   "title_field": "template_name",
-  "modified": "2026-10-25 12:00:00.000000"
+  "modified": "2026-10-25 23:30:00.000000"
 }
