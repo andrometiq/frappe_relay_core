@@ -46,3 +46,49 @@ class InteractiveMessageTests(unittest.TestCase):
         from relay_core.message_types import normalize
         for raw in ('[]','not json','x'*12001):
             with self.assertRaises(ValueError):normalize('interactive',{'nfm_reply':{'response_json':raw}},provider='WhatsApp')
+
+class WhatsAppInboundTypesTests(unittest.TestCase):
+    setUp = ChannelProjectionTests.setUp
+
+    def extract(self, kind, detail, **extra):
+        message = {'id': 'wamid.fixture', 'from': '919999999999', 'from_user_id': 'business-scoped-user',
+                   'type': kind, kind: detail, **extra}
+        return self.module.extract_messages({'entry': [{'changes': [{'value': {'messages': [message]}}]}]})
+
+    def test_media_preserves_metadata_and_ignores_download_urls(self):
+        from relay_core.message_types import preview
+        for kind in ('image', 'audio', 'video', 'document', 'sticker'):
+            detail = {'id': '123', 'mime_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                      'filename': 'Local fixture.docx', 'file_size': 12345, 'caption': 'Local test caption',
+                      'url': 'https://private.invalid/signed', 'sha256': 'opaque-digest'}
+            row, = self.extract(kind, detail)
+            self.assertEqual(row['type'], kind)
+            self.assertEqual(row['from'], '919999999999')
+            self.assertEqual(row['from_user_id'], 'business-scoped-user')
+            data = row['message_data']
+            self.assertEqual(data, {'kind': kind, 'media': {key: detail[key] for key in ('id', 'mime_type', 'filename', 'file_size')}, 'caption': 'Local test caption'})
+            self.assertEqual(preview(data), 'Local test caption')
+        row, = self.extract('document', {'id': '123', 'filename': 'Local fixture.docx'})
+        self.assertEqual(preview(row['message_data']), 'Local fixture.docx')
+
+    def test_common_inbound_types(self):
+        cases = [
+            ('text', {'body': 'Hello'}, 'text'),
+            ('location', {'latitude': 12.9, 'longitude': 80.2, 'name': 'Local fixture'}, 'location'),
+            ('contacts', [{'name': {'formatted_name': 'Local fixture'}, 'phones': [{'phone': '+919999999999'}]}], 'contacts'),
+            ('button', {'text': 'Yes', 'payload': 'yes'}, 'text'),
+            ('interactive', {'button_reply': {'id': 'yes', 'title': 'Yes'}}, 'text'),
+            ('interactive', {'list_reply': {'id': 'item', 'title': 'Item'}}, 'text'),
+            ('interactive', {'nfm_reply': {'body': 'Form submitted', 'response_json': '{"rating":5}'}}, 'text'),
+            ('interactive', {'call_permission_reply': {'response': 'accept'}}, 'text'),
+            ('interactive', {'type': 'unknown_reply'}, 'unsupported'),
+            ('order', {'catalog_id': '123'}, 'unsupported'),
+            ('system', {'body': 'Number changed'}, 'unsupported'),
+            ('unsupported', {'raw_type': 'poll_creation'}, 'unsupported'),
+            ('future_type', {}, 'unsupported'),
+        ]
+        for kind, detail, normalized in cases:
+            with self.subTest(kind=kind, detail=detail):
+                row, = self.extract(kind, detail)
+                self.assertEqual(row['message_data']['kind'], normalized)
+        self.assertEqual(self.extract('reaction', {'message_id': 'wamid.original', 'emoji': '👍'}), [])

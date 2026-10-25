@@ -172,6 +172,8 @@ def normalize(kind, detail, *, provider, body=''):
 def preview(value):
     if isinstance(value.get('form_response'),dict):
         return (value.get('text','Form submitted')+'\n'+json.dumps(value['form_response'],ensure_ascii=False))[:12000]
-    return value.get('text') or value.get('caption') or {
+    return value.get('text') or value.get('caption') or (
+        (value.get('media') or {}).get('filename') or (value.get('media') or {}).get('file_name')
+        if value['kind'] == 'document' else None) or {
         'contact': 'Contact card', 'contacts': 'Contact cards', 'location': 'Location',
         'sticker': 'Sticker', 'photo': 'Photo', 'image': 'Photo'}.get(value['kind'], value['kind'].replace('_', ' ').title())

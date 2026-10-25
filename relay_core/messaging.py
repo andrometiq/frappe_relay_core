@@ -530,7 +530,7 @@ def sticker(message):
         data = object_value(original.message_data or {})
     media = data.get('media') or {}; file_id = media.get('file_id') if channel.channel == 'Telegram' else media.get('id')
     if not isinstance(file_id, str) or not file_id: raise ValueError('Sticker file reference is missing')
-    result = whatsapp.client().media(channel.channel, file_id)
+    result = whatsapp.client().media(channel.channel, file_id, sticker=True)
     mime = result.get('content_type')
     if mime not in ('image/webp', 'video/webm', 'application/x-tgsticker'): raise ValueError('Unsupported sticker media type')
     try: raw = base64.b64decode(result.get('content_base64', ''), validate=True)
