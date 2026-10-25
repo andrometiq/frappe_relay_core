@@ -17,3 +17,10 @@ test('inbox filter offers All channels only when every provider is enabled', () 
   assert.deepEqual(mediumOptions({ enabled_channels: ['WhatsApp', 'Telegram', 'Email'] }),
     [{ label: 'All channels', value: 'all' }, 'WhatsApp', 'Telegram', 'Email'])
 })
+
+test('bubbles name their channel only when several channels are enabled', async () => {
+  const { multipleChannels } = await import('../src/services/enabledChannels.js')
+  assert.equal(multipleChannels({ enabled_channels: ['WhatsApp'] }), false)
+  assert.equal(multipleChannels({}), false)
+  assert.equal(multipleChannels({ enabled_channels: ['WhatsApp', 'Telegram'] }), true)
+})

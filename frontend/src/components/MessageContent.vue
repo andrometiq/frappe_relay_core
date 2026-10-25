@@ -8,6 +8,7 @@ import {
   reactionLabels,
   unsupportedNotice,
   orderLines,
+  templateParts,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
 const chat=inject(messagesKey,null), translationOpen=ref(false);
@@ -22,6 +23,7 @@ const TgsSticker = defineAsyncComponent(() => import("./TgsSticker.vue"));
 const props = defineProps({ message: { type: Object, required: true }, showReplyReference: { type: Boolean, default: true } });
 watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
+const template = computed(() => templateParts(data.value));
 const context = computed(() => objectValue(props.message.provider_context));
 const loaded = ref(false),
   mediaError = ref(false);
@@ -52,7 +54,16 @@ const video = computed(
     </div>
     <template v-if="!translationOpen || !['text','email'].includes(data.kind)">
     <EmailContent v-if="data.email" :message="message" :email="data.email" />
-    <p v-if="data.kind === 'text'" class="whitespace-pre-wrap break-words">
+    <div v-if="data.kind === 'text' && template" class="message-template">
+      <strong v-if="template.header">{{ template.header }}</strong>
+      <p class="whitespace-pre-wrap break-words">{{ data.text }}</p>
+      <small v-if="template.footer" class="message-template-footer">{{ template.footer }}</small>
+      <ul v-if="template.buttons.length" class="message-template-buttons" aria-label="Template buttons">
+        <li v-for="(button, index) in template.buttons" :key="index">{{ button }}</li>
+      </ul>
+      <small class="message-template-caption">{{ template.caption }}</small>
+    </div>
+    <p v-else-if="data.kind === 'text'" class="whitespace-pre-wrap break-words">
       {{ data.text }}
     </p>
     <div v-else-if="data.kind === 'sticker'" class="space-y-2">

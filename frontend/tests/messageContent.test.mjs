@@ -34,3 +34,12 @@ test('unsupported messages show the WhatsApp reason and order lines stay readabl
   assert.deepEqual(orderLines({ order: { items: [{ product_retailer_id: 'shirt', quantity: 2, item_price: 30, currency: 'INR' }, { product_retailer_id: 'cap' }] } }),
     ['2 × shirt · INR 30', '1 × cap'])
 })
+
+test('sent templates show rendered parts with a template or campaign caption', async () => {
+  const { templateParts } = await import('../src/components/messageContent.js')
+  const data = { kind: 'text', text: 'Hi Ravi', template: { name: 'relay_test_marketing', header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'] } }
+  assert.deepEqual(templateParts(data), { header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'], caption: 'Template · relay_test_marketing' })
+  assert.equal(templateParts({ ...data, campaign: 'Winter launch' }).caption, 'Campaign: Winter launch')
+  assert.deepEqual(templateParts({ kind: 'text', text: 'Hi', template: { name: 'plain', buttons: 'bad' } }).buttons, [])
+  assert.equal(templateParts({ kind: 'text', text: 'Hello' }), null)
+})

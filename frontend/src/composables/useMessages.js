@@ -165,7 +165,7 @@ export function useMessages() {
     const saved=windows.get(windowKey());
     if (!saved) { viewPosition.value=null; return false; }
     ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
-    viewPosition.value=saved.position;restored.value=saved.position?.name||'';
+    viewPosition.value=saved.position;restored.value=saved.position?.atBottom?'':saved.position?.name||'';
     if(!businessName.value && !source.value)source.value=rows.value.at(-1)||null;
     restoredRefreshPending = true;
     return true;
@@ -200,6 +200,7 @@ export function useMessages() {
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     ingestionCursor.value=checkpoint.ingestion_cursor||'RELAY-MSG-0000000000';
     if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;clearRecipient();}
+    if(saved.atBottom){await history();return;} // A reader who left at the end returns to the newest message.
     const page=businessName.value
       ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:saved.name})
       : await coreApi('api.message_context',{message:saved.name,...(channel.value?{channel:channel.value}:{})});
