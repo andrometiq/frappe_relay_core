@@ -84,6 +84,20 @@ def default_calling_code():
     return code.lstrip('+')
 
 
+def contact_identities(person):
+    """Provider identities typed on a Frappe Contact: WhatsApp numbers and email addresses."""
+    numbers = [row.phone for row in person.get('phone_nos') or []] + [person.get('mobile_no'), person.get('phone')]
+    emails = [row.email_id for row in person.get('email_ids') or []] + [person.get('email_id')]
+    identities = {'WhatsApp': {contact_number(value) for value in numbers if value}, 'Email': set()}
+    for value in filter(None, emails):
+        try:
+            identities['Email'].add(normalize('Email', value))
+        except ValueError:
+            continue
+    identities['WhatsApp'].discard(None)
+    return identities
+
+
 def bindings(channel, provider, value):
     """Find canonical aliases without rewriting pre-normalization stored keys."""
     import frappe

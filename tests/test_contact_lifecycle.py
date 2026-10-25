@@ -1,8 +1,15 @@
 """Contact edits keep endpoints, routing and message access in step."""
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
-from relay_core import identity
+from frappe import _dict
+from relay_core import contact_lifecycle as lifecycle, identity
+
+
+def person(name='Contact-A', phones=(), emails=()):
+    return _dict(name=name, phone_nos=[_dict(phone=value) for value in phones],
+                 email_ids=[_dict(email_id=value) for value in emails], mobile_no=None, phone=None, email_id=None)
 
 
 class ContactNumberTests(unittest.TestCase):
@@ -22,6 +29,103 @@ class ContactNumberTests(unittest.TestCase):
         for value in ('', None, 'call me', '+0123456789', '+1234', '+1234567890123456'):
             with self.subTest(value=value):
                 self.assertIsNone(identity.contact_number(value))
+
+    def test_contact_identities_cover_child_rows_and_primary_fields(self):
+        doc = person(phones=['+91 98765 43210'], emails=['Ravi@Example.Invalid', 'not an email'])
+        doc.mobile_no = '+91 91234 56789'
+        self.assertEqual(identity.contact_identities(doc),
+                         {'WhatsApp': {'919876543210', '919123456789'}, 'Email': {'ravi@example.invalid'}})
+
+
+class ContactUpdateTests(unittest.TestCase):
+    def setUp(self):
+        self.endpoints = {'E-OLD': _dict(name='E-OLD', channel='CH-WA', endpoint='919876543210', verified=1),
+                          'E-MAIL': _dict(name='E-MAIL', channel='CH-EMAIL', endpoint='ravi@example.invalid', verified=1)}
+        self.inserted = []
+        self.roles = ['Relay Communication Manager']
+
+        def get_doc(value, name=None):
+            if isinstance(value, dict):
+                doc = _dict(value, save=Mock())
+                self.inserted.append(doc)
+                return doc
+            return SimpleNamespace(**self.endpoints[name], save=Mock())
+
+        providers = {'CH-WA': 'WhatsApp', 'CH-EMAIL': 'Email'}
+        db = SimpleNamespace(get_value=lambda doctype, filters, field: (
+            'RELAY-CON-A' if doctype == 'Relay Contact' else providers[filters]))
+        self.fake = SimpleNamespace(db=db, get_doc=Mock(side_effect=get_doc), flags=SimpleNamespace(),
+                                    get_all=Mock(return_value=list(self.endpoints.values())),
+                                    get_roles=lambda: self.roles, cache=SimpleNamespace(lock=MagicMock()))
+        self.enterContext(patch.object(lifecycle, 'frappe', self.fake))
+        self.enterContext(patch.object(identity, 'default_calling_code', return_value='91'))
+        self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))
+        self.bindings = self.enterContext(patch.object(lifecycle, 'bindings', return_value=iter(())))
+
+    def update(self, before, after):
+        after.get_doc_before_save = lambda: before
+        lifecycle.on_update(after)
+        return [(getattr(call.args[0], 'name', None) or call.args[0]['endpoint'], call.args[1])
+                for call in self.verified.call_args_list]
+
+    def test_format_only_edit_and_added_values_keep_endpoints(self):
+        self.assertEqual(self.update(person(phones=['+91 98765 43210']),
+                                     person(phones=['098765 43210', '+91 91234 56789'])), [])
+        self.fake.get_all.assert_not_called()
+
+    def test_manager_number_change_disables_old_and_verifies_new(self):
+        changes = self.update(person(phones=['+91 98765 43210'], emails=['ravi@example.invalid']),
+                              person(phones=['+91 91234 56789'], emails=['ravi@example.invalid']))
+        self.assertEqual(changes, [('E-OLD', 0), ('919123456789', 1)])
+        self.assertEqual(self.inserted[0]['relay_contact'], 'RELAY-CON-A')
+        self.assertEqual(self.inserted[0]['channel'], 'CH-WA')
+
+    def test_plain_editor_only_disables(self):
+        self.roles = ['Sales User']
+        changes = self.update(person(phones=['+91 98765 43210'], emails=['ravi@example.invalid']),
+                              person(phones=['+91 91234 56789']))
+        self.assertEqual(changes, [('E-OLD', 0), ('E-MAIL', 0)])
+
+    def test_shared_value_stays_with_existing_binding(self):
+        self.bindings.return_value = iter([_dict(name='E-OTHER', relay_contact='RELAY-CON-B')])
+        changes = self.update(person(phones=['+91 98765 43210']), person(phones=['+91 91234 56789']))
+        self.assertEqual(changes, [('E-OLD', 0)])
+
+    def test_contacts_without_relay_history_are_ignored(self):
+        self.fake.db.get_value = lambda *args: None
+        self.assertEqual(self.update(person(phones=['+91 98765 43210']), person()), [])
+
+
+class ContactRemovalTests(unittest.TestCase):
+    def setUp(self):
+        def throw(message, exception=ValueError):
+            raise exception(message)
+        self.relay = {'Contact-A': 'RELAY-CON-A', 'Contact-B': 'RELAY-CON-B'}
+        self.fake = SimpleNamespace(throw=throw, bold=str, LinkExistsError=PermissionError,
+                                    db=SimpleNamespace(get_value=lambda doctype, filters, field: self.relay.get(filters['contact'])))
+        self.enterContext(patch.object(lifecycle, 'frappe', self.fake))
+
+    def test_delete_is_blocked_while_relay_history_exists(self):
+        with self.assertRaises(PermissionError):
+            lifecycle.on_trash(person('Contact-A'))
+        lifecycle.on_trash(person('Contact-C'))
+
+    def test_merge_is_blocked_only_when_both_contacts_have_relay_history(self):
+        with self.assertRaises(ValueError):
+            lifecycle.before_rename(person('Contact-A'), 'before_rename', 'Contact-A', 'Contact-B', True)
+        lifecycle.before_rename(person('Contact-A'), 'before_rename', 'Contact-A', 'Contact-C', True)
+        lifecycle.before_rename(person('Contact-A'), 'before_rename', 'Contact-A', 'Contact-B', False)
+
+
+    def test_rename_rekeys_channel_preferences(self):
+        from relay_core.channel_preferences import scope_key
+        row = _dict(name='PREF-A', business_doctype='Customer', business_name='Sim Customer', endpoint='E-A')
+        self.fake.get_all = Mock(return_value=[row])
+        self.fake.db.set_value = Mock()
+        lifecycle.after_rename(person('Contact-New'), 'after_rename', 'Contact-Old', 'Contact-New', False)
+        values = self.fake.db.set_value.call_args.args[2]
+        self.assertEqual(values['scope_key'], scope_key('Contact-New', 'Customer', 'Sim Customer'))
+        self.assertNotEqual(values['scope_key'], scope_key('Contact-Old', 'Customer', 'Sim Customer'))
 
 
 if __name__ == '__main__':

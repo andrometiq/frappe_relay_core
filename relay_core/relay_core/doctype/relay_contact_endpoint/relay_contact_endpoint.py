@@ -6,11 +6,10 @@ from relay_core.permissions import require_access
 
 class RelayContactEndpoint(Document):
     def validate(self):
-        if getattr(frappe.flags, "relay_business_contact_sync", False):
-            require_access()
-        elif getattr(frappe.flags, "relay_endpoint_enrollment", False):
+        # Contact sync follows a permitted Contact write.
+        if getattr(frappe.flags, "relay_endpoint_enrollment", False):
             require_access(manage=True)
-        else:
+        elif not getattr(frappe.flags, "relay_contact_sync", False):
             require_access(configure=True)
         previous = self.get_doc_before_save()
         from relay_core.identity import normalize
