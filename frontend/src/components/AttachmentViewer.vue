@@ -11,7 +11,7 @@ const url = computed(
 );
 const filename = computed(
   () =>
-    props.data.media?.file_name || props.data.media?.filename || "Attachment",
+    props.data.media?.file_name || props.data.media?.filename || (props.data.media?.voice ? "Voice message" : "Attachment"),
 );
 const pdf = computed(
   () =>

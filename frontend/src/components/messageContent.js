@@ -42,3 +42,25 @@ export function attachmentDownloadURL(message) {
   if (message._pending || !message.name || !['photo','image','video','audio','voice','document','animation'].includes(messageData(message).kind)) return null;
   return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
 }
+
+export function transcriptState(message) {
+  if (message.transcript) return { state: 'available', text: message.transcript }
+  const labels = { Pending: 'Transcript pending…', Failed: 'Transcript unavailable: transcription failed',
+    Unavailable: 'Transcript unavailable: no transcription provider is set up' }
+  return labels[message.transcript_status]
+    ? { state: message.transcript_status.toLowerCase(), text: labels[message.transcript_status] }
+    : { state: 'legacy', text: '' }
+}
+
+export function unsupportedNotice(data) {
+  const value = data.unsupported || {}
+  const meta = [value.details || value.title, value.code ? 'code ' + value.code : ''].filter(Boolean).join(' · ')
+  return { reason: value.reason || 'This message type is not supported', meta }
+}
+
+export function orderLines(data) {
+  return (data.order?.items || []).slice(0, 100).map(item => {
+    const price = typeof item.item_price === 'number' ? ` · ${item.currency || ''} ${item.item_price}`.replace('  ', ' ') : ''
+    return `${item.quantity ?? 1} × ${item.product_retailer_id || 'Product'}${price}`
+  })
+}
