@@ -95,6 +95,17 @@ def deliveries(after='',cancel_id=None):
         frappe.throw('Could not read or cancel deliveries')
 
 
+FAILURE = 'Hub could not complete this operation. Check account configuration, capability and provider status before retrying.'
+
+
+def failure_message(error):
+    """Managers see the Hub's redacted rejection text; others see a generic notice."""
+    detail = getattr(error, 'detail', '')
+    if detail and set(frappe.get_roles()).intersection({'System Manager', 'Relay Communication Manager'}):
+        return 'Hub rejected this operation: ' + detail
+    return FAILURE
+
+
 @frappe.whitelist(methods=['POST'])
 def execute(operation, arguments=None, contact=None, business_doctype=None, business_name=None, request_key=None):
     if operation in SEND:
@@ -102,18 +113,14 @@ def execute(operation, arguments=None, contact=None, business_doctype=None, busi
                          business_doctype=business_doctype, business_name=business_name))
     payload=prepare(operation,arguments,contact,business_doctype,business_name)
     try:
-        hub=client()
-        capabilities=hub.execute({'operation':'capabilities'})
-        site_url=frappe.utils.get_url().rstrip('/')
-        if str(capabilities.get('site','')).rstrip('/') != site_url:
-            frappe.throw('Hub account belongs to another site')
+        hub,capabilities=checked_client()
         result=capabilities if operation=='capabilities' else hub.execute(payload)
-        if operation == 'templates.list':
-            from relay_core.whatsapp_templates import overlay
-            result = overlay(result)
-        return result
-    except (HubError, ValueError):
-        frappe.throw('Hub could not complete this operation. Check account configuration, capability and provider status before retrying.')
+    except (HubError, ValueError) as error:
+        frappe.throw(failure_message(error))
+    if operation == 'templates.list':
+        from relay_core.whatsapp_templates import overlay
+        result = overlay(result)
+    return result
 
 
 @frappe.whitelist(methods=['POST'])

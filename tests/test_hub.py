@@ -90,6 +90,20 @@ class MediaContractTests(unittest.TestCase):
             self.assertNotIn('private-token', str(error.exception))
             self.assertNotIn('private-token', str(error.exception.metadata))
 
+class RejectionDetailTests(unittest.TestCase):
+    def test_tool_text_and_meta_user_fields_are_returned_redacted(self):
+        hub = HubClient('http://127.0.0.1:1234/mcp', 'x'*64); hub.protocol = '2025-06-18'
+        result = {'isError': True, 'content': [{'type': 'text', 'text': 'provider rejected operation\nBearer abc.def token=' + 'k'*12}],
+                  'structuredContent': {'provider': 'WhatsApp', 'error': {'http_status': 400, 'error_user_title': 'Invalid parameter',
+                  'error_user_msg': "Variables can't be at the start or end of the template. " + 'A'*40}}}
+        with patch.object(hub, '_request', return_value=result):
+            with self.assertRaises(HubError) as caught: hub.execute({'operation': 'templates.create'})
+        self.assertEqual(caught.exception.detail, 'provider rejected operation [hidden] [hidden] · Invalid parameter · '
+                         "Variables can't be at the start or end of the template. [hidden]")
+        self.assertNotIn('abc.def', caught.exception.detail)
+        self.assertNotIn('error_user_msg', str(caught.exception.metadata))
+
+
 class MediaHTTPTests(unittest.TestCase):
     def test_media_http_transport_accepts_attachment_envelope_and_safe_denial(self):
         import base64
