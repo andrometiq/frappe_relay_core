@@ -9,6 +9,7 @@ It publishes an authenticated `/relay` workspace; automatic replies remain off.
   The automation drain uses session locks on MariaDB and PostgreSQL. Production runs MariaDB.
 - A running Relay Hub with one account whose site URL matches this Frappe site.
 - A Hub API token granted to that account, with the scopes your operations need.
+  WhatsApp bulk campaigns also need `deliveries:cancel`, or a cancel cannot stop queued sends.
   See [authentication](authentication.md).
 - A System Manager on the Frappe site.
 
