@@ -796,3 +796,4 @@
   .v1-shell .frappe-list-row>span:nth-child(n){padding:3px 0;align-items:baseline}
   .v1-shell .frappe-list-row>span::before{min-width:84px}
 }
+.message-unread-divider span{background:var(--surface-blue-1);border-color:var(--outline-blue-1);color:var(--ink-blue-3)}

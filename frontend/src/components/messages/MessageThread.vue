@@ -12,6 +12,7 @@ import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL } from "../messageContent";
 import { multipleChannels } from "../../services/enabledChannels";
+import { createScrollHold } from "./scrollHold";
 const props = defineProps({
   rows: Array,
   contactName: String,
@@ -23,6 +24,7 @@ const props = defineProps({
   anchor: String,
   position: Object,
   newer: Boolean,
+  unread: String,
 });
 const emit = defineEmits([
   "reconcile",
@@ -49,7 +51,8 @@ async function loadReaders(){
 }
 watch(()=>[props.selected,(props.rows||[]).map(row=>row.name).join(',')],()=>loadReaders(),{immediate:true});
 useRealtimeRefresh([],['reads'],loadReaders);
-const viewport = ref(null);
+const viewport = ref(null), content = ref(null);
+const scroll = createScrollHold(() => viewport.value);
 const reactionTarget = ref(null);
 const reactionChoices = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
 function canReact(message) {
@@ -119,10 +122,7 @@ watch(
   async (value) => {
     if (!value) return;
     await nextTick();
-    const node = [
-      ...(viewport.value?.querySelectorAll("[data-message]") || []),
-    ].find((node) => node.dataset.message === value);
-    if(node && viewport.value)viewport.value.scrollTop+=node.getBoundingClientRect().top-viewport.value.getBoundingClientRect().top-(props.position?.offset??20);
+    scroll.toMessage(value, props.position?.offset ?? 20);
   },
 );
 let visibleTimer;
@@ -150,32 +150,27 @@ function trackVisible() {
   }, 400);
 }
 onBeforeUnmount(() => clearTimeout(visibleTimer));
-// Follows the newest message while the reader is at the end, also when media grows the thread.
-let pinned = true;
-function keepPinned() {
-  if (pinned && viewport.value) viewport.value.scrollTop = viewport.value.scrollHeight;
-}
 async function restorePosition() {
   await nextTick();
-  const node=viewport.value;if(!node)return;
   const name=props.position?.atBottom ? props.anchor : props.position?.name || props.anchor;
-  const target=[...node.querySelectorAll('[data-message]')].find(row=>row.dataset.message===name);
-  pinned=!target;
-  if(target)node.scrollTop+=target.getBoundingClientRect().top-node.getBoundingClientRect().top-(props.position?.offset??20);
-  else node.scrollTop=node.scrollHeight;
+  if(!name || !scroll.toMessage(name, props.position?.offset ?? 20)) scroll.toBottom();
   trackVisible();
 }
+let resizes;
 onMounted(() => {
   restorePosition();
+  resizes = new ResizeObserver(() => scroll.apply());
+  resizes.observe(viewport.value);
+  resizes.observe(content.value);
   window.addEventListener('focus', trackVisible);
   document.addEventListener('visibilitychange', trackVisible);
 });
 onBeforeUnmount(() => {
+  resizes?.disconnect();
   window.removeEventListener('focus', trackVisible);
   document.removeEventListener('visibilitychange', trackVisible);
 });
-let pagingDirection='';
-function requestPage(direction) {if(props.busy)return;pagingDirection=direction;emit(direction);}
+function requestPage(direction) {if(!props.busy)emit(direction);}
 async function fillViewport() {
   await nextTick();
   const node=viewport.value;
@@ -185,41 +180,17 @@ async function fillViewport() {
 watch(()=>[props.more,props.busy,props.rows?.length],fillViewport);
 watch(
   () => props.rows,
-  async (rows, previous) => {
-    const node = viewport.value;
-    if (!node) return;
-    const height = node.scrollHeight,
-      top = node.scrollTop;
-    const viewportTop=node.getBoundingClientRect().top;
-    const visibleAnchor=[...node.querySelectorAll('[data-message]')].find(row=>row.getBoundingClientRect().bottom>viewportTop+20);
-    const stableName=visibleAnchor?.dataset.message, stableOffset=visibleAnchor?.getBoundingClientRect().top-viewportTop;
-    const paging=!!pagingDirection;pagingDirection='';
-    const prepended =
-      previous?.length &&
-      rows[0]?.name !== previous[0]?.name &&
-      rows.some((row) => row.name === previous[0].name);
-    const atBottom = height - top - node.clientHeight < 80;
+  async (_rows, previous) => {
     await nextTick();
     trackVisible();
-    if (props.anchor && !previous?.length) {
-      const target = [...node.querySelectorAll("[data-message]")].find(
-        (row) => row.dataset.message === props.anchor,
-      );
-      if (target) {
-        node.scrollTop+=target.getBoundingClientRect().top-node.getBoundingClientRect().top-(props.position?.offset??20);
-        return;
-      }
-    }
-    const stable=[...node.querySelectorAll('[data-message]')].find(row=>row.dataset.message===stableName);
-    if((paging||prepended||!atBottom)&&stable)node.scrollTop+=stable.getBoundingClientRect().top-node.getBoundingClientRect().top-stableOffset;
-    else if (prepended) node.scrollTop = top + node.scrollHeight - height;
-    else if (atBottom || !previous?.length) node.scrollTop = node.scrollHeight;
+    if (previous?.length) scroll.apply();
+    else if (!props.anchor || !scroll.toMessage(props.anchor, props.position?.offset ?? 20)) scroll.toBottom();
   },
 );
 function scrolled() {
   trackVisible();
+  scroll.scrolled();
   const node = viewport.value;
-  if (node) pinned = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
   if (
     node &&
     node.scrollTop < 32 &&
@@ -279,12 +250,12 @@ function actions(message) {
     class="message-thread"
     aria-label="Conversation"
     @scroll.passive="scrolled"
-    @load.capture="keepPinned"
   >
     <LoadingRows v-if="busy && !rows.length" label="Loading messages…" :count="3" />
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
     </div>
+    <div ref="content">
     <template v-for="(message, index) in rows" :key="message.name">
       <div
         v-if="
@@ -294,6 +265,9 @@ function actions(message) {
         class="message-date-divider"
       >
         <span>{{ dayLabel(message) }}</span>
+      </div>
+      <div v-if="message.name === unread" class="message-date-divider message-unread-divider" role="separator">
+        <span>Unread messages</span>
       </div>
       <article
         class="conversation-bubble"
@@ -390,6 +364,7 @@ function actions(message) {
         <ReadByBubble v-if="!message._pending && readersByMessage[message.name]?.length" :message="message.name" :readers="readersByMessage[message.name]" />
       </article>
     </template>
+    </div>
   </div>
   <Dialog v-model="infoOpen" :options="{ title: 'Message info', size: 'lg' }"
     ><template #body-content

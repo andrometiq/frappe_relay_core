@@ -260,14 +260,25 @@ def view_state(contact, channel=None):
     if channel:
         validate_reference(channel, 'CH')
         frappe.get_doc('Relay Channel', channel).check_permission('read')
+    state = {'channel': channel, 'first_unread': first_unread(contact, channel)}
     position = views.get(channel or 'combined') or {}
     if position.get('name'):
         doc = frappe.get_doc('Relay Message', position['name']); doc.check_permission('read')
         frappe.get_doc('Relay Channel', doc.channel).check_permission('read')
-        if doc.relay_contact != contact or channel and doc.channel != channel:
-            return {}
-        return dict(position,channel=channel)
-    return {}
+        if doc.relay_contact == contact and (not channel or doc.channel == channel):
+            state.update(position)
+    return state
+
+
+def first_unread(contact, channel=None):
+    """Oldest unread message in thread order, where the conversation opens."""
+    from relay_core.timeline import timeline_time
+    message = frappe.qb.DocType('Relay Message')
+    query = _unread_query(['name'], contact)
+    if channel:
+        query = query.where(message.channel == channel)
+    rows = query.orderby(timeline_time()).orderby(message.name).limit(1).run()
+    return rows[0][0] if rows else None
 
 
 @frappe.whitelist(methods=['POST'])

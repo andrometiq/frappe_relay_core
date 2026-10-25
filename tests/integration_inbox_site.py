@@ -68,9 +68,9 @@ try:
  inbox.save_view(contact.name,messages[0].name,channel=channel.name,offset=-7,at_bottom=0)
  assert inbox.view_state(contact.name,channel.name)['name']==messages[0].name
  assert inbox.view_state(contact.name,channel.name)['offset']==-7
- assert not inbox.view_state(contact.name,'')
+ assert not inbox.view_state(contact.name,'').get('name')
  assert inbox.view_state(contact.name)['channel']==channel.name
- frappe.set_user(users[0]);assert not inbox.view_state(contact.name,channel.name)
+ frappe.set_user(users[0]);assert not inbox.view_state(contact.name,channel.name).get('name')
  denied(lambda:inbox.save_view(contact.name,second_message.name,channel=channel.name))
  assert inbox.read(contact.name)['unread']==3
  print('PASS channel metadata, independently persisted backward resume positions, user isolation and no false reads')

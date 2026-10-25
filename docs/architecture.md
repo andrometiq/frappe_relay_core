@@ -81,7 +81,7 @@ Timeline and compact summary are two views of the same authorized conversation. 
 Use `(user, conversation)` state, not one global unread Boolean. Allocate a monotonic local sequence when a message is committed; provider timestamps are display data and may arrive late or out of order.
 
 1. Opening a chat captures an ingestion high-water mark H and the user's previous viewport anchor in one API response.
-2. Clear that user's badge only for inbound messages through H. Preserve the previous viewport anchor, load a bounded page around it, and show a new-message divider. A new chat opens at first unread, or latest page if none.
+2. Clear that user's badge only for inbound messages through H. Every chat opens at its first unread message in thread order, with an unread divider and a bounded page around it, or at the newest message if none is unread. The thread keeps that message, or the newest message, in place while media and other parts of bubbles load.
 3. New messages above H remain unread unless the active foreground view acknowledges them. A background tab cannot clear newly arriving messages.
 4. Update viewport anchor on actual viewing/leave with a version token. Keep it distinct from monotonic seen/read progress: scrolling backward must remain a valid resume location; stale tabs must not overwrite a newer viewport session.
 5. Record exact visible message IDs in bounded batches for “read by” details. Merely opening a long chat does not fabricate exact readership for every historical message.
