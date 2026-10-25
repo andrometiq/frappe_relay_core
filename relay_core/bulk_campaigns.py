@@ -85,7 +85,7 @@ def create(title, template_name, language, channel=None, reply_window_hours=72):
         hub, _ = whatsapp.checked_client()
         snapshot = template_snapshot(approved_template(hub, template_name, language))
     except whatsapp.HubError as exc:
-        frappe.throw(str(exc))
+        frappe.throw(whatsapp.failure_message(exc))
     except ValueError as exc:
         frappe.throw(str(exc))
     doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation='templates.send',
@@ -277,7 +277,7 @@ def control(name, action):
                 hub, _ = whatsapp.checked_client()
                 approved_template(hub, doc.template_name, doc.language)
             except whatsapp.HubError as exc:
-                frappe.throw(str(exc))
+                frappe.throw(whatsapp.failure_message(exc))
             doc.execution_user, doc.started_at = frappe.session.user, doc.started_at or frappe.utils.now_datetime()
             from relay_core.bulk_updates import open_reply_window
             open_reply_window(doc.reply_window_hours)
@@ -318,7 +318,8 @@ def push(doc, deadline):
             result = hub.call_tool('whatsapp.bulk', {'messages': messages})
         except whatsapp.HubError as exc:
             # Same keys are pushed again on recovery; Hub returns the rows it already holds.
-            frappe.db.set_value('Relay Campaign', doc.name, 'last_error', str(exc)[:500], update_modified=False)
+            frappe.db.set_value('Relay Campaign', doc.name, 'last_error', whatsapp.failure_message(exc)[:500],
+                                update_modified=False)
             frappe.db.commit()
             return
         admit(rows, result.get('deliveries') or [])
