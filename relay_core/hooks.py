@@ -68,6 +68,7 @@ for _event in ('after_insert', 'on_submit', 'on_cancel'):
     if isinstance(_handlers, str): _handlers = [_handlers]
     doc_events['*'][_event] = [*_handlers, 'relay_core.business_events.on_event']
 scheduler_events['cron']['* * * * *'].append('relay_core.business_events.recover')
+scheduler_events['cron']['*/10 * * * *'] = ['relay_core.whatsapp_templates.sync']
 
 after_migrate.append('relay_core.ai.samples.install_samples')
 after_install.append('relay_core.ai.samples.install_samples')
