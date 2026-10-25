@@ -343,26 +343,121 @@ export function buildTemplateComponents(form) {
   return components;
 }
 
-function validateButton(button, submit) {
-  if (!submit) return;
-  if (!button.text && !["CATALOG", "OTP"].includes(button.type)) {
-    throw new Error("Every button requires visible text.");
+const LIMITS = { body: 1024, header: 60, footer: 60, button: 25, url: 2000 };
+const BUTTON_LIMITS = { QUICK_REPLY: 10, URL: 2, PHONE_NUMBER: 1, COPY_CODE: 1 };
+const PLACEHOLDER = /\{\{\s*([^{}]*?)\s*\}\}/g;
+
+function placeholders(value) {
+  return [...String(value || "").matchAll(PLACEHOLDER)].map((match) => match[1]);
+}
+
+function formatIssues(label, value, parameterFormat) {
+  const names = placeholders(value);
+  if (parameterFormat === "NAMED") {
+    return names.some((name) => !/^[a-z][a-z0-9_]*$/.test(name))
+      ? [`${label} variables must be named like {{customer_name}}: lowercase letters, numbers and underscores.`]
+      : [];
   }
-  if (button.type === "URL" && !button.url)
-    throw new Error("Website buttons require a URL.");
-  if (button.type === "PHONE_NUMBER" && !button.phone_number) {
-    throw new Error("Phone buttons require a phone number.");
+  if (names.some((name) => !/^\d+$/.test(name)))
+    return [`${label} variables must be numbered like {{1}}.`];
+  const numbers = [...new Set(names.map(Number))].sort((left, right) => left - right);
+  return numbers.some((number, index) => number !== index + 1)
+    ? [`${label} variables must be numbered in order from {{1}} without gaps.`]
+    : [];
+}
+
+function buttonIssues(form) {
+  const buttons = form.buttons || [];
+  const issues = buttons.length > 10 ? ["Use at most 10 buttons."] : [];
+  for (const [type, limit] of Object.entries(BUTTON_LIMITS)) {
+    if (buttons.filter((button) => button.type === type).length > limit)
+      issues.push(`Use at most ${limit} ${type.toLowerCase().replaceAll("_", " ")} button${limit > 1 ? "s" : ""}.`);
   }
-  if (button.type === "FLOW" && !button.flow_id) {
-    throw new Error("Flow buttons require a Flow ID.");
+  buttons.forEach((button, index) => {
+    const label = `Button ${index + 1}`;
+    const text = String(button.text || "").trim();
+    if (!text && !["CATALOG", "OTP"].includes(button.type)) issues.push(`${label} needs visible text.`);
+    if (text.length > LIMITS.button) issues.push(`${label} text must be at most ${LIMITS.button} characters.`);
+    if (button.type === "URL") {
+      const url = String(button.url || "").trim();
+      const variables = placeholders(url);
+      if (!/^https?:\/\/\S+$/.test(url) || url.length > LIMITS.url)
+        issues.push(`${label} needs a website URL starting with https:// (at most ${LIMITS.url} characters).`);
+      else if (variables.length > 1 || (variables.length && !/\{\{\s*[^{}]*\s*\}\}$/.test(url)))
+        issues.push(`${label} URL can have one variable, only at the end.`);
+      else if (variables.length && !String(button.example_value || "").trim())
+        issues.push(`${label} needs an example URL value for its variable.`);
+    }
+    if (button.type === "PHONE_NUMBER" && !/^\+?[0-9]{7,20}$/.test(String(button.phone_number || "").replace(/[ ()-]/g, "")))
+      issues.push(`${label} needs a phone number with country code.`);
+    if (button.type === "FLOW" && !button.flow_id) issues.push(`${label} needs a Flow ID.`);
+    if (button.type === "OTP" && button.otp_type === "ZERO_TAP" && (!button.package_name || !button.signature_hash))
+      issues.push(`${label} needs the Android package name and signature hash.`);
+  });
+  return issues;
+}
+
+// Mirrors the Meta review rules that most often reject a submitted template.
+export function templateIssues(form, { submit = true } = {}) {
+  const issues = [];
+  const format = String(form.parameter_format || "POSITIONAL").toUpperCase();
+  const category = String(form.category || "").toUpperCase();
+  const body = String(form.body_text || "").trim();
+  const header = String(form.header_text || "").trim();
+  const footer = String(form.footer_text || "").trim();
+  if (!String(form.template_name || "").trim() || !String(form.language_code || "").trim())
+    issues.push("Template name and language are required.");
+  else if (!/^[a-z0-9_]{1,512}$/.test(String(form.template_name).trim()))
+    issues.push("Template name must use lowercase letters, numbers and underscores.");
+  if (!["MARKETING", "UTILITY", "AUTHENTICATION"].includes(category)) issues.push("Choose a template category.");
+  if (!["POSITIONAL", "NAMED"].includes(format)) issues.push("Choose a parameter format.");
+  if (category !== "AUTHENTICATION" && !body) issues.push("Message body is required.");
+  if (body.length > LIMITS.body) issues.push(`Message body must be at most ${LIMITS.body} characters.`);
+  if (/^\{\{[^{}]*\}\}/.test(body) || /\{\{[^{}]*\}\}$/.test(body))
+    issues.push("Meta rejects a variable at the very start or end of the body. Add text before and after it.");
+  issues.push(...formatIssues("Body", body, format));
+  if (form.header_type === "TEXT") {
+    if (!header) issues.push("Text headers require header text.");
+    if (header.length > LIMITS.header) issues.push(`Header text must be at most ${LIMITS.header} characters.`);
+    if (placeholders(header).length > 1) issues.push("Header text can have at most one variable.");
+    issues.push(...formatIssues("Header", header, format));
   }
-  if (button.type === "OTP" && button.otp_type === "ZERO_TAP") {
-    if (!button.package_name || !button.signature_hash) {
-      throw new Error(
-        "Zero-tap OTP buttons require package name and signature hash.",
-      );
+  if (footer.length > LIMITS.footer) issues.push(`Footer must be at most ${LIMITS.footer} characters.`);
+  if (placeholders(footer).length) issues.push("Footer cannot contain variables.");
+  if (submit && ["IMAGE", "VIDEO", "DOCUMENT"].includes(form.header_type) && !String(form.header_media_example || "").trim())
+    issues.push("Upload a header sample file before submission.");
+  if (submit) {
+    for (const field of templateSampleFields(form)) {
+      if (!String(form.sample_values?.[field.scope]?.[field.name] || "").trim())
+        issues.push(`${field.label} is required before submission.`);
     }
   }
+  const ttl = String(form.message_send_ttl_seconds || "").trim();
+  if (ttl && (!/^\d+$/.test(ttl) || Number(ttl) < 1)) issues.push("Message validity must be a positive number of seconds.");
+  const expiration = String(form.code_expiration_minutes || "").trim();
+  if (expiration && (!/^\d+$/.test(expiration) || Number(expiration) < 1))
+    issues.push("Code expiration must be a positive number of minutes.");
+  return [...issues, ...(submit ? buttonIssues(form) : [])];
+}
+
+function sampled(text, values = {}) {
+  return String(text || "").replace(PLACEHOLDER, (match, name) => String(values[name] || "").trim() || match);
+}
+
+// WhatsApp-style preview content with the current examples filled in.
+export function templatePreview(form) {
+  const type = String(form.header_type || "NONE").toUpperCase();
+  return {
+    header: type === "TEXT" ? sampled(form.header_text, form.sample_values?.header) : "",
+    media: ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(type) ? type.toLowerCase() : "",
+    body: sampled(form.body_text, form.sample_values?.body),
+    footer: String(form.footer_text || "").trim(),
+    buttons: (form.buttons || []).map((button) => ({
+      key: button._client_key,
+      text: String(button.text || "").trim() || (button.type === "OTP" ? "Copy code" : button.type),
+      icon: { URL: "external-link", PHONE_NUMBER: "phone", COPY_CODE: "copy", OTP: "copy" }[button.type] || "corner-up-left",
+    })),
+  };
 }
 
 export function templateRequest(
@@ -378,59 +473,16 @@ export function templateRequest(
   const parameterFormat = String(form.parameter_format || "POSITIONAL")
     .trim()
     .toUpperCase();
-  if (!accountName || !templateName || !languageCode) {
-    throw new Error("Account, template name, and language are required.");
-  }
-  if (!/^[a-z0-9_]{1,512}$/.test(templateName)) {
-    throw new Error(
-      "Template name must use lowercase letters, numbers, and underscores.",
-    );
-  }
-  if (!["MARKETING", "UTILITY", "AUTHENTICATION"].includes(category)) {
-    throw new Error("Template category is invalid.");
-  }
-  if (!["POSITIONAL", "NAMED"].includes(parameterFormat)) {
-    throw new Error("Parameter format is invalid.");
-  }
+  if (!accountName) throw new Error("Account is required.");
+  const issues = templateIssues(form, { submit });
+  if (issues.length) throw new Error(issues[0]);
   const ttlValue = String(form.message_send_ttl_seconds || "").trim();
-  if (ttlValue && (!/^\d+$/.test(ttlValue) || Number(ttlValue) < 1)) {
-    throw new Error("Message send TTL must be a positive number of seconds.");
-  }
-  if (form.header_type === "TEXT" && !String(form.header_text || "").trim()) {
-    throw new Error("Text headers require header text.");
-  }
-  if (
-    submit &&
-    ["IMAGE", "VIDEO", "DOCUMENT"].includes(form.header_type) &&
-    !String(form.header_media_example || "").trim()
-  ) {
-    throw new Error(
-      "Media headers require a sample handle or URL before submission.",
-    );
-  }
-  if (category !== "AUTHENTICATION" && !String(form.body_text || "").trim()) {
-    throw new Error("Template body text is required.");
-  }
-  if (submit) {
-    for (const field of templateSampleFields(form)) {
-      if (
-        !String(form.sample_values?.[field.scope]?.[field.name] || "").trim()
-      ) {
-        throw new Error(`${field.label} is required before submission.`);
-      }
-    }
-  }
-  for (const button of form.buttons || []) validateButton(button, submit);
-  const expiration = String(form.code_expiration_minutes || "").trim();
-  if (expiration && (!/^\d+$/.test(expiration) || Number(expiration) < 1)) {
-    throw new Error("Code expiration must be a positive number of minutes.");
-  }
   const template = {
     account_name: accountName,
     template_name: templateName,
     language_code: languageCode,
     category,
-    parameter_format: parameterFormat,
+    parameter_format: parameterFormat.toLowerCase(),
     components: buildTemplateComponents(form),
   };
   if (ttlValue) template.message_send_ttl_seconds = Number(ttlValue);

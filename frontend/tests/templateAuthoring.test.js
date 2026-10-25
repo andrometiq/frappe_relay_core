@@ -6,6 +6,8 @@ import {
 	buildTemplateComponents,
 	parseTemplateComponents,
 	templateForm,
+	templateIssues,
+	templatePreview,
 	templateRequest,
 	templateSampleFields,
 } from '../src/services/templateAuthoring.js'
@@ -134,4 +136,46 @@ test('fails closed on malformed storage and incomplete submission fields', () =>
 	form.sample_values.body['1'] = 'A-2'
 	form.template_name = 'Bad Name'
 	assert.throws(() => templateRequest(form, { submit: true }), /lowercase/)
+})
+
+function namedForm(body) {
+	const form = templateForm({ account_name: 'current-account', template_name: 'order_update', language_code: 'en_US',
+		parameter_format: 'NAMED', components: [{ type: 'BODY', text: body }] })
+	form.sample_values.body = { customer_name: 'Asha', order_id: 'SO-12' }
+	return form
+}
+
+test('flags the Meta rules that cause template rejections', () => {
+	assert.match(templateIssues(namedForm('{{customer_name}}, your order is ready')).join(' '), /very start or end/)
+	assert.match(templateIssues(namedForm('Your order is ready {{order_id}}')).join(' '), /very start or end/)
+	assert.match(templateIssues(namedForm('Hello {{Customer Name}}, ready')).join(' '), /lowercase letters/)
+	assert.match(templateIssues(namedForm('Hi {{1}}, ready')).join(' '), /named like/)
+	const missing = namedForm('Hi {{customer_name}}, order {{order_id}} is ready')
+	missing.sample_values.body = {}
+	assert.match(templateIssues(missing).join(' '), /Body sample for \{\{customer_name\}\}/)
+	const positional = templateForm({ account_name: 'a', template_name: 'gap', components: [{ type: 'BODY', text: 'Hi {{1}} and {{3}} ok' }] })
+	assert.match(templateIssues(positional).join(' '), /without gaps/)
+	const long = namedForm('Hi {{customer_name}} ' + 'x'.repeat(1030) + ' ok')
+	long.footer_text = 'Thanks {{customer_name}}'
+	long.buttons = [{ type: 'URL', text: 'Track my order right now please', url: 'ftp://bad' }, { type: 'PHONE_NUMBER', text: 'Call', phone_number: '12' }]
+	const issues = templateIssues(long).join(' ')
+	for (const rule of [/at most 1024/, /Footer cannot contain variables/, /at most 25 characters/, /https:\/\//, /country code/]) assert.match(issues, rule)
+	assert.throws(() => templateRequest(namedForm('{{customer_name}} hi'), { submit: true }), /very start or end/)
+	assert.deepEqual(templateIssues(namedForm('Hi {{customer_name}}, order {{order_id}} is ready.')), [])
+})
+
+test('sends Meta parameter format in lowercase', () => {
+	const request = templateRequest(namedForm('Hi {{customer_name}}, order {{order_id}} is ready.'), { submit: true })
+	assert.equal(request.template.parameter_format, 'named')
+	assert.deepEqual(request.template.components[0].example.body_text_named_params,
+		[{ param_name: 'customer_name', example: 'Asha' }, { param_name: 'order_id', example: 'SO-12' }])
+})
+
+test('preview fills examples, media header and button icons', () => {
+	const form = namedForm('Hi {{customer_name}}, order {{order_id}} is ready.')
+	form.header_type = 'IMAGE'
+	form.footer_text = 'Essdee'
+	form.buttons = [{ type: 'URL', text: 'Track' }, { type: 'QUICK_REPLY', text: 'Thanks' }]
+	assert.deepEqual(templatePreview(form), { header: '', media: 'image', body: 'Hi Asha, order SO-12 is ready.', footer: 'Essdee',
+		buttons: [{ key: undefined, text: 'Track', icon: 'external-link' }, { key: undefined, text: 'Thanks', icon: 'corner-up-left' }] })
 })

@@ -18,6 +18,8 @@ import {
   templateStatusTheme,
 } from "../../services/templateList";
 import TemplateEditor from "./TemplateEditor.vue";
+import TemplatePreview from "./TemplatePreview.vue";
+import { templateForm, templatePreview } from "../../services/templateAuthoring";
 
 const access = inject('relayCapabilities', ref({ manage: false }));
 const workspace = inject(whatsappKey);
@@ -41,6 +43,11 @@ const status = ref("ALL");
 const category = ref("ALL");
 const language = ref("ALL");
 const confirmingDelete = ref(false);
+const selectedPreview = computed(() => {
+  try { return selectedTemplate.value ? templatePreview(templateForm(selectedTemplate.value)) : null; }
+  catch { return null; } // Templates without a standard body keep the field view only.
+});
+const rejection = (row) => row.rejected_reason || row.rejection_reason || "";
 let restoreInFlight = false;
 const columns = [
   { key: "name", label: "Template name", width: "minmax(210px,1.2fr)" },
@@ -181,10 +188,10 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
       <div class="frappe-field-grid">
         <FrappeReadField label="Template name" :value="selectedTemplate.name" />
         <FrappeReadField label="Status" :value="selectedTemplate.status || 'Unknown'" />
-        <FrappeReadField v-if="selectedTemplate.status === 'REJECTED'" label="Rejection reason" :value="selectedTemplate.rejected_reason || selectedTemplate.rejection_reason || 'Meta has not provided a rejection reason. Review the template in WhatsApp Manager.'" wide />
+        <FrappeReadField v-if="['REJECTED', 'PAUSED', 'DISABLED'].includes(selectedTemplate.status)" label="Reason from Meta" :value="rejection(selectedTemplate) || 'Meta has not provided a reason. Review the template in WhatsApp Manager.'" wide />
         <FrappeReadField label="Category" :value="selectedTemplate.category" />
         <FrappeReadField label="Language" :value="languageLabel(selectedTemplate.language)" />
-        <FrappeReadField label="Parameter format" :value="selectedTemplate.parameter_format || 'POSITIONAL'" />
+        <FrappeReadField label="Parameter format" :value="String(selectedTemplate.parameter_format || '').toUpperCase() === 'NAMED' ? 'Named' : 'Numbered'" />
         <FrappeReadField label="Meta template ID" :value="selectedTemplate.id" />
       </div>
     </FrappeFormSection>
@@ -204,20 +211,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     </FrappeFormSection>
 
     <template #sidebar>
-      <section class="template-side-preview">
-        <h3>Preview</h3>
-        <div class="template-phone-preview">
-          <div class="template-preview-bubble">
-            <strong v-if="templateHeader(selectedTemplate)">{{ templateHeader(selectedTemplate) }}</strong>
-            <p>{{ templateBody(selectedTemplate) || "No message body" }}</p>
-            <small v-if="templateFooter(selectedTemplate)">{{ templateFooter(selectedTemplate) }}</small>
-            <div v-if="templateButtons(selectedTemplate).length" class="template-preview-buttons">
-              <span v-for="(button, index) in templateButtons(selectedTemplate)" :key="index">{{ button.text || button.type }}</span>
-            </div>
-            <time>12:00</time>
-          </div>
-        </div>
-      </section>
+      <TemplatePreview v-if="selectedPreview" :preview="selectedPreview" />
       <section v-if="confirmingDelete" class="template-danger-zone" role="alert">
         <h3>Delete template?</h3>
         <p>This removes <strong>{{ selectedTemplate.name }}</strong> from Meta.</p>
@@ -257,7 +251,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <template #cell-status="{ item }"><Badge :label="item.status || 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
     <template #cell-category="{ item }">{{ item.category || "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
-    <template #cell-message="{ item }">{{ templateBody(item) || "No message body" }}</template>
+    <template #cell-message="{ item }"><span v-if="item.status === 'REJECTED'" class="template-row-reason">Rejected{{ rejection(item) ? ': ' + rejection(item) : '' }}</span>{{ templateBody(item) || "No message body" }}</template>
     <template #empty-action><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
     <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} loaded templates</span><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /></template>
   </FrappeListView>
