@@ -41,3 +41,23 @@ class MultimodalTests(unittest.TestCase):
    opener.return_value.open.side_effect=RuntimeError('synthetic-secret')
    with self.assertRaises(providers.ProviderError) as error:multimodal.transcribe('fixture-transcribe','synthetic-secret',wav(),'audio/wav')
    self.assertNotIn('synthetic-secret',str(error.exception))
+
+
+def ogg_page(serial,granule,packet,first=False):
+ import struct
+ return b'OggS'+bytes([0,2 if first else 0])+struct.pack('<qII',granule,serial,0)+b'\0\0\0\0'+bytes([1,len(packet)])+packet
+
+def opus(seconds,serial=7):
+ import struct
+ head=b'OpusHead'+bytes([1,1])+struct.pack('<HIhB',312,48000,0,0)
+ return ogg_page(serial,0,head,True)+ogg_page(serial,0,b'OpusTags'+b'\0'*8)+ogg_page(serial,312+int(seconds*48000),b'\0'*20)
+
+class OggDurationTests(unittest.TestCase):
+ def test_voice_note_length_without_ffprobe(self):
+  self.assertAlmostEqual(multimodal.ogg_duration(opus(12.5)),12.5)
+  with patch.object(multimodal.shutil,'which',return_value=None):
+   self.assertEqual(multimodal.audio_extension(opus(12.5),'audio/ogg'),'ogg')
+   for data in (opus(301),opus(0),b'OggS'+b'\0'*80,opus(5)[:-30]+ogg_page(9,10**9,b'\0'*4)):
+    with self.assertRaises(ValueError):multimodal.audio_extension(data,'audio/ogg')
+   # Other containers still need ffprobe to bound their length.
+   with self.assertRaises(ValueError):multimodal.audio_extension(wav(),'audio/wav')

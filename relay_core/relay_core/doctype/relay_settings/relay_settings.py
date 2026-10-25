@@ -16,3 +16,7 @@ class RelaySettings(Document):
             value=self.get(field)
             if value and not set(value)=={'*'} and (not 32<=len(value)<=maximum or any(ord(c)<32 for c in value)):
                 frappe.throw('Credentials must contain at least 32 printable characters')
+        if self.transcription_provider:
+            provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)
+            if provider.provider!='OpenAI' or not provider.enabled:
+                frappe.throw('Voice transcription requires an enabled OpenAI provider with a transcription model')

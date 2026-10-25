@@ -14,6 +14,10 @@ def transcript(message):
     frappe.get_doc('Relay Channel', source.channel).check_permission('read')
     if source.message_type not in ('audio', 'voice'):
         return {'available': False, 'status': 'unavailable'}
+    if source.transcript:
+        details = json.loads(source.transcript_details) if isinstance(source.transcript_details, str) else (source.transcript_details or {})
+        return {'available': True, 'text': source.transcript, 'kind': 'transcript', 'translated': False,
+                'provenance': {key: details.get(key) for key in ('provider', 'model', 'created_at', 'source_hash')}}
     derived=frappe.get_all('Relay Message Translation',filters={'message':message,'source_hash':message_hash(source)},fields=['result'],order_by='creation desc',limit_page_length=1)
     if derived:
         result=json.loads(derived[0].result) if isinstance(derived[0].result,str) else (derived[0].result or {})
@@ -32,7 +36,8 @@ def transcript(message):
         return {'available': True, 'text': row.transcript,
                 'kind': 'transcript', 'translated': False,
                 'provenance': {key: metadata.get(key) for key in ('provider', 'model', 'created_at', 'source_hash')}}
-    return {'available': False, 'status': 'pending' if any(row.status in ('Pending', 'Deciding') for row in rows) else 'unavailable'}
+    pending = source.transcript_status == 'Pending' or any(row.status in ('Pending', 'Deciding') for row in rows)
+    return {'available': False, 'status': 'pending' if pending else (source.transcript_status or 'unavailable').lower()}
 
 
 @frappe.whitelist(methods=['GET'])

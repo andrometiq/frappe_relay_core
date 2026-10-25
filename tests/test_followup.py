@@ -55,6 +55,12 @@ class FollowupTests(unittest.TestCase):
         schema = json.loads(Path('relay_core/relay_core/doctype/relay_message/relay_message.json').read_text())
         self.assertEqual(next(f for f in schema['fields'] if f['fieldname'] == 'content')['ignore_xss_filter'], 1)
 
+    def test_voice_note_preview_includes_its_transcript(self):
+        data = json.dumps({'kind': 'audio', 'media': {'id': '1', 'voice': True}})
+        self.assertEqual(directory_preview(_dict(message_data=data)), 'Voice message')
+        self.assertEqual(directory_preview(_dict(message_data=data, transcript='Send the blue shirts')),
+                         'Voice message: Send the blue shirts')
+
     def test_historical_tokens_use_business_label_in_preview_and_thread(self):
         from relay_core.message_display import decorate_messages
         row = _dict(content='relay-business:'+'a'*32, channel='email', business_doctype='Supplier')

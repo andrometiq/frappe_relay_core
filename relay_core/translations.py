@@ -55,15 +55,16 @@ def source_text(source,policy,run=None,job=None):
         return source.content or '',None
     if not policy.allow_voice:
         raise ValueError('Voice transcription disabled')
+    from relay_core import voice_transcripts
     digest=message_hash(source)
-    # Reply inference and independent translation share one durable transcript.
+    # Reply inference, translation and the inbound step share the message's transcript.
     # The source-specific lock spans persistence, avoiding duplicate audio calls.
-    with frappe.cache.lock('relay-voice-'+digest,timeout=120,blocking_timeout=90):
+    with voice_transcripts.lock(source):
         # A waiter must not retain the database snapshot from before the lock.
         frappe.db.commit()
-        text=None;metadata=None
+        text,metadata=voice_transcripts.stored(source)
         existing=frappe.get_all('Relay Automation Run',filters={'message':source.name,'message_hash':digest,'transcript':['is','set']},fields=['transcript','transcript_metadata'],order_by='creation desc',limit_page_length=1)
-        if existing and existing[0].transcript:
+        if not text and existing and existing[0].transcript:
             text=existing[0].transcript;raw=existing[0].transcript_metadata
             metadata=json.loads(raw) if isinstance(raw,str) else (raw or {})
         if not text:
@@ -73,14 +74,10 @@ def source_text(source,policy,run=None,job=None):
                 if value.get('transcript'):
                     text=value['transcript'];metadata=value.get('transcript_provenance') or {};break
         if not text:
-            from relay_core.attachments import read
-            from relay_core.automation.multimodal import transcribe
             provider=frappe.get_doc('Relay AI Provider',policy.transcription_provider)
             if not provider.enabled or provider.provider!='OpenAI':
                 raise ValueError('Transcription provider unavailable')
-            response=read(source.name);reserve_attempt(policy)
-            text=transcribe(provider.model,provider.get_password('api_key'),response.get_data(),response.mimetype)
-            metadata={'provider':provider.provider,'model':provider.model,'created_at':str(frappe.utils.now_datetime()),'source_hash':digest}
+            text,metadata=voice_transcripts.create(source,provider,reserve=lambda:reserve_attempt(policy))
         if run is not None and not run.get('transcript'):
             run.transcript=text;run.transcript_metadata=json.dumps(metadata);internal_save(run)
         if job is not None:
