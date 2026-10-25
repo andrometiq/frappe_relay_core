@@ -110,8 +110,8 @@ def refresh(name):
     delay = PROGRESS_SECONDS - (time.time() - frappe.utils.flt(frappe.cache.get_value(PUBLISHED + name)))
     if delay > 0:
         time.sleep(delay)
+    frappe.cache.srem(DIRTY, name)  # Before the snapshot: a later change marks again and gets its own refresh.
     frappe.db.commit()  # A fresh snapshot: count what committed during the wait.
-    frappe.cache.srem(DIRTY, name)
     publish(name, recount(name))
     frappe.cache.set_value(PUBLISHED + name, time.time(), expires_in_sec=60)
 
