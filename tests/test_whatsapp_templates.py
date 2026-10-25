@@ -8,13 +8,26 @@ from relay_core import whatsapp_templates
 from relay_core.hub import HubError
 
 
+class Cache:
+    """Redis hash and value calls the module uses, in memory."""
+    def __init__(self):
+        self.values = {}
+
+    def hset(self, name, key, value): self.values.setdefault(name, {})[key] = value
+    def hget(self, name, key): return self.values.get(name, {}).get(key)
+    def set_value(self, name, value): self.values[name] = value
+    def get_value(self, name): return self.values.get(name)
+    def delete_value(self, name): self.values.pop(name, None)
+
+
 class Store:
     """In-memory Relay WhatsApp Template rows behind the frappe calls the module uses."""
     def __init__(self):
         self.rows, self.requests = {}, []
         self.frappe = SimpleNamespace(db=Mock(), get_doc=self.get_doc, get_all=self.get_all,
             publish_realtime=Mock(), realtime=SimpleNamespace(get_doctype_room=lambda doctype: doctype),
-            log_error=Mock(), ValidationError=type('ValidationError', (Exception,), {}))
+            log_error=Mock(), ValidationError=type('ValidationError', (Exception,), {}), cache=Cache(),
+            utils=SimpleNamespace(now=lambda: '2026-10-26 09:00:00'))
         self.frappe.db.exists.return_value = True
         self.frappe.db.get_value.side_effect = self.get_value
 
@@ -140,6 +153,92 @@ class TemplateSyncTests(unittest.TestCase):
         self.store.frappe.get_all = lambda *args, **kwargs: [_dict(template_id='101', reason='INVALID_FORMAT')]
         result = whatsapp_templates.overlay({'data': [dict(ROW, status='REJECTED')]})
         self.assertEqual((result['data'][0]['status'], result['data'][0]['rejected_reason']), ('REJECTED', 'INVALID_FORMAT'))
+
+
+MARKETING = {'name': 'relay_test_marketing', 'language': 'en', 'parameter_format': 'POSITIONAL', 'components': [
+    {'type': 'HEADER', 'format': 'TEXT', 'text': 'Hello {{1}}'},
+    {'type': 'BODY', 'text': 'Hi {{1}}, our {{2}} collection is now available. {{3}}'},
+    {'type': 'FOOTER', 'text': 'Essdee Knitting Mills'},
+    {'type': 'BUTTONS', 'buttons': [{'type': 'QUICK_REPLY', 'text': 'Send catalogue'}, {'type': 'URL', 'text': 'Open shop', 'url': 'https://example.invalid/{{1}}'}]}]}
+SENT = [{'type': 'header', 'parameters': [{'type': 'text', 'text': 'Ravi'}]},
+        {'type': 'body', 'parameters': [{'type': 'text', 'text': 'Ravi'}, {'type': 'text', 'text': 'Winter'},
+                                        {'type': 'currency', 'currency': {'fallback_value': 'Rs 499'}}]},
+        {'type': 'button', 'sub_type': 'url', 'index': '1', 'parameters': [{'type': 'text', 'text': 'winter'}]}]
+
+
+class TemplateRenderTests(unittest.TestCase):
+    def setUp(self):
+        self.store, self.hub = Store(), Mock()
+        self.patches = [patch.object(whatsapp_templates, 'frappe', self.store.frappe),
+            patch.object(whatsapp_templates, 'internal_save', side_effect=self.store.save),
+            patch.object(whatsapp_templates, 'connection_value', return_value='essdee'),
+            patch('relay_core.whatsapp.checked_client', return_value=(self.hub, {'templates': True}))]
+        for item in self.patches: item.start()
+
+    def tearDown(self):
+        for item in self.patches: item.stop()
+
+    def test_positional_values_fill_header_body_and_buttons(self):
+        rendered = whatsapp_templates.render(MARKETING, SENT)
+        self.assertEqual(rendered, {'header': 'Hello Ravi', 'body': 'Hi Ravi, our Winter collection is now available. Rs 499',
+                                    'footer': 'Essdee Knitting Mills', 'buttons': ['Send catalogue', 'Open shop']})
+
+    def test_named_values_and_missing_values_keep_placeholders(self):
+        template = {'components': [{'type': 'BODY', 'text': 'Hi {{customer_name}}, order {{order_number}}'}]}
+        sent = [{'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha', 'parameter_name': 'customer_name'}]}]
+        self.assertEqual(whatsapp_templates.render(template, sent), {'body': 'Hi Asha, order {{order_number}}'})
+
+    def test_media_header_is_not_rendered_as_text(self):
+        template = {'components': [{'type': 'HEADER', 'format': 'IMAGE'}, {'type': 'BODY', 'text': 'New stock'}]}
+        self.assertEqual(whatsapp_templates.render(template, []), {'body': 'New stock'})
+
+    def test_sync_caches_definitions_so_sends_skip_the_hub(self):
+        self.hub.execute.return_value = page([dict(ROW, **MARKETING, id='103', status='APPROVED')])
+        whatsapp_templates.sync()
+        self.hub.execute.reset_mock()
+        content = whatsapp_templates.message_content({'name': 'relay_test_marketing', 'language': 'en', 'components': SENT, 'to': '9190'})
+        self.hub.execute.assert_not_called()
+        self.assertEqual(content['text'], 'Hi Ravi, our Winter collection is now available. Rs 499')
+        self.assertEqual(content['template'], {'name': 'relay_test_marketing', 'language': 'en', 'components': SENT,
+            'header': 'Hello Ravi', 'footer': 'Essdee Knitting Mills', 'buttons': ['Send catalogue', 'Open shop']})
+
+    def test_cache_miss_scans_the_hub_once_and_unknown_template_falls_back_to_name(self):
+        self.hub.execute.return_value = page([dict(ROW, **MARKETING, id='103', status='APPROVED')])
+        content = whatsapp_templates.message_content({'name': 'relay_test_marketing', 'language': 'en', 'components': SENT})
+        self.assertEqual((self.hub.execute.call_count, content['template']['header']), (1, 'Hello Ravi'))
+        missing = whatsapp_templates.message_content({'name': 'retired_offer', 'language': 'en'})
+        self.assertEqual(missing, {'kind': 'text', 'text': 'Template: retired_offer', 'template': {'name': 'retired_offer', 'language': 'en'}})
+
+    def test_hub_failure_does_not_block_the_send(self):
+        self.hub.execute.side_effect = HubError('down')
+        self.assertEqual(whatsapp_templates.message_content({'name': 'relay_test_marketing', 'language': 'en'})['text'],
+                         'Template: relay_test_marketing')
+
+    def test_template_edit_drops_cached_content(self):
+        self.store.frappe.cache.hset(whatsapp_templates.DEFINITIONS + 'essdee', 'relay_test_marketing|en', MARKETING)
+        whatsapp_templates.apply_request('templates.update', {'id': '103'}, {'success': True})
+        self.assertIsNone(self.store.frappe.cache.hget(whatsapp_templates.DEFINITIONS + 'essdee', 'relay_test_marketing|en'))
+
+    def test_sync_status_reports_last_successful_sync(self):
+        with patch('relay_core.permissions.require_access'):
+            self.assertEqual(whatsapp_templates.sync_status(), {'synced_at': None, 'templates': 0})
+            self.hub.execute.return_value = page([ROW])
+            whatsapp_templates.sync()
+            self.assertEqual(whatsapp_templates.sync_status(), {'synced_at': '2026-10-26 09:00:00', 'templates': 1})
+            self.hub.execute.side_effect = HubError('down')
+            whatsapp_templates.sync()
+            self.assertEqual(whatsapp_templates.sync_status()['synced_at'], '2026-10-26 09:00:00')
+
+
+    def test_single_send_stores_the_rendered_body_as_message_text(self):
+        from relay_core import conversation_start, messaging
+        self.store.frappe.cache.hset(whatsapp_templates.DEFINITIONS + 'essdee', 'relay_test_marketing|en', MARKETING)
+        content = conversation_start.whatsapp_content({'operation': 'templates.send', 'to': '9190',
+            'name': 'relay_test_marketing', 'language': 'en', 'components': SENT})
+        self.assertEqual(messaging.preview(content), 'Hi Ravi, our Winter collection is now available. Rs 499')
+        self.assertEqual(content['template']['buttons'], ['Send catalogue', 'Open shop'])
+        with self.assertRaises(ValueError):
+            conversation_start.whatsapp_content({'operation': 'templates.send', 'name': ''})
 
 
 if __name__ == '__main__':

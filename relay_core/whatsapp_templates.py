@@ -10,6 +10,9 @@ from relay_core.settings import value as connection_value
 EVENT_STATUSES = {'APPROVED','REJECTED','PENDING','PAUSED','DISABLED','IN_APPEAL','DELETED','PENDING_DELETION','REINSTATED','FLAGGED'}
 SYNC_PAGES = 20  # Hub pages hold 50 templates.
 FIELDS = ('template_name', 'language', 'category', 'status', 'quality', 'reason')
+DEFINITIONS = 'relay-template-definitions:'
+SYNCED = 'relay-template-synced:'
+PLACEHOLDER = re.compile(r'\{\{\s*([a-z0-9_]+)\s*\}\}')
 
 
 def record(account, identifier):
@@ -123,7 +126,85 @@ def sync():
     except (HubError, ValueError, frappe.ValidationError) as error:
         frappe.log_error('Relay WhatsApp template sync failed', getattr(error, 'detail', '') or str(error))
         return False
-    return store(account, rows, complete)
+    changed = store(account, rows, complete)
+    remember(account, rows)
+    frappe.cache.set_value(SYNCED + account, {'synced_at': frappe.utils.now(), 'templates': len(rows)})
+    return changed
+
+
+def remember(account, rows):
+    """Cache listed template content so sends render without another Hub list."""
+    for row in rows:
+        if row.get('name') and row.get('language'):
+            frappe.cache.hset(DEFINITIONS + account, row['name'] + '|' + row['language'],
+                              {key: row.get(key) for key in ('parameter_format', 'components')})
+
+
+def definition(name, language):
+    """Template content from the sync cache, or from one Hub list scan on a miss."""
+    account = connection_value('relay_hub_account')
+    key = f'{name}|{language}'
+    found = frappe.cache.hget(DEFINITIONS + account, key)
+    if found is None:
+        from relay_core.hub import HubError
+        from relay_core.whatsapp import checked_client
+        try:
+            rows, _ = listed(checked_client()[0])
+        except (HubError, ValueError):
+            return None
+        remember(account, rows)
+        found = frappe.cache.hget(DEFINITIONS + account, key)
+    return found
+
+
+def parameter_value(parameter):
+    kind = parameter.get('type')
+    if kind == 'text':
+        return parameter.get('text')
+    return (parameter.get(kind) or {}).get('fallback_value') if kind in ('currency', 'date_time') else None
+
+
+def render(template, sent):
+    """Header, body, footer and button labels with the sent parameter values filled in."""
+    values = {}
+    for component in sent or []:
+        for index, parameter in enumerate(component.get('parameters') or [], 1):
+            value = parameter_value(parameter)
+            if isinstance(value, str):
+                values[(str(component.get('type')).upper(), parameter.get('parameter_name') or str(index))] = value
+
+    def fill(kind, text):
+        return PLACEHOLDER.sub(lambda match: values.get((kind, match.group(1)), match.group(0)), text or '')
+
+    result = {}
+    for component in template.get('components') or []:
+        kind = str(component.get('type') or '').upper()
+        if kind == 'HEADER' and str(component.get('format') or 'TEXT').upper() == 'TEXT':
+            result['header'] = fill(kind, component.get('text'))
+        elif kind == 'BODY':
+            result['body'] = fill(kind, component.get('text'))
+        elif kind == 'FOOTER' and component.get('text'):
+            result['footer'] = component['text']
+        elif kind == 'BUTTONS':
+            result['buttons'] = [button['text'] for button in component.get('buttons') or [] if button.get('text')]
+    return {key: value for key, value in result.items() if value}
+
+
+def message_content(arguments, template=None):
+    """Stored outgoing template message: the rendered body as text, the rest beside the template name."""
+    sent = {key: arguments[key] for key in ('name', 'language', 'components') if key in arguments}
+    template = template or definition(sent['name'], sent.get('language') or '')
+    rendered = render(template, sent.get('components')) if template else {}
+    body = rendered.pop('body', '') or 'Template: ' + sent['name']
+    return {'kind': 'text', 'text': body[:4096], 'template': {**sent, **rendered}}
+
+
+@frappe.whitelist(methods=['GET'])
+def sync_status():
+    """When the scheduled local template copy last finished."""
+    from relay_core.permissions import require_access
+    require_access()
+    return frappe.cache.get_value(SYNCED + (connection_value('relay_hub_account') or '')) or {'synced_at': None, 'templates': 0}
 
 
 def record_request(operation, arguments, result=None, error=''):
@@ -145,6 +226,8 @@ def apply_request(operation, arguments, result):
         store(account, [{'id':result['id'], 'name':arguments.get('name'), 'language':arguments.get('language'),
                          'category':result.get('category') or arguments.get('category'),
                          'status':result.get('status') or 'PENDING'}])
+    if operation in ('templates.update', 'templates.delete'):
+        frappe.cache.delete_value(DEFINITIONS + account)
     if operation == 'templates.delete':
         filters = {'account':account, 'template_name':arguments.get('name'), 'status':['!=', 'DELETED']}
         if arguments.get('id'):
