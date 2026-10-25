@@ -19,6 +19,7 @@ class BusinessEventTests(unittest.TestCase):
         tools = module('relay_core/ai/tools.py', self.f)
         self.service = module('relay_core/business_events.py', self.f,
             {'relay_core.ai.tools': tools, 'relay_core.automation.service': automation})
+        self.service.snapshot_ownership = Mock()
         self.rule = Doc(name='RULE-1', modified='v1', recipient_field='customer', business_doctype='Customer',
             parameter_mapping='["name", "items_summary"]', source_doctype='Delivery Note', template='TPL-1', channel='CH-1')
         self.source = Doc(doctype='Delivery Note', name='DN-1', customer='CUST-A',

@@ -88,9 +88,10 @@ class TelegramAdmissionTests(unittest.TestCase):
 class AutomatedRetryTests(unittest.TestCase):
     def test_ai_and_business_events_cannot_be_retried_without_provenance(self):
         for operation in ('text', 'email'):
-            for provenance in ('automation_run', 'business_event'):
+            for provenance in ('automation_run', 'flow_run', 'business_event', 'notification', 'email_values'):
                 action = _dict(name='action', owner='sender', status='Rejected', operation=operation,
-                    payload=json.dumps({provenance:'origin', 'email_values':{'to':['a@example.invalid']}}),
+                    payload=json.dumps({'email_values':{'to':['a@example.invalid']},
+                        provenance: {'auto_submitted':1} if provenance=='email_values' else 'origin'}),
                     check_permission=Mock())
                 with self.subTest(operation=operation, provenance=provenance), \
                         patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=action), \

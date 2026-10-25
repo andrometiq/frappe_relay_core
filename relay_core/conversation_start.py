@@ -160,14 +160,22 @@ def send_locked(contact, endpoint, kind, data, request_key, business_doctype, bu
     source,channel,context,tool,args,content=prepared(contact,endpoint,kind,data,business_doctype,business_name)
     payload={'tool':tool,'arguments':args,'content':content,'start':intent}
     from relay_core.business_events import outgoing_event
-    if outgoing_event.get(): payload['business_event'] = outgoing_event.get()
+    if outgoing_event.get():
+        payload['business_event'] = outgoing_event.get()
+    if not messaging.automatic_delivery(payload):
+        from relay_core.tickets import manual_takeover
+        manual_takeover(source)
+    messaging.delivery_snapshot(payload, source, context)
     action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,'operation':content['kind'] if kind=='whatsapp' else kind,'payload':json.dumps(payload),
                           'payload_hash':digest,'status':'Dispatching','start_contact':contact,'target_channel':channel.name,'preview':messaging.preview(content)[:300]})
     internal_save(action,new=True);frappe.db.commit()
     try:
         _,_,_,fresh_tool,fresh_args,_=prepared(contact,endpoint,kind,data,business_doctype,business_name)
         if fresh_tool!=tool or fresh_args!=args:raise ValueError('Conversation changed before sending')
+        messaging.delivery_fence(action, source, context)
         messaging.automation_scope(action, source)
+    except messaging.DeliverySuppressed:
+        return messaging.suppress_delivery(action)
     except (frappe.PermissionError,frappe.ValidationError,ValueError):
         action.status='Rejected';internal_save(action);frappe.db.commit()
         return {'action':action.name,'status':'Rejected','message':None}

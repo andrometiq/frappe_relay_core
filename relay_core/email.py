@@ -104,7 +104,7 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
             action=frappe.get_doc('Relay Message Action',existing);action.check_permission('read')
             if action.payload_hash!=digest:raise ValueError('Request key was already used for different content')
             return reconcile_action(action)
-        source,channel,_=send_target(values)
+        source,channel,context=send_target(values)
         if channel.channel!='Email':raise ValueError('Choose an email conversation')
         # Pre-journal notifications used the raw key. Adopt any durable intent
         # before a new hashed identity could admit the same notification again.
@@ -115,13 +115,21 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
         payload={'email_request':request_key,'email_values':values,
             'business':[source.get('business_doctype'),source.get('business_name')],
             'destination':[source.relay_contact,source.channel,source.sender_endpoint],
-            'notification':notification, 'automation_run':outgoing_run.get(),
+            'notification':notification, 'automation_run':outgoing_run.get(), 'flow_run':messaging.outgoing_flow.get(),
             'business_event':outgoing_event.get()}
+        messaging.delivery_snapshot(payload, source, context)
         action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,
             'source_message':message,'start_contact':None if message else source.relay_contact,
             'operation':'email','target_channel':channel.name,
             'preview':str(body or '')[:300],'payload_hash':digest,
             'payload':json.dumps(payload),'status':'Dispatching'})
+        if (message and str(auto_submitted) == '0' and str(forward) == '0'
+                and not outgoing_run.get() and not messaging.outgoing_flow.get() and not outgoing_event.get() and not notification):
+            from relay_core.tickets import manual_takeover
+            manual_takeover(source)
+            if source.get('ticket'):
+                payload['ticket'] = source.ticket
+                action.payload = json.dumps(payload)
         internal_save(action,new=True);frappe.db.commit()
         if legacy is not None:return finish(action,legacy)
         return submit(action)
@@ -211,6 +219,10 @@ def submit(action):
             raise ValueError('Email content changed before recovery')
         payload['arguments']=arguments
         action.payload=json.dumps(payload);internal_save(action);frappe.db.commit()
+        # The journal commit releases ownership locks; reacquire before Hub admission.
+        messaging.admission_scope(action)
+    except messaging.DeliverySuppressed:
+        return messaging.suppress_delivery(action)
     except frappe.TimestampMismatchError:
         frappe.db.rollback()
         action.reload()
@@ -331,6 +343,7 @@ def project(action,receipt):
         'direction':'Outgoing','status':'Sent','content':values['body'],'message_type':'text','sender_endpoint':source.sender_endpoint,
         'provider_id':receipt['message_id'],'source_key':history_key,
         'business_doctype':business[0],'business_name':business[1],
+        'ticket':payload.get('ticket') or source.get('ticket'),
         'conversation_key':conversation_key(source.channel,source.sender_endpoint,outgoing_context),
         'provider_message_key':provider_key(source.channel,source.sender_endpoint,receipt['message_id']),
         'provider_context':json.dumps(outgoing_context),

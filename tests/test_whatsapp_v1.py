@@ -21,6 +21,7 @@ class DispatchRecoveryTests(unittest.TestCase):
         self.finish = Mock(return_value={'status':'Submitted'})
         for fixture in (patch.object(messaging,'frappe',SimpleNamespace(get_doc=Mock(return_value=self.action), PermissionError=PermissionError, DoesNotExistError=LookupError)),
                         patch.object(messaging,'readable_source',return_value=(self.source,self.channel,{})),
+                        patch.object(messaging,'delivery_episodes',return_value=[]),
                         patch.object(messaging,'require_reply_window'),patch.object(messaging.whatsapp,'client',return_value=self.hub),
                         patch.object(messaging,'finish',self.finish)):
             fixture.start();self.addCleanup(fixture.stop)
@@ -115,7 +116,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
             conf={'relay_automation_enabled': 1}, ValidationError=ValueError,
             PermissionError=PermissionError, DoesNotExistError=LookupError)
         self.fake.db.get_value.return_value = None
-        self.fake.get_doc.side_effect = lambda dt, name=None: self.action if isinstance(dt, dict) else {
+        self.fake.get_doc.side_effect = lambda dt, name=None: (self.action.update(dt) or self.action) if isinstance(dt, dict) else {
             'Relay Automation Run': self.run, 'Relay AI Skill': self.skill}[dt]
         def commit():
             if not self.committed:
@@ -385,7 +386,7 @@ class OutgoingProjectionTests(unittest.TestCase):
              patch.object(whatsapp,'prepare',return_value=args), patch.object(whatsapp,'client',return_value=hub), \
              patch.object(conversation_start.service_window,'require_open'), \
              patch.object(conversation_start,'internal_save'), patch.object(messaging,'internal_save') as save, \
-             patch('relay_core.realtime.changed') as changed:
+             patch('relay_core.realtime.changed') as changed, patch('relay_core.tickets.manual_takeover'):
             result = conversation_start.send('contact','endpoint','whatsapp',
                 {'operation':'messages.react','arguments':{'reply_to':'provider','emoji':'👍'}},
                 'reaction-key','Customer','customer')

@@ -159,6 +159,7 @@ def capture(rule, doc, event):
     # The business document transaction serializes lifecycle callbacks; unique key is final protection.
     if frappe.db.exists('Relay Business Event Delivery', {'event_key': key}): return
     payload = snapshot(rule, doc, people[0], business)
+    snapshot_ownership(payload, rule, people[0], business)
     delivery = frappe.get_doc({'doctype': 'Relay Business Event Delivery', 'event_key': key,
         'rule': rule.name, 'rule_version': str(rule.modified), 'source_doctype': doc.doctype,
         'source_name': doc.name, 'event': event, 'business_doctype': rule.business_doctype,
@@ -169,6 +170,19 @@ def capture(rule, doc, event):
         'endpoint': payload.get('selection', {}).get('endpoint'), 'status': 'Pending'})
     internal_save(delivery, new=True)
     frappe.db.after_commit.add(lambda: enqueue_delivery(delivery.name))
+
+
+def snapshot_ownership(payload, rule, contact, business):
+    """Freeze lifecycle ownership with the intent, before any queued dispatch."""
+    from relay_core.conversation_start import ensure_business_binding, target
+    from relay_core.messaging import delivery_episodes
+    selection = payload.get('selection', {})
+    with as_user(rule.run_as_user):
+        relay, endpoint = ensure_business_binding(contact, selection.get('channel') or rule.channel,
+            rule.business_doctype, business, selection.get('endpoint'))
+        source, _, context = target(relay, endpoint, rule.business_doctype, business)
+        payload['delivery_episodes'] = [[row.name, int(row.generation or 0)]
+                                       for row in delivery_episodes(source, context)]
 
 
 def snapshot(rule, source, contact, business):
@@ -209,7 +223,9 @@ def action_key(delivery, rule):
     return hashlib.sha256((prefix + (delivery.get('execution_user') or rule.run_as_user) + ':' + delivery.event_key).encode()).hexdigest()
 
 
-def delivery_status(status):
+def delivery_status(status, result=None):
+    if status == 'Rejected' and (result or {}).get('suppressed'):
+        return 'Suppressed'
     return {'Submitted': 'Submitted', 'Queued': 'Queued', 'Rejected': 'Failed'}.get(status, 'Uncertain')
 
 
@@ -246,14 +262,15 @@ def dispatch(name):
                     payload = json.loads(delivery.payload)
                     selection = payload.get('selection', {})
                     result = send_business(delivery.contact, selection.get('channel') or rule.channel,
-                        payload.get('kind', 'template'), payload.get('data', payload), delivery.event_key,
+                        payload.get('kind', 'template'), payload.get('data') or {key: payload[key] for key in ('name', 'language', 'components')}, delivery.event_key,
                         delivery.business_doctype, delivery.business_name, **({'endpoint': selection['endpoint']} if selection else {}))
                 finally:
                     outgoing_event.reset(token)
         frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
         delivery.reload()
-        if delivery.status != 'Submitted':
-            delivery.status = delivery_status(result['status'])
+        if delivery.status not in ('Submitted', 'Suppressed'):
+            action_result = json.loads(frappe.db.get_value('Relay Message Action', result.get('action'), 'result') or '{}') if result.get('action') else {}
+            delivery.status = delivery_status(result['status'], action_result)
         delivery.action = result.get('action')
         internal_save(delivery); frappe.db.commit()
     except frappe.QueryDeadlockError:
@@ -301,7 +318,7 @@ def complete(action):
     status = frappe.db.get_value('Relay Business Event Delivery', name, 'status', for_update=True)
     if status and status != 'Submitted':
         frappe.db.set_value('Relay Business Event Delivery', name,
-            {'status': delivery_status(action.status), 'action': action.name})
+            {'status': delivery_status(action.status, json.loads(action.result or '{}')), 'action': action.name})
 
 
 def recover():

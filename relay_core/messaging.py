@@ -25,6 +25,100 @@ from relay_core.permissions import require_access, readable_contact
 outgoing_flow = ContextVar('relay_outgoing_flow', default=None)
 
 
+class DeliverySuppressed(ValueError):
+    """The intent remains auditable, but must never be newly admitted to Hub."""
+
+
+def automatic_delivery(payload):
+    return bool(any(payload.get(key) for key in
+        ('automation_run', 'flow_run', 'business_event', 'notification', 'routing'))
+        or str(payload.get('email_values', {}).get('auto_submitted', 0)) == '1')
+
+
+def delivery_episodes(source, context):
+    """Lock Relay ownership only; callers retain these locks through admission.
+
+    A standalone email has no thread yet, so any held thread in this business
+    blocks it. Anchored replies and Telegram topics retain their exact scope.
+    """
+    company = frappe.db.get_value('Relay Channel', source.channel, 'company')
+    if not company:
+        return []  # Legacy channels cannot admit new AI episodes.
+    from relay_core.tickets import _lock_episode_routing
+    conversation = source.get('conversation_key') or conversation_key(source.channel, source.sender_endpoint, context)
+    _lock_episode_routing(source, conversation)
+    filters = dict(company=company)
+    if source.get('business_name'):
+        filters.update(business_doctype=source.business_doctype, business_name=source.business_name)
+    if source.get('name') or context.get('provider') != 'Email':
+        filters['conversation_key'] = conversation
+    else:
+        conversations = frappe.qb.get_query('Relay Business Routing', filters=dict(channel=source.channel,
+            relay_contact=source.relay_contact, endpoint=source.sender_endpoint),
+            fields=['conversation_key'], limit=101, for_update=True).run(pluck=True)
+        if len(conversations) > 100:
+            raise DeliverySuppressed('Too many email threads to authorize delivery')
+        filters['conversation_key'] = ['in', conversations or [conversation]]
+    names = frappe.qb.get_query('Relay Ticket', filters=filters,
+        or_filters=[['active_scope_key', 'is', 'set'],
+                    ['source_hub_event', 'is', 'set']], fields=['name'],
+        order_by='name', limit=101, for_update=True).run(pluck=True)
+    if len(names) > 100:
+        raise DeliverySuppressed('Too many active episodes to authorize delivery')
+    if source.get('ticket') and source.ticket not in names:
+        names.append(source.ticket)
+    rows = [frappe.get_doc('Relay Ticket', name, for_update=True) for name in sorted(names)]
+    return [row for row in rows if row.active_scope_key or row.name == source.get('ticket')
+            or row.ai_disabled and row.get('ownership_actor')
+                and row.get('source_hub_event') and not row.get('business_name')]
+
+
+def delivery_snapshot(payload, source, context):
+    if source.get('ticket'):
+        payload['ticket'] = source.ticket
+    if payload.get('business_event'):
+        event = frappe.get_doc('Relay Business Event Delivery', payload['business_event'])
+        snapshot = object_value(event.payload)
+        if 'delivery_episodes' in snapshot:
+            payload['delivery_episodes'] = snapshot['delivery_episodes']
+            if len(snapshot['delivery_episodes']) == 1 and context.get('provider') != 'Email':
+                payload['ticket'] = snapshot['delivery_episodes'][0][0]
+        return
+    if automatic_delivery(payload):
+        payload['delivery_episodes'] = [[row.name, int(row.generation or 0)]
+                                      for row in delivery_episodes(source, context)]
+
+
+def delivery_fence(action, source, context):
+    payload = object_value(action.payload)
+    if not automatic_delivery(payload):
+        return
+    rows = delivery_episodes(source, context)
+    current = [[row.name, int(row.generation or 0)] for row in rows]
+    expected = payload.get('delivery_episodes')
+    # Fixed email rules may still have an inbound queue marker but no action yet.
+    # Resume admits new messages only, never old pending replies.
+    from frappe.utils import get_datetime
+    stale_source = source.get('creation') and any(row.get('ownership_at')
+        and get_datetime(source.creation) <= get_datetime(row.ownership_at) for row in rows)
+    if (stale_source or any(row.ai_disabled or not row.active_scope_key for row in rows)
+            or expected is not None and expected != current
+            or expected is None and any(row.generation for row in rows)):
+        raise DeliverySuppressed('Automatic delivery stopped by episode ownership')
+
+
+def suppress_delivery(action):
+    # Accepted/uncertain deliveries remain transport-owned; never pretend to cancel.
+    frappe.db.get_value('Relay Message Action', action.name, 'name', for_update=True)
+    action.reload()
+    if action.status == 'Dispatching':
+        action.status = 'Rejected'
+        action.result = json.dumps({'suppressed': True, 'reason': 'Episode ownership changed'})
+        internal_save(action)
+    frappe.db.commit()
+    return action_result(action)
+
+
 def object_value(value):
     if isinstance(value, str): value = json.loads(value)
     if not isinstance(value, dict): raise ValueError('Expected an object')
@@ -179,8 +273,10 @@ def send(message, kind, data, request_key, quote=1):
     if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', request_key):
         raise ValueError('A stable request key is required')
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
-    encoded = json.dumps({'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
-        'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}, sort_keys=True, separators=(',', ':'))
+    payload = {'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
+        'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}
+    delivery_snapshot(payload, source, context)
+    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(json.dumps({'tool':tool,'arguments':arguments,'source':source.name}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     key = hashlib.sha256((frappe.session.user + ':' + request_key).encode()).hexdigest()
     existing = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'payload_hash', 'status', 'outbound_message'], as_dict=True, for_update=True)
@@ -190,6 +286,12 @@ def send(message, kind, data, request_key, quote=1):
     require_reply_window(source,channel,context)
     action = frappe.get_doc({'doctype': 'Relay Message Action', 'request_key': key, 'source_message': source.name,
         'operation': kind, 'preview':preview(content)[:300], 'target_channel':channel.name, 'payload': encoded, 'payload_hash': digest, 'status': 'Dispatching'})
+    if not outgoing_run.get() and not outgoing_flow.get():
+        from relay_core.tickets import manual_takeover
+        manual_takeover(source)
+        if source.get('ticket'):
+            payload['ticket'] = source.ticket
+            action.payload = json.dumps(payload)
     internal_save(action, new=True); frappe.db.commit()
     try:
         fresh_source, fresh_channel, fresh_context = readable_source(message)
@@ -200,6 +302,7 @@ def send(message, kind, data, request_key, quote=1):
             raise ValueError('Message business changed before sending')
         if fresh_tool != tool or fresh_arguments != arguments:
             raise ValueError('Conversation changed before sending')
+        delivery_fence(action, fresh_source, fresh_context)
         if outgoing_flow.get():
             automation_scope(action, fresh_source)
         if outgoing_run.get():
@@ -209,6 +312,11 @@ def send(message, kind, data, request_key, quote=1):
             if run.get('skill'):
                 from relay_core.ai.service import delivery_scope
                 delivery_scope(run, frappe.get_doc('Relay AI Skill', run.skill), fresh_source)
+            else:
+                from relay_core.automation.service import scope
+                scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+    except DeliverySuppressed:
+        return suppress_delivery(action)
     except (ValueError, frappe.ValidationError, frappe.PermissionError, frappe.DoesNotExistError):
         action.reload(); action.status = 'Rejected'; internal_save(action); frappe.db.commit()
         return {'action': action.name, 'status': action.status, 'message': None}
@@ -282,6 +390,7 @@ def admission_scope(action):
     business = payload.get('business') or []
     if any(business) and (not all(business) or business != [source.get('business_doctype'), source.get('business_name')]):
         raise ValueError('Message business changed before recovery')
+    delivery_fence(action, source, context)
     automation_scope(action, source)
     return source, channel, context
 
@@ -387,6 +496,7 @@ def finish(action, source, channel, context, content, result, *, commit=True):
             'sender_endpoint': source.sender_endpoint, 'provider_id': str(provider_id or ''),
             'provider_context': json.dumps(outgoing_context), 'source_key': action.request_key,
             'business_doctype':business[0], 'business_name':business[1],
+            'ticket': stored.get('ticket') or source.get('ticket'),
             'conversation_key': conversation_key(source.channel, source.sender_endpoint, context),
             'provider_message_key': provider_key(source.channel, source.sender_endpoint, provider_id) if provider_id else None})
         from relay_core.ticket_notifications import insert_message
@@ -497,6 +607,8 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
 def action_error(doc):
     """Expose a fixed, safe reason from durable authentication failure evidence."""
     result = object_value(doc.result or {})
+    if result.get('suppressed'):
+        return 'Automatic delivery stopped because staff took over this episode.'
     error = result.get('error')
     if (doc.status == 'Rejected' and result.get('provider') == 'Hub'
             and isinstance(error, dict) and error.get('http_status') in (401, 403)
@@ -538,6 +650,8 @@ def reconcile(action):
         # Only a successful empty lookup proves admission can safely resume.
         try:
             source, channel, context = admission_scope(doc)
+        except DeliverySuppressed:
+            return suppress_delivery(doc)
         except (ValueError, frappe.PermissionError, frappe.DoesNotExistError):
             if not payload.get('flow_run'): raise
             doc.status = 'Rejected'; internal_save(doc); frappe.db.commit()
@@ -562,6 +676,10 @@ def reconcile(action):
             tool, arguments = payload['tool'], payload['arguments']
         if tool != payload['tool'] or arguments != payload['arguments']:
             raise ValueError('Conversation changed before recovery')
+        try:
+            delivery_fence(doc, source, context)
+        except DeliverySuppressed:
+            return suppress_delivery(doc)
         try:
             receipt = whatsapp.client().call_tool(tool, dict(arguments, request_key=doc.request_key))
         except Exception as exc:
@@ -630,7 +748,7 @@ def actions(contact, before=None):
         retryable=row.status=='Rejected' and row.owner==frappe.session.user and row.operation!='business_prompt'
         if retryable:
             payload=object_value(frappe.get_doc('Relay Message Action',row.name).payload)
-            retryable=not any(payload.get(key) for key in ('notification', 'automation_run', 'business_event')) and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
+            retryable=not automatic_delivery(payload) and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
         items.append({'name':row.name,'operation':row.operation,'status':row.status,'creation':row.creation,
                       'preview':(row.preview or '')[:300], 'message':row.outbound_message,
                       'can_retry':retryable, 'error':action_error(row)})
@@ -653,7 +771,7 @@ def retry(action):
     # that child is a separate reviewed action with its own retry identity.
     key=retry_key(doc.name)
     payload=object_value(doc.payload)
-    if any(payload.get(key) for key in ('notification', 'automation_run', 'business_event')):
+    if automatic_delivery(payload):
         frappe.throw('Automated messages cannot be retried from the inbox',frappe.PermissionError)
     if payload.get('group'):
         from relay_core.telegram import send as group_send
