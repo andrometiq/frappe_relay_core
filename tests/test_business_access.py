@@ -24,6 +24,17 @@ class ActionPermissionTests(unittest.TestCase):
         self.assertFalse(access.action_permission(self.action))
         self.assertFalse(access.action_permission(self.action, user='other'))
 
+    def test_ticket_access_uses_its_business_without_a_contact(self):
+        ticket = _dict(doctype='Relay Ticket', business_doctype='Customer', business_name='C1')
+        with patch.object(access, 'candidates', side_effect=AssertionError('a ticket has no contact')):
+            self.assertTrue(access.allowed(ticket, user='sender'))
+            self.source.has_permission.return_value = False
+            self.assertFalse(access.allowed(ticket, user='sender'))
+        message = _dict(doctype='Relay Message', relay_contact='contact', business_doctype='Customer', business_name='C1')
+        with patch.object(access, 'candidates', return_value=[]):
+            self.source.has_permission.return_value = True
+            self.assertFalse(access.allowed(message, user='sender'), 'A message still needs the Contact link')
+
     def test_legacy_ambiguity_missing_source_and_partial_snapshots_fail_closed(self):
         self.reference.return_value = None
         self.assertFalse(access.action_permission(self.action))

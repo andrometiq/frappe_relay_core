@@ -50,7 +50,9 @@ def allowed(doc,user=None):
     if not target:return False
     # A removed Contact link ends access to that business's history at once; a validated
     # ticket notification is the one stored exception, as it reaches a subscriber's own contact.
-    if not doc.get('ticket_notification') and target not in candidates(doc.relay_contact):return False
+    # A ticket has no contact: its stored business alone decides.
+    if (doc.get('doctype') != 'Relay Ticket' and not doc.get('ticket_notification')
+            and target not in candidates(doc.relay_contact)):return False
     try:return frappe.get_doc(*target).has_permission('read',user=user)
     except frappe.DoesNotExistError:return False
 
