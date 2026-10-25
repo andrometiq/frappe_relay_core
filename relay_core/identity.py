@@ -57,6 +57,33 @@ def normalize(provider, value):
     return value
 
 
+def contact_number(value):
+    """WhatsApp digits for a typed Contact number; national numbers take the system country code."""
+    digits = re.sub(r'[ .+()\-]', '', value or '')
+    if not digits.isdigit():
+        return None
+    if (value or '').strip().startswith('+'):
+        number = digits
+    elif digits.startswith('00'):
+        number = digits[2:]
+    elif digits.startswith('0') or len(digits) <= 10:
+        code = default_calling_code()
+        if not code:
+            return None
+        number = code + digits.lstrip('0')
+    else:
+        number = digits
+    return number if re.fullmatch(r'[1-9][0-9]{6,14}', number) else None
+
+
+def default_calling_code():
+    import frappe
+    from frappe.geo.country_info import get_country_info
+    country = frappe.db.get_single_value('System Settings', 'country')
+    code = (get_country_info(country) or {}).get('isd', '') if country else ''
+    return code.lstrip('+')
+
+
 def bindings(channel, provider, value):
     """Find canonical aliases without rewriting pre-normalization stored keys."""
     import frappe
