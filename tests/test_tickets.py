@@ -389,3 +389,215 @@ class EpisodeScopeTests(unittest.TestCase):
             self.module._lock_episode_routing(self.message, 'Sim Conversation')
         self.f.db.rollback.assert_called_once_with(save_point='episode_routing')
         self.f.get_doc.assert_called_with('Relay Business Routing', 'Sim Routing Winner', for_update=True)
+
+
+class OwnershipTests(unittest.TestCase):
+    def setUp(self):
+        TicketTests.setUp(self)
+        self.doc = Record(name='RELAY-TKT-0000000001', ai_disabled=0, generation=4,
+            active_scope_key='Sim Scope', pending_run='Sim Run', status='Open',
+            check_permission=Mock(), save=Mock())
+        self.f.session = Record(user='Sim Staff')
+        self.f.db = Mock()
+        self.f.get_doc.side_effect = None
+        self.f.get_doc.return_value = self.doc
+        self.enterContext(patch.dict(sys.modules, {'frappe.utils': types.SimpleNamespace(now_datetime=lambda: 'now')}))
+
+    def test_claim_locks_checks_access_and_changes_ownership_once(self):
+        result = self.module.claim(self.doc.name)
+        self.assertEqual(result, dict(name=self.doc.name, ai_disabled=True, generation=5))
+        self.f.get_doc.assert_called_with('Relay Ticket', self.doc.name, for_update=True)
+        self.doc.check_permission.assert_called_with('write')
+        self.assertEqual((self.doc.ownership_actor, self.doc.ownership_at, self.doc.pending_run), ('Sim Staff','now',None))
+        self.assertEqual(self.module.claim(self.doc.name), result)
+        self.doc.save.assert_called_once()
+        self.assertIsNone(self.module._episode_transition.get())
+
+    def test_staff_claim_records_actor_even_when_triage_already_holds(self):
+        self.doc.ai_disabled, self.doc.ownership_actor = 1, 'Administrator'
+        self.assertEqual(self.module.claim(self.doc.name)['generation'], 5)
+        self.assertEqual(self.doc.ownership_actor, 'Sim Staff')
+        self.module.hold_episode(self.doc.name)
+        self.assertEqual(self.doc.generation, 5)
+
+    def test_denied_claim_and_resume_never_mutate(self):
+        self.doc.check_permission.side_effect = PermissionError
+        for method in (self.module.claim, self.module.resume_ai):
+            with self.assertRaises(PermissionError): method(self.doc.name)
+        self.doc.save.assert_not_called()
+        self.assertEqual(self.doc.generation, 4)
+
+    def test_resume_requires_active_episode_and_keeps_old_workers_fenced(self):
+        run = Record(ticket=self.doc.name, ownership_generation=4)
+        self.module.check_episode(run)
+        self.module.claim(self.doc.name)
+        with self.assertRaises(ValueError): self.module.check_episode(run)
+        result = self.module.resume_ai(self.doc.name)
+        self.assertEqual(result, dict(name=self.doc.name, ai_disabled=False, generation=6))
+        with self.assertRaises(ValueError): self.module.check_episode(run)
+        self.module.check_episode(Record(ticket=self.doc.name, ownership_generation=6))
+        self.doc.active_scope_key = None
+        with self.assertRaises(ValueError): self.module.resume_ai(self.doc.name)
+        with self.assertRaises(ValueError): self.module.check_episode(Record(ticket=self.doc.name, ownership_generation=6))
+
+    def test_explicit_release_clears_scope_and_fences_old_workers(self):
+        result = self.module.close_and_release(self.doc.name)
+        self.assertEqual(result['status'], 'Closed')
+        self.assertTrue(result['ai_disabled'])
+        self.assertIsNone(self.doc.active_scope_key)
+        self.assertEqual(self.doc.generation, 5)
+        self.module.close_and_release(self.doc.name)
+        self.assertEqual(self.doc.generation, 5)
+
+    def test_manual_message_holds_only_current_business_scope(self):
+        scope = dict(conversation_key='Sim Conversation')
+        self.module._episode_scope = Mock(return_value=(scope, 'Sim Business Scope'))
+        self.module._lock_episode_routing = Mock()
+        self.module.hold_episode = Mock()
+        source = Record(name='Sim Source', channel='Sim Channel', ticket='Old Episode', business_name='Sim Supplier')
+        self.f.db.get_value.side_effect = lambda dt, *a, **kw: 'Sim Company' if dt == 'Relay Channel' else self.doc.name
+        self.module.manual_takeover(source)
+        self.module.hold_episode.assert_called_once_with(self.doc.name, claim=True)
+        self.f.db.get_value.assert_any_call('Relay Ticket', {'active_scope_key':'Sim Business Scope'}, 'name', for_update=True)
+        self.module.hold_episode.reset_mock()
+        source.name = None
+        self.module.manual_takeover(source)
+        self.module.hold_episode.assert_called_once_with(self.doc.name, claim=True)
+        self.module.hold_episode.reset_mock()
+        self.f.db.get_value.side_effect = lambda dt, *a, **kw: 'Sim Company' if dt == 'Relay Channel' else None
+        self.module.manual_takeover(source)
+        self.module.hold_episode.assert_not_called()  # A released episode stays released.
+
+    def test_failed_save_restores_private_transition_guard(self):
+        self.doc.save.side_effect = ValueError('Journal transaction failed')
+        with self.assertRaises(ValueError): self.module.claim(self.doc.name)
+        self.assertIsNone(self.module._episode_transition.get())
+
+
+    def test_status_save_holds_closed_and_resolved_episodes(self):
+        for status in ('In progress', 'Closed', 'Resolved'):
+            with self.subTest(status=status):
+                previous = Record(generation=4, status='Open', conversation_key='Sim Conversation',
+                    active_scope_key='Sim Scope', ai_disabled=0, pending_run='Sim Run')
+                doc = Record(previous, name=self.doc.name, subject='Staff review', category='Support',
+                    messages=[Record(message=self.message.name)], status=status, check_permission=Mock(),
+                    get_doc_before_save=lambda: previous)
+                self.f.get_doc.side_effect = lambda dt, *a, **kw: previous if dt=='Relay Ticket' else self.message
+                self.module._episode_scope = Mock(return_value=({'conversation_key':'Sim Conversation'},'Sim Scope'))
+                self.module.validate_ticket(doc)
+                self.assertEqual((doc.ai_disabled, doc.generation, doc.pending_run), (1,5,None))
+                self.assertEqual(doc.active_scope_key, 'Sim Scope')
+
+    def test_legacy_channel_manual_message_does_not_require_episode_configuration(self):
+        self.f.db.get_value.return_value = None
+        self.module._episode_scope = Mock()
+        self.module.manual_takeover(Record(name='Source', channel='Legacy Channel', business_name='Supplier'))
+        self.module._episode_scope.assert_not_called()
+
+
+class TicketHistoryTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        self.json = json
+        TicketTests.setUp(self)
+        self.ticket = Record(name='RELAY-TKT-0000000001', company='Sim Company',
+            conversation_key='Sim Conversation', business_doctype='Supplier', business_name='Sim Supplier',
+            generation=2, ai_disabled=0, check_permission=Mock())
+        self.source = Record(ticket=self.ticket.name, company='Sim Company', conversation_key='Sim Conversation',
+            business_doctype='Supplier', business_name='Sim Supplier', channel='Sim Channel', relay_contact='Sim Contact',
+            check_permission=Mock(), apply_fieldlevel_read_permissions=Mock())
+        self.channel = Record(company='Sim Company', check_permission=Mock())
+        self.run = Record(name='RELAY-AR-0000000002', message='RELAY-MSG-0000000001', ticket=self.ticket.name,
+            skill='Sim Event', skill_version='version', status='Completed', stage='Event', creation='now', ownership_generation=2,
+            search_plan=json.dumps({'plan':{'reference':'ledger', 'purpose':'Check October', 'arguments':{'secret':'private'}}, 'confirmed_by':'Sim Yes'}),
+            decision=json.dumps({'reads':[{'arguments':{'secret':'private'},'digest':'private','tool':'ledger'}], 'reply':'private'}))
+        self.action = Record(name='Sim Action', action='create_draft', step=0, status='Completed', approval_evidence='private')
+        self.delivery = Record(name='Sim Delivery', status='Uncertain', payload=json.dumps({'automation_run':self.run.name,'secret':'private'}))
+        self.f.get_doc.side_effect = lambda dt, name: {'Relay Ticket':self.ticket, 'Relay Message':self.source,
+            'Relay Channel':self.channel, 'Relay Automation Run':self.run}[dt]
+        self.f.db = Mock(get_value=Mock(return_value='Payment review'))
+        self.f.get_all.side_effect = lambda dt, **kw: {'Relay Automation Run':[self.run],
+            'Relay Flow Action':[self.action], 'Relay Message Action':[self.delivery]}[dt]
+
+    def test_delivery_projection_pages_and_checks_permissions(self):
+        row = Record(name='Sim Delivery', kind='Message', status='Queued', creation='now',
+            source_message=self.run.message, channel='Sim Channel')
+        self.module._delivery_rows = Mock(return_value=[row])
+        result = self.module.deliveries(self.ticket.name)
+        self.assertEqual(result, {'items':[dict(name=row.name,kind='Message',status='Queued',creation='now')],'next':None})
+        self.channel.company = 'Other Company'
+        with self.assertRaises(PermissionError): self.module.deliveries(self.ticket.name)
+        self.channel.company = 'Sim Company'
+        self.source.check_permission.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.module.deliveries(self.ticket.name)
+        self.module._delivery_rows.return_value = []
+        with self.assertRaises(PermissionError): self.module.deliveries(self.ticket.name,before='Other Delivery')
+        for limit in (True,0,101,{},'bad'):
+            with self.assertRaises(ValueError): self.module.deliveries(self.ticket.name,limit=limit)
+
+    def test_history_is_bounded_operational_projection_without_raw_data(self):
+        result = self.module.ai_history(self.ticket.name)
+        self.assertEqual(set(result), {'items','next'})
+        row = result['items'][0]
+        self.assertEqual(row['event'], 'Payment review')
+        self.assertEqual(row['read_count'], 1)
+        self.assertTrue(row['search']['confirmed'])
+        self.assertEqual(row['actions'][0], dict(name='Sim Action', action='create_draft', step=1, status='Completed', approval='Recorded'))
+        self.assertEqual(row['deliveries'], [dict(name='Sim Delivery',status='Uncertain')])
+        self.assertNotIn('private', self.json.dumps(result))
+        self.f.get_all.assert_any_call('Relay Automation Run', filters={'ticket':self.ticket.name},
+            fields=['name','message','skill','skill_version','status','stage','creation','search_plan','decision','ownership_generation'],
+            order_by='name desc', limit_page_length=21)
+
+    def test_history_denies_ticket_message_channel_and_cross_company_access(self):
+        for doc in (self.ticket, self.source, self.channel):
+            doc.check_permission.side_effect = PermissionError
+            with self.assertRaises(PermissionError): self.module.ai_history(self.ticket.name)
+            doc.check_permission.side_effect = None
+        self.channel.company = 'Other Company'
+        with self.assertRaises(PermissionError): self.module.ai_history(self.ticket.name)
+
+    def test_cursor_scope_and_limits_are_checked(self):
+        for limit in (0, 51, True, {}, 'bad'):
+            with self.assertRaises(ValueError): self.module.ai_history(self.ticket.name, limit=limit)
+        self.run.ticket = 'Other ticket'
+        with self.assertRaises(PermissionError): self.module.ai_history(self.ticket.name, before=self.run.name)
+
+    def test_history_pages_use_the_ticket_bound_cursor(self):
+        older = Record(self.run, name='RELAY-AR-0000000001')
+        original = self.f.get_all.side_effect
+        def rows(dt, **kwargs):
+            if dt != 'Relay Automation Run': return original(dt, **kwargs)
+            return [older] if kwargs['filters'].get('name') else [self.run, older]
+        self.f.get_all.side_effect = rows
+        first = self.module.ai_history(self.ticket.name, limit=1)
+        self.assertEqual(first['next'], {'before':self.run.name})
+        second = self.module.ai_history(self.ticket.name, limit=1, **first['next'])
+        self.assertEqual(second['items'][0]['name'], older.name)
+        self.assertIsNone(second['next'])
+
+    def test_takeover_invalidates_pending_approval_but_preserves_completed_history(self):
+        self.ticket.ai_disabled = 1
+        self.action.status = 'Approved'
+        action = self.module.ai_history(self.ticket.name)['items'][0]['actions'][0]
+        self.assertEqual((action['status'], action['approval']), ('Stopped','Invalidated'))
+        self.ticket.ai_disabled = 0; self.ticket.generation = 3
+        self.assertEqual(self.module.ai_history(self.ticket.name)['items'][0]['actions'][0]['status'], 'Stopped')
+        self.action.status = 'Completed'
+        self.assertEqual(self.module.ai_history(self.ticket.name)['items'][0]['actions'][0]['status'], 'Completed')
+
+    def test_malformed_optional_history_never_discloses_internal_text(self):
+        self.run.search_plan = 'broken'; self.run.decision = '[]'
+        self.delivery.payload = 'broken'
+        row = self.module.ai_history(self.ticket.name)['items'][0]
+        self.assertIsNone(row['search']); self.assertEqual(row['read_count'], 0); self.assertEqual(row['deliveries'], [])
+
+    def test_realtime_journals_use_ticket_room_without_payload_and_after_commit(self):
+        from relay_core import realtime
+        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt))
+        with patch.object(realtime, 'frappe', fake):
+            for dt in ('Relay Automation Run','Relay Flow Action','Relay Message Action'):
+                realtime.changed(Record(doctype=dt, input_snapshot='private'))
+                fake.publish_realtime.assert_called_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
+            realtime.changed(Record(doctype='Relay Message', ticket=self.ticket.name))
+            fake.publish_realtime.assert_called_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)

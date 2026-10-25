@@ -335,7 +335,8 @@ class HandoffTests(unittest.TestCase):
         automation = types.SimpleNamespace(lock_contact=lambda name: self.contact, internal_save=lambda doc: self.saved.append(doc))
         self.ticket = Doc(name='TKT-1')
         self.ensure = Mock(return_value=self.ticket)
-        tickets = types.SimpleNamespace(ensure_episode=self.ensure, episode_owner_allowed=lambda user, message: user == 'fallback')
+        self.hold = Mock()
+        tickets = types.SimpleNamespace(ensure_episode=self.ensure, hold_episode=self.hold, episode_owner_allowed=lambda user, message: user == 'fallback')
         self.service = module('relay_core/ai/handoff.py', self.f,
             {'relay_core.tickets': tickets, 'relay_core.automation.service': automation})
         self.f.get_single = lambda dt: Doc(ai_handoff_owner='fallback')
@@ -343,15 +344,16 @@ class HandoffTests(unittest.TestCase):
         self.run = Doc(name='RUN-1', message='MSG-1', generation=0)
         self.skill = Doc(handoff_owner='disabled')
 
-    def test_retries_delegate_to_shared_episode_and_preserve_legacy_pause(self):
+    def test_retries_hold_only_the_shared_episode(self):
         for _ in range(2): self.service.handoff(self.run, self.skill, 'Permission denied')
         self.assertEqual(self.ensure.call_count, 2)
         self.ensure.assert_called_with(self.message, owner='fallback', skill=self.skill, run=self.run,
             subject='Conversation needs a person', reason='Permission denied')
         self.assertEqual(self.run.ticket, 'TKT-1')
         self.assertEqual(self.run.status, 'Handoff')
-        self.assertEqual(self.contact.automation_generation, 1)
-        self.assertEqual(self.contact.automation_paused, 1)
+        self.assertEqual(self.contact.automation_generation, 0)
+        self.assertEqual(self.contact.automation_paused, 0)
+        self.hold.assert_called_with('TKT-1')
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_no_owner_leaves_work_recoverable_without_unassigned_ticket(self):
@@ -466,6 +468,7 @@ class SharedAdapterTests(unittest.TestCase):
         except ImportError:
             self.skipTest('Requires the bench Python environment with frappe_tools')
         self.agent, self.client, self.llm = agent, client, llm
+        self.continuation = self.enterContext(patch('relay_core.ai.service.check_continuation'))
         self.f = framework()
         self.tools = module('relay_core/ai/tools.py', self.f)
         self.adapter = module('relay_core/ai/adapter.py', self.f, {'relay_core.ai.tools': self.tools})
@@ -575,6 +578,32 @@ class SharedAdapterTests(unittest.TestCase):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})
 
+    def test_reply_style_reaches_preview_and_live_trusted_prompt(self):
+        self.skill.reply_style = 'Use short Tamil sentences. ' * 100
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions',return_value={'reply':REPLY}))
+        self.attempt.return_value = self.outcome({'reply':'Hello', 'handoff':False, 'reason':''})
+        for run_id in (None, 'RUN-1'):
+            with patch.object(self.agent.AgentRun, 'run_route', wraps=None, return_value=self.outcome({'reply':'Hello','handoff':False,'reason':''})) as route:
+                self.adapter.complete(self.skill, 'partner', ('Supplier','SUP-A'), 'Question', run_id)
+                system = route.call_args.args[2][0]
+                self.assertIn('Owner reply style:\n' + self.skill.reply_style[:2000], system)
+                self.assertNotIn(self.skill.reply_style, system)
+
+    def test_takeover_after_model_tool_response_prevents_continuation(self):
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions',return_value={'reply':REPLY}))
+        self.attempt.return_value = self.outcome(calls=[{'name':'EXECUTE', 'arguments':{'action':'reply','parameters':{'text':'Hello'}}}])
+        # Initial turn passes; staff owns the episode when its tools return.
+        self.continuation.side_effect = [None, None, None, ValueError('Episode ownership changed')]
+        with self.assertRaises(ValueError):
+            self.adapter.complete(self.skill, 'partner', ('Supplier','SUP-A'), 'Question', 'RUN-1')
+        self.assertEqual(self.attempt.call_count, 1)
+
     def test_adapter_rejects_oversized_input_without_calling_model(self):
         with self.assertRaisesRegex(ValueError, 'budget'):
             self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'x' * 12001)
@@ -670,6 +699,22 @@ class ConversationIdentityTests(unittest.TestCase):
         self.f.get_list.side_effect = PermissionError('Audit history is restricted')
         self.assertEqual(history(), [])
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_takeover_during_image_observation_prevents_next_model(self):
+        original = self.f.get_doc.side_effect
+        self.f.get_doc.side_effect = lambda dt, name: Doc(supports_vision=1) if dt=='AI Model' else Doc() if dt=='Relay Automation Run' else original(dt,name)
+        self.message.message_type = 'image'
+        self.service.conversation_history = Mock(return_value=[])
+        self.service.check_continuation = Mock(side_effect=[None, ValueError('Episode ownership changed')])
+        adapter = types.SimpleNamespace(complete=Mock(), MAX_PROMPT_LENGTH=12000,
+            observe_image=Mock(return_value='Amount 1250 INR'), require_vision=Mock())
+        media = types.SimpleNamespace(context=Mock(return_value=('Payment', ['image'])))
+        with patch.dict(sys.modules, {'relay_core.ai.adapter':adapter, 'relay_core.automation.multimodal':media}), \
+                patch('relay_core.automation.service.reserve_attempt'):
+            with self.assertRaises(ValueError): self.service.decide(self.skill, self.message, 'RUN-1')
+        adapter.observe_image.assert_called_once()
+        adapter.complete.assert_not_called()
+        self.assertEqual(self.service.check_continuation.call_count, 2)
 
     def test_prompt_drops_oldest_history_and_preserves_handoff_request(self):
         self.message.content = 'Please hand this to a person. "Do not reply automatically."'

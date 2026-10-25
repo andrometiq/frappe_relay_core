@@ -20,6 +20,16 @@ class MatchingTests(unittest.TestCase):
             self.assertEqual(self.result(first, second)['selected'], selected)
         self.assertIsNone(self.result(1, 0, True)['selected'])
 
+    def test_human_request_requires_explicit_intent(self):
+        for text in ('Person in charge listed on invoice', 'agent commission 1250', 'staff payment',
+                     'human resources balance', 'I want a human resources balance', 'Who is the agent?', 'person', 'staff',
+                     "I don't want to talk to a human", 'No need to speak with staff'):
+            with self.subTest(text=text): self.assertFalse(matching.human_request(text))
+        for text in ('Talk to a human', 'Please connect me with an agent', 'I want a human',
+                     'Transfer me to your staff', 'Speak with a real person', 'Human please',
+                     'Please hand this to a person', 'I need an operator'):
+            with self.subTest(text=text): self.assertTrue(matching.human_request(text))
+
     def test_malformed_and_untrusted_output(self):
         valid = {'scores':[{'id':'one','score':.95}], 'human_request':False}
         for value in (None, [], {}, dict(valid, extra=True), dict(valid, human_request=1),
@@ -178,12 +188,13 @@ class AdmissionTests(unittest.TestCase):
         self.claims.return_value=True
         self.assertEqual(service.create_run(self.message)['status'],'Handoff')
         self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
-        self.assertEqual(self.contact.automation_paused, 1)
-        self.assertEqual(self.contact.automation_generation, 1)
-        self.contact.save.assert_called_once_with(ignore_permissions=True)
+        self.episode.assert_called_with(self.run, self.message, hold=True)
+        self.assertEqual(self.contact.automation_paused, 0)
+        self.assertEqual(self.contact.automation_generation, 0)
+        self.contact.save.assert_not_called()
+        self.episode.return_value.ai_disabled = 1
         self.assertEqual(service.create_run(self.message)['status'], 'Cancelled')
-        self.assertEqual(self.contact.automation_generation, 1)
-        self.contact.save.assert_called_once()
+        self.contact.save.assert_not_called()
         self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
 
     def test_takeover_and_owner_failure_never_start_handlers(self):

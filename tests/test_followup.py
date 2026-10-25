@@ -35,14 +35,15 @@ class FollowupTests(unittest.TestCase):
         fake.get_doc.side_effect = [_dict(name='message'), run, _dict(name='message'), run]
         contact = _dict(automation_paused=0, automation_generation=2, save=Mock())
         with patch.object(service, 'frappe', fake), patch.object(service, 'internal_save') as save, \
-                patch.object(service, 'episode'), patch.object(service, 'lock_contact', return_value=contact):
+                patch.object(service, 'episode') as episode, patch.object(service, 'lock_contact', return_value=contact):
             service.configuration_failure('message', ValueError('Competing enabled skills'))
             self.assertEqual(run.status, 'Handoff')
             self.assertEqual(run.reason, 'Automation configuration requires review')
             service.configuration_failure('message', ValueError('Replay'))
         save.assert_called_once_with(run)
-        self.assertEqual((contact.automation_paused, contact.automation_generation), (1, 3))
-        contact.save.assert_called_once_with(ignore_permissions=True)
+        self.assertEqual((contact.automation_paused, contact.automation_generation), (0, 2))
+        episode.assert_called_once_with(run, unittest.mock.ANY, hold=True)
+        contact.save.assert_not_called()
 
     def test_new_plain_text_preview_preserves_literal_entities_and_markup(self):
         content = 'Quantity 30 Total 1500 Local & team <review> "yes" \'ok\' &amp; literal <script>alert(1)</script>'

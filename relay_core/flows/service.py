@@ -248,8 +248,13 @@ def scope(run,message, *, handoff=False):
     if source.direction!='Incoming' or channel.name!=version.channel or route(source)!=run.conversation_key:
         raise ValueError('Flow conversation changed')
     contact,_=readable_contact(source.relay_contact)
-    if source.get('ticket') and frappe.db.get_value('Relay Ticket', source.ticket, 'ai_disabled'):
-        raise ValueError('Episode is owned by staff')
+    if source.get('ticket'):
+        from relay_core.tickets import check_episode
+        admission = frappe.db.get_value('Relay Automation Run', {'message': run.start_message},
+            ['ticket', 'ownership_generation'], as_dict=True)
+        if not admission or admission.ticket != source.ticket:
+            raise ValueError('Flow episode changed')
+        check_episode(admission)
     generation = int(run.generation or 0) + int(handoff)
     if bool(contact.automation_paused) != handoff or int(contact.automation_generation or 0) != generation:
         raise ValueError('A human has taken ownership of this conversation')
@@ -379,11 +384,10 @@ def _process(event):
                 'summary':text,'category':node.get('category',''),'status':node.get('status','Open'),
                 'messages':list(dict.fromkeys([run.start_message]+sources))},source='Flow',source_key=key)
         elif node['kind']=='handoff':
-            flow_ticket(source, text)
-            from relay_core.automation.service import takeover
-            takeover(source.relay_contact,paused=1)
+            ticket = flow_ticket(source, text)
+            from relay_core.tickets import hold_episode
+            hold_episode(ticket.name)
             run.status='Handoff';internal_save(run);finish(event)
-            send(run,event,source,channel,text,key)
             return
         run.step=next_step(nodes,run.step);internal_save(run);frappe.db.commit()
     frappe.enqueue('relay_core.flows.service.process',name=event.name,queue=QUEUE,enqueue_after_commit=True)

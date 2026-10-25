@@ -23,7 +23,16 @@ def candidates(message):
 
 
 def human_request(text):
-    return bool(re.search(r'\b(?:human|person|agent|staff|operator)\b', (text or '').casefold()))
+    # Ordinary business text ("staff invoice", "agent commission") is not a request.
+    person = r'(?:a |an |the |your )?(?:real |live )?(?:human|person|agent|staff(?: member)?|operator|representative)\b'
+    request = r'(?:(?:talk|speak|chat) (?:to|with)|(?:connect|transfer) me (?:to|with)|hand (?:this|me) to) '
+    value = ' '.join((text or '').casefold().split())
+    if re.search(r"\b(?:don’t|don't|do not|no need to) (?:want to |need to )?" + request + person, value):
+        return False
+    return bool(re.search(r'\b' + request + person, value)
+                or re.search(r'\bi (?:want|need|would like) (?:to (?:talk|speak) to )?' + person
+                             + r'(?=\s*(?:[.!?]|$)|\s+please\b)', value)
+                or re.fullmatch(r'(?:please ' + person + '|' + person + r' please)[.!?]*', value))
 
 
 def trigger(message):
