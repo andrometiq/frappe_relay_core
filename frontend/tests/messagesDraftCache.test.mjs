@@ -81,7 +81,7 @@ test('reaction and a changed business scope preserve the composer', async t => {
   assert.equal(state.body.value, 'Draft')
 })
 
-test('cached contact and channel restores catch up messages and statuses without polling', async t => {
+test('reopened contacts and channels read current messages and statuses without polling', async t => {
   const {state, records, row, calls} = fixture(t)
   records.set('A', [row('A-1'), row('A-2', 'whatsapp')])
   await state.open('A'); await state.open('B')
@@ -93,7 +93,8 @@ test('cached contact and channel restores catch up messages and statuses without
   records.get('A').push(row('A-4'))
   await state.filterChannel('telegram')
   assert.equal(state.rows.value.at(-1).name, 'A-4')
-  assert.ok(calls.some(call => call.method === 'api.messages' && call.values.since === 'A-3' && call.values.channel === 'telegram'))
+  // Contact threads reopen at the first unread or newest message, so they read the server, not a cached window.
+  assert.ok(calls.some(call => call.method === 'inbox.view_state' && call.values.channel === 'telegram'))
 })
 
 test('business cache keys separate Customer and Supplier and denied restores expose no cached data', async t => {

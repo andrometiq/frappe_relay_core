@@ -138,10 +138,11 @@ export function useMessages() {
     notice = ref("");
   const newer = ref(false),
     last = ref(null),
-    restored = ref("");
+    restored = ref(""),
+    firstUnread = ref("");
   const windows = new Map(), preferredChannels = new Map();
   let restoredRefreshPending = false;
-  const viewPosition = ref(null), newArrivals = ref(0);
+  const viewPosition = ref(null), newArrivals = ref(0), UNREAD_OFFSET = 56;
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
@@ -156,7 +157,7 @@ export function useMessages() {
     preferredChannels.delete(conversation);preferredChannels.set(conversation,channel.value);
     while(preferredChannels.size>30)preferredChannels.delete(preferredChannels.keys().next().value);
     const key = windowKey();
-    if (!key || !rows.value.length) return;
+    if (!businessName.value || !key || !rows.value.length) return;
     windows.delete(key);
     windows.set(key, {rows: rows.value, before: before.value, last: last.value, ingestionCursor:ingestionCursor.value, more:more.value, newer:newer.value, position:viewPosition.value});
     while(windows.size>20) windows.delete(windows.keys().next().value);
@@ -195,18 +196,21 @@ export function useMessages() {
       ? await coreApi('business_inbox.view_state',{doctype:businessType.value,name:businessName.value})
       : await coreApi('inbox.view_state',{contact:selected.value,...(usePreferred?{}:{channel:channel.value})});
     if(generation!==requestSequence||identity!==conversationIdentity())return;
-    if(!saved.name){await history();return;}
+    if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;clearRecipient();}
+    // A contact conversation opens at its first unread message, otherwise at the newest one.
+    const target=businessName.value ? !saved.atBottom && saved.name : saved.first_unread;
+    if(!target){await history();return;}
     const checkpoint=await historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})});
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     ingestionCursor.value=checkpoint.ingestion_cursor||'RELAY-MSG-0000000000';
-    if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;clearRecipient();}
-    if(saved.atBottom){await history();return;} // A reader who left at the end returns to the newest message.
     const page=businessName.value
-      ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:saved.name})
-      : await coreApi('api.message_context',{message:saved.name,...(channel.value?{channel:channel.value}:{})});
+      ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:target})
+      : await coreApi('api.message_context',{message:target,...(channel.value?{channel:channel.value}:{})});
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     rows.value=page.items;before.value=page.first;last.value=page.last;more.value=page.has_more;newer.value=page.has_newer;
-    viewPosition.value=saved;restored.value=saved.name;if(!source.value)source.value=rows.value.at(-1)||null;
+    viewPosition.value=businessName.value ? saved : {name:target,offset:UNREAD_OFFSET,atBottom:false};
+    restored.value=target;firstUnread.value=businessName.value ? '' : target;
+    if(!source.value)source.value=rows.value.at(-1)||null;
     updateChannels();
   }
   async function latest() {
@@ -360,7 +364,7 @@ export function useMessages() {
     if(busy.value || channel.value===value) return;
     clearRecipient();saveWindow();++requestSequence;
     channel.value=value;rows.value=[];source.value=null;quoting.value=false;
-    restored.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
+    restored.value='';firstUnread.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
     clearRecipient();
     return restoreWindow() ? refreshVisible() : run(restoreSavedView);
   }
@@ -403,7 +407,7 @@ export function useMessages() {
     businessName.value = "";
     businessType.value = "";
     businessContext.value = null;
-    restored.value = "";
+    restored.value = "";firstUnread.value = "";
     viewPosition.value=null;newArrivals.value=0;
     newer.value = false;
     last.value = null;
@@ -423,7 +427,6 @@ export function useMessages() {
       const metadata=await coreApi('api.conversation_channels',{contact});
       channels.value=metadata.items;
       await restorePending();
-      if(restoreWindow())return;
       await restoreSavedView(true);
     });
   }
@@ -459,7 +462,7 @@ export function useMessages() {
     last.value = null;
     ingestionCursor.value = 'RELAY-MSG-0000000000';
     newer.value = false;
-    restored.value = "";
+    restored.value = "";firstUnread.value = "";
     more.value = false;
     channel.value = "";
     channels.value = [];
@@ -697,6 +700,7 @@ export function useMessages() {
     newer,
     last,
     restored,
+    firstUnread,
     loadNewer,
     contacts,
     starred,

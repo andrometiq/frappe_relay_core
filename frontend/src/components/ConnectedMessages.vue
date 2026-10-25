@@ -263,7 +263,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
       <p v-if="notice" role="status" class="feedback-panel">{{ notice }}</p>
 
       <MessageThread :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
-        :newer="newer" :anchor="restored" :rows="visibleRows" :more="more" :busy="busy" :emoji="emoji"
+        :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :emoji="emoji"
         :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="run(() => history(true))" @reply="reply"

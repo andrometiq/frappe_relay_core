@@ -21,10 +21,16 @@ def provider_time(payload, row=None):
         return None
 
 
+def timeline_time():
+    """Effective message time that orders every thread."""
+    message = frappe.qb.DocType('Relay Message')
+    return (message.relay_timeline_time if frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message','relay_timeline_time')
+            else Coalesce(message.sent_at, message.creation))
+
+
 def page_query(fields, filters, limit, before=None, after=None, contact=None, ingestion=False, search=''):
     message = frappe.qb.DocType('Relay Message')
-    timestamp = (message.relay_timeline_time if frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message','relay_timeline_time')
-                 else Coalesce(message.sent_at, message.creation))
+    timestamp = timeline_time()
     query = frappe.qb.get_query('Relay Message', fields=fields, filters=filters,
                                ignore_permissions=False, order_by='', limit=limit)
     if search.strip():
