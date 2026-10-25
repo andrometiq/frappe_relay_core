@@ -3,7 +3,7 @@ import json
 from unittest.mock import patch
 import frappe
 from channel_identity_fixtures import scenario, configured, endpoint
-from relay_core import ticket_notifications as notifications, tickets, whatsapp, messaging
+from relay_core import business_access, ticket_notifications as notifications, tickets, whatsapp, messaging
 
 
 def run(separate_contact=False):
@@ -84,6 +84,30 @@ def run(separate_contact=False):
                 client.reset_mock(); notifications.dispatch(notice.name)
                 client.return_value.call_tool.assert_not_called()
         if separate_contact:
+            # The stored marker lets the reader of the ticket business see a notification that
+            # crosses the recipient Contact's links; an unmarked message with that business stays hidden.
+            assert message.ticket_notification and ('Customer', fixture.customer.name) not in business_access.candidates(recipient.name)
+            assert message.has_permission('read')
+            assert message.name in frappe.get_list('Relay Message', filters={'relay_contact': recipient.name}, pluck='name')
+            frappe.set_user('Administrator')
+            plain = frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': recipient.name, 'channel': bindings[0].channel,
+                'sender_endpoint': bindings[0].endpoint, 'direction': 'Outgoing', 'content': 'Unlinked order note',
+                'message_type': 'text', 'status': 'Sent'}).insert()
+            frappe.db.set_value('Relay Message', plain.name, {'business_doctype': 'Customer', 'business_name': fixture.customer.name})
+            forged = frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': recipient.name, 'channel': bindings[0].channel,
+                'sender_endpoint': bindings[0].endpoint, 'direction': 'Outgoing', 'content': 'Forged notice',
+                'message_type': 'text', 'status': 'Sent', 'business_doctype': 'Customer', 'business_name': fixture.customer.name,
+                'ticket_notification': notice.name})
+            try:
+                forged.insert()
+            except frappe.ValidationError:
+                pass
+            else:
+                raise AssertionError('A message outside the notification path took the notification marker')
+            frappe.db.commit(); frappe.set_user(fixture.actor)
+            assert not frappe.get_doc('Relay Message', plain.name).has_permission('read')
+            assert plain.name not in frappe.get_list('Relay Message', filters={'relay_contact': recipient.name}, pluck='name')
+            print('PASS marked ticket notifications stay readable across Contact links; unmarked and forged messages do not')
             # Keeping access to the recipient's personal business cannot expose the ticket's content.
             frappe.set_user('Administrator')
             unrelated = business('C2 staff revocation ' + fixture.stamp)

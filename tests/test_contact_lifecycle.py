@@ -150,6 +150,39 @@ class LinkedBusinessAccessTests(unittest.TestCase):
             record.has_permission.assert_called_with('read', user=None)
             links.return_value = [('Supplier', 'Sim Supplier')]
             self.assertFalse(business_access.allowed(message))
+            # A marked ticket notification reaches the subscriber's own contact across its links.
+            self.assertTrue(business_access.allowed(_dict(message, ticket_notification='Ticket update')))
+            record.has_permission.return_value = False
+            self.assertFalse(business_access.allowed(_dict(message, ticket_notification='Ticket update')))
+
+    def test_query_exempts_only_marked_notifications_from_the_link_rule(self):
+        fake = MagicMock()
+        fake.session.user = 'reader'
+        fake.get_all.return_value = ['Customer']
+        fake.has_permission.return_value = True
+        fake.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM `tabCustomer`'
+        fake.db.escape = lambda value: f"'{value}'"
+        with patch.object(business_access, 'frappe', fake):
+            condition = business_access.query_condition()
+        explicit = condition.split('OR (COALESCE(`tabRelay Message`.business_name')[0]
+        self.assertIn("(COALESCE(`tabRelay Message`.ticket_notification,'')!='' OR EXISTS", explicit)
+        self.assertIn("`tabRelay Message`.business_name IN (SELECT name FROM `tabCustomer`)", explicit)
+
+    def test_only_the_notification_path_may_store_the_marker(self):
+        from relay_core.ticket_notifications import message_ownership
+        doc = _dict(direction='Outgoing', relay_contact='RELAY-CON-A', channel='CH', sender_endpoint='a@example.invalid',
+                    business_doctype='Customer', business_name='Sim Customer', ticket_notification='Ticket update')
+        fake = SimpleNamespace(throw=Mock(side_effect=ValueError))
+        with patch.object(business_access, 'frappe', fake), patch.object(business_access, 'candidates', return_value=[]):
+            with self.assertRaises(ValueError):
+                business_access.associate(doc)
+            token = message_ownership.set(('RELAY-CON-A', 'CH', 'a@example.invalid', 'Customer', 'Sim Customer', 'Ticket update'))
+            try:
+                business_access.associate(doc)
+                with self.assertRaises(ValueError):
+                    business_access.associate(_dict(doc, ticket_notification='Another update'))
+            finally:
+                message_ownership.reset(token)
 
 
 if __name__ == '__main__':
