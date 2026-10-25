@@ -16,6 +16,7 @@ import {
   templateFooter,
   templateHeader,
   templateStatusTheme,
+  templateSyncLabel,
 } from "../../services/templateList";
 import TemplateEditor from "./TemplateEditor.vue";
 import TemplatePreview from "./TemplatePreview.vue";
@@ -28,6 +29,7 @@ const {
   loadingMore,
   templates,
   templateCursor,
+  syncStatus,
   editingTemplate,
   template,
   creating,
@@ -226,7 +228,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
   <FrappeListView
     v-else
     title="Message templates"
-    description="Create and manage templates submitted to Meta."
+    :description="templateSyncLabel(syncStatus)"
     label="Message templates"
     :columns="columns"
     :items="filteredTemplates"

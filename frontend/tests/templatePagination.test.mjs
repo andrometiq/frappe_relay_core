@@ -5,7 +5,7 @@ import { computed, createSSRApp, defineComponent, effectScope, h, ref, watch } f
 import * as Vue from 'vue'
 import { compile } from '@vue/compiler-dom'
 import { renderToString } from '@vue/server-renderer'
-import { filterTemplates } from '../src/services/templateList.js'
+import { filterTemplates, templateSyncLabel } from '../src/services/templateList.js'
 
 const workspaceSource = (await readFile(new URL('../src/composables/whatsapp/useWhatsAppTemplatesWorkspace.js', import.meta.url), 'utf8'))
   .replace(/^import .*\n/gm, '').replace('export function', 'function')
@@ -13,7 +13,7 @@ const makeWorkspace = new Function('computed','ref','onMounted','useRealtimeRefr
 const component = await readFile(new URL('../src/components/whatsapp/WhatsAppTemplates.vue', import.meta.url), 'utf8')
 const script = component.split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm, '')
 const makeList = new Function('computed','ref','watch','onBeforeUnmount','inject','whatsappKey','filterTemplates','window','location',
-  script+'\nreturn {query,status,category,language,filteredTemplates,templateCursor,nextTemplates,busy,loadingMore,templates,access,columns,statuses,creating,selectedTemplate,supported,refresh,openTemplate};')
+  script+'\nreturn {query,status,category,language,filteredTemplates,templateCursor,syncStatus,nextTemplates,busy,loadingMore,templates,access,columns,statuses,creating,selectedTemplate,supported,refresh,openTemplate};')
 const template = component.slice(component.indexOf('<template>') + '<template>'.length, component.lastIndexOf('</template>'))
 const render = new Function('Vue', compile(template, {mode:'function',prefixIdentifiers:true}).code)(Vue)
 const Empty = defineComponent({setup:() => () => null})
@@ -39,7 +39,7 @@ for (const query of ['quantity', 'missing']) test(`filtered templates can reach 
     if (props.label === 'Load more templates') loadMore = attrs.onClick
     return h('button', {...attrs, disabled:props.disabled || props.loading}, props.label)
   }})
-  const html = () => renderToString(createSSRApp({setup:()=>state, render, components:{Button,FrappeListView:List,TemplateEditor:Empty,FrappeFormView:Empty,
+  const html = () => renderToString(createSSRApp({setup:()=>({...state,templateSyncLabel}), render, components:{Button,FrappeListView:List,TemplateEditor:Empty,FrappeFormView:Empty,
     FrappeFormSection:Empty,FrappeReadField:Empty,RelaySelect:Empty,TextInput:Empty,FeatherIcon:Empty,Badge:Empty}}))
   const empty = await html()
   assert.equal((empty.match(/Load more templates/g)||[]).length,2,'Empty state and footer both expose pagination')
