@@ -94,29 +94,32 @@ def link_reply(row):
 
 
 def changed(name):
-    frappe.cache.sadd(DIRTY, name)
-    frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120,
-                   job_id=f'relay-bulk-progress:{name}', deduplicate=True, enqueue_after_commit=True)
+    """After commit, mark the campaign; the change that marks it enqueues one trailing refresh."""
+    frappe.db.after_commit.add(lambda: mark(name))
+
+
+def mark(name):
+    if frappe.cache.execute_command('SADD', frappe.cache.make_key(DIRTY), name):
+        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120)
 
 
 def refresh(name):
     """Single owner of campaign counters, completion and progress events, at most one per PROGRESS_SECONDS.
-    A change inside that time stays marked; the next change, slice or recovery run publishes it."""
-    if not frappe.cache.sismember(DIRTY, name):
-        return
-    if time.time() - frappe.utils.flt(frappe.cache.get_value(PUBLISHED + name)) < PROGRESS_SECONDS:
-        return
+    It waits out the rest of that time instead of dropping the change, so the last change is always published."""
+    delay = PROGRESS_SECONDS - (time.time() - frappe.utils.flt(frappe.cache.get_value(PUBLISHED + name)))
+    if delay > 0:
+        time.sleep(delay)
+    frappe.db.commit()  # A fresh snapshot: count what committed during the wait.
     frappe.cache.srem(DIRTY, name)
     publish(name, recount(name))
     frappe.cache.set_value(PUBLISHED + name, time.time(), expires_in_sec=60)
 
 
 def recover():
-    """Publish changes a throttled refresh left marked."""
+    """Refresh campaigns a stopped worker left marked."""
     for name in list(frappe.cache.smembers(DIRTY))[:50]:
         name = name.decode() if isinstance(name, bytes) else name
-        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120,
-                       job_id=f'relay-bulk-progress:{name}', deduplicate=True)
+        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120)
 
 
 def tally(rows):

@@ -194,26 +194,29 @@ class ApplyTests(unittest.TestCase):
         changed.assert_called_once_with('Winter launch')
         resume.assert_called_once_with('Winter launch')
 
-    def test_refresh_throttles_without_sleeping_and_keeps_the_change_marked(self):
-        cache = FakeCache()
-        fake = SimpleNamespace(cache=cache, utils=frappe.utils, enqueue=Mock())
+    def test_a_committed_change_enqueues_one_trailing_refresh_that_waits_out_the_throttle(self):
+        cache, callbacks = FakeCache(), []
+        db = SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append), commit=Mock())
+        fake = SimpleNamespace(cache=cache, db=db, utils=frappe.utils, enqueue=Mock())
         with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'recount', return_value={}) as recount, \
-                patch.object(bulk_updates, 'publish') as publish, patch.object(bulk_updates.time, 'time', return_value=100.0):
+                patch.object(bulk_updates, 'publish') as publish, patch.object(bulk_updates.time, 'sleep') as sleep, \
+                patch.object(bulk_updates.time, 'time', return_value=100.0):
             bulk_updates.changed('Winter launch')
+            fake.enqueue.assert_not_called()  # Nothing before commit: a rollback leaves no mark.
+            for callback in callbacks * 3:
+                callback()
+            self.assertEqual(fake.enqueue.call_count, 1)  # Later changes ride on the queued refresh.
             bulk_updates.refresh('Winter launch')
-            bulk_updates.changed('Winter launch')
-            bulk_updates.refresh('Winter launch')  # Inside PROGRESS_SECONDS: stays marked.
-            self.assertEqual(publish.call_count, 1)
-            self.assertTrue(cache.sismember(bulk_updates.DIRTY, 'Winter launch'))
+            sleep.assert_not_called()
+            self.assertFalse(cache.sismember(bulk_updates.DIRTY, 'Winter launch'))
+            callbacks[0]()  # A change after the refresh took the mark gets its own refresh.
+            self.assertEqual(fake.enqueue.call_count, 2)
+            bulk_updates.refresh('Winter launch')
+            sleep.assert_called_once_with(3.0)  # Inside PROGRESS_SECONDS: waits, then still publishes.
             bulk_updates.recover()
-            self.assertEqual(fake.enqueue.call_args.kwargs['name'], 'Winter launch')
-        with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'recount', return_value={}), \
-                patch.object(bulk_updates, 'publish') as publish, patch.object(bulk_updates.time, 'time', return_value=104.0):
-            bulk_updates.refresh('Winter launch')
-            bulk_updates.refresh('Winter launch')
-        self.assertEqual(publish.call_count, 1)
-        self.assertFalse(cache.sismember(bulk_updates.DIRTY, 'Winter launch'))
-        self.assertEqual(recount.call_count, 1)
+            self.assertEqual(fake.enqueue.call_count, 2)  # Nothing left marked.
+        self.assertEqual((publish.call_count, recount.call_count), (2, 2))
+        self.assertTrue(db.commit.called)  # The count after the wait reads a fresh snapshot.
 
     def test_reply_links_by_context_then_number_and_is_gated(self):
         db = Mock()
@@ -271,6 +274,15 @@ class FakeCache:
 
     def sismember(self, key, value):
         return value in self.sets.get(key, set())
+
+    def make_key(self, key):
+        return key
+
+    def execute_command(self, command, key, value):
+        assert command == 'SADD'
+        added = value not in self.sets.get(key, set())
+        self.sadd(key, value)
+        return int(added)
 
     def smembers(self, key):
         return {value.encode() for value in self.sets.get(key, set())}
