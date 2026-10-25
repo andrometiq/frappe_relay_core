@@ -18,13 +18,27 @@ class DeliveryFenceTests(unittest.TestCase):
         payload = dict(automation_run='run', delivery_episodes=[['episode', 0]], **values)
         return _dict(name='action', status='Dispatching', payload=json.dumps(payload), reload=Mock(), result='{}')
 
-    def test_every_automatic_origin_stops_but_manual_delivery_remains_available(self):
+    def test_ai_origins_stop_but_manual_and_business_notices_remain_available(self):
         self.ticket.ai_disabled = 1
-        for marker in ('automation_run', 'flow_run', 'business_event', 'notification', 'routing', 'email_values'):
+        for marker in ('automation_run', 'flow_run', 'notification', 'routing', 'email_values'):
             value = {'auto_submitted': 1} if marker == 'email_values' else 'intent'
             with self.subTest(marker=marker), self.assertRaises(messaging.DeliverySuppressed):
                 messaging.delivery_fence(_dict(payload=json.dumps({marker:value})), self.source, {})
         messaging.delivery_fence(_dict(payload='{}'), self.source, {})
+
+    def test_business_notices_survive_takeover_resume_and_release_without_becoming_manual(self):
+        payload = dict(business_event='event', delivery_episodes=[['episode', 0]])
+        for context in ({'provider': 'WhatsApp'}, {'provider': 'Telegram'}, {'provider': 'Email'}):
+            for change in ({'ai_disabled': 1}, {'generation': 2}, {'active_scope_key': None}):
+                with self.subTest(context=context, change=change), patch.dict(self.ticket, change):
+                    self.assertTrue(messaging.automatic_delivery(payload))
+                    messaging.delivery_fence(_dict(payload=json.dumps(payload)), self.source, context)
+        self.rows.assert_not_called()
+        # AI provenance must still fence an action even if it also has an event.
+        self.ticket.ai_disabled = 1
+        for marker in ('automation_run', 'flow_run'):
+            with self.subTest(marker=marker), self.assertRaises(messaging.DeliverySuppressed):
+                messaging.delivery_fence(_dict(payload=json.dumps(dict(payload, **{marker: 'run'}))), self.source, {})
 
     def test_resume_release_replacement_and_legacy_intents_never_revive_old_work(self):
         action = self.action()
@@ -116,6 +130,30 @@ class DeliveryFenceTests(unittest.TestCase):
 
 
 class DeliveryScopeTests(unittest.TestCase):
+    def test_email_choice_prompt_uses_its_thread_not_other_held_threads(self):
+        from relay_core import tickets, business_routing_prompt as prompts
+        state = _dict(prompt_action='prompt', relay_contact='contact', channel='email',
+                      endpoint='peer@example.invalid', conversation_key='new-thread')
+        fake = SimpleNamespace(db=Mock(), qb=Mock(), _dict=_dict, get_doc=Mock(return_value=_dict(
+            enabled=1, channel='Email', account='local')))
+        fake.db.get_value.return_value = 'contact'
+        fake.qb.get_query.return_value.run.return_value = []
+        action = _dict(name='prompt', start_contact='contact', payload='{"routing":"new-thread","context":{"provider":"Email"}}')
+        with patch.object(prompts, 'frappe', fake), patch.object(prompts, 'require_access'), \
+                patch.object(prompts, 'routing_state', return_value=state), \
+                patch.object(prompts, 'connection_value', return_value='local'), \
+                patch.object(messaging, 'frappe', fake), patch.object(tickets, '_lock_episode_routing'):
+            source, _, context = prompts.target(action)
+            messaging.delivery_fence(action, source, context)
+            fake.qb.get_query.assert_called_once()
+            self.assertEqual(fake.qb.get_query.call_args.args, ('Relay Ticket',))
+            self.assertEqual(fake.qb.get_query.call_args.kwargs['filters']['conversation_key'], 'new-thread')
+            # A hold in this exact thread still stops its pending prompt.
+            fake.qb.get_query.return_value.run.return_value = ['held']
+            fake.get_doc.return_value = _dict(name='held', active_scope_key='scope', ai_disabled=1, generation=1)
+            with self.assertRaises(messaging.DeliverySuppressed):
+                messaging.delivery_fence(action, source, context)
+
     def test_queries_use_company_business_and_exact_conversation_with_current_locks(self):
         from relay_core import tickets
         source = _dict(name='source',channel='channel',sender_endpoint='peer',relay_contact='contact',

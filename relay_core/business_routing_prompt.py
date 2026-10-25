@@ -67,7 +67,8 @@ def target(action):
     if (binding != state.relay_contact or not channel.enabled or channel.channel != context['provider']
             or channel.account != connection_value('relay_hub_account')):
         raise ValueError('Business prompt destination is unavailable')
-    source = frappe._dict(relay_contact=state.relay_contact, channel=state.channel, sender_endpoint=state.endpoint)
+    source = frappe._dict(relay_contact=state.relay_contact, channel=state.channel,
+                         sender_endpoint=state.endpoint, conversation_key=state.conversation_key)
     return source, channel, context
 
 

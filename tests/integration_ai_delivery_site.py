@@ -195,24 +195,24 @@ def main():
             assert [p['text'] for p in sent[1]['components'][0]['parameters']]==['1250.0','25.0']
             print('PASS populated lifecycle capture -> conversation start -> durable queued transport')
 
-            # Captured before claim; pending and new intents both stop during hold.
+            # Lifecycle notices are independent of AI ownership, before or during a hold.
             pending=capture(); ownership('claim'); during=capture()
             hub.reset_mock()
             for delivery in (pending,during):
                 business_events.dispatch(delivery.name);delivery.reload()
-                assert delivery.status=='Suppressed' and delivery.action, (delivery.status,delivery.action)
+                assert delivery.status=='Queued' and delivery.action, (delivery.status,delivery.action)
                 action=frappe.get_doc('Relay Message Action',delivery.action)
-                assert action.status=='Rejected' and json.loads(action.result)['suppressed']
-            hub.call_tool.assert_not_called()
+                assert action.status=='Queued' and not json.loads(action.result).get('suppressed')
+            assert hub.call_tool.call_count==2
             response=request('tickets.deliveries',{'name':ticket.name},verb='GET')
             assert response.status_code==200, response.status_code
             states={row['name']:row['status'] for row in response.json['message']['items']}
-            assert states[happy.name]=='Queued' and states[pending.name]=='Suppressed' and states[during.name]=='Suppressed'
+            assert all(states[delivery.name]=='Queued' for delivery in (happy,pending,during))
             ownership('resume_ai')
             for delivery in (pending,during): business_events.dispatch(delivery.name)
-            hub.call_tool.assert_not_called()
+            assert hub.call_tool.call_count==2  # Dispatch replay never sends accepted notices again.
             fresh=capture();business_events.dispatch(fresh.name);fresh.reload();assert fresh.status=='Queued'
-            print('PASS lifecycle notices retained as Suppressed; resume does not replay them; fresh notice allowed')
+            print('PASS lifecycle notices deliver during hold; resume does not resend them; fresh notice allowed')
 
             # Recovery reads accepted transport state even after takeover, never resending.
             ownership('claim')
@@ -245,13 +245,12 @@ def main():
             racing=capture();hub.reset_mock();hub.call_tool.side_effect=receipt
             with patch('relay_core.conversation_start.internal_save',side_effect=racing_save):
                 business_events.dispatch(racing.name)
-            racing.reload();assert racing.status=='Suppressed',racing.status
-            hub.call_tool.assert_not_called()
+            racing.reload();assert racing.status=='Queued',racing.status
+            hub.call_tool.assert_called_once()
             ownership('resume_ai')
-            print('PASS takeover committed between chat journaling and dispatch prevents Hub admission')
+            print('PASS takeover between journaling and dispatch preserves lifecycle notice admission')
 
-            # If admission wins the race, takeover waits for the Relay lock;
-            # the queued transport receipt is retained after the claim completes.
+            # Lifecycle notice admission does not need to serialize a staff claim.
             from threading import Event
             started=Event()
             winner=capture()
@@ -263,19 +262,17 @@ def main():
                 def admitted(tool,args):
                     pending_claim.append(pool.submit(waiting_claim))
                     assert started.wait(2)
-                    try: pending_claim[0].result(timeout=.2)
-                    except TimeoutError: pass
-                    else: raise AssertionError('Takeover bypassed the dispatch ownership lock')
+                    assert pending_claim[0].result(timeout=15)['ai_disabled']
                     return {'delivery':{'state':'queued'}}
                 hub.call_tool.side_effect=admitted
                 business_events.dispatch(winner.name)
                 assert pending_claim[0].result(timeout=15)['ai_disabled']
             frappe.db.rollback();winner.reload();assert winner.status=='Queued'
             ownership('resume_ai')
-            print('PASS admitted send serializes takeover; accepted transport remains outstanding')
+            print('PASS lifecycle send allows concurrent takeover; accepted transport remains outstanding')
 
-            # A crash leaves Dispatching, whose empty Hub lookup is insufficient to
-            # unlock delivery after a later claim and resume.
+            # A lifecycle notice left Dispatching can recover after claim/resume,
+            # using the same journal identity after checking for a Hub receipt.
             crashed=capture()
             class SimulatedCrash(BaseException): pass
             def crash_after_journal(action, **kwargs):
@@ -291,13 +288,14 @@ def main():
             action_name=frappe.db.get_value('Relay Message Action',{'request_key':key},'name')
             assert action_name
             ownership('claim');ownership('resume_ai')
-            hub.reset_mock();hub.call_tool.side_effect=lambda *a: {'deliveries':[]}
+            hub.reset_mock();hub.call_tool.side_effect=lambda tool,args: (
+                {'deliveries':[]} if tool=='whatsapp.deliveries' else receipt(tool,args))
             response=request('messaging.reconcile',{'action':action_name})
-            assert response.status_code==200 and response.json['message']['status']=='Rejected',response.status_code
-            assert 'staff' in response.json['message']['error']
-            assert hub.call_tool.call_count==1 and hub.call_tool.call_args.args[0]=='whatsapp.deliveries'
-            crashed.reload();assert crashed.status=='Suppressed'
-            print('PASS unadmitted crash recovery cannot revive old generation after claim/resume')
+            assert response.status_code==200 and response.json['message']['status']=='Queued',response.status_code
+            assert [call.args[0] for call in hub.call_tool.call_args_list]==['whatsapp.deliveries','whatsapp.execute']
+            assert all(call.args[1]['request_key']==key for call in hub.call_tool.call_args_list)
+            crashed.reload();assert crashed.status=='Queued'
+            print('PASS lifecycle crash recovery keeps its original request key after claim/resume')
 
             # A claimed unresolved triage has no active business scope key.
             from relay_core import business_routing_prompt
