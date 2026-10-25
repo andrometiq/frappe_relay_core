@@ -327,6 +327,7 @@ class PromptRecoveryTests(unittest.TestCase):
         self.hub = Mock()
         self.enterContext(patch.object(messaging, 'frappe', self.fake))
         self.enterContext(patch.object(messaging, 'internal_save'))
+        self.enterContext(patch.object(messaging, 'delivery_episodes', return_value=[]))
         self.enterContext(patch.object(conversation_start, 'action_target', return_value=(
             _dict(), _dict(channel='WhatsApp'), {})))
         self.enterContext(patch.object(messaging.whatsapp, 'client', return_value=self.hub))
@@ -432,6 +433,7 @@ class TriageEpisodeTests(unittest.TestCase):
             get_single=Mock(return_value=_dict(ai_handoff_owner='backup')),
             PermissionError=PermissionError, DoesNotExistError=LookupError, ValidationError=ValueError)
         self.enterContext(patch.object(tickets, 'frappe', self.fake))
+        self.enterContext(patch('frappe.utils.now_datetime', return_value='Sim time'))
         self.enterContext(patch('relay_core.permissions.require_administrator'))
         from contextlib import nullcontext
         self.enterContext(patch('relay_core.ai.tools.as_user', side_effect=lambda user:nullcontext()))
@@ -445,6 +447,8 @@ class TriageEpisodeTests(unittest.TestCase):
         self.assertIs(again, first)
         self.assertEqual(first.company, 'Company North')
         self.assertEqual(first.assigned_to, 'primary')
+        self.assertEqual((first.ai_disabled, first.generation), (1, 1))
+        self.assertIsNone(first.ownership_actor)
         self.assertEqual(first.source_hub_event, 'event')
         self.assertNotIn('1250', json.dumps({k:v for k,v in first.items() if k != 'insert'}))
         self.assertEqual(len(self.created), 1)
