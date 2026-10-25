@@ -5,6 +5,7 @@ import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
+import { useEnabledChannels } from "../../composables/useEnabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import {
   templateParameterDescriptors,
@@ -12,6 +13,7 @@ import {
 } from "../../services/templateParameters";
 const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String });
 const emit = defineEmits(["close", "sent"]);
+const channelEnabled = useEnabledChannels();
 const shown = ref(true),
   contact = ref(props.contact || ""),
   endpoint = ref(""),
@@ -103,7 +105,7 @@ async function destinations() {
         business_doctype:props.businessDoctype,business_name:props.businessName },
     );
     if (current !== generation) return;
-    endpoints.value = result.map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
+    endpoints.value = result.filter(row => channelEnabled(row.provider)).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
     endpoint.value = endpoints.value[0]?.value || "";
   } catch (e) {
     if (current === generation) error.value = e.message;

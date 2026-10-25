@@ -9,10 +9,12 @@ import { relativeTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
+import { mediumOptions } from '../../services/enabledChannels'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business'])
 const capabilities = inject('relayCapabilities')
-const medium = ref('all');
+const mediums = computed(() => mediumOptions(capabilities.value))
+const medium = ref(mediums.value[0]?.value || mediums.value[0]);
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
 const moreQueues = computed(() => [
   { label: 'Businesses', onClick: () => { mode.value = 'business' } },
@@ -47,7 +49,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
   <template v-else>
     <form class="directory-search inbox-filters" role="search" @submit.prevent="load()">
       <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
-      <FormControl v-model="medium" type="select" aria-label="Channel" :options="[{label:'All channels',value:'all'}, 'WhatsApp', 'Telegram', 'Email']" />
+      <FormControl v-if="mediums.length > 1" v-model="medium" type="select" aria-label="Channel" :options="mediums" />
     </form>
     <p v-if="mode === 'mine'" class="px-4 pb-3 text-xs text-ink-gray-5">Conversations assigned directly to you.</p>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry queue" @click="load()" /></div>

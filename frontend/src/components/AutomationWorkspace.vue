@@ -10,6 +10,7 @@ import EventPicker from './fields/EventPicker.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
+import { useEnabledChannels } from '../composables/useEnabledChannels'
 const props = defineProps({ kind: String })
 const capabilities = inject('relayCapabilities')
 const configurationLinks = [
@@ -24,7 +25,8 @@ const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
     value: row.name, label: linkedTitle('Relay Channel', row.name, row.channel || 'Saved channel'),
   }))])
 const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
-const variant = provider => !!draft.value?.use_preferences || channelProvider.value === provider
+const channelEnabled = useEnabledChannels()
+const variant = provider => channelEnabled(provider) && (!!draft.value?.use_preferences || channelProvider.value === provider)
 const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), parameters = ref('')
 // Display fixture captions without rewriting the stored title on unrelated saves.
 const titleCaption = computed({ get: () => recordTitle(draft.value?.title, ''), set: value => { draft.value.title = value } })
@@ -50,7 +52,7 @@ async function load(append = false) {
   const request = ++generation; busy.value = true; error.value = ''
   try {
     const [page, available, catalog] = await Promise.all([coreApi(api.value + '.directory', { after: append ? next.value : null }), coreApi('api.channel_options'), skill.value ? coreApi('ai.configuration.editor_options', {kind:'action'}) : Promise.resolve({items:[]})])
-    if (request === generation) { actionOptions.value = catalog.items; channels.value = available.items; rows.value = append ? [...rows.value, ...page.items] : page.items; next.value = page.next }
+    if (request === generation) { actionOptions.value = catalog.items; channels.value = available.items.filter(row => channelEnabled(row.channel)); rows.value = append ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) busy.value = false }
 }
@@ -179,7 +181,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             <FormControl v-model="draft.contact" label="Explicit Contact (required when several people are linked)" :disabled="busy" />
             <FormControl v-if="variant('Telegram')" v-model="draft.telegram_body" label="Telegram template" type="textarea" rows="4" :disabled="busy" />
             <template v-if="variant('Email')"><FormControl v-model="draft.email_subject" label="Email subject template" :disabled="busy" /><FormControl v-model="draft.email_body" label="Email body template" type="textarea" rows="5" :disabled="busy" /><FormControl v-model="draft.email_signature" label="Email signature" type="textarea" :disabled="busy" maxlength="2000" /></template>
-            <FormControl v-model="parameters" label="Template parameters in order (one source field per line)" type="textarea" rows="4" :disabled="busy" /><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. Choose a Contact when several people belong to the business. Telegram and email use {field} placeholders from this list; email content is escaped. Consent is required. An uncertain send never switches channels.</p>
+            <FormControl v-model="parameters" label="Template parameters in order (one source field per line)" type="textarea" rows="4" :disabled="busy" /><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. Choose a Contact when several people belong to the business. <template v-if="variant('Telegram') || variant('Email')">Telegram and email use {field} placeholders from this list; email content is escaped.</template> Consent is required. An uncertain send never switches channels.</p>
           </template>
           <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-if="skill" v-model="draft.run_as_user" label="Run-as user" kind="user" :disabled="busy" /><FormControl v-else v-model="draft.run_as_user" label="User email" :required="Boolean(draft.enabled)" :disabled="busy" /><p v-if="skill" class="text-sm">The linked sender user takes precedence. Otherwise this user’s permissions apply; denial never falls back.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
           <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ variant('WhatsApp') ? livePreview : '' }}</p><p v-if="variant('Telegram')" class="whitespace-pre-wrap">Telegram: {{ variantPreview(draft.telegram_body, parameters) }}</p><p v-if="variant('Email')" class="whitespace-pre-wrap">Email: {{ variantPreview(draft.email_subject, parameters) }}
