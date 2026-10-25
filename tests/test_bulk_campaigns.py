@@ -39,13 +39,12 @@ class SheetTests(unittest.TestCase):
                                             {'type': 'text', 'text': '20%', 'parameter_name': 'discount'}]},
             {'type': 'button', 'sub_type': 'url', 'index': '0', 'parameters': [{'type': 'text', 'text': 'winter'}]}])
 
-    def test_phone_normalisation(self):
-        self.assertEqual(bulk_sheet.normalize_phone('98765 43210', 'IN'), '919876543210')
-        self.assertEqual(bulk_sheet.normalize_phone('+91 98765-43210'), '919876543210')
-        self.assertEqual(bulk_sheet.normalize_phone('0091 9876543210'), '919876543210')
-        self.assertEqual(bulk_sheet.normalize_phone(9876543210.0 and '9876543210', 'IN'), '919876543210')
+    def test_sheet_numbers_use_the_shared_phone_helper(self):
+        self.assertEqual(bulk_sheet.phone_number('98765 43210', 'IN'), '919876543210')
+        self.assertEqual(bulk_sheet.phone_number('+91 98765-43210', ''), '919876543210')
+        self.assertEqual(bulk_sheet.phone_number('0091 9876543210', ''), '919876543210')
         for bad in ('', '12345', 'call me', '9876543210'):
-            self.assertIsNone(bulk_sheet.normalize_phone(bad))
+            self.assertIsNone(bulk_sheet.phone_number(bad, ''))
 
     def write(self, suffix, rows):
         handle, path = tempfile.mkstemp(suffix=suffix)

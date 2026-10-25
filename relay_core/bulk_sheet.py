@@ -2,6 +2,7 @@
 import csv
 import re
 from urllib.parse import urlsplit
+from relay_core.identity import phone_number
 
 PHONE_COLUMNS = ('phone', 'mobile', 'mobile no', 'mobile number', 'phone number', 'whatsapp', 'number')
 MEDIA_FORMATS = ('IMAGE', 'VIDEO', 'DOCUMENT')
@@ -156,24 +157,9 @@ def media_url(value):
     return value
 
 
-def normalize_phone(raw, region=None):
-    """E.164 digits without '+', or None. Numbers without + use the campaign country."""
-    import phonenumbers
-    value = re.sub(r'[\s().-]', '', raw or '')
-    if value.startswith('00'):
-        value = '+' + value[2:]
-    try:
-        number = phonenumbers.parse(value, None if value.startswith('+') else (region or None))
-    except phonenumbers.NumberParseException:
-        return None
-    if not phonenumbers.is_valid_number(number):
-        return None
-    return phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164).lstrip('+')
-
-
 def prepare_row(row, mapping, fields, region):
     """Return (destination, values, problem). Problems are user-facing reasons."""
-    destination = normalize_phone(row.get(mapping['phone']), region)
+    destination = phone_number(row.get(mapping['phone']), region)
     if not destination:
         return None, None, 'Invalid phone number'
     values = {}
