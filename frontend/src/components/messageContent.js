@@ -76,3 +76,10 @@ export function templateParts(data) {
     caption: typeof data.campaign === 'string' && data.campaign ? `Campaign: ${data.campaign}` : `Template · ${template.name}`,
   }
 }
+
+// Short file type for a document card, from the file name or else the MIME type.
+export function documentType(media) {
+  const extension = /\.([A-Za-z0-9]{1,8})$/.exec(media?.file_name || media?.filename || '')?.[1]
+  const subtype = String(media?.mime_type || '').split(';')[0].split('/')[1] || ''
+  return extension ? extension.toUpperCase() : subtype && subtype.length <= 8 ? subtype.toUpperCase() : 'Document'
+}

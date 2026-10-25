@@ -25,15 +25,8 @@ watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
 const template = computed(() => templateParts(data.value));
 const context = computed(() => objectValue(props.message.provider_context));
-const loaded = ref(false),
-  mediaError = ref(false);
-watch(
-  () => props.message.name,
-  () => {
-    loaded.value = false;
-    mediaError.value = false;
-  },
-);
+const mediaError = ref(false);
+watch(() => props.message.name, () => { mediaError.value = false; });
 const source = computed(() => stickerURL(props.message.name));
 const animatedDownload = computed(
   () => data.value.media?.is_animated && context.value.provider === "Telegram",
@@ -68,13 +61,6 @@ const video = computed(
     </p>
     <div v-else-if="data.kind === 'sticker'" class="space-y-2">
       <TgsSticker v-if="animatedDownload" :source="source" />
-      <button
-        v-else-if="!loaded"
-        class="rounded border px-3 py-2"
-        @click="loaded = true"
-      >
-        Load sticker
-      </button>
       <template v-else-if="!mediaError">
         <video
           v-if="video"
@@ -84,7 +70,7 @@ const video = computed(
           muted
           playsinline
           preload="metadata"
-          class="max-h-48 max-w-full"
+          class="message-sticker"
           @error="mediaError = true"
         />
         <img
@@ -92,11 +78,13 @@ const video = computed(
           :src="source"
           alt="Sticker"
           loading="lazy"
-          class="max-h-48 max-w-full object-contain"
+          width="160"
+          height="160"
+          class="message-sticker"
           @error="mediaError = true"
         />
       </template>
-      <p v-if="mediaError" role="status">Sticker unavailable.</p>
+      <p v-if="mediaError" class="media-error" role="status">Sticker unavailable. <button type="button" @click="mediaError = false">Retry</button></p>
       <p v-if="data.media?.emoji">{{ data.media.emoji }}</p>
     </div>
     <AttachmentViewer
