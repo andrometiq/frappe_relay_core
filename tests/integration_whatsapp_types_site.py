@@ -150,6 +150,11 @@ try:
     print('PASS voice transcript is stored once on the message', flush=True)
 
     from frappe.auth import LoginManager
+    from werkzeug.test import EnvironBuilder
+    from werkzeug.wrappers import Request
+    frappe.local.request = Request(EnvironBuilder(path='/').get_environ())
+    from frappe.auth import CookieManager
+    frappe.local.cookie_manager = CookieManager()
     frappe.local.login_manager = LoginManager(); frappe.local.login_manager.login_as('Administrator')
     sid = frappe.session.sid; frappe.db.commit()
     server = make_server('127.0.0.1', 0, application, handler_class=Quiet)
