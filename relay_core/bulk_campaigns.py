@@ -223,7 +223,7 @@ def insert_chunk(doc, chunk):
                        'Skipped' if problem else 'Pending', destination or '', canonical(arguments) if arguments else None,
                        number, problem or ''))
     frappe.db.bulk_insert(RECIPIENT, ('name', 'creation', 'modified', 'owner', 'modified_by', 'docstatus', 'campaign',
-        'contact', 'recipient_key', 'request_key', 'status', 'destination', 'arguments', 'row_number', 'reason'),
+        'contact', 'recipient_key', 'request_key', 'status', 'destination', 'arguments', 'sheet_row', 'reason'),
         values, ignore_duplicates=True)
     frappe.db.commit()
 
@@ -233,20 +233,20 @@ def read(name, after=None, status=None):
     doc = bulk(name)
     filters = [['campaign', '=', name]]
     if after:
-        filters.append(['row_number', '>', frappe.utils.cint(after)])
+        filters.append(['sheet_row', '>', frappe.utils.cint(after)])
     if status:
         if status not in ('Pending', 'Skipped', 'Queued', 'Sent', 'Delivered', 'Read', 'Failed', 'Uncertain', 'Cancelled'):
             frappe.throw('Invalid recipient status')
         filters.append(['status', '=', status])
-    rows = frappe.get_all(RECIPIENT, filters=filters, fields=['row_number', 'destination', 'contact', 'status', 'reason',
-                          'error_code', 'replied_at'], order_by='row_number asc', limit_page_length=51)
+    rows = frappe.get_all(RECIPIENT, filters=filters, fields=['sheet_row', 'destination', 'contact', 'status', 'reason',
+                          'error_code', 'replied_at'], order_by='sheet_row asc', limit_page_length=51)
     issues = frappe.db.sql(f'''SELECT reason, count(*) AS count FROM `tab{RECIPIENT}` WHERE campaign=%s
         AND status IN ('Skipped','Failed') AND reason!='' GROUP BY reason ORDER BY count DESC LIMIT 10''', name, as_dict=True)
     return {**{key: doc.get(key) for key in ('name', 'title', 'channel', 'status', 'template_name', 'language',
                'source_file', 'country', 'reply_window_hours', 'started_at', 'finished_at', 'last_error')},
             'mapping': json.loads(doc.column_map) if doc.column_map else None,
             'fields': json.loads(doc.arguments)['fields'], 'counts': counts(doc), 'issues': issues,
-            'recipients': rows[:50], 'next': rows[49].row_number if len(rows) > 50 else None}
+            'recipients': rows[:50], 'next': rows[49].sheet_row if len(rows) > 50 else None}
 
 
 def counts(doc):
@@ -302,7 +302,7 @@ def push(doc, deadline):
     hub = whatsapp.client()
     while time.monotonic() < deadline and frappe.db.get_value('Relay Campaign', doc.name, 'status') == 'Running':
         rows = frappe.db.sql(f'''SELECT name, request_key, destination, arguments FROM `tab{RECIPIENT}`
-            WHERE campaign=%s AND status='Pending' ORDER BY row_number LIMIT {BATCH}''', doc.name, as_dict=True)
+            WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
             return
         messages = [{'key': row.request_key, 'message': {'operation': 'templates.send', 'to': row.destination,

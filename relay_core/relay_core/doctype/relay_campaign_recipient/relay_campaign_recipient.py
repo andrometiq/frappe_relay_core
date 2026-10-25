@@ -7,4 +7,4 @@ class RelayCampaignRecipient(InternalRecord):
 
 
 def on_doctype_update():
-    frappe.db.add_index('Relay Campaign Recipient', ['campaign', 'status', 'row_number'], 'campaign_status_row')
+    frappe.db.add_index('Relay Campaign Recipient', ['campaign', 'status', 'sheet_row'], 'campaign_status_row')

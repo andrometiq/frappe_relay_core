@@ -3,6 +3,7 @@ Synthetic credentials only; the fixture user is disabled and the stored event re
 Run from the bench sites folder: PYTHONPATH=<worktree>:<worktree>/tests CI=1 ../env/bin/python -B <this file>
 """
 import hashlib, hmac, json, secrets, threading, time
+from pathlib import Path
 from unittest.mock import patch
 from wsgiref.simple_server import make_server, WSGIRequestHandler
 import requests
@@ -15,7 +16,7 @@ SITE = 'yrp.site'
 frappe.init(site=SITE)
 frappe.connect()
 frappe.set_user('Administrator')
-assert inbound.__file__.startswith('/home/sakthi/development/relay-wt/core-bulk/'), 'Run with the worktree first on PYTHONPATH'
+assert Path(inbound.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1]), 'Run with this checkout first on PYTHONPATH'
 account = 'bulk-http-fixture'
 secret, api_key, api_secret = secrets.token_hex(32), secrets.token_hex(12), secrets.token_hex(24)
 email = 'relay-bulk-callback-fixture@example.invalid'
