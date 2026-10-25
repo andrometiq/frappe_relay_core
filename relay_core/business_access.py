@@ -47,7 +47,8 @@ def allowed(doc,user=None):
     if (user or frappe.session.user) == 'Administrator': return True
     if doc.get('legacy_triage'): return False
     target=reference(doc)
-    if not target:return False
+    # A removed Contact link ends access to that business's history at once.
+    if not target or target not in candidates(doc.relay_contact):return False
     try:return frappe.get_doc(*target).has_permission('read',user=user)
     except frappe.DoesNotExistError:return False
 
@@ -75,7 +76,10 @@ def query_condition(user=None):
         query=frappe.qb.get_query(dt,fields=['name'],ignore_permissions=False,user=user,order_by='')
         subquery=query.get_sql()
         value=frappe.db.escape(dt)
-        explicit=f"(`tabRelay Message`.business_doctype={value} AND `tabRelay Message`.business_name IN ({subquery}))"
+        explicit=f"""(`tabRelay Message`.business_doctype={value} AND `tabRelay Message`.business_name IN ({subquery})
+        AND EXISTS (SELECT 1 FROM `tabRelay Contact` c JOIN `tabDynamic Link` k ON k.parent=c.contact
+         WHERE c.name=`tabRelay Message`.relay_contact AND k.parenttype='Contact' AND k.parentfield='links'
+         AND k.link_doctype={value} AND k.link_name=`tabRelay Message`.business_name))"""
         # Legacy records resolve only when there is exactly one configured business link.
         legacy=f"""(COALESCE(`tabRelay Message`.business_name,'')='' AND `tabRelay Message`.relay_contact IN
         (SELECT r.name FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact

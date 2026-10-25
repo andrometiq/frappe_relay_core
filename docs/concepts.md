@@ -36,6 +36,21 @@ indexes, and permissions. New records use Relay-prefixed names and Frappe naming
 series. Hashes are used for deduplication/binding keys where needed, not to replace
 every document's visible name.
 
+## Contact lifecycle
+
+Messages belong to the Relay Contact and its endpoint. The business on a message is the routing decision for that conversation. A reader needs read access to that business record, and the Contact must still link to it.
+
+| Contact change | Result |
+| --- | --- |
+| Number or email changes only in format (`+91`, spaces, leading `0`) | No change. National numbers use the System Settings country code. |
+| Number or email removed or replaced | The old endpoint becomes unverified at once. Its messages stay on the Relay Contact. |
+| Replacement saved by a Relay manager or System Manager | Core also verifies the new value, unless another endpoint already holds it. |
+| Business link removed | Routing, outbound send and message access for that business stop at once. |
+| Delete | Blocked while a Relay Contact exists. Remove numbers or links, or merge the Contact. |
+| Merge into a Contact without Relay history | The Relay Contact moves to the target Contact. Merging two Contacts that both have Relay history is blocked. |
+
+One person has one Contact, linked to all their business records. When a sender has two or more linked businesses, routing asks the sender which one. One endpoint belongs to one Relay Contact, so a number that is already enrolled stays with its first Contact.
+
 ## Receive and reply
 
 1. Hub authenticates the provider callback and records the event.
