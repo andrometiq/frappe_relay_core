@@ -47,17 +47,22 @@ def allowed(doc,user=None):
     if (user or frappe.session.user) == 'Administrator': return True
     if doc.get('legacy_triage'): return False
     target=reference(doc)
-    # A removed Contact link ends access to that business's history at once.
-    if not target or target not in candidates(doc.relay_contact):return False
+    if not target:return False
+    # A removed Contact link ends access to that business's history at once; a validated
+    # ticket notification is the one stored exception, as it reaches a subscriber's own contact.
+    if not doc.get('ticket_notification') and target not in candidates(doc.relay_contact):return False
     try:return frappe.get_doc(*target).has_permission('read',user=user)
     except frappe.DoesNotExistError:return False
 
 
 def associate(doc,method=None):
+    from relay_core.ticket_notifications import message_ownership
+    notification = doc.direction == 'Outgoing' and message_ownership.get() == (doc.relay_contact, doc.channel,
+        doc.sender_endpoint, doc.business_doctype, doc.business_name, doc.get('ticket_notification'))
+    if doc.get('ticket_notification') and not notification:
+        frappe.throw('Only a validated ticket notification may cross contact business links')
     if doc.get('business_doctype') or doc.get('business_name'):
-        from relay_core.ticket_notifications import message_ownership
-        if (doc.direction == 'Outgoing' and message_ownership.get()
-                == (doc.relay_contact, doc.channel, doc.sender_endpoint, doc.business_doctype, doc.business_name)):
+        if notification:
             return
         if (doc.get('business_doctype'),doc.get('business_name')) not in candidates(doc.relay_contact):
             frappe.throw('Message business must be linked to its contact')
@@ -77,9 +82,9 @@ def query_condition(user=None):
         subquery=query.get_sql()
         value=frappe.db.escape(dt)
         explicit=f"""(`tabRelay Message`.business_doctype={value} AND `tabRelay Message`.business_name IN ({subquery})
-        AND EXISTS (SELECT 1 FROM `tabRelay Contact` c JOIN `tabDynamic Link` k ON k.parent=c.contact
+        AND (COALESCE(`tabRelay Message`.ticket_notification,'')!='' OR EXISTS (SELECT 1 FROM `tabRelay Contact` c JOIN `tabDynamic Link` k ON k.parent=c.contact
          WHERE c.name=`tabRelay Message`.relay_contact AND k.parenttype='Contact' AND k.parentfield='links'
-         AND k.link_doctype={value} AND k.link_name=`tabRelay Message`.business_name))"""
+         AND k.link_doctype={value} AND k.link_name=`tabRelay Message`.business_name)))"""
         # Legacy records resolve only when there is exactly one configured business link.
         legacy=f"""(COALESCE(`tabRelay Message`.business_name,'')='' AND `tabRelay Message`.relay_contact IN
         (SELECT r.name FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact

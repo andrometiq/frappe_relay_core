@@ -191,7 +191,8 @@ def insert_message(doc, action):
             doc.business_doctype, doc.business_name, payload['notification'], snapshot=True)
         if list(business) != payload.get('business'):
             raise frappe.PermissionError('Notification snapshot changed')
-        token = message_ownership.set((doc.relay_contact, doc.channel, doc.sender_endpoint, *business))
+        doc.ticket_notification = payload['notification']
+        token = message_ownership.set((doc.relay_contact, doc.channel, doc.sender_endpoint, *business, doc.ticket_notification))
         try:
             return doc.insert(ignore_permissions=True)
         finally:
