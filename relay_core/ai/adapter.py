@@ -35,7 +35,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         raise ValueError('Event turn deadline exceeded')
     account, model, secrets, options = route(skill.ai_model)
     options['timeout'] = min(options.get('timeout', 20), deadline - time.monotonic())
-    from relay_core.ai.service import authorize_search
+    from relay_core.ai.service import authorize_search, check_continuation
     reader = Reader(skill, user, business, scope,
         authorize=lambda contract, arguments: authorize_search(run_id, skill, contract, arguments))
     references = contracts(skill)
@@ -90,7 +90,15 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
              'properties': {'action': {'type': 'string', 'enum': [row['action'] for row in declarations]},
                             'parameters': {'type': 'object'}}}, execute_action))
     class SkillRun(agent.AgentRun):
+        def run_tools(self, calls):
+            check_continuation(run_id)
+            results = super().run_tools(calls)
+            # AgentRun starts the next model turn immediately after this returns.
+            check_continuation(run_id)
+            return results
+
         def run_tool(self, call):
+            check_continuation(run_id)
             # Existing single-event providers can still name a declared reference.
             # Normalize it through SEARCH; it never bypasses the declaration gate.
             try:
@@ -124,8 +132,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         'in the written order; when proposing actions, leave the final reply empty. '
         'Return JSON with reply, handoff, reason, search.\nReferences:\n' + json.dumps(references) +
         '\nAllowed actions:\n' + json.dumps(action_schemas) +
-        '\nAuthorized search:\n' + json.dumps(search) + '\nSkill:\n' + skill.instructions)
+        '\nAuthorized search:\n' + json.dumps(search) + '\nSkill:\n' + skill.instructions +
+        '\nOwner reply style:\n' + str(skill.get('reply_style') or '')[:2000])
     options['max_tokens'] = min(options['max_tokens'], 1200)
+    check_continuation(run_id)
     outcome = engine.run_route(account, model.model_id,
         (system, llm.redact_secrets(text, secrets), RESPONSE), options,
         dict(extraction=None, target_doctype=business[0], phase=None,

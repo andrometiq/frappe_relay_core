@@ -53,7 +53,8 @@ def decide(skill, message, run_id=None, *, deadline=None):
     deadline = deadline or time.monotonic() + 20
     user, business, scope = context(skill, message)
     text = message.content or ''
-    if any(phrase in text.casefold() for phrase in ('talk to a human', 'talk to a person', 'speak to a human', 'hand this to a person')):
+    from relay_core.ai.matching import human_request
+    if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': 'Sender requested a person', 'user': user, 'reads': []}
     history = conversation_history(skill, message, user, business, scope)
     if message.message_type in ('photo', 'image'):
@@ -64,6 +65,7 @@ def decide(skill, message, run_id=None, *, deadline=None):
         require_vision(frappe.get_doc('AI Model', skill.ai_model))
         with as_user(user):
             text, images = media_context({'allow_images': True}, message, run_id)
+        check_continuation(run_id)
         if run_id:
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
@@ -75,11 +77,24 @@ def decide(skill, message, run_id=None, *, deadline=None):
                 run = frappe.get_doc('Relay Automation Run', run_id)
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
+            check_continuation(run_id)
             decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
             return dict(decision, scope=fingerprint(scope))
         if not history:
             raise ValueError('Incoming message exceeds the skill prompt budget')
         history.pop(0)
+
+
+def check_continuation(run_id):
+    """Refresh state after slow work, releasing Relay locks before model I/O."""
+    if not run_id:
+        return  # Saved-event previews have no operational episode.
+    frappe.db.commit()
+    run = frappe.get_doc('Relay Automation Run', run_id)
+    skill = frappe.get_doc('Relay AI Skill', run.skill)
+    message = frappe.get_doc('Relay Message', run.message)
+    current(run, skill, message)
+    frappe.db.commit()
 
 
 def conversation_history(skill, message, user, business, scope):
@@ -254,8 +269,11 @@ def search_delivered(run, skill):
 
 def current(run, skill, message):
     contact = lock_contact(message.relay_contact)
-    if run.get('ticket') and frappe.db.get_value('Relay Ticket', run.ticket, 'ai_disabled'):
-        raise Superseded('Episode is owned by staff')
+    from relay_core.tickets import check_episode
+    try:
+        check_episode(run)
+    except ValueError as exc:
+        raise Superseded(str(exc)) from exc
     if not skill.enabled or str(skill.modified) != run.skill_version or contact.automation_paused or int(contact.automation_generation or 0) != int(run.generation):
         raise Superseded('Conversation or skill changed')
     if message_hash(message) != run.message_hash or not latest_message(message):
@@ -469,11 +487,14 @@ def recover_deliveries():
 def defer_handoff(name):
     frappe.db.rollback()
     run = lock_run(name)
-    contact = lock_contact(frappe.get_doc('Relay Message', run.message).relay_contact)
-    if not contact.automation_paused:
-        contact.automation_generation = int(contact.automation_generation or 0) + 1
-    contact.automation_paused = 1
-    contact.save(ignore_permissions=True)
+    from relay_core.tickets import hold_episode
+    if run.get('ticket'):
+        actor = frappe.session.user
+        try:
+            frappe.set_user('Administrator')
+            hold_episode(run.ticket)
+        finally:
+            frappe.set_user(actor)
     run.reason = 'Handoff owner unavailable; automation paused pending recovery'
     internal_save(run); frappe.db.commit()
     frappe.log_error(title='Relay handoff unavailable', message='Configure an enabled owner with conversation access')
@@ -488,6 +509,11 @@ def admit(run):
     message = frappe.get_doc('Relay Message', run.message)
     try:
         ticket = episode(run, message)
+        from relay_core.tickets import check_episode
+        try:
+            check_episode(run)
+        except ValueError as exc:
+            raise Superseded(str(exc)) from exc
         contact = lock_contact(message.relay_contact)
         if ticket.ai_disabled or contact.automation_paused or int(contact.automation_generation or 0) != int(run.generation):
             run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
@@ -521,6 +547,10 @@ def admit(run):
         if run.status != 'Deciding' or run.stage != 'Matching':
             return
         message.reload()
+        try:
+            check_episode(run)
+        except ValueError as exc:
+            raise Superseded(str(exc)) from exc
         contact = lock_contact(message.relay_contact)
         if (contact.automation_paused or int(contact.automation_generation or 0) != int(run.generation)
                 or frappe.db.get_value('Relay Ticket', run.ticket, 'ai_disabled')

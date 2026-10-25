@@ -110,6 +110,8 @@ def scope(run, policy):
         raise ValueError('Message does not match policy')
     if not latest_message(message):
         raise ValueError('A newer incoming message superseded this turn')
+    from relay_core.tickets import check_episode
+    check_episode(run)
     contact = frappe.get_doc('Relay Contact', message.relay_contact)
     contact.check_permission('read')
     if contact.automation_paused or int(contact.automation_generation or 0) != int(run.generation):
@@ -141,16 +143,16 @@ def enqueue(message):
     return create_run(doc)
 
 
-def episode(run, message, skill=None):
+def episode(run, message, skill=None, *, hold=False):
     """Create the assigned episode before either flows or event tools execute."""
-    from relay_core.tickets import ensure_episode, triage_owner
+    from relay_core.tickets import ensure_episode, triage_owner, hold_episode
     actor = frappe.session.user
     try:
         frappe.set_user('Administrator')
         channel = frappe.get_doc('Relay Channel', message.channel)
         owner = triage_owner(channel, message)
         ticket = ensure_episode(message, owner=owner, skill=skill, run=run)
-        return ticket
+        return hold_episode(ticket.name) if hold else ticket
     finally:
         frappe.set_user(actor)
 
@@ -158,17 +160,12 @@ def episode(run, message, skill=None):
 def triage(run, message, reason):
     run.reason = reason[:500]
     try:
-        episode(run, message)
+        episode(run, message, hold=True)
     except (ValueError, frappe.PermissionError, frappe.ValidationError):
         # The run is the durable intent when the configured owner loses access.
         run.stage, run.status = 'Triage', 'Pending'
         run.reason = 'Triage owner unavailable; review required'
     else:
-        contact = lock_contact(message.relay_contact)
-        if not contact.automation_paused:
-            contact.automation_paused = 1
-            contact.automation_generation = int(contact.automation_generation or 0) + 1
-            contact.save(ignore_permissions=True)
         run.stage, run.status = 'Triage', 'Handoff'
     internal_save(run)
 
@@ -216,6 +213,7 @@ def create_run(doc):
     except (ValueError, frappe.PermissionError, frappe.ValidationError):
         triage(run, doc, 'Episode admission requires review')
         return {'name': run.name, 'status': run.status}
+    run.ownership_generation = int(ticket.generation or 0)
     if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled'):
         from relay_core.ai.service import continue_search
         try:
@@ -301,6 +299,8 @@ def dispatch(name):
         if run.get('message_hash') and run.message_hash != message_hash(message):
             out.status = 'Cancelled'; internal_save(out); frappe.db.commit(); return
         contact = lock_contact(message.relay_contact)
+        from relay_core.tickets import check_episode
+        check_episode(run)
         if not frappe.conf.get('relay_automation_enabled') or not policy.enabled or str(policy.modified) != run.policy_version or int(contact.automation_generation or 0) != int(run.generation):
             out.status = 'Cancelled'; internal_save(out); frappe.db.commit(); return
         contact.check_permission('read')

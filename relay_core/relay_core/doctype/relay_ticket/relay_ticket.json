@@ -24,7 +24,9 @@
     "pending_run",
     "active_scope_key",
     "source_hub_event",
-    "source_provider_message_key"
+    "source_provider_message_key",
+    "ownership_actor",
+    "ownership_at"
   ],
   "fields": [
     {
@@ -163,6 +165,19 @@
       "fieldtype": "Data",
       "label": "Source provider message key",
       "read_only": 1
+    },
+    {
+      "fieldname": "ownership_actor",
+      "label": "Ownership actor",
+      "fieldtype": "Link",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "ownership_at",
+      "label": "Ownership changed at",
+      "fieldtype": "Datetime",
+      "read_only": 1
     }
   ],
   "autoname": "RELAY-TKT-.##########",
@@ -189,5 +204,5 @@
       "create": 1
     }
   ],
-  "modified": "2026-10-25 02:45:50.808737"
+  "modified": "2026-10-26 00:00:00.000001"
 }

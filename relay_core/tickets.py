@@ -20,6 +20,106 @@ def _save_episode(doc, *, new=False):
         _episode_transition.reset(token)
 
 
+def _ownership(doc, *, disabled=True):
+    """Caller holds the ticket lock; generations invalidate approvals and old runs."""
+    from frappe.utils import now_datetime
+    doc.ai_disabled = int(disabled)
+    doc.generation = int(doc.get('generation') or 0) + 1
+    doc.pending_run = None
+    doc.ownership_actor = frappe.session.user
+    doc.ownership_at = now_datetime()
+
+
+def hold_episode(name, *, claim=False):
+    """Shared staff/service transition. Assignment alone never calls this."""
+    require_access()
+    doc = frappe.get_doc('Relay Ticket', name, for_update=True)
+    doc.check_permission('write')
+    if not doc.get('ai_disabled') or claim and doc.get('ownership_actor') != frappe.session.user:
+        _ownership(doc)
+        token = _episode_transition.set(doc)
+        try:
+            doc.save()
+        finally:
+            _episode_transition.reset(token)
+    return doc
+
+
+@frappe.whitelist(methods=['POST'])
+def claim(name):
+    validate_reference(name, 'TKT')
+    doc = hold_episode(name, claim=True)
+    return {'name': doc.name, 'ai_disabled': bool(doc.ai_disabled), 'generation': doc.generation}
+
+
+@frappe.whitelist(methods=['POST'])
+def resume_ai(name):
+    require_access()
+    validate_reference(name, 'TKT')
+    doc = frappe.get_doc('Relay Ticket', name, for_update=True)
+    doc.check_permission('write')
+    if not doc.get('active_scope_key') or doc.status in ('Closed', 'Resolved'):
+        frappe.throw('Only an active episode can resume AI')
+    _ownership(doc, disabled=False)
+    token = _episode_transition.set(doc)
+    try:
+        doc.save()
+    finally:
+        _episode_transition.reset(token)
+    # No enqueue: only a new inbound message may start fresh work.
+    return {'name': doc.name, 'ai_disabled': bool(doc.ai_disabled), 'generation': doc.generation}
+
+
+@frappe.whitelist(methods=['POST'])
+def close_and_release(name):
+    require_access()
+    validate_reference(name, 'TKT')
+    doc = frappe.get_doc('Relay Ticket', name, for_update=True)
+    doc.check_permission('write')
+    if doc.get('active_scope_key'):
+        _ownership(doc)
+        doc.status, doc.active_scope_key = 'Closed', None
+        token = _episode_transition.set(doc)
+        try:
+            doc.save()
+        finally:
+            _episode_transition.reset(token)
+    return {'name': doc.name, 'status': doc.status, 'ai_disabled': bool(doc.ai_disabled),
+            'generation': doc.generation}
+
+
+def check_episode(run):
+    """Lock only Relay state, fencing each continuation until its commit."""
+    if not run.get('ticket'):
+        return  # Pre-episode flow/policy recovery keeps its legacy contact fence.
+    ticket = frappe.get_doc('Relay Ticket', run.ticket, for_update=True)
+    if (ticket.ai_disabled or not ticket.active_scope_key
+            or int(ticket.generation or 0) != int(run.get('ownership_generation') or 0)):
+        raise ValueError('Episode ownership changed')
+
+
+def manual_takeover(source):
+    """Join the current episode hold to the caller's manual-message journal write."""
+    if not source.get('business_name'):
+        return
+    if not frappe.db.get_value('Relay Channel', source.channel, 'company'):
+        return  # Legacy channels cannot admit AI episodes.
+    scope, key = _episode_scope(source)
+    _lock_episode_routing(source, scope['conversation_key'])
+    name = frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, 'name', for_update=True)
+    if not name and source.get('name') and not source.get('ticket'):
+        source.check_permission('read')
+        actor = frappe.session.user
+        try:
+            frappe.set_user('Administrator')
+            name = ensure_episode(source, owner=actor).name
+        finally:
+            frappe.set_user(actor)
+    if name:
+        hold_episode(name, claim=True)
+        source.ticket = name
+
+
 def episode_owner_allowed(user, message):
     from relay_core.ai.tools import as_user
     from relay_core.permissions import company_allowed
@@ -122,6 +222,9 @@ def _ensure_triage(event, channel, row):
             status='Open', assigned_to=owner, company=channel.company,
             conversation_key=conversation_key(channel.name, row['from'], row.get('provider_context') or {}),
             source_action_key=action, source_hub_event=event.name, source_provider_message_key=key))
+        _ownership(doc)
+        # Triage holds AI until enrollment, but assignment is not a staff claim.
+        doc.ownership_actor = None
         _save_episode(doc, new=True)
     except (frappe.PermissionError, frappe.ValidationError):
         # An owner can lose access between selection and controller validation.
@@ -230,7 +333,8 @@ def validate_ticket(doc, check_assignment=True):
             for record in (doc, previous)):
         protected = ('company', 'conversation_key', 'source_hub_event', 'source_provider_message_key',
                      'source_action_key', 'business_doctype', 'business_name', 'active_scope_key',
-                     'source_run', 'skill', 'skill_version', 'ai_disabled', 'generation', 'pending_run')
+                     'source_run', 'skill', 'skill_version', 'ai_disabled', 'generation', 'pending_run',
+                     'ownership_actor', 'ownership_at')
         if _episode_transition.get() is not doc and (not previous or any(
                 doc.get(key) != previous.get(key) for key in protected)):
             frappe.throw('Episode scope can only be changed by an internal transition', frappe.PermissionError)
@@ -278,6 +382,14 @@ def validate_ticket(doc, check_assignment=True):
             finally:
                 frappe.set_user(actor)
 
+    if (previous and doc.get('conversation_key') and doc.status != previous.status
+            and doc.status in ('In progress', 'Closed', 'Resolved') and _episode_transition.get() is not doc):
+        doc.check_permission('write')
+        current = frappe.get_doc('Relay Ticket', doc.name, for_update=True)
+        if int(current.generation or 0) != int(previous.generation or 0):
+            frappe.throw('Episode ownership changed; reload the ticket')
+        _ownership(doc)
+
 
 @frappe.whitelist(methods=['POST'])
 def create(subject, messages, brief='', category='Query'):
@@ -298,7 +410,7 @@ def create(subject, messages, brief='', category='Query'):
 def update_status(name, status):
     require_access()
     validate_reference(name, 'TKT')
-    doc = frappe.get_doc('Relay Ticket', name)
+    doc = frappe.get_doc('Relay Ticket', name, for_update=True)
     doc.check_permission('write')
     doc.status = status
     doc.save()
@@ -344,7 +456,151 @@ def read(name):
             'company': doc.get('company'), 'conversation_key': doc.get('conversation_key'),
             'skill': doc.get('skill'), 'skill_version': doc.get('skill_version'),
             'ai_disabled': bool(doc.get('ai_disabled')), 'generation': doc.get('generation') or 0,
+            'ownership_actor': doc.get('ownership_actor'), 'ownership_at': doc.get('ownership_at'),
+            'can_resume': bool(doc.get('active_scope_key') and doc.get('ai_disabled')
+                and doc.status not in ('Closed', 'Resolved') and doc.has_permission('write')),
+            'can_release': bool(doc.get('active_scope_key') and doc.has_permission('write')),
+            'can_take_over': bool(doc.get('conversation_key') and doc.has_permission('write')),
             'can_assign': bool(set(frappe.get_roles()).intersection({'System Manager','Relay Communication Manager'}))}
+
+
+def _episode_message(ticket, name):
+    message = frappe.get_doc('Relay Message', name)
+    message.check_permission('read')
+    readable_contact(message.relay_contact)
+    channel = frappe.get_doc('Relay Channel', message.channel)
+    channel.check_permission('read')
+    if (message.get('ticket') != ticket.name or channel.get('company') != ticket.get('company')
+            or any(message.get(key) != ticket.get(key)
+                   for key in ('conversation_key', 'business_doctype', 'business_name'))):
+        frappe.throw('Transcript scope changed', frappe.PermissionError)
+    message.apply_fieldlevel_read_permissions()
+    return message
+
+
+def _history_json(value):
+    try:
+        value = json.loads(value or '{}')
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+@frappe.whitelist(methods=['GET'])
+def ai_history(name, before=None, limit=20):
+    """Operational evidence only. Internal journals never become public documents."""
+    require_access()
+    validate_reference(name, 'TKT')
+    if isinstance(limit, bool) or not isinstance(limit, (str, int)) or not str(limit).isdigit() or not 1 <= int(limit) <= 50:
+        frappe.throw('Limit must be between 1 and 50')
+    ticket = frappe.get_doc('Relay Ticket', name)
+    ticket.check_permission('read')
+    filters = {'ticket': name}
+    if before:
+        validate_reference(before, 'AR')
+        anchor = frappe.get_doc('Relay Automation Run', before)
+        if anchor.ticket != name:
+            frappe.throw('History cursor belongs to another episode', frappe.PermissionError)
+        _episode_message(ticket, anchor.message)
+        filters['name'] = ['<', before]
+    rows = frappe.get_all('Relay Automation Run', filters=filters,
+        fields=['name', 'message', 'skill', 'skill_version', 'status', 'stage', 'creation',
+                'search_plan', 'decision', 'ownership_generation'],
+        order_by='name desc', limit_page_length=int(limit) + 1)
+    items = []
+    for run in rows[:int(limit)]:
+        _episode_message(ticket, run.message)
+        plan = _history_json(run.search_plan)
+        search = plan.get('plan')
+        # Purpose/reference are the declared announcement; never return filters,
+        # returned records, model reasoning, typed action inputs or scope snapshots.
+        announcement = None
+        if isinstance(search, dict):
+            announcement = dict(reference=str(search.get('reference') or '')[:140],
+                purpose=str(search.get('purpose') or '')[:500],
+                confirmed=bool(plan.get('confirmed_by') or plan.get('consumed_by')))
+        reads = _history_json(run.decision).get('reads')
+        actions = []
+        for action in frappe.get_all('Relay Flow Action', filters={'automation_run': run.name, 'ticket': name},
+                fields=['name', 'action', 'step', 'status', 'approval_evidence'],
+                order_by='step asc', limit_page_length=4):
+            stale = (action.status != 'Completed' and (ticket.get('ai_disabled')
+                or int(run.ownership_generation or 0) != int(ticket.get('generation') or 0)))
+            actions.append(dict(name=action.name, action=action.action, step=action.step + 1,
+                status='Stopped' if stale else action.status,
+                approval='Invalidated' if stale else 'Recorded' if action.approval_evidence else None))
+        deliveries = []
+        for delivery in frappe.get_all('Relay Message Action', filters={'source_message': run.message},
+                fields=['name', 'status', 'payload'], order_by='creation asc', limit_page_length=20):
+            if _history_json(delivery.payload).get('automation_run') == run.name:
+                deliveries.append(dict(name=delivery.name, status=delivery.status))
+        items.append(dict(name=run.name, creation=run.creation, status=run.status,
+            event=frappe.db.get_value('Relay AI Skill', run.skill, 'title') if run.skill else None,
+            event_version=run.skill_version, stage=run.stage, search=announcement,
+            read_count=len(reads) if isinstance(reads, list) else 0,
+            actions=actions, deliveries=deliveries))
+    return {'items': items, 'next': {'before': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
+
+
+def _delivery_rows(name, *, before=None, before_created=None, exact=None, limit=51):
+    # Journals already carry immutable episode snapshots. Include older anchored
+    # flow replies through their source message; never expose journal payloads.
+    return frappe.db.sql("""
+        SELECT * FROM (
+            SELECT a.name, a.status, a.creation, a.source_message, a.target_channel AS channel,
+                'Message' AS kind, NULL AS source_doctype, NULL AS source_name,
+                NULL AS business_doctype, NULL AS business_name
+            FROM `tabRelay Message Action` a
+            LEFT JOIN `tabRelay Message` m ON m.name = a.source_message
+            WHERE m.ticket = %(ticket)s OR JSON_UNQUOTE(JSON_EXTRACT(a.payload, '$.ticket')) = %(ticket)s
+                OR JSON_SEARCH(a.payload, 'one', %(ticket)s, NULL, '$.delivery_episodes[*][0]') IS NOT NULL
+            UNION ALL
+            SELECT d.name, d.status, d.creation, NULL AS source_message, d.channel,
+                'Lifecycle notice' AS kind, d.source_doctype, d.source_name, d.business_doctype, d.business_name
+            FROM `tabRelay Business Event Delivery` d
+            WHERE JSON_SEARCH(d.payload, 'one', %(ticket)s, NULL, '$.delivery_episodes[*][0]') IS NOT NULL
+        ) deliveries
+        WHERE (%(before)s IS NULL OR creation < %(before_created)s
+            OR (creation = %(before_created)s AND name < %(before)s))
+          AND (%(exact)s IS NULL OR name = %(exact)s)
+        ORDER BY creation DESC, name DESC LIMIT %(limit)s
+    """, dict(ticket=name, before=before, before_created=before_created, exact=exact, limit=limit), as_dict=True)
+
+
+def _read_delivery(ticket, row):
+    channel = frappe.get_doc('Relay Channel', row.channel)
+    channel.check_permission('read')
+    if channel.get('company') != ticket.company:
+        frappe.throw('Delivery company changed', frappe.PermissionError)
+    if row.source_message:
+        _episode_message(ticket, row.source_message)
+    if row.kind == 'Lifecycle notice':
+        if (row.business_doctype, row.business_name) != (ticket.business_doctype, ticket.business_name):
+            frappe.throw('Delivery business changed', frappe.PermissionError)
+        frappe.get_doc(row.source_doctype, row.source_name).check_permission('read')
+    return {key: row.get(key) for key in ('name', 'status', 'creation', 'kind')}
+
+
+@frappe.whitelist(methods=['GET'])
+def deliveries(name, before=None, limit=50):
+    """Permission-checked delivery states, including flow and suppressed notices."""
+    require_access()
+    validate_reference(name, 'TKT')
+    if isinstance(limit, bool) or not isinstance(limit, (str, int)) or not str(limit).isdigit() or not 1 <= int(limit) <= 100:
+        frappe.throw('Limit must be between 1 and 100')
+    ticket = frappe.get_doc('Relay Ticket', name)
+    ticket.check_permission('read')
+    if before:
+        if not isinstance(before, str) or len(before) > 140:
+            frappe.throw('Invalid delivery cursor')
+        anchor = _delivery_rows(name, exact=before, limit=1)
+        if not anchor:
+            frappe.throw('Delivery cursor belongs to another episode', frappe.PermissionError)
+        _read_delivery(ticket, anchor[0])
+    rows = _delivery_rows(name, before=before, before_created=anchor[0].creation if before else None,
+        limit=int(limit) + 1)
+    return {'items': [_read_delivery(ticket, row) for row in rows[:int(limit)]],
+            'next': {'before': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
 
 
 @frappe.whitelist(methods=['GET'])
@@ -368,14 +624,7 @@ def transcript(name, after=None, limit=50):
     items = []
     fields = ('name', 'content', 'direction', 'status', 'creation', 'sent_at', 'message_type', 'channel')
     for row in rows[:int(limit)]:
-        message = frappe.get_doc('Relay Message', row.name)
-        message.check_permission('read')
-        readable_contact(message.relay_contact)
-        frappe.get_doc('Relay Channel', message.channel).check_permission('read')
-        if message.get('ticket') != name or any(message.get(key) != ticket.get(key)
-                for key in ('conversation_key', 'business_doctype', 'business_name')):
-            frappe.throw('Transcript scope changed', frappe.PermissionError)
-        message.apply_fieldlevel_read_permissions()
+        message = _episode_message(ticket, row.name)
         items.append({key: message.get(key) for key in fields})
     return {'items': items, 'next': {'after': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
 
