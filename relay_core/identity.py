@@ -57,38 +57,48 @@ def normalize(provider, value):
     return value
 
 
-def contact_number(value):
-    """WhatsApp digits for a typed Contact number; national numbers take the system country code."""
-    digits = re.sub(r'[ .+()\-]', '', value or '')
-    if not digits.isdigit():
+def phone_number(value, region=None):
+    """E.164 digits without '+', or None. A number without + follows the length rules of the
+    region (default: the System Settings country); a long number that is not valid there is
+    read as international, as Contacts often store numbers without the +."""
+    import phonenumbers
+    text = re.sub(r'[\s().-]', '', str(value or ''))
+    if text.startswith('00'):
+        text = '+' + text[2:]
+    if not re.fullmatch(r'\+?[0-9]{4,17}', text):
         return None
-    if (value or '').strip().startswith('+'):
-        number = digits
-    elif digits.startswith('00'):
-        number = digits[2:]
-    elif digits.startswith('0') or len(digits) <= 10:
-        code = default_calling_code()
-        if not code:
-            return None
-        number = code + digits.lstrip('0')
-    else:
-        number = digits
-    return number if re.fullmatch(r'[1-9][0-9]{6,14}', number) else None
+    if text.startswith('+'):
+        return parsed(text, None, phonenumbers.is_possible_number)
+    region = default_region() if region is None else region
+    found = parsed(text, region, phonenumbers.is_valid_number) if region else None
+    if not found and len(text) >= 11 and text[0] != '0':
+        found = parsed('+' + text, None, phonenumbers.is_possible_number)
+    return found
 
 
-def default_calling_code():
+def parsed(text, region, accept):
+    import phonenumbers
+    try:
+        number = phonenumbers.parse(text, region)
+    except phonenumbers.NumberParseException:
+        return None
+    return phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164).lstrip('+') if accept(number) else None
+
+
+def default_region():
+    """Two-letter code of the System Settings country, or ''."""
     import frappe
     from frappe.geo.country_info import get_country_info
     country = frappe.db.get_single_value('System Settings', 'country')
-    code = (get_country_info(country) or {}).get('isd', '') if country else ''
-    return code.lstrip('+')
+    code = (get_country_info(country) or {}).get('code') if country else None
+    return code.upper() if isinstance(code, str) and len(code) == 2 else ''
 
 
 def contact_identities(person):
     """Provider identities typed on a Frappe Contact: WhatsApp numbers and email addresses."""
     numbers = [row.phone for row in person.get('phone_nos') or []] + [person.get('mobile_no'), person.get('phone')]
     emails = [row.email_id for row in person.get('email_ids') or []] + [person.get('email_id')]
-    identities = {'WhatsApp': {contact_number(value) for value in numbers if value}, 'Email': set()}
+    identities = {'WhatsApp': {phone_number(value) for value in numbers if value}, 'Email': set()}
     for value in filter(None, emails):
         try:
             identities['Email'].add(normalize('Email', value))

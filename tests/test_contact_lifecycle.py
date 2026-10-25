@@ -14,21 +14,31 @@ def person(name='Contact-A', phones=(), emails=()):
 
 class ContactNumberTests(unittest.TestCase):
     def test_international_and_national_formats_share_one_identity(self):
-        with patch.object(identity, 'default_calling_code', return_value='91'):
+        with patch.object(identity, 'default_region', return_value='IN'):
             for value in ('+91 98765 43210', '+91-98765-43210', '(+91) 98765.43210', '0091 98765 43210',
                           '919876543210', '098765 43210', '9876543210'):
                 with self.subTest(value=value):
-                    self.assertEqual(identity.contact_number(value), '919876543210')
+                    self.assertEqual(identity.phone_number(value), '919876543210')
+
+    def test_region_length_rules_decide_before_any_prefix(self):
+        # An 11-digit Chinese mobile is national in CN; the old rule read it as +1 381...
+        self.assertEqual(identity.phone_number('13812345678', 'CN'), '8613812345678')
+        self.assertEqual(identity.phone_number('91234567', 'SG'), '6591234567')
+        self.assertEqual(identity.phone_number('07911 123456', 'GB'), '447911123456')
+        # Long numbers stored without + that are not valid in the region stay international.
+        self.assertEqual(identity.phone_number('15550000001', 'IN'), '15550000001')
+        self.assertIsNone(identity.phone_number('98765', 'IN'))
 
     def test_national_numbers_need_a_system_country(self):
-        with patch.object(identity, 'default_calling_code', return_value=''):
-            self.assertIsNone(identity.contact_number('09876543210'))
-            self.assertEqual(identity.contact_number('+44 20 7946 0958'), '442079460958')
+        with patch.object(identity, 'default_region', return_value=''):
+            self.assertIsNone(identity.phone_number('09876543210'))
+            self.assertIsNone(identity.phone_number('9876543210'))
+            self.assertEqual(identity.phone_number('+44 20 7946 0958'), '442079460958')
 
     def test_invalid_values_are_not_identities(self):
-        for value in ('', None, 'call me', '+0123456789', '+1234', '+1234567890123456'):
+        for value in ('', None, 'call me', '+0123456789', '+1234', '+1234567890123456', '12345'):
             with self.subTest(value=value):
-                self.assertIsNone(identity.contact_number(value))
+                self.assertIsNone(identity.phone_number(value, 'IN'))
 
     def test_contact_identities_cover_child_rows_and_primary_fields(self):
         doc = person(phones=['+91 98765 43210'], emails=['Ravi@Example.Invalid', 'not an email'])
@@ -58,7 +68,7 @@ class ContactUpdateTests(unittest.TestCase):
                                     get_all=Mock(return_value=list(self.endpoints.values())),
                                     get_roles=lambda: self.roles, cache=SimpleNamespace(lock=MagicMock()))
         self.enterContext(patch.object(lifecycle, 'frappe', self.fake))
-        self.enterContext(patch.object(identity, 'default_calling_code', return_value='91'))
+        self.enterContext(patch.object(identity, 'default_region', return_value='IN'))
         self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))
         self.bindings = self.enterContext(patch.object(lifecycle, 'bindings', return_value=iter(())))
 

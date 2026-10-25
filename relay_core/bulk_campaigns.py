@@ -7,6 +7,7 @@ from redis.exceptions import LockError
 from relay_core import bulk_sheet, whatsapp
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
+from relay_core.identity import default_region
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
 
@@ -63,13 +64,6 @@ def approved_template(hub, name, language):
     frappe.throw('Template not found for this WhatsApp account')
 
 
-def default_country():
-    from frappe.geo.country_info import get_country_info
-    country = frappe.db.get_default('country')
-    code = (get_country_info(country) or {}).get('code') if country else None
-    return code.upper() if isinstance(code, str) and len(code) == 2 else ''
-
-
 def template_snapshot(template):
     kept = {key: template.get(key) for key in ('name', 'language', 'category', 'parameter_format', 'components')}
     return {'template': kept, 'fields': bulk_sheet.template_fields(template)}
@@ -94,7 +88,7 @@ def create(title, template_name, language, channel=None, reply_window_hours=72):
         frappe.throw(str(exc))
     doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation='templates.send',
         template_name=template_name, language=language, arguments=canonical(template_snapshot(template)),
-        status='Draft', account=connection_value('relay_hub_account'), country=default_country(),
+        status='Draft', account=connection_value('relay_hub_account'), country=default_region(),
         reply_window_hours=hours, request_key='bulk-' + hashlib.sha256(title.encode()).hexdigest()[:40]))
     internal_save(doc, new=True)
     return read(doc.name)
