@@ -109,6 +109,13 @@ def main():
                 connect()
                 return response
             def source(text):
+                # Each failure case starts fresh work on the same episode. Triage
+                # now holds that episode until an explicit staff resume.
+                from relay_core.tickets import resume_ai
+                for held in frappe.get_all('Relay Ticket', filters={'company': company.name,
+                        'ai_disabled': 1, 'active_scope_key': ['is', 'set']}, pluck='name'):
+                    resume_ai(held)
+                frappe.db.commit()
                 provenance = dict(provider='WhatsApp',participant_id=endpoint)
                 doc = frappe.get_doc(dict(doctype='Relay Message',relay_contact=contact.name,channel=channel.name,
                     sender_endpoint=endpoint,direction='Incoming',message_type='text',content=text,status='Sent',

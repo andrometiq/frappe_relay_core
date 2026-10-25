@@ -1,37 +1,15 @@
-# Supplier ledger skill
+# Supplier ledger event
 
-The disabled **Supplier ledger** sample is installed once using its stable
-`sample_key`, alongside the business-event samples. Installation never replaces
-edited instructions or configuration. Set the supplier types in the instruction
-text, choose a WhatsApp channel, AI Model, run-as user and handoff owner, then test
-in Shadow mode before enabling Automatic replies. Disabled drafts may omit those
-operational settings; activation validates them.
+The disabled Supplier ledger sample is a Relay AI Skill with a stable `sample_key`. Configure the owner text, channel, model, execution user, and handoff owner. Set the channel company and triage owner. Add the supplier identity mapping and explicit company field to the memory reference before activation. The sample keeps owner changes when installed again.
 
-The single `supplier_ledger` tool reads GL Entry using `get_list`. Its Dynamic
-Link scope fixes both `party` and `party_type` to the verified conversation's
-supplier. Model filters can only narrow the scope. Reads are
-restricted to non-cancelled GL entries (`is_cancelled = 0`) before pagination.
-The exposed fields are posting_date, voucher_type, voucher_no, debit, credit and
-remarks. Reads continue
-to enforce query, document and field permissions under the conversation user.
+The event uses `execution_policy = Execute` and allows the `reply` action. One enabled ledger event per channel is supported. Several distinct event targets can also share a channel. The supplier ledger simulation must configure `identity_anchor`, provider `identity_fields`, and `company_field`. A broad execution role does not replace these boundaries.
 
-The assistant is instructed to offer a date range and ask for confirmation
-before reading. The sample instructions and provider still determine this
-conversation behavior; it is not a general-purpose consent state machine.
-Decimal totals for the returned rows are calculated in code. When a GL read
-succeeds, Core renders the ledger reply itself rather than forwarding model
-arithmetic. It fetches one extra row to detect truncation, excludes that row from
-totals, and explains partial totals. These figures are never described as an
-opening/closing balance. Long details are bounded to the message budget with an
-explicit omission note. Delivery rechecks the scoped read fingerprint.
+The `supplier_ledger` reference reads GL Entry with `get_list`. Its scope fixes `party` to the selected Supplier, `party_type` to Supplier, and `company` to the channel company. The supplier identity field must match the authenticated sender. The query excludes cancelled entries before pagination. Declared fields include company, posting date, voucher type and number, debit, credit, and remarks. User, query, document, and field permissions remain in force.
 
-Tickets now show their creation age and use the shared heading, loading, badge,
-avatar and empty-state components. Skills and event rules use cards with enabled
-filters; event previews fetch the actual Hub template wording and substitute
-labelled source-field placeholders as the mapping changes. Previews send nothing.
+Core creates the episode ticket before tools run. It records a proposed date range and sends a search statement through the durable message journal. The supplier must confirm that exact plan before SEARCH can read the ledger. Core checks the event version, sender scope, source message, ticket generation, and submitted announcement. A changed range requires a new plan. A pending or uncertain announcement does not authorize a read. Confirmation cannot be reused by another run.
 
-Validation preparation: Relay AI Skill was reloaded on yrp.site without migration,
-and one disabled Shadow sample was installed (RELAY-AIS-0000000001).
-Connected AI/event acceptance and site UI behavior remain pending the required
-web/worker restart; no restart was performed by the agent. See Hub's
-`docs/simulation-validation.md` for steps 13–14 and fixture boundaries.
+Core calculates decimal totals from returned rows and renders the ledger reply. It fetches one extra row to detect truncation, excludes that row from totals, and states when totals are partial. It does not describe these totals as opening or closing balances. It bounds message detail and states when rows are omitted. Delivery checks the read fingerprint again. Changed data or permissions stop delivery and require staff review.
+
+The event can propose a search in saved-event preview without reading undeclared business data. Live Shadow mode records proposals and creates the required ticket, but sends no reply. In Automatic mode, staff takeover stops further AI work for the episode. Staff can inspect the ticket transcript and action history.
+
+The local search suite uses ledger debits of 1250 and credits of 250. It tests the real HTTP admission path, search journal, date confirmation, changed ranges, replay, uncertain delivery, and flow exclusion. It also verifies that an invented model total cannot replace the code result. The permission suite checks a second company and a Customer with the same name as the Supplier. The draft suite checks real Payment Entry drafts and linked accounts. All created fixtures are removed. Run the event acceptance command in [automation-queue.md](automation-queue.md) to include these checks. Live Hub/provider acceptance and existing-process reload are separate checks.

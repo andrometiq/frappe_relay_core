@@ -1,55 +1,53 @@
-# Relay skills and business events
+# Relay AI events and business events
 
-`frappe_tools` is required. Relay uses its AI Model, AI Provider Account, client and bounded AgentRun engine through `relay_core.ai.adapter`. The extraction-only task API is deliberately not used. Logs use the shared log's supported empty phase and reference the Relay Automation Run, not a business document. No dependency files or provider credentials are copied.
+## Configure an event
 
-## Configure a skill
+Each Relay AI Skill is one event. The owner writes its Target, Memory and rules, and Reply style in plain text on the **AI & skills** page. Several enabled events can use one channel and business type. The saved Reply style is bounded to 2000 characters and included with the trusted owner instructions in both preview and live model prompts. Select a model, execution user, handoff owner, and business type. Set one company and an eligible triage owner on the channel. Relay Settings supplies a backup owner. If no eligible owner is available, Core keeps a recoverable ticket intent and stops AI work.
 
-In **AI & skills**, choose an AI Model, WhatsApp channel, business DocType, dedicated enabled Relay manager as run-as user, and a handoff owner with conversation access. Configure the fallback owner in Relay Settings. Start in Shadow mode. The existing `relay_automation_enabled` site flag must already be enabled for inbound automation; this change does not edit site configuration.
+Relay uses the shared AI Model, AI Provider Account, and bounded agent adapter from `frappe_tools`. The existing site automation gate controls inbound work. An event can run in Shadow or Automatic mode. Shadow creates the episode ticket and records proposals. It does not send automatic replies or create business drafts.
 
-There can be one enabled skill per channel/business type. Its plain-English instructions define supported work. Unsupported requests and failed model/tool reads go to the same handoff service. Text messages are supported; media requires a human. Imported history does not start automation.
+The saved-event test checks the authenticated sender and shows the selected event, identity scope, proposed search, and proposed actions. It can call the model and consume budget. It creates no operational run, ticket, approval, business document, or outbound message. Test a saved draft before activation. This preview does not replace a local end-to-end test.
 
-Tools have fixed names, operations, DocTypes, fields and business links. For example:
+## Select and record an episode
 
-```json
-[
-  {
-    "name": "supplier_ledger",
-    "method": "get_list",
-    "doctype": "Payment Ledger Entry",
-    "fields": ["name", "party", "posting_date", "amount"],
-    "scope_field": "party"
-  }
-]
-```
+The callback authenticates and stores the source. The automation drain creates one run per incoming message. Core creates or reuses an assigned episode ticket before event tools run. The message stores its ticket link. A replay retains that link, including after closure.
 
-The service constrains `party` to the conversation's supplier and the Dynamic Link's `party_type` to Supplier. It cannot be overridden by model arguments. A Link must directly target the skill's business DocType; reading the business itself uses `scope_field: "name"`. Child tables, credential/settings DocTypes and sensitive fields are unavailable.
+An active flow or confirmed search continues through the same admission path. Otherwise Core matches enabled event targets within the resolved business scope. An exact configured trigger can select an event without a classifier. Classifier selection requires a score of at least 0.85 and a lead of at least 0.15. Invalid output, a timeout, ambiguity, or no match causes company triage. Core does not select the first event as a fallback. A request for a person bypasses the model.
 
-`get_doc` accepts only `name`. `get_list` accepts `limit` (1–20) and filters on configured fields. Filters support scalar equality or `[operator, operand]`, with operators `=`, `>=`, `<=`, and `between`; for example `{"posting_date": ["between", ["2026-10-01", "2026-10-24"]]}`. Every read uses `frappe.get_list` and document permission checks, including installed YRP hooks and field permissions. No raw SQL, arbitrary method, report or URL tool is registered.
+Unresolved senders and business choices also receive company triage tickets from the stored Hub event. These tickets expose a sanitized summary. Enrollment can attach the projected message to that ticket. A company or active-episode conflict keeps the source in triage.
 
-A linked Contact.user is authoritative, including when disabled or denied. Only a missing user link falls back to the skill's run-as user. Read results are fingerprinted and reread under that identity before sending and before any journal recovery resubmission. Permission or content changes cause handoff. Empty read results also hand off: a restrictive query hook must not be misrepresented as a zero balance. The loop has a 20-second model deadline, four tool calls, one provider attempt and the skill's daily budget. Existing site worker slots bound automatic concurrent decisions.
+## SEARCH and EXECUTE
 
-The shadow test uses the **saved** skill and an incoming Relay Message reference. It performs real permission-scoped reads and model inference, consumes budget and produces shared model logs. It cannot create a run, send a message, pause automation or create a ticket.
+The model has two tools: SEARCH and EXECUTE. SEARCH uses a declared `get_doc` or `get_list` reference. Each reference specifies readable fields, a direct business scope, an identity anchor, provider identity fields, and a company field. SQL, reports, arbitrary methods, and URL tools are unavailable.
 
-## Handoff and delivery
+The authenticated sender identity unlocks only that person's records. Text entered in a message cannot establish identity. Reads require private transport evidence and a verified endpoint. A linked Contact user is authoritative. A disabled or denied linked user cannot fall back to the event execution user. The configured execution user applies only when no user is linked.
 
-`relay_core.ai.handoff.handoff()` serializes on the contact, reuses the ticket key for the conversation/ownership generation, selects the configured eligible owner or fallback, and stores business, reason and source run. It pauses the existing contact-level automation ownership and advances its generation, invalidating unsent automation. Other conversations sharing that Relay Contact are also paused, consistent with the existing takeover service. Closing a ticket does not automatically resume AI.
+Each read applies user, company, business, sender, document, and field permissions. Fixed filters apply before pagination. Model filters can only narrow them. Dynamic party links also fix the party type. A document name must pass the same filtered query before loading. Core checks the read evidence again before delivery and recovery. Empty or inaccessible results require staff review.
 
-If both owners are unavailable, automation remains paused and the pending run records the configuration problem for recovery. It never creates an unassigned ticket. Fix the owner/access configuration before resuming.
+Core records a search plan and sends its statement through the message journal before reading business data. The plan includes purpose, reference, fields, and filters. Ledger searches always require confirmation of the exact date range. A changed plan requires a new declaration. An uncertain announcement cannot authorize SEARCH.
 
-AI text uses `messaging.send` with a stable action key and source run, so the normal Relay Message Action journal creates history and tracks receipts. Decisions are saved before sending and reused after crashes. Uncertain delivery remains journal-owned; it is never blindly retried. Legacy Relay AI Provider, policy, outbox and run records are retained. New inbound decisions require a skill; pending legacy runs route to a human (or finish Shadow). Existing legacy outboxes keep their journal reconciliation path. Ancillary legacy JSON tasks now require an AI Model on their policy. Image inference through that compatibility path is unavailable.
+EXECUTE follows the event's declared steps in order. The shared Relay Flow Action journal stores typed inputs, scope, versions, status, and results. The registered actions are `create_draft` and `reply`. The current draft target is Payment Entry. The event must allow that target and its typed fields. Core supplies company and party from the authenticated scope, inserts through normal document validation, and requires `docstatus = 0`. It never submits a document. The ticket action history links each draft so staff can open, check, and submit it. A Ticket only event creates the ticket without model execution, replies, or drafts.
 
-## Business events
+Each action uses a stable command key and input hash. A changed input under the same key fails. Local writes and their journal results share a transaction. Replies use the existing durable message journal, with Core supplying the destination. An uncertain reply blocks later steps until its receipt is resolved. A retry cannot create a second draft or bypass changed permissions. Bounded image input requires a vision-capable model and attachment access checks.
 
-**Business events** configures a source DocType, `after_insert` / `on_submit` / `on_cancel`, a Link field resolving its Customer/Supplier/party, channel, run-as user, approved template and ordered source parameters. The business must have exactly one linked Contact; ambiguous or missing recipients are logged instead of guessed. `items_summary` renders item names, quantities and UOM. Zero-valued parameters are retained.
+## Staff ownership and delivery
 
-The lifecycle hook captures an immutable intent in the business transaction, keyed by site, source DocType/name, event, rule and recipient. Each rule uses a savepoint. Delivery is enqueued only after commit, and even a queue/logging failure cannot escape the hook. Pending intents survive queue outages for scheduler recovery. Workers recheck the rule version, source/field permissions, business link and template approval, then call the same conversation-start action journal. Source changes before dispatch fail closed. The outgoing message carries its business association into the business chat timeline.
+Take over, Start work, an explicit claim, and the first manual outbound message stop AI for that episode. The ownership transaction sets `ai_disabled`, advances its generation, and invalidates pending approvals. Assignment alone does not stop AI. All continuations, writes, flow steps, sends, and recovery attempts check ownership. Other business episodes for the same contact remain independent.
 
-Disabled Delivery Note and Sales Order sample rules are installed by `install_samples()` after install/migration when those ERPNext DocTypes exist. An orchestrator using DocType reloads instead can invoke that idempotent function on the authorized local test site after reloading the new schema. Samples deliberately lack channel, user and approved template until configured.
+Close ticket and Resolved retain the episode scope and human hold. Only the explicit Close and release action clears that scope. Closing a ticket does not resume AI. Resume AI advances the generation and permits fresh work. It does not replay old actions. Close and release ends the episode. A closed ticket that retains its human hold reopens when another message arrives. Existing contact-wide pauses remain conservative holds.
 
-All three screens use existing Socket.IO invalidations. No polling was added.
+Manual replies from the conversation and business composer hold the current episode in the same transaction as their delivery journal. An unresolved triage claim also fences queued business-choice prompts. Model continuations recheck current ownership after image observation and between tool turns. Core prevents new automatic dispatch after takeover. A delivery already accepted by Hub or the provider can still arrive. The ticket retains its outstanding delivery evidence. Recovery can obtain its receipt without sending it again. Core does not claim that takeover retracts accepted messages.
 
-## Validation and remaining acceptance
+The ticket view loads the episode transcript from message links, beyond the selected-evidence table's 50-message limit. Chat and email delivery journals preserve their originating episode for outbound projection, including delayed receipts. The delivery view includes flow replies and lifecycle notices, including Suppressed notices, through permission-checked journal projections. Socket.IO refreshes revalidate the loaded transcript and history window rather than replacing it with the first page. Transcript and action APIs check company, business, message, and field access. Editor and ticket updates use Socket.IO notifications and permission-checked reads. They do not poll.
 
-The unit suites exercise two suppliers with non-zero ledger values, dynamic party type collisions, YRP-style query/document denials, changed identities, read revalidation, model failure, shared agent calls, shadow mode, idempotent assigned handoff, journal sends/recovery, event failures and deduplication. Transport and model responses are mocked; these results are not site acceptance.
+## Document lifecycle events
 
-Before release, the orchestrator must reload the changed/new DocTypes on the exact isolated development site, install the disabled samples, reload web/workers and serve the built assets. Exercise populated Supplier/Customer conversations with YRP, an approved local template and local mocked transport: consent/date-range ledger flow, unauthorized second supplier, unsupported intent, revoked user/permissions, failed model, unavailable handoff owner, duplicate/concurrent callbacks, takeover, Redis outage, uncertain sends and receipt history. Verify the Tickets filters/assignment and both editors at mobile and desktop sizes, including reconnects. Measure reply latency under concurrent inbound messages. No site reload, migration, production mutation or live delivery was performed in this worktree task.
+Relay Business Event Rule remains the separate mechanism for document lifecycle notifications. It maps a source event, recipient business, channel, execution user, approved template, and ordered parameters. An ambiguous or missing contact prevents delivery. Quantity summaries and zero-valued parameters are retained.
+
+The document hook records an immutable delivery intent in the business transaction. Queue work starts after commit. Recovery retains intents through queue outages. Before delivery, Core checks source and rule versions, permissions, business links, and template approval. During human ownership, it retains the notice with Suppressed status and stops automatic conversation delivery. Resume AI does not replay suppressed notices.
+
+## Local acceptance
+
+`tests/integration_ai_events_site.py` exercises signed ingress, duplicate callbacks, concurrent projection, enrollment, HTTP isolation, declared searches, draft chains, takeover, and delivery races. It runs the matching, search, action, takeover, and delivery suites in fresh processes. `tests/integration_ai_permissions_site.py` probes real query and document permissions with populated company and party fixtures, then checks preview HTTP status, response shape, and denial. Its permission-layer probes supply a test search authorization callback; the event suite tests the real search journal and confirmation path.
+
+`tests/automation_queue_site.py` exercises the actual drain and background jobs in an isolated RQ queue. See [automation-queue.md](automation-queue.md) for load and recovery evidence. These tests use `yrp.site`, import this worktree first, block external delivery, and delete their inserted fixtures. Local HTTP tests use the Frappe WSGI application. They do not establish that existing web or worker processes have loaded this checkout. See the activation record in [automation-queue.md](automation-queue.md) for remaining checks.

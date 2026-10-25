@@ -1,145 +1,46 @@
 # Inbound automation drain
 
-`Relay Message.automation_status` is a hidden, read-only Select with an index.
-The controller sets `Pending` during insertion for new incoming, non-legacy
-messages. Outgoing/imported messages and pre-existing history remain blank.
-There are no policy reads, Redis operations or automation hooks in this step.
-The marker commits atomically with the message, covering death before the
-post-commit callback. Only that callback signals the default queue.
+Relay Message stores a hidden `automation_status` marker. Insertion marks new incoming messages Pending. Outgoing messages and imported history remain unmarked. The marker commits with the message. The callback after commit signals the default queue. Model work does not run in the ingress callback.
 
-A site-scoped reservation in **queue Redis** coalesces signals into one waiting
-drain. WATCH/MULTI/EXEC publishes the reservation, RQ job and queue entry together.
-The versioned key avoids trusting old cache-Redis reservations during activation.
-Use `get_queue('default').connection.get(_signal_key())` for diagnostics; reading
-`frappe.cache` now inspects the wrong Redis connection. The reservation expires
-after 120 seconds to cover jobs lost before entering the drain. Each
-reservation has its own job ID: a fixed RQ ID deduplicated while STARTED would
-lose a wake-up arriving after the drain's final empty read. The reservation is
-released, with a token comparison, when its job starts. Arrivals can reserve one
-successor while the current drain runs. An expired reservation can leave a
-redundant job, but cannot duplicate committed hook effects.
+A site reservation in queue Redis combines the wake token, RQ job, and queue entry in one WATCH/MULTI/EXEC transaction. Read diagnostics from the default queue connection, not cache Redis. The reservation expires after 120 seconds. Each reservation uses its own job ID. A drain releases only its own token when it starts, so a new arrival can reserve a successor while that drain runs.
 
-A MariaDB connection-owned advisory lock serializes drains for the site. They
-wait up to one second for the lock; a contender that consumed its signal but
-cannot acquire the lock publishes a successor before returning. They
-read 100 pending names at a time, ordered by creation and name, and commit each
-message's intents and `Complete` marker together. Paused contacts skip AI before
-skill lookup/contact locking; translation, flow and email retain their independent
-guards. Hooks only create transactional intents or after-commit work; they must
-not commit or perform external delivery themselves. Uncommitted work is retried
-after worker death; committed work is never replayed. Actual downstream jobs
-retain their existing journals and guards.
+A connection-owned database lock serializes drains. A contender that cannot acquire the lock signals a successor before it returns. The drain reads up to 100 Pending messages in creation and name order. It commits each message's intents and Complete marker together. Death before commit rolls both back. Recovery can then create one committed run and episode.
 
-The drain yields after five seconds between messages so downstream AI jobs can
-run during sustained ingress. This does not bound an individual slow hook.
-The existing minutely automation recovery wakes pending message work even when
-the AI gate is off. Redis outages leave SQL markers intact. A hook exception
-rolls back that message and fails the drain; recovery retries the oldest pending
-message, preserving ordering. A persistently failing hook therefore requires
-repair before later messages can advance. No failure is silently acknowledged.
-Existing per-message RQ jobs use a compatibility entry point to join this drain;
-historical messages are not bulk backfilled.
+The drain creates transactional intents through the existing hooks. Matching, model work, searches, and execution run outside the site drain lock. The shared admission path prevents a flow and an event from answering the same message. It creates the ticket before event tools run. Staff ownership cancels AI work for the held episode.
 
-## Local verification — 2026-10-24
+The drain yields after five seconds between messages so downstream jobs can run during sustained ingress. This limit does not bound one slow hook. A configuration validation error rolls back the partial intents, records triage or a recoverable ticket intent, and acknowledges the source. Other hook errors roll back the message and fail the drain. Recovery retries the oldest pending work. A persistent unexpected hook error requires repair before later messages can advance.
 
-On `yrp.site`, Frappe 16.52.0, with exactly one existing default worker separated
-from short/long projection workers:
+The existing scheduler calls recovery. Redis failure leaves SQL markers intact. A lost connection after Redis EXEC can leave an uncertain acknowledgement, but it cannot publish only the reservation. Do not remove that reservation on an ambiguous error. Message journals retain their own stable keys, permission checks, generation checks, and receipt recovery. Existing per-message jobs join this drain through a compatibility entry point. Historical messages are not bulk backfilled.
 
-| Measurement | Result |
-| --- | ---: |
-| 300 incoming messages, half paused and half without a skill | 1.641 s, one RQ drain job |
-| Old measured 0.46 s/job × 300 | 138 s (baseline estimate) |
-| AI intent behind a separately committed 300-message backlog | 1.543 s |
-| AI worker completes Shadow decision through loopback HTTP provider | 2.111 s |
+## Local acceptance commands
 
-These include queue pickup and worker startup. The benchmark inserts real
-messages through normal DocType hooks. It uses linked local business/contact
-fixtures, an enabled Shadow skill, meaningful quantity/amount text and a
-loopback AI provider. It verifies outgoing/imported exclusions, no duplicate AI
-run after replay, and concurrent-drain exclusion with a second process.
-Another process exits after creating an AI intent and completion marker but
-before commit: neither survives; recovery creates exactly one committed run and
-one provider call for that message. Two provider calls total cover the normal
-and recovered messages. Records are retained with prefix
-`Local queue benchmark 1792796729740340992`; its skill was disabled afterwards.
-
-Reproduce from the Core repository, with the existing isolated workers running:
+Use the bench Python with this worktree first on PYTHONPATH. These commands target only `yrp.site`:
 
 ```sh
-../../env/bin/python -B tests/automation_queue_site.py
-../../env/bin/python -B tests/test_automation_queue.py
-../../env/bin/python -B -m unittest discover -s tests
+cd /home/sakthi/development/relay-wt/core-aiev3
+export PYTHONPATH=/home/sakthi/development/relay-wt/core-aiev3
+/home/sakthi/development/pilot/benches/version_16/env/bin/python -B -m unittest discover -s tests
+/home/sakthi/development/pilot/benches/version_16/env/bin/python -B tests/integration_ai_permissions_site.py
+/home/sakthi/development/pilot/benches/version_16/env/bin/python -B tests/integration_ai_events_site.py
+/home/sakthi/development/pilot/benches/version_16/env/bin/python -B tests/automation_queue_site.py
 ```
 
-The explicit site benchmark is intentionally excluded from unit discovery. It
-only targets `yrp.site`, retains identifiable test records, and does not restart
-services, change site configuration, migrate, export fixtures or send messages.
+Run these commands in sequence. A queue run concurrent with schema reload checks encountered MariaDB error 1020 on the shared naming series and failed. The run after those checks passed. Concurrent schema activation is not covered by this acceptance result.
 
-## Activation
+The queue test uses a separate RQ queue and fresh local workers. It restricts drain queries to its own channels. It creates readable Sim fixtures with a run label, an authenticated email endpoint, a linked Supplier, a Company, and an enabled Ticket only event. The messages contain amount 1250. It deletes all inserted fixtures, including child-process records, and removes its own queue jobs. It does not depend on retained simulation companies or accounts.
 
-Already executed on **yrp.site only**:
+The test covers 80 independent event episodes, atomic wake publication, a queue Redis outage during the message commit callback, competing drains, replay, and process death after ticket/run/ack writes but before commit. Recovery must leave exactly one run and ticket per source. Ticket only events must create no outbound action. The test injects Redis errors at the queue boundary; it does not stop the shared Redis service. It kills only its own child process.
 
-```python
-frappe.reload_doc('relay_core', 'doctype', 'relay_message', force=True)
-frappe.db.commit()
-```
+The event acceptance script also runs the existing populated matching, search, draft, takeover, and delivery suites. They use the real Frappe HTTP application and database. External model and transport responses are controlled. The draft checks create normal Payment Entry drafts with linked accounts, verify `docstatus = 0`, and delete them after the test. Permission probes include two companies, shared party names, changed bindings, changed fields, and query denial. Delivery races use independent database connections.
 
-Verified the `automation_status` column and `automation_status_index`. No other
-DocType was reloaded. The existing default worker successfully executed the new
-drain and downstream AI job. **RESTART NEEDED** for web processes that cache the
-old controller/decorator before full connected HTTP acceptance. No service was
-restarted. The full WhatsApp simulation has not been rerun for this change;
-its independent receipt-deadlock failure is documented in Hub's simulation log.
+## Activation evidence
 
-## Connected-channel defect regression — 2026-10-24
+The review run completed 80 independent episodes in 18.101 seconds. Ticket creation took 7791.53 ms at p95, including backlog wait. Run completion took 17360.45 ms at p95. A staff claim took 25.84 ms. All runs completed with one ticket per source and no outbound actions. No model call occurred in this Ticket only load run. Redis failure, process death, drain contention, and replay checks passed. The permission and event acceptance suites passed, including real non-zero drafts and delivery races. Cleanup assertions confirmed removal of inserted fixtures.
 
-The previous implementation wrote an NX reservation to cache Redis, then
-separately called `frappe.enqueue` on queue Redis. Producer death in between
-left a reservation without a job, and later wakes returned until expiry. A
-fresh read on yrp.site reproduced the reported state: 24 Pending messages,
-zero default jobs, and an unexpired reservation without its RQ job. There were
-no corresponding persisted wake-error records. This establishes the orphaned
-reservation and the non-atomic failure window, **not the originating interruption
-in the historical Hub run**. Frappe 16.52.0's enqueue defaults to immediate
-publication; its after-commit manager runs callbacks added during callback
-execution. No deferred-enqueue ordering or fixed-job-ID dedupe cause was found.
+The checks use `yrp.site` on Frappe 16.52.0 with developer mode enabled. Relay Core resolves to this worktree. Core unit discovery ran 550 tests with three skips: a separately initialized site test class and two opt-in live Hub tests. The audio tests passed using ffprobe and its required libraries extracted under this worktree's ignored `.runtime` directory, with PATH and LD_LIBRARY_PATH set only for the test process. Frontend unit tests passed 113 checks. Fourteen existing Hub simulation contract tests passed with the Hub scripts read-only. The populated Core search suite also passed the existing single-event supplier-ledger offer/yes/reference-tool protocol.
 
-The new implementation uses RQ's pipeline API because Frappe's enqueue wrapper
-does not expose it. It retains Frappe's worker entry point, site/user context,
-failure callback and configured result/failure retention. A connection loss
-after EXEC can leave a job with an unknown acknowledgement, but cannot leave
-only the reservation. Do not release it on such an ambiguous failure. SQL
-markers, ordering locks and per-message commits still enforce one committed
-hook execution. Redis unavailability/worker death still needs durable recovery;
-this does not claim guaranteed immediate execution through an outage.
+The takeover, delivery, event editor and ticket history suites pass through actual local Frappe HTTP and worker paths. They cover retained holds after ordinary closure, explicit release, manual business-composer takeover and journal rollback, a claim during image observation, unresolved routing-prompt suppression, delayed chat/email receipts, suppressed lifecycle notices, paginated delivery permission checks, and saved reply style in preview and live model prompts. The browser checks retain 60 real transcript messages and multiple history pages through Socket.IO invalidation and reconnect, verify permission-revocation clearing, and check that the UI does not poll. Both browser acceptance fixtures pass with the actual paginated API shapes.
 
-`../../env/bin/python -B tests/core_defects_site.py` uses an isolated RQ queue and
-a fresh local worker process against yrp.site. It retains identifiable local
-records, scopes drains to its own channels, disables external HTTP and uses a
-loopback provider for a real Shadow AI decision. The deterministic producer
-fault occurs after staging the reservation and before staging the RQ job; no
-reservation becomes visible, and the next wake succeeds immediately. A second
-process exercises lock contention after consuming the wake. Replay verifies
-ordering, no duplicate hook processing and one AI run/provider request.
+Relay Core frontend assets were built in this worktree and served by the local site harness. The event suite reloads Relay Channel, Relay Ticket, Relay Message, and Relay Automation Run from this worktree. The delivery suite also reloads Relay Business Event Delivery. The three uncommitted DocType JSON revisions have newer modified values and were reloaded again after the final revision. No migration, fixture export, site configuration change, other-app edit, production write, service restart, commit, or push was performed.
 
-Final 304-message run: **3.754 seconds**, one Shadow provider call, all hook
-markers Complete. Fixture prefix: `Local Core defects 1792807586671470171`.
-The same run tested authenticated Telegram/email callback projection at
-**113.66/86.08 ms** (one observation each, not Hub-to-browser p95 acceptance).
-Oversized messages and a signed non-zero bounce DSN remained background work.
-
-Relay Message alone was reloaded on yrp.site. Its provider ID now bypasses HTML
-sanitization and validates opaque IDs explicitly: controls, whitespace, malformed
-angle IDs and slash-delimited angle markup are rejected, never silently changed.
-Accepted Message-IDs retain case, brackets and punctuation. Blank historical IDs
-remain readable/saveable; no backfill or rekey was performed. The run verified
-731 existing blank-ID email rows with intact context (including retained
-local regression fixtures), and preserved their source/provider hashes. A local
-blank-ID fixture still deduplicated replay and resolved reply threading through
-the existing context and `provider_message_key` paths.
-
-Core unit discovery: **337 tests, 332 passed, 3 skipped, 2 known ffprobe errors**.
-No production access, fixture export, migration, site-config change, service
-restart, commit or push was performed. **RESTART NEEDED** for existing web and
-worker processes before rerunning connected Hub HTTP/Socket.IO simulations.
-Fresh-process site tests do not certify those already-running processes.
+RESTART NEEDED for existing web and worker processes before connected Hub acceptance. Fresh WSGI processes and isolated RQ workers prove this checkout's local behavior; they do not prove that installed services use it. The orchestrator must activate the reviewed changes and affected Relay Core assets, then verify the installed target UI and Socket.IO updates. The full connected Hub supplier-ledger simulation and real-provider latency remain separate acceptance checks. The isolated load result measures ticket admission and processing, not model inference or provider delivery latency.

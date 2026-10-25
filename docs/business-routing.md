@@ -1,67 +1,29 @@
 # Business references and inbound routing
 
-Relay business names are historical Data references. Deleting, cancelling,
-renaming or updating a business must not depend on Relay history. Every packaged
-Relay DocType is exempt from Frappe delete checks; cancel hooks extend the
-business document's existing exemptions before and after its controller runs.
-Other business backlinks still apply. Messages and tickets remain stored; normal
-business access checks still govern reads. Historical names do not follow renames.
+Relay stores business names as historical Data references. Relay history must not prevent a business document from being updated, cancelled, renamed, or deleted. Relay DocTypes are excluded from Frappe business delete checks. Cancel hooks extend the document's existing exemptions. Other business links still apply. Historical names do not follow a rename. Reads continue to require access to the referenced business.
 
-`business_routing.resolve` owns inbound decisions. Authenticated reply context is
-scoped to the contact, channel, endpoint and conversation. A single current link
-is unambiguous. Otherwise a validated sender selection or the conversation's
-saved selection applies. Manager assignments go through the existing triage API
-and the same resolver. Each projected message records `business_rule` in its
-provider context; unresolved events retain per-message `routing_decisions`.
-Sender-choice tokens are validated before single-link fallback, so removing a
-choice cannot silently route its reply to another business.
+`business_routing.resolve` selects the business for an incoming message. Authenticated reply context is scoped to the contact, channel, endpoint, and conversation. A single current contact link can resolve the business. Otherwise Core uses a validated sender choice or saved conversation selection. Manager enrollment uses the same resolver. The model cannot choose the company or business record.
 
-The channel-neutral Relay Business Routing record stores explicit selection and
-prompt state. A database lock on the verified Relay endpoint serializes decisions
-without locking business documents. Selection is revalidated against current
-contact links. Earlier unresolved messages stay in triage, except the specific
-message that prompted the sender's choice. Following events use the selection.
-Routing state uses locking reads after the endpoint lock to see committed choices
-even when a worker already has a database snapshot. The selection's event and
-position also route later messages within that batch without reassigning earlier
-messages when the batch is replayed.
+Each projected message records its routing rule in provider context. Unresolved Hub events retain routing decisions for each message. A sender choice is validated before single-link fallback. Removing a choice cannot silently route its reply to a different business.
 
-Private WhatsApp conversations with 2–10 businesses and fresh provider timestamp
-evidence get one list prompt. The window is capped by local event arrival time.
-Choices contain only that contact's current enabled business links and opaque IDs.
-Forged, revoked, cross-conversation and consumed selections cannot select a business.
-Groups, unsupported prompt channels, oversized lists and expired/missing window
-evidence remain in manager triage. Sender choices retain their interactive type
-so they do not act as text replies to a business flow.
+Relay Business Routing stores selection and prompt state. A lock on a Relay endpoint serializes routing. It does not lock the business record. Core checks the selection against current contact links and reads committed routing state after it acquires the lock. A selection can route later messages in the same batch without changing earlier messages on replay.
 
-Prompts use Relay Message Action with an immutable request key. The prompt and
-its result remain in the manager-only journal because it has no selected business.
-The worker runs only this internally created action as Administrator and restores
-its original identity. Existing delivery lookup, callbacks and recovery apply;
-expired or revoked prompts are rejected, uncertain attempts are never blindly
-resent, and rejected prompts cannot be manually retried. Browser updates continue
-to use existing Socket.IO invalidations.
+For private WhatsApp conversations with two to ten businesses and fresh timestamp evidence, Core can prepare one list prompt. Local event arrival time also bounds the reply window. Choices contain only the contact's enabled business links and opaque selection IDs. Forged, revoked, consumed, or foreign-conversation choices cannot select a business. Groups, unsupported prompt channels, large lists, and expired or missing window evidence remain in triage.
 
-## Validation boundary
+The prompt uses Relay Message Action with a stable request key. Its journal remains restricted to managers because no business is selected yet. Existing delivery lookup, callbacks, and recovery apply. Core does not blindly resend an uncertain attempt. Sender choices retain their interactive type and cannot act as text replies to an explicit flow.
 
-The Core adapter currently assumes `whatsapp.execute` accepts
-`operation=messages.interactive` with a Meta-shaped `interactive` list object.
-This Hub contract has **not been verified**; Core's existing public send interface
-does not expose it. Confirm the operation and argument shape against the owning
-Hub implementation before enabling this feature. Local tests mock that boundary
-and do not establish provider delivery.
+## Company triage and episodes
 
-Schema activation requires migration of the target development site. No migration,
-fixture export or site configuration change was run for this work. `yrp.site` has
-`allow_tests=False`, so the lifecycle database tests were skipped. Those tests
-require an initialized local test site with tests already enabled and create a
-reusable custom `Relay Reference Test Business` fixture; individual test records
-are rolled back. Runtime activation, database concurrency, actual UI/API/background
-job integration and provider delivery remain unverified.
+Configure one company and an eligible triage owner for each channel. Relay Settings can supply a backup owner. An unresolved sender or ambiguous business receives a sanitized company triage ticket from the stored Hub event and provider message key, even when no Relay Message exists. If no eligible owner is available, Core retains the source for recovery.
 
-Review validation: 85 focused Python tests passed with the site lifecycle class
-skipped; all 55 Node tests and `npm run build` passed. Full Python discovery
-reported 172 tests, two audio-test errors because `ffprobe` is unavailable, and
-three skips (the site lifecycle class and two opt-in Hub tests). Unit regressions
-cover revoked choices after link removal, committed-state reads and ordering
-within a multi-message webhook batch; they do not prove database concurrency.
+Enrollment checks company and business access before it creates an endpoint or projects a message. A successful enrollment attaches the message to the original ticket. An active-episode collision or changed company keeps the source in triage. Cross-company staff and guests cannot read the ticket or raw source, or bind its sender.
+
+A resolved message enters the existing automation drain. The shared episode service assigns its ticket before event tools run. An unmatched message remains on that ticket for staff review, with its business reference retained. Replays use the original source link. Event changes do not create a second episode. Coordination uses Relay source, routing, and ticket records.
+
+Staff takeover belongs to the episode. It stops AI for that conversation and business without pausing unrelated episodes for the same contact. A manual message uses the same ownership service. Closing alone does not resume AI. Socket.IO notifications trigger permission-checked UI reads.
+
+## Local verification
+
+`tests/integration_ai_events_site.py` uses signed local callbacks and independent database connections to test duplicate projection, unknown senders, ambiguous Customer/Supplier links, owner failure and recovery, enrollment replay, and company conflicts. HTTP checks cover response shape, list filtering, guest denial, cross-company denial, and refusal of internal helper methods. The fixtures contain amount 1250 and quantity 25. All inserted records are deleted after the test.
+
+These tests intercept external transport. They do not establish provider delivery for the WhatsApp interactive-list operation. Verify that Hub accepts `whatsapp.execute` with `operation=messages.interactive` before enabling that prompt on a live channel. The current activation evidence and remaining environment checks are in [automation-queue.md](automation-queue.md).

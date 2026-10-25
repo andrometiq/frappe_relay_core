@@ -42,7 +42,6 @@ def main(exercise=None):
         frappe.flags.mute_emails = True
         frappe.conf.relay_automation_enabled = 1
     connect()
-    frappe.reload_doc('relay_core', 'doctype', 'relay_flow_action', force=True)
     frappe.db.commit()
     created = []
     original_insert = BaseDocument.db_insert
@@ -153,7 +152,7 @@ def main(exercise=None):
                     actions=[dict(action='draft_payment',parameters={'paid_amount':amount}) for _ in range(steps)])
                 run=raw('Relay Automation Run','Action Run '+label,event_key='sim-action-'+label+'-'+stamp,
                     message=doc.name,execution_user=user,status='Deciding',skill=event.name,skill_version=str(event.modified),
-                    generation=0,ticket=ticket.name,message_hash=service.message_hash(doc),scope_fingerprint=fingerprint(scope),
+                    generation=0,ownership_generation=int(ticket.generation or 0),ticket=ticket.name,message_hash=service.message_hash(doc),scope_fingerprint=fingerprint(scope),
                     decision=json.dumps(plan),stage='Event')
                 frappe.db.commit()
                 return run,ticket
