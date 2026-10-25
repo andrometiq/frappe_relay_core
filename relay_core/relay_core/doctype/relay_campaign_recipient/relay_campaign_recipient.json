@@ -18,7 +18,11 @@
     "reason",
     "attempted",
     "destination",
-    "arguments"
+    "arguments",
+    "row_number",
+    "error_code",
+    "replied_at",
+    "reply_provider_id"
   ],
   "fields": [
     {
@@ -61,7 +65,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "read_only": 1,
-      "options": "Pending\nDispatching\nQueued\nSubmitted\nRejected\nUncertain\nCancelled",
+      "options": "Pending\nSkipped\nDispatching\nQueued\nSubmitted\nSent\nDelivered\nRead\nFailed\nRejected\nUncertain\nCancelled",
       "search_index": 1
     },
     {
@@ -81,7 +85,8 @@
       "label": "Provider Id",
       "fieldtype": "Data",
       "read_only": 1,
-      "length": 300
+      "length": 300,
+      "search_index": 1
     },
     {
       "fieldname": "reason",
@@ -99,13 +104,39 @@
       "fieldname": "destination",
       "label": "Prepared recipient",
       "fieldtype": "Data",
-      "read_only": 1
+      "read_only": 1,
+      "search_index": 1
     },
     {
       "fieldname": "arguments",
       "label": "Recipient content",
       "fieldtype": "JSON",
       "read_only": 1
+    },
+    {
+      "fieldname": "row_number",
+      "label": "Sheet row",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "error_code",
+      "label": "Provider error code",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "replied_at",
+      "label": "Replied at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "reply_provider_id",
+      "label": "Reply message ID",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "length": 300
     }
   ],
   "permissions": [
@@ -118,6 +149,6 @@
       "read": 1
     }
   ],
-  "track_changes": 1,
-  "modified": "2026-10-25 12:00:01.000000"
+  "track_changes": 0,
+  "modified": "2026-10-25 22:00:00.000000"
 }

@@ -3,8 +3,8 @@
   "name": "Relay Campaign",
   "module": "Relay Core",
   "engine": "InnoDB",
-  "autoname": "RELAY-CAM-.##########",
-  "naming_rule": "Expression (old style)",
+  "autoname": "field:title",
+  "naming_rule": "By fieldname",
   "field_order": [
     "title",
     "channel",
@@ -16,14 +16,33 @@
     "execution_user",
     "account",
     "request_key",
-    "last_error"
+    "last_error",
+    "template_name",
+    "language",
+    "source_file",
+    "column_map",
+    "country",
+    "reply_window_hours",
+    "started_at",
+    "finished_at",
+    "progress_section",
+    "total_count",
+    "skipped_count",
+    "queued_count",
+    "sent_count",
+    "delivered_count",
+    "read_count",
+    "failed_count",
+    "replied_count"
   ],
   "fields": [
     {
       "fieldname": "title",
       "label": "Title",
       "fieldtype": "Data",
-      "read_only": 1
+      "read_only": 1,
+      "reqd": 1,
+      "length": 100
     },
     {
       "fieldname": "channel",
@@ -63,7 +82,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "read_only": 1,
-      "options": "Draft\nRunning\nPaused\nCancelling\nCancelled\nCompleted",
+      "options": "Draft\nImporting\nRunning\nPaused\nCancelling\nCancelled\nCompleted",
       "search_index": 1
     },
     {
@@ -91,6 +110,117 @@
       "label": "Latest issue",
       "fieldtype": "Small Text",
       "read_only": 1
+    },
+    {
+      "fieldname": "template_name",
+      "label": "Template",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "language",
+      "label": "Language",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "source_file",
+      "label": "Recipient file",
+      "fieldtype": "Attach",
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_map",
+      "label": "Column mapping",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "country",
+      "label": "Default country",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "length": 2
+    },
+    {
+      "fieldname": "reply_window_hours",
+      "label": "Reply window (hours)",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "72"
+    },
+    {
+      "fieldname": "started_at",
+      "label": "Started at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "finished_at",
+      "label": "Finished at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "progress_section",
+      "label": "Progress",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "total_count",
+      "label": "Total",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "skipped_count",
+      "label": "Skipped",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "queued_count",
+      "label": "Queued",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "sent_count",
+      "label": "Sent",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "delivered_count",
+      "label": "Delivered",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "read_count",
+      "label": "Read",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "failed_count",
+      "label": "Failed",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
+    },
+    {
+      "fieldname": "replied_count",
+      "label": "Replied",
+      "fieldtype": "Int",
+      "read_only": 1,
+      "default": "0"
     }
   ],
   "permissions": [
@@ -103,5 +233,7 @@
       "read": 1
     }
   ],
-  "track_changes": 1
+  "track_changes": 1,
+  "title_field": "title",
+  "modified": "2026-10-25 22:00:00.000000"
 }

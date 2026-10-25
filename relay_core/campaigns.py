@@ -1,4 +1,4 @@
-"""Historical campaign reads and recovery for existing non-WhatsApp deliveries."""
+"""Campaign directory, Telegram/email history and recovery; WhatsApp bulk lives in bulk_campaigns."""
 import hashlib
 import time
 import frappe
@@ -15,7 +15,8 @@ def digest(value):return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 def campaign(name,active=False):
     require_access(manage=True);doc=frappe.get_doc('Relay Campaign',name);doc.check_permission('read')
-    frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+    if doc.business_doctype:
+        frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
     channel=frappe.get_doc('Relay Channel',doc.channel);channel.check_permission('read')
     if channel.channel not in ('WhatsApp','Telegram','Email') or active and (not channel.enabled or channel.account!=connection_value('relay_hub_account') or doc.account!=channel.account):
         frappe.throw('Campaign channel is disabled or belongs to another Hub account')
@@ -99,6 +100,8 @@ def process(name,refresh_only=False):
 
 
 def recover():
+    from relay_core.bulk_campaigns import recover as recover_bulk
+    recover_bulk()
     rows=frappe.get_all('Relay Campaign',filters={'status':['in',['Running','Paused','Cancelling']],'operation':['in',['telegram.send','email.send']]},pluck='name',order_by='modified asc',limit_page_length=10)
     for name in rows:frappe.enqueue('relay_core.campaigns.process',name=name,queue='long',timeout=120)
 

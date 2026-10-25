@@ -230,7 +230,7 @@ class IncomingBusinessTests(unittest.TestCase):
         event=_dict(name='event',account='fixture',payload=json.dumps(payload),projection_status='Pending')
         db=Mock();db.exists.return_value=False;db.get_value.return_value='contact'
         fake=SimpleNamespace(db=db,get_doc=Mock(return_value=event),get_all=Mock(return_value=['channel']))
-        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch('relay_core.business_routing.resolve',return_value=(None,'triage_window_closed')),patch('relay_core.tickets.ensure_episode') as triage,patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'):
+        with patch.object(projection,'frappe',fake),patch.object(projection,'apply_updates',return_value='Ignored'),patch.object(whatsapp_templates,'project',return_value=False),patch('relay_core.business_routing.resolve',return_value=(None,'triage_window_closed')),patch('relay_core.tickets.ensure_episode') as triage,patch('relay_core.call_records.ingest',return_value=False),patch('relay_core.realtime.changed'),patch('relay_core.bulk_updates.link_reply'):
             projection.project('event')
         triage.assert_called_once()
         self.assertEqual(triage.call_args.kwargs['event'], event)
