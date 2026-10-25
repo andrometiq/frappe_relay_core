@@ -37,6 +37,8 @@ test('production client uses WebSocket, rejoins rooms and catches up once after 
   await wait(80);assert.deepEqual(batches.at(-1), ['contacts'])
   connections[0].emit('relay_changed', {kind:'reads'})
   await wait(80);assert.deepEqual(batches.at(-1), ['reads'])
+  connections[0].emit('relay_campaign_progress', {name:'Winter launch Oct 2026', counts:{sent:5}})
+  await wait(80);assert.deepEqual(batches.at(-1), ['campaign_progress'])
   const initial=batches.length;await wait(200);assert.equal(batches.length,initial)
   const connected=once(client,'connect');connections[0].conn.close();await connected;await wait(100)
   assert.equal(connections.length,2)

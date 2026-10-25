@@ -1,0 +1,30 @@
+// Campaign progress shown from counters only; rows are paged separately.
+export const COUNTERS = [
+  ["total", "Recipients"], ["queued", "Waiting"], ["sent", "Sent"], ["delivered", "Delivered"],
+  ["read", "Read"], ["replied", "Replied"], ["failed", "Failed"], ["skipped", "Skipped"],
+];
+
+export function percent(part, total) {
+  return total ? Math.min(100, Math.round((100 * (part || 0)) / total)) : 0;
+}
+
+export function applyProgress(campaign, event) {
+  if (!campaign || !event || event.name !== campaign.name) return campaign;
+  return { ...campaign, status: event.status || campaign.status, counts: { ...campaign.counts, ...event.counts } };
+}
+
+export function campaignActions(status) {
+  return {
+    Draft: ["start", "cancel"], Running: ["pause", "cancel"], Paused: ["resume", "cancel"],
+  }[status] || [];
+}
+
+export function statusTheme(status) {
+  return { Running: "blue", Completed: "green", Paused: "orange", Cancelled: "gray", Cancelling: "gray", Importing: "blue" }[status] || "gray";
+}
+
+export function missingMapping(fields, mapping) {
+  if (!mapping?.phone) return ["Phone number"];
+  return fields.filter((field) => !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
+    .map((field) => field.label);
+}
