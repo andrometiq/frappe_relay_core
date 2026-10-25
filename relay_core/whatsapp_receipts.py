@@ -82,7 +82,8 @@ def receipt_values(doc, update):
     if not advances(doc.status, update['status'], int(previous.get('timestamp', 0)), update['timestamp']):
         return None
     history['delivery'] = {'timestamp': update['timestamp'], 'event_id': update['event_id']}
-    return {'status': update['status'], 'message_updates': json.dumps(history)}
+    # A later delivered/read receipt clears an earlier failure reason.
+    return {'status': update['status'], 'message_updates': json.dumps(history), 'delivery_error': update.get('error', '')}
 
 
 def apply_pending(doc):
