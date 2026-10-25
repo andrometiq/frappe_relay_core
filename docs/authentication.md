@@ -33,6 +33,8 @@ scopes. Examples include `account:read`, `messages:send`, `messages:read`,
 [reference](https://github.com/andrometiq/relay_hub/tree/develop/docs) is authoritative
 for individual operation scopes.
 
+WhatsApp bulk campaigns need `account:read`, `templates:read`, `messages:send` and `deliveries:cancel` on this token. Without `deliveries:cancel`, Hub refuses each cancellation. The campaign then stays `Cancelling`, shows the Hub reason and keeps the refused rows as queued. Hub can still send these rows. Relay retries by itself. To fix it, issue a new Hub auth key with `deliveries:cancel` under Permissions and save it in Relay Settings.
+
 Do not distribute this token to browsers or AI clients. Those clients authenticate
 to Core as their own Frappe user so Core can enforce business permissions.
 

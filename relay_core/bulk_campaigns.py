@@ -24,6 +24,9 @@ LOCK_WAIT = 10  # A slice notices a pause or cancel within one Hub call or one s
 WAIT = 'relay-bulk-wait:'
 RETRIES = 'relay-bulk-retries:'
 CANCEL_AFTER = 'relay-bulk-cancel-after:'
+NOT_QUEUED = 'queued delivery could not be cancelled'  # Hub already sends it; its update has the outcome.
+CANCEL_REFUSED = ('Hub refused to cancel queued messages, so they may still be sent. Issue a Hub auth key with the '
+                  'deliveries:cancel scope and save it in Relay Settings; Relay retries by itself. ')
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 
@@ -417,33 +420,53 @@ def admit(rows, deliveries):
 
 
 def cancel_remaining(doc, deadline):
-    """Cancel every row Hub still holds, paging past rows Hub already sends. True when time ran out."""
+    """Cancel every row Hub still holds, paging past rows Hub already sends. True when time ran out.
+    A Hub refusal keeps the campaign Cancelling with the reason; the refused row is tried again."""
     in_chunks(doc.name, 'Pending', lambda names: frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Cancelled',
         modified=NOW(6) WHERE name IN %s AND status='Pending' ''', (names,)))
     hub = whatsapp.client()
-    from relay_core.bulk_timeline import cancelled
-    while True:
+    while time.monotonic() < deadline:
+        if is_waiting(doc.name, deadline):
+            continue
         after = frappe.cache.get_value(CANCEL_AFTER + doc.name) or ''
         rows = frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'status': 'Queued', 'delivery_id': ['!=', ''],
                               'name': ['>', after]}, fields=['name', 'delivery_id', 'request_key'],
                               order_by='name asc', limit_page_length=CHUNK)
         if not rows:
-            break
+            finish_cancel(doc)
+            return False
         for row in rows:
             if time.monotonic() >= deadline:
                 return True
-            try:
-                if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
-                    frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
-                    cancelled(row.request_key)
-            except whatsapp.HubError:
-                pass  # Already sending; its Hub update records the real outcome.
-            frappe.cache.set_value(CANCEL_AFTER + doc.name, row.name, expires_in_sec=86400)
-            frappe.db.commit()
-    frappe.cache.delete_value(CANCEL_AFTER + doc.name)
-    frappe.db.set_value('Relay Campaign', doc.name, {'status': 'Cancelled', 'finished_at': frappe.utils.now_datetime()})
+            if not cancel_row(hub, doc, row):
+                break
+    return True
+
+
+def cancel_row(hub, doc, row):
+    """False when Hub refused, so the row stays Queued and counted as queued."""
+    try:
+        if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
+            frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
+            from relay_core.bulk_timeline import cancelled
+            cancelled(row.request_key)
+    except whatsapp.HubError as exc:
+        if NOT_QUEUED not in (exc.detail or ''):
+            retry_later(doc, CANCEL_REFUSED + whatsapp.failure_message(exc))
+            return False
+    if doc.last_error:
+        clear_error(doc)
+    frappe.cache.set_value(CANCEL_AFTER + doc.name, row.name, expires_in_sec=86400)
     frappe.db.commit()
-    return False
+    return True
+
+
+def finish_cancel(doc):
+    frappe.cache.delete_value(CANCEL_AFTER + doc.name)
+    frappe.cache.delete_value(RETRIES + doc.name)
+    frappe.db.set_value('Relay Campaign', doc.name, {'status': 'Cancelled', 'finished_at': frappe.utils.now_datetime(),
+                                                     'last_error': ''})
+    frappe.db.commit()
 
 
 def recover():

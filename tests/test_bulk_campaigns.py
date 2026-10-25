@@ -449,6 +449,31 @@ class SenderTests(unittest.TestCase):
         with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns, 'in_chunks'):
             self.assertTrue(bulk_campaigns.cancel_remaining(self.doc, time.monotonic() - 1))
 
+    def test_cancel_refused_by_hub_stays_cancelling_with_the_reason_and_claims_nothing(self):
+        self.fake.get_all = Mock(return_value=[_dict(name='q0001', delivery_id='1', request_key='k1')])
+        hub = Mock()
+        hub.call_tool.side_effect = HubError('Hub operation was rejected', detail='deliveries:cancel scope required')
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns, 'in_chunks'), \
+                patch.object(bulk_campaigns.whatsapp, 'failure_message', side_effect=manager_text), \
+                patch('relay_core.bulk_timeline.cancelled') as cancelled:
+            self.assertTrue(bulk_campaigns.cancel_remaining(self.doc, time.monotonic() + 0.05))
+        cancelled.assert_not_called()
+        self.assertFalse([c for c in self.db.sql.call_args_list if "SET status='Cancelled'" in c.args[0]])
+        self.assertNotIn({'status': 'Cancelled'}, [c.args[2] for c in self.db.set_value.call_args_list if isinstance(c.args[2], dict)])
+        self.assertTrue(self.doc.last_error.startswith(bulk_campaigns.CANCEL_REFUSED))
+        self.assertIn('deliveries:cancel scope required', self.doc.last_error)
+        self.assertNotIn(bulk_campaigns.CANCEL_AFTER + 'Winter launch', self.cache.values)  # The refused row is tried again.
+
+    def test_cancel_moves_past_a_row_hub_already_sends(self):
+        pages = [[_dict(name='q0001', delivery_id='1', request_key='k1')], []]
+        self.fake.get_all = Mock(side_effect=lambda *args, **kwargs: pages.pop(0))
+        hub = Mock()
+        hub.call_tool.side_effect = HubError('Hub operation was rejected', detail=bulk_campaigns.NOT_QUEUED)
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub), patch.object(bulk_campaigns, 'in_chunks'):
+            self.assertFalse(bulk_campaigns.cancel_remaining(self.doc, time.monotonic() + 30))
+        self.assertFalse([c for c in self.db.sql.call_args_list if "SET status='Cancelled'" in c.args[0]])
+        self.assertEqual(self.db.set_value.call_args.args[2]['status'], 'Cancelled')
+
     def test_campaign_apis_deny_without_manager_access(self):
         for call in (lambda: bulk_campaigns.create('Winter launch Oct 2026', 'notice', 'en_US'),
                      lambda: bulk_campaigns.read('Winter launch Oct 2026'),
