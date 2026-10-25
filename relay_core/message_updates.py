@@ -189,8 +189,10 @@ def apply_updates(payload, channel, event):
         else:
             changed(frappe.get_doc('Relay Message', name))
         if update['kind'] == 'edit':
-            from relay_core.translations import on_message
-            on_message(frappe.get_doc('Relay Message', name))
+            from relay_core import translations, voice_transcripts
+            edited = frappe.get_doc('Relay Message', name)
+            translations.on_message(edited)
+            voice_transcripts.on_message(edited)
     if delivery_contacts:
         from relay_core.realtime import changed, contact_changed
         first, *remaining = delivery_contacts.values()

@@ -19,6 +19,7 @@ TURN_SECONDS = 5
 WAKE_TTL = 120
 HANDLERS = (
     'relay_core.translations.on_message',
+    'relay_core.voice_transcripts.on_message',
     'relay_core.automation.service.on_message',
     'relay_core.email_preferences.on_message',
 )

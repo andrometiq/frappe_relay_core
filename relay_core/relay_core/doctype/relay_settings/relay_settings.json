@@ -9,7 +9,8 @@
     "hub_account",
     "hub_token",
     "callback_secret",
-    "ai_handoff_owner"
+    "ai_handoff_owner",
+    "transcription_provider"
   ],
   "fields": [
     {
@@ -38,6 +39,13 @@
       "fieldtype": "Link",
       "options": "User",
       "description": "Fallback for skill handoffs; must have access to the conversation."
+    },
+    {
+      "fieldname": "transcription_provider",
+      "label": "Voice transcription provider",
+      "fieldtype": "Link",
+      "options": "Relay AI Provider",
+      "description": "Transcribes received voice notes in the background. Requires an enabled OpenAI provider with a transcription model."
     }
   ],
   "permissions": [
@@ -47,5 +55,6 @@
       "write": 1,
       "create": 1
     }
-  ]
+  ],
+  "modified": "2026-10-25 23:30:00.000000"
 }

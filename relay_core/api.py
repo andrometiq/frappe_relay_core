@@ -55,9 +55,6 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     filters = {'relay_contact': contact}
     if not isinstance(query, str) or len(query) > 200 or any(ord(c) < 32 for c in query):
         frappe.throw('Message search must contain at most 200 printable characters')
-    if query.strip():
-        escaped = query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-        filters['content'] = ['like', '%' + escaped + '%']
     if sender_endpoint is not None:
         if not isinstance(sender_endpoint, str) or not 1 <= len(sender_endpoint) <= 200 or any(ord(c)<32 for c in sender_endpoint):
             frappe.throw('Invalid conversation endpoint')
@@ -65,12 +62,12 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     if channel:
         filters['channel'] = channel
     from relay_core.timeline import page_query
-    watermark = page_query(['name'], filters, 1, contact=contact, ingestion=True).run(as_dict=True) if not since else []
+    watermark = page_query(['name'], filters, 1, contact=contact, ingestion=True, search=query).run(as_dict=True) if not since else []
     rows = page_query(
         ['name', 'channel', 'content', 'direction', 'status', 'creation', 'sent_at', 'provider_context',
-         'message_type', 'message_data', 'reactions', 'edited_at', 'provider_id', 'sender_endpoint', 'legacy_author',
+         'message_type', 'message_data', 'reactions', 'edited_at', 'transcript', 'transcript_status', 'delivery_error', 'provider_id', 'sender_endpoint', 'legacy_author',
          'relay_contact', 'business_doctype', 'business_name'],
-        filters, limit+1, before, since or after, contact, ingestion=bool(since)).run(as_dict=True)
+        filters, limit+1, before, since or after, contact, ingestion=bool(since), search=query).run(as_dict=True)
     more = len(rows) > limit
     rows = rows[:limit]
     channels = {}
@@ -162,7 +159,7 @@ def message_context(message, channel=None):
         frappe.throw('Message belongs to another channel')
     earlier=messages(doc.relay_contact,before=message,limit=25,channel=channel)
     later=messages(doc.relay_contact,after=message,limit=25,channel=channel)
-    fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author']
+    fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','legacy_author']
     row={key:doc.get(key) for key in fields}
     from relay_core.message_display import decorate_messages
     decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)})
@@ -197,7 +194,7 @@ def message_snapshots(contact, names):
     for name in names:validate_reference(name,'MSG')
     rows=frappe.get_list('Relay Message',filters={'relay_contact':contact,'name':['in',names]},
         fields=['name','channel','content','direction','status','creation','sent_at','provider_context',
-                'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint','legacy_author'],page_length=50)
+                'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','legacy_author'],page_length=50)
     channels = {row.channel: frappe.get_doc('Relay Channel', row.channel) for row in rows}
     for channel in channels.values():
         channel.check_permission('read')

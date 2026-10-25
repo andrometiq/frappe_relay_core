@@ -215,17 +215,16 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     if channel:filters['channel']=channel
     if query is not None:
         if not isinstance(query,str) or len(query)>100 or any(ord(c)<32 for c in query):frappe.throw('Invalid message search')
-        if query.strip():filters['content']=['like','%'+query.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%']
     if names is not None:
         names=frappe.parse_json(names) if isinstance(names,str) else names
         if not isinstance(names,list) or not 1<=len(names)<=50:frappe.throw('Refresh between 1 and 50 messages')
         for item in names:validate_reference(item,'MSG')
         filters['name']=['in',names]
     fields=['name','relay_contact','channel','content','direction','status','creation','sent_at','provider_context',
-            'message_type','message_data','reactions','edited_at','provider_id','sender_endpoint']
+            'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint']
     # Frappe applies role/user permissions and the assignment query hook before LIMIT.
     from relay_core.timeline import page_query
-    query=page_query(fields,filters,limit+1,before,since or after,ingestion=bool(since))
+    query=page_query(fields,filters,limit+1,before,since or after,ingestion=bool(since),search=query or '')
     if from_date is not None or to_date is not None:
         from relay_core.prepared_reports import date_range
         from pypika.functions import Coalesce

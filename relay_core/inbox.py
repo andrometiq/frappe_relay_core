@@ -131,7 +131,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         except frappe.PermissionError:continue
         latest_filters={'relay_contact':row.name}
         if medium:latest_filters['channel']=['in',channel_names]
-        latest=page_query(['name','content','message_data','channel','creation','sent_at','business_doctype','business_name'],latest_filters,1).run(as_dict=True)
+        latest=page_query(['name','content','message_data','transcript','channel','creation','sent_at','business_doctype','business_name'],latest_filters,1).run(as_dict=True)
         state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(row.name)},['last_read','starred','folder'],as_dict=True) or {}
         unread=unread_count(row.name, channels=channel_names)
         last=latest[0] if latest else {}
@@ -156,6 +156,8 @@ def directory_preview(message):
     from relay_core.messaging import object_value
     from relay_core.message_types import preview
     data = object_value(message.get('message_data') or {})
+    if data.get('kind') and message.get('transcript'):
+        return (preview(data) + ': ' + message['transcript'])[:200]
     if data.get('kind'):
         return preview(data)[:200]
     # Older messages have only sanitized HTML content. Decode after stripping tags;

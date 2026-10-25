@@ -21,12 +21,16 @@ def provider_time(payload, row=None):
         return None
 
 
-def page_query(fields, filters, limit, before=None, after=None, contact=None, ingestion=False):
+def page_query(fields, filters, limit, before=None, after=None, contact=None, ingestion=False, search=''):
     message = frappe.qb.DocType('Relay Message')
     timestamp = (message.relay_timeline_time if frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message','relay_timeline_time')
                  else Coalesce(message.sent_at, message.creation))
     query = frappe.qb.get_query('Relay Message', fields=fields, filters=filters,
                                ignore_permissions=False, order_by='', limit=limit)
+    if search.strip():
+        # Voice notes are found by their transcript as well as their preview.
+        pattern = '%' + search.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        query = query.where(message.content.like(pattern) | message.transcript.like(pattern))
     # Preserve the public start-of-history cursor used by API clients.
     if before or after and after != 'RELAY-MSG-0000000000':
         anchor = frappe.get_doc('Relay Message', before or after)

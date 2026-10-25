@@ -3,6 +3,8 @@ import io
 import json
 import math
 import re
+import shutil
+import struct
 import subprocess
 import tempfile
 import urllib.request
@@ -28,6 +30,12 @@ def audio_extension(raw,mime):
     extensions={'audio/mpeg':'mp3','audio/mp4':'m4a','audio/ogg':'ogg','application/ogg':'ogg','audio/wav':'wav','audio/x-wav':'wav','audio/webm':'webm'}
     if mime not in extensions or not isinstance(raw,bytes) or not 1<=len(raw)<=MAX_BYTES:
         raise ValueError('Choose supported audio up to 4 MiB')
+    if shutil.which('ffprobe') is None:
+        # WhatsApp voice notes are Ogg Opus; their length is read without ffprobe.
+        if extensions[mime]!='ogg':raise ValueError('Audio length cannot be checked on this server')
+        duration=ogg_duration(raw)
+        if not 0<duration<=300:raise ValueError('Audio must be readable and at most five minutes')
+        return 'ogg'
     # A private seekable file is needed to determine Ogg/MP4 duration. Explicit
     # demuxers reject playlists; network protocols are disabled.
     try:
@@ -46,6 +54,23 @@ def audio_extension(raw,mime):
     except (subprocess.SubprocessError,OSError,ValueError,TypeError):
         raise ValueError('Audio must be readable and at most five minutes') from None
     return extensions[mime]
+
+
+def ogg_duration(raw):
+    """Seconds of a single-stream Ogg Opus or Vorbis file, from its last page's granule position."""
+    if raw[:4]!=b'OggS' or len(raw)<64:raise ValueError('Audio must be readable and at most five minutes')
+    serial=raw[14:18];packet=raw[27+raw[26]:]
+    if packet.startswith(b'OpusHead'):
+        rate=48000;skip=struct.unpack_from('<H',packet,10)[0]
+    elif packet.startswith(b'\x01vorbis'):
+        rate=struct.unpack_from('<I',packet,12)[0];skip=0
+    else:
+        raise ValueError('Audio must be Ogg Opus or Vorbis')
+    last=raw.rfind(b'OggS')
+    if last<0 or len(raw)<last+27 or raw[last+14:last+18]!=serial or not rate:
+        raise ValueError('Audio must be readable and at most five minutes')
+    granule=struct.unpack_from('<q',raw,last+6)[0]
+    return (granule-skip)/rate
 
 
 def transcribe(model,key,raw,mime):
