@@ -42,3 +42,14 @@ test("normalizes preview content and approval colors", () => {
   assert.equal(templateStatusTheme("PENDING"), "amber");
   assert.equal(templateStatusTheme("REJECTED"), "red");
 });
+
+test("template sync status reads as one human sentence", async () => {
+  const { templateSyncLabel } = await import("../src/services/templateList.js");
+  const now = new Date("2026-10-26T10:00:00").getTime();
+  assert.equal(templateSyncLabel({ synced_at: null }, now), "Not synced yet");
+  assert.equal(templateSyncLabel({ synced_at: "2026-10-26 09:59:40" }, now), "Synced just now");
+  assert.equal(templateSyncLabel({ synced_at: "2026-10-26 09:59:00" }, now), "Synced 1 minute ago");
+  assert.equal(templateSyncLabel({ synced_at: "2026-10-26 09:57:00" }, now), "Synced 3 minutes ago");
+  assert.equal(templateSyncLabel({ synced_at: "2026-10-26 07:00:00" }, now), "Synced 3 hours ago");
+  assert.match(templateSyncLabel({ synced_at: "2026-10-20 07:00:00" }, now), /^Synced on /);
+});

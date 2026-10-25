@@ -62,3 +62,15 @@ export function filterTemplates(
       .some((value) => value.includes(needle));
   });
 }
+
+// One sentence for the scheduled local template copy, e.g. "Synced 3 minutes ago".
+export function templateSyncLabel(status, now = Date.now()) {
+  const date = new Date(String(status?.synced_at || "").replace(" ", "T"));
+  if (!Number.isFinite(date.getTime())) return "Not synced yet";
+  const minutes = Math.floor(Math.max(0, now - date.getTime()) / 60000);
+  const plural = (count, unit) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  if (minutes < 1) return "Synced just now";
+  if (minutes < 60) return "Synced " + plural(minutes, "minute");
+  if (minutes < 1440) return "Synced " + plural(Math.floor(minutes / 60), "hour");
+  return "Synced on " + date.toLocaleDateString([], { day: "numeric", month: "short" });
+}

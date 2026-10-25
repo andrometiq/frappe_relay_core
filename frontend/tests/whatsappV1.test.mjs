@@ -136,6 +136,7 @@ test('template lifecycle events refresh after an in-flight request without polli
   let handler,release,lists=0
   const api=async(method,args)=>{
     if(method==='whatsapp.connection')return {configured:true}
+    if(method==='whatsapp_templates.sync_status')return {synced_at:null,templates:0}
     if(args.operation==='capabilities')return {templates:true}
     lists++
     if(lists===1)await new Promise(resolve=>release=resolve)
