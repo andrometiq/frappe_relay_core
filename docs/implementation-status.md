@@ -18,6 +18,31 @@ The source checked on 2026-10-24 implements WhatsApp v1 and Telegram/email v1.5 
 
 The installed `/relay` workspace uses Frappe login and same-origin APIs. `npm run build:site` builds the installed UI. The separate preview does not supply an authenticated Frappe site.
 
+## WhatsApp inbound types
+
+| Type | Core behavior |
+| --- | --- |
+| Text | Text message. |
+| Image, audio, video, document | Attachment viewer and account-scoped download, up to 16 MiB for received WhatsApp media. Uploads and AI inputs retain their separate 4 MiB limits. Documents retain filename, MIME, optional caption and file_size when supplied. If the webhook omits size, the download response supplies Content-Length; no size is invented during projection. Document previews use caption, then filename. |
+| Sticker | Sticker viewer with a separate 2 MiB WebP proxy. |
+| Location, contacts | Coordinates/address and contact cards. |
+| Reaction | Updates the original message, including reaction removal; no new conversation turn. |
+| Interactive button/list replies, template button replies | Text with selection identity. |
+| Interactive form reply | Text and form fields; flow correlation token excluded from display. |
+| Interactive call-permission reply | Text acknowledgement; does not enable calling. |
+| Order, system, unknown interactive replies, unknown types | Unsupported display; no commerce or identity-change behavior. |
+| Meta `unsupported`, including `poll_creation` | Remains unsupported. Raw provider evidence is retained in the Hub event. |
+
+An additional `from_user_id` does not replace the verified `from` endpoint or
+change routing. Payloads without `from` cannot yet resolve a verified endpoint;
+business-scoped-ID-only routing is not implemented.
+
+`HubClient.media('WhatsApp', id)` uses `whatsapp.attachment` and requires the
+existing `messages:read` scope. Sticker callers explicitly select the narrower
+`whatsapp.media` tool. Both enforce received-media ownership before any Meta GET.
+Failures report a safe check identifier (scope, ownership, provider metadata,
+MIME, size, destination or integrity), never provider URLs or credentials.
+
 ## Measured checkpoint
 
 | Channel | Single inbound p50/p95 | Additional connected evidence |

@@ -4,6 +4,7 @@ import binascii
 import re
 import frappe
 from relay_core import messaging, whatsapp
+from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES
 
 MAX_BYTES=4*1024*1024
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
@@ -105,7 +106,7 @@ def read(message,download=0,index=None):
         result=whatsapp.client().call_tool('whatsapp.attachment',{'media_id':media_id})
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
-        if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
+        if not 1<=len(raw)<=MAX_WHATSAPP_DOWNLOAD_BYTES:frappe.throw('Attachment exceeds the 16 MiB download limit')
         return response(raw,result.get('content_type','application/octet-stream'),media.get('filename') or result.get('filename'),download)
     if channel.channel!='Telegram':frappe.throw('Remote attachment download is not available for this channel')
     media=data.get('media') or {};file_id=media.get('file_id')

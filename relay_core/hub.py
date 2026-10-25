@@ -8,6 +8,24 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 from .config import load_env
 
+MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
+
+MEDIA_CHECKS = {
+    'account': 'an account-scoped credential is required',
+    'scope': 'messages:read scope is required',
+    'input': 'media ID or size limit is invalid',
+    'capacity': 'media download capacity is exhausted',
+    'ownership_verification': 'account media ownership could not be verified',
+    'ownership': 'media was not received by this account for this tool',
+    'provider_metadata': 'Meta media metadata could not be read; check provider permission and media availability',
+    'destination': 'Meta media download destination was rejected',
+    'identifier': 'Meta returned a different media ID',
+    'content_type': 'media MIME type is invalid or unsupported by this tool',
+    'size': 'media size is invalid or exceeds the proxy limit',
+    'download': 'Meta media download failed',
+    'integrity': 'media content integrity verification failed',
+}
+
 
 class HubError(RuntimeError):
     def __init__(self, message, metadata=None):
@@ -19,6 +37,8 @@ class HubError(RuntimeError):
         if not isinstance(source, dict):
             return
         safe = {}
+        if metadata['provider'] == 'Hub' and isinstance(source.get('check'), str) and source['check'] in MEDIA_CHECKS:
+            safe['check'] = source['check']
         for key in ('http_status', 'code', 'retry_after', 'migrate_to_chat_id'):
             value = source.get(key)
             if type(value) is int and abs(value) < 2**52 and (key == 'migrate_to_chat_id' or value >= 0):
@@ -68,6 +88,8 @@ class HubClient:
         try:
             with self.opener.open(req, timeout=30) as response:
                 limit = 6 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.attachment','email.attachment','whatsapp.attachment') else 3 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.media', 'whatsapp.media') else 2097152
+                if method == 'tools/call' and params.get('name') == 'whatsapp.attachment':
+                    limit = ((MAX_WHATSAPP_DOWNLOAD_BYTES + 2) // 3) * 4 + 65536
                 raw = response.read(limit + 1)
                 if len(raw) > limit:
                     raise HubError("Hub response exceeds size limit")
@@ -111,7 +133,11 @@ class HubClient:
             self.initialize()
         result = self._request("tools/call", {"name": name, "arguments": arguments}, 2)
         if result.get("isError"):
-            raise HubError("Hub operation was rejected; check account capabilities and request details", result.get('structuredContent'))
+            error = HubError("Hub operation was rejected; check account capabilities and request details", result.get('structuredContent'))
+            check = error.metadata.get('error', {}).get('check')
+            if check:
+                error.args = (f"Hub {name} rejected at {check}: {MEDIA_CHECKS[check]}",)
+            raise error
         payload = result.get("structuredContent")
         if not isinstance(payload, dict):
             raise HubError("Unexpected Hub response")
@@ -133,11 +159,11 @@ class HubClient:
     def telegram_message(self, **arguments):
         return self.call_tool('telegram.message', arguments)
 
-    def media(self, provider, file_id):
+    def media(self, provider, file_id, *, sticker=False):
         if provider == 'Telegram':
             return self.call_tool('telegram.media', {'file_id': file_id})
         if provider == 'WhatsApp':
-            return self.call_tool('whatsapp.media', {'media_id': file_id})
+            return self.call_tool('whatsapp.media' if sticker else 'whatsapp.attachment', {'media_id': file_id})
         raise HubError('Unsupported media provider')
 
     def email_send(self, to, subject, body, cc=None, bcc=None, request_key=None):

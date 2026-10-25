@@ -65,3 +65,66 @@ class LiveHubTests(unittest.TestCase):
         good = HubClient.from_env()
         with self.assertRaisesRegex(HubError, r'\(401\)'):
             HubClient(good.url, 'invalid-'*8).health()
+
+class MediaContractTests(unittest.TestCase):
+    def test_general_media_and_stickers_use_distinct_tools(self):
+        hub = HubClient('http://127.0.0.1:1234/mcp', 'x'*64)
+        with patch.object(hub, 'call_tool', return_value={}) as call:
+            hub.media('WhatsApp', '123')
+            call.assert_called_with('whatsapp.attachment', {'media_id': '123'})
+            hub.media('WhatsApp', '123', sticker=True)
+            call.assert_called_with('whatsapp.media', {'media_id': '123'})
+            hub.media('Telegram', 'received', sticker=True)
+            call.assert_called_with('telegram.media', {'file_id': 'received'})
+
+    def test_media_rejection_identifies_only_allowlisted_check(self):
+        hub = HubClient('http://127.0.0.1:1234/mcp', 'x'*64)
+        hub.protocol = '2025-06-18'
+        for check in ('scope', 'ownership', 'content_type', 'size', 'provider_metadata', 'private-token'):
+            result = {'isError': True, 'content': [{'type': 'text', 'text': 'private-token'}],
+                      'structuredContent': {'provider': 'Hub', 'error': {'check': check, 'description': 'private-token'}}}
+            with patch.object(hub, '_request', return_value=result):
+                with self.assertRaises(HubError) as error: hub.media('WhatsApp', '123')
+            if check != 'private-token':
+                self.assertIn('rejected at ' + check, str(error.exception))
+            self.assertNotIn('private-token', str(error.exception))
+            self.assertNotIn('private-token', str(error.exception.metadata))
+
+class MediaHTTPTests(unittest.TestCase):
+    def test_media_http_transport_accepts_attachment_envelope_and_safe_denial(self):
+        import base64
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        raw = b'fixture' * 1000000
+        seen = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                seen.append(body)
+                if body['method'] == 'initialize':
+                    result = {'protocolVersion': '2025-06-18'}
+                elif body['method'] == 'notifications/initialized':
+                    self.send_response(202); self.end_headers(); return
+                elif body['params']['arguments']['media_id'] == '999':
+                    result = {'isError': True, 'structuredContent': {'provider': 'Hub', 'error': {'check': 'ownership'}},
+                              'content': [{'type': 'text', 'text': 'private-provider-error'}]}
+                else:
+                    result = {'structuredContent': {'content_type': 'image/jpeg', 'filename': 'attachment.jpg',
+                                                     'content_base64': base64.b64encode(raw).decode()}}
+                self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+                self.wfile.write(json.dumps({'jsonrpc': '2.0', 'id': body['id'], 'result': result}).encode())
+            def log_message(self, *_): pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            hub = HubClient(f'http://127.0.0.1:{server.server_port}/mcp', 'x'*64)
+            result = hub.media('WhatsApp', '123')
+            self.assertEqual(base64.b64decode(result['content_base64']), raw)
+            self.assertEqual(result['content_type'], 'image/jpeg')
+            self.assertEqual(seen[-1]['params']['name'], 'whatsapp.attachment')
+            with self.assertRaisesRegex(HubError, 'rejected at ownership') as caught:
+                hub.media('WhatsApp', '999')
+            self.assertNotIn('private-provider-error', str(caught.exception))
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
