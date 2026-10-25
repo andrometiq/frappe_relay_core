@@ -294,7 +294,7 @@ def check_ready(doc):
     whatsapp_channel(doc.channel)
     if doc.status == 'Draft' and doc.last_error:
         frappe.throw('The last import failed. Fix the file and import the recipients again')
-    if not frappe.db.exists(RECIPIENT, {'campaign': doc.name, 'status': 'Pending'}):
+    if doc.status == 'Draft' and not frappe.db.exists(RECIPIENT, {'campaign': doc.name, 'status': 'Pending'}):
         frappe.throw('Import recipients with at least one valid row first')
     try:
         hub, _ = whatsapp.checked_client()

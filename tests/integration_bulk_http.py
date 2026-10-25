@@ -103,7 +103,8 @@ try:
         assert stored() == 1
         headers = {'Authorization': f'token {api_key}:{api_secret}'}
         for method, data in (('relay_core.bulk_campaigns.create', {'title': 'Winter launch Oct 2026', 'template_name': 'notice', 'language': 'en'}),
-                             ('relay_core.bulk_campaigns.control', {'name': 'Winter launch Oct 2026', 'action': 'start'})):
+                             ('relay_core.bulk_campaigns.control', {'name': 'Winter launch Oct 2026', 'action': 'start'}),
+                             ('relay_core.bulk_campaigns.control', {'name': title, 'action': 'resume'})):
             for auth in (None, headers):
                 response = requests.post(base + method, json=data, headers=auth or {}, timeout=20)
                 assert response.status_code == 403, (method, response.status_code)
@@ -122,9 +123,20 @@ try:
             assert response.status_code == 417 and 'last import failed' in response.text, (response.status_code, response.text[:300])
         frappe.db.rollback()
         assert frappe.db.get_value('Relay Campaign', title, 'status') == 'Draft'
+        frappe.db.set_value('Relay Campaign', title, {'status': 'Paused', 'last_error': ''})  # Every row is already in Hub.
+        frappe.db.commit()
+        with patch.object(bulk_campaigns, 'connection_value', side_effect=settings.get), \
+                patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(None, {})), \
+                patch.object(bulk_campaigns, 'approved_template'), patch.object(bulk_campaigns, 'enqueue') as enqueue, \
+                patch('relay_core.bulk_updates.open_reply_window'):
+            response = requests.post(base + 'relay_core.bulk_campaigns.control', json={'name': title, 'action': 'resume'},
+                                     headers=manager_headers, timeout=20)
+            assert response.status_code == 200, (response.status_code, response.text[:300])
+            assert response.json()['message']['status'] == 'Running', response.text[:300]
+            assert enqueue.call_args.kwargs == {'slot': 'control'}, enqueue.call_args
     print(f'PASS bulk update HTTP: 500-row signed batch accepted in {elapsed * 1000:.0f} ms per call, replay stored once, '
           'unsigned/unauthenticated/foreign/oversized/invalid-state batches rejected without writes; campaign APIs deny guests and non-managers; '
-          'a manager reads the campaign shape and cannot start it after a failed import')
+          'a manager reads the campaign shape, cannot start it after a failed import, and resumes it with no pending rows')
 finally:
     server.shutdown()
     server.server_close()

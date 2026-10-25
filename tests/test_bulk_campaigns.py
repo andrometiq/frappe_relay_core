@@ -464,6 +464,28 @@ class ControlTests(unittest.TestCase):
             self.assertIn('import', fake.throw.call_args.args[0])
 
 
+    def test_resume_works_when_every_row_is_already_in_hub(self):
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), cache=FakeCache(), utils=UTILS,
+                               enqueue=Mock(), session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
+        doc = _dict(name='Winter launch', status='Paused', channel='WA', template_name='notice', language='en', last_error='',
+                    reply_window_hours=72, started_at='2026-10-26 09:00:00')
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
+                patch.object(bulk_campaigns, 'bulk', return_value=doc), patch.object(bulk_campaigns, 'whatsapp_channel'), \
+                patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(Mock(), {})), \
+                patch.object(bulk_campaigns, 'approved_template'), patch.object(bulk_campaigns, 'internal_save'), \
+                patch.object(bulk_campaigns, 'read'), patch('relay_core.bulk_updates.open_reply_window'):
+            bulk_campaigns.wait('Winter launch', 60)
+            bulk_campaigns.control('Winter launch', 'resume')
+            fake.throw.assert_not_called()
+            self.assertNotIn(bulk_campaigns.WAIT + 'Winter launch', fake.cache.values)  # Tries Hub now.
+            self.assertEqual(doc.status, 'Running')  # The slice finds nothing pending; recount completes it.
+            self.assertEqual(fake.enqueue.call_args.kwargs['job_id'], 'relay-bulk-send_job:Winter launch:control')
+            doc.status = 'Draft'
+            with self.assertRaises(frappe.ValidationError):
+                bulk_campaigns.control('Winter launch', 'start')
+            self.assertIn('at least one valid row', fake.throw.call_args.args[0])
+
+
 class ImportTests(unittest.TestCase):
     def test_import_marks_duplicates_and_opt_outs_and_inserts_in_chunks(self):
         fields = bulk_sheet.template_fields(POSITIONAL)
