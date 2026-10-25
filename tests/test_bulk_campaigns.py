@@ -317,6 +317,21 @@ class ImportTests(unittest.TestCase):
         self.assertEqual((doc.status, doc.last_error), ('Draft', ''))
         changed.assert_called_once_with('Winter launch')
 
+    def test_opt_out_outlives_the_contact_link(self):
+        number = '919876543210'
+        key = hashlib.sha256(('WA:' + number).encode()).hexdigest()
+
+        def get_all(doctype, **kwargs):
+            if doctype == 'Relay Contact Endpoint':
+                self.assertNotIn('verified', kwargs['filters'])
+                return [_dict(name='E-OLD', endpoint_key=key, relay_contact='RELAY-CON-A', verified=0)]
+            if doctype == 'Relay Channel Preference':
+                return ['E-OLD']
+            raise AssertionError(doctype)
+        with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(get_all=Mock(side_effect=get_all))):
+            contacts, opted_out = bulk_campaigns.endpoint_facts('WA', [number])
+        self.assertEqual((contacts, opted_out), ({}, {number}))
+
 
 if __name__ == '__main__':
     unittest.main()
