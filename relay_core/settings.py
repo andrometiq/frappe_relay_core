@@ -4,6 +4,9 @@ import frappe
 from relay_core.permissions import require_access
 from relay_core.hub import HubClient
 
+# Channels the Relay UI offers. Telegram and Email backends stay intact for a later switch-on.
+ENABLED_CHANNELS=('WhatsApp',)
+
 FIELDS={'relay_hub_url':'hub_url','relay_hub_account':'hub_account','relay_hub_token':'hub_token','relay_callback_secret':'callback_secret'}
 
 def value(key):
