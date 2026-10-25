@@ -26,7 +26,11 @@ def titles(records):
         result = frappe.get_list(doctype, filters={'name': name}, fields=fields, page_length=1)
         if result:
             title = result[0].get(field)
-            if not title and doctype == 'Relay Channel':
-                title = ' · '.join(value for value in (result[0].get('channel'), result[0].get('account')) if value)
+            if doctype == 'Relay Channel':
+                provider, account = result[0].get('channel'), result[0].get('account')
+                # Old channel creation synthesized a title from the account key.
+                # Only an independently configured human title is a caption.
+                if not title or title in (name, account, f'{provider} {account}', f'{provider} · {account}'):
+                    title = provider
             items.append({'doctype': doctype, 'name': name, 'title': title or doctype})
     return {'items': items}

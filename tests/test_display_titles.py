@@ -32,9 +32,18 @@ class DisplayTitlesTests(unittest.TestCase):
         self.f.get_list.return_value = []
         self.assertEqual(self.module.titles([{'doctype':'Customer', 'name':'missing'}]), {'items':[]})
 
-    def test_legacy_channel_without_title_uses_safe_configured_identity(self):
+    def test_channel_uses_human_title_or_provider_without_account_identifiers(self):
         self.f.get_meta.return_value.title_field = 'title'
         self.f.get_list.return_value = [{'name':'RELAY-CH-0000000001','title':'','channel':'Email','account':'Support'}]
         result = self.module.titles([{'doctype':'Relay Channel','name':'RELAY-CH-0000000001'}])
-        self.assertEqual(result['items'][0]['title'], 'Email · Support')
+        self.assertEqual(result['items'][0]['title'], 'Email')
         self.assertEqual(self.f.get_list.call_args.kwargs['fields'], ['name','title','channel','account'])
+
+        for account in ('c2-R1024-1955-ash-olive-oak', '1792867625249477656'):
+            self.f.get_list.return_value[0].update(channel='Telegram', account=account)
+            self.assertEqual(self.module.titles([{'doctype':'Relay Channel','name':'RELAY-CH-0000000001'}])['items'][0]['title'], 'Telegram')
+        self.f.get_list.return_value[0]['title'] = 'Warehouse support'
+        self.assertEqual(self.module.titles([{'doctype':'Relay Channel','name':'RELAY-CH-0000000001'}])['items'][0]['title'], 'Warehouse support')
+
+        self.f.get_list.return_value[0]['title'] = 'Telegram 1792867625249477656'
+        self.assertEqual(self.module.titles([{'doctype':'Relay Channel','name':'RELAY-CH-0000000001'}])['items'][0]['title'], 'Telegram')

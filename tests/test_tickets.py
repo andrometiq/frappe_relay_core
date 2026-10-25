@@ -263,13 +263,13 @@ class TranscriptTests(unittest.TestCase):
     def setUp(self):
         TicketTests.setUp(self)
         self.ticket = Record(name='RELAY-TKT-0000000001', check_permission=Mock(),
-            conversation_key='Sim Conversation', business_doctype='Customer', business_name='Sim Customer')
+            company='Sim Company', conversation_key='Sim Conversation', business_doctype='Customer', business_name='Sim Customer')
         self.rows = [Record(name=f'RELAY-MSG-{i:010d}', ticket=self.ticket.name,
             conversation_key=self.ticket.conversation_key, business_doctype='Customer', business_name='Sim Customer',
             relay_contact='Sim Contact', channel='Sim Channel', content='Quantity 25, amount 1250',
             check_permission=Mock(), apply_fieldlevel_read_permissions=Mock()) for i in range(1, 62)]
         self.f.get_doc.side_effect = lambda dt, name: self.ticket if dt == 'Relay Ticket' else (
-            next(row for row in self.rows if row.name == name) if dt == 'Relay Message' else Record(check_permission=Mock()))
+            next(row for row in self.rows if row.name == name) if dt == 'Relay Message' else Record(company='Sim Company', check_permission=Mock()))
         self.f.get_list = Mock(side_effect=lambda dt, **kw: [r for r in self.rows if not kw['filters'].get('name')
             or r.name > kw['filters']['name'][1]][:kw['page_length']])
 
@@ -299,6 +299,43 @@ class TranscriptTests(unittest.TestCase):
     def test_transcript_rejects_invalid_page_limits(self):
         for limit in (0, 101, True, 'bad', -1):
             with self.assertRaises(ValueError): self.module.transcript(self.ticket.name, limit=limit)
+
+    def test_legacy_transcript_uses_only_explicit_links_and_read_permissions(self):
+        self.ticket.company = None
+        self.ticket.conversation_key = None
+        self.ticket.messages = [Record(message=row.name) for row in self.rows[:2]]
+        for row in self.rows[:2]:
+            row.ticket = None
+            row.business_name = 'Other readable business'
+        self.f.get_list.side_effect = lambda dt, **kw: [row for row in self.rows
+            if row.name in kw['filters']['name'][1]][:kw['page_length']]
+        first = self.module.transcript(self.ticket.name, limit=1)
+        second = self.module.transcript(self.ticket.name, limit=1, **first['next'])
+        self.assertEqual([row['name'] for row in first['items'] + second['items']],
+                         [row.name for row in self.rows[:2]])
+        self.assertIsNone(second['next'])
+        self.assertEqual(set(first['items'][0]), {'name','content','direction','status','creation','sent_at','message_type','channel'})
+        with self.assertRaises(PermissionError):
+            self.module.transcript(self.ticket.name, after=self.rows[2].name)
+        self.rows[0].check_permission.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.module.transcript(self.ticket.name)
+        self.rows[0].check_permission.side_effect = None
+        self.module.readable_contact.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.module.transcript(self.ticket.name)
+        self.module.readable_contact.side_effect = None
+        original = self.f.get_doc.side_effect
+        self.f.get_doc.side_effect = lambda dt, name: Record(check_permission=Mock(side_effect=PermissionError)) if dt == 'Relay Channel' else original(dt,name)
+        with self.assertRaises(PermissionError): self.module.transcript(self.ticket.name)
+
+    def test_legacy_journals_are_empty_and_cannot_use_episode_cursors(self):
+        self.ticket.company = None
+        for method in (self.module.ai_history, self.module.deliveries):
+            self.assertEqual(method(self.ticket.name), {'items': [], 'next': None})
+            with self.assertRaises(PermissionError): method(self.ticket.name, before='RELAY-AR-0000000001')
+            self.ticket.check_permission.side_effect = PermissionError
+            with self.assertRaises(PermissionError): method(self.ticket.name)
+            self.ticket.check_permission.side_effect = None
+        self.f.get_all.assert_not_called()
 
 
 class CompanyPermissionTests(unittest.TestCase):

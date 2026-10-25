@@ -21,11 +21,13 @@ const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
 const channels = ref([]), editor = ref(null)
 const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
   ...configurationChannels(channels.value, draft.value?.channel).map(row => ({
-    value: row.name, label: linkedTitle('Relay Channel', row.name, row.title || row.channel || 'Saved channel'),
+    value: row.name, label: linkedTitle('Relay Channel', row.name, row.channel || 'Saved channel'),
   }))])
 const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
 const variant = provider => !!draft.value?.use_preferences || channelProvider.value === provider
 const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), parameters = ref('')
+// Display fixture captions without rewriting the stored title on unrelated saves.
+const titleCaption = computed({ get: () => recordTitle(draft.value?.title, ''), set: value => { draft.value.title = value } })
 const busy = ref(false), error = ref(''), notice = ref(''), message = ref(''), preview = ref(null)
 const actionOptions = ref([]), actions = ref([]), validation = ref([]), validationSummary = ref(null), saved = ref('')
 const snapshot = () => JSON.stringify([draft.value, tools.value, actions.value])
@@ -110,7 +112,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
         <div class="space-y-3 event-list">
           <div v-if="skill" class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div>
           <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading events…' : 'Loading event rules…'" />
-          <button v-for="row in visibleRows" :key="row.name" type="button" :aria-label="(skill ? 'Open event: ' : 'Open event rule: ') + row.title" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
+          <button v-for="row in visibleRows" :key="row.name" type="button" :aria-label="(skill ? 'Open event: ' : 'Open event rule: ') + recordTitle(row, skill ? 'Event' : 'Event rule')" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
             <div class="automation-card-heading"><strong>{{ recordTitle(row, skill ? 'Event' : 'Event rule') }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
             <span v-if="skill">{{ row.business_doctype }} · {{ row.mode }} · {{ linkedTitle('Relay Channel', row.channel, 'Choose a channel') }} · {{ toolCount(row.allowed_tools) }} {{ toolCount(row.allowed_tools) === 1 ? 'reference' : 'references' }}</span>
             <span v-else>{{ eventDescription(row) }}</span>
@@ -120,7 +122,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'event' : 'event rule' }}</h2><Button label="Dismiss" :disabled="busy" @click="draft = null" /></div>
-          <FormControl v-model="draft.title" label="Title" required :disabled="busy" />
+          <FormControl v-model="titleCaption" label="Title" required :disabled="busy" />
           <div class="grid gap-3 sm:grid-cols-2"><EventPicker v-if="skill" :model-value="draft.business_doctype" label="Business type" kind="doctype" :disabled="busy" @update:model-value="chooseBusiness" /><FormControl v-else v-model="draft.business_doctype" label="Business type" required :disabled="busy" /><FormControl v-model="draft.channel" label="Channel" type="select" :options="channelOptions" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy || !!draft.use_preferences" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Owner instructions</legend>

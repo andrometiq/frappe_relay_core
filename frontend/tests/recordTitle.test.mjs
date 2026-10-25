@@ -21,3 +21,10 @@ test('local fixture run keys do not obscure names or alter stored records', () =
   assert.equal(row.title, 'Local C2 1792867625249477656')
   assert.equal(recordTitle({title:'Account 1792867625249477656'}), 'Account 1792867625249477656')
 })
+
+test('notification captions hide generated timestamp suffixes without changing subjects', () => {
+  const ticket = {subject:'Notification 1792867625249477656'}
+  assert.equal(recordTitle(ticket), 'Notification')
+  assert.equal(ticket.subject, 'Notification 1792867625249477656')
+  assert.equal(recordTitle({subject:'Notification 1250'}), 'Notification 1250')
+})
