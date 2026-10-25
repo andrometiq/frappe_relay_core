@@ -460,16 +460,26 @@ def read(name):
             'can_resume': bool(doc.get('active_scope_key') and doc.get('ai_disabled')
                 and doc.status not in ('Closed', 'Resolved') and doc.has_permission('write')),
             'can_release': bool(doc.get('active_scope_key') and doc.has_permission('write')),
-            'can_take_over': bool(doc.get('conversation_key') and doc.has_permission('write')),
+            'can_take_over': bool(not _legacy_ticket(doc) and doc.has_permission('write')),
             'can_assign': bool(set(frappe.get_roles()).intersection({'System Manager','Relay Communication Manager'}))}
 
 
-def _episode_message(ticket, name):
+def _legacy_ticket(ticket):
+    # Evidence tickets created before episodes have no complete scope snapshot.
+    return not (ticket.get('conversation_key') and ticket.get('company'))
+
+
+def _read_message(name):
     message = frappe.get_doc('Relay Message', name)
     message.check_permission('read')
     readable_contact(message.relay_contact)
     channel = frappe.get_doc('Relay Channel', message.channel)
     channel.check_permission('read')
+    return message, channel
+
+
+def _episode_message(ticket, name):
+    message, channel = _read_message(name)
     if (message.get('ticket') != ticket.name or channel.get('company') != ticket.get('company')
             or any(message.get(key) != ticket.get(key)
                    for key in ('conversation_key', 'business_doctype', 'business_name'))):
@@ -495,6 +505,10 @@ def ai_history(name, before=None, limit=20):
         frappe.throw('Limit must be between 1 and 50')
     ticket = frappe.get_doc('Relay Ticket', name)
     ticket.check_permission('read')
+    if _legacy_ticket(ticket):
+        if before:
+            frappe.throw('History cursor requires an episode', frappe.PermissionError)
+        return {'items': [], 'next': None}
     filters = {'ticket': name}
     if before:
         validate_reference(before, 'AR')
@@ -590,6 +604,10 @@ def deliveries(name, before=None, limit=50):
         frappe.throw('Limit must be between 1 and 100')
     ticket = frappe.get_doc('Relay Ticket', name)
     ticket.check_permission('read')
+    if _legacy_ticket(ticket):
+        if before:
+            frappe.throw('History cursor requires an episode', frappe.PermissionError)
+        return {'items': [], 'next': None}
     if before:
         if not isinstance(before, str) or len(before) > 140:
             frappe.throw('Invalid delivery cursor')
@@ -612,19 +630,34 @@ def transcript(name, after=None, limit=50):
         frappe.throw('Limit must be between 1 and 100')
     ticket = frappe.get_doc('Relay Ticket', name)
     ticket.check_permission('read')
-    filters = {'ticket': name}
+    legacy = _legacy_ticket(ticket)
+    linked = {row.message for row in ticket.messages} if legacy else set()
+    if legacy and not linked:
+        if after:
+            frappe.throw('Transcript cursor is not linked to this ticket', frappe.PermissionError)
+        return {'items': [], 'next': None}
+    filters = {'name': ['in', sorted(linked)]} if legacy else {'ticket': name}
     if after:
         validate_reference(after, 'MSG')
-        anchor = frappe.get_doc('Relay Message', after)
-        anchor.check_permission('read')
-        if anchor.get('ticket') != name:
-            frappe.throw('Transcript cursor belongs to another episode', frappe.PermissionError)
-        filters['name'] = ['>', after]
+        if legacy:
+            if after not in linked:
+                frappe.throw('Transcript cursor is not linked to this ticket', frappe.PermissionError)
+            _read_message(after)
+            filters['name'] = ['in', sorted(item for item in linked if item > after)]
+        else:
+            _episode_message(ticket, after)
+            filters['name'] = ['>', after]
     rows = frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name asc', page_length=int(limit)+1)
     items = []
     fields = ('name', 'content', 'direction', 'status', 'creation', 'sent_at', 'message_type', 'channel')
     for row in rows[:int(limit)]:
-        message = _episode_message(ticket, row.name)
+        if legacy:
+            if row.name not in linked:
+                frappe.throw('Message is not linked to this ticket', frappe.PermissionError)
+            message, _ = _read_message(row.name)
+            message.apply_fieldlevel_read_permissions()
+        else:
+            message = _episode_message(ticket, row.name)
         items.append({key: message.get(key) for key in fields})
     return {'items': items, 'next': {'after': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
 

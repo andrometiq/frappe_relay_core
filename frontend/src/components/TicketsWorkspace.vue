@@ -106,7 +106,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
     <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
       <div class="space-y-3">
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
-        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + row.subject" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
+        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
           <div class="automation-card-heading"><strong>{{ recordTitle(row, 'Ticket') }}</strong><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></div>
           <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? linkedTitle(row.business_doctype, row.business_name) : 'Conversation'" /><span>{{ row.category }} · {{ linkedTitle('User', row.assigned_to, 'Unassigned') }} · {{ relativeTime(row.creation) }}</span></div>
         </button>
@@ -114,8 +114,8 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
         <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <div class="automation-card-heading"><h2 class="font-semibold">{{ selected.subject }}</h2><Button label="Dismiss" @click="dismiss" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
-        <div v-if="selected.conversation_key" class="space-y-2">
+        <div class="automation-card-heading"><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button label="Dismiss" @click="dismiss" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
+        <div v-if="selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
             <Button v-if="selected.can_take_over && !staffTookOver" label="Take over" :loading="saving" :disabled="busy" @click="update('claim')" />
@@ -131,7 +131,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           <h3 class="font-semibold">Documents for review</h3>
           <a v-for="draft in selected.linked_drafts" :key="draft.doctype + ':' + draft.name" class="v1-link block"
             :href="'/app/' + encodeURIComponent(draft.doctype.toLowerCase().replaceAll(' ', '-')) + '/' + encodeURIComponent(draft.name)">
-            {{ draft.doctype }} · {{ draft.name }} · {{ ['Draft', 'Submitted', 'Cancelled'][draft.docstatus] }}
+            {{ draft.doctype }} · {{ linkedTitle(draft.doctype, draft.name) }} · {{ ['Draft', 'Submitted', 'Cancelled'][draft.docstatus] }}
           </a>
           <p>Open each draft, check the details and submit when ready.</p>
         </div>
@@ -141,7 +141,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           <p v-if="!detailBusy && !history.items.length">No AI activity recorded.</p>
           <ol class="space-y-3">
             <li v-for="run in history.items" :key="run.name" class="ticket-history-entry space-y-2">
-              <div class="flex flex-wrap items-center gap-2"><strong>{{ run.event || 'Triage · no matched event' }}</strong><Badge :label="run.status" /></div>
+              <div class="flex flex-wrap items-center gap-2"><strong>{{ recordTitle(run.event, 'Triage · no matched event') }}</strong><Badge :label="run.status" /></div>
               <p>{{ relativeTime(run.creation) }}<span v-if="run.event_version"> · Event version {{ run.event_version }}</span></p>
               <div v-if="run.search">
                 <p><strong>Search announcement:</strong> {{ run.search.purpose }} · {{ run.search.reference }}</p>

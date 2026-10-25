@@ -26,7 +26,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         'reason':raw_secret, 'reply':raw_secret})
     service.internal_save(run)
     draft = raw('Payment Entry','History Draft', company=company.name, party_type='Supplier', party=supplier.name,
-        payment_type='Pay', paid_amount=1250, received_amount=1250, docstatus=0)
+        title='Sim Supplier payment review', payment_type='Pay', paid_amount=1250, received_amount=1250, docstatus=0)
     completed = raw('Relay Flow Action','History Completed', automation_run=run.name, ticket=ticket.name,
         action_key='sim-history-completed-'+stamp, action='create_draft', step=0, status='Completed',
         target_doctype=draft.doctype, target_name=draft.name, input_snapshot=raw_secret, result=raw_secret)
@@ -124,7 +124,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     print('PASS takeover invalidates approval, preserves completed draft; journal Socket.IO invalidations contain only kind')
 
 
-def browser_site(actor, event, ticket, draft):
+def browser_site(actor, event, ticket, draft=None, *, script='ticketSimulation.mjs'):
     import subprocess
     from threading import Thread
     from werkzeug.wrappers import Response
@@ -152,9 +152,9 @@ def browser_site(actor, event, ticket, draft):
         server=make_server('127.0.0.1',0,app,request_handler=QuietHandler,threaded=True)
         thread=Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
-            result=subprocess.run(['node',str(root/'frontend/tests/browser/ticketSimulation.mjs')],cwd=root,
+            result=subprocess.run(['node',str(root/'frontend/tests/browser'/script)],cwd=root,
                 input=json.dumps(dict(origin='http://127.0.0.1:'+str(server.server_port),subject=ticket.subject,
-                    event=event.title,draft=draft.name,actor=actor.name)),text=True,capture_output=True,timeout=90)
+                    event=event.title,draft=draft.name if draft else None,draft_title=draft.title if draft else None,actor=actor.name)),text=True,capture_output=True,timeout=90)
             assert result.returncode==0,result.stdout[-1000:]+result.stderr[-3000:]
             print(result.stdout.strip())
         finally:

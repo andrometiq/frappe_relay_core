@@ -31,10 +31,5 @@ export function linkedTitle(doctype, name, fallback = doctype || 'Record') {
     if (!timer) timer = setTimeout(resolve, 0)
   }
   const title = titles.get(key)
-  // A provider/account fallback is not a channel title. Hide generated local
-  // account run keys while preserving configured titles and normal account names.
-  const caption = doctype === 'Relay Channel'
-    ? title?.replace(/^(WhatsApp|Telegram|Email) · c\d+-\d{16,20}$/, '$1')
-    : title
-  return readableName(caption, fallback)
+  return readableName(title, fallback)
 }
