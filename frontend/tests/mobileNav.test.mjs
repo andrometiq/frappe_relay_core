@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { navAllowed } from '../src/services/navigation.js'
-import { contactInfoRoute, isContactInfoRoute, splitMobileNav, unreadBadge } from '../src/services/mobileNav.js'
+import { contactInfoRoute, isContactInfoRoute, splitMobileNav } from '../src/services/mobileNav.js'
 import { mediumChips } from '../src/services/enabledChannels.js'
 
 const navigation = [
@@ -22,13 +22,6 @@ test('the tab bar uses the same gating as the sidebar', () => {
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, user)))
   assert.deepEqual(names(tabs), ['Messages', 'Tickets'])
   assert.deepEqual(names(more), ['Contacts'])
-})
-
-test('the inbox badge counts unread chats and marks more pages', () => {
-  assert.equal(unreadBadge({ items: [] }), '')
-  assert.equal(unreadBadge(undefined), '')
-  assert.equal(unreadBadge({ items: [{}, {}, {}] }), '3')
-  assert.equal(unreadBadge({ items: [{}, {}], next: { after: 'x' } }), '2+')
 })
 
 test('contact info is the chat route with info=1', () => {

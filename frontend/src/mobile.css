@@ -51,7 +51,7 @@
   .v1-shell.relay-shell .contact-directory>.directory-search{order:0;padding:4px 16px 0}
   .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1}
   .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
-  .v1-shell.relay-shell .v1-queues>button{flex:1 1 0;justify-content:center;min-width:0;min-height:32px;padding:0 4px;border-radius:6px;font-size:13px}
+  .v1-shell.relay-shell .v1-queues>button{flex:1 1 auto;justify-content:center;min-width:0;white-space:nowrap;min-height:32px;padding:0 4px;border-radius:6px;font-size:13px}
   .v1-shell.relay-shell .v1-queues>button[aria-pressed=true]{background:var(--relay-layer-strong);color:var(--ink-gray-9);box-shadow:var(--relay-shadow-1)}
   .v1-shell.relay-shell .v1-queues>button:nth-child(1){order:3}
   .v1-shell.relay-shell .v1-queues>button:nth-child(2){order:1}

@@ -6,13 +6,6 @@ export function splitMobileNav(items) {
   return { tabs, more: items.filter(item => !TAB_PAGES.includes(item.name)) }
 }
 
-// Inbox tab badge from one page of the unread queue: the number of unread chats, or "N+" when more pages exist.
-export function unreadBadge(page) {
-  const count = page?.items?.length || 0
-  if (!count) return ''
-  return page.next ? `${count}+` : String(count)
-}
-
 // The contact info page is the open chat route plus info=1, so Back returns to the chat.
 export function contactInfoRoute(hash) {
   const [path, query = ''] = hash.split('?')
