@@ -157,13 +157,15 @@ test('template lifecycle events refresh after an in-flight request without polli
   assert.equal(lists,2)
 })
 
-test('active navigation shows manager campaigns, omits calls and groups and includes manager triage',async()=>{
+test('navigation puts WhatsApp under Channels with manager campaigns, omits calls and groups and includes manager triage',async()=>{
   const text=await readFile(new URL('../src/SiteApp.vue',import.meta.url),'utf8')
   assert.match(text, /Contacts: defineAsyncComponent/)
   const contacts = await readFile(new URL('../src/components/ContactsWorkspace.vue', import.meta.url), 'utf8')
   assert.match(contacts, /IncomingWorkspace v-if="tab === 'unlinked' && capabilities.manage"/)
-  assert.match(text, /location.hash = '\/contacts\?tab=unlinked'/)
-  assert.match(text, /name: 'Campaigns', label: 'Campaigns', icon: 'send', manage: true/)
+  assert.match(text, /name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp'/)
+  assert.doesNotMatch(text, /name: 'Campaigns'/)
+  const section = await readFile(new URL('../src/components/whatsapp/WhatsAppSection.vue', import.meta.url), 'utf8')
+  assert.match(section, /name: 'campaigns', label: 'Bulk campaigns', show: capabilities.value.manage/)
   assert.doesNotMatch(text,/name:'Calls'|name:'Groups'|Calls:|Groups:/)
 })
 

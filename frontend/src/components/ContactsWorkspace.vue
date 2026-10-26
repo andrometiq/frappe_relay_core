@@ -9,8 +9,9 @@ import WorkspaceState from './WorkspaceState.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import IncomingWorkspace from './IncomingWorkspace.vue'
 import ContactDetails from './ContactDetails.vue'
+import { routeTab } from '../useViewRoute'
 const capabilities = inject('relayCapabilities')
-const tab = ref(new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'contacts')
+const tab = ref(routeTab(location.hash, 'contacts'))
 const rows = ref([]), query = ref(''), selected = ref(''), busy = ref(false), error = ref(''), more = ref(false)
 let generation = 0
 async function load(append = false) {
@@ -21,7 +22,7 @@ async function load(append = false) {
   } catch (e) { if (ticket === generation) { error.value = e.message; rows.value = []; selected.value = '' } }
   finally { if (ticket === generation) busy.value = false }
 }
-function readRoute() { tab.value = new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'contacts' }
+function readRoute() { tab.value = routeTab(location.hash, 'contacts') }
 onMounted(() => { load(); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++generation; window.removeEventListener('hashchange', readRoute) })
 useRealtimeRefresh(['Contact'], ['contacts', 'incoming'], () => load())
