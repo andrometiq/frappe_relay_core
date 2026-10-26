@@ -1,22 +1,20 @@
-import { ref, unref, watch } from 'vue'
+import { computed, onScopeDispose, shallowRef, unref, watch } from 'vue'
 import { coreApi } from '../services/coreApi'
-import { EMPTY_COUNTS, queueCountParams } from '../services/queueCounts'
-import { useRealtimeRefresh } from './useRealtimeRefresh'
+import { sharedQueueCounts } from '../services/queueCounts'
+import { watchRealtime } from './useRealtimeRefresh'
 
-// Live inbox queue counts; refetched on the inbox realtime events, never polled.
+// One live count per channel for the whole app; refetched on the inbox realtime events, never polled.
+const acquire = sharedQueueCounts(
+  params => coreApi('queue_counts.read', params),
+  load => watchRealtime(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'reads', 'permissions', 'contacts'], load),
+)
+
 export function useQueueCounts(medium) {
-  const counts = ref({ ...EMPTY_COUNTS })
-  let generation = 0
-  async function load() {
-    const ticket = ++generation
-    try {
-      const result = await coreApi('queue_counts.read', queueCountParams(unref(medium)))
-      if (ticket === generation) counts.value = { ...EMPTY_COUNTS, ...result }
-    } catch {
-      if (ticket === generation) counts.value = { ...EMPTY_COUNTS }
-    }
-  }
-  watch(() => unref(medium), load, { immediate: true })
-  useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'reads', 'permissions', 'contacts'], load)
-  return { counts, load }
+  const lease = shallowRef(null)
+  watch(() => unref(medium), value => {
+    lease.value?.release()
+    lease.value = acquire(value)
+  }, { immediate: true })
+  onScopeDispose(() => lease.value?.release())
+  return { counts: computed(() => lease.value.counts.value) }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { countLabel, queueCountParams } from '../src/services/queueCounts.js'
+import { EMPTY_COUNTS, countLabel, queueCountParams, sharedQueueCounts } from '../src/services/queueCounts.js'
 
 test('queue counts are exact below a thousand and hidden at zero', () => {
   assert.equal(countLabel(0), '')
@@ -19,4 +19,37 @@ test('counts follow the chosen channel and drop the all-channels choice', () => 
   assert.deepEqual(queueCountParams('Telegram'), { medium: 'Telegram' })
   assert.deepEqual(queueCountParams('all'), {})
   assert.deepEqual(queueCountParams(undefined), {})
+})
+
+test('views of one channel share a single count read and live refresh', async () => {
+  const reads = [], refreshers = [], stopped = []
+  const acquire = sharedQueueCounts(async params => { reads.push(params); return { unread: reads.length } },
+    load => { refreshers.push(load); return () => stopped.push(load) })
+  const badge = acquire('WhatsApp'), tabs = acquire('WhatsApp'), all = acquire('all')
+  await Promise.resolve()
+  assert.deepEqual(reads, [{ medium: 'WhatsApp' }, {}])
+  assert.equal(refreshers.length, 2)
+  assert.equal(badge.counts, tabs.counts)
+  assert.equal(badge.counts.value.unread, 1)
+  await refreshers[0]()
+  assert.equal(tabs.counts.value.unread, 3)
+  badge.release(); badge.release()
+  assert.equal(stopped.length, 0)
+  tabs.release()
+  assert.deepEqual(stopped, [refreshers[0]])
+  acquire('WhatsApp')
+  assert.equal(reads.length, 4)
+  all.release()
+})
+
+test('a failed count read shows empty counts instead of stale ones', async () => {
+  let fail = false
+  let refresh
+  const acquire = sharedQueueCounts(async () => { if (fail) throw Error('offline'); return { unread: 5 } }, load => { refresh = load; return () => {} })
+  const lease = acquire('WhatsApp')
+  await Promise.resolve(); await Promise.resolve()
+  assert.equal(lease.counts.value.unread, 5)
+  fail = true
+  await refresh()
+  assert.deepEqual(lease.counts.value, { ...EMPTY_COUNTS })
 })
