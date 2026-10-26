@@ -16,6 +16,8 @@ class RelaySettings(Document):
             value=self.get(field)
             if value and not set(value)=={'*'} and (not 32<=len(value)<=maximum or any(ord(c)<32 for c in value)):
                 frappe.throw('Credentials must contain at least 32 printable characters')
+        if not 0 <= (self.whatsapp_margin_percent or 0) <= 1000:
+            frappe.throw('WhatsApp margin percent must be between 0 and 1000')
         if self.transcription_provider:
             provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)
             if provider.provider!='OpenAI' or not provider.enabled:
