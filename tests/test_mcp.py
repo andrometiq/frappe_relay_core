@@ -99,6 +99,23 @@ class MCPTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.api.dispatch('tools/call',{'name':'relay.tickets.read','arguments':{'name':'RELAY-TKT-0000000001'}})
 
+    def test_number_sends_and_campaigns_use_the_checked_services(self):
+        import relay_core
+        api=types.SimpleNamespace(send_text=Mock(return_value={'status':'Submitted'}),send_media=Mock(),send_template=Mock(),
+                                  send_messages=Mock(return_value={'results':[]}))
+        campaigns=types.SimpleNamespace(create_with_rows=Mock(side_effect=PermissionError('denied')),append_rows=Mock(),read=Mock())
+        with patch.object(relay_core,'messaging_api',api,create=True),patch.object(relay_core,'bulk_campaigns',campaigns,create=True):
+            self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_text','arguments':{'number':'919876543210','body':'Hi','key':'k-1'}})
+            api.send_text.assert_called_once_with(number='919876543210',body='Hi',key='k-1')
+            self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_messages','arguments':{'items':[{'type':'text'}]}})
+            api.send_messages.assert_called_once_with(items=[{'type':'text'}])
+            with self.assertRaises(PermissionError):
+                self.api.dispatch('tools/call',{'name':'relay.campaigns.create','arguments':{'title':'Promo','rows':[{'phone':'1'}]}})
+            with self.assertRaises(ValueError):
+                self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_text','arguments':{'number':'919876543210'}})
+        names={tool['name'] for tool in self.api.TOOLS}
+        self.assertTrue({'relay.whatsapp.send_media','relay.whatsapp.send_template','relay.campaigns.append','relay.campaigns.read'}<=names)
+
     def test_telegram_mcp_uses_checked_facade_for_groups_and_topics(self):
         import relay_core
         service=types.SimpleNamespace(groups=Mock(return_value={'success':True}),execute=Mock(return_value={'success':True}),send=Mock(return_value={'accepted':1}))

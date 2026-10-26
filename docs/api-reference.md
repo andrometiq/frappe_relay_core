@@ -64,6 +64,51 @@ both records. Group administration and account-wide delivery management require
 manager access. Provider operation details belong in
 [Hub's reference](https://github.com/andrometiq/relay_hub/tree/develop/docs).
 
+## Send to a phone number
+
+These POST methods send one WhatsApp message to a phone number through the same action journal as the inbox. The message shows in the contact timeline. Use the number with its country code.
+
+| Method | Arguments |
+| --- | --- |
+| `relay_core.messaging_api.send_text` | `number, body, key=None, business_doctype=None, business_name=None` |
+| `relay_core.messaging_api.send_media` | `number, media_url, media_type, caption=None, filename=None, key=None, business_doctype=None, business_name=None` |
+| `relay_core.messaging_api.send_template` | `number, template, language, params=None, header_media_url=None, key=None, business_doctype=None, business_name=None` |
+| `relay_core.messaging_api.send_messages` | `items`, 1–100 objects of `{type: text \| media \| template, number, ...}` |
+
+- Each send returns `action, status, message, number, contact, key`. `send_messages` returns `results`, one per item, with `index`, `ok` and the send result or an `error`. A failed item does not stop the others.
+- A repeat with the same `key` is the same message. Without `key`, the key comes from the number and content, so the same content to the same number is sent once. Give a new `key` to send the same content again.
+- Text and media go only inside the 24-hour reply window. Outside it, the send fails with "Outside the 24-hour reply window". Use a template.
+- `media_type` is `image`, `video`, `audio` or `document`. `media_url` must be an HTTPS link. Only a document takes `filename`.
+- `params` is an object of named values (or field keys such as `button:0`), or a list of every value in template order. `header_media_url` fills an image, video or document header.
+- The number must be the main mobile number of a verified Contact that you can access. Without `business_doctype` and `business_name`, the send uses the Contact's primary (or only) business record.
+- An unknown number gets a new Contact linked to `business_doctype` and `business_name`. Only Relay Communication Managers can do this.
+
+```json
+{"number": "+919876543210", "template": "order_ready", "language": "en", "params": ["SO-25"], "key": "so-25-ready"}
+```
+
+## Campaigns from rows
+
+These POST methods create a bulk WhatsApp campaign from JSON rows instead of a sheet. They require Relay Communication Manager. The rows go through the same checks and send job as sheet rows.
+
+| Method | Arguments |
+| --- | --- |
+| `relay_core.bulk_campaigns.create_with_rows` | `title, rows, message=None, template_name=None, language=None, mapping=None, start=0, channel=None, reply_window_hours=72` |
+| `relay_core.bulk_campaigns.append_rows` | `name, rows`; only for a Draft campaign made with rows |
+| `relay_core.bulk_campaigns.read` (GET) | `name, after=None, status=None` |
+
+- `rows` is a list of 1–5000 objects of column name to value. Use `append_rows` for more rows, up to 100,000 for each campaign.
+- Give `template_name` and `language` for an approved template, or `message` for text or media, for example `{"kind": "photo", "caption": "Hi {{name}}"}`.
+- Without `mapping`, columns match by name as for a sheet: `phone` (or `mobile`, `number`), the template value names, `media_url` for a media message, and `header_media` (or `image url`) for a template media header. Positional template values take the other columns in order.
+- A row with an invalid number, a missing value, a link that is not HTTPS, a number that is already in the campaign, or an opted-out number is Skipped with the reason.
+- Over MCP a request holds at most 1 MiB, so send a long list in more calls.
+- `start=1` starts sending after the rows are added. Otherwise start it with `relay_core.bulk_campaigns.control` and `action=start`.
+
+```json
+{"title": "October offer", "template_name": "winter_offer", "language": "en", "start": 1,
+ "rows": [{"phone": "+919876543210", "customer_name": "Asha", "header_media": "https://cdn.example/asha.jpg"}]}
+```
+
 ## MCP
 
 POST `/api/method/relay_core.mcp.endpoint`. Supported protocol methods:
@@ -115,6 +160,8 @@ Call a typed reply:
 | `relay.messaging.send` | Typed reply/reaction bound to a readable source message |
 | `relay.messages.send`, `relay.messages.bulk` | Durable WhatsApp queue admission |
 | `relay.whatsapp.execute`, `relay.deliveries.list` | WhatsApp operations and delivery management |
+| `relay.whatsapp.send_text`, `relay.whatsapp.send_media`, `relay.whatsapp.send_template`, `relay.whatsapp.send_messages` | [Send to a phone number](#send-to-a-phone-number) |
+| `relay.campaigns.create`, `relay.campaigns.append`, `relay.campaigns.read` | [Campaigns from rows](#campaigns-from-rows); manager only |
 | `relay.telegram.send`, `relay.telegram.groups`, `relay.telegram.execute` | Verified Telegram sends and manager group operations |
 | `relay.email.send` | Account-level email send with CC/BCC; does not yet enforce Contact recipient lookup |
 | `relay.contacts.list`, `relay.conversation.read` | Business-contact lookup and WhatsApp history |

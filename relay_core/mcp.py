@@ -18,6 +18,7 @@ def obj(properties, required=()):
 STRING = {"type": "string"}
 MESSAGE = obj({"key": STRING, "operation": {"type": "string", "enum": ["messages.send", "messages.media", "messages.react", "messages.location", "messages.contacts", "templates.send"]},
                "arguments": {"type": "object"}, "contact": STRING, "business_doctype": STRING, "business_name": STRING}, ("key", "operation"))
+SEND_TO = {"number": STRING, "key": STRING, "business_doctype": STRING, "business_name": STRING}
 TOOLS = [
     {"name":"relay.flows.providers","description":"List configured AI Models available for permission-checked workflow generation.","inputSchema":obj({"query":STRING,"after":STRING})},
     {"name":"relay.flows.references","description":"Search valid WhatsApp channels, execution users, or business document types for an AI-authored workflow.","inputSchema":obj({"kind":{"type":"string","enum":["channel","execution_user","business_doctype"]},"query":STRING},("kind",))},
@@ -52,6 +53,13 @@ TOOLS = [
     {"name": "relay.deliveries.list", "description": "Read or cancel account deliveries; requires Relay Communication Manager.", "inputSchema": obj({"after": STRING, "cancel_id": STRING})},
     {"name": "relay.contacts.list", "description": "List accessible Contacts linked to a business record.", "inputSchema": obj({"doctype": STRING, "name": STRING, "after": STRING}, ("doctype", "name"))},
     {"name": "relay.conversation.read", "description": "Read conversation pages for an accessible business Contact.", "inputSchema": obj({"contact": STRING, "business_doctype": STRING, "business_name": STRING, "before": STRING, "after": STRING}, ("contact", "business_doctype", "business_name"))},
+    {"name": "relay.whatsapp.send_text", "description": "Send a WhatsApp text to a phone number inside its 24-hour reply window. An unknown number needs a manager and a business record for its new Contact. A repeated key (or the same content without a key) is one message.", "inputSchema": obj(dict(SEND_TO, body=STRING), ("number", "body"))},
+    {"name": "relay.whatsapp.send_media", "description": "Send a WhatsApp image, video, audio or document from an HTTPS link inside the 24-hour reply window.", "inputSchema": obj(dict(SEND_TO, media_url=STRING, media_type={"type": "string", "enum": ["image", "video", "audio", "document"]}, caption=STRING, filename=STRING), ("number", "media_url", "media_type"))},
+    {"name": "relay.whatsapp.send_template", "description": "Send an approved WhatsApp template to a phone number. params: object of named values, or a list of every value in template order.", "inputSchema": obj(dict(SEND_TO, template=STRING, language=STRING, params={"type": ["object", "array"]}, header_media_url=STRING), ("number", "template", "language"))},
+    {"name": "relay.whatsapp.send_messages", "description": "Send 1-100 WhatsApp messages; each item is {type: text|media|template, number, ...that send's arguments} and gets its own result.", "inputSchema": obj({"items": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 100}}, ("items",))},
+    {"name": "relay.campaigns.create", "description": "Create a bulk WhatsApp campaign from up to 5000 JSON rows (column -> value), with an approved template or a text/media message; start=1 sends at once. Relay Communication Manager only.", "inputSchema": obj({"title": STRING, "rows": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 5000}, "message": {"type": "object"}, "template_name": STRING, "language": STRING, "mapping": {"type": "object"}, "start": {"type": "integer", "enum": [0, 1]}, "channel": STRING, "reply_window_hours": {"type": "integer", "minimum": 1, "maximum": 720}}, ("title", "rows"))},
+    {"name": "relay.campaigns.append", "description": "Add up to 5000 more JSON rows to a Draft campaign created with rows. Relay Communication Manager only.", "inputSchema": obj({"name": STRING, "rows": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 5000}}, ("name", "rows"))},
+    {"name": "relay.campaigns.read", "description": "Read a bulk campaign's status, counts, issues and first recipients. Relay Communication Manager only.", "inputSchema": obj({"name": STRING, "after": STRING, "status": STRING}, ("name",))},
 ]
 
 
@@ -108,6 +116,13 @@ def dispatch(method, params):
             handlers[name] = flows.providers
         elif name == 'relay.flows.references':
             handlers[name] = flows.references
+    if name.startswith('relay.whatsapp.send_'):
+        from relay_core import messaging_api
+        handlers[name] = getattr(messaging_api, name.rsplit('.', 1)[-1])
+    if name.startswith('relay.campaigns.'):
+        from relay_core import bulk_campaigns
+        handlers.update({'relay.campaigns.create': bulk_campaigns.create_with_rows,
+                         'relay.campaigns.append': bulk_campaigns.append_rows, 'relay.campaigns.read': bulk_campaigns.read})
     if name == 'relay.messaging.send':
         from relay_core import messaging
         handlers[name] = messaging.send
