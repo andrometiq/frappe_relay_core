@@ -48,3 +48,32 @@ export function missingMapping(fields, mapping) {
   return fields.filter((field) => !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
     .map((field) => field.label);
 }
+
+// Message types a campaign can send: a template, text, or a media kind the WhatsApp channel registry offers.
+export function messageTypes(mediaKinds) {
+  const media = ["photo", "video", "document"].filter((kind) => mediaKinds.includes(kind));
+  return [{ value: "template", label: "Template" }, { value: "text", label: "Text" },
+    ...media.map((kind) => ({ value: kind, label: kind[0].toUpperCase() + kind.slice(1) }))];
+}
+
+export function campaignMessage(type, text) {
+  return type === "text" ? { kind: "text", body: text.trim() } : { kind: type, caption: text.trim() };
+}
+
+// Sheet columns a text or caption fills, in first-use order.
+export function placeholders(text) {
+  return [...new Set([...String(text || "").matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((match) => match[1]))];
+}
+
+export function messageLabel(campaign) {
+  if (campaign?.template_name) return campaign.template_name;
+  const kind = campaign?.message?.kind;
+  return kind ? kind[0].toUpperCase() + kind.slice(1) : { "messages.send": "Text", "messages.media": "Media" }[campaign?.operation] || "—";
+}
+
+export function windowNotice(window) {
+  if (!window) return "";
+  const total = window.open + window.closed;
+  return `${window.open.toLocaleString()} of ${total.toLocaleString()} numbers messaged you in the last 24 hours and can get this message.`
+    + (window.closed ? ` ${window.closed.toLocaleString()} rows will be marked Failed: Outside the 24-hour reply window.` : "");
+}
