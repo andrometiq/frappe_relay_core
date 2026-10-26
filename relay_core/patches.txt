@@ -1,1 +1,2 @@
 relay_core.patches.v1_0.use_linked_entity_names
+relay_core.patches.v1_0.grant_whatsapp_roles
