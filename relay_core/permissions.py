@@ -96,6 +96,7 @@ def after_migrate():
     frappe.db.add_index('Relay Notification', ['user','name'], 'relay_user_notifications')
     frappe.db.add_index('Relay Campaign Recipient', ['campaign','status','name'], 'relay_campaign_pending')
     frappe.db.add_index('Relay Ticket Notification', ['status','next_attempt'], 'relay_ticket_pending')
+    frappe.db.add_index('Relay Hub Event', ['projection_status','name'], 'relay_event_projection')
 
 
 def assignment_allowed(contact, user=None):

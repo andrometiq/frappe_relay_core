@@ -35,12 +35,11 @@ def retry_callback(method):
     return receive
 
 
-def insert_event(values, *, inline=False, received_ns=None):
+def insert_event(values, *, inline=False):
     token = callback_write.set(True)
     try:
         doc = frappe.get_doc(dict(values, doctype='Relay Hub Event'))
         doc.flags.relay_inline_projection = inline
-        doc.flags.relay_received_ns = received_ns
         return doc.insert(ignore_permissions=True)
     finally:
         callback_write.reset(token)
@@ -112,7 +111,7 @@ def receive(**_ignored):
                     frappe.throw('Conflicting Hub event')
                 continue
             doc = insert_event({'event_key':part_key,'account':account,'hub_event_id':str(event['id']),'payload':encoded},
-                inline=len(payload['events']) == 1 and single_text(part), received_ns=started)
+                inline=len(payload['events']) == 1 and single_text(part))
             projection_ms += doc.flags.get('relay_projection_ms', 0)
     # Frappe commits successful POST methods before returning the acknowledgement.
     # Per-user notifications avoid broadcasting event contents to all site users.
@@ -212,7 +211,7 @@ def receive_statuses(**_ignored):
         projection = {'entry':[{'changes':[{'value':{'statuses':statuses}}]}]}
         insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,
             'hub_event_id':str(payload['statuses'][-1]['event_id']),
-            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))}, received_ns=started)
+            'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['statuses']), 'timing': {'receive_ms': (time.time_ns() - started) / 1e6}}
 
 
