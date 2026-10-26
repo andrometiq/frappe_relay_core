@@ -78,3 +78,16 @@
   "sort_order": "DESC",
   "track_changes": 1
 }
+    {
+      "role": "WhatsApp Manager",
+      "read": 1,
+      "report": 1
+    },
+    },
+    {
+      "role": "WhatsApp User",
+      "read": 1
+    },
+    {
+      "role": "WhatsApp Multi-Channel User",
+      "read": 1

@@ -1,12 +1,13 @@
 """Team membership and assignment enforce the same boundary in Desk and APIs."""
 import frappe
-from relay_core.permissions import require_access, readable_contact, MANAGER, USER
+from relay_core.permissions import (require_access, readable_contact, MANAGER_ROLES,
+                                    RELAY_ROLES, WA_MULTI)
 
 
 def validate_agent(user):
     if not isinstance(user, str) or not frappe.db.get_value('User', user, 'enabled'):
         frappe.throw('Choose an enabled user')
-    if not set(frappe.get_roles(user)).intersection({MANAGER, USER, 'System Manager'}):
+    if not RELAY_ROLES.intersection(frappe.get_roles(user)):
         frappe.throw('The user needs a Relay communication role')
 
 
@@ -22,6 +23,18 @@ def validate_team(doc):
         if member.user in seen:
             frappe.throw('A user can only appear once in a team')
         seen.add(member.user)
+    validate_access(doc.get('access') or [])
+
+
+def validate_access(rows):
+    if len(rows) > 100:
+        frappe.throw('A team can list at most 100 viewers from other teams')
+    users = [row.user for row in rows]
+    if len(set(users)) != len(users):
+        frappe.throw('A viewer can only appear once in a team')
+    for user in users:
+        if not frappe.db.get_value('User', user, 'enabled') or WA_MULTI not in frappe.get_roles(user):
+            frappe.throw(f'{user} needs the {WA_MULTI} role to view other teams')
 
 
 def validate_assignment(doc):
@@ -58,14 +71,14 @@ def _agent_options(query, contact=None):
     """Filter candidates in SQL before applying the bounded search window."""
     user=frappe.qb.DocType('User');role=frappe.qb.DocType('Has Role')
     roles=frappe.qb.from_(role).select(role.parent).where(
-        (role.parenttype=='User') & role.role.isin([MANAGER,USER,'System Manager']))
+        (role.parenttype=='User') & role.role.isin(list(RELAY_ROLES)))
     condition=(user.enabled==1) & user.name.isin(roles)
     if contact:
         from relay_core.permissions import readable_contact
         readable_contact(contact)
         assignment=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},['team','assigned_to'],as_dict=True) or {}
         managers=frappe.qb.from_(role).select(role.parent).where(
-            (role.parenttype=='User') & role.role.isin([MANAGER,'System Manager']))
+            (role.parenttype=='User') & role.role.isin(list(MANAGER_ROLES)))
         allowed=(user.name=='Administrator') | user.name.isin(managers)
         if assignment.get('assigned_to'):
             allowed=allowed | (user.name==assignment['assigned_to'])
@@ -83,20 +96,33 @@ def _agent_options(query, contact=None):
 
 
 @frappe.whitelist(methods=['POST'])
-def save(title, members, name=None):
+def save(title, members, name=None, access=None):
+    """Leaving out access keeps the team's current viewers."""
     require_access(manage=True)
-    if isinstance(members,str): members=frappe.parse_json(members)
-    if not isinstance(members,list) or any(not isinstance(user,str) for user in members): frappe.throw('Invalid team members')
+    members=user_list(members,'Invalid team members')
     doc=frappe.get_doc('Relay Team',name) if name else frappe.new_doc('Relay Team')
-    doc.title=title;doc.set('members',[{'user':user} for user in members]);doc.save()
-    return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members]}
+    doc.title=title;doc.set('members',[{'user':user} for user in members])
+    if access is not None: doc.set('access',[{'user':user} for user in user_list(access,'Invalid team viewers')])
+    doc.save()
+    return team_payload(doc)
+
+
+def user_list(value, message):
+    if isinstance(value,str): value=frappe.parse_json(value)
+    if not isinstance(value,list) or any(not isinstance(user,str) for user in value): frappe.throw(message)
+    return value
+
+
+def team_payload(doc):
+    return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members],
+            'access':[row.user for row in doc.get('access') or []]}
 
 
 @frappe.whitelist(methods=['GET'])
 def read(name):
     require_access(manage=True)
     doc=frappe.get_doc('Relay Team',name);doc.check_permission('read')
-    return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members]}
+    return team_payload(doc)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -112,7 +138,9 @@ def assign(contact, team=None, assigned_to=None):
 def readable_filter_team(name):
     require_access()
     doc = frappe.get_doc('Relay Team', name)
-    if not doc.has_permission('read') and not any(row.user == frappe.session.user for row in doc.members):
+    user = frappe.session.user
+    viewer = WA_MULTI in frappe.get_roles() and any(row.user == user for row in doc.get('access') or [])
+    if not doc.has_permission('read') and not viewer and not any(row.user == user for row in doc.members):
         frappe.throw('This team is not available to you', frappe.PermissionError)
     return doc
 
@@ -126,6 +154,10 @@ def filter_options(query=''):
     team = frappe.qb.DocType('Relay Team')
     member = frappe.qb.DocType('Relay Team Member')
     search = frappe.qb.from_(team).select(team.name, team.title).where(team.title.like('%' + query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%'))
-    if not set(frappe.get_roles()).intersection({'System Manager', MANAGER}):
-        search = search.where(team.name.isin(frappe.qb.from_(member).select(member.parent).where((member.user == frappe.session.user) & (member.parenttype == 'Relay Team'))))
+    if not MANAGER_ROLES.intersection(frappe.get_roles()):
+        allowed = team.name.isin(frappe.qb.from_(member).select(member.parent).where((member.user == frappe.session.user) & (member.parenttype == 'Relay Team')))
+        if WA_MULTI in frappe.get_roles():
+            access = frappe.qb.DocType('Relay Team Access')
+            allowed = allowed | team.name.isin(frappe.qb.from_(access).select(access.parent).where((access.user == frappe.session.user) & (access.parenttype == 'Relay Team')))
+        search = search.where(allowed)
     return [{'value': row.name, 'label': row.title} for row in search.orderby(team.name).limit(30).run(as_dict=True)]

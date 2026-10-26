@@ -18,11 +18,19 @@
       "fieldtype": "Table",
       "options": "Relay Team Member",
       "reqd": 1
+    },
+    {
+      "fieldname": "access",
+      "label": "Viewers from other teams",
+      "fieldtype": "Table",
+      "options": "Relay Team Access",
+      "description": "WhatsApp Multi-Channel Users who may view this team's conversations."
     }
   ],
   "field_order": [
     "title",
-    "members"
+    "members",
+    "access"
   ],
   "permissions": [
     {
@@ -38,9 +46,16 @@
       "write": 1,
       "create": 1,
       "delete": 1
+    },
+    {
+      "role": "WhatsApp Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
     }
   ],
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-25 12:00:00.000000"
+  "modified": "2026-10-26 12:00:00.000000"
 }

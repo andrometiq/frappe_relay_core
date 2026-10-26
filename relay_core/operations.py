@@ -16,7 +16,7 @@ JOBS = {
 
 @frappe.whitelist(methods=['GET'])
 def recovery_status():
-    require_access(manage=True)
+    require_access(configure=True)
     from frappe.utils.scheduler import is_scheduler_inactive
     inactive=bool(is_scheduler_inactive(verbose=False))
     reasons=[]
@@ -55,7 +55,7 @@ def recovery_status():
 @frappe.whitelist(methods=['GET'])
 def callback_status():
     """Bounded account-scoped receipt/projection status, without event payloads."""
-    require_access(manage=True)
+    require_access(configure=True)
     from relay_core.settings import value
     filters = {'account': value('relay_hub_account')}
     latest = frappe.get_all('Relay Hub Event', filters=filters,

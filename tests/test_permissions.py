@@ -75,3 +75,106 @@ class PermissionsTest(unittest.TestCase):
                     if permission['role']!='System Manager':
                         self.assertFalse(permission.get('write'))
                         self.assertFalse(permission.get('create'))
+
+
+class WhatsAppRoleTests(unittest.TestCase):
+    """New WhatsApp roles and the old Relay roles grant the same access."""
+
+    def fake(self, roles, assignment=None, members=(), viewers=()):
+        def denied(*args): raise PermissionError()
+        def exists(doctype, filters):
+            rows = members if doctype == 'Relay Team Member' else viewers
+            return (filters['parent'], filters['user']) in rows
+        db = types.SimpleNamespace(get_value=lambda *args, **kwargs: assignment, exists=exists, escape=lambda value: repr(value))
+        return types.SimpleNamespace(get_roles=lambda user=None: list(roles), session=types.SimpleNamespace(user='agent@example.com'),
+                                     throw=denied, PermissionError=PermissionError, db=db)
+
+    def scoped(self, frappe):
+        groups = types.SimpleNamespace(responsible=lambda contact, user: False, responsibility_condition=lambda user, contact: '0=1')
+        return patch.dict(sys.modules, frappe=frappe, **{'relay_core.business_groups': groups})
+
+    def test_require_access_tiers_per_role(self):
+        from relay_core import permissions
+        cases = {
+            'WhatsApp User': (True, False, False), 'Relay Communication User': (True, False, False),
+            'WhatsApp Multi-Channel User': (True, False, False), 'WhatsApp Manager': (True, True, False),
+            'Relay Communication Manager': (True, True, False), 'System Manager': (True, True, True),
+            'Guest': (False, False, False),
+        }
+        for role, (use, manage, configure) in cases.items():
+            with patch.dict(sys.modules, frappe=self.fake([role])):
+                for allowed, kwargs in ((use, {}), (manage, {'manage': True}), (configure, {'configure': True})):
+                    if allowed:
+                        permissions.require_access(**kwargs)
+                    else:
+                        with self.assertRaises(PermissionError, msg=(role, kwargs)):
+                            permissions.require_access(**kwargs)
+
+    def test_install_roles_creates_whatsapp_roles(self):
+        from relay_core import permissions
+        created = []
+        fake = types.SimpleNamespace(db=types.SimpleNamespace(exists=lambda doctype, name: name == permissions.MANAGER),
+                                     get_doc=lambda values: types.SimpleNamespace(insert=lambda: created.append(values['role_name'])))
+        with patch.dict(sys.modules, frappe=fake):
+            permissions.install_roles()
+        self.assertEqual(created, [permissions.USER, permissions.WA_MANAGER, permissions.WA_USER,
+                                   permissions.WA_MULTI, 'Relay Hub Service'])
+
+    def test_manager_sees_all_and_user_only_own_team(self):
+        from relay_core import permissions
+        team_row = types.SimpleNamespace(team='Sales-001', assigned_to=None)
+        for role in ('WhatsApp Manager', 'Relay Communication Manager'):
+            with self.scoped(self.fake([role], team_row)):
+                self.assertTrue(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+                self.assertEqual(permissions.assignment_condition('agent@example.com'), '')
+        for role in ('WhatsApp User', 'Relay Communication User'):
+            with self.scoped(self.fake([role], team_row, members={('Sales-001', 'agent@example.com')})):
+                self.assertTrue(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+            with self.scoped(self.fake([role], team_row)):
+                self.assertFalse(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+        with self.scoped(self.fake(['Guest'], team_row)):
+            self.assertFalse(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+            self.assertEqual(permissions.assignment_condition('agent@example.com'), '1=0')
+
+    def test_multi_channel_user_sees_listed_teams_only(self):
+        from relay_core import permissions
+        assigned = types.SimpleNamespace(team='Support-001', assigned_to='other@example.com')
+        viewers = {('Support-001', 'agent@example.com')}
+        with self.scoped(self.fake([permissions.WA_MULTI], assigned, viewers=viewers)):
+            self.assertTrue(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+            condition = permissions.assignment_condition('agent@example.com')
+            self.assertIn('`tabRelay Team Access`', condition)
+        with self.scoped(self.fake([permissions.WA_MULTI], assigned)):
+            self.assertFalse(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+        # Access rows count only for the Multi-Channel role.
+        with self.scoped(self.fake([permissions.WA_USER], assigned, viewers=viewers)):
+            self.assertFalse(permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com'))
+            self.assertNotIn('`tabRelay Team Access`', permissions.assignment_condition('agent@example.com'))
+
+    def test_has_app_permission_for_every_relay_role(self):
+        from relay_core import permissions
+        for role in permissions.RELAY_ROLES:
+            with patch.dict(sys.modules, frappe=self.fake([role])):
+                self.assertTrue(permissions.has_app_permission())
+        with patch.dict(sys.modules, frappe=self.fake(['Employee'])):
+            self.assertFalse(permissions.has_app_permission())
+
+    def test_whatsapp_roles_follow_the_old_roles_on_doctypes(self):
+        import json
+        from pathlib import Path
+        aliases = {'Relay Communication Manager': ['WhatsApp Manager'],
+                   'Relay Communication User': ['WhatsApp User', 'WhatsApp Multi-Channel User']}
+        for path in Path('relay_core/relay_core').glob('**/*.json'):
+            doc = json.loads(path.read_text())
+            rows = doc.get('permissions') or doc.get('roles') or []
+            if not isinstance(rows, list):
+                continue
+            by_role = {row.get('role'): row for row in rows if isinstance(row, dict)}
+            for old, news in aliases.items():
+                for new in news:
+                    if old in by_role:
+                        self.assertEqual({**by_role[old], 'role': new}, by_role.get(new), (path, new))
+
+    def test_grant_patch_is_registered(self):
+        from pathlib import Path
+        self.assertIn('relay_core.patches.v1_0.grant_whatsapp_roles', Path('relay_core/patches.txt').read_text().split())

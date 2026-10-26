@@ -109,7 +109,16 @@
    "role": "Relay Communication Manager"
   },
   {
+   "role": "WhatsApp Manager"
+  },
+  {
    "role": "Relay Communication User"
+  },
+  {
+   "role": "WhatsApp User"
+  },
+  {
+   "role": "WhatsApp Multi-Channel User"
   }
  ],
  "charts": [],

@@ -1,6 +1,6 @@
 """Installed automation configuration; API secrets are write-only."""
 import frappe
-from relay_core.permissions import require_access
+from relay_core.permissions import require_access, AGENT_MANAGER_ROLES
 
 POLICY_FIELDS=('ai_model','channel','provider','fallback_provider','execution_user','enabled','mode','allow_ticket','allow_reply','business_doctype','daily_limit','instructions','reply_ids','fallback_reply','allow_images','allow_voice','transcription_provider','allow_report','allow_summary','allow_translation')
 
@@ -48,7 +48,7 @@ def references(kind, query=''):
         'source_message': ('Relay Message', ['name'], {'direction':'Incoming'}),
         'channel': ('Relay Channel', ['name', 'channel'], {}),
         'provider': ('AI Model', ['name', 'model_id'], {'enabled': 1}),
-        'execution_user': ('User', ['name', 'full_name'], [['User', 'enabled', '=', 1], ['Has Role', 'role', '=', 'Relay Communication Manager']]),
+        'execution_user': ('User', ['name', 'full_name'], [['User', 'enabled', '=', 1], ['Has Role', 'role', 'in', list(AGENT_MANAGER_ROLES)]]),
         'reply': ('Relay Canned Reply', ['name', 'language'], {'published': 1, 'ai_enabled': 1}),
     }
     if not isinstance(query, str) or len(query) > 80:
@@ -65,5 +65,5 @@ def references(kind, query=''):
     if kind == 'execution_user':
         rows = [row for row in rows if row.name not in ('Guest', 'Administrator')
                 and 'System Manager' not in frappe.get_roles(row.name)
-                and 'Relay Communication Manager' in frappe.get_roles(row.name)]
+                and AGENT_MANAGER_ROLES.intersection(frappe.get_roles(row.name))]
     return [{'value': row.name, 'label': ' · '.join(str(row[field]) for field in fields if row.get(field))} for row in rows]

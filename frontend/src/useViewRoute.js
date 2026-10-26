@@ -42,3 +42,15 @@ export function useViewRoute(views, fallback) {
   onBeforeUnmount(() => window.removeEventListener('hashchange', receive))
   return view
 }
+
+// Drill-in views: opening from a list adds one history entry and switching replaces it, so Back returns to the list.
+export function openRoute(route, replace) {
+  if (location.hash === route) return
+  if (replace) window.history.replaceState(window.history.state, '', route)
+  else window.history.pushState({ relayList: true }, '', route)
+}
+
+export function closeRoute(listRoute) {
+  if (window.history.state?.relayList) window.history.back()
+  else if (location.hash !== listRoute) window.history.replaceState(null, '', listRoute)
+}

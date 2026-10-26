@@ -1,6 +1,6 @@
 import frappe
 from frappe.model.document import Document
-from relay_core.permissions import require_access
+from relay_core.permissions import require_access, AGENT_MANAGER_ROLES
 
 
 class InternalRecord(Document):
@@ -49,8 +49,8 @@ class AutomationPolicy(Document):
             frappe.throw('Execution user must not be a System Manager')
         if not frappe.db.get_value('User', self.execution_user, 'enabled'):
             frappe.throw('Execution user must be enabled')
-        if 'Relay Communication Manager' not in frappe.get_roles(self.execution_user):
-            frappe.throw('Execution user needs Relay Communication Manager access')
+        if not AGENT_MANAGER_ROLES.intersection(frappe.get_roles(self.execution_user)):
+            frappe.throw('Execution user needs WhatsApp Manager access')
         if not 1 <= int(self.daily_limit or 0) <= 1000:
             frappe.throw('Daily limit must be between 1 and 1000')
         if len(self.instructions or '') > 4000:

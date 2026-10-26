@@ -121,8 +121,12 @@
     {
       "role": "Relay Communication Manager",
       "read": 1
+    },
+    {
+      "role": "WhatsApp Manager",
+      "read": 1
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-25 12:00:00.000000"
+  "modified": "2026-10-26 12:00:00.000000"
 }

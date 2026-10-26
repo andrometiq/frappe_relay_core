@@ -96,7 +96,30 @@
       "delete": 1
     },
     {
+      "role": "WhatsApp Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
       "role": "Relay Communication User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "WhatsApp User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "if_owner": 1
+    },
+    {
+      "role": "WhatsApp Multi-Channel User",
       "read": 1,
       "write": 1,
       "create": 1,
