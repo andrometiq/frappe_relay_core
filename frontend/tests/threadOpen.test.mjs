@@ -80,3 +80,12 @@ test('returning to a conversation applies the rule again instead of a cached scr
   assert.equal(calls.filter(call => call.method === 'inbox.view_state').length, 3)
   assert.equal(state.restored.value, name(29))
 })
+
+test('opening a conversation reads channels, pending sends and the saved view in one round trip', async t => {
+  const { state, calls } = fixture(t, () => ({ channel: '', first_unread: name(26) }))
+  const opening = state.open('RELAY-CON-0000000001')
+  assert.deepEqual(calls.map(call => call.method).sort(), ['api.conversation_channels', 'inbox.view_state', 'messaging.pending_messages'])
+  await opening
+  assert.deepEqual(calls.slice(3).map(call => call.method).sort(), ['api.message_context', 'api.messages'])
+  assert.equal(state.restored.value, name(26))
+})
