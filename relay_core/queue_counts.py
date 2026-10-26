@@ -29,6 +29,8 @@ def read(medium=None):
 
 
 def get_counts(medium=None):
+    if medium and not medium_channels(medium):
+        return dict.fromkeys(('all', 'mine', 'unassigned', 'unread', 'unread_messages'), 0)
     contact = frappe.qb.DocType('Relay Contact')
     assignment = frappe.qb.DocType('Relay Conversation Assignment')
     message = frappe.qb.DocType('Relay Message')
@@ -36,15 +38,24 @@ def get_counts(medium=None):
         assignment.assigned_to == frappe.session.user)
     assigned = frappe.qb.from_(assignment).select(assignment.relay_contact).where(
         (Coalesce(assignment.assigned_to, '') != '') | (Coalesce(assignment.team, '') != ''))
-    unread_contacts = unread_messages(medium, ['relay_contact'])
-    unread_total = unread_messages(medium, ['name']).where(message.relay_contact.isin(visible_contacts(medium)))
+    # One pass over unread messages gives both the conversation and the message total.
+    unseen = unread_messages(medium, ['relay_contact']).where(message.relay_contact.isin(visible_contacts()))
+    if medium:
+        # EXISTS, not a nested IN: MariaDB then materializes the channel's contacts once instead of
+        # copying every unread row into a duplicate-weedout table.
+        from pypika.terms import ExistsCriterion
+        endpoints = frappe.qb.DocType('Relay Contact Endpoint')
+        unseen = unseen.where(ExistsCriterion(medium_contacts(medium).where(endpoints.relay_contact == message.relay_contact)))
+    unseen = unseen.as_('unseen')
+    conversations, messages = frappe.qb.from_(unseen).select(
+        Count(unseen.relay_contact).distinct(), Count('*')).run()[0]
 
     return {
         'all': count(visible_contacts(medium)),
         'mine': count(visible_contacts(medium).where(contact.name.isin(mine))),
         'unassigned': count(visible_contacts(medium).where(contact.name.notin(assigned))),
-        'unread': count(visible_contacts(medium).where(contact.name.isin(unread_contacts))),
-        'unread_messages': count(unread_total),
+        'unread': int(conversations),
+        'unread_messages': int(messages),
     }
 
 
@@ -52,11 +63,13 @@ def visible_contacts(medium=None):
     """Relay Contacts under the same permission query and medium filter as inbox.directory."""
     query = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False, order_by='')
     if medium:
-        contact = frappe.qb.DocType('Relay Contact')
-        endpoints = frappe.qb.DocType('Relay Contact Endpoint')
-        query = query.where(contact.name.isin(
-            frappe.qb.from_(endpoints).select(endpoints.relay_contact).where(endpoints.channel.isin(medium_channels(medium)))))
+        query = query.where(frappe.qb.DocType('Relay Contact').name.isin(medium_contacts(medium)))
     return query
+
+
+def medium_contacts(medium):
+    endpoints = frappe.qb.DocType('Relay Contact Endpoint')
+    return frappe.qb.from_(endpoints).select(endpoints.relay_contact).where(endpoints.channel.isin(medium_channels(medium)))
 
 
 def unread_messages(medium, fields):
@@ -68,8 +81,8 @@ def unread_messages(medium, fields):
 
 
 def medium_channels(medium):
-    channels = frappe.qb.DocType('Relay Channel')
-    return frappe.qb.from_(channels).select(channels.name).where(channels.channel == medium)
+    # Literal names, not a subquery: nested semi-joins made MariaDB copy every unread row into a weedout table.
+    return frappe.get_all('Relay Channel', filters={'channel': medium}, pluck='name', limit_page_length=0)
 
 
 def count(query):
