@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="robots" content="noindex,nofollow">
   <title>Relay Core</title>
+  {% for script in relay_preloads %}<link rel="modulepreload" href="{{ script | e }}">{% endfor %}
   {% for stylesheet in relay_styles %}<link rel="stylesheet" href="{{ stylesheet | e }}">{% endfor %}
 </head>
 <body>

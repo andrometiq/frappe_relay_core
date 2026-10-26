@@ -21,6 +21,7 @@ def get_context(context):
     styles = entry.get('css', []) or ([assets['style.css']['file']] if 'style.css' in assets else [])
     context.update(no_cache=1, title='Relay Core',
         relay_script='/assets/relay_core/relay/' + entry['file'],
+        relay_preloads=['/assets/relay_core/relay/' + assets[name]['file'] for name in entry.get('imports', [])],
         relay_styles=['/assets/relay_core/relay/' + name for name in styles],
         relay_csrf=get_csrf_token(), relay_user=frappe.session.user,
         relay_capabilities=frappe.as_json(capabilities(), indent=None),

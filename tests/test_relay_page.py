@@ -1,4 +1,4 @@
-"""The /relay page renders the shell's capabilities so the browser needs no extra request."""
+"""The /relay page renders the shell's capabilities and preloads its chunks so the browser needs no extra round trip."""
 import json
 import tempfile
 import unittest
@@ -15,7 +15,8 @@ class RelayPageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             manifest = Path(folder, 'public', 'relay', '.vite')
             manifest.mkdir(parents=True)
-            manifest.joinpath('manifest.json').write_text(json.dumps({'site.html': {'file': 'assets/site-1.js', 'css': ['assets/style-1.css']}}))
+            manifest.joinpath('manifest.json').write_text(json.dumps({'site.html': {'file': 'assets/site-1.js', 'css': ['assets/style-1.css'], 'imports': ['_vendor-1.js']},
+                '_vendor-1.js': {'file': 'assets/vendor-1.js'}}))
             page = SimpleNamespace(session=SimpleNamespace(user='agent@example.com'), local=SimpleNamespace(site='relay.example'),
                 conf={}, request=None, as_json=frappe.as_json, get_app_path=lambda app, *parts: str(Path(folder, *parts)))
             granted = {'manage': False, 'enabled_channels': ['WhatsApp']}
@@ -24,6 +25,7 @@ class RelayPageTests(unittest.TestCase):
                 context = relay.get_context(frappe._dict())
         self.assertEqual(json.loads(context.relay_capabilities), granted)
         self.assertEqual(context.relay_script, '/assets/relay_core/relay/assets/site-1.js')
+        self.assertEqual(context.relay_preloads, ['/assets/relay_core/relay/assets/vendor-1.js'])
 
 
 if __name__ == '__main__':
