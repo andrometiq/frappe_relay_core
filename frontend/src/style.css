@@ -697,7 +697,7 @@
 .workspace-heading p { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .workspace-heading-actions { width:auto; flex:none; }
 .workspace-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; min-width:0; }
-.workspace-toolbar .automation-chips { flex:1 0 auto; justify-content:flex-end; }
+.workspace-toolbar .automation-chips { flex:1 0 auto; justify-content:flex-start; }
 .automation-filter-bar { padding:6px 8px; gap:8px; flex-wrap:nowrap; overflow-x:auto; }
 .automation-filter-bar .automation-chips { flex:0 0 auto; }
 .automation-filter-bar > .relay-field { flex:1 0 130px; }
