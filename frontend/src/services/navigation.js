@@ -9,9 +9,9 @@ export function navAllowed(item, capabilities) {
 
 // WhatsApp section tabs, shared by the sidebar, the phone More sheet and the section's own tab bar.
 const WHATSAPP_SECTIONS = [
-  { name: 'templates', label: 'Templates', icon: 'file-text', feature: 'templates' },
+  { name: 'templates', label: 'Templates', icon: 'layout', feature: 'templates' },
   { name: 'campaigns', label: 'Bulk campaigns', icon: 'megaphone', manage: true, feature: 'bulk_campaigns' },
-  { name: 'forms', label: 'Forms', icon: 'clipboard-list', manage: true, feature: 'forms' },
+  { name: 'forms', label: 'Forms', icon: 'file-text', manage: true, feature: 'forms' },
   { name: 'billing', label: 'Billing', icon: 'credit-card', billing: true },
 ]
 

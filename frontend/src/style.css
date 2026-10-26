@@ -900,7 +900,16 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .relay-dialog__close{width:32px;height:32px;border-radius:6px;color:var(--relay-ink-2)}.relay-dialog__close:hover{background:var(--relay-hover)}
 
 /* Shell: titlebar, navigation and the content layer */
-.v1-shell.relay-shell{background:transparent}
+.v1-shell.relay-shell{background:transparent;font-size:inherit}
+.relay-input-suffix{display:flex;align-items:center;flex:none;padding-right:8px}
+.relay-input-suffix kbd{padding:1px 6px;border:1px solid var(--relay-stroke-strong);border-radius:4px;color:var(--relay-ink-3);font:11px var(--relay-font)}
+:is(.relay-titlebar-search,.directory-search) .relay-input::placeholder{color:var(--relay-ink-3)}
+.nav-row{position:relative}
+.nav-chevron{position:absolute;top:50%;right:4px;display:grid;place-items:center;width:28px;height:28px;border-radius:5px;color:var(--relay-ink-3);transform:translateY(-50%)}
+.nav-chevron:hover{background:var(--relay-hover)}
+.nav-chevron svg{transition:transform var(--relay-fast) var(--relay-ease)}
+.nav-chevron[aria-expanded=false] svg{transform:rotate(-90deg)}
+.v1-shell.relay-shell .nav-item[data-channel=WhatsApp] svg{color:#25a35a}
 .v1-shell.relay-shell .relay-brand{display:flex;align-items:center;gap:8px;height:auto;margin:0;padding:0;color:var(--relay-ink);font-size:12px;font-weight:600;letter-spacing:0}
 .relay-logo{display:grid;place-items:center;width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,var(--relay-accent),#8a5cf6);color:#fff}
 .relay-logo svg{width:11px;height:11px;stroke-width:2.2}
@@ -927,6 +936,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
   .v1-shell.relay-shell{grid-template-columns:232px minmax(0,1fr);grid-template-rows:40px minmax(0,1fr);padding:0}
   .v1-shell.relay-shell>.v1-header{grid-column:1 / -1;gap:10px;height:40px;min-height:40px;padding:0 8px 0 14px;border:0;background:transparent;color:var(--relay-ink-2);font-size:12px}
   .v1-shell.relay-shell>.v1-header>h1{display:none}
+  .v1-shell.relay-shell>.v1-header>.ml-auto{margin-left:0}
   .relay-titlebar-search{width:420px;max-width:40vw;margin:0 auto}
   .relay-titlebar-search .relay-input-shell{min-height:30px;height:30px;gap:0;border-radius:6px;background:var(--relay-layer);color:var(--relay-ink-3)}
   .relay-titlebar-search .relay-input{min-height:28px;font-size:12px}

@@ -54,7 +54,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
   </header>
   <form v-if="mode !== 'business'" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
     <Teleport to="#relay-titlebar-search" :disabled="isMobile" defer>
-      <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
+      <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template><template v-if="!isMobile" #suffix><kbd>Ctrl K</kbd></template></TextInput>
     </Teleport>
   </form>
   <div v-if="mode !== 'business'" class="inbox-channel-chips" role="group" aria-label="Channel">

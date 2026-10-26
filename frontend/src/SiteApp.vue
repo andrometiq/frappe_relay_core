@@ -13,7 +13,7 @@ import MobileTabBar from './components/shell/MobileTabBar.vue'
 import { useMobileLayout } from './composables/useMobileLayout'
 import { useQueueCounts } from './composables/useQueueCounts'
 import { countLabel } from './services/queueCounts'
-import { defaultMedium } from './services/enabledChannels'
+import { defaultMedium, pageCapabilities } from './services/enabledChannels'
 
 const location = window.location
 const views = {
@@ -29,21 +29,22 @@ const views = {
 }
 const navigation = [
   { name: 'Messages', label: 'Inbox', icon: 'inbox' },
-  { name: 'Contacts', label: 'Contacts & links', icon: 'users' },
   { name: 'Tickets', label: 'Tickets', icon: 'bookmark' },
-  { name: 'Skills', label: 'AI & skills', icon: 'bot', configure: true },
-  { name: 'Business events', label: 'Business events', icon: 'zap', configure: true },
+  { name: 'Contacts', label: 'Contacts & Links', icon: 'users' },
   { name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp' },
-  { name: 'Teams', label: 'Teams & access', icon: 'user-check', teams: true, group: 'Admin' },
-  { name: 'Settings', label: 'Settings & setup', icon: 'settings', configure: true, group: 'Admin' },
-  { name: 'Activity', label: 'Activity & health', icon: 'activity', configure: true, group: 'Admin' },
+  { name: 'Business events', label: 'Business events', icon: 'zap', configure: true, group: 'System manager' },
+  { name: 'Skills', label: 'AI skills', icon: 'bot', configure: true, group: 'System manager' },
+  { name: 'Settings', label: 'Settings & Setup', icon: 'settings', configure: true, group: 'System manager' },
+  { name: 'Activity', label: 'Activity & Health', icon: 'activity', configure: true, group: 'System manager' },
+  { name: 'Teams', label: 'Teams & Access', icon: 'user-check', teams: true, group: 'System manager' },
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
-const capabilities = ref({ manage: false, configure: false, teams: false, billing: false, multi_team: false }), ready = ref(false)
+const rendered = pageCapabilities(document.getElementById('app'))
+const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false }), ready = ref(Boolean(rendered))
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))
-const menu = computed(() => ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.value.filter(item => (item.group || '') === group) })).filter(section => section.items.length))
+const menu = computed(() => ['', 'Channels', 'System manager'].map(group => ({ group, items: visible.value.filter(item => (item.group || '') === group) })).filter(section => section.items.length))
 const isMobile = useMobileLayout(), moreOpen = ref(false)
 const { counts: queueCounts } = useQueueCounts(computed(() => defaultMedium(capabilities.value)))
 const inboxBadge = computed(() => countLabel(queueCounts.value.unread))
@@ -51,7 +52,8 @@ const sections = computed(() => whatsappSections(capabilities.value))
 const hash = ref(location.hash)
 const section = computed(() => view.value === 'WhatsApp' ? routeTab(hash.value, 'templates') : '')
 const subActive = name => section.value === name
-const itemActive = item => view.value === item.name && !(item.name === 'WhatsApp' && sections.value.some(row => subActive(row.name)))
+const whatsappOpen = ref(true)
+const itemActive = item => view.value === item.name && !(item.name === 'WhatsApp' && whatsappOpen.value && sections.value.some(row => subActive(row.name)))
 function openSection(name) { location.hash = whatsappRoute(name) }
 function openNavigation() {
   if (isMobile.value) moreOpen.value = true
@@ -61,6 +63,7 @@ const user = window.frappe?.session?.user || document.getElementById('app')?.dat
 const userTitle = computed(() => linkedTitle('User', user, 'Account'))
 provide('relayCapabilities', capabilities)
 async function initialize() {
+  if (ready.value) return
   error.value = ''
   try { capabilities.value = await coreApi('api.capabilities'); ready.value = true }
   catch (e) { error.value = e.message }
@@ -83,7 +86,14 @@ function trapNavigation(event) {
 }
 watch(mobile, async value => { if (value) { await nextTick(); document.querySelector('.mobile-nav-open button')?.focus() } })
 watch(view, () => { if (mobile.value) closeNavigation() })
-onMounted(() => { startRealtime(); initialize(); window.addEventListener('hashchange', () => { hash.value = location.hash }) })
+function focusSearch(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return
+  const input = document.querySelector('#relay-titlebar-search input')
+  if (!input) return
+  event.preventDefault()
+  input.focus()
+}
+onMounted(() => { startRealtime(); initialize(); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
@@ -105,11 +115,15 @@ onErrorCaptured(e => {
       <nav v-for="section in menu" :key="section.group" class="relay-nav-section" :aria-label="section.group || 'Workspace'">
         <p v-if="section.group" class="relay-nav-group" aria-hidden="true">{{ section.group }}</p>
         <template v-for="item in section.items" :key="item.name">
-          <button class="nav-item" :class="{ active: itemActive(item) }" :aria-current="itemActive(item) ? 'page' : undefined" @click="view = item.name">
-            <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
-            <span v-if="item.name === 'Messages' && inboxBadge" class="nav-count" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span>
-          </button>
-          <template v-if="item.name === 'WhatsApp'">
+          <div class="nav-row">
+            <button class="nav-item" :class="{ active: itemActive(item) }" :data-channel="item.channel" :aria-current="itemActive(item) ? 'page' : undefined" @click="view = item.name">
+              <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
+              <span v-if="item.name === 'Messages' && inboxBadge" class="nav-count" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span>
+            </button>
+            <button v-if="item.name === 'WhatsApp' && sections.length" type="button" class="nav-chevron" :aria-expanded="whatsappOpen"
+              :aria-label="whatsappOpen ? 'Hide WhatsApp pages' : 'Show WhatsApp pages'" @click="whatsappOpen = !whatsappOpen"><FeatherIcon name="chevron-down" :size="12" /></button>
+          </div>
+          <template v-if="item.name === 'WhatsApp' && whatsappOpen">
             <button v-for="row in sections" :key="row.name" class="nav-item nav-sub" :class="{ active: subActive(row.name) }"
               :aria-current="subActive(row.name) ? 'page' : undefined" @click="openSection(row.name)">
               <FeatherIcon :name="row.icon" class="h-4 w-4" /><span>{{ row.label }}</span>
