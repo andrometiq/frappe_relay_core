@@ -55,6 +55,9 @@ mapping. Rebuild these ignored assets for each frontend release.
 
 Run automation on its own worker: `bench worker --queue default`. Run message
 and receipt projection separately with `bench worker --queue short,long`.
+Each projection queue has one drain per site: a callback wakes it once, and it
+projects Pending events in arrival order until none remain. Run `bench migrate`
+after deploying it to add the Pending event index.
 Do not let a worker consume both `default` and either projection queue: one slow
 AI request would then occupy projection capacity. No custom queue configuration
 is required. Incoming-message hooks defer policy reads and intent creation until

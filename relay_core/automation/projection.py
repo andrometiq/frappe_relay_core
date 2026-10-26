@@ -1,14 +1,20 @@
 """Verified Hub events -> bounded, deduplicated Core message projection."""
 import hashlib
 import json
+import math
 import time
-from datetime import timezone
 import frappe
+from relay_core.automation.queue import BATCH_SIZE, TURN_SECONDS, Drain
 from relay_core.automation.provenance import conversation_key, telegram_message, email_context
 from relay_core.message_types import normalize, preview, referral
 from relay_core.message_updates import apply_updates, provider_key
 from relay_core.inbound import retry_callback
 from relay_core.realtime import one_incoming_change
+
+DRAINS = {queue: Drain(queue, 'relay_core.automation.projection.drain', signal=f'relay-projection-wake:{queue}',
+                       job=f'relay-projection-drain-{queue}', lock=f'relay-projection-{queue}', kwargs={'queue': queue})
+          for queue in ('short', 'long')}
+STATUS_EVENT_KEYS = ('statuses:%', 'channel-statuses:%', 'bulk-updates:%', '%:updates')  # Set by relay_core.inbound.
 
 
 def extract_messages(payload):
@@ -216,44 +222,60 @@ def on_event(doc, method=None):
         project(doc.name)
         doc.flags.relay_projection_ms = (time.perf_counter_ns() - started) / 1e6
         return
-    batch = getattr(frappe.local, 'relay_projection_batch', None)
-    if batch is None:
-        batch = frappe.local.relay_projection_batch = []
-        frappe.db.after_commit.add(enqueue_batch)
-        frappe.db.after_rollback.add(clear_batch)
-    batch.append((doc.name, doc.payload, doc.flags.get('relay_received_ns')))
+    frappe.db.after_commit.add(DRAINS[projection_queue(doc.payload)].wake)
 
 
-def enqueue_batch():
-    batch = frappe.local.relay_projection_batch
-    clear_batch()
-    enqueue_projection([(name, payload) for name, payload, _ in batch], batch[0][2])
+def drain(queue='short', token=None):
+    """Project this queue's Pending events in arrival order until none remain."""
+    signal = DRAINS[queue]
+    with signal.turn(token) as held:
+        if not held:
+            # This job consumed its signal; the owner may already be past its final read.
+            signal.wake()
+            return 0
+        count, finished = project_pending(queue)
+    if not finished:
+        signal.wake()
+    return count
 
 
-def clear_batch():
-    if hasattr(frappe.local, 'relay_projection_batch'):
-        del frappe.local.relay_projection_batch
+def project_pending(queue):
+    """Return the projected count and whether the scan reached the end within the turn."""
+    deadline = time.monotonic() + TURN_SECONDS
+    count, after = 0, ''
+    while time.monotonic() < deadline:
+        names, after = pending(queue, after)
+        frappe.db.commit()  # End the list's snapshot, so each event locks before it reads.
+        if after is None:
+            return count, True
+        count += project_names(names, deadline)
+    return count, False
 
 
-def enqueue_projection(events, received_ns=None):
-    """One job per queue keeps callback order and pays worker setup once per batch."""
-    queues = {}
-    for name, payload in events:
-        queues.setdefault(projection_queue(payload), []).append(name)
-    for queue, names in queues.items():
-        frappe.enqueue('relay_core.automation.projection.project_queued', names=names, queue=queue,
-            submitted_ns=time.time_ns(), received_ns=received_ns)
+def pending(queue, after):
+    """Return the next Pending names of this queue's kind after a name, and the new cursor.
+
+    Series names follow commit order, so the cursor skips failed events without
+    skipping late commits. Status-only callback keys never hold messages.
+    """
+    filters = [['projection_status', '=', 'Pending'], ['name', '>', after]]
+    if queue == 'short':
+        filters += [['event_key', 'not like', pattern] for pattern in STATUS_EVENT_KEYS]
+    rows = frappe.get_all('Relay Hub Event', filters=filters, fields=['name', 'payload'],
+                          order_by='name asc', limit_page_length=BATCH_SIZE)
+    if not rows:
+        return [], None
+    return [row.name for row in rows if projection_queue(row.payload) == queue], rows[-1].name
 
 
-def project_queued(name=None, submitted_ns=None, received_ns=None, names=()):
+def project_names(names, deadline=math.inf):
     """Project events in order, each in its own transaction; a failed event stays for recovery."""
-    from rq import get_current_job
     from rq.timeouts import JobTimeoutException
-    started = time.time_ns()
-    monotonic = time.monotonic_ns()
-    names = names or [name]
+    count = 0
     with one_incoming_change():
         for event in names:
+            if time.monotonic() >= deadline:
+                break
             try:
                 project_committed(event)
             except JobTimeoutException:
@@ -262,20 +284,14 @@ def project_queued(name=None, submitted_ns=None, received_ns=None, names=()):
                 frappe.db.rollback()
                 frappe.log_error('Relay Hub Event projection failed', reference_doctype='Relay Hub Event', reference_name=event)
                 frappe.db.commit()
+            count += 1
     frappe.db.commit()
-    job = get_current_job()
-    if job:
-        finished = time.monotonic_ns()
-        timing = {'projection_ms': (finished - monotonic) / 1e6, 'events': len(names),
-                  'started_ns': monotonic, 'finished_ns': finished,
-                  'receive_to_enqueue_ms': (submitted_ns - received_ns) / 1e6 if received_ns else None}
-        enqueued = job.enqueued_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
-        picked_up = job.started_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
-        timing.update(enqueue_ms=(enqueued - submitted_ns) / 1e6,
-                      queue_wait_ms=(picked_up - enqueued) / 1e6,
-                      worker_setup_ms=(started - picked_up) / 1e6)
-        job.meta['relay_timing'] = timing
-        job.save_meta()
+    return count
+
+
+def project_queued(name=None, names=(), **_ignored):
+    """Compatibility for jobs queued before the projection drain."""
+    project_names(names or [name])
 
 
 @retry_callback
@@ -285,9 +301,12 @@ def project_committed(name):
 
 
 def recover():
-    rows = frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name', 'payload'], order_by='modified asc', limit_page_length=20)
-    if rows:
-        enqueue_projection([(row.name, row.payload) for row in rows])
+    """Wake the drains for stragglers and retry a bounded page of Uncategorized events."""
+    if frappe.db.exists('Relay Hub Event', {'projection_status': 'Pending'}):
+        for signal in DRAINS.values():
+            signal.wake()
+    project_names(frappe.get_all('Relay Hub Event', filters={'projection_status': 'Uncategorized'},
+                                 pluck='name', order_by='modified asc', limit_page_length=20))
 
 
 def projection_queue(payload):

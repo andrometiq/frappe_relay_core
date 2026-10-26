@@ -91,7 +91,7 @@ def verify_snapshot_conflict(tag, receipt, work):
     assert '1020' in conflicts[0] and 'tabSeries' in conflicts[0]
     assert work.qsize() == 2, 'Each committed event should schedule projection once'
     while not work.empty():
-        projection.project(work.get_nowait()); frappe.db.commit()
+        projection.drain(work.get_nowait())
     return True
 
 
@@ -179,10 +179,11 @@ def main():
     finished = threading.Event()
     receiving = threading.Event()
 
-    def enqueue(method, **kwargs):
-        assert method == 'relay_core.automation.projection.project_queued', method
-        for name in kwargs['names']:
-            work.put(name)
+    def scoped(doctype, *args, **kwargs):
+        # The drains see only this run's events, never other local Pending rows.
+        if doctype == 'Relay Hub Event' and isinstance(kwargs.get('filters'), list):
+            kwargs['filters'] = kwargs['filters'] + [['account', '=', tag]]
+        return get_all(doctype, *args, **kwargs)
 
     def settings(key):
         return {'relay_hub_account': tag, 'relay_callback_secret': SECRET}.get(key)
@@ -210,7 +211,11 @@ def main():
                 durations[lane][key] += time.perf_counter() - start
         frappe.db.sql = sql
 
-    with patch.object(frappe, 'enqueue', side_effect=enqueue), \
+    get_all = frappe.get_all
+    wakes = [patch.object(signal, 'wake', side_effect=lambda kind=kind: work.put(kind))
+             for kind, signal in projection.DRAINS.items()]
+    with patch.object(frappe, 'enqueue', side_effect=AssertionError('Unexpected enqueue')), \
+         patch.object(frappe, 'get_all', side_effect=scoped), wakes[0], wakes[1], \
          patch.object(frappe, 'publish_realtime'), patch.object(queue, 'wake'), \
          patch.object(inbound, 'connection_value', side_effect=settings), \
          patch.object(whatsapp, 'client', side_effect=AssertionError('External delivery forbidden')):
@@ -267,16 +272,13 @@ def main():
             try:
                 while not receiving.is_set() or not work.empty():
                     try:
-                        name = work.get(timeout=.1)
+                        kind = work.get(timeout=.1)
                     except queues.Empty:
                         continue
                     start = time.perf_counter()
-                    try:
-                        projection.project(name); frappe.db.commit()
+                    if projection.drain(kind):
                         timings.append(time.perf_counter() - start)
                         spans.append((start, time.perf_counter()))
-                    except frappe.QueryDeadlockError as exc:
-                        error('projection', exc); frappe.db.rollback(); work.put(name)
             finally:
                 finished.set(); frappe.destroy()
 
@@ -340,7 +342,7 @@ def main():
             assert work.empty(), 'Duplicate status callback queued again'
             late = dict(rows[0], event_id=stamp + 1000000, timestamp=stamp + 1000000, status='delivered')
             signed_call(inbound.receive_statuses, {'account': tag, 'statuses': [late]})
-            projection.project(work.get_nowait()); frappe.db.commit()
+            projection.drain(work.get_nowait())
             assert frappe.db.get_value('Relay Message', names[0], ['status', 'modified']) == before
             result['verification'] = verify_recovery(tag, channel.name, endpoint, work)
             result['verification']['late_delivery_preserves_read_and_modified'] = True

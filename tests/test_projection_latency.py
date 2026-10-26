@@ -1,13 +1,12 @@
-"""Inline projection bounds, transaction boundary and worker timing contracts."""
+"""Inline projection bounds, transaction boundary and projection drain contracts."""
 import json
 import unittest
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from frappe import _dict
 from relay_core import inbound
-from relay_core.automation import projection
+from relay_core.automation import projection, queue
 
 
 def text_payload():
@@ -141,63 +140,94 @@ class ProjectionLatencyTests(unittest.TestCase):
         self.assertEqual([c.args[0] for c in projected.call_args_list], ['first', 'slow'])
         fake.log_error.assert_not_called()
 
-    def test_recovery_retains_queue_routing(self):
-        rows = [_dict(name='inbound', payload=json.dumps(text_payload())), _dict(name='status', payload='{}'),
-                _dict(name='later', payload=json.dumps(text_payload()))]
-        fake = SimpleNamespace(get_all=Mock(return_value=rows), enqueue=Mock())
-        with patch.object(projection, 'frappe', fake):
+    def test_recovery_wakes_both_drains_and_retries_uncategorized_in_order(self):
+        fake = SimpleNamespace(db=Mock(), get_all=Mock(return_value=['old', 'newer']))
+        fake.db.exists.return_value = True
+        with patch.object(projection, 'frappe', fake), patch.object(projection, 'project_committed') as project, \
+                patch.object(projection.DRAINS['short'], 'wake') as short, patch.object(projection.DRAINS['long'], 'wake') as long:
             projection.recover()
-        self.assertEqual([(c.kwargs['names'], c.kwargs['queue']) for c in fake.enqueue.call_args_list],
-                         [(['inbound', 'later'], 'short'), (['status'], 'long')])
+        short.assert_called_once_with(); long.assert_called_once_with()
+        self.assertEqual([c.args[0] for c in project.call_args_list], ['old', 'newer'])
+        self.assertEqual(fake.get_all.call_args.kwargs['filters'], {'projection_status': 'Uncategorized'})
 
-    def batch_frappe(self):
-        callbacks = SimpleNamespace(commit=[], rollback=[])
-        db = SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.commit.append),
-                             after_rollback=SimpleNamespace(add=callbacks.rollback.append))
-        return SimpleNamespace(db=db, local=SimpleNamespace(), enqueue=Mock()), callbacks
-
-    def test_callback_batch_enqueues_one_ordered_job_per_queue_after_commit(self):
-        fake, callbacks = self.batch_frappe()
-        events = [('first', text_payload()), ('status', {'channel_statuses': []}), ('second', text_payload())]
+    def test_burst_of_callbacks_wakes_one_drain_per_queue_after_commit(self):
+        callbacks = []
+        fake = SimpleNamespace(db=SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append)))
         with patch.object(projection, 'frappe', fake):
-            for name, payload in events:
-                projection.on_event(_dict(name=name, payload=json.dumps(payload), flags=_dict(relay_received_ns=1)))
-            fake.enqueue.assert_not_called()
-            self.assertEqual(len(callbacks.commit), 1)
-            callbacks.commit.pop()()
-        self.assertEqual([(c.kwargs['names'], c.kwargs['queue'], c.kwargs['received_ns'])
-                          for c in fake.enqueue.call_args_list],
-                         [(['first', 'second'], 'short', 1), (['status'], 'long', 1)])
-        self.assertFalse(hasattr(fake.local, 'relay_projection_batch'))
+            for index in range(50):
+                projection.on_event(_dict(name=f'text-{index}', payload=json.dumps(text_payload()), flags=_dict()))
+            projection.on_event(_dict(name='status', payload=json.dumps({'channel_statuses': []}), flags=_dict()))
+        self.assertEqual(len(callbacks), 51)  # Redis is touched only after commit.
+        rq = MagicMock()
+        pipe = rq.connection.pipeline.return_value.__enter__.return_value
+        reserved = {}
+        pipe.get.side_effect = reserved.get
+        pipe.set.side_effect = lambda key, token, ex: reserved.setdefault(key, token)
+        fake = Mock(conf={}, local=SimpleNamespace(site='test'))
+        fake.cache.make_key.side_effect = lambda key: key
+        with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq) as get_queue, \
+                patch.object(queue, 'create_job_id', side_effect=lambda value: value):
+            for callback in callbacks:
+                callback()
+        jobs = [c.kwargs['kwargs'] for c in rq.enqueue_call.call_args_list]
+        self.assertEqual([(job['method'], job['kwargs']['queue']) for job in jobs],
+                         [('relay_core.automation.projection.drain', 'short'), ('relay_core.automation.projection.drain', 'long')])
+        self.assertEqual({c.args[0] for c in get_queue.call_args_list}, {'long', 'short'})
 
-    def test_rolled_back_callback_enqueues_nothing(self):
-        fake, callbacks = self.batch_frappe()
-        with patch.object(projection, 'frappe', fake):
-            projection.on_event(_dict(name='lost', payload=json.dumps(text_payload()), flags=_dict()))
-            callbacks.rollback.pop()()
-            callbacks.commit.clear()
-            projection.on_event(_dict(name='kept', payload=json.dumps(text_payload()), flags=_dict()))
-            callbacks.commit.pop()()
-        self.assertEqual(fake.enqueue.call_args.kwargs['names'], ['kept'])
+    def drain_frappe(self, pages):
+        fake = Mock(local=SimpleNamespace(site='test'), QueryDeadlockError=type('Conflict', (Exception,), {}))
+        fake.db.db_type = 'mariadb'
+        fake.db.sql.return_value = [(1,)]
+        fake.get_all.side_effect = [[_dict(name=name, payload=json.dumps(body)) for name, body in page] for page in pages]
+        return fake
 
-    def test_worker_records_enqueue_pickup_setup_and_projection(self):
-        job = SimpleNamespace(meta={}, enqueued_at=datetime.fromtimestamp(2, timezone.utc),
-                              started_at=datetime.fromtimestamp(3, timezone.utc), save_meta=Mock())
-        fake = SimpleNamespace(db=Mock())
-        with patch.object(projection, 'frappe', fake), patch.object(projection, 'project') as project, \
-                patch('rq.get_current_job', return_value=job), patch.object(projection.time, 'time_ns', return_value=4_000_000_000), \
-                patch.object(projection.time, 'monotonic_ns', side_effect=[4_000_000_000, 5_000_000_000]):
-            projection.project_queued(names=['event', 'next'], submitted_ns=1_500_000_000, received_ns=1_000_000_000)
-        self.assertEqual([c.args[0] for c in project.call_args_list], ['event', 'next'])
-        timing = job.meta['relay_timing']
-        self.assertEqual(timing['events'], 2)
-        self.assertEqual(timing['receive_to_enqueue_ms'], 500)
-        self.assertEqual(timing['enqueue_ms'], 500)
-        self.assertEqual(timing['queue_wait_ms'], 1000)
-        self.assertEqual(timing['worker_setup_ms'], 1000)
-        self.assertEqual(timing['projection_ms'], 1000)
-        job.save_meta.assert_called_once()
+    def test_drain_projects_its_kind_in_name_order_until_none_remain(self):
+        status = {'channel_statuses': []}
+        fake = self.drain_frappe([[('e1', text_payload()), ('e2', status), ('e3', text_payload())],
+                                  [('e4', text_payload())], []])
+        order = []
+        signal = projection.DRAINS['short']
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(signal, 'release_signal', side_effect=lambda token: order.append('release')), \
+                patch.object(signal, 'wake') as wake, \
+                patch.object(projection, 'project_committed', side_effect=order.append):
+            self.assertEqual(projection.drain('short', token='signal'), 3)
+        self.assertEqual(order, ['release', 'e1', 'e3', 'e4'])  # A wake from now on reserves a successor.
+        cursors = [next(f[2] for f in c.kwargs['filters'] if f[0] == 'name') for c in fake.get_all.call_args_list]
+        self.assertEqual(cursors, ['', 'e3', 'e4'])
+        self.assertIn(['event_key', 'not like', 'statuses:%'], fake.get_all.call_args.kwargs['filters'])
+        self.assertEqual(fake.get_all.call_args.kwargs['order_by'], 'name asc')
+        wake.assert_not_called()
+        self.assertIn('release_lock', fake.db.sql.call_args.args[0])
 
+    def test_long_drain_takes_only_its_kind_and_tries_a_failed_event_once(self):
+        fake = self.drain_frappe([[('text', text_payload()), ('bad', {'channel_statuses': []})], []])
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(inbound, 'frappe', fake), \
+                patch.object(projection, 'project', side_effect=RuntimeError('invalid')) as project, \
+                patch.object(projection.DRAINS['long'], 'wake') as wake:
+            self.assertEqual(projection.drain('long'), 1)
+        project.assert_called_once_with('bad')
+        self.assertEqual(fake.log_error.call_args.kwargs['reference_name'], 'bad')
+        self.assertEqual(len(fake.get_all.call_args.kwargs['filters']), 2)
+        wake.assert_not_called()  # The failed event waits for recovery instead of spinning.
+
+    def test_contended_or_unfinished_drain_keeps_a_successor(self):
+        fake = self.drain_frappe([])
+        fake.db.sql.return_value = [(0,)]
+        signal = projection.DRAINS['short']
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(signal, 'wake') as wake:
+            self.assertEqual(projection.drain('short'), 0)
+        wake.assert_called_once_with()
+        fake.get_all.assert_not_called()
+        fake = self.drain_frappe([[('one', text_payload()), ('two', text_payload())]])
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(signal, 'wake') as wake, patch.object(projection, 'project_committed') as project, \
+                patch.object(projection.time, 'monotonic', side_effect=[0, 0, 0, 6, 6]):
+            self.assertEqual(projection.drain('short'), 1)
+        project.assert_called_once_with('one')
+        wake.assert_called_once_with()
 
     def test_batch_sends_one_triage_invalidation_after_all_events(self):
         from relay_core import realtime
