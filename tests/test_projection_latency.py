@@ -113,54 +113,93 @@ class ProjectionLatencyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'retry'):
                 projection.on_event(doc)
 
-    def test_failed_worker_projection_does_not_report_committed_timing(self):
-        fake = SimpleNamespace(db=Mock())
-        with patch.object(projection, 'frappe', fake), patch('rq.get_current_job', return_value=Mock()), \
-                patch.object(projection, 'project', side_effect=RuntimeError('rollback')):
-            with self.assertRaisesRegex(RuntimeError, 'rollback'):
-                projection.project_queued('event', 1)
-        fake.db.after_commit.add.assert_not_called()
+    def test_failed_event_is_logged_and_the_rest_of_the_batch_projects(self):
+        fake = SimpleNamespace(db=Mock(), log_error=Mock(), QueryDeadlockError=type('Conflict', (Exception,), {}))
+        def project(name):
+            if name == 'bad':
+                raise RuntimeError('invalid')
+        with patch.object(projection, 'frappe', fake), patch.object(inbound, 'frappe', fake), \
+                patch('rq.get_current_job', return_value=None), \
+                patch.object(projection, 'project', side_effect=project) as projected:
+            projection.project_queued(names=['first', 'bad', 'last'], submitted_ns=1)
+        self.assertEqual([c.args[0] for c in projected.call_args_list], ['first', 'bad', 'last'])
+        fake.db.rollback.assert_called_once()
+        self.assertEqual(fake.db.commit.call_count, 4)
+        self.assertEqual(fake.log_error.call_args.kwargs['reference_name'], 'bad')
 
     def test_recovery_retains_queue_routing(self):
-        rows = [_dict(name='inbound', payload=json.dumps(text_payload())), _dict(name='status', payload='{}')]
+        rows = [_dict(name='inbound', payload=json.dumps(text_payload())), _dict(name='status', payload='{}'),
+                _dict(name='later', payload=json.dumps(text_payload()))]
         fake = SimpleNamespace(get_all=Mock(return_value=rows), enqueue=Mock())
         with patch.object(projection, 'frappe', fake):
             projection.recover()
-        self.assertEqual([(c.kwargs['name'], c.kwargs['queue']) for c in fake.enqueue.call_args_list],
-                         [('inbound', 'short'), ('status', 'long')])
+        self.assertEqual([(c.kwargs['names'], c.kwargs['queue']) for c in fake.enqueue.call_args_list],
+                         [(['inbound', 'later'], 'short'), (['status'], 'long')])
 
-    def test_bulk_and_status_jobs_enqueue_only_after_commit_on_separate_queues(self):
-        for payload, queue in ((text_payload(), 'short'), ({'entry': []}, 'long'),
-                               ({'channel_statuses': []}, 'long')):
-            callbacks = []
-            fake = SimpleNamespace(db=SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append)), enqueue=Mock())
-            doc = _dict(name='event', payload=json.dumps(payload), flags=_dict(relay_received_ns=1))
-            with patch.object(projection, 'frappe', fake):
-                projection.on_event(doc)
-                fake.enqueue.assert_not_called()
-                callbacks.pop()()
-            self.assertEqual(fake.enqueue.call_args.kwargs['queue'], queue)
-            self.assertEqual(fake.enqueue.call_args.kwargs['received_ns'], 1)
+    def batch_frappe(self):
+        callbacks = SimpleNamespace(commit=[], rollback=[])
+        db = SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.commit.append),
+                             after_rollback=SimpleNamespace(add=callbacks.rollback.append))
+        return SimpleNamespace(db=db, local=SimpleNamespace(), enqueue=Mock()), callbacks
 
-    def test_worker_records_enqueue_pickup_setup_and_committed_projection(self):
-        callbacks = []
+    def test_callback_batch_enqueues_one_ordered_job_per_queue_after_commit(self):
+        fake, callbacks = self.batch_frappe()
+        events = [('first', text_payload()), ('status', {'channel_statuses': []}), ('second', text_payload())]
+        with patch.object(projection, 'frappe', fake):
+            for name, payload in events:
+                projection.on_event(_dict(name=name, payload=json.dumps(payload), flags=_dict(relay_received_ns=1)))
+            fake.enqueue.assert_not_called()
+            self.assertEqual(len(callbacks.commit), 1)
+            callbacks.commit.pop()()
+        self.assertEqual([(c.kwargs['names'], c.kwargs['queue'], c.kwargs['received_ns'])
+                          for c in fake.enqueue.call_args_list],
+                         [(['first', 'second'], 'short', 1), (['status'], 'long', 1)])
+        self.assertFalse(hasattr(fake.local, 'relay_projection_batch'))
+
+    def test_rolled_back_callback_enqueues_nothing(self):
+        fake, callbacks = self.batch_frappe()
+        with patch.object(projection, 'frappe', fake):
+            projection.on_event(_dict(name='lost', payload=json.dumps(text_payload()), flags=_dict()))
+            callbacks.rollback.pop()()
+            callbacks.commit.clear()
+            projection.on_event(_dict(name='kept', payload=json.dumps(text_payload()), flags=_dict()))
+            callbacks.commit.pop()()
+        self.assertEqual(fake.enqueue.call_args.kwargs['names'], ['kept'])
+
+    def test_worker_records_enqueue_pickup_setup_and_projection(self):
         job = SimpleNamespace(meta={}, enqueued_at=datetime.fromtimestamp(2, timezone.utc),
                               started_at=datetime.fromtimestamp(3, timezone.utc), save_meta=Mock())
-        fake = SimpleNamespace(db=SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append)))
+        fake = SimpleNamespace(db=Mock())
         with patch.object(projection, 'frappe', fake), patch.object(projection, 'project') as project, \
                 patch('rq.get_current_job', return_value=job), patch.object(projection.time, 'time_ns', return_value=4_000_000_000), \
                 patch.object(projection.time, 'monotonic_ns', side_effect=[4_000_000_000, 5_000_000_000]):
-            projection.project_queued('event', 1_500_000_000, 1_000_000_000)
-            job.save_meta.assert_not_called()
-            callbacks.pop()()
-        project.assert_called_once_with('event')
+            projection.project_queued(names=['event', 'next'], submitted_ns=1_500_000_000, received_ns=1_000_000_000)
+        self.assertEqual([c.args[0] for c in project.call_args_list], ['event', 'next'])
         timing = job.meta['relay_timing']
+        self.assertEqual(timing['events'], 2)
         self.assertEqual(timing['receive_to_enqueue_ms'], 500)
         self.assertEqual(timing['enqueue_ms'], 500)
         self.assertEqual(timing['queue_wait_ms'], 1000)
         self.assertEqual(timing['worker_setup_ms'], 1000)
         self.assertEqual(timing['projection_ms'], 1000)
         job.save_meta.assert_called_once()
+
+
+    def test_batch_sends_one_triage_invalidation_after_all_events(self):
+        from relay_core import realtime
+        fake = SimpleNamespace(get_all=Mock(return_value=['manager']), publish_realtime=Mock())
+        with patch.object(realtime, 'frappe', fake):
+            with realtime.one_incoming_change():
+                realtime.incoming_changed()
+                realtime.incoming_changed()
+                fake.publish_realtime.assert_not_called()
+            self.assertEqual(sorted(c.kwargs['user'] for c in fake.publish_realtime.call_args_list), ['Administrator', 'manager'])
+            fake.publish_realtime.reset_mock()
+            with realtime.one_incoming_change():
+                pass
+            fake.publish_realtime.assert_not_called()
+            realtime.incoming_changed()
+            self.assertEqual(fake.publish_realtime.call_count, 2)
 
 
 class ProjectionRetryTests(unittest.TestCase):
@@ -185,4 +224,4 @@ class ProjectionRetryTests(unittest.TestCase):
         self.assertEqual(attempts, ['event', 'event'])
         self.assertEqual(callbacks, ['attempt'])
         db.rollback.assert_called_once()
-        db.commit.assert_not_called()
+        self.assertEqual(db.commit.call_count, 2)
