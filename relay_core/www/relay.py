@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import frappe
 from frappe.sessions import get_csrf_token
+from relay_core.api import capabilities
 from relay_core.permissions import require_access
 
 no_cache = 1
@@ -22,6 +23,7 @@ def get_context(context):
         relay_script='/assets/relay_core/relay/' + entry['file'],
         relay_styles=['/assets/relay_core/relay/' + name for name in styles],
         relay_csrf=get_csrf_token(), relay_user=frappe.session.user,
+        relay_capabilities=frappe.as_json(capabilities(), indent=None),
         relay_site=frappe.local.site,
         relay_socket_port=frappe.conf.get('socketio_port',9000) if frappe.request and frappe.request.host.rsplit(':',1)[-1] == str(frappe.conf.get('webserver_port',8000)) else '')
     return context

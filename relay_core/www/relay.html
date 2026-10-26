@@ -8,7 +8,7 @@
   {% for stylesheet in relay_styles %}<link rel="stylesheet" href="{{ stylesheet | e }}">{% endfor %}
 </head>
 <body>
-  <div id="app" data-csrf="{{ relay_csrf | e }}" data-user="{{ relay_user | e }}" data-site="{{ relay_site | e }}" data-socket-port="{{ relay_socket_port | e }}"></div>
+  <div id="app" data-csrf="{{ relay_csrf | e }}" data-user="{{ relay_user | e }}" data-capabilities="{{ relay_capabilities | e }}" data-site="{{ relay_site | e }}" data-socket-port="{{ relay_socket_port | e }}"></div>
   <script type="module" src="{{ relay_script | e }}"></script>
 </body>
 </html>
