@@ -102,13 +102,15 @@ class MCPTests(unittest.TestCase):
     def test_number_sends_and_campaigns_use_the_checked_services(self):
         import relay_core
         api=types.SimpleNamespace(send_text=Mock(return_value={'status':'Submitted'}),send_media=Mock(),send_template=Mock(),
-                                  send_messages=Mock(return_value={'results':[]}))
+                                  send_messages=Mock(return_value={'results':[]}),send_status=Mock(return_value={'results':[]}))
         campaigns=types.SimpleNamespace(create_with_rows=Mock(side_effect=PermissionError('denied')),append_rows=Mock(),read=Mock())
         with patch.object(relay_core,'messaging_api',api,create=True),patch.object(relay_core,'bulk_campaigns',campaigns,create=True):
             self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_text','arguments':{'number':'919876543210','body':'Hi','key':'k-1'}})
             api.send_text.assert_called_once_with(number='919876543210',body='Hi',key='k-1')
             self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_messages','arguments':{'items':[{'type':'text'}]}})
             api.send_messages.assert_called_once_with(items=[{'type':'text'}])
+            self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_status','arguments':{'batch':'b-1'}})
+            api.send_status.assert_called_once_with(batch='b-1')
             with self.assertRaises(PermissionError):
                 self.api.dispatch('tools/call',{'name':'relay.campaigns.create','arguments':{'title':'Promo','rows':[{'phone':'1'}]}})
             with self.assertRaises(ValueError):

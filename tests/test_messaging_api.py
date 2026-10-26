@@ -33,6 +33,7 @@ class SendTests(unittest.TestCase):
         for method in (messaging_api.send_text, messaging_api.send_media, messaging_api.send_template,
                        messaging_api.send_messages):
             self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ['POST'])
+        self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[messaging_api.send_status], ['GET'])
 
     def test_text_goes_through_the_journal_with_the_contact_and_its_business(self):
         result = messaging_api.send_text('+91 98765 43210', 'Your order is ready')
@@ -49,9 +50,9 @@ class SendTests(unittest.TestCase):
         with patch.object(messaging_api.time, 'time', return_value=6599.0):
             self.assertEqual(messaging_api.send_text('+' + NUMBER, 'Your order is ready')['key'], first)
             self.assertNotEqual(messaging_api.send_text(NUMBER, 'Another text')['key'], first)
+        self.assertEqual(messaging_api.send_text(NUMBER, 'Your order is ready', key='order-25')['key'], 'api-order-25')
         with patch.object(messaging_api.time, 'time', return_value=6600.0):  # The next 10-minute bucket sends again.
             self.assertNotEqual(messaging_api.send_text(NUMBER, 'Your order is ready')['key'], first)
-        self.assertEqual(messaging_api.send_text(NUMBER, 'Your order is ready', key='order-25')['key'], 'api-order-25')
         for bad in ('has space', 'x' * 101, 25):
             with self.subTest(key=bad), self.assertRaises(frappe.ValidationError):
                 messaging_api.send_text(NUMBER, 'Your order is ready', key=bad)
@@ -113,31 +114,97 @@ class SendTests(unittest.TestCase):
 
 
 class ListTests(unittest.TestCase):
-    def test_each_item_gets_its_own_result_and_a_failure_rolls_back_only_itself(self):
-        db = Mock()
-        with patch.object(messaging_api, 'require_access'), patch.object(messaging_api.frappe, 'db', db), \
-                patch.object(messaging_api.frappe, 'throw', throw), patch.object(messaging_api.frappe, 'clear_messages') as clear, \
-                patch.object(messaging_api, 'send_text', side_effect=[{'action': 'ACT-1'}, frappe.PermissionError('Not permitted')]), \
-                patch.object(messaging_api, 'SENDS', {}) as sends:
-            sends.update(text=messaging_api.send_text, media=messaging_api.send_media)
-            result = messaging_api.send_messages([{'type': 'text', 'number': NUMBER, 'body': 'Hi'},
-                                                  {'type': 'text', 'number': NUMBER, 'body': 'Hi'},
-                                                  {'type': 'media', 'number': NUMBER, 'body': 'Hi'}, {'type': 'call'}, 'text'])
-        self.assertEqual(result['results'][0], {'index': 0, 'ok': True, 'action': 'ACT-1'})
-        self.assertEqual([(row['ok'], row.get('error')) for row in result['results'][1:]],
+    def setUp(self):
+        self.cache = {}
+        cache = Mock(get_value=lambda key, user=None: self.cache.get((user, key)),
+                     set_value=lambda key, value, user=None, expires_in_sec=None: self.cache.__setitem__((user, key), value))
+        self.enqueue, self.db, self.sent = Mock(), Mock(), Mock()
+        self.message = {'key': 'api-k', 'operation': 'messages.send', 'arguments': {'body': 'Hi'}, 'contact': 'Contact Asha',
+                        'business_doctype': 'Customer', 'business_name': 'Asha Stores'}
+        patches = [patch.object(messaging_api, 'require_access'), patch.object(messaging_api.frappe, 'throw', throw),
+                   patch.object(messaging_api.frappe, 'cache', cache), patch.object(messaging_api.frappe, 'db', self.db),
+                   patch.object(messaging_api.frappe, 'enqueue', self.enqueue),
+                   patch.object(messaging_api.frappe, 'session', _dict(user='api@example.com')),
+                   patch.object(messaging_api.frappe, 'clear_messages'), patch.object(messaging_api.whatsapp, 'send', self.sent)]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def checked(self, number, body, key=None, business_doctype=None, business_name=None):
+        if body == 'refused':
+            raise frappe.PermissionError('Not permitted')
+        return dict(self.message, key='api-' + (key or body)), number
+
+    def queue(self, items):
+        with patch.dict(messaging_api.MESSAGES, text=self.checked):
+            return messaging_api.send_messages(items)
+
+    def test_items_are_checked_at_once_and_the_accepted_ones_queue_as_one_job(self):
+        result = self.queue([{'type': 'text', 'number': NUMBER, 'body': 'Hi'}, {'type': 'text', 'number': NUMBER, 'body': 'refused'},
+                             {'type': 'media', 'number': NUMBER, 'body': 'Hi'}, {'type': 'call'}, 'text',
+                             {'type': 'text', 'number': NUMBER, 'body': 'Bye', 'key': 'k-2'}])
+        self.assertEqual(result['results'][0], {'index': 0, 'ok': True, 'status': 'Pending', 'number': NUMBER,
+                                                'contact': 'Contact Asha', 'key': 'api-Hi'})
+        self.assertEqual([(row['ok'], row.get('error')) for row in result['results'][1:5]],
                          [(False, 'Not permitted'), (False, 'Give the fields a media send needs and no others'),
                           (False, 'type must be text, media or template'), (False, 'type must be text, media or template')])
-        self.assertEqual(db.rollback.call_count, 4)
-        self.assertEqual(clear.call_count, 4)
+        self.assertEqual(self.db.rollback.call_count, 4)
+        self.sent.assert_not_called()  # Nothing is sent inside the request.
+        job = self.enqueue.call_args
+        self.assertEqual((job.args[0], job.kwargs['queue'], job.kwargs['job_id'], job.kwargs['deduplicate'], job.kwargs['batch']),
+                         ('relay_core.messaging_api.deliver_batch', 'long', 'relay-send-' + result['batch'], True, result['batch']))
+        self.assertEqual([message['key'] for message in job.kwargs['messages']], ['api-Hi', 'api-k-2'])
+
+    def test_a_retried_request_gets_the_same_batch_and_job_and_a_new_request_another(self):
+        items = [{'type': 'text', 'number': NUMBER, 'body': 'Hi'}]
+        first, again = self.queue(items)['batch'], self.queue(items)['batch']
+        self.assertEqual(first, again)
+        self.assertEqual({call.kwargs['job_id'] for call in self.enqueue.call_args_list}, {'relay-send-' + first})
+        self.assertNotEqual(self.queue([dict(items[0], body='Other')])['batch'], first)
+
+    def test_nothing_is_queued_when_every_item_is_refused(self):
+        result = self.queue([{'type': 'text', 'number': NUMBER, 'body': 'refused'}])
+        self.assertIsNone(result['batch'])
+        self.enqueue.assert_not_called()
+
+    def test_the_job_sends_each_item_through_the_journal_and_status_reads_each_result(self):
+        batch = self.queue([{'type': 'text', 'number': NUMBER, 'body': 'Hi'}, {'type': 'text', 'number': NUMBER, 'body': 'Bye'},
+                            {'type': 'text', 'number': NUMBER, 'body': 'Later'}])['batch']
+        messages = self.enqueue.call_args.kwargs['messages']
+        self.sent.side_effect = [{'action': 'ACT-1'}, ValueError('Configure one available WhatsApp channel'), {'action': 'ACT-3'}]
+        messaging_api.deliver_batch(batch, messages)
+        self.assertEqual([call.args[0] for call in self.sent.call_args_list], messages)
+        self.assertEqual((self.db.commit.call_count, self.db.rollback.call_count), (2, 1))
+        actions = {'api-Hi': _dict(name='ACT-1', status='Submitted', outbound_message='RELAY-MSG-1')}
+        self.db.get_value.side_effect = lambda doctype, filters, fields, as_dict: next(
+            (row for key, row in actions.items() if filters['request_key'] ==
+             messaging_api.hashlib.sha256(('api@example.com:' + key).encode()).hexdigest()), None)
+        self.assertEqual(messaging_api.send_status(batch)['results'], [
+            {'index': 0, 'key': 'api-Hi', 'status': 'Submitted', 'action': 'ACT-1', 'message': 'RELAY-MSG-1'},
+            {'index': 1, 'key': 'api-Bye', 'status': 'Failed', 'error': 'Configure one available WhatsApp channel'},
+            {'index': 2, 'key': 'api-Later', 'status': 'Pending'}])
+        self.sent.side_effect = None
+        messaging_api.deliver_batch(batch, messages)  # A rerun that succeeds clears the old error.
+        self.assertEqual(messaging_api.send_status(batch)['results'][1]['status'], 'Pending')
+
+    def test_status_is_only_for_the_batch_owner(self):
+        batch = self.queue([{'type': 'text', 'number': NUMBER, 'body': 'Hi'}])['batch']
+        with patch.object(messaging_api.frappe, 'session', _dict(user='other@example.com')), \
+                self.assertRaises(frappe.DoesNotExistError):
+            messaging_api.send_status(batch)
+        for bad in ('missing', None):
+            with self.subTest(batch=bad), self.assertRaises(frappe.DoesNotExistError):
+                messaging_api.send_status(bad)
 
     def test_lists_are_capped_and_denied_without_access(self):
-        with patch.object(messaging_api, 'require_access'), patch.object(messaging_api.frappe, 'throw', throw):
-            for items in ([], [{'type': 'text'}] * 101, {'type': 'text'}):
-                with self.subTest(size=len(items)), self.assertRaises(frappe.ValidationError):
-                    messaging_api.send_messages(items)
+        for items in ([], [{'type': 'text'}] * 101, {'type': 'text'}):
+            with self.subTest(size=len(items)), self.assertRaises(frappe.ValidationError):
+                messaging_api.send_messages(items)
         with patch.object(messaging_api, 'require_access', side_effect=frappe.PermissionError):
-            with self.assertRaises(frappe.PermissionError):
-                messaging_api.send_messages([{'type': 'text'}])
+            for call in (lambda: messaging_api.send_messages([{'type': 'text'}]), lambda: messaging_api.send_status('b')):
+                with self.assertRaises(frappe.PermissionError):
+                    call()
+        self.enqueue.assert_not_called()
 
 
 class RecipientTests(unittest.TestCase):

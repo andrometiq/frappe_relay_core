@@ -7,6 +7,7 @@ import time
 import frappe
 from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.bulk_campaigns import parsed, whatsapp_channel
+from relay_core.hub import HubError
 from relay_core.identity import phone_number
 from relay_core.permissions import require_access
 
@@ -14,6 +15,9 @@ MAX_ITEMS = 100
 KEY = re.compile(r'[A-Za-z0-9_-]{1,100}')
 MEDIA = ('image', 'video', 'audio', 'document')
 AUTO_KEY_SECONDS = 600
+BATCH_CACHE = 'relay-send-batch:'
+BATCH_SECONDS = 86400
+PENDING = 'Pending'
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window. Send an approved template instead'
 
 
@@ -21,7 +25,7 @@ OUTSIDE_WINDOW = 'Outside the 24-hour reply window. Send an approved template in
 def send_text(number, body, key=None, business_doctype=None, business_name=None):
     """One text inside the 24-hour reply window."""
     require_access()
-    return send(number, 'messages.send', {'body': body}, key, business_doctype, business_name)
+    return sent(*text_message(number, body, key, business_doctype, business_name))
 
 
 @frappe.whitelist(methods=['POST'])
@@ -29,13 +33,7 @@ def send_media(number, media_url, media_type, caption=None, filename=None, key=N
                business_name=None):
     """One photo, video, audio or document from an HTTPS link, inside the 24-hour reply window."""
     require_access()
-    if media_type not in MEDIA:
-        frappe.throw('media_type must be image, video, audio or document')
-    if filename and media_type != 'document':
-        frappe.throw('Only a document has a file name')
-    arguments = {'media_type': media_type, 'media_url': link(media_url),
-                 **({'caption': caption} if caption else {}), **({'filename': filename} if filename else {})}
-    return send(number, 'messages.media', arguments, key, business_doctype, business_name)
+    return sent(*media_message(number, media_url, media_type, caption, filename, key, business_doctype, business_name))
 
 
 @frappe.whitelist(methods=['POST'])
@@ -44,6 +42,27 @@ def send_template(number, template, language, params=None, header_media_url=None
     """One approved template. params is an object of named values (or field keys such as button:0), or a list
     of every value in template order; header_media_url fills an image, video or document header."""
     require_access()
+    return sent(*template_message(number, template, language, params, header_media_url, key, business_doctype,
+                                  business_name))
+
+
+def text_message(number, body, key=None, business_doctype=None, business_name=None):
+    return prepared(number, 'messages.send', {'body': body}, key, business_doctype, business_name)
+
+
+def media_message(number, media_url, media_type, caption=None, filename=None, key=None, business_doctype=None,
+                  business_name=None):
+    if media_type not in MEDIA:
+        frappe.throw('media_type must be image, video, audio or document')
+    if filename and media_type != 'document':
+        frappe.throw('Only a document has a file name')
+    arguments = {'media_type': media_type, 'media_url': link(media_url),
+                 **({'caption': caption} if caption else {}), **({'filename': filename} if filename else {})}
+    return prepared(number, 'messages.media', arguments, key, business_doctype, business_name)
+
+
+def template_message(number, template, language, params=None, header_media_url=None, key=None, business_doctype=None,
+                     business_name=None):
     from relay_core.whatsapp_templates import definition
     found = definition(template, language) if isinstance(template, str) and isinstance(language, str) else None
     if not found:
@@ -54,39 +73,111 @@ def send_template(number, template, language, params=None, header_media_url=None
         components = bulk_sheet.build_components(fields, template_values(fields, params, header_media_url))
     except ValueError as exc:
         frappe.throw(str(exc))
-    return send(number, 'templates.send', {'name': template, 'language': language, 'components': components}, key,
-                business_doctype, business_name)
+    return prepared(number, 'templates.send', {'name': template, 'language': language, 'components': components}, key,
+                    business_doctype, business_name)
 
 
-SENDS = {'text': send_text, 'media': send_media, 'template': send_template}
+MESSAGES = {'text': text_message, 'media': media_message, 'template': template_message}
 
 
 @frappe.whitelist(methods=['POST'])
 def send_messages(items):
-    """Up to 100 sends of {type: text, media or template, number, ...the arguments of that send}. Each item gets
-    its own result; one failed item does not stop the others."""
+    """Checks 1-100 sends of {type: text, media or template, number, ...the arguments of that send} at once and
+    queues the accepted ones as one background job. Each item gets its own result; poll send_status(batch)."""
     require_access()
     items = parsed(items)
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_ITEMS:
         frappe.throw(f'Send 1-{MAX_ITEMS} items')
-    return {'results': [send_item(index, item) for index, item in enumerate(items)]}
+    results, accepted = [], []
+    for index, item in enumerate(items):
+        result, message = checked_item(index, item)
+        results.append(result)
+        if message:
+            accepted.append((index, message))
+    return {'batch': queue_batch(accepted) if accepted else None, 'results': results}
 
 
-def send_item(index, item):
+def checked_item(index, item):
+    """(result, journal message) of one list item; a refused item has no message."""
     try:
-        if not isinstance(item, dict) or item.get('type') not in SENDS:
+        if not isinstance(item, dict) or item.get('type') not in MESSAGES:
             frappe.throw('type must be text, media or template')
-        method = SENDS[item['type']]
+        build = MESSAGES[item['type']]
         arguments = {key: value for key, value in item.items() if key != 'type'}
         try:
-            inspect.signature(method).bind(**arguments)
+            inspect.signature(build).bind(**arguments)
         except TypeError:
             frappe.throw(f"Give the fields a {item['type']} send needs and no others")
-        return {'index': index, 'ok': True, **method(**arguments)}
+        message, destination = build(**arguments)
+        return {'index': index, 'ok': True, 'status': PENDING, 'number': destination, 'contact': message['contact'],
+                'key': message['key']}, message
     except (frappe.ValidationError, frappe.PermissionError, frappe.DuplicateEntryError) as exc:
-        frappe.db.rollback()  # This item's uncommitted writes only; each send commits its own.
+        frappe.db.rollback()  # This item's uncommitted writes only; a new Contact commits its own.
         frappe.clear_messages()
-        return {'index': index, 'ok': False, 'error': str(exc) or 'Not permitted'}
+        return {'index': index, 'ok': False, 'error': str(exc) or 'Not permitted'}, None
+
+
+def queue_batch(accepted):
+    """One long-queue job per distinct request, so a retried request finds the same batch and job."""
+    user = frappe.session.user
+    content = json.dumps([user, accepted], sort_keys=True, separators=(',', ':'), default=str)
+    batch = hashlib.sha256(content.encode()).hexdigest()[:32]
+    if not frappe.cache.get_value(BATCH_CACHE + batch, user=user):
+        frappe.cache.set_value(BATCH_CACHE + batch, {'items': [(index, message['key']) for index, message in accepted],
+                                                     'errors': {}}, user=user, expires_in_sec=BATCH_SECONDS)
+    frappe.enqueue('relay_core.messaging_api.deliver_batch', queue='long', timeout=1800, job_id='relay-send-' + batch,
+                   deduplicate=True, enqueue_after_commit=True, batch=batch,
+                   messages=[message for _, message in accepted])
+    return batch
+
+
+def deliver_batch(batch, messages):
+    """Background job: send each message through the journal. Each item's key makes a rerun safe."""
+    for message in messages:
+        try:
+            whatsapp.send(message)
+            frappe.db.commit()
+            error = None
+        except (ValueError, HubError, frappe.ValidationError, frappe.PermissionError, frappe.DuplicateEntryError) as exc:
+            frappe.db.rollback()
+            frappe.clear_messages()
+            error = str(exc) or 'Not permitted'
+        record_error(batch, message['key'], error)
+
+
+def record_error(batch, key, error):
+    """Set or clear one item's error; a rerun that succeeds clears the error of an earlier run."""
+    state = frappe.cache.get_value(BATCH_CACHE + batch, user=frappe.session.user)
+    if not state or state['errors'].get(key) == error:
+        return
+    if error:
+        state['errors'][key] = error
+    else:
+        state['errors'].pop(key)
+    frappe.cache.set_value(BATCH_CACHE + batch, state, user=frappe.session.user, expires_in_sec=BATCH_SECONDS)
+
+
+@frappe.whitelist(methods=['GET'])
+def send_status(batch):
+    """Per-item status of the caller's send_messages batch, for 24 hours."""
+    require_access()
+    state = frappe.cache.get_value(BATCH_CACHE + batch, user=frappe.session.user) if isinstance(batch, str) else None
+    if not state:
+        frappe.throw('Batch not found or expired', frappe.DoesNotExistError)
+    return {'batch': batch, 'results': [item_status(index, key, state['errors']) for index, key in state['items']]}
+
+
+def item_status(index, key, errors):
+    """Failed with its error, Pending before the job reaches it, else the journal action's status."""
+    if key in errors:
+        return {'index': index, 'key': key, 'status': 'Failed', 'error': errors[key]}
+    request_key = hashlib.sha256((frappe.session.user + ':' + key).encode()).hexdigest()
+    action = frappe.db.get_value('Relay Message Action', {'request_key': request_key},
+                                 ['name', 'status', 'outbound_message'], as_dict=True)
+    if not action:
+        return {'index': index, 'key': key, 'status': PENDING}
+    return {'index': index, 'key': key, 'status': action.status, 'action': action.name,
+            'message': action.outbound_message}
 
 
 def template_values(fields, params, header_media_url):
@@ -118,7 +209,8 @@ def link(value):
         frappe.throw(str(exc))
 
 
-def send(number, operation, arguments, key, business_doctype, business_name):
+def prepared(number, operation, arguments, key, business_doctype, business_name):
+    """(journal message, number) after the number, reply window, recipient and key checks."""
     destination = phone_number(number) if isinstance(number, (str, int)) and not isinstance(number, bool) else None
     if not destination:
         frappe.throw('Give the phone number with its country code')
@@ -126,13 +218,16 @@ def send(number, operation, arguments, key, business_doctype, business_name):
     if operation != 'templates.send' and not service_window.open_numbers(channel, [destination]):
         frappe.throw(OUTSIDE_WINDOW)
     contact, business = recipient(channel, destination, business_doctype, business_name)
-    request_key = message_key(key, destination, operation, arguments)
+    return {'key': message_key(key, destination, operation, arguments), 'operation': operation, 'arguments': arguments,
+            'contact': contact, 'business_doctype': business[0], 'business_name': business[1]}, destination
+
+
+def sent(message, destination):
     try:
-        result = whatsapp.send({'key': request_key, 'operation': operation, 'arguments': arguments, 'contact': contact,
-                                'business_doctype': business[0], 'business_name': business[1]})
+        result = whatsapp.send(message)
     except ValueError as exc:
         frappe.throw(str(exc))
-    return {**result, 'number': destination, 'contact': contact, 'key': request_key}
+    return {**result, 'number': destination, 'contact': message['contact'], 'key': message['key']}
 
 
 def message_key(key, destination, operation, arguments):
