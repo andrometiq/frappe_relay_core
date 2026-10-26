@@ -12,11 +12,11 @@ import { useEnabledChannels } from '../composables/useEnabledChannels'
 const channelEnabled = useEnabledChannels()
 const capabilities = inject('relayCapabilities')
 const props = defineProps({ contact: String, dismissible: Boolean })
-const emit = defineEmits(['close', 'loaded'])
+const emit = defineEmits(['close', 'loaded', 'changed'])
 const detail = ref(null), busy = ref(false), error = ref('')
 let generation = 0
 const desk = (doctype, name) => '/desk/' + doctype.toLowerCase().replaceAll(' ', '-') + '/' + encodeURIComponent(name)
-const linksChanged = summary => { detail.value = { ...detail.value, links: summary.links, primary: summary.primary } }
+const linksChanged = summary => { detail.value = { ...detail.value, links: summary.links, primary: summary.primary }; emit('changed', summary) }
 async function load() {
   const ticket = ++generation
   detail.value = null; error.value = ''; busy.value = true

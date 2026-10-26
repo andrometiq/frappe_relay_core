@@ -5,7 +5,7 @@ import ContactDetails from '../ContactDetails.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 
 defineProps({ title: String, contact: String, primary: Object, channel: String, canOrganize: Boolean })
-const emit = defineEmits(['close', 'cases', 'notes'])
+const emit = defineEmits(['close', 'cases', 'notes', 'changed'])
 const phone = ref('')
 </script>
 
@@ -27,7 +27,7 @@ const phone = ref('')
         </div>
       </div>
       <dl v-if="channel" class="contact-info-facts"><div><dt>Channel</dt><dd>{{ channel }}</dd></div></dl>
-      <ContactDetails v-if="contact" :contact="contact" @loaded="phone = $event.phone" />
+      <ContactDetails v-if="contact" :contact="contact" @loaded="phone = $event.phone" @changed="emit('changed')" />
       <WorkspaceState v-else compact title="No linked Contact" description="This chat has no Frappe Contact yet, so it has no business links." icon="user" />
     </div>
   </section>
