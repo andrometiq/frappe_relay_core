@@ -3,7 +3,7 @@ links; Relay Contact keeps only which link is primary."""
 import hashlib
 
 import frappe
-from relay_core.permissions import require_access
+from relay_core.permissions import readable_contact, require_access
 
 
 def business_links(links):
@@ -99,6 +99,7 @@ def set_primary(contact, doctype=None, name=None):
     relay = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
     if not relay:
         frappe.throw('This contact has no Relay conversation')
+    readable_contact(relay)  # The primary routes the conversation, so only its readers set it.
     target = (None, None)
     if doctype or name:
         from relay_core.business_access import candidates
