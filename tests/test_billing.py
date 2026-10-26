@@ -1,4 +1,4 @@
-"""WhatsApp billing: Meta pricing parsing, idempotent month rows, margin math and access."""
+"""WhatsApp billing: Meta pricing parsing, idempotent month rows, billed rates, totals and access."""
 import json
 import unittest
 from datetime import date, datetime, timezone
@@ -98,14 +98,16 @@ class BillingTests(unittest.TestCase):
         with self.assertRaisesRegex(frappe.ValidationError, 'between 0 and 1000'):
             RelaySettings.validate(settings)
 
-    def test_margin_is_read_by_managers_and_saved_by_system_managers(self):
+    def test_only_system_managers_read_and_save_the_margin(self):
         settings = Mock(whatsapp_margin_percent=30)
         self.frappe.get_single.return_value = settings
-        self.assertEqual(billing.get_margin(), {'margin_percent': 30.0})
+        with self.assertRaises(frappe.PermissionError):
+            billing.get_margin()
         with self.assertRaises(frappe.PermissionError):
             billing.save_margin('25')
         settings.save.assert_not_called()
         self.roles = ['System Manager']
+        self.assertEqual(billing.get_margin(), {'margin_percent': 30.0})
         self.sql.return_value = [('25',)]
         self.assertEqual(billing.save_margin('25'), {'margin_percent': 25.0})
         self.assertEqual(settings.whatsapp_margin_percent, 25.0)
@@ -155,18 +157,32 @@ class BillingTests(unittest.TestCase):
         self.assertEqual(rows[(date(2026, 3, 1), 'UNKNOWN', 'UNKNOWN')]['volume'], 0)
         self.assertEqual(len(rows), 2)
 
-    def test_margin_math_includes_zero_volume(self):
-        self.assertEqual(billing.priced(0, 0, 30), {'volume': 0, 'meta_cost': 0.0, 'margin_amount': 0.0, 'total': 0.0})
-        self.assertEqual(billing.priced(10, 2.5, 30), {'volume': 10, 'meta_cost': 2.5, 'margin_amount': 0.75, 'total': 3.25})
-        self.assertEqual(billing.priced(10, 2.5, 0)['total'], 2.5)
-        rows = [_dict(period=date(2026, 2, 1), category='MARKETING', pricing_type='REGULAR', volume=10, meta_cost=2.5),
-                _dict(period=date(2026, 2, 1), category='SERVICE', pricing_type='FREE_CUSTOMER_SERVICE', volume=0, meta_cost=0)]
-        months, categories, total = billing.summarise(2026, rows, {2: 7}, 30)
+    def test_billed_rate_adds_the_service_charge_to_the_meta_rate(self):
+        self.assertEqual(billing.billed_rate(10, 2.5, 30), 0.325)
+        self.assertEqual(billing.billed_rate(3, 1, 30), 0.4333)
+        self.assertEqual(billing.billed_rate(0, 0, 30), 0.0)
+        self.assertEqual(billing.billed_rate(5, 0, 30), 0.0)
+        self.assertEqual(billing.bill_line('UTILITY', 1231, 141.565, 30),
+                         {'category': 'UTILITY', 'messages': 1231, 'rate': 0.1495, 'amount': 184.03})
+
+    def test_months_and_year_total_the_billed_lines(self):
+        row = lambda month, category, pricing_type, volume, cost: _dict(
+            period=date(2026, month, 1), category=category, pricing_type=pricing_type, volume=volume, meta_cost=cost)
+        rows = [row(2, 'SERVICE', 'FREE_CUSTOMER_SERVICE', 20, 0), row(2, 'MARKETING', 'REGULAR', 10, 2.5),
+                row(2, 'UTILITY', 'FREE_ENTRY_POINT', 3, 0), row(2, 'UTILITY', 'REGULAR', 4, 0.4),
+                row(3, 'MARKETING', 'REGULAR', 30, 9.0)]
+        months, total = billing.summarise(2026, rows, 30)
         self.assertEqual(len(months), 12)
-        self.assertEqual((months[1]['period'], months[1]['messages_sent'], months[1]['total']), ('2026-02-01', 7, 3.25))
-        self.assertEqual(months[0]['total'], 0.0)
-        self.assertEqual([item['category'] for item in categories], ['MARKETING', 'SERVICE'])
-        self.assertEqual((total['meta_cost'], total['margin_amount'], total['total'], total['messages_sent']), (2.5, 0.75, 3.25, 7))
+        self.assertEqual(months[0], {'period': '2026-01-01', 'lines': [], 'messages': 0, 'amount': 0})
+        self.assertEqual(months[1]['lines'], [
+            {'category': 'MARKETING', 'messages': 10, 'rate': 0.325, 'amount': 3.25},
+            {'category': 'UTILITY', 'messages': 4, 'rate': 0.13, 'amount': 0.52},
+            {'category': 'SERVICE', 'messages': 23, 'rate': 0.0, 'amount': 0.0}])
+        self.assertEqual((months[1]['messages'], months[1]['amount']), (37, 3.77))
+        self.assertEqual((months[2]['messages'], months[2]['amount']), (30, 11.7))
+        self.assertEqual((total['messages'], total['amount']), (67, 15.47))
+        self.assertEqual(total['lines'][0], {'category': 'MARKETING', 'messages': 40, 'amount': 14.95, 'rate': 0.3737})
+        self.assertEqual(total['lines'][-1]['category'], 'SERVICE')
 
     def test_months_follow_the_site_timezone(self):
         self.assertEqual(billing.period_of({'start': utc(2026, 1, 31, 18, 30), 'end': utc(2026, 2, 28, 18, 30)}), date(2026, 2, 1))
@@ -215,19 +231,37 @@ class BillingTests(unittest.TestCase):
         self.frappe.log_error.assert_called()
         self.frappe.db.rollback.assert_called()
 
-    def test_get_billing_returns_months_categories_and_templates(self):
+    def billing_for(self, roles):
+        self.roles = roles
+        self.frappe.get_roles = lambda user=None: self.roles
         self.frappe.get_list.return_value = ['CH-WA']
         self.frappe.get_all.side_effect = lambda doctype, **kwargs: (
             [_dict(period=date(2026, 3, 1), category='UTILITY', pricing_type='REGULAR', volume=5, meta_cost=1.0,
-                   currency='INR', fetched_at='2026-10-26 10:00:00')] if doctype == billing.DOCTYPE
+                   currency='INR', fetched_at='2026-10-26 10:00:00', raw_data='[{"cost": 1}]')] if doctype == billing.DOCTYPE
             else [_dict(template_name='order_ready', category='UTILITY')])
-        with patch.object(billing, 'message_counts', return_value=({3: 9}, [('order_ready', 3, 4)])):
-            result = billing.get_billing('acct-1', 2026)
-        self.assertEqual((result['margin_percent'], result['currency']), (30.0, 'INR'))
-        self.assertEqual(result['months'][2]['total'], 1.3)
-        self.assertEqual(result['templates'], [{'template': 'order_ready', 'category': 'UTILITY', 'period': '2026-03-01', 'messages_sent': 4}])
-        self.assertEqual(result['total']['messages_sent'], 9)
+        with patch.object(billing, 'template_counts', return_value=[('order_ready', 3, 4)]):
+            return billing.get_billing('acct-1', 2026)
 
+    def test_get_billing_returns_the_bill_and_template_counts(self):
+        result = self.billing_for(['WhatsApp Manager'])
+        self.assertEqual(result['currency'], 'INR')
+        self.assertEqual(result['months'][2]['lines'], [{'category': 'UTILITY', 'messages': 5, 'rate': 0.26, 'amount': 1.3}])
+        self.assertEqual((result['total']['messages'], result['total']['amount']), (5, 1.3))
+        self.assertEqual(result['templates'], [{'template': 'order_ready', 'category': 'UTILITY', 'period': '2026-03-01', 'messages': 4}])
+
+    def test_the_bill_never_shows_meta_cost_or_the_service_charge_to_managers(self):
+        def keys(value):
+            if isinstance(value, dict):
+                return set(value) | {key for item in value.values() for key in keys(item)}
+            if isinstance(value, list):
+                return {key for item in value for key in keys(item)}
+            return set()
+        leaked = {'internal', 'meta_cost', 'margin_percent', 'margin_amount', 'raw_data', 'pricing_type'}
+        self.assertFalse(keys(self.billing_for(['WhatsApp Manager'])) & leaked)
+        self.assertFalse(keys(self.billing_for(['Relay Communication Manager'])) & leaked)
+        internal = self.billing_for(['System Manager'])['internal']
+        self.assertEqual((internal['margin_percent'], internal['meta_cost'], internal['margin_amount']), (30.0, 1.0, 0.3))
+        self.assertEqual(internal['months'][2], {'period': '2026-03-01', 'meta_cost': 1.0, 'margin_amount': 0.3})
 
 if __name__ == '__main__':
     unittest.main()
