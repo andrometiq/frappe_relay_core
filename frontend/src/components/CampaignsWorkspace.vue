@@ -58,8 +58,8 @@ function setColumn(key, column) {
 async function chooseMedia(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  const uploaded = await workspace.uploadMedia(file);
-  if (uploaded) { mapping.value.fixed.media_url = uploaded.url; mediaFile.value = uploaded.file_name; }
+  const fileUrl = await workspace.uploadMedia(file);
+  if (fileUrl) { mapping.value.fixed.media_url = fileUrl; mediaFile.value = file.name; }
   event.target.value = "";
 }
 function back() { campaign.value = null; sheet.value = null; workspace.refresh(); }

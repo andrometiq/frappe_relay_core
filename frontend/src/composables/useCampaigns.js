@@ -5,11 +5,10 @@ import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { applyProgress, approvedTemplates, mergeCampaign } from "../services/campaignProgress";
 import { realtimeRefreshQueue } from "../services/realtimeRefreshQueue";
 
-// A sheet stays private; campaign media is public so WhatsApp can fetch it.
-async function uploadFile(file, isPrivate, failure) {
+async function uploadFile(file, failure) {
   const form = new FormData();
   form.append("file", file, file.name);
-  form.append("is_private", isPrivate ? "1" : "0");
+  form.append("is_private", "1");
   const response = await fetch("/api/method/upload_file", { method: "POST", credentials: "same-origin", body: form,
     headers: { "X-Frappe-CSRF-Token": window.frappe?.csrf_token || window.csrf_token || "" } });
   const body = await response.json().catch(() => null);
@@ -35,13 +34,11 @@ export function useCampaigns() {
   });
   const create = (values) => run(async () => { campaign.value = await coreApi("bulk_campaigns.create", values, true); return campaign.value; });
   const upload = (file) => run(async () => {
-    const file_url = await uploadFile(file, true, "The file could not be uploaded. Use a .xlsx or .csv file.");
+    const file_url = await uploadFile(file, "The file could not be uploaded. Use a .xlsx or .csv file.");
     sheet.value = await coreApi("bulk_campaigns.inspect", { name: campaign.value.name, file_url }, true);
   });
-  const uploadMedia = (file) => run(async () => {
-    const file_url = await uploadFile(file, false, "The media file could not be uploaded.");
-    return coreApi("bulk_campaigns.media_link", { name: campaign.value.name, file_url }, true);
-  });
+  // Relay sends this file to Hub once when the campaign starts; rows carry the Hub media ID.
+  const uploadMedia = (file) => run(() => uploadFile(file, "The media file could not be uploaded."));
   const importRows = (mapping) => run(async () => { campaign.value = await coreApi("bulk_campaigns.import_rows", { name: campaign.value.name, mapping }, true); sheet.value = null; });
   const control = (action) => run(async () => { campaign.value = await coreApi("bulk_campaigns.control", { name: campaign.value.name, action }, true); });
   const page = (status, after) => run(async () => {

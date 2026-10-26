@@ -21,6 +21,8 @@
     "language",
     "source_file",
     "column_map",
+    "media_id",
+    "media_uploaded_at",
     "country",
     "reply_window_hours",
     "started_at",
@@ -136,6 +138,18 @@
       "read_only": 1
     },
     {
+      "fieldname": "media_id",
+      "label": "Hub media ID",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "media_uploaded_at",
+      "label": "Media uploaded at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
       "fieldname": "country",
       "label": "Default country",
       "fieldtype": "Data",
@@ -235,5 +249,5 @@
   ],
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-26 13:00:00.000000"
 }

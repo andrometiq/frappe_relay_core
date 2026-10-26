@@ -1,9 +1,10 @@
 """Bulk text and media campaigns: mapping, placeholders, media sources, reply window and Hub payloads."""
 import json
+import tempfile
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
 from relay_core import bulk_campaigns, bulk_sheet, service_window
@@ -50,6 +51,20 @@ class MessageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'HTTPS'):
             bulk_sheet.check_mapping(dict(fixed, fixed={'media_url': 'http://relay.localhost/files/offer.jpg'}), header, fields)
         self.assertIn('HTTPS', bulk_sheet.prepare_row(dict(row, Picture='ftp://x/a.jpg'), column, fields, 'IN')[2])
+        self.assertIn('HTTPS', bulk_sheet.prepare_row(dict(row, Picture='/private/files/a.jpg'), column, fields, 'IN')[2])
+
+    def test_one_uploaded_file_is_sent_by_its_hub_media_id(self):
+        fields = bulk_sheet.message_fields(PHOTO)
+        mapping = bulk_sheet.check_mapping({'phone': 'Mobile', 'fields': {'text:Name': 'Name'},
+                                            'fixed': {'media_url': '/private/files/offer.jpg'}}, ['Mobile', 'Name'], fields)
+        values = bulk_sheet.prepare_row({'Mobile': '9876543210', 'Name': 'Asha'}, mapping, fields, 'IN')[1]['values']
+        self.assertEqual(bulk_sheet.build_message(PHOTO, values, '555'),
+                         {'operation': 'messages.media', 'media_type': 'image', 'media_id': '555', 'caption': 'Offer for Asha'})
+        self.assertEqual(bulk_sheet.build_message({'kind': 'document', 'caption': ''}, {'media_url': '/private/files/March bill.pdf'}, '7'),
+                         {'operation': 'messages.media', 'media_type': 'document', 'media_id': '7', 'filename': 'March bill.pdf'})
+        with self.assertRaisesRegex(ValueError, 'HTTPS'):
+            bulk_sheet.check_mapping({'phone': 'Mobile', 'fixed': {'header_media': '/files/a.jpg'}}, ['Mobile'],
+                                     [{'key': 'header_media', 'label': 'Header image URL', 'component': 'header', 'media': 'image'}])
 
     def test_documents_carry_a_file_name_and_captions_may_be_empty(self):
         values = {'media_url': 'https://cdn.example/bills/March%20bill.pdf?v=2'}
@@ -83,19 +98,90 @@ class CreateTests(unittest.TestCase):
         self.assertTrue(bulk_campaigns.is_bulk(doc))
         self.assertFalse(bulk_campaigns.is_bulk(_dict(operation='messages.send', arguments='{"body": "old"}')))
 
-    def test_media_link_needs_a_public_file_of_an_accepted_type(self):
-        doc = _dict(arguments=json.dumps({'message': PHOTO, 'fields': []}))
-        file = _dict(is_private=0, file_name='offer.png', file_url='/files/offer.png')
-        fake = SimpleNamespace(utils=SimpleNamespace(get_url=lambda path: 'https://relay.example' + path),
-                               throw=Mock(side_effect=frappe.ValidationError))
-        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'bulk', return_value=doc), \
-                patch.object(bulk_campaigns, 'uploaded_file', return_value=file):
-            self.assertEqual(bulk_campaigns.media_link('Offer', '/files/offer.png'),
-                             {'url': 'https://relay.example/files/offer.png', 'file_name': 'offer.png'})
-            for change in ({'is_private': 1}, {'file_name': 'offer.mp4'}):
-                file.update({'is_private': 0, 'file_name': 'offer.png', **change})
-                with self.subTest(change=change), self.assertRaises(frappe.ValidationError):
-                    bulk_campaigns.media_link('Offer', '/files/offer')
+    def test_fixed_file_must_be_a_readable_upload_of_an_accepted_type(self):
+        doc = _dict(arguments=json.dumps({'message': PHOTO, 'fields': []}),
+                    column_map=json.dumps({'fixed': {'media_url': '/private/files/offer.png'}}))
+        file = _dict(file_name='offer.png')
+        with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(throw=Mock(side_effect=frappe.ValidationError))), \
+                patch.object(bulk_campaigns, 'uploaded_file', return_value=file) as uploaded:
+            self.assertEqual(bulk_campaigns.fixed_file(doc), (file, 'image/png'))
+            uploaded.assert_called_once_with('/private/files/offer.png')
+            file.file_name = 'offer.mp4'
+            with self.assertRaises(frappe.ValidationError):
+                bulk_campaigns.fixed_file(doc)
+            self.assertIsNone(bulk_campaigns.fixed_file(_dict(doc, column_map=json.dumps({'fixed': {'media_url': 'https://cdn.example/a.png'}}))))
+            self.assertIsNone(bulk_campaigns.fixed_file(_dict(doc, column_map=None)))
+
+
+class MediaUploadTests(unittest.TestCase):
+    """The fixed file goes to Hub once at start; every row then sends its media id."""
+    NOW = frappe.utils.get_datetime('2026-10-26 10:00:00')
+
+    def setUp(self):
+        self.path = self.enterContext(tempfile.TemporaryDirectory()) + '/offer.png'
+        with open(self.path, 'wb') as handle:
+            handle.write(b'\x89PNG\r\n\x1a\n')
+        self.file = _dict(file_name='offer.png', get_full_path=lambda: self.path)
+        self.doc = _dict(name='Offer', status='Draft', channel='WA', operation='messages.media', last_error='', reply_window_hours=72,
+                         arguments=json.dumps({'message': PHOTO, 'fields': bulk_sheet.message_fields(PHOTO)}),
+                         column_map=json.dumps({'phone': 'Mobile', 'fields': {'text:Name': 'Name'},
+                                                'fixed': {'media_url': '/private/files/offer.png'}}))
+        self.hub = Mock()
+        self.hub.execute.return_value = {'id': '555'}
+        self.cache = FakeCache()
+        self.cache.lock = Mock(side_effect=lambda *a, **k: MagicMock())
+        utils = SimpleNamespace(now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
+                                add_to_date=frappe.utils.add_to_date, cint=frappe.utils.cint, flt=frappe.utils.flt)
+        self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=self.cache, utils=utils, enqueue=Mock(),
+                                    session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
+        self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
+        for name in ('require_access', 'whatsapp_channel', 'read'):
+            self.enterContext(patch.object(bulk_campaigns, name))
+        self.save = self.enterContext(patch.object(bulk_campaigns, 'internal_save'))
+        self.enterContext(patch.object(bulk_campaigns, 'bulk', return_value=self.doc))
+        self.enterContext(patch.object(bulk_campaigns, 'uploaded_file', return_value=self.file))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(self.hub, {})))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'failure_message', side_effect=str))
+        self.prepare = self.enterContext(patch.object(bulk_campaigns.whatsapp, 'prepare',
+                                                      side_effect=lambda operation, arguments: {**arguments, 'operation': operation}))
+        self.enterContext(patch('relay_core.bulk_updates.open_reply_window'))
+
+    def test_start_uploads_once_and_every_row_sends_the_media_id(self):
+        bulk_campaigns.control('Offer', 'start')
+        self.hub.execute.assert_called_once_with({'operation': 'messages.media_upload', 'media_type': 'image',
+            'mime_type': 'image/png', 'filename': 'offer.png', 'content_base64': 'iVBORw0KGgo='})
+        self.prepare.assert_called_once()
+        self.assertEqual((self.doc.status, self.doc.media_id, self.doc.media_uploaded_at), ('Running', '555', self.NOW))
+        rows = [_dict(destination=f'91987654320{i}', arguments=json.dumps({'values': {'text:Name': 'Asha',
+                      'media_url': '/private/files/offer.png'}})) for i in range(3)]
+        snapshot = json.loads(self.doc.arguments)
+        messages = [bulk_campaigns.hub_message(self.doc, snapshot, row) for row in rows]
+        self.assertEqual({m['media_id'] for m in messages}, {'555'})
+        self.assertFalse([m for m in messages if 'media_url' in m])
+        self.hub.execute.assert_called_once()
+
+    def test_resume_reuploads_only_when_the_media_id_would_expire(self):
+        self.doc.update(status='Paused', media_id='444', media_uploaded_at=self.NOW.replace(day=1))
+        bulk_campaigns.control('Offer', 'resume')
+        self.hub.execute.assert_not_called()
+        self.assertEqual(self.doc.media_id, '444')
+        self.doc.update(status='Paused', media_uploaded_at=frappe.utils.add_to_date(self.NOW, days=-30))
+        bulk_campaigns.control('Offer', 'resume')
+        self.hub.execute.assert_called_once()
+        self.assertEqual((self.doc.media_id, self.doc.media_uploaded_at), ('555', self.NOW))
+
+    def test_a_failed_upload_leaves_the_campaign_in_draft(self):
+        self.hub.execute.side_effect = bulk_campaigns.whatsapp.HubError('Hub rejected', detail='mime type mismatch')
+        for result in (None, {}):
+            if result is not None:
+                self.hub.execute.side_effect, self.hub.execute.return_value = None, result
+            with self.subTest(result=result), self.assertRaises(frappe.ValidationError):
+                bulk_campaigns.control('Offer', 'start')
+        self.assertEqual(self.doc.status, 'Draft')
+        self.assertIsNone(self.doc.media_id)
+        self.save.assert_not_called()
+        self.cache.lock.assert_not_called()
+        self.fake.enqueue.assert_not_called()
 
 
 class WindowTests(unittest.TestCase):

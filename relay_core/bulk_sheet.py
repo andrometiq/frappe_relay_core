@@ -179,7 +179,7 @@ def check_mapping(mapping, header, fields):
     for field in fields:
         if field['key'] not in columns_used and not str(fixed.get(field['key']) or '').strip():
             raise ValueError(f"Choose a column or fixed value for {field['label']}")
-        if field['key'] in fixed and field.get('media'):
+        if field['key'] in fixed and field.get('media') and not (field['component'] == 'media' and is_site_file(fixed[field['key']])):
             media_url(fixed[field['key']])
     return {'phone': mapping['phone'], 'fields': dict(columns_used), 'extra': list(dict.fromkeys(extra)),
             'fixed': {key: str(value).strip() for key, value in fixed.items() if key not in columns_used}}
@@ -190,6 +190,11 @@ def media_url(value):
     if parts.scheme != 'https' or not parts.hostname or parts.username or parts.password or parts.fragment or len(value) > 2048:
         raise ValueError('Media needs an HTTPS link without credentials')
     return value
+
+
+def is_site_file(value):
+    """An uploaded File that every row sends; Relay uploads it to Hub once when the campaign starts."""
+    return isinstance(value, str) and value.startswith(('/files/', '/private/files/'))
 
 
 def prepare_row(row, mapping, fields, region):
@@ -205,7 +210,7 @@ def prepare_row(row, mapping, fields, region):
             return destination, None, f"Missing {field['label']}"
         if len(value) > MAX_VALUE:
             return destination, None, f"{field['label']} is too long"
-        if field.get('media'):
+        if column and field.get('media'):  # check_mapping checked the fixed value.
             try:
                 media_url(value)
             except ValueError:
@@ -260,11 +265,13 @@ def message_problem(message, values):
     return None
 
 
-def build_message(message, values):
-    """Hub messages.send or messages.media arguments for one row, without the recipient."""
+def build_message(message, values, media_id=None):
+    """Hub messages.send or messages.media arguments for one row, without the recipient. A media_id replaces
+    the row's link when the campaign sends one uploaded file."""
     if message['kind'] == 'text':
         return {'operation': 'messages.send', 'body': fill(message['body'], values)}
-    payload = {'operation': 'messages.media', 'media_type': MESSAGE_MEDIA[message['kind']], 'media_url': values['media_url']}
+    source = {'media_id': media_id} if media_id else {'media_url': values['media_url']}
+    payload = {'operation': 'messages.media', 'media_type': MESSAGE_MEDIA[message['kind']], **source}
     caption = fill(message['caption'], values)
     if caption:
         payload['caption'] = caption
