@@ -56,8 +56,9 @@ def period_of(point):
     return datetime.fromtimestamp((start + end) / 2, site_zone()).date().replace(day=1)
 
 
-def parse(points):
-    """Meta data points -> {(period, category, pricing_type): totals}. Field names are read defensively."""
+def parse(points, currency=''):
+    """Meta data points -> {(period, category, pricing_type): totals}. Field names are read defensively; a point
+    without a currency takes the WABA currency."""
     rows = {}
     for point in points:
         if not isinstance(point, dict) or number(point.get('start')) <= 0:
@@ -66,7 +67,7 @@ def parse(points):
         row = rows.setdefault(key, {'volume': 0, 'meta_cost': 0.0, 'currency': '', 'raw': []})
         row['volume'] += int(number(point.get('volume')))
         row['meta_cost'] += number(point.get('cost'))
-        row['currency'] = row['currency'] or str(point.get('currency') or '')[:10]
+        row['currency'] = row['currency'] or str(point.get('currency') or currency)[:10]
         row['raw'].append(point)
     return rows
 
@@ -106,7 +107,8 @@ def configured_account(account):
 
 
 def refresh(account, year):
-    """Read the year's monthly Meta charges through the Hub and upsert one row per month, category and type."""
+    """Read the year's monthly Meta charges and the WABA currency through the Hub, and upsert one row per month,
+    category and type."""
     from relay_core.whatsapp import checked_client
     year, account = valid_year(year), configured_account(account)
     start, end = year_bounds(year)
@@ -118,7 +120,8 @@ def refresh(account, year):
     points = result.get('data_points') if isinstance(result, dict) else None
     if not isinstance(points, list):
         raise HubError('Hub returned no pricing data points')
-    rows, fetched_at = parse(points), frappe.utils.now_datetime()
+    currency = result.get('currency') if isinstance(result.get('currency'), str) else ''
+    rows, fetched_at = parse(points, currency), frappe.utils.now_datetime()
     for key, values in rows.items():
         upsert(account, key, values, fetched_at)
     return {'rows': len(rows), 'data_points': len(points)}
