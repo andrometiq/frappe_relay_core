@@ -106,6 +106,16 @@ class TemplateSyncTests(unittest.TestCase):
         self.assertEqual(self.hub.execute.call_args_list[1].args[0], {'operation': 'templates.list', 'after': 'c0'})
         self.assertNotIn('DELETED', self.statuses().values())  # A truncated list never infers deletion.
 
+    def test_requested_sync_publishes_even_without_changes_and_on_failure(self):
+        self.hub.execute.return_value = page([ROW])
+        whatsapp_templates.sync()
+        self.store.frappe.publish_realtime.reset_mock()
+        self.assertFalse(whatsapp_templates.sync(notify=True))
+        self.store.frappe.publish_realtime.assert_called_once()
+        self.hub.execute.side_effect = HubError('down')
+        self.assertFalse(whatsapp_templates.sync(notify=True))
+        self.assertEqual(self.store.frappe.publish_realtime.call_count, 2)
+
     def test_hub_error_is_logged_without_writes(self):
         self.hub.execute.side_effect = HubError('rejected', detail='templates are not enabled for this account')
         self.assertFalse(whatsapp_templates.sync())
@@ -239,6 +249,57 @@ class TemplateRenderTests(unittest.TestCase):
         self.assertEqual(content['template']['buttons'], ['Send catalogue', 'Open shop'])
         with self.assertRaises(ValueError):
             conversation_start.whatsapp_content({'operation': 'templates.send', 'name': ''})
+
+
+class LocalTemplateListTests(unittest.TestCase):
+    """The Templates tab reads the local copy; a stale copy queues one background Hub sync."""
+    def setUp(self):
+        self.cache = Cache()
+        self.cache.hgetall = lambda name: {key.encode(): value for key, value in self.cache.values.get(name, {}).items()}
+        self.locks = set()
+        self.cache.make_key = lambda key: key
+        self.cache.set = lambda key, value, nx=False, ex=None: not (key in self.locks or self.locks.add(key))
+        self.rows = [_dict(template_id='103', template_name='relay_test_marketing', language='en', category='MARKETING',
+                           status='APPROVED', quality='GREEN', reason=None)]
+        self.frappe = SimpleNamespace(cache=self.cache, enqueue=Mock(), publish_realtime=Mock(),
+            realtime=SimpleNamespace(get_doctype_room=lambda doctype: doctype),
+            get_all=Mock(side_effect=lambda doctype, **kwargs: self.rows),
+            utils=SimpleNamespace(now=lambda: '2026-10-26 09:10:00',
+                time_diff_in_seconds=lambda later, earlier: 600 if earlier == '2026-10-26 09:00:00' else 10))
+        self.patches = [patch.object(whatsapp_templates, 'frappe', self.frappe),
+            patch.object(whatsapp_templates, 'connection_value', return_value='essdee'),
+            patch('relay_core.permissions.require_access')]
+        for item in self.patches: item.start()
+
+    def tearDown(self):
+        for item in self.patches: item.stop()
+
+    def test_local_rows_are_the_listed_hub_rows_with_newer_local_status(self):
+        self.cache.hset(whatsapp_templates.DEFINITIONS + 'essdee', 'relay_test_marketing|en', dict(MARKETING, id='103',
+            status='PENDING', category='MARKETING', message_send_ttl_seconds=300))
+        self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:09:50', 'templates': 1})
+        result = whatsapp_templates.directory()
+        self.assertEqual(result['data'], [{'id': '103', 'name': 'relay_test_marketing', 'language': 'en', 'category': 'MARKETING',
+            'status': 'APPROVED', 'quality_score': {'score': 'GREEN'}, 'parameter_format': 'POSITIONAL',
+            'components': MARKETING['components'], 'message_send_ttl_seconds': 300}])
+        self.assertEqual(result['sync'], {'synced_at': '2026-10-26 09:09:50', 'templates': 1, 'syncing': False})
+        self.frappe.enqueue.assert_not_called()
+        self.assertEqual(self.frappe.get_all.call_args.kwargs['filters'], {'account': 'essdee', 'status': ['!=', 'DELETED']})
+
+    def test_stale_or_incomplete_copy_queues_one_sync_per_minute(self):
+        self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:00:00', 'templates': 1})
+        self.assertTrue(whatsapp_templates.directory()['sync']['syncing'])
+        self.assertFalse(whatsapp_templates.directory()['sync']['syncing'], 'A second open within a minute does not queue again')
+        self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_templates.sync', queue='short', timeout=300, notify=True)
+        self.locks.clear()
+        self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:09:50', 'templates': 1})
+        self.assertTrue(whatsapp_templates.directory()['sync']['syncing'], 'Rows without cached content need a sync')
+
+    def test_without_an_account_nothing_is_queued(self):
+        self.rows = []
+        with patch.object(whatsapp_templates, 'connection_value', return_value=None):
+            self.assertEqual(whatsapp_templates.directory(), {'data': [], 'sync': {'synced_at': None, 'templates': 0, 'syncing': False}})
+        self.frappe.enqueue.assert_not_called()
 
 
 if __name__ == '__main__':
