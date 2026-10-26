@@ -8,10 +8,10 @@ from unittest.mock import Mock, patch
 class WhatsAppTests(unittest.TestCase):
     def setUp(self):
         def throw(message,*args):raise ValueError(message)
-        self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),db=Mock(),get_roles=Mock(return_value=['Relay Communication Manager']),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'))
+        self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),db=Mock(),get_roles=Mock(return_value=['Relay Communication Manager']),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'),cache=types.SimpleNamespace(get_value=lambda key:None,set_value=Mock()))
         spec=importlib.util.spec_from_file_location('wa_test',Path('relay_core/whatsapp.py'));self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
-        self.api.require_business_assignment=Mock();self.api.require_access=Mock();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
+        self.api.require_business_assignment=Mock();self.api.connection_value=lambda key:'';self.api.require_access=Mock();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
         self.audit=patch.multiple('relay_core.whatsapp_templates',record_request=Mock(),apply_request=Mock(),overlay=Mock(side_effect=lambda page:page))
         self.audit.start();self.addCleanup(self.audit.stop)
     def test_multiple_contacts_are_returned(self):
