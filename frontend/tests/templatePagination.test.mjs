@@ -55,3 +55,32 @@ for (const query of ['quantity', 'missing']) test(`filtered templates can reach 
   assert.doesNotMatch(exhausted,/Load more templates/)
   if(query === 'quantity')assert.match(exhausted,/quantity_25/)
 })
+
+test('the template list asks for the connection and the Hub capabilities together', async t => {
+  const scope = effectScope();t.after(() => scope.stop())
+  const calls = [], answers = {
+    'whatsapp.connection': {configured:true}, 'whatsapp_templates.sync_status': {synced_at:null,templates:1},
+    capabilities: {templates:true}, 'templates.list': {data:[{id:'1',name:'order_update'}],paging:{}},
+  }
+  const workspace = scope.run(() => makeWorkspace(computed,ref,()=>{},()=>{},async(method,values) => {
+    const key = method === 'whatsapp.execute' ? values.operation : method
+    calls.push(key)
+    return answers[key]
+  },()=>[]))
+  const refreshing = workspace.refresh()
+  assert.deepEqual(calls, ['capabilities', 'whatsapp.connection'])
+  await refreshing
+  assert.deepEqual(calls.slice(2).sort(), ['templates.list', 'whatsapp_templates.sync_status'])
+  assert.deepEqual(workspace.templates.value.map(row => row.name), ['order_update'])
+})
+
+test('an unconfigured account shows no templates even though the Hub capabilities read fails', async t => {
+  const scope = effectScope();t.after(() => scope.stop())
+  const workspace = scope.run(() => makeWorkspace(computed,ref,()=>{},()=>{},async(method) => {
+    if (method === 'whatsapp.execute') throw Error('Hub could not complete this operation')
+    return {configured:false}
+  },()=>[]))
+  await workspace.refresh()
+  assert.equal(workspace.capabilities.value, null)
+  assert.equal(workspace.error.value, '')
+})
