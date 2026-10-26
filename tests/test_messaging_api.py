@@ -44,9 +44,13 @@ class SendTests(unittest.TestCase):
                                   'number': NUMBER, 'contact': 'Contact Asha', 'key': message['key']})
 
     def test_a_repeat_keeps_its_key_and_a_given_key_is_used(self):
-        first = messaging_api.send_text(NUMBER, 'Your order is ready')['key']
-        self.assertEqual(messaging_api.send_text('+' + NUMBER, 'Your order is ready')['key'], first)
-        self.assertNotEqual(messaging_api.send_text(NUMBER, 'Another text')['key'], first)
+        with patch.object(messaging_api.time, 'time', return_value=6000.0):
+            first = messaging_api.send_text(NUMBER, 'Your order is ready')['key']
+        with patch.object(messaging_api.time, 'time', return_value=6599.0):
+            self.assertEqual(messaging_api.send_text('+' + NUMBER, 'Your order is ready')['key'], first)
+            self.assertNotEqual(messaging_api.send_text(NUMBER, 'Another text')['key'], first)
+        with patch.object(messaging_api.time, 'time', return_value=6600.0):  # The next 10-minute bucket sends again.
+            self.assertNotEqual(messaging_api.send_text(NUMBER, 'Your order is ready')['key'], first)
         self.assertEqual(messaging_api.send_text(NUMBER, 'Your order is ready', key='order-25')['key'], 'api-order-25')
         for bad in ('has space', 'x' * 101, 25):
             with self.subTest(key=bad), self.assertRaises(frappe.ValidationError):
