@@ -5,7 +5,7 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
-import { relativeTime } from '../relativeTime'
+import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
@@ -75,7 +75,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
       <button v-for="row in rows" :key="row.name" type="button" :aria-label="'Open conversation: ' + recordTitle(row, 'Contact')" class="directory-contact" :class="{ 'is-unread': row.unread }" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
         <span class="directory-avatar"><Avatar :label="recordTitle(row, 'Contact')" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
         <span class="directory-contact-copy">
-          <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ relativeTime(row.latest_at) }}</time></span>
+          <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
           <span class="directory-contact-bottom"><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
           <span class="directory-contact-context"><span v-if="row.business" class="directory-business" :title="linkedTitle(row.business.doctype, row.business.name)">{{ linkedTitle(row.business.doctype, row.business.name) }}</span><span class="directory-assignee"><FeatherIcon name="user" :size="12" />{{ row.assignment?.assigned_to ? linkedTitle('User', row.assignment.assigned_to, 'Assigned') : linkedTitle('Relay Team', row.assignment?.team, 'Unassigned') }}</span></span>
         </span>

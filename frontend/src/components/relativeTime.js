@@ -10,3 +10,19 @@ export function relativeTime(value, now = Date.now()) {
   if (minutes < 10080) return `${Math.floor(minutes / 1440)}d ago`
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== new Date(now).getFullYear() ? { year: 'numeric' } : {}) })
 }
+
+// Conversation list time: the clock time today, "Yesterday", the weekday within a week, then the date.
+export function listTime(value, now = Date.now()) {
+  if (!value) return ''
+  const date = new Date(String(value).replace(' ', 'T'))
+  if (!Number.isFinite(date.getTime())) return ''
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  const day = new Date(date)
+  day.setHours(0, 0, 0, 0)
+  const days = Math.round((today - day) / 86400000)
+  if (days <= 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return date.toLocaleDateString([], { weekday: 'short' })
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) })
+}
