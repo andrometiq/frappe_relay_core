@@ -165,7 +165,7 @@ test('navigation puts WhatsApp under Channels with manager campaigns, omits call
   assert.match(text, /name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp'/)
   assert.doesNotMatch(text, /name: 'Campaigns'/)
   const section = await readFile(new URL('../src/components/whatsapp/WhatsAppSection.vue', import.meta.url), 'utf8')
-  assert.match(section, /name: 'campaigns', label: 'Bulk campaigns', show: capabilities.value.manage && can\('bulk_campaigns'\)/)
+  assert.match(section, /\.\.\.whatsappSections\(capabilities\.value\)/)
   assert.doesNotMatch(text,/name:'Calls'|name:'Groups'|Calls:|Groups:/)
 })
 

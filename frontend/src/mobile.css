@@ -38,6 +38,7 @@
   .mobile-sheet-item.active{color:var(--relay-accent-text);font-weight:600}
   .mobile-sheet-icon{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:var(--relay-radius);background:var(--relay-accent-soft);color:var(--relay-accent-text)}
   .mobile-sheet-chevron{margin-left:auto;color:var(--ink-gray-4)}
+  .mobile-sheet-group{padding:12px 8px 4px;font-size:12px;font-weight:600;color:var(--ink-gray-5)}
   .v1-shell.relay-shell .mobile-sheet-account{display:flex;align-items:center;gap:10px;margin-top:8px}
   .mobile-sheet-account .relay-user-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 

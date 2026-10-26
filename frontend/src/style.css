@@ -954,6 +954,11 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .relay-table{border-color:var(--relay-stroke);border-radius:var(--relay-radius);background:var(--relay-layer-strong)}
 .v1-shell.relay-shell :is(.frappe-list-row,.list-table tbody tr,.relay-table [role=row]){transition:background-color var(--relay-fast) ease}
 
+/* WhatsApp section items under the WhatsApp nav item */
+.v1-shell.relay-shell .nav-item.nav-sub{min-height:32px;height:32px;padding-left:40px;font-size:13px;color:var(--ink-gray-7)}
+.v1-shell.relay-shell .nav-item.nav-sub::after{content:"";position:absolute;left:21px;top:0;bottom:0;width:1px;background:var(--relay-stroke-strong)}
+@media(max-width:900px){.v1-shell.relay-shell .app-nav:not(.mobile-nav-open) .nav-sub{display:none}}
+
 @keyframes relay-fade{from{opacity:0}}
 @keyframes relay-fade-up{from{opacity:0;transform:translateY(6px)}}
 @keyframes relay-scale-in{from{opacity:0;transform:scale(.96)}}

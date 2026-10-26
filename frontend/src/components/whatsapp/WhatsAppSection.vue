@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { channelCan } from '../../services/enabledChannels'
+import { whatsappRoute, whatsappSections } from '../../services/navigation'
 import { routeTab } from '../../useViewRoute'
 import WhatsAppWorkspace from '../WhatsAppWorkspace.vue'
 import WhatsAppIdentity from '../WhatsAppIdentity.vue'
@@ -12,20 +12,14 @@ const views = {
   templates: WhatsAppWorkspace,
   campaigns: defineAsyncComponent(() => import('../CampaignsWorkspace.vue')),
   forms: defineAsyncComponent(() => import('./WhatsAppForms.vue')),
+  billing: defineAsyncComponent(() => import('./WhatsAppBilling.vue')),
 }
-const can = feature => channelCan(capabilities.value, 'WhatsApp', feature)
-const tabs = computed(() => [
-  { name: 'templates', label: 'Templates', show: can('templates') },
-  { name: 'campaigns', label: 'Bulk campaigns', show: capabilities.value.manage && can('bulk_campaigns') },
-  { name: 'forms', label: 'Forms', show: capabilities.value.manage && can('forms') },
-  { name: 'account', label: 'Account' },
-].filter(tab => tab.show !== false))
+const tabs = computed(() => [...whatsappSections(capabilities.value), { name: 'account', label: 'Account' }])
 const requested = ref(routeTab(location.hash, 'templates'))
 const tab = computed(() => (tabs.value.find(item => item.name === requested.value) || tabs.value[0]).name)
 const account = ref(''), configured = ref(null), error = ref('')
 
-// Templates is the default tab, so its own ?template= links stay unchanged.
-function open(name) { location.hash = name === 'templates' ? '/whatsapp' : '/whatsapp?tab=' + name }
+function open(name) { location.hash = whatsappRoute(name) }
 function readRoute() { requested.value = routeTab(location.hash, 'templates') }
 async function load() {
   error.value = ''
@@ -55,7 +49,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
       </div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Hub connection and setup</a><a class="v1-link" href="/desk/relay-channel">Configure channel</a></div>
     </div>
-    <component :is="views[tab]" v-else />
+    <component :is="views[tab]" v-else v-bind="tab === 'billing' ? { account } : {}" />
   </section>
 </template>
 <style scoped>

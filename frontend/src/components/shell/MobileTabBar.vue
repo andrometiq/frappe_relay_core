@@ -5,8 +5,8 @@ import { coreApi } from '../../services/coreApi'
 import { splitMobileNav, unreadBadge } from '../../services/mobileNav'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 
-const props = defineProps({ items: { type: Array, required: true }, view: String })
-const emit = defineEmits(['navigate'])
+const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String })
+const emit = defineEmits(['navigate', 'section'])
 const open = defineModel('open', { type: Boolean, default: false })
 const split = computed(() => splitMobileNav(props.items))
 const badge = ref(''), sheet = ref(null)
@@ -19,6 +19,10 @@ async function loadUnread() {
 function go(name) {
   open.value = false
   emit('navigate', name)
+}
+function goSection(name) {
+  open.value = false
+  emit('section', name)
 }
 watch(open, async value => {
   if (!value) return
@@ -53,6 +57,14 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
         <span class="mobile-sheet-icon"><FeatherIcon :name="item.icon" :size="18" /></span><span>{{ item.label }}</span>
         <FeatherIcon name="chevron-right" :size="16" class="mobile-sheet-chevron" />
       </button>
+      <template v-if="sections.length">
+        <p class="mobile-sheet-group">WhatsApp</p>
+        <button v-for="item in sections" :key="item.name" type="button" class="mobile-sheet-item" :class="{ active: section === item.name }"
+          :aria-current="section === item.name ? 'page' : undefined" @click="goSection(item.name)">
+          <span class="mobile-sheet-icon"><FeatherIcon :name="item.icon" :size="18" /></span><span>{{ item.label }}</span>
+          <FeatherIcon name="chevron-right" :size="16" class="mobile-sheet-chevron" />
+        </button>
+      </template>
       <slot name="footer" />
     </div>
   </Transition>
