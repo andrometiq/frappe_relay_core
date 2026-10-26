@@ -75,12 +75,25 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
     return payload
 
 
+HUB_CAPABILITIES_KEY = 'relay_hub_capabilities'
+HUB_CAPABILITIES_SECONDS = 60
+
+
 def checked_client():
+    """Hub client and account capabilities. Capabilities are cached briefly per Hub URL and account."""
     hub=client()
-    capabilities=hub.execute({'operation':'capabilities'})
+    key=f"{HUB_CAPABILITIES_KEY}:{connection_value('relay_hub_url')}:{connection_value('relay_hub_account')}"
+    capabilities=frappe.cache.get_value(key)
+    if capabilities is None:
+        capabilities=hub.execute({'operation':'capabilities'})
+        frappe.cache.set_value(key,capabilities,expires_in_sec=HUB_CAPABILITIES_SECONDS)
     if str(capabilities.get('site','')).rstrip('/') != frappe.utils.get_url().rstrip('/'):
         frappe.throw('Hub account belongs to another site')
     return hub,capabilities
+
+
+def clear_hub_capabilities():
+    frappe.cache.delete_keys(HUB_CAPABILITIES_KEY)
 
 
 @frappe.whitelist(methods=['POST'])
