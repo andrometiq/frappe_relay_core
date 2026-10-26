@@ -1062,6 +1062,14 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-bubble:not(.ml-auto) :is(.message-quote,.media-document){border-radius:6px;background:var(--relay-hover)}
 .v1-shell.relay-shell .conversation-bubble.ml-auto .message-template-buttons>li{border-color:rgba(255,255,255,.4);background:transparent;color:#fff}
 .message-template-footer,.message-template-caption{font-size:11.5px}
+.message-reactions{display:flex;flex-wrap:wrap;gap:4px}
+.message-reaction{display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:11px;background:var(--relay-bubble-in);box-shadow:var(--relay-shadow-1);color:var(--relay-ink-3);font-size:12.5px;font-weight:600;white-space:nowrap}
+.v1-shell.relay-shell .conversation-bubble>.message-reactions{position:absolute;left:10px;top:calc(100% - 6px);z-index:2;margin:0}
+.v1-shell.relay-shell .conversation-bubble:has(>.message-reactions):not(:has(.message-readers)){margin-bottom:16px}
+.reaction-picker{gap:2px;margin-top:6px;padding:4px;border:1px solid var(--relay-stroke);border-radius:8px;background:var(--surface-modal);box-shadow:var(--relay-shadow-2);color:var(--relay-ink)}
+.reaction-picker button{border-radius:6px}
+.reaction-picker button:hover{background:var(--relay-hover)}
+.reaction-picker button:last-child{padding:0 8px;color:var(--relay-ink-2)}
 .v1-shell.relay-shell .message-date-divider{margin:6px 0 10px}
 .v1-shell.relay-shell .message-date-divider span{padding:3px 10px;border:1px solid var(--relay-stroke);border-radius:10px;background:var(--relay-layer);color:var(--relay-ink-3);font-size:11.5px;font-weight:600}
 .v1-shell.relay-shell .message-unread-divider{display:flex;align-items:center;gap:12px;margin:14px 0 8px}

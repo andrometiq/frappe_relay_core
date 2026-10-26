@@ -20,7 +20,7 @@ const AttachmentViewer = defineAsyncComponent(
   () => import("./AttachmentViewer.vue"),
 );
 const TgsSticker = defineAsyncComponent(() => import("./TgsSticker.vue"));
-const props = defineProps({ message: { type: Object, required: true }, showReplyReference: { type: Boolean, default: true } });
+const props = defineProps({ message: { type: Object, required: true }, showReplyReference: { type: Boolean, default: true }, showReactions: { type: Boolean, default: true } });
 watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
 const template = computed(() => templateParts(data.value));
@@ -214,14 +214,14 @@ const video = computed(
       </div>
     </dl>
     <div
-      v-if="reactionLabels(message.reactions).length"
-      class="flex flex-wrap gap-1"
+      v-if="showReactions && reactionLabels(message.reactions).length"
+      class="message-reactions"
       aria-label="Reactions"
     >
       <span
         v-for="reaction in reactionLabels(message.reactions)"
         :key="reaction"
-        class="rounded-full bg-surface-gray-2 px-2 py-1"
+        class="message-reaction"
         >{{ reaction }}</span
       >
     </div>

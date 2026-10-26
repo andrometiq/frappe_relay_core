@@ -10,7 +10,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } fr
 import { Button, FeatherIcon, Dropdown, Dialog } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
-import { messageData, objectValue, attachmentDownloadURL } from "../messageContent";
+import { messageData, objectValue, attachmentDownloadURL, reactionLabels } from "../messageContent";
 import { channelCan, multipleChannels } from "../../services/enabledChannels";
 import { createScrollHold } from "./scrollHold";
 import { groupSends } from "../../services/sendGroups";
@@ -303,7 +303,7 @@ function actions(message) {
           }}</span>
         </button>
         <span v-if="showChannel && !message.sends" class="message-channel">{{ objectValue(message.provider_context).provider }}</span>
-        <MessageContent :message="message" :show-reply-reference="false" />
+        <MessageContent :message="message" :show-reply-reference="false" :show-reactions="false" />
         <p v-if="message._pending && message.error" class="text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
         <footer class="message-footer">
           <time
@@ -368,6 +368,9 @@ function actions(message) {
             :aria-label="'React ' + reaction" :disabled="busy" @click="react(message, reaction)">{{ reaction }}</button>
           <button type="button" aria-label="Remove reaction" title="Remove reaction" :disabled="busy" @click="react(message, '')">×</button>
           <button type="button" aria-label="Close reactions" title="Close reactions" @click="reactionTarget = null">Close</button>
+        </div>
+        <div v-if="reactionLabels(message.reactions).length" class="message-reactions" aria-label="Reactions">
+          <span v-for="reaction in reactionLabels(message.reactions)" :key="reaction" class="message-reaction">{{ reaction }}</span>
         </div>
         <ReadByBubble v-if="!message._pending && readersByMessage[message.name]?.length" :message="message.name" :readers="readersByMessage[message.name]" />
       </article>
