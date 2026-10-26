@@ -269,19 +269,22 @@ def send(message, kind, data, request_key, quote=1, channels=None):
 
     Extra copies never quote: the quoted message exists only on the source channel.
     """
-    sources = channel_sources(message, kind, channels)
+    group = request_hash(request_key)[:32]
+    sources = channel_sources(message, kind, channels, request_key)
     if not sources:
         return send_one(message, kind, data, request_key, quote)
-    group = request_hash(request_key)[:32]
     results = [send_one(message, kind, data, request_key, quote, group)]
-    for name in sources:
-        key = hashlib.sha256((request_key + ':' + name).encode()).hexdigest()[:40]
+    for key, name in sources:
         results.append(send_one(name, kind, data, key, 0, group))
     return dict(results[0], send_group=group, sends=results)
 
 
-def channel_sources(message, kind, names):
-    """Newest message of the same person on each extra enabled channel."""
+def channel_sources(message, kind, names, request_key):
+    """(request key, source message) for each extra enabled channel of the same person.
+
+    The key comes from the channel, and a retry reuses the source of its first try, so a newer
+    incoming message on that channel cannot make the same request send twice.
+    """
     names = frappe.parse_json(names) if isinstance(names, str) else names or []
     if (not isinstance(names, list) or len(names) > 3 or not all(isinstance(name, str) for name in names)
             or len(set(names)) != len(names)):
@@ -298,11 +301,13 @@ def channel_sources(message, kind, names):
         validate_reference(name, 'CH')
         if frappe.db.get_value('Relay Channel', name, 'channel') not in enabled:
             raise ValueError('This channel is switched off')
-        newest = frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': name},
-            'name', order_by='creation desc')
+        key = hashlib.sha256((request_key + ':' + name).encode()).hexdigest()[:40]
+        newest = (frappe.db.get_value('Relay Message Action', {'request_key': request_hash(key)}, 'source_message')
+            or frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': name},
+                'name', order_by='creation desc'))
         if not newest:
             raise ValueError('This person has no conversation on the chosen channel')
-        sources.append(newest)
+        sources.append((key, newest))
     return sources
 
 
@@ -645,7 +650,8 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
             'provider_context': {'provider': channel.channel}, 'direction': 'Outgoing',
             'content': row.preview or 'Outgoing message', 'creation': row.creation, 'error': action_error(doc),
             'status': {'Dispatching': 'Sending', 'Uncertain': 'Unconfirmed',
-                       'Rejected': 'Failed'}.get(row.status, row.status), '_pending': True})
+                       'Rejected': 'Failed'}.get(row.status, row.status), '_pending': True,
+            'send_group': object_value(doc.payload).get('send_group')})
         if doc.operation=='email':
             items[-1].update(emailRequest=object_value(doc.payload).get('email_request'),emailSource=row.source_message)
     return {'items': items, 'next': records[49].name if len(records) > 50 else None}
