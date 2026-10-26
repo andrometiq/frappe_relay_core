@@ -23,6 +23,12 @@ class QueueCountTests(unittest.TestCase):
         self.access = self.enterContext(patch.object(queue_counts, 'require_access'))
         self.sql = []
         self.enterContext(patch.object(queue_counts, 'count', side_effect=lambda query: self.sql.append(query.get_sql()) or len(self.sql)))
+        self.unread_sql = []
+        def run(query, **kwargs):
+            self.unread_sql.append(query.get_sql()); return [(4, 5)]
+        from pypika.queries import QueryBuilder
+        self.enterContext(patch.object(QueryBuilder, 'run', run, create=True))
+        self.fake.get_all.side_effect = lambda doctype, filters, **kwargs: ['TG-1'] if filters == {'channel': 'Telegram'} else []
 
     def scoped_query(self, doctype, fields, ignore_permissions, order_by, filters=None):
         """Stand-in for permission query conditions, marked so the SQL shows where scope applies."""
@@ -34,19 +40,24 @@ class QueueCountTests(unittest.TestCase):
         result = queue_counts.get_counts()
 
         self.assertEqual(result, {'all': 1, 'mine': 2, 'unassigned': 3, 'unread': 4, 'unread_messages': 5})
-        for sql in self.sql:
+        for sql in self.sql + self.unread_sql:
             self.assertIn(SCOPE + "('Relay Contact')", sql)
         self.assertIn("`assigned_to`='agent@example.invalid'", self.sql[1])
         self.assertIn('NOT IN', self.sql[2])
-        for sql in self.sql[3:]:
-            self.assertIn(SCOPE + "('Relay Message')", sql, 'Unread counts keep the message scope too')
-            self.assertIn("`user`='agent@example.invalid'", sql)
+        [unread] = self.unread_sql
+        self.assertIn(SCOPE + "('Relay Message')", unread, 'Unread counts keep the message scope too')
+        self.assertIn("`user`='agent@example.invalid'", unread)
+        self.assertIn('COUNT(DISTINCT', unread, 'One pass counts conversations and messages')
 
     def test_medium_limits_contacts_and_unread_messages_to_its_channels(self):
         queue_counts.get_counts('Telegram')
 
-        for sql in self.sql:
-            self.assertIn("`channel`='Telegram'", sql)
+        for sql in self.sql + self.unread_sql:
+            self.assertIn("IN ('TG-1')", sql)
+
+    def test_medium_without_channels_counts_nothing_without_queries(self):
+        self.assertEqual(queue_counts.get_counts('Email'), dict.fromkeys(('all', 'mine', 'unassigned', 'unread', 'unread_messages'), 0))
+        self.assertEqual(self.sql + self.unread_sql, [])
 
     def test_read_denies_users_without_relay_access_and_bad_mediums(self):
         self.access.side_effect = PermissionError

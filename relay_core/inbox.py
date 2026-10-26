@@ -121,29 +121,54 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=100) if medium else None
     rows=search.run(as_dict=True);more=len(rows)>30;page=rows[:30]
     if before:page.reverse()
-    items=[]
-    from relay_core.timeline import page_query
-    from relay_core.api import business_types
-    configured = set(business_types())
-    for row in page:
-        try:_, person = readable_contact(row.name)
-        except frappe.PermissionError:continue
-        latest_filters={'relay_contact':row.name}
-        if medium:latest_filters['channel']=['in',channel_names]
-        latest=page_query(['name','content','message_data','transcript','channel','creation','sent_at','business_doctype','business_name'],latest_filters,1).run(as_dict=True)
-        state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(row.name)},['last_read','starred','folder'],as_dict=True) or {}
-        unread=unread_count(row.name, channels=channel_names)
-        last=latest[0] if latest else {}
-        if last and not frappe.get_doc('Relay Channel',last.channel).has_permission('read'):last={}
-        business = ({'doctype': last['business_doctype'], 'name': last['business_name']}
-                    if last.get('business_doctype') in configured and last.get('business_name') else None)
-        assigned = frappe.db.get_value('Relay Conversation Assignment', {'relay_contact': row.name},
-                                      ['team', 'assigned_to'], as_dict=True) or {}
-        items.append(dict(row,provider=frappe.db.get_value('Relay Channel',last.channel,'channel') if last else None,business=business,assignment=assigned,id=row.name,starred=state.get('starred',0),folder=state.get('folder',''),
-                          latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
-                          unread=unread,unread_more=False))
+    items=directory_items(page,channel_names)
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+PREVIEW_FIELDS = ['name','relay_contact','content','message_data','transcript','channel','creation','sent_at','business_doctype','business_name']
+
+
+def directory_items(rows, channels=None):
+    """Previews, reads, unread counts and assignments for one page in a fixed number of queries.
+
+    Rows come from the Relay Contact permission query, and every lookup here runs under the
+    Relay Message and Relay Channel permission queries."""
+    names=[row.name for row in rows]
+    if not names: return []
+    from relay_core.api import business_types
+    configured=set(business_types())
+    providers=dict(frappe.get_list('Relay Channel',fields=['name','channel'],as_list=True,limit_page_length=0))
+    latest=latest_messages(names,channels)
+    states={row.relay_contact:row for row in frappe.get_all('Relay Conversation State',
+        filters={'state_key':['in',[state_key(name) for name in names]]},fields=['relay_contact','starred','folder',*READ_FIELDS])}
+    unread=unread_counts({name:read_position(states.get(name)) for name in names},channels)
+    assignments={row.relay_contact:{'team':row.team,'assigned_to':row.assigned_to} for row in frappe.get_all(
+        'Relay Conversation Assignment',filters={'relay_contact':['in',names]},fields=['relay_contact','team','assigned_to'])}
+    items=[]
+    for row in rows:
+        last=latest.get(row.name) or {}
+        if last.get('channel') not in providers: last={}
+        state=states.get(row.name) or {}
+        business=({'doctype':last['business_doctype'],'name':last['business_name']}
+                  if last.get('business_doctype') in configured and last.get('business_name') else None)
+        items.append(dict(row,provider=providers.get(last.get('channel')),business=business,assignment=assignments.get(row.name,{}),id=row.name,
+                          starred=state.get('starred',0),folder=state.get('folder',''),
+                          latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
+                          unread=unread.get(row.name,0),unread_more=False))
+    return items
+
+
+def latest_messages(contacts, channels=None):
+    """The newest readable message of each conversation: one indexed LIMIT 1 lookup per contact in one statement."""
+    if channels is not None and not channels: return {}
+    from relay_core.timeline import page_query
+    message=frappe.qb.DocType('Relay Message')
+    base=page_query(PREVIEW_FIELDS,{'channel':['in',channels]} if channels is not None else {},1)
+    parts=[base.where(message.relay_contact==contact) for contact in contacts]
+    union=parts[0]
+    for part in parts[1:]: union=union*part  # UNION ALL keeps each part's ORDER BY and LIMIT.
+    return {row.relay_contact:row for row in union.run(as_dict=True)}
 
 
 def directory_preview(message):
@@ -233,17 +258,59 @@ def typing(contact, active=1, message=None):
     return {'ok': True}
 
 
-def _unread_query(fields, contact=None):
+READ_FIELDS = ['exact_reads','last_read','read_baseline']
+
+
+def read_position(state):
+    """Messages after this name are unread: the exact-read baseline, else the legacy cursor."""
+    state = state or {}
+    return (state.get('read_baseline') if state.get('exact_reads') == 1 else state.get('last_read')) or ''
+
+
+def _unread_query(fields, contact=None, position=None):
+    """Unread incoming messages of the current user. For one contact the read position is a literal,
+    so the relay_unread_messages index seeks straight to the unread rows."""
+    query=unread_base(fields)
+    if contact:
+        if position is None:
+            position=read_position(frappe.db.get_value('Relay Conversation State',{'state_key':state_key(contact)},READ_FIELDS,as_dict=True))
+        return contact_unread(query,contact,position)
     from pypika.functions import Coalesce
-    message=frappe.qb.DocType('Relay Message');saved=frappe.qb.DocType('Relay Conversation State');evidence=frappe.qb.DocType('Relay Message Read')
-    filters={'direction':'Incoming','legacy_source':['is','not set']}
-    if contact:filters['relay_contact']=contact
-    query=frappe.qb.get_query('Relay Message',fields=fields,filters=filters,ignore_permissions=False,order_by='')
+    message=frappe.qb.DocType('Relay Message');saved=frappe.qb.DocType('Relay Conversation State')
     query=query.left_join(saved).on((saved.relay_contact==message.relay_contact)&(saved.user==frappe.session.user))
     legacy=(Coalesce(saved.exact_reads,0)==0)&(message.name>Coalesce(saved.last_read,''))
     exact=(saved.exact_reads==1)&(message.name>Coalesce(saved.read_baseline,''))
-    recorded=frappe.qb.from_(evidence).select(evidence.message).where(evidence.user==frappe.session.user)
-    return query.where((legacy|exact)&message.name.notin(recorded))
+    return query.where(legacy|exact)
+
+
+def unread_base(fields):
+    """Readable incoming live messages the user has not read individually."""
+    message=frappe.qb.DocType('Relay Message');evidence=frappe.qb.DocType('Relay Message Read')
+    query=frappe.qb.get_query('Relay Message',fields=fields,filters={'direction':'Incoming','legacy_source':['is','not set']},
+                              ignore_permissions=False,order_by='')
+    # Anti-join on the unique (user, message) read: one index probe per message.
+    query=query.left_join(evidence).on((evidence.message==message.name)&(evidence.user==frappe.session.user))
+    return query.where(evidence.name.isnull())
+
+
+def contact_unread(base, contact, position):
+    message=frappe.qb.DocType('Relay Message')
+    return base.where(message.relay_contact==contact).where(message.name>position)
+
+
+def unread_counts(positions, channels=None):
+    """Unread message count per contact for a page: one seek per contact from its read position, in one statement."""
+    if not positions or channels is not None and not channels: return {}
+    from pypika.functions import Count
+    message=frappe.qb.DocType('Relay Message')
+    base=unread_base(['relay_contact'])
+    if channels is not None: base=base.where(message.channel.isin(channels))
+    union=None
+    for contact,position in positions.items():
+        unseen=contact_unread(base,contact,position).as_('unseen')
+        part=frappe.qb.from_(unseen).select(unseen.relay_contact,Count('*')).groupby(unseen.relay_contact)
+        union=part if union is None else union*part
+    return {contact:int(total) for contact,total in union.run()}
 
 
 def unread_count(contact, channel=None, channels=None):
