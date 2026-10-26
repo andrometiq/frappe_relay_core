@@ -115,6 +115,9 @@ class MCPTests(unittest.TestCase):
                 self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_text','arguments':{'number':'919876543210'}})
         names={tool['name'] for tool in self.api.TOOLS}
         self.assertTrue({'relay.whatsapp.send_media','relay.whatsapp.send_template','relay.campaigns.append','relay.campaigns.read'}<=names)
+        manager_tools=[tool['description'] for tool in self.api.TOOLS if 'Relay Communication Manager' in tool['description']]
+        self.assertTrue(manager_tools)
+        self.assertTrue(all('WhatsApp Manager' in text for text in manager_tools))
 
     def test_telegram_mcp_uses_checked_facade_for_groups_and_topics(self):
         import relay_core
