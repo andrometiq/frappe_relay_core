@@ -33,6 +33,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(doc.account,'Account');self.assertEqual(doc.enabled,1)
         doc.check_permission.assert_any_call('write');doc.save.assert_called_once()
 
+    def test_capabilities_keep_enabled_channels_and_add_their_features(self):
+        self.f.get_roles=Mock(return_value=['Relay Communication Manager'])
+        whatsapp=Mock();whatsapp.name='WhatsApp';whatsapp.get_features.return_value={'templates':True}
+        with patch('relay_core.channels.enabled',return_value=[whatsapp]):
+            result=self.api.capabilities()
+        self.assertEqual(result,{'manage':True,'configure':False,'enabled_channels':['WhatsApp'],
+                                 'channels':{'WhatsApp':{'templates':True}}})
+
     def test_invalid_input_does_not_write(self):
         for name,account,enabled in [('','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:
             with self.assertRaises(ValueError):self.api.update_channel(name,account,enabled)

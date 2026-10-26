@@ -206,10 +206,12 @@ def message_snapshots(contact, names):
 @frappe.whitelist(methods=['GET'])
 def capabilities():
     require_access()
-    from relay_core.settings import ENABLED_CHANNELS
+    from relay_core.channels import enabled
     roles=set(frappe.get_roles())
+    channels=enabled()
     return {'manage':bool(roles.intersection({'System Manager','Relay Communication Manager'})),
-            'configure':'System Manager' in roles, 'enabled_channels':list(ENABLED_CHANNELS)}
+            'configure':'System Manager' in roles, 'enabled_channels':[item.name for item in channels],
+            'channels':{item.name:item.get_features() for item in channels}}
 
 
 @frappe.whitelist(methods=['GET'])
