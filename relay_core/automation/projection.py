@@ -248,6 +248,7 @@ def enqueue_projection(events, received_ns=None):
 def project_queued(name=None, submitted_ns=None, received_ns=None, names=()):
     """Project events in order, each in its own transaction; a failed event stays for recovery."""
     from rq import get_current_job
+    from rq.timeouts import JobTimeoutException
     started = time.time_ns()
     monotonic = time.monotonic_ns()
     names = names or [name]
@@ -255,6 +256,8 @@ def project_queued(name=None, submitted_ns=None, received_ns=None, names=()):
         for event in names:
             try:
                 project_committed(event)
+            except JobTimeoutException:
+                raise  # The worker stops the job; the rest stays Pending for recovery.
             except Exception:
                 frappe.db.rollback()
                 frappe.log_error('Relay Hub Event projection failed', reference_doctype='Relay Hub Event', reference_name=event)
