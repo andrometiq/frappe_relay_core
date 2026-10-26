@@ -1,6 +1,5 @@
 <script setup>
 import { recordTitle } from '../services/recordTitle'
-import { linkedTitle } from '../services/linkedTitle'
 import { inject, ref, watch } from 'vue'
 import { Avatar, Button, Badge, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { relativeTime } from './relativeTime'
@@ -8,6 +7,7 @@ import LoadingRows from './LoadingRows.vue'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import ChannelPreferences from './ChannelPreferences.vue'
+import ContactLinks from './ContactLinks.vue'
 import { useEnabledChannels } from '../composables/useEnabledChannels'
 const channelEnabled = useEnabledChannels()
 const capabilities = inject('relayCapabilities')
@@ -15,9 +15,8 @@ const props = defineProps({ contact: String, dismissible: Boolean })
 const emit = defineEmits(['close', 'loaded'])
 const detail = ref(null), busy = ref(false), error = ref('')
 let generation = 0
-const isPrimary = link => detail.value?.primary?.doctype === link.doctype && detail.value?.primary?.name === link.name
 const desk = (doctype, name) => '/desk/' + doctype.toLowerCase().replaceAll(' ', '-') + '/' + encodeURIComponent(name)
-const conversation = link => '#/messages?' + new URLSearchParams({ business_doctype: link.doctype, business_name: link.name, contact: props.contact })
+const linksChanged = summary => { detail.value = { ...detail.value, links: summary.links, primary: summary.primary } }
 async function load() {
   const ticket = ++generation
   detail.value = null; error.value = ''; busy.value = true
@@ -42,13 +41,8 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
     <template v-if="detail">
       <header class="contact-detail-heading"><Button v-if="dismissible" icon="arrow-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div><h3>{{ recordTitle(detail, 'Contact') }}</h3><p>Contact details</p></div></header>
       <p>{{ detail.phone || 'No phone number' }} <Badge :label="/^[0-9]{7,15}$/.test((detail.phone || '').replace(/[ +()\-]/g, '')) ? 'Phone format valid' : 'Country code and number required'" /></p>
-      <a class="underline" :href="desk('Contact', detail.name)">Edit Contact and business links in Desk</a>
-      <h4 class="font-medium">Permitted business links</h4>
-      <div v-for="link in detail.links" :key="link.doctype + link.name" class="contact-link-row flex flex-wrap gap-3" :class="{ 'is-primary': isPrimary(link) }">
-        <a class="underline" :href="desk(link.doctype, link.name)">{{ link.doctype }} · {{ linkedTitle(link.doctype, link.name) }}</a><Badge v-if="isPrimary(link)" label="Primary" theme="blue" />
-        <a class="underline" :href="conversation(link)">Open conversation</a>
-      </div>
-      <p v-if="!detail.links.length">No accessible, configured business links. Add a link in Contact and enable its business type in Settings.</p>
+      <a class="underline" :href="desk('Contact', detail.name)">Edit Contact in Desk</a>
+      <ContactLinks :contact="detail.name" :detail="detail" @changed="linksChanged" />
       <h4 class="font-medium">Channel identities</h4>
       <article v-for="endpoint in detail.endpoints" :key="endpoint.name" class="contact-identity">
         <div class="identity-heading"><span><FeatherIcon :name="endpoint.provider === 'Email' ? 'mail' : endpoint.provider === 'Telegram' ? 'send' : 'message-circle'" :size="14" />{{ endpoint.provider }}</span><Badge :label="endpoint.verified ? 'Verified' : 'Revoked / unverified'" :theme="endpoint.verified ? 'green' : 'amber'" /></div>

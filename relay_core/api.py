@@ -258,9 +258,11 @@ def contact_details(contact):
             if channel.has_permission('read'):
                 row.provider = channel.channel
                 endpoints.append(row)
+    can_edit_links = bool(person.has_permission('write'))
     return {'name': person.name, 'label': person.full_name or person.name,
             'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
-            'links': links, 'primary': primary, 'endpoints': endpoints}
+            'links': links, 'primary': primary, 'endpoints': endpoints,
+            'can_edit_links': can_edit_links, 'can_set_primary': can_edit_links and bool(relay)}
 
 
 @frappe.whitelist(methods=['GET'])
