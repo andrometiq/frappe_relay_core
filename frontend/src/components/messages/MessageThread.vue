@@ -426,5 +426,5 @@ function actions(message) {
 </template>
 
 <style scoped>
-.conversation-bubble:has(.message-readers){margin-bottom:32px}
+.conversation-bubble:has(.message-readers){margin-bottom:24px}
 </style>
