@@ -385,6 +385,7 @@
 }
 .relay-shell .message-delivery{display:inline-flex;align-items:center;color:var(--ink-gray-5)}
 .relay-shell .message-delivery.delivery-read{color:var(--ink-blue-3)}
+.relay-shell .message-delivery+.message-delivery{margin-left:6px}.relay-shell .message-send-channel{margin-right:2px;font-size:10px}
 .relay-shell .delivery-checks{display:inline-flex;align-items:center;width:14px}
 .relay-shell .delivery-checks svg+svg{margin-left:-7px}
 @media(max-width:640px){

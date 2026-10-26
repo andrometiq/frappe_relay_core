@@ -13,6 +13,7 @@ import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL } from "../messageContent";
 import { channelCan, multipleChannels } from "../../services/enabledChannels";
 import { createScrollHold } from "./scrollHold";
+import { groupSends } from "../../services/sendGroups";
 const props = defineProps({
   rows: Array,
   contactName: String,
@@ -41,6 +42,9 @@ const emit = defineEmits([
 ]);
 const capabilities = inject("relayCapabilities", ref({}));
 const showChannel = computed(() => multipleChannels(capabilities.value));
+const threadRows = computed(() => groupSends(props.rows || []));
+// A message sent to several channels shows one delivery mark per channel.
+const deliveries = message => message.sends || [message];
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
@@ -66,6 +70,9 @@ function deliveryKind(message) {
   if (status === "Read") return "read";
   if (status === "Delivered") return "delivered";
   return "sent";
+}
+function channelLabel(message, copy) {
+  return message.sends ? objectValue(copy.provider_context).provider + ': ' + channelStatus(copy) : channelStatus(copy);
 }
 function react(message, emoji) {
   if (props.busy) return;
@@ -255,11 +262,11 @@ function actions(message) {
       <h2>No messages yet</h2>
     </div>
     <div ref="content" class="message-thread-content">
-    <template v-for="(message, index) in rows" :key="message.name">
+    <template v-for="(message, index) in threadRows" :key="message.name">
       <div
         v-if="
           dayLabel(message) &&
-          (!index || dayLabel(rows[index - 1]) !== dayLabel(message))
+          (!index || dayLabel(threadRows[index - 1]) !== dayLabel(message))
         "
         class="message-date-divider"
       >
@@ -295,7 +302,7 @@ function actions(message) {
             quoted(message)?.content || "View original message"
           }}</span>
         </button>
-        <span v-if="showChannel" class="message-channel">{{ objectValue(message.provider_context).provider }}</span>
+        <span v-if="showChannel && !message.sends" class="message-channel">{{ objectValue(message.provider_context).provider }}</span>
         <MessageContent :message="message" :show-reply-reference="false" />
         <p v-if="message._pending && message.error" class="text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
         <footer class="message-footer">
@@ -306,21 +313,23 @@ function actions(message) {
           >
           <span v-if="message.edited_at" title="Message edited">edited</span>
           <span
-            v-if="message.direction === 'Outgoing'"
-            :title="channelStatus(message)"
-            :aria-label="channelStatus(message)"
+            v-for="copy in message.direction === 'Outgoing' ? deliveries(message) : []"
+            :key="copy.name"
+            :title="channelLabel(message, copy)"
+            :aria-label="channelLabel(message, copy)"
             class="message-delivery"
             :class="{
-              'delivery-failed': deliveryKind(message) === 'failed',
-              'delivery-read': deliveryKind(message) === 'read',
+              'delivery-failed': deliveryKind(copy) === 'failed',
+              'delivery-read': deliveryKind(copy) === 'read',
             }"
           >
+            <span v-if="message.sends" class="message-send-channel">{{ objectValue(copy.provider_context).provider }}</span>
             <FeatherIcon
-              v-if="['failed', 'sending', 'sent'].includes(deliveryKind(message))"
+              v-if="['failed', 'sending', 'sent'].includes(deliveryKind(copy))"
               :name="
-                deliveryKind(message) === 'failed'
+                deliveryKind(copy) === 'failed'
                   ? 'alert-circle'
-                  : deliveryKind(message) === 'sending'
+                  : deliveryKind(copy) === 'sending'
                     ? 'clock'
                     : 'check'
               "
