@@ -1,7 +1,7 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
-from relay_core.permissions import require_access, readable_contact, contact_query
+from relay_core.permissions import require_access, readable_contact, contact_query, MANAGER_ROLES, WA_MULTI
 
 
 def validate_reference(value, prefix):
@@ -209,7 +209,8 @@ def capabilities():
     from relay_core.channels import enabled
     roles=set(frappe.get_roles())
     channels=enabled()
-    return {'manage':bool(roles.intersection({'System Manager','Relay Communication Manager'})),
+    manage=bool(roles & MANAGER_ROLES)
+    return {'manage':manage, 'teams':manage, 'billing':manage, 'multi_team':WA_MULTI in roles,
             'configure':'System Manager' in roles, 'enabled_channels':[item.name for item in channels],
             'channels':{item.name:item.get_features() for item in channels}}
 

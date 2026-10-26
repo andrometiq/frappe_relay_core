@@ -8,7 +8,7 @@ import LoadingRows from './components/LoadingRows.vue'
 import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import { useViewRoute } from './useViewRoute'
-import { channelEnabled } from './services/enabledChannels'
+import { navAllowed } from './services/navigation'
 
 const location = window.location
 const views = {
@@ -29,17 +29,16 @@ const navigation = [
   { name: 'Skills', label: 'AI & skills', icon: 'bot', configure: true },
   { name: 'Business events', label: 'Business events', icon: 'zap', configure: true },
   { name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp' },
-  { name: 'Teams', label: 'Teams & access', icon: 'user-check', group: 'Admin' },
-  { name: 'Settings', label: 'Settings & setup', icon: 'settings', group: 'Admin' },
-  { name: 'Activity', label: 'Activity & health', icon: 'activity', manage: true, group: 'Admin' },
+  { name: 'Teams', label: 'Teams & access', icon: 'user-check', teams: true, group: 'Admin' },
+  { name: 'Settings', label: 'Settings & setup', icon: 'settings', configure: true, group: 'Admin' },
+  { name: 'Activity', label: 'Activity & health', icon: 'activity', configure: true, group: 'Admin' },
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
-const capabilities = ref({ manage: false, configure: false }), ready = ref(false)
+const capabilities = ref({ manage: false, configure: false, teams: false, billing: false, multi_team: false }), ready = ref(false)
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const menu = computed(() => {
-  const caps = capabilities.value
-  const visible = navigation.filter(item => (!item.manage || caps.manage) && (!item.configure || caps.configure) && channelEnabled(caps, item.channel))
+  const visible = navigation.filter(item => navAllowed(item, capabilities.value))
   return ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.filter(item => (item.group || '') === group) })).filter(section => section.items.length)
 })
 const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
@@ -102,7 +101,7 @@ onErrorCaptured(e => {
       </header>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
-      <p v-else-if="current?.manage && !capabilities.manage" class="p-4">A Relay Communication Manager role is required. <a href="#/teams" class="underline">Review access</a></p>
+      <p v-else-if="current && !navAllowed(current, capabilities)" class="p-4">Your role does not include this page.</p>
       <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events'].includes(view) ? { kind: view === 'Skills' ? 'skills' : 'business_events' } : {}" />
     </main>
   </div>
