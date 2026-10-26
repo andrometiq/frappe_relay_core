@@ -76,7 +76,7 @@ These POST methods send one WhatsApp message to a phone number through the same 
 | `relay_core.messaging_api.send_messages` | `items`, 1–100 objects of `{type: text \| media \| template, number, ...}` |
 
 - Each send returns `action, status, message, number, contact, key`. `send_messages` returns `results`, one per item, with `index`, `ok` and the send result or an `error`. A failed item does not stop the others.
-- A repeat with the same `key` is the same message. Without `key`, the key comes from the number and content, so the same content to the same number is sent once. Give a new `key` to send the same content again.
+- A repeat with the same `key` is the same message. Without `key`, the key comes from the number, the content and the current 10-minute period. A double click is sent once, and the same content later is sent again. Give a `key` to make a retry safe after 10 minutes.
 - Text and media go only inside the 24-hour reply window. Outside it, the send fails with "Outside the 24-hour reply window". Use a template.
 - `media_type` is `image`, `video`, `audio` or `document`. `media_url` must be an HTTPS link. Only a document takes `filename`.
 - `params` is an object of named values (or field keys such as `button:0`), or a list of every value in template order. `header_media_url` fills an image, video or document header.

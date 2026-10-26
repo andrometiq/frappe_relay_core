@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import json
 import re
+import time
 import frappe
 from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.bulk_campaigns import parsed, whatsapp_channel
@@ -12,6 +13,7 @@ from relay_core.permissions import require_access
 MAX_ITEMS = 100
 KEY = re.compile(r'[A-Za-z0-9_-]{1,100}')
 MEDIA = ('image', 'video', 'audio', 'document')
+AUTO_KEY_SECONDS = 600
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window. Send an approved template instead'
 
 
@@ -134,9 +136,11 @@ def send(number, operation, arguments, key, business_doctype, business_name):
 
 
 def message_key(key, destination, operation, arguments):
-    """The caller's key, else one from the content, so a repeated send stays one message."""
+    """The caller's key, else one from the content and the current 10-minute bucket: a double click stays one
+    message, and the same content later is a new one."""
     if key in (None, ''):
-        content = json.dumps([destination, operation, arguments], sort_keys=True, separators=(',', ':'))
+        bucket = int(time.time() // AUTO_KEY_SECONDS)
+        content = json.dumps([destination, operation, arguments, bucket], sort_keys=True, separators=(',', ':'))
         return 'api-' + hashlib.sha256(content.encode()).hexdigest()[:64]
     if not isinstance(key, str) or not KEY.fullmatch(key):
         frappe.throw('key must be 1-100 letters, digits, _ or -')
