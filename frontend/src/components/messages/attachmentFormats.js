@@ -1,22 +1,30 @@
-// Match the formats currently accepted by the Core and Hub upload adapters.
-// Picker hints are advisory; provider adapters still validate the actual bytes.
-const formats = {
-  Telegram: {
-    photo: '.jpg,.jpeg,.png,.webp', video: '.mp4', audio: '.mp3,.m4a',
-    voice: '.ogg,.oga,.opus', document: '',
-  },
-  WhatsApp: {
-    photo: '.jpg,.jpeg,.png', video: '.mp4', audio: '.mp3,.m4a,.ogg,.aac',
-    document: '.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
-  },
+import { channelFeature } from '../../services/enabledChannels.js';
+
+// Extension to media type, as the backend guesses it from the file name.
+const mediaTypes = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.aac': 'audio/aac',
+  '.pdf': 'application/pdf', '.txt': 'text/plain', '.doc': 'application/msword', '.xls': 'application/vnd.ms-excel',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
-export function attachmentAccept(provider, kind) {
-  return formats[provider]?.[kind] ?? '';
+
+// Picker hints are advisory; the backend still validates the file against the channel formats.
+function allowedExtensions(capabilities, provider, kind) {
+  const types = channelFeature(capabilities, provider, 'media.' + kind);
+  if (!types) return undefined;
+  if (types.includes('*/*')) return [];
+  return Object.keys(mediaTypes).filter(extension => types.includes(mediaTypes[extension]));
 }
-export function attachmentFormatError(provider, kind, filename) {
-  const allowed = formats[provider]?.[kind];
-  if (allowed === undefined) return 'This attachment type is unavailable for this channel.';
-  if (!allowed) return '';
+export function attachmentAccept(capabilities, provider, kind) {
+  return (allowedExtensions(capabilities, provider, kind) || []).join(',');
+}
+export function attachmentFormatError(capabilities, provider, kind, filename) {
+  const allowed = allowedExtensions(capabilities, provider, kind);
+  if (!allowed) return 'This attachment type is unavailable for this channel.';
+  if (!allowed.length) return '';
   const extension = '.' + filename.toLowerCase().split('.').at(-1);
-  return allowed.split(',').includes(extension) ? '' : `Choose ${allowed.replaceAll(',', ', ')} for this attachment.`;
+  return allowed.includes(extension) ? '' : `Choose ${allowed.join(', ')} for this attachment.`;
 }

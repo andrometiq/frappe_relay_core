@@ -3,6 +3,7 @@ import { inject, computed, watch, ref, onBeforeUnmount, nextTick } from "vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
+import { channelCan } from "../../services/enabledChannels";
 import { Button, FormControl, Dropdown } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
@@ -37,6 +38,8 @@ const {
   error,
   send,
 } = inject(messagesKey);
+const capabilities = inject("relayCapabilities", ref({}));
+const can = feature => channelCan(capabilities.value, sourceContext.value.provider, feature);
 const attachmentInput = ref(null);
 const draftScope = computed(() => compositionScope(source.value, document.getElementById('app')?.dataset.user));
 useStoredDraft(() => draftScope.value,
@@ -77,7 +80,7 @@ async function attachFile(event) {
   const file=event.target.files?.[0];
   event.target.value='';
   if (!file) return;
-  const formatError = attachmentFormatError(sourceContext.value.provider, requestedAttachmentKind.value, file.name);
+  const formatError = attachmentFormatError(capabilities.value, sourceContext.value.provider, requestedAttachmentKind.value, file.name);
   if (formatError) { error.value = formatError; return; }
   const previous=attachment.value;
   await uploadAttachment(file);
@@ -91,10 +94,7 @@ let windowGeneration = 0, expiryTimer;
 async function checkWindow() {
   const generation = ++windowGeneration;
   clearTimeout(expiryTimer);
-  if (
-    sourceContext.value.provider !== "WhatsApp" ||
-    sourceContext.value.group_id
-  ) {
+  if (!can("reply_window_hours") || sourceContext.value.group_id) {
     windowState.value = { open: true };
     windowError.value = "";
     return;
@@ -120,9 +120,7 @@ watch(
   () => source.value?.name,
   () => {
     windowState.value = {
-      open:
-        sourceContext.value.provider !== "WhatsApp" ||
-        !!sourceContext.value.group_id,
+      open: !can("reply_window_hours") || !!sourceContext.value.group_id,
     };
     checkWindow();
   },
@@ -217,8 +215,8 @@ function keydown(event) {
     <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
     <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
     <div v-show="expanded" class="composer-toolbar">
-      <Button v-if="sourceContext.provider === 'WhatsApp'" label="Template" :disabled="busy" @click="emit('template')" />
-      <Dropdown :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
+      <Button v-if="can('templates')" label="Template" :disabled="busy" @click="emit('template')" />
+      <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
       <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
       <Button icon="zap" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />
       <span v-if="kind !== 'text'" class="composer-selection">{{attachTypes[kind]?.[0] || kind}}
@@ -226,7 +224,7 @@ function keydown(event) {
       </span>
     </div>
     <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
-      :accept="attachmentAccept(sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
+      :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
     <span class="composer-channel"><slot name="channel" /></span>
     <textarea ref="draftInput"
       v-if="kind === 'text'"

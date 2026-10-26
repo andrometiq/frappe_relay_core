@@ -1,12 +1,14 @@
 import { resetRecipient } from '../services/recipientContext.js';
 import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { sha256Hex, randomUUID } from '../services/crypto.js';
-import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { composerKinds } from "../services/enabledChannels.js";
 import { coordinates } from "../components/formValidation";
 import { coreApi } from "../services/coreApi";
 import { messageData, objectValue } from "../components/messageContent";
 
 export function useMessages() {
+  const capabilities = inject('relayCapabilities', ref({}));
   const contacts = ref([]),
     query = ref(""),
     selected = ref(""),
@@ -301,26 +303,7 @@ export function useMessages() {
   const sourceContext = computed(() =>
     objectValue(source.value?.provider_context),
   );
-  const whatsappGroup = computed(
-    () =>
-      sourceContext.value.provider === "WhatsApp" &&
-      sourceContext.value.group_id,
-  );
-  const kinds = computed(() =>
-    whatsappGroup.value
-      ? ["text", "sticker", "photo", "video", "audio", "document"]
-      : [
-          "text",
-          "sticker",
-          "location",
-          "contact",
-          ...(sourceContext.value.provider === "Telegram"
-            ? ["photo", "video", "audio", "voice", "document"]
-            : sourceContext.value.provider === "WhatsApp"
-              ? ["photo", "video", "audio", "document"]
-              : []),
-        ],
-  );
+  const kinds = computed(() => composerKinds(capabilities.value, sourceContext.value));
 
   const call = (method, values, write) =>
     coreApi(method.replace("relay_core.", ""), values, write);
@@ -727,7 +710,6 @@ export function useMessages() {
     connectionError,
     notice,
     sourceContext,
-    whatsappGroup,
     kinds,
     previousContacts,
     nextContacts,

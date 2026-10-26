@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from "vue";
 import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
 import { useEnabledChannels } from "../../composables/useEnabledChannels";
+import { channelCan } from "../../services/enabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import {
   templateParameterDescriptors,
@@ -14,6 +15,8 @@ import {
 const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String });
 const emit = defineEmits(["close", "sent"]);
 const channelEnabled = useEnabledChannels();
+const capabilities = inject("relayCapabilities", ref({}));
+const can = feature => channelCan(capabilities.value, destination.value?.provider, feature);
 const shown = ref(true),
   contact = ref(props.contact || ""),
   endpoint = ref(""),
@@ -124,7 +127,7 @@ const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
   () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
   saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
-  () => ({body:'',subject:'',kind:destination.value?.provider === 'Email' ? 'email' : destination.value?.provider === 'WhatsApp' && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
+  () => ({body:'',subject:'',kind:can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 async function loadTemplates(next = false) {
   await run(async () => {
     const result = await coreApi(
@@ -253,7 +256,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             : "No eligible channel identity is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
         </p>
         <template v-if="destination">
-          <p v-if="destination.provider === 'WhatsApp'" class="text-sm">
+          <p v-if="can('reply_window_hours')" class="text-sm">
             {{
               destination.window.open
                 ? "The reply window is open. You can send a message or an approved template."
@@ -261,7 +264,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             }}
           </p>
           <RelaySelect
-            v-if="destination.provider === 'WhatsApp'"
+            v-if="can('templates')"
             label="Message type"
             v-model="kind"
             :disabled="busy || !!pending"
