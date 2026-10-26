@@ -49,7 +49,7 @@ def directory(after=None,query='',status=None):
     pattern=f'%{query}%'
     rows=frappe.get_list('Relay Campaign',filters=filters,
         or_filters=[['Relay Campaign','name','like',pattern],['Relay Campaign','title','like',pattern]] if query else None,
-        fields=['name','title','status','creation','template_name','total_count','sent_count','replied_count'],order_by='name asc',page_length=31)
+        fields=['name','title','status','creation','operation','template_name','total_count','sent_count','replied_count'],order_by='name asc',page_length=31)
     items=[]
     for row in rows[:30]:
         try:campaign(row.name)
@@ -75,7 +75,7 @@ def read(name,after=None,status=None):
 
 
 def process(name,refresh_only=False):
-    if frappe.db.get_value('Relay Campaign', name, 'operation') in ('messages.send', 'templates.send'):
+    if frappe.db.get_value('Relay Campaign', name, 'operation') in ('messages.send', 'messages.media', 'templates.send'):
         return
     with frappe.cache.lock('relay-campaign:'+name,timeout=150,blocking_timeout=1):
         original=frappe.session.user

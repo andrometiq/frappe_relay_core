@@ -68,7 +68,8 @@ def reply_window_open():
     until = frappe.cache.get_value(REPLY_GATE)
     if until is None:
         latest = frappe.db.sql('''SELECT MAX(UNIX_TIMESTAMP(COALESCE(finished_at, NOW())) + reply_window_hours * 3600)
-            FROM `tabRelay Campaign` WHERE operation='templates.send' AND started_at IS NOT NULL''')[0][0]
+            FROM `tabRelay Campaign` WHERE operation IN ('templates.send', 'messages.send', 'messages.media')
+            AND started_at IS NOT NULL''')[0][0]
         until = float(latest or 0)
         frappe.cache.set_value(REPLY_GATE, until, expires_in_sec=600)
     return float(until) > time.time()

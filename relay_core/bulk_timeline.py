@@ -1,4 +1,4 @@
-"""Campaign sends in contact timelines: one outgoing template message per admitted row, written per batch."""
+"""Campaign sends in contact timelines: one outgoing message per admitted row, written per batch."""
 import frappe
 from frappe.model.naming import getseries
 from relay_core.automation.contracts import canonical
@@ -25,11 +25,10 @@ def reserve(count):
 
 
 def record(doc, snapshot, rows, first):
-    """Insert the rendered template for rows whose number belongs to a Relay Contact; one realtime event.
+    """Insert the sent message of rows whose number belongs to a Relay Contact; one realtime event.
     first is what reserve(len(rows)) returned. Its locks come before its first plain read."""
     from relay_core.inbox import message_created
     from relay_core.whatsapp_receipts import lock_endpoints
-    from relay_core.whatsapp_templates import message_content
     people = lock_endpoints(doc.channel, sorted({row.destination for row in rows})) if rows else {}
     if people:  # message_created updates these contacts after the read below.
         frappe.db.sql('SELECT name FROM `tabRelay Contact` WHERE name IN %s ORDER BY name FOR UPDATE',
@@ -45,9 +44,7 @@ def record(doc, snapshot, rows, first):
     values, latest = [], {}
     for index, row in enumerate(rows):
         name = f'{SERIES}{first + index:010d}'
-        content = message_content({'name': doc.template_name, 'language': doc.language, 'components': row.components},
-                                  snapshot['template'])
-        content['campaign'] = doc.name
+        content = sent_content(doc, snapshot, row.message)
         values.append((name, now, now, user, user, 0, people[row.destination], doc.channel, 'Outgoing', 'Pending',
                        content['text'], 'text', canonical(content), row.destination, canonical(context),
                        conversation_key(doc.channel, row.destination, context), row.request_key))
@@ -56,6 +53,19 @@ def record(doc, snapshot, rows, first):
     for contact in sorted(latest):
         message_created(frappe._dict(relay_contact=contact, creation=now, name=latest[contact]))
     changed()
+
+
+def sent_content(doc, snapshot, message):
+    """Timeline content of one Hub message: the rendered template, the text, or the media kind and caption."""
+    if 'message' in snapshot:
+        label = snapshot['message']['kind'].capitalize()
+        text = message.get('body') or ': '.join(filter(None, (label, message.get('caption'))))
+        return {'kind': 'text', 'text': text, 'campaign': doc.name}
+    from relay_core.whatsapp_templates import message_content
+    content = message_content({'name': doc.template_name, 'language': doc.language, 'components': message['components']},
+                              snapshot['template'])
+    content['campaign'] = doc.name
+    return content
 
 
 def apply(rows):
