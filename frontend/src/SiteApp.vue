@@ -7,8 +7,8 @@ import { realtimeStatus, startRealtime } from './services/realtime'
 import LoadingRows from './components/LoadingRows.vue'
 import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
-import { useViewRoute } from './useViewRoute'
-import { navAllowed } from './services/navigation'
+import { routeTab, useViewRoute } from './useViewRoute'
+import { navAllowed, whatsappRoute, whatsappSections } from './services/navigation'
 import MobileTabBar from './components/shell/MobileTabBar.vue'
 import { useMobileLayout } from './composables/useMobileLayout'
 
@@ -42,6 +42,12 @@ const current = computed(() => navigation.find(item => item.name === view.value)
 const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))
 const menu = computed(() => ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.value.filter(item => (item.group || '') === group) })).filter(section => section.items.length))
 const isMobile = useMobileLayout(), moreOpen = ref(false)
+const sections = computed(() => whatsappSections(capabilities.value))
+const hash = ref(location.hash)
+const section = computed(() => view.value === 'WhatsApp' ? routeTab(hash.value, 'templates') : '')
+const subActive = name => section.value === name
+const itemActive = item => view.value === item.name && !(item.name === 'WhatsApp' && sections.value.some(row => subActive(row.name)))
+function openSection(name) { location.hash = whatsappRoute(name) }
 function openNavigation() {
   if (isMobile.value) moreOpen.value = true
   else mobile.value = true
@@ -72,7 +78,7 @@ function trapNavigation(event) {
 }
 watch(mobile, async value => { if (value) { await nextTick(); document.querySelector('.mobile-nav-open button')?.focus() } })
 watch(view, () => { if (mobile.value) closeNavigation() })
-onMounted(() => { startRealtime(); initialize() })
+onMounted(() => { startRealtime(); initialize(); window.addEventListener('hashchange', () => { hash.value = location.hash }) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
@@ -88,10 +94,17 @@ onErrorCaptured(e => {
       <p class="relay-nav-caption">Communication workspace</p>
       <nav v-for="section in menu" :key="section.group" class="relay-nav-section" :aria-label="section.group || 'Workspace'">
         <p v-if="section.group" class="relay-nav-group" aria-hidden="true">{{ section.group }}</p>
-        <button v-for="item in section.items" :key="item.name"
-          class="nav-item" :class="{ active: view === item.name }" :aria-current="view === item.name ? 'page' : undefined" @click="view = item.name">
-          <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
-        </button>
+        <template v-for="item in section.items" :key="item.name">
+          <button class="nav-item" :class="{ active: itemActive(item) }" :aria-current="itemActive(item) ? 'page' : undefined" @click="view = item.name">
+            <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
+          </button>
+          <template v-if="item.name === 'WhatsApp'">
+            <button v-for="row in sections" :key="row.name" class="nav-item nav-sub" :class="{ active: subActive(row.name) }"
+              :aria-current="subActive(row.name) ? 'page' : undefined" @click="openSection(row.name)">
+              <FeatherIcon :name="row.icon" class="h-4 w-4" /><span>{{ row.label }}</span>
+            </button>
+          </template>
+        </template>
       </nav>
       <div class="relay-nav-footer">
         <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" />Frappe Desk</a>
@@ -109,7 +122,7 @@ onErrorCaptured(e => {
       <p v-else-if="current && !navAllowed(current, capabilities)" class="p-4">Your role does not include this page.</p>
       <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events'].includes(view) ? { kind: view === 'Skills' ? 'skills' : 'business_events' } : {}" />
     </main>
-    <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :view="view" @navigate="view = $event">
+    <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :sections="sections" :view="view" :section="section" @navigate="view = $event" @section="openSection">
       <template #footer>
         <a href="/desk/relay-core" class="mobile-sheet-item"><span class="mobile-sheet-icon"><FeatherIcon name="grid" :size="18" /></span><span>Frappe Desk</span></a>
         <div class="relay-account mobile-sheet-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
