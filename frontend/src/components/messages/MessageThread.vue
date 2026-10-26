@@ -341,7 +341,7 @@ function actions(message) {
                 class="h-3 w-3"
             /></span>
           </span>
-          <span v-if="!message._pending && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
+          <span v-if="!message._pending && !message.sends && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
           <span v-if="message._pending" class="pending-status">{{channelStatus(message)}}
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>

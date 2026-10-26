@@ -644,6 +644,11 @@ export function useMessages() {
       restored.value = "";
       await history();
       if(result.status==='Submitted')pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
+      // Unfinished copies on other channels join the same bubble as failed or pending marks.
+      if((result.sends||[]).slice(1).some(copy=>!['Submitted','Queued'].includes(copy.status))) {
+        notice.value=notice.value||"Some channels did not get this message. Review Message activity for retry options.";
+        await restorePending();
+      }
     });
   }
   async function uploadAttachment(file) {
