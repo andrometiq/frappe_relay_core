@@ -310,6 +310,7 @@ class SenderTests(unittest.TestCase):
         self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
+        self.reserve = self.enterContext(patch('relay_core.bulk_timeline.reserve', return_value=41))
         self.enterContext(patch('relay_core.bulk_updates.changed'))
         self.sleep = self.enterContext(patch.object(bulk_campaigns.time, 'sleep'))
         self.doc = _dict(name='Winter launch', template_name='notice', language='en_US', status='Running',
@@ -359,6 +360,20 @@ class SenderTests(unittest.TestCase):
         with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
             bulk_campaigns.push(self.doc, time.monotonic() + 30)
         self.assertEqual(order[order.index('attempted'):order.index('hub') + 1], ['attempted', 'commit', 'hub'])
+
+    def test_names_are_reserved_after_hub_admits_and_before_the_batch_locks_its_rows(self):
+        order = []
+        self.selects([self.rows(3), []])
+        self.reserve.side_effect = lambda count: order.append(('reserve', count)) or 41
+        sql = self.db.sql.side_effect
+        self.db.sql.side_effect = lambda query, *a, **k: (order.append('admit') if 'SET status=%s' in query else None) or sql(query, *a, **k)
+        self.timeline.side_effect = lambda *args: order.append(('record', args[3]))
+        hub = self.hub()
+        send = hub.call_tool.side_effect
+        hub.call_tool.side_effect = lambda tool, args: order.append('hub') or send(tool, args)
+        with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
+            bulk_campaigns.push(self.doc, time.monotonic() + 30)
+        self.assertEqual(order, ['hub', ('reserve', 3), 'admit', 'admit', 'admit', ('record', 41)])
 
     def test_a_later_accepted_batch_clears_the_retry_error(self):
         self.selects([self.rows(5), []])
@@ -604,11 +619,16 @@ class TimelineTests(unittest.TestCase):
                                get_all=Mock(return_value=[]),
                                utils=SimpleNamespace(now_datetime=lambda: '2026-10-26 10:00:00'),
                                realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
-        with patch.object(bulk_timeline, 'frappe', fake), patch.object(bulk_timeline, 'getseries', return_value='0000000041'), \
+        order = []
+        db.sql.side_effect = lambda query, values: order.append('lock contacts')
+        fake.get_all.side_effect = lambda *args, **kwargs: order.append('read') or []
+        with patch.object(bulk_timeline, 'frappe', fake), \
                 patch('relay_core.whatsapp_receipts.lock_endpoints', return_value={'919876543210': 'RELAY-CON-A', '919876543212': 'RELAY-CON-B'}), \
                 patch('relay_core.inbox.message_created') as activity:
-            bulk_timeline.record(doc, {'template': template}, rows)
-        self.assertEqual(db.sql.call_args.args[1], (1, 'RELAY-MSG-'))
+            bulk_timeline.record(doc, {'template': template}, rows, 41)
+        self.assertEqual(order, ['lock contacts', 'read'])  # Snapshot isolation refuses a lock taken after a read.
+        self.assertIn('FOR UPDATE', db.sql.call_args.args[0])
+        self.assertEqual(sorted(db.sql.call_args.args[1][0]), ['RELAY-CON-A', 'RELAY-CON-B'])
         values = db.bulk_insert.call_args.args[2]
         self.assertTrue(db.bulk_insert.call_args.kwargs['ignore_duplicates'])
         self.assertEqual([(v[0], v[6], v[16]) for v in values], [('RELAY-MSG-0000000041', 'RELAY-CON-A', 'bulk-k-0'),
@@ -619,6 +639,17 @@ class TimelineTests(unittest.TestCase):
                          ('Winter launch', 'Hello Asha', 'Reply STOP to opt out', ['Stop']))
         self.assertEqual(activity.call_count, 2)
         fake.publish_realtime.assert_called_once_with('relay_changed', {'kind': 'messages'}, room='doctype:Relay Message', after_commit=True)
+
+    def test_names_are_reserved_in_a_transaction_of_their_own(self):
+        from relay_core import bulk_timeline
+        order = []
+        db = Mock()
+        db.commit.side_effect = lambda: order.append('commit')
+        db.sql.side_effect = lambda query, values: order.append(('add', values))
+        with patch.object(bulk_timeline, 'frappe', SimpleNamespace(db=db)), \
+                patch.object(bulk_timeline, 'getseries', side_effect=lambda key, digits: order.append('lock') or '0000000041'):
+            self.assertEqual(bulk_timeline.reserve(50), 41)
+        self.assertEqual(order, ['commit', 'lock', ('add', (49, 'RELAY-MSG-')), 'commit'])
 
     def test_bulk_updates_move_timeline_messages_forward_with_quote_keys(self):
         from relay_core import bulk_timeline

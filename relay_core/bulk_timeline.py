@@ -14,12 +14,26 @@ RANK = {'Pending': 0, 'Sent': 1, 'Failed': 2, 'Delivered': 3, 'Read': 4}
 CANCELLED = 'Cancelled before sending'
 
 
-def record(doc, snapshot, rows):
-    """Insert the rendered template for rows whose number belongs to a Relay Contact; one realtime event."""
+def reserve(count):
+    """First of count new Relay Message numbers, from a short transaction of its own. The series row is locked
+    before any read, so snapshot isolation cannot refuse it, and other messages do not wait for the batch."""
+    frappe.db.commit()
+    first = int(getseries(SERIES, 10))
+    frappe.db.sql('UPDATE `tabSeries` SET `current`=`current`+%s WHERE `name`=%s', (count - 1, SERIES))
+    frappe.db.commit()
+    return first
+
+
+def record(doc, snapshot, rows, first):
+    """Insert the rendered template for rows whose number belongs to a Relay Contact; one realtime event.
+    first is what reserve(len(rows)) returned. Its locks come before its first plain read."""
     from relay_core.inbox import message_created
     from relay_core.whatsapp_receipts import lock_endpoints
     from relay_core.whatsapp_templates import message_content
     people = lock_endpoints(doc.channel, sorted({row.destination for row in rows})) if rows else {}
+    if people:  # message_created updates these contacts after the read below.
+        frappe.db.sql('SELECT name FROM `tabRelay Contact` WHERE name IN %s ORDER BY name FOR UPDATE',
+                      (tuple(set(people.values())),))
     rows = [row for row in rows if row.destination in people]
     if rows:  # A repeated push of the same keys writes nothing.
         known = set(frappe.get_all('Relay Message', filters={'source_key': ['in', [row.request_key for row in rows]]},
@@ -27,8 +41,6 @@ def record(doc, snapshot, rows):
         rows = [row for row in rows if row.request_key not in known]
     if not rows:
         return
-    first = int(getseries(SERIES, 10))  # Locks the series row; reserve the rest of the block in one update.
-    frappe.db.sql('UPDATE `tabSeries` SET `current`=`current`+%s WHERE `name`=%s', (len(rows) - 1, SERIES))
     now, user, context = frappe.utils.now_datetime(), frappe.session.user, {'provider': 'WhatsApp'}
     values, latest = [], {}
     for index, row in enumerate(rows):

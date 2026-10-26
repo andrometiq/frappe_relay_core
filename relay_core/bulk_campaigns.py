@@ -380,11 +380,12 @@ def push(doc, deadline):
         except whatsapp.HubError as exc:
             retry_later(doc, whatsapp.failure_message(exc))  # The same keys go again; Hub returns rows it holds.
             continue
+        from relay_core.bulk_timeline import record, reserve
+        first = reserve(len(rows))  # Commits; the batch below locks its rows before it reads any.
         admitted = admit(rows, result.get('deliveries') or [])
-        from relay_core.bulk_timeline import record
-        record(doc, snapshot, [row for row in rows if row.request_key in admitted])
         if doc.last_error:  # Hub accepted again after a retry.
             clear_error(doc)
+        record(doc, snapshot, [row for row in rows if row.request_key in admitted], first)
         frappe.db.commit()
         from relay_core.bulk_updates import changed
         changed(doc.name)

@@ -52,10 +52,10 @@ try:
             for index, number in enumerate(numbers)]
     with patch.object(frappe, 'publish_realtime') as realtime:
         started = time.perf_counter()
-        bulk_timeline.record(doc, {'template': TEMPLATE}, rows)
+        bulk_timeline.record(doc, {'template': TEMPLATE}, rows, bulk_timeline.reserve(len(rows)))
         frappe.db.commit()
         elapsed = time.perf_counter() - started
-        bulk_timeline.record(doc, {'template': TEMPLATE}, rows)  # A repeated push inserts nothing.
+        bulk_timeline.record(doc, {'template': TEMPLATE}, rows, bulk_timeline.reserve(len(rows)))  # A repeat inserts nothing.
         frappe.db.commit()
     assert realtime.call_count == 1, realtime.call_args_list
     keys = [row.request_key for row in rows]
