@@ -205,6 +205,7 @@ class ApplyTests(unittest.TestCase):
             for callback in callbacks * 3:
                 callback()
             self.assertEqual(fake.enqueue.call_count, 1)  # Later changes ride on the queued refresh.
+            self.assertEqual(fake.enqueue.call_args.kwargs['queue'], 'long')  # Takes turns with send slices.
             bulk_updates.refresh('Winter launch')
             sleep.assert_not_called()
             self.assertFalse(cache.sismember(bulk_updates.DIRTY, 'Winter launch'))
