@@ -38,8 +38,24 @@ class ApiTests(unittest.TestCase):
         whatsapp=Mock();whatsapp.name='WhatsApp';whatsapp.get_features.return_value={'templates':True}
         with patch('relay_core.channels.enabled',return_value=[whatsapp]):
             result=self.api.capabilities()
-        self.assertEqual(result,{'manage':True,'configure':False,'enabled_channels':['WhatsApp'],
-                                 'channels':{'WhatsApp':{'templates':True}}})
+        self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':False,'configure':False,
+                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}}})
+
+    def test_capabilities_follow_each_role(self):
+        flags=('manage','teams','billing','multi_team','configure')
+        expected={
+            'WhatsApp User':(False,False,False,False,False),
+            'Relay Communication User':(False,False,False,False,False),
+            'WhatsApp Multi-Channel User':(False,False,False,True,False),
+            'WhatsApp Manager':(True,True,True,False,False),
+            'Relay Communication Manager':(True,True,True,False,False),
+            'System Manager':(True,True,True,False,True),
+        }
+        for role,values in expected.items():
+            self.f.get_roles=Mock(return_value=[role])
+            with patch('relay_core.channels.enabled',return_value=[]):
+                result=self.api.capabilities()
+            self.assertEqual(tuple(result[flag] for flag in flags),values,role)
 
     def test_invalid_input_does_not_write(self):
         for name,account,enabled in [('','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:
