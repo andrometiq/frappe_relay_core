@@ -1,21 +1,18 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { FeatherIcon } from '@relay/ui'
-import { coreApi } from '../../services/coreApi'
-import { splitMobileNav, unreadBadge } from '../../services/mobileNav'
-import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
+import { splitMobileNav } from '../../services/mobileNav'
+import { countLabel } from '../../services/queueCounts'
+import { useQueueCounts } from '../../composables/useQueueCounts'
 
 const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String })
 const emit = defineEmits(['navigate', 'section'])
 const open = defineModel('open', { type: Boolean, default: false })
 const split = computed(() => splitMobileNav(props.items))
-const badge = ref(''), sheet = ref(null)
+const sheet = ref(null)
 const tabLabels = { Messages: 'Inbox' }
-
-async function loadUnread() {
-  try { badge.value = unreadBadge(await coreApi('inbox.directory', { mode: 'unread' })) }
-  catch { badge.value = '' }
-}
+const { counts } = useQueueCounts()
+const badge = computed(() => countLabel(counts.value.unread))
 function go(name) {
   open.value = false
   emit('navigate', name)
@@ -29,8 +26,6 @@ watch(open, async value => {
   await nextTick()
   sheet.value?.querySelector('button, a[href]')?.focus()
 })
-loadUnread()
-useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'reads'], loadUnread)
 </script>
 
 <template>

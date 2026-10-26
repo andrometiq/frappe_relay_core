@@ -10,12 +10,15 @@ import LoadingRows from '../LoadingRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
 import { mediumChips, mediumOptions } from '../../services/enabledChannels'
+import { countLabel } from '../../services/queueCounts'
+import { useQueueCounts } from '../../composables/useQueueCounts'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business'])
 const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
 const chips = computed(() => mediumChips(capabilities.value))
 const medium = ref(mediums.value[0]?.value || mediums.value[0]);
+const { counts } = useQueueCounts(medium)
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
 const moreQueues = computed(() => [
   { label: 'Businesses', onClick: () => { mode.value = 'business' } },
@@ -43,7 +46,8 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
 </script>
 <template>
   <nav class="v1-queues" aria-label="Inbox queues">
-    <button v-for="[value, label] in [['all','All'],['mine','Mine'],['unread','Unread'],['unassigned','Unassigned']]" :key="value" :aria-pressed="mode === value" @click="mode = value">{{ label }}</button>
+    <button v-for="[value, label] in [['all','All'],['mine','Mine'],['unread','Unread'],['unassigned','Unassigned']]" :key="value" :aria-pressed="mode === value"
+      :aria-label="countLabel(counts[value]) ? `${label}, ${counts[value]} conversations` : label" @click="mode = value">{{ label }}<span v-if="countLabel(counts[value])" class="queue-count" aria-hidden="true">{{ countLabel(counts[value]) }}</span></button>
     <Dropdown :options="moreQueues"><Button label="More" icon-right="chevron-down" :aria-pressed="mode === 'business'" aria-label="More inbox views" /></Dropdown>
   </nav>
   <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
@@ -78,4 +82,6 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
 .inbox-filters { align-items:center; }
 .inbox-filters > .relay-input-shell { flex:1; width:0; }
 .inbox-filters > .relay-field { flex:0 0 132px; min-width:0; }
+.queue-count { margin-left:5px; color:var(--ink-gray-5); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; }
+[aria-pressed=true] > .queue-count { color:inherit; font-weight:600; }
 </style>
