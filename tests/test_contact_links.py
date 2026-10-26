@@ -14,6 +14,7 @@ class ContactApiTests(unittest.TestCase):
         self.fake = fake_frappe(flags=SimpleNamespace(), parse_json=Mock(side_effect=json.loads))
         self.enterContext(patch.object(contacts, 'frappe', self.fake))
         self.access = self.enterContext(patch.object(contacts, 'require_access'))
+        self.conversation = self.enterContext(patch.object(contacts, 'readable_contact'))
         self.records = {}
         self.inserted = []
         self.fake.db.exists.return_value = True
@@ -110,6 +111,15 @@ class ContactApiTests(unittest.TestCase):
         self.fake.get_doc('Contact', 'P1').check_permission.side_effect = PermissionError
         with self.assertRaises(PermissionError):
             contacts.set_primary('P1', 'Customer', 'C1')
+        self.fake.get_doc('Relay Contact', 'RELAY-CON-0000000001').save.assert_not_called()
+
+
+    def test_set_primary_denies_users_outside_the_conversation(self):
+        self.fake.db.get_value.return_value = 'RELAY-CON-0000000001'
+        self.conversation.side_effect = PermissionError
+        with self.assertRaises(PermissionError):
+            contacts.set_primary('P1', 'Customer', 'C1')
+        self.conversation.assert_called_once_with('RELAY-CON-0000000001')
         self.fake.get_doc('Relay Contact', 'RELAY-CON-0000000001').save.assert_not_called()
 
 
