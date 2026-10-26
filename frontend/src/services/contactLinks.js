@@ -29,3 +29,10 @@ export function recordIcon(doctype) {
   if (/delivery|shipment|dispatch|packing|transport/i.test(doctype || '')) return { icon: 'truck', tone: 'purple' }
   return { icon: 'file-text', tone: 'blue' }
 }
+
+// Chat header chip for the other linked records: "+2 linked" next to the primary, "2 linked" without one.
+export function linkedLabel(profile) {
+  const count = Number(profile?.link_count) || 0, others = count - (profile?.primary ? 1 : 0)
+  if (others < 1) return ''
+  return `${profile?.primary ? '+' : ''}${others} linked`
+}

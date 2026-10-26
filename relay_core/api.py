@@ -292,9 +292,11 @@ def contact_directory(query='', after=None):
 def contact_profile(contact):
     require_access()
     doc, _ = readable_contact(contact)
-    from relay_core.business_access import primary_record
+    from relay_core.business_access import candidates, primary_record
+    links = candidates(doc.name)
+    readable = [link for link in links if frappe.has_permission(link[0], 'read', doc=link[1])]
     return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
-            'primary': primary_record(doc.name)}
+            'primary': primary_record(doc.name, links), 'link_count': len(readable)}
 
 
 @frappe.whitelist(methods=['GET'])

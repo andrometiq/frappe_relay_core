@@ -30,6 +30,7 @@ import { channelCan } from "../services/enabledChannels";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { useMobileLayout } from "../composables/useMobileLayout";
 import { contactInfoRoute, isContactInfoRoute } from "../services/mobileNav";
+import { linkedLabel, recordIcon } from "../services/contactLinks";
 
 const state = useMessages();
 const channelEnabled = useEnabledChannels();
@@ -83,6 +84,8 @@ const visibleRows = computed(() => {
     (row.channel === target.channel && row.sender_endpoint === target.sender_endpoint));
 });
 const isMobile = useMobileLayout(), infoOpen = ref(false), organizeRequest = ref(0);
+const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
+const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactRecord.value));
 const menuActions = computed(() => [
   ...(conversationContact.value ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen.value = true}, {label:'Internal notes',disabled:busy.value,icon:'message-square',onClick:() => openNote()}, {label:'Cases',disabled:busy.value,icon:'briefcase',onClick:() => casesOpen.value = true}, {label:'Topics',disabled:busy.value,icon:'list',onClick:() => topicsOpen.value = true}] : []),
   ...(frappeContact.value ? [{label:'Business context',icon:'info',onClick:() => contextOpen.value = !contextOpen.value}] : []),
@@ -263,9 +266,9 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
             <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
             <span v-if="contactCount">{{ contactCount }}</span>
-            <template v-if="!isMobile && !businessName && contactRecord?.primary">
-              <span class="conversation-record"><FeatherIcon name="file-text" :size="13" />{{ contactRecord.primary.title }}<small>· {{ contactRecord.primary.doctype }}</small></span>
-              <button type="button" class="conversation-linked" @click="contextOpen = !contextOpen">Linked records</button>
+            <template v-if="!isMobile">
+              <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
+              <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextOpen" @click="contextOpen = !contextOpen">{{ otherLinks }}</button>
             </template>
             <span v-if="!isMobile && channelLine" class="conversation-channel">· {{ channelLine }}</span>
           </div>
@@ -279,9 +282,9 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         </div>
       </header>
 
-      <div v-if="isMobile && !businessName && contactRecord?.primary" class="mobile-record-bar">
-        <span class="mobile-record-chip"><FeatherIcon name="file-text" :size="14" />{{ contactRecord.primary.title }}<small>· {{ contactRecord.primary.doctype }}</small></span>
-        <button type="button" class="mobile-linked-chip" @click="openInfo">Linked records</button>
+      <div v-if="isMobile && (primary || otherLinks)" class="mobile-record-bar">
+        <span v-if="primary" class="mobile-record-chip"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="14" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
+        <button v-if="otherLinks" type="button" class="mobile-linked-chip" @click="openInfo">{{ otherLinks }}</button>
       </div>
 
       <nav v-if="businessName" class="business-contact-strip" aria-label="Business contacts">

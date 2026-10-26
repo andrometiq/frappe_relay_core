@@ -43,9 +43,9 @@ def primary(contact, links=None):
     return tuple(marked) if marked and tuple(marked) in links else None
 
 
-def primary_record(contact):
+def primary_record(contact, links=None):
     """The primary record the current user can read, for a conversation header."""
-    target = primary(contact)
+    target = primary(contact, links)
     if not target: return None
     doc = frappe.get_doc(*target)
     if not doc.has_permission('read'): return None

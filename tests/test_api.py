@@ -179,10 +179,13 @@ class ChannelUITests(unittest.TestCase):
     def test_profile_returns_only_safe_identity_and_rechecks_access(self):
         self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), None)
         header = {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'}
-        with patch('relay_core.business_access.primary_record', return_value=header) as primary:
+        links = [('Customer', 'C1'), ('Supplier', 'S1')]
+        self.f.has_permission = Mock(side_effect=lambda doctype, ptype, doc: doctype == 'Customer')
+        with patch('relay_core.business_access.primary_record', return_value=header) as primary, \
+                patch('relay_core.business_access.candidates', return_value=links):
             self.assertEqual(self.api.contact_profile('relay'), {'name':'relay','display_name':'Local','contact':'person',
-                                                                 'primary': header})
-        primary.assert_called_once_with('relay')
+                                                                 'primary': header, 'link_count': 1})
+        primary.assert_called_once_with('relay', links)
         self.api.readable_contact.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_profile('relay')
 

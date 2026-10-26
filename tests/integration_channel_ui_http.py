@@ -101,7 +101,7 @@ try:
             request(method,values,actor=None,status=403)
         assert {row['channel'] for row in request('api.channel_options')['items']} == {'WhatsApp','Telegram','Email'}
         profile=request('api.contact_profile',{'contact':fixture.contact.name})
-        assert set(profile)=={'name','display_name','contact'}
+        assert set(profile)=={'name','display_name','contact','primary','link_count'}
         for medium in ('WhatsApp','Telegram','Email'):
             page=request('inbox.directory',{'query':'Local C2 '+fixture.stamp,'medium':medium},actor=fixture.actor)
             assert len(page['items'])==1
