@@ -5,6 +5,12 @@ export function channelEnabled(capabilities, provider) {
   return !provider || (capabilities?.enabled_channels || []).includes(provider)
 }
 
+// The /relay page renders api.capabilities into the app root, so the shell starts without another round trip.
+export function pageCapabilities(root) {
+  const raw = root?.dataset.capabilities
+  return raw ? JSON.parse(raw) : null
+}
+
 // Inbox filters offer "All channels" only when no supported provider is switched off.
 export function mediumOptions(capabilities) {
   const enabled = capabilities?.enabled_channels || []

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { channelEnabled, defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
+import { channelEnabled, defaultMedium, mediumOptions, pageCapabilities } from '../src/services/enabledChannels.js'
 
 test('only the enabled channels are offered and messages without a provider stay visible', () => {
   const whatsapp = { enabled_channels: ['WhatsApp'] }
@@ -29,4 +29,11 @@ test('the inbox and its unread badge open on the same channel queue', () => {
   assert.equal(defaultMedium({ enabled_channels: ['WhatsApp'] }), 'WhatsApp')
   assert.equal(defaultMedium({ enabled_channels: ['WhatsApp', 'Telegram', 'Email'] }), 'all')
   assert.equal(defaultMedium({ enabled_channels: [] }), undefined)
+})
+
+test('the shell starts from the capabilities the page rendered, or asks the server without them', () => {
+  const rendered = { manage: true, enabled_channels: ['WhatsApp'] }
+  assert.deepEqual(pageCapabilities({ dataset: { capabilities: JSON.stringify(rendered) } }), rendered)
+  assert.equal(pageCapabilities({ dataset: {} }), null)
+  assert.equal(pageCapabilities(null), null)
 })
