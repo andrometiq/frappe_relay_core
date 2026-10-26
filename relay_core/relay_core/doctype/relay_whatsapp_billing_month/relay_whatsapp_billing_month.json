@@ -1,0 +1,114 @@
+{
+  "doctype": "DocType",
+  "name": "Relay WhatsApp Billing Month",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:record_key",
+  "in_create": 1,
+  "read_only": 1,
+  "fields": [
+    {
+      "fieldname": "record_key",
+      "label": "Record key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "reqd": 1,
+      "read_only": 1,
+      "description": "Hash of account, month, category and pricing type."
+    },
+    {
+      "fieldname": "account",
+      "label": "Account",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "period",
+      "label": "Month",
+      "fieldtype": "Date",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "First day of the month in the site timezone."
+    },
+    {
+      "fieldname": "category",
+      "label": "Pricing category",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "pricing_type",
+      "label": "Pricing type",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "volume",
+      "label": "Volume",
+      "fieldtype": "Int",
+      "default": "0",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "meta_cost",
+      "label": "Meta cost",
+      "fieldtype": "Currency",
+      "options": "currency",
+      "default": "0",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "currency",
+      "label": "Currency",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "fetched_at",
+      "label": "Fetched at",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "raw_data",
+      "label": "Meta data points",
+      "fieldtype": "JSON",
+      "description": "Data points as Meta returned them."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1
+    },
+    {
+      "role": "WhatsApp Manager",
+      "read": 1,
+      "report": 1
+    }
+  ],
+  "field_order": [
+    "record_key",
+    "account",
+    "period",
+    "category",
+    "pricing_type",
+    "volume",
+    "meta_cost",
+    "currency",
+    "fetched_at",
+    "raw_data"
+  ],
+  "sort_field": "period",
+  "sort_order": "DESC",
+  "modified": "2026-10-26 21:00:00.000000"
+}
