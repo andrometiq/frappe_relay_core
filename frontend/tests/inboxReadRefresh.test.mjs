@@ -5,11 +5,12 @@ import { computed, effectScope, nextTick, ref, watch } from 'vue'
 import { coreApi } from '../src/services/coreApi.js'
 import { onRealtime } from '../src/services/realtime.js'
 import { defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
+import { mergeChangedRows, newestActivity, onlyChangedRows } from '../src/services/inboxRows.js'
 
 test('read mutations refresh the unread queue without waiting for a socket, but failed reads do not', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-  const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout',
+  const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows',
     script + '\nreturn { mode, rows, loading };')
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window
   let unread = 2, fail = false, loads = 0, mount, off, refreshed
@@ -28,7 +29,7 @@ test('read mutations refresh the unread queue without waiting for a socket, but 
   try {
     const state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, computed, ref, watch, coreApi,
       (_doctypes, kinds, refresh) => { off = onRealtime(event => { if (kinds.includes(event.kind)) refreshed = refresh() }) }, mediumOptions,
-      () => ({ counts: ref({}) }), defaultMedium, () => ref(false)))
+      () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, newestActivity, onlyChangedRows))
     await mount()
     state.mode.value = 'unread'
     await nextTick()
