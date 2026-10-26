@@ -126,7 +126,7 @@ class SheetTests(unittest.TestCase):
 
 
 class MappingTests(unittest.TestCase):
-    def test_positional_values_take_the_columns_after_the_phone_column_in_order(self):
+    def test_positional_values_take_the_columns_other_than_the_phone_column_in_order(self):
         header = ['Name', 'Mobile', 'Offer', 'City']
         mapping = bulk_sheet.suggest(header, bulk_sheet.template_fields(POSITIONAL))
         self.assertEqual(mapping['phone'], 'Mobile')

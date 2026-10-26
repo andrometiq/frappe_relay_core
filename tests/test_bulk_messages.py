@@ -178,6 +178,20 @@ class PushTests(unittest.TestCase):
         self.hub.call_tool.assert_not_called()
 
 
+class RecoverTests(unittest.TestCase):
+    def test_recovery_skips_older_text_campaigns_in_sql_and_resumes_bulk_ones(self):
+        rows = [_dict(name='Old', status='Running', operation='messages.send', template_name=None, arguments='{"body": "x"}'),
+                _dict(name='Offer', status='Running', operation='messages.media', template_name=None,
+                      arguments=json.dumps({'message': PHOTO, 'fields': []}))]
+        get_all = Mock(return_value=rows)
+        with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(get_all=get_all)), \
+                patch.object(bulk_campaigns, 'enqueue') as enqueue, patch('relay_core.bulk_updates.recover'):
+            bulk_campaigns.recover()
+        self.assertEqual(get_all.call_args.kwargs['or_filters'],
+                         {'template_name': ['is', 'set'], 'arguments': ['like', '%"message"%']})
+        enqueue.assert_called_once_with('send_job', 'Offer')
+
+
 class TimelineTests(unittest.TestCase):
     def test_text_and_media_rows_show_what_was_sent(self):
         from relay_core.bulk_timeline import sent_content
