@@ -20,7 +20,9 @@ class ChannelQueryTests(unittest.TestCase):
         fake=Mock(); query=Mock(); query.where.return_value=query; query.run.return_value=[]
         fake.qb.DocType.side_effect=lambda name: __import__('pypika').Table(name)
         fake.qb.from_.side_effect=__import__('pypika').Query.from_
-        with patch.object(business_inbox,'frappe',fake), patch.object(business_inbox,'check_type'), patch.dict('sys.modules',{'relay_core.timeline':SimpleNamespace(page_query=Mock(return_value=query))}):
+        with patch.object(business_inbox,'frappe',fake), patch.object(business_inbox,'check_type'), \
+                patch.object(business_inbox,'resolved_contacts',return_value=[]), \
+                patch.dict('sys.modules',{'relay_core.timeline':SimpleNamespace(page_query=Mock(return_value=query))}):
             for medium in (None,'WhatsApp','Telegram','Email'):
                 result=business_inbox.messages('Customer','local',medium=medium)
                 self.assertEqual(result['items'],[])

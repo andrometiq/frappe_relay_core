@@ -71,6 +71,11 @@ class ContactUpdateTests(unittest.TestCase):
         self.enterContext(patch.object(identity, 'default_region', return_value='IN'))
         self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))
         self.bindings = self.enterContext(patch.object(lifecycle, 'bindings', return_value=iter(())))
+        self.drop_primary = self.enterContext(patch.object(business_access, 'drop_stale_primary'))
+
+    def test_link_edits_are_never_blocked_and_clear_a_removed_primary(self):
+        self.assertEqual(self.update(person(), person()), [])
+        self.drop_primary.assert_called_once_with('RELAY-CON-A')
 
     def update(self, before, after):
         after.get_doc_before_save = lambda: before

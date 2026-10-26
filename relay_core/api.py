@@ -245,9 +245,11 @@ def contact_details(contact):
              if row.link_doctype in configured
              and frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')]
     relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
-    endpoints = []
+    endpoints, primary = [], None
     if relay:
         readable_contact(relay)
+        from relay_core.business_access import primary_record
+        primary = primary_record(relay)
         rows = frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': relay},
                              fields=['name', 'channel', 'endpoint', 'verified', 'creation', 'modified'],
                              limit_page_length=100)
@@ -258,7 +260,7 @@ def contact_details(contact):
                 endpoints.append(row)
     return {'name': person.name, 'label': person.full_name or person.name,
             'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
-            'links': links, 'endpoints': endpoints}
+            'links': links, 'primary': primary, 'endpoints': endpoints}
 
 
 @frappe.whitelist(methods=['GET'])
@@ -288,7 +290,9 @@ def contact_directory(query='', after=None):
 def contact_profile(contact):
     require_access()
     doc, _ = readable_contact(contact)
-    return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact}
+    from relay_core.business_access import primary_record
+    return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
+            'primary': primary_record(doc.name)}
 
 
 @frappe.whitelist(methods=['GET'])

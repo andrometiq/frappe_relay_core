@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import frappe
 from relay_core.automation.provenance import conversation_key
 from relay_core.automation.service import internal_save
-from relay_core.business_access import campaign_send, candidates, incoming_reference
+from relay_core.business_access import campaign_send, candidates, incoming_reference, primary
 
 
 def resolve(contact, channel, endpoint, context, row, event, override=None, position=0):
@@ -71,6 +71,8 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                 or (event.get('name') and event.name == state.selected_event and position > state.selected_position)
                 or row['id'] == state.prompt_message_id):
             business, rule = (state.business_doctype, state.business_name), 'conversation'
+        elif marked := primary(contact, links):
+            business, rule = marked, 'primary_link'
         elif state.prompt_action:
             status = frappe.db.get_value('Relay Message Action', state.prompt_action, 'status')
             rule = 'triage_prompt_rejected' if status == 'Rejected' else 'triage_prompt_pending'

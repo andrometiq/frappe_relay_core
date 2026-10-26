@@ -8,6 +8,8 @@
   "field_order": [
     "contact",
     "display_name",
+    "primary_doctype",
+    "primary_name",
     "automation_paused",
     "automation_generation",
     "last_message_at",
@@ -27,6 +29,20 @@
       "label": "Display name",
       "fieldtype": "Data",
       "reqd": 1
+    },
+    {
+      "fieldname": "primary_doctype",
+      "label": "Primary business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "read_only": 1
+    },
+    {
+      "fieldname": "primary_name",
+      "label": "Primary business record",
+      "fieldtype": "Dynamic Link",
+      "options": "primary_doctype",
+      "read_only": 1
     },
     {
       "fieldname": "automation_paused",

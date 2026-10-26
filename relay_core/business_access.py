@@ -35,12 +35,54 @@ def candidates(contact):
     return sorted({(r.link_doctype,r.link_name) for r in rows if r.link_doctype in enabled and frappe.db.exists(r.link_doctype, r.link_name)})
 
 
+def primary(contact, links=None):
+    """The marked link, or the only link. A primary whose Contact link is gone does not count."""
+    if links is None: links = candidates(contact)
+    if len(links) == 1: return links[0]
+    marked = frappe.db.get_value('Relay Contact', contact, ['primary_doctype', 'primary_name'])
+    return tuple(marked) if marked and tuple(marked) in links else None
+
+
+def primary_record(contact):
+    """The primary record the current user can read, for a conversation header."""
+    target = primary(contact)
+    if not target: return None
+    doc = frappe.get_doc(*target)
+    if not doc.has_permission('read'): return None
+    title = doc.get(doc.meta.title_field) if doc.meta.title_field else None
+    return {'doctype': target[0], 'name': target[1], 'title': str(title or target[1])}
+
+
+def drop_stale_primary(contact):
+    marked = frappe.db.get_value('Relay Contact', contact, ['primary_doctype', 'primary_name'])
+    if marked and any(marked) and tuple(marked) not in candidates(contact):
+        frappe.db.set_value('Relay Contact', contact, {'primary_doctype': None, 'primary_name': None})
+
+
 def reference(doc):
     if doc.get('legacy_triage'): return None
     if doc.get('business_doctype') and doc.get('business_name'):
         return doc.business_doctype,doc.business_name
-    links=candidates(doc.relay_contact)
-    return links[0] if len(links)==1 else None
+    return primary(doc.relay_contact)
+
+
+def message_allowed(doc, user=None):
+    """A message is readable through its business, or through its contact's one conversation."""
+    if allowed(doc, user): return True
+    if doc.get('legacy_triage'): return False
+    try: return frappe.get_doc('Relay Contact', doc.relay_contact).has_permission('read', user=user)
+    except frappe.DoesNotExistError: return False
+
+
+def message_condition(user=None):
+    user = user or frappe.session.user
+    business = query_condition(user)
+    if not business or not frappe.has_permission('Relay Contact', 'read', user=user): return business
+    contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
+                                   user=user, order_by='').get_sql()
+    conversation = (f"(COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND "
+                    f"`tabRelay Message`.relay_contact IN ({contacts}))")
+    return '(' + business + ' OR ' + conversation + ')'
 
 
 def allowed(doc,user=None):
@@ -87,13 +129,14 @@ def query_condition(user=None):
         AND (COALESCE(`tabRelay Message`.ticket_notification,'')!='' OR EXISTS (SELECT 1 FROM `tabRelay Contact` c JOIN `tabDynamic Link` k ON k.parent=c.contact
          WHERE c.name=`tabRelay Message`.relay_contact AND k.parenttype='Contact' AND k.parentfield='links'
          AND k.link_doctype={value} AND k.link_name=`tabRelay Message`.business_name)))"""
-        # Legacy records resolve only when there is exactly one configured business link.
+        # Records without a business resolve to the only configured link, or the primary one.
         legacy=f"""(COALESCE(`tabRelay Message`.business_name,'')='' AND `tabRelay Message`.relay_contact IN
         (SELECT r.name FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact
          WHERE l.parenttype='Contact' AND l.parentfield='links' AND l.link_doctype={value}
          AND l.link_name IN ({subquery}) AND
-         (SELECT count(*) FROM `tabDynamic Link` x JOIN `tabRelay Contact Type` t ON t.business_doctype=x.link_doctype AND t.enabled=1
-          WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links')=1))"""
+         ((SELECT count(*) FROM `tabDynamic Link` x JOIN `tabRelay Contact Type` t ON t.business_doctype=x.link_doctype AND t.enabled=1
+          WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links')=1
+          OR (r.primary_doctype={value} AND r.primary_name=l.link_name))))"""
         clauses.append('('+explicit+' OR '+legacy+')')
     business = '(COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND ('+' OR '.join(clauses)+'))' if clauses else '1=0'
     return business
@@ -215,7 +258,7 @@ def email_prompt_contexts(contact, channel, endpoint, message_id):
 
 def choose_business(contact, doctype=None, name=None):
     links = candidates(contact)
-    business = (doctype, name) if doctype or name else links[0] if len(links) == 1 else None
+    business = (doctype, name) if doctype or name else primary(contact, links)
     if business not in links:
         frappe.throw('Choose a linked business record')
     frappe.get_doc(*business).check_permission('read')

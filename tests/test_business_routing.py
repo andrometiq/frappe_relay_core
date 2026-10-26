@@ -33,7 +33,7 @@ class RoutingFixtures:
 
     def get_value(self, dt, filters, fields=None, **kwargs):
         if dt == 'Relay Contact':
-            return filters
+            return getattr(self, 'marked', None) if fields == ['primary_doctype', 'primary_name'] else filters
         if dt == 'Relay Contact Endpoint':
             if not self.verified:
                 return None
@@ -231,6 +231,14 @@ class RoutingTests(RoutingFixtures, unittest.TestCase):
         self.now += timedelta(seconds=1)
         self.assertEqual(self.resolve(context={'provider': 'Email', 'authentication': {'status': 'pass'}}), (self.links[1], 'conversation'))
         self.assertFalse(self.actions)
+
+    def test_primary_link_skips_the_choice_prompt(self):
+        self.marked = self.links[1]
+        self.assertEqual(self.resolve(), (self.links[1], 'primary_link'))
+        self.assertFalse(self.actions)
+        self.marked = ('Customer', 'unlinked')
+        self.assertEqual(self.resolve('second'), (None, 'triage_prompt_pending'))
+        self.assertEqual(len(self.actions), 1)
 
     def test_single_link_and_revoked_endpoint(self):
         self.links = self.links[:1]
