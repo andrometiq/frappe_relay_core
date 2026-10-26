@@ -1,7 +1,7 @@
 import { resetRecipient } from '../src/services/recipientContext.js'
 import test from 'node:test'
 import { injectCapabilities } from './channelCapabilities.js'
-import { composerKinds } from '../src/services/enabledChannels.js'
+import { composerKinds, defaultSendSource } from '../src/services/enabledChannels.js'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {computed,ref,watch,reactive,nextTick,effectScope} from 'vue'
@@ -10,7 +10,7 @@ import {sha256Hex} from '../src/services/crypto.js'
 
 const source=(await readFile(new URL('../src/composables/useMessages.js',import.meta.url),'utf8'))
   .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','function')
-const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','inject','composerKinds','"use strict";\n'+source+'\nreturn useMessages();')
+const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','inject','composerKinds','defaultSendSource','"use strict";\n'+source+'\nreturn useMessages();')
 function storage(){
   const value={}
   Object.defineProperties(value,{
@@ -23,7 +23,7 @@ function setup(api){
   globalThis.sessionStorage=storage()
   let refresh,id=0
   const scope=effectScope()
-  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue,resetRecipient,injectCapabilities,composerKinds))
+  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue,resetRecipient,injectCapabilities,composerKinds,defaultSendSource))
   return {state,refresh:(...kinds)=>refresh({kinds:new Set(kinds)}),stop:()=>scope.stop()}
 }
 const row=(number,time)=>({name:`RELAY-MSG-${String(number).padStart(10,'0')}`,channel:'channel',content:'Hello',creation:'2026-10-24',sent_at:time,provider_context:{provider:'WhatsApp'},sender_endpoint:'15550000001'})
@@ -254,4 +254,18 @@ test('business reconnect restores only its scoped durable pending attempts',asyn
     await fixture.refresh('reconnect')
     assert.equal(fixture.state.displayRows.value[0].action,'action')
   } finally {fixture.stop()}
+})
+
+test('Send via switches the source channel without filtering the timeline',async()=>{
+  const calls=[],fixture=setup(async method=>{calls.push(method);return {items:[],has_more:false}})
+  const message=(name,channel)=>({...row(name,'2026-10-24'),channel,relay_contact:'contact'})
+  const rows=[message(1,'second-number'),message(2,'live-number'),message(3,'second-number')]
+  fixture.state.selected.value='contact';fixture.state.rows.value=rows;fixture.state.source.value=rows[2]
+  fixture.state.sendVia('live-number')
+  assert.equal(fixture.state.source.value.name,rows[1].name)
+  assert.equal(fixture.state.channel.value,'')
+  assert.equal(fixture.state.rows.value.length,3)
+  assert.deepEqual(calls,[])
+  assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact'])
+  fixture.stop()
 })

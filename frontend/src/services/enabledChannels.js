@@ -1,3 +1,5 @@
+import { objectValue } from '../components/messageContent.js'
+
 // The backend owns the switch through api.capabilities enabled_channels.
 export function channelEnabled(capabilities, provider) {
   return !provider || (capabilities?.enabled_channels || []).includes(provider)
@@ -22,6 +24,15 @@ export function channelFeature(capabilities, provider, feature) {
 
 export function channelCan(capabilities, provider, feature) {
   return Boolean(channelFeature(capabilities, provider, feature))
+}
+
+// The composer sends via the newest message of the first enabled channel, WhatsApp in v1.
+export function defaultSendSource(rows, capabilities) {
+  for (const provider of capabilities?.enabled_channels || []) {
+    const row = rows.findLast(item => objectValue(item.provider_context).provider === provider)
+    if (row) return row
+  }
+  return rows.at(-1) || null
 }
 
 // Message types the composer offers for the source channel. Groups take media only.

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { channelCan, channelFeature, composerKinds } from '../src/services/enabledChannels.js'
+import { channelCan, channelFeature, composerKinds, defaultSendSource } from '../src/services/enabledChannels.js'
 import { attachmentAccept, attachmentFormatError } from '../src/components/messages/attachmentFormats.js'
 import { whatsappCapabilities as capabilities } from './channelCapabilities.js'
 
@@ -38,4 +38,14 @@ test('attachment hints and checks follow the channel media types', () => {
   const anyFile = { channels: { Email: { media: { document: ['*/*'] } } } }
   assert.equal(attachmentAccept(anyFile, 'Email', 'document'), '')
   assert.equal(attachmentFormatError(anyFile, 'Email', 'document', 'report.zip'), '')
+})
+
+test('the composer sends via the newest message of the first enabled channel', () => {
+  const row = (name, provider) => ({ name, provider_context: { provider } })
+  const rows = [row('old-whatsapp', 'WhatsApp'), row('new-whatsapp', 'WhatsApp'), row('newest-email', 'Email')]
+  const both = { enabled_channels: ['WhatsApp', 'Email'] }
+  assert.equal(defaultSendSource(rows, both).name, 'new-whatsapp')
+  assert.equal(defaultSendSource([rows[2]], both).name, 'newest-email')
+  assert.equal(defaultSendSource([rows[2]], {}).name, 'newest-email')
+  assert.equal(defaultSendSource([], both), null)
 })
