@@ -13,10 +13,11 @@ const views = {
   campaigns: defineAsyncComponent(() => import('../CampaignsWorkspace.vue')),
   forms: defineAsyncComponent(() => import('./WhatsAppForms.vue')),
 }
+const can = feature => channelCan(capabilities.value, 'WhatsApp', feature)
 const tabs = computed(() => [
-  { name: 'templates', label: 'Templates' },
-  { name: 'campaigns', label: 'Bulk campaigns', show: capabilities.value.manage },
-  { name: 'forms', label: 'Forms', show: capabilities.value.manage && channelCan(capabilities.value, 'WhatsApp', 'forms') },
+  { name: 'templates', label: 'Templates', show: can('templates') },
+  { name: 'campaigns', label: 'Bulk campaigns', show: capabilities.value.manage && can('bulk_campaigns') },
+  { name: 'forms', label: 'Forms', show: capabilities.value.manage && can('forms') },
   { name: 'account', label: 'Account' },
 ].filter(tab => tab.show !== false))
 const requested = ref(routeTab(location.hash, 'templates'))
