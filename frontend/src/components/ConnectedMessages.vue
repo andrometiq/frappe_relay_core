@@ -191,12 +191,15 @@ const { people } = useConversationPresence({
   get visibleMessages() { return visibleMessages.value; },
 }, () => {});
 
-watch(selected, async contact => {
-  contactRecord.value = null; closeNotes(); deliveriesOpen.value = false;
-  lastVisible.value = ''; visibleMessages.value = [];
-  if (!contact) return;
+// The chat title and record bar show the primary record, so a link change in contact info reloads the profile.
+async function loadProfile(contact) {
   try { const record = await coreApi('api.contact_profile', { contact }); if (selected.value === contact) contactRecord.value = record; }
   catch (e) { if (selected.value === contact) contactsError.value = e.message; }
+}
+watch(selected, contact => {
+  contactRecord.value = null; closeNotes(); deliveriesOpen.value = false;
+  lastVisible.value = ''; visibleMessages.value = [];
+  if (contact) loadProfile(contact);
 }, { immediate: true });
 watch([businessType, businessName], () => {
   closeNotes(); contextOpen.value = false;
@@ -333,7 +336,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
 
     <Transition name="relay-page">
       <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine"
-        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" />
+        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" @changed="loadProfile(selected)" />
     </Transition>
   </section>
 </template>
