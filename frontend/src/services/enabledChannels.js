@@ -47,3 +47,10 @@ export function composerKinds(capabilities, context) {
 export function alsoSendChoices(capabilities, choices, current) {
   return multipleChannels(capabilities) ? [...choices].filter(([value]) => value !== current) : []
 }
+
+// Phone inbox chips: every provider in a fixed order; switched-off ones stay visible but disabled.
+export function mediumChips(capabilities) {
+  const options = mediumOptions(capabilities).map(option => option.value ?? option)
+  const all = options.includes('all') ? [{ value: 'all', label: 'All', enabled: true }] : []
+  return [...all, ...['WhatsApp', 'Email', 'Telegram'].map(value => ({ value, label: value, enabled: options.includes(value) }))]
+}

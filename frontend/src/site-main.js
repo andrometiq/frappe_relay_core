@@ -4,6 +4,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import SiteApp from './SiteApp.vue'
 import './style.css'
+import './mobile.css'
 const root = document.getElementById('app')
 window.frappe = window.frappe || {}
 window.frappe.csrf_token = root.dataset.csrf || ''

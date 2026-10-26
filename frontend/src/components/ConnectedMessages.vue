@@ -1,6 +1,6 @@
 <script setup>
 import { inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
-import { Avatar, Button, Dropdown, ErrorMessage } from "@relay/ui";
+import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon } from "@relay/ui";
 import { recordTitle } from '../services/recordTitle';
 import { linkedTitle } from '../services/linkedTitle';
 import WorkspaceState from "./WorkspaceState.vue";
@@ -12,6 +12,7 @@ import ConversationCases from "./messages/ConversationCases.vue";
 import ConversationTopics from "./messages/ConversationTopics.vue";
 import InternalNotes from "./messages/InternalNotes.vue";
 import ContactDetails from "./ContactDetails.vue";
+import ContactInfoPage from "./messages/ContactInfoPage.vue";
 import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
 import StartConversation from "./messages/StartConversation.vue";
@@ -26,7 +27,9 @@ import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
 import { useEnabledChannels } from "../composables/useEnabledChannels";
 import { channelCan } from "../services/enabledChannels";
-import { openRoute } from "../useViewRoute";
+import { closeRoute, openRoute } from "../useViewRoute";
+import { useMobileLayout } from "../composables/useMobileLayout";
+import { contactInfoRoute, isContactInfoRoute } from "../services/mobileNav";
 
 const state = useMessages();
 const channelEnabled = useEnabledChannels();
@@ -79,6 +82,22 @@ const visibleRows = computed(() => {
   return all.filter(row => row.frappe_contact === activeBusinessContact.value ||
     (row.channel === target.channel && row.sender_endpoint === target.sender_endpoint));
 });
+const isMobile = useMobileLayout(), infoOpen = ref(false);
+const channelLine = computed(() => {
+  if (!source.value) return "";
+  const provider = objectValue(source.value.provider_context).provider || "";
+  const label = linkedTitle("Relay Channel", source.value.channel, "");
+  return [provider, label].filter((value, index, list) => value && list.indexOf(value) === index).join(" · ");
+});
+function readInfoRoute() { infoOpen.value = location.hash.split("?")[0] === "#/messages" && isContactInfoRoute(location.hash); }
+function openInfo() { openRoute(contactInfoRoute(location.hash)); infoOpen.value = true; }
+function closeInfo() {
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  params.delete("info");
+  closeRoute("#/messages?" + params);
+  infoOpen.value = false;
+}
+function infoAction(open) { closeInfo(); open(); }
 const recipientLabel = computed(() => {
   if (!source.value) return "";
   const linked = linkedContacts.value.find(item => item.value === source.value.frappe_contact);
@@ -204,8 +223,8 @@ function readContactRoute() {
   if (contact !== activeBusinessContact.value) chooseContact(contact, false);
 }
 watch([busy, selected], readContactRoute, { flush: 'post' });
-onMounted(() => { readContactRoute(); window.addEventListener('hashchange', readContactRoute); window.addEventListener('popstate', readContactRoute); });
-onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange', readContactRoute); window.removeEventListener('popstate', readContactRoute); });
+onMounted(() => { readContactRoute(); readInfoRoute(); window.addEventListener('hashchange', readContactRoute); window.addEventListener('popstate', readContactRoute); window.addEventListener('hashchange', readInfoRoute); window.addEventListener('popstate', readInfoRoute); });
+onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange', readContactRoute); window.removeEventListener('popstate', readContactRoute); window.removeEventListener('hashchange', readInfoRoute); window.removeEventListener('popstate', readInfoRoute); });
 </script>
 
 <template>
@@ -219,12 +238,18 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         @business="openBusiness" @select="openContact" />
     </aside>
 
+    <Teleport v-if="isMobile && !active" to="#relay-header-actions" defer>
+      <Button variant="solid" icon="plus" class="relay-header-new" aria-label="New conversation" title="New conversation" @click="openStart()" />
+    </Teleport>
+
+    <Transition name="relay-page" :css="isMobile">
     <div v-if="active" class="connected-thread">
       <header class="conversation-heading">
         <Button class="mobile-only conversation-back" icon="arrow-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
-          <h2>{{ title }}</h2>
+          <h2><button v-if="isMobile && (frappeContact || conversationContact)" type="button" class="conversation-title-button" aria-label="Open contact info" @click="openInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
+          <p v-if="isMobile && channelLine" class="conversation-channel-line">{{ channelLine }}</p>
           <div class="conversation-meta">
             <span v-if="businessContext?.doctype_label || businessType">{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
@@ -242,6 +267,11 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           ]"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
         </div>
       </header>
+
+      <div v-if="isMobile && !businessName && contactRecord?.primary" class="mobile-record-bar">
+        <span class="mobile-record-chip"><FeatherIcon name="file-text" :size="14" />{{ contactRecord.primary.title }}<small>· {{ contactRecord.primary.doctype }}</small></span>
+        <button type="button" class="mobile-linked-chip" @click="openInfo">Linked records</button>
+      </div>
 
       <nav v-if="businessName" class="business-contact-strip" aria-label="Business contacts">
         <button type="button" :aria-pressed="!activeBusinessContact" :class="{ active: !activeBusinessContact }" :disabled="busy" @click="showAllContacts">
@@ -299,6 +329,12 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
     <div v-else class="connected-thread whatsapp-empty-pane" aria-label="No open conversation">
       <WorkspaceState title="Choose a conversation" description="Select a customer on the left to view messages and reply." icon="message-circle" />
     </div>
+    </Transition>
+
+    <Transition name="relay-page">
+      <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine"
+        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" />
+    </Transition>
   </section>
 </template>
 

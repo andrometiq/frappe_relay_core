@@ -192,7 +192,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
 .campaign-rows { display: grid; margin: 12px 0; }
 .campaign-rows > div { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--outline-gray-1); font-size: 13px; color: var(--ink-gray-8); }
 .campaign-rows small { grid-column: 1 / -1; color: var(--ink-gray-5); overflow-wrap: anywhere; }
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .campaign-counters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .campaign-map-row { grid-template-columns: 1fr; }
 }
