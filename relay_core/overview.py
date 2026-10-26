@@ -27,7 +27,7 @@ def read():
         if date in daily:daily[date][row.direction.lower()]+=1
     operations=None
     recovery=None
-    if set(frappe.get_roles()).intersection({'System Manager','Relay Communication Manager'}):
+    if 'System Manager' in frappe.get_roles():
         from relay_core.operations import recovery_status
         recovery=recovery_status()
         from relay_core.settings import value

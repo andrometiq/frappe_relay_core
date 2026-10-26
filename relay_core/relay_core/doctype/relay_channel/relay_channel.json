@@ -108,7 +108,20 @@
       "report": 1
     },
     {
+      "role": "WhatsApp Manager",
+      "read": 1,
+      "report": 1
+    },
+    {
       "role": "Relay Communication User",
+      "read": 1
+    },
+    {
+      "role": "WhatsApp User",
+      "read": 1
+    },
+    {
+      "role": "WhatsApp Multi-Channel User",
       "read": 1
     },
     {
@@ -122,5 +135,5 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-25 12:00:02.000001"
+  "modified": "2026-10-26 12:00:00.000000"
 }

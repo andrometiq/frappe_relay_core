@@ -68,6 +68,10 @@
     {
       "role": "Relay Communication Manager",
       "read": 1
+    },
+    {
+      "role": "WhatsApp Manager",
+      "read": 1
     }
   ],
   "field_order": [
@@ -83,5 +87,5 @@
   "title_field": "template_name",
   "sort_field": "creation",
   "sort_order": "DESC",
-  "modified": "2026-10-25 23:30:00.000000"
+  "modified": "2026-10-26 12:00:00.000000"
 }

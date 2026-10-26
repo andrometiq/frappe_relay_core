@@ -69,6 +69,9 @@
   "permissions": [
     {"role": "System Manager", "read": 1},
     {"role": "Relay Communication Manager", "read": 1},
-    {"role": "Relay Communication User", "read": 1, "if_owner": 1}
+    {"role": "Relay Communication User", "read": 1, "if_owner": 1},
+    {"role": "WhatsApp Manager", "read": 1},
+    {"role": "WhatsApp User", "read": 1, "if_owner": 1},
+    {"role": "WhatsApp Multi-Channel User", "read": 1, "if_owner": 1}
   ]
 }

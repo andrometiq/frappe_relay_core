@@ -6,6 +6,7 @@ import { composerKinds, defaultSendSource } from "../services/enabledChannels.js
 import { coordinates } from "../components/formValidation";
 import { coreApi } from "../services/coreApi";
 import { messageData, objectValue } from "../components/messageContent";
+import { closeRoute, openRoute } from "../useViewRoute.js";
 
 export function useMessages() {
   const capabilities = inject('relayCapabilities', ref({}));
@@ -430,19 +431,18 @@ export function useMessages() {
   }
   function businessRoute(doctype, name, replace = false) {
     const params = new URLSearchParams({ business_doctype: doctype, business_name: name });
-    const route = "#/messages?" + params.toString();
-    if (location.hash === route) return;
-    window.history[replace ? "replaceState" : "pushState"](null, "", route);
+    openRoute("#/messages?" + params.toString(), replace);
   }
   function clearSelection(updateRoute = true) {
     clearRecipient();saveWindow();++requestSequence;
     selected.value="";businessName.value="";businessType.value="";businessContext.value=null;
     rows.value=[];source.value=null;quoting.value=false;
-    if(updateRoute && location.hash.split('?')[0]==='#/messages')window.history.pushState(null,"","#/messages");
+    if(updateRoute && location.hash.split('?')[0]==='#/messages')closeRoute("#/messages");
   }
   function openBusiness(doctype, record, updateRoute = true) {
     const name=typeof record==='string'?record:record?.name;
     if (busy.value || !doctype || !name) return;
+    const switching=!!(selected.value||businessName.value);
     clearRecipient();saveWindow();
     ++requestSequence;
     selected.value = "";
@@ -465,7 +465,7 @@ export function useMessages() {
     channel.value = "";
     channels.value = [];
     clearRecipient();
-    if(updateRoute)businessRoute(doctype,name);
+    if(updateRoute)businessRoute(doctype,name,switching);
     return run(async()=>{
       businessContext.value=await coreApi('business_inbox.context',{doctype,name});
       if(!restoreWindow())await restoreSavedView();
@@ -685,10 +685,14 @@ export function useMessages() {
         await openBusiness(businessDoctype,business,false);
       return;
     }
-    if(businessName.value)clearSelection(false);
     const anchor=params.get('message'),contact=params.get('contact');
+    if(businessName.value||(!anchor&&!contact&&selected.value))clearSelection(false);
     if(anchor && anchor!==restored.value)await focusMessage(anchor);
-    else if(contact && contact!==selected.value)open(contact);
+    else if(contact && contact!==selected.value){
+      await open(contact);
+      // A missing or forbidden conversation link falls back to the list.
+      if(error.value&&selected.value===contact){clearSelection(false);window.history.replaceState(null,"","#/messages");}
+    }
   }
   onMounted(async()=>{window.addEventListener('hashchange',openFromLink);window.addEventListener('popstate',openFromLink);await openFromLink()});
   onBeforeUnmount(()=>{window.removeEventListener('hashchange',openFromLink);window.removeEventListener('popstate',openFromLink)});

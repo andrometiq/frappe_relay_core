@@ -26,6 +26,7 @@ import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
 import { useEnabledChannels } from "../composables/useEnabledChannels";
 import { channelCan } from "../services/enabledChannels";
+import { openRoute } from "../useViewRoute";
 
 const state = useMessages();
 const channelEnabled = useEnabledChannels();
@@ -106,7 +107,7 @@ async function loadBusinessContacts() {
 function contactRoute(contact) {
   const params = new URLSearchParams({ business_doctype: businessType.value, business_name: businessName.value });
   if (contact) params.set("contact", contact);
-  window.history.pushState(null, "", "#/messages?" + params.toString());
+  openRoute("#/messages?" + params.toString(), true);
 }
 function chooseContact(contact, updateRoute = true) {
   if (busy.value) return;
@@ -132,14 +133,17 @@ function openStart(contact = "") {
 async function started(result) {
   startOpen.value = false;
   if (!businessName.value && result?.contact && result.contact !== selected.value) {
-    historyRoute(result.contact);
-    await state.open(result.contact);
+    await openContact(result.contact);
   } else {
     await run(() => history());
     if (businessName.value && result?.contact) chooseContact(result.contact);
   }
 }
-function historyRoute(contact) { window.history.pushState(null, '', '#/messages?contact=' + encodeURIComponent(contact)); }
+function openContact(contact) {
+  if (busy.value) return;
+  openRoute('#/messages?contact=' + encodeURIComponent(contact), !!active.value);
+  return state.open(contact);
+}
 function closeNotes() { casesOpen.value = false; topicsOpen.value = false; notesOpen.value = false; noteMessages.value = []; noteContact.value = ''; }
 function openNote(message) {
   noteContact.value = message ? message.relay_contact : conversationContact.value;
@@ -212,7 +216,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
 
     <aside class="contact-directory">
       <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
-        @business="openBusiness" @select="contact => { state.open(contact); historyRoute(contact) }" />
+        @business="openBusiness" @select="openContact" />
     </aside>
 
     <div v-if="active" class="connected-thread">

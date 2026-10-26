@@ -245,6 +245,10 @@
     {
       "role": "Relay Communication Manager",
       "read": 1
+    },
+    {
+      "role": "WhatsApp Manager",
+      "read": 1
     }
   ],
   "track_changes": 1,

@@ -21,6 +21,7 @@ import {
 import TemplateEditor from "./TemplateEditor.vue";
 import TemplatePreview from "./TemplatePreview.vue";
 import { templateForm, templatePreview } from "../../services/templateAuthoring";
+import { closeRoute, openRoute } from "../../useViewRoute";
 
 const access = inject('relayCapabilities', ref({ manage: false }));
 const workspace = inject(whatsappKey);
@@ -80,40 +81,40 @@ const statuses = computed(() => [
 ]);
 
 function routeTemplate(id = "", edit = false) {
-  const params = new URLSearchParams();
-  if (id) params.set("template", id);
+  if (!id) return closeRoute("#/whatsapp");
+  const params = new URLSearchParams({ template: id });
   if (edit) params.set("edit", "1");
-  history.pushState(null, "", `#/whatsapp${params.size ? `?${params}` : ""}`);
+  openRoute(`#/whatsapp?${params}`, !!(template.value || creating.value));
 }
 function openTemplate(row, updateRoute = true) {
+  if (updateRoute) routeTemplate(row.id);
   confirmingDelete.value = false;
   creating.value = false;
   editingTemplate.value = "";
   template.value = row.id;
-  if (updateRoute) routeTemplate(row.id);
 }
 function openList(updateRoute = true) {
+  if (updateRoute) routeTemplate();
   confirmingDelete.value = false;
   creating.value = false;
   editingTemplate.value = "";
   template.value = "";
-  if (updateRoute) routeTemplate();
 }
 function createTemplate(updateRoute = true) {
   if (!access.value.manage) return;
+  if (updateRoute) routeTemplate("new");
   confirmingDelete.value = false;
   template.value = "";
   editingTemplate.value = "";
   creating.value = true;
-  if (updateRoute) routeTemplate("new");
 }
 function editTemplate() {
   if (!access.value.manage) return;
   if (!selectedTemplate.value) return;
+  routeTemplate(selectedTemplate.value.id, true);
   confirmingDelete.value = false;
   editingTemplate.value = selectedTemplate.value.id;
   creating.value = true;
-  routeTemplate(selectedTemplate.value.id, true);
 }
 async function saved() {
   const edited = editingTemplate.value;
