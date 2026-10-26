@@ -160,3 +160,18 @@ class MediaHTTPTests(unittest.TestCase):
             self.assertNotIn('private-provider-error', str(caught.exception))
         finally:
             server.shutdown(); server.server_close(); thread.join()
+
+
+class ToolDetailTests(unittest.TestCase):
+    def test_meta_text_is_shown_once(self):
+        from relay_core.hub import tool_detail
+        result = {'content': [{'type': 'text', 'text': 'provider rejected operation (code 100): Status Can\'t Be Changed: Only add or delete'}],
+                  'structuredContent': {'error': {'error_user_title': "Status Can't Be Changed",
+                                                  'error_user_msg': 'Only add or delete', 'code': 100}}}
+        self.assertEqual(tool_detail(result), "provider rejected operation (code 100): Status Can't Be Changed: Only add or delete")
+
+    def test_structured_text_missing_from_message_is_kept(self):
+        from relay_core.hub import tool_detail
+        result = {'content': [{'type': 'text', 'text': 'provider rejected operation'}],
+                  'structuredContent': {'error': {'error_user_msg': 'Template name exists', 'code': 100}}}
+        self.assertEqual(tool_detail(result), 'provider rejected operation · Template name exists · code 100')

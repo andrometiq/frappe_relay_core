@@ -49,7 +49,11 @@ def tool_detail(result):
         parts += [error.get('error_user_title'), error.get('error_user_msg'), error.get('title'), error.get('message')]
         if error.get('code'):
             parts.append(f"code {error['code']}")
-    return ' · '.join(dict.fromkeys(text for text in map(safe_text, parts) if text))
+    shown = []
+    for text in filter(None, map(safe_text, parts)):
+        if not any(text in earlier for earlier in shown):  # Hub's text often already carries Meta's fields.
+            shown.append(text)
+    return ' · '.join(shown)
 
 
 class HubError(RuntimeError):
