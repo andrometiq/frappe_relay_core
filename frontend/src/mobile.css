@@ -61,9 +61,11 @@
   .v1-shell.relay-shell .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
 
   /* Small controls keep the mockup size; an invisible band makes each touch target 40px tall */
-  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button){position:relative}
-  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button)::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
+  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button,.automation-chip){position:relative}
+  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button,.automation-chip)::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
   .v1-shell.relay-shell .contact-directory>.v1-queues,.v1-shell.relay-shell .v1-tabs{overflow:visible}
+  .v1-shell.relay-shell .automation-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
+  .v1-shell.relay-shell .automation-chips{gap:6px;padding-block:5px;margin-block:-5px}
   .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
   .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
   .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:28px;min-height:28px;min-width:0;padding:0 4px;border-radius:6px;font-size:13px}
@@ -142,6 +144,7 @@
 
   /* Lists, tables and forms fit the screen */
   .v1-shell.relay-shell :is(.relay-table,.list-table,.campaign-rows){max-width:100%;overflow-x:auto}
+  .v1-shell.relay-shell button.frappe-list-row>span>span:not(.relay-badge){display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:3}
   .v1-shell.relay-shell .frappe-page-head{flex-wrap:wrap;gap:8px;padding-top:calc(8px + env(safe-area-inset-top))}
   .v1-shell.relay-shell .frappe-page-actions{flex-wrap:wrap}
 

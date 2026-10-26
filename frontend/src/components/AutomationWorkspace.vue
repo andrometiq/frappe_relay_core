@@ -106,8 +106,8 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
   <section class="v1-screen" :class="{ 'event-workspace': skill }"><div class="v1-content space-y-4">
     <p v-if="!capabilities.configure">A System Manager role is required to configure automation.</p>
     <template v-else>
-      <header v-if="skill" class="event-toolbar"><strong>Events</strong><Dropdown :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New event" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
-      <WorkspaceHeading v-else description="Keep customers informed when business documents change."><Button label="New event rule" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
+      <header v-if="skill" class="event-toolbar"><strong>Events</strong><Dropdown :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New event" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
+      <WorkspaceHeading v-else description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
       <div v-if="!skill" class="workspace-toolbar"><div class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div></div>
       <ErrorMessage v-if="error" :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
       <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !draft, 'event-detail-open': skill && draft }">
