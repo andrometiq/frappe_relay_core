@@ -141,7 +141,7 @@ class ProjectionLatencyTests(unittest.TestCase):
         fake.log_error.assert_not_called()
 
     def test_recovery_wakes_both_drains_and_retries_uncategorized_in_order(self):
-        fake = SimpleNamespace(db=Mock(), get_all=Mock(return_value=['old', 'newer']))
+        fake = SimpleNamespace(db=Mock(), cache=Mock(), get_all=Mock(return_value=['old', 'newer']))
         fake.db.exists.return_value = True
         with patch.object(projection, 'frappe', fake), patch.object(projection, 'project_committed') as project, \
                 patch.object(projection.DRAINS['short'], 'wake') as short, patch.object(projection.DRAINS['long'], 'wake') as long:
@@ -179,6 +179,11 @@ class ProjectionLatencyTests(unittest.TestCase):
         fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(1,)]
         fake.get_all.side_effect = [[_dict(name=name, payload=json.dumps(body)) for name, body in page] for page in pages]
+        cursors = {}
+        fake.cache.get_value.side_effect = cursors.get
+        fake.cache.set_value.side_effect = cursors.__setitem__
+        fake.cache.delete_value.side_effect = lambda key: cursors.pop(key, None)
+        fake.cursors = cursors
         return fake
 
     def test_drain_projects_its_kind_in_name_order_until_none_remain(self):
@@ -211,6 +216,36 @@ class ProjectionLatencyTests(unittest.TestCase):
         self.assertEqual(fake.log_error.call_args.kwargs['reference_name'], 'bad')
         self.assertEqual(len(fake.get_all.call_args.kwargs['filters']), 2)
         wake.assert_not_called()  # The failed event waits for recovery instead of spinning.
+
+    def test_failed_event_is_not_retried_by_the_next_drain_until_recovery(self):
+        fake = self.drain_frappe([[('bad', text_payload())], [], [('new', text_payload())], []])
+        def project(name):
+            if name == 'bad':
+                raise RuntimeError('invalid')
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(inbound, 'frappe', fake), \
+                patch.object(projection, 'project', side_effect=project) as projected:
+            projection.drain('short')
+            projection.drain('short')
+        self.assertEqual([c.args[0] for c in projected.call_args_list], ['bad', 'new'])
+        cursors = [next(f[2] for f in c.kwargs['filters'] if f[0] == 'name') for c in fake.get_all.call_args_list]
+        self.assertEqual(cursors, ['', 'bad', 'bad', 'new'])  # The second drain starts after the failure.
+        fake.log_error.assert_called_once()
+        fake.db.exists.return_value = True
+        fake.get_all.side_effect = None
+        fake.get_all.return_value = []
+        with patch.object(projection, 'frappe', fake), patch.object(projection.DRAINS['short'], 'wake'), \
+                patch.object(projection.DRAINS['long'], 'wake'):
+            projection.recover()
+        self.assertEqual(fake.cursors, {})  # Recovery rescans failed events from the start once a minute.
+
+    def test_turn_ending_mid_page_resumes_after_the_last_event_tried(self):
+        fake = self.drain_frappe([[('one', text_payload()), ('two', text_payload())]])
+        with patch.object(queue, 'frappe', fake), patch.object(projection, 'frappe', fake), \
+                patch.object(projection.DRAINS['short'], 'wake'), patch.object(projection, 'project_committed'), \
+                patch.object(projection.time, 'monotonic', side_effect=[0, 0, 0, 6, 6]):
+            projection.drain('short')
+        self.assertEqual(fake.cursors, {projection.CURSOR + 'short': 'one'})
 
     def test_contended_or_unfinished_drain_keeps_a_successor(self):
         fake = self.drain_frappe([])

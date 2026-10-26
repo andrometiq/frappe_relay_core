@@ -15,6 +15,7 @@ DRAINS = {queue: Drain(queue, 'relay_core.automation.projection.drain', signal=f
                        job=f'relay-projection-drain-{queue}', lock=f'relay-projection-{queue}', kwargs={'queue': queue})
           for queue in ('short', 'long')}
 STATUS_EVENT_KEYS = ('statuses:%', 'channel-statuses:%', 'bulk-updates:%', '%:updates')  # Set by relay_core.inbound.
+CURSOR = 'relay-projection-cursor:'  # Last event a drain tried; only recover() rescans older failures.
 
 
 def extract_messages(payload):
@@ -242,13 +243,17 @@ def drain(queue='short', token=None):
 def project_pending(queue):
     """Return the projected count and whether the scan reached the end within the turn."""
     deadline = time.monotonic() + TURN_SECONDS
-    count, after = 0, ''
+    count, after = 0, frappe.cache.get_value(CURSOR + queue) or ''
     while time.monotonic() < deadline:
-        names, after = pending(queue, after)
+        names, last = pending(queue, after)
         frappe.db.commit()  # End the list's snapshot, so each event locks before it reads.
-        if after is None:
+        if last is None:
             return count, True
-        count += project_names(names, deadline)
+        done = project_names(names, deadline)
+        count += done
+        # A turn that ends mid-page resumes after the last event it tried, not after the page.
+        after = last if done == len(names) else names[done - 1] if done else after
+        frappe.cache.set_value(CURSOR + queue, after)
     return count, False
 
 
@@ -303,7 +308,8 @@ def project_committed(name):
 def recover():
     """Wake the drains for stragglers and retry a bounded page of Uncategorized events."""
     if frappe.db.exists('Relay Hub Event', {'projection_status': 'Pending'}):
-        for signal in DRAINS.values():
+        for queue, signal in DRAINS.items():
+            frappe.cache.delete_value(CURSOR + queue)  # Retry failed events once a minute, not on every turn.
             signal.wake()
     project_names(frappe.get_all('Relay Hub Event', filters={'projection_status': 'Uncategorized'},
                                  pluck='name', order_by='modified asc', limit_page_length=20))
