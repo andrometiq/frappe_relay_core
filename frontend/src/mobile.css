@@ -120,9 +120,6 @@
   .contact-info-page .contact-details{display:flex;flex-direction:column;gap:10px;padding:14px;border:0;box-shadow:var(--relay-shadow-1)}
   .contact-info-page .contact-details h4{margin-top:6px;color:var(--ink-gray-6);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
   .contact-info-page .contact-detail-heading{display:none}
-  .contact-info-page .contact-link-row{align-items:center;gap:6px 10px;padding:10px 0;border-top:1px solid var(--relay-stroke)}
-  .contact-info-page .contact-link-row>a:first-child{flex:1 1 100%;color:var(--ink-gray-9);font-weight:600;text-decoration:none}
-  .contact-info-page .contact-link-row>a{min-height:0}
 
   /* Tickets: the list and the open ticket are separate pages */
   .v1-screen:has(.ticket-detail) :is(.workspace-heading,.automation-filter-bar){display:none}

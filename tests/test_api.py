@@ -118,7 +118,8 @@ class ContactDetailsTests(unittest.TestCase):
     setUp = ApiTests.setUp
     def test_details_exclude_private_links_and_include_readable_channels(self):
         person = types.SimpleNamespace(name='fixture-contact', full_name='Local fixture', mobile_no='15550000001', phone='',
-            check_permission=Mock(), links=[types.SimpleNamespace(link_doctype='Customer', link_name=name) for name in ['visible', 'private']])
+            check_permission=Mock(), has_permission=Mock(return_value=True),
+            links=[types.SimpleNamespace(link_doctype='Customer', link_name=name) for name in ['visible', 'private']])
         person.links.append(types.SimpleNamespace(link_doctype='Supplier', link_name='unconfigured'))
         docs = {('Contact', 'fixture-contact'): person,
                 ('Customer', 'visible'): types.SimpleNamespace(has_permission=lambda _: True),
@@ -139,6 +140,12 @@ class ContactDetailsTests(unittest.TestCase):
         self.api.readable_contact.assert_called_once_with('relay-contact')
         person.check_permission.assert_called_once_with('read')
         self.assertEqual(self.api.contact_details.allowed_methods,['GET'])
+        self.assertEqual((result['can_edit_links'], result['can_set_primary']), (True, True))
+        person.has_permission.assert_called_once_with('write')
+        person.has_permission.return_value=False
+        with patch('relay_core.business_access.primary_record', return_value=None):
+            result=self.api.contact_details('fixture-contact')
+        self.assertEqual((result['can_edit_links'], result['can_set_primary']), (False, False), 'Read-only users get no link controls')
 
     def test_details_stop_before_endpoint_read_when_assignment_is_denied(self):
         person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(),links=[])

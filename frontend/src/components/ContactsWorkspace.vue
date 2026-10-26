@@ -9,10 +9,11 @@ import WorkspaceState from './WorkspaceState.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import IncomingWorkspace from './IncomingWorkspace.vue'
 import ContactDetails from './ContactDetails.vue'
+import NewContactDialog from './NewContactDialog.vue'
 import { routeTab } from '../useViewRoute'
 const capabilities = inject('relayCapabilities')
 const tab = ref(routeTab(location.hash, 'contacts'))
-const rows = ref([]), query = ref(''), selected = ref(''), busy = ref(false), error = ref(''), more = ref(false)
+const rows = ref([]), query = ref(''), selected = ref(''), busy = ref(false), error = ref(''), more = ref(false), creating = ref(false)
 let generation = 0
 async function load(append = false) {
   const ticket = ++generation; busy.value = true; error.value = ''
@@ -22,6 +23,7 @@ async function load(append = false) {
   } catch (e) { if (ticket === generation) { error.value = e.message; rows.value = []; selected.value = '' } }
   finally { if (ticket === generation) busy.value = false }
 }
+function created(result) { selected.value = result.contact; load() }
 function readRoute() { tab.value = routeTab(location.hash, 'contacts') }
 onMounted(() => { load(); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++generation; window.removeEventListener('hashchange', readRoute) })
@@ -32,7 +34,7 @@ useRealtimeRefresh(['Contact'], ['contacts', 'incoming'], () => load())
     <nav class="v1-tabs" aria-label="Contact views"><Button label="Contacts" :variant="tab === 'contacts' ? 'solid' : 'ghost'" @click="tab = 'contacts'" /><Button v-if="capabilities.manage" label="Unlinked / ambiguous senders" :variant="tab === 'unlinked' ? 'solid' : 'ghost'" @click="tab = 'unlinked'" /></nav>
     <IncomingWorkspace v-if="tab === 'unlinked' && capabilities.manage" />
     <div v-else class="v1-content">
-      <WorkspaceHeading description="Customer details, channel identities and connected business records."><a class="relay-button relay-button--solid" href="/desk/contact/new"><FeatherIcon name="plus" />New Contact in Desk</a></WorkspaceHeading>
+      <WorkspaceHeading description="Customer details, channel identities and connected business records."><Button v-if="capabilities.manage" label="New contact" icon="plus" variant="solid" @click="creating = true" /><a class="relay-button" href="/desk/contact/new">New Contact in Desk</a></WorkspaceHeading>
       <form class="workspace-search" role="search" @submit.prevent="load()"><TextInput v-model="query" aria-label="Search Frappe Contacts" placeholder="Search contacts by name" type="search"><template #prefix><FeatherIcon name="search" /></template></TextInput><Button type="submit" label="Search" :loading="busy" /></form>
       <ErrorMessage :message="error" />
       <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
@@ -45,5 +47,6 @@ useRealtimeRefresh(['Contact'], ['contacts', 'incoming'], () => load())
         <ContactDetails v-if="selected" :key="selected" :contact="selected" dismissible @close="selected = ''" />
       </div>
     </div>
+    <NewContactDialog v-if="capabilities.manage" v-model="creating" @created="created" />
   </section>
 </template>
