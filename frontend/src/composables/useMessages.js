@@ -192,25 +192,25 @@ export function useMessages() {
     else return;
     clearTimeout(positionTimer);positionTimer=setTimeout(flushPosition,800);
   }
-  async function restoreSavedView(usePreferred=false) {
+  // An opening conversation may pass its view state request, started together with its other reads.
+  async function restoreSavedView(usePreferred=false,savedRequest=null) {
     if(!selected.value&&!businessName.value)return;
     const generation=++requestSequence;
     const identity=conversationIdentity();
-    const saved=businessName.value
-      ? await coreApi('business_inbox.view_state',{doctype:businessType.value,name:businessName.value})
-      : await coreApi('inbox.view_state',{contact:selected.value,...(usePreferred?{}:{channel:channel.value})});
+    const saved=await (savedRequest||(businessName.value
+      ? coreApi('business_inbox.view_state',{doctype:businessType.value,name:businessName.value})
+      : coreApi('inbox.view_state',{contact:selected.value,...(usePreferred?{}:{channel:channel.value})})));
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     if(!businessName.value&&usePreferred && saved.channel && channels.value.some(row=>row.value===saved.channel)){channel.value=saved.channel;clearRecipient();}
     // A contact conversation opens at its first unread message, otherwise at the newest one.
     const target=businessName.value ? !saved.atBottom && saved.name : saved.first_unread;
     if(!target){await history();return;}
-    const checkpoint=await historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})});
+    const [checkpoint,page]=await Promise.all([historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})}),
+      businessName.value
+        ? coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:target})
+        : coreApi('api.message_context',{message:target,...(channel.value?{channel:channel.value}:{})})]);
     if(generation!==requestSequence||identity!==conversationIdentity())return;
     ingestionCursor.value=checkpoint.ingestion_cursor||'RELAY-MSG-0000000000';
-    const page=businessName.value
-      ? await coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:target})
-      : await coreApi('api.message_context',{message:target,...(channel.value?{channel:channel.value}:{})});
-    if(generation!==requestSequence||identity!==conversationIdentity())return;
     rows.value=page.items;before.value=page.first;last.value=page.last;more.value=page.has_more;newer.value=page.has_newer;
     viewPosition.value=businessName.value ? saved : {name:target,offset:UNREAD_OFFSET,atBottom:false};
     restored.value=target;firstUnread.value=businessName.value ? '' : target;
@@ -423,10 +423,11 @@ export function useMessages() {
     channels.value = [];
     clearRecipient();
     return run(async () => {
-      const metadata=await coreApi('api.conversation_channels',{contact});
+      const saved=coreApi('inbox.view_state',{contact});
+      saved.catch(()=>{});
+      const [metadata]=await Promise.all([coreApi('api.conversation_channels',{contact}),restorePending()]);
       channels.value=metadata.items;
-      await restorePending();
-      await restoreSavedView(true);
+      await restoreSavedView(true,saved);
     });
   }
   function businessRoute(doctype, name, replace = false) {
