@@ -267,7 +267,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
               <span class="conversation-record"><FeatherIcon name="file-text" :size="13" />{{ contactRecord.primary.title }}<small>· {{ contactRecord.primary.doctype }}</small></span>
               <button type="button" class="conversation-linked" @click="contextOpen = !contextOpen">Linked records</button>
             </template>
-            <span v-if="!isMobile && channelLine" class="conversation-channel">{{ channelLine }}</span>
+            <span v-if="!isMobile && channelLine" class="conversation-channel">· {{ channelLine }}</span>
           </div>
         </div>
         <div class="conversation-heading-actions">

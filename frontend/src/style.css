@@ -1028,7 +1028,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-meta>:is(.conversation-record,.conversation-linked){flex:none}
 .v1-shell.relay-shell .conversation-meta>.conversation-channel{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .conversation-linked{display:inline-flex;align-items:center;flex:none;height:24px;padding:0 9px;border:1px solid var(--relay-stroke-strong);border-radius:12px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:600}
-.v1-shell.relay-shell .conversation-meta>.conversation-channel::before{content:"·";margin-right:-2px}
 .v1-shell.relay-shell .conversation-heading-actions{display:flex;flex:none;align-items:center;gap:6px;width:auto;margin-left:auto}
 .conversation-viewers{display:inline-flex;align-items:center;gap:4px;margin-right:4px;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
 .viewer-stack{display:flex}
@@ -1048,7 +1047,14 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-bubble:hover{box-shadow:var(--relay-shadow-2)}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble:nth-last-child(-n+3){animation:relay-fade-up var(--relay-normal) var(--relay-ease) both}
 .v1-shell.relay-shell .conversation-bubble .message-content>p:last-child::after,.v1-shell.relay-shell .conversation-bubble .message-template>:last-child::after{content:none}
-.v1-shell.relay-shell .conversation-bubble>.message-footer{position:static;justify-content:flex-end;gap:4px;margin-top:2px;color:inherit;font-size:10.5px;line-height:14px;opacity:.7}
+.v1-shell.relay-shell .conversation-bubble>.message-footer{position:static;justify-content:flex-end;gap:4px;margin-top:2px;color:inherit;font-size:10.5px;line-height:inherit;opacity:.7}
+.v1-shell.relay-shell .conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks{width:auto}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg{width:14px;height:14px}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg+svg{margin-left:-9px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:10px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto):is(:first-child,:not(.conversation-bubble:not(.ml-auto))+*){border-top-left-radius:3px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto:is(:first-child,:not(.conversation-bubble.ml-auto)+*){border-top-right-radius:3px}
 .v1-shell.relay-shell .message-footer :is(time,.message-channel,.message-delivery){color:inherit;font-size:10.5px}
 .v1-shell.relay-shell .message-sender{margin:0 0 3px;color:var(--relay-ink-3);font-size:11.5px;font-weight:600}
 .v1-shell.relay-shell .conversation-bubble.ml-auto :is(.message-quote,.message-template,.media-document,.email-content){border-color:transparent;border-radius:6px;background:rgba(255,255,255,.16)}

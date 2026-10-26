@@ -91,6 +91,8 @@
   .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--relay-ink-2);font-size:12.5px;font-weight:600}
   .v1-shell.relay-shell .message-thread{padding:12px 12px 6px;background:var(--relay-chat)}
   .v1-shell.relay-shell .conversation-bubble{max-width:80%;font-size:14px;line-height:1.42}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble{border-radius:8px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:8px}
 
   /* Composer: "+" menu, a rounded input pill with the attach button inside, and a round Send button */
   .v1-shell.relay-shell .compact-composer:not(.email-composer){grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"extras extras extras" "plus input send";align-items:end;gap:0 6px;max-height:45%;margin:0;padding:8px 10px calc(6px + env(safe-area-inset-bottom));border:0;border-top:1px solid var(--relay-stroke);border-radius:0;background:var(--relay-layer);box-shadow:none}
