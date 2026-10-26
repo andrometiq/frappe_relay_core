@@ -5,20 +5,21 @@ import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { applyProgress, approvedTemplates, mergeCampaign } from "../services/campaignProgress";
 import { realtimeRefreshQueue } from "../services/realtimeRefreshQueue";
 
-async function uploadPrivate(file) {
+// A sheet stays private; campaign media is public so WhatsApp can fetch it.
+async function uploadFile(file, isPrivate, failure) {
   const form = new FormData();
   form.append("file", file, file.name);
-  form.append("is_private", "1");
+  form.append("is_private", isPrivate ? "1" : "0");
   const response = await fetch("/api/method/upload_file", { method: "POST", credentials: "same-origin", body: form,
     headers: { "X-Frappe-CSRF-Token": window.frappe?.csrf_token || window.csrf_token || "" } });
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.message?.file_url) throw Error("The file could not be uploaded. Use a .xlsx or .csv file.");
+  if (!response.ok || !body?.message?.file_url) throw Error(failure);
   return body.message.file_url;
 }
 
 export function useCampaigns() {
   const busy = ref(false), error = ref(""), items = ref([]), next = ref(null), campaign = ref(null), sheet = ref(null), templates = ref([]);
-  const filter = ref("");
+  const filter = ref(""), replyWindow = ref(null);
   async function run(fn) {
     busy.value = true; error.value = "";
     try { return await fn(); } catch (e) { error.value = e.message; } finally { busy.value = false; }
@@ -34,8 +35,12 @@ export function useCampaigns() {
   });
   const create = (values) => run(async () => { campaign.value = await coreApi("bulk_campaigns.create", values, true); return campaign.value; });
   const upload = (file) => run(async () => {
-    const file_url = await uploadPrivate(file);
+    const file_url = await uploadFile(file, true, "The file could not be uploaded. Use a .xlsx or .csv file.");
     sheet.value = await coreApi("bulk_campaigns.inspect", { name: campaign.value.name, file_url }, true);
+  });
+  const uploadMedia = (file) => run(async () => {
+    const file_url = await uploadFile(file, false, "The media file could not be uploaded.");
+    return coreApi("bulk_campaigns.media_link", { name: campaign.value.name, file_url }, true);
   });
   const importRows = (mapping) => run(async () => { campaign.value = await coreApi("bulk_campaigns.import_rows", { name: campaign.value.name, mapping }, true); sheet.value = null; });
   const control = (action) => run(async () => { campaign.value = await coreApi("bulk_campaigns.control", { name: campaign.value.name, action }, true); });
@@ -43,6 +48,17 @@ export function useCampaigns() {
     filter.value = status || "";
     const result = await coreApi("bulk_campaigns.read", { name: campaign.value.name, status: status || undefined, after: after || undefined });
     campaign.value = { ...campaign.value, recipients: after ? [...campaign.value.recipients, ...result.recipients] : result.recipients, next: result.next };
+  });
+
+  // Text and media reach only numbers inside the reply window; a Draft shows how many before it starts.
+  watch(() => [campaign.value?.name, campaign.value?.status, campaign.value?.counts?.total], async () => {
+    const current = campaign.value;
+    replyWindow.value = null;
+    if (!current?.message || current.status !== "Draft" || !current.counts?.total) return;
+    try {
+      const counted = await coreApi("bulk_campaigns.window", { name: current.name });
+      if (campaign.value?.name === current.name) replyWindow.value = counted;
+    } catch (e) { error.value = e.message; }
   });
 
   let leave = null;
@@ -63,5 +79,5 @@ export function useCampaigns() {
   useRealtimeRefresh(["Relay Campaign"], ["campaigns"], refresh);
   onMounted(refresh);
   onBeforeUnmount(() => { off(); leave?.(); reread.dispose(); });
-  return { busy, error, items, next, campaign, sheet, templates, filter, refresh, open, loadTemplates, create, upload, importRows, control, page };
+  return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, uploadMedia, importRows, control, page };
 }

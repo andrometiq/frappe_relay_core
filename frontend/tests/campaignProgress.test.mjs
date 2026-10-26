@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyProgress, approvedTemplates, campaignActions, mergeCampaign, missingMapping, percent } from "../src/services/campaignProgress.js";
+import { applyProgress, approvedTemplates, campaignActions, campaignMessage, mergeCampaign, messageLabel, messageTypes, missingMapping, percent, placeholders, windowNotice } from "../src/services/campaignProgress.js";
 
 test("progress events merge counters only for the open campaign", () => {
   const campaign = { name: "Winter launch Oct 2026", status: "Running", counts: { total: 5000, sent: 10 } };
@@ -43,4 +43,21 @@ test("approved templates are read across every Hub page", async () => {
   const rows = await approvedTemplates(async (after) => { seen.push(after); return pages[after]; });
   assert.deepEqual(rows.map((row) => row.name), ["a", "c"]);
   assert.deepEqual(seen, ["", "p2"]);
+});
+
+test("text and media campaigns follow the registry kinds and fill sheet columns", () => {
+  assert.deepEqual(messageTypes(["photo", "voice", "document"]).map((row) => row.value), ["template", "text", "photo", "document"]);
+  assert.deepEqual(campaignMessage("text", " Hi {{Name}} "), { kind: "text", body: "Hi {{Name}}" });
+  assert.deepEqual(campaignMessage("photo", ""), { kind: "photo", caption: "" });
+  assert.deepEqual(placeholders("Hi {{Name}}, order {{ Order No }} for {{Name}}"), ["Name", "Order No"]);
+  assert.deepEqual(placeholders(""), []);
+  assert.equal(messageLabel({ template_name: "notice" }), "notice");
+  assert.equal(messageLabel({ message: { kind: "video" } }), "Video");
+  assert.equal(messageLabel({ operation: "messages.send" }), "Text");
+});
+
+test("the reply window preflight counts numbers and warns about the rest", () => {
+  assert.equal(windowNotice(null), "");
+  assert.equal(windowNotice({ open: 3, closed: 0 }), "3 of 3 numbers messaged you in the last 24 hours and can get this message.");
+  assert.match(windowNotice({ open: 1, closed: 1200 }), /^1 of 1,201 numbers.*1,200 rows will be marked Failed: Outside the 24-hour reply window\.$/);
 });
