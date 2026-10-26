@@ -264,21 +264,68 @@ def prepare(source, channel, context, kind, data, quote=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def send(message, kind, data, request_key, quote=1):
+def send(message, kind, data, request_key, quote=1, channels=None):
+    """`channels` names more Relay Channels of the same person; all copies share one send_group.
+
+    Extra copies never quote: the quoted message exists only on the source channel.
+    """
+    sources = channel_sources(message, kind, channels)
+    if not sources:
+        return send_one(message, kind, data, request_key, quote)
+    group = request_hash(request_key)[:32]
+    results = [send_one(message, kind, data, request_key, quote, group)]
+    for name in sources:
+        key = hashlib.sha256((request_key + ':' + name).encode()).hexdigest()[:40]
+        results.append(send_one(name, kind, data, key, 0, group))
+    return dict(results[0], send_group=group, sends=results)
+
+
+def channel_sources(message, kind, names):
+    """Newest message of the same person on each extra enabled channel."""
+    names = frappe.parse_json(names) if isinstance(names, str) else names or []
+    if (not isinstance(names, list) or len(names) > 3 or not all(isinstance(name, str) for name in names)
+            or len(set(names)) != len(names)):
+        raise ValueError('Choose up to 3 different channels')
+    if not names:
+        return []
+    source = readable_source(message)[0]
+    names = [name for name in names if name != source.channel]
+    if names and kind not in ('text', 'location', 'contact'):
+        raise ValueError('Only text, location and contact messages can go to several channels')
+    enabled = {item.name for item in channels.enabled()}
+    sources = []
+    for name in names:
+        validate_reference(name, 'CH')
+        if frappe.db.get_value('Relay Channel', name, 'channel') not in enabled:
+            raise ValueError('This channel is switched off')
+        newest = frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': name},
+            'name', order_by='creation desc')
+        if not newest:
+            raise ValueError('This person has no conversation on the chosen channel')
+        sources.append(newest)
+    return sources
+
+
+def request_hash(request_key):
+    if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', request_key):
+        raise ValueError('A stable request key is required')
+    return hashlib.sha256((frappe.session.user + ':' + request_key).encode()).hexdigest()
+
+
+def send_one(message, kind, data, request_key, quote=1, send_group=None):
     source, channel, context = readable_source(message)
     data = object_value(data)
     if quote not in (True, False, 0, 1, "0", "1"):
         raise ValueError("Invalid quoted reply option")
     quote = quote in (True, 1, "1")
-    if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', request_key):
-        raise ValueError('A stable request key is required')
+    key = request_hash(request_key)
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
     payload = {'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
         'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}
+    if send_group: payload['send_group'] = send_group
     delivery_snapshot(payload, source, context)
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(json.dumps({'tool':tool,'arguments':arguments,'source':source.name}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    key = hashlib.sha256((frappe.session.user + ':' + request_key).encode()).hexdigest()
     existing = frappe.db.get_value('Relay Message Action', {'request_key': key}, ['name', 'payload_hash', 'status', 'outbound_message'], as_dict=True, for_update=True)
     if existing:
         if existing.payload_hash != digest: raise ValueError('Request key was already used for different content')
@@ -496,7 +543,7 @@ def finish(action, source, channel, context, content, result, *, commit=True):
             'sender_endpoint': source.sender_endpoint, 'provider_id': str(provider_id or ''),
             'provider_context': json.dumps(outgoing_context), 'source_key': action.request_key,
             'business_doctype':business[0], 'business_name':business[1],
-            'ticket': stored.get('ticket') or source.get('ticket'),
+            'ticket': stored.get('ticket') or source.get('ticket'), 'send_group': stored.get('send_group'),
             'conversation_key': conversation_key(source.channel, source.sender_endpoint, context),
             'provider_message_key': provider_key(source.channel, source.sender_endpoint, provider_id) if provider_id else None})
         from relay_core.ticket_notifications import insert_message
