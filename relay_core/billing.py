@@ -1,4 +1,4 @@
-"""WhatsApp billing: Meta pricing analytics cached per month, with a margin and Relay send counts."""
+"""WhatsApp billing: Meta pricing cached per month, billed to the customer with the service charge in the rate."""
 import hashlib
 import json
 from datetime import date, datetime, timedelta
@@ -13,6 +13,7 @@ DOCTYPE = 'Relay WhatsApp Billing Month'
 DEFAULT_MARGIN = 30.0
 DIMENSIONS = ['PRICING_CATEGORY', 'PRICING_TYPE']
 SENT = ('Sent', 'Delivered', 'Read')
+PAID_ORDER = ['MARKETING', 'UTILITY', 'AUTHENTICATION']
 
 
 def site_zone():
@@ -151,7 +152,7 @@ def margin_percent():
 
 @frappe.whitelist(methods=['GET'])
 def get_margin():
-    require_access(manage=True)
+    require_access(configure=True)
     return {'margin_percent': margin_percent()}
 
 
@@ -169,11 +170,74 @@ def save_margin(percent):
     return {'margin_percent': margin_percent()}
 
 
-def priced(volume, meta_cost, margin):
-    meta_cost = float(meta_cost or 0)
-    margin_amount = round(meta_cost * margin / 100, 4)
-    return {'volume': int(volume), 'meta_cost': round(meta_cost, 4), 'margin_amount': margin_amount,
-            'total': round(meta_cost + margin_amount, 4)}
+def bill_category(category, pricing_type):
+    """Free messages (service window, free entry points) bill as SERVICE; paid ones keep their Meta category."""
+    return 'SERVICE' if category == 'SERVICE' or str(pricing_type).startswith('FREE') else category
+
+
+def category_order(category):
+    return (category == 'SERVICE', PAID_ORDER.index(category) if category in PAID_ORDER else len(PAID_ORDER), category)
+
+
+def billed_rate(volume, meta_cost, margin):
+    """Charge per message: Meta's average cost per message with the service charge added."""
+    if not volume or not meta_cost:
+        return 0.0
+    return round(meta_cost / volume * (1 + margin / 100), 4)
+
+
+def bill_line(category, volume, meta_cost, margin):
+    rate = billed_rate(volume, meta_cost, margin)
+    return {'category': category, 'messages': int(volume), 'rate': rate, 'amount': round(rate * volume, 2)}
+
+
+def statement(lines):
+    """Messages and amount of a set of bill lines; the amount is the sum of the rounded line amounts."""
+    return {'messages': sum(line['messages'] for line in lines), 'amount': round(sum(line['amount'] for line in lines), 2)}
+
+
+def month_bill(period, rows, margin):
+    grouped = {}
+    for row in rows:
+        totals = grouped.setdefault(bill_category(row.category, row.pricing_type), [0, 0.0])
+        totals[0] += row.volume or 0
+        totals[1] += row.meta_cost or 0
+    lines = [bill_line(category, volume, cost, margin) for category, (volume, cost) in sorted(grouped.items(), key=lambda item: category_order(item[0]))]
+    return {'period': str(period), 'lines': lines, **statement(lines)}
+
+
+def year_lines(months):
+    """Year totals per category; the rate is the year's average so that messages x rate matches the amount."""
+    grouped = {}
+    for line in (line for month in months for line in month['lines']):
+        totals = grouped.setdefault(line['category'], [0, 0.0])
+        totals[0] += line['messages']
+        totals[1] += line['amount']
+    return [{'category': category, 'messages': volume, 'amount': round(amount, 2),
+             'rate': round(amount / volume, 4) if volume else 0.0}
+            for category, (volume, amount) in sorted(grouped.items(), key=lambda item: category_order(item[0]))]
+
+
+def summarise(year, rows, margin):
+    """Twelve monthly bills and the year bill, with billed figures only."""
+    by_month = {month: [] for month in range(1, 13)}
+    for row in rows:
+        by_month[frappe.utils.getdate(row.period).month].append(row)
+    months = [month_bill(date(year, month, 1), month_rows, margin) for month, month_rows in by_month.items()]
+    lines = year_lines(months)
+    return months, {'lines': lines, **statement(lines)}
+
+
+def internal_figures(rows, months, margin):
+    """System Manager only: Meta cost and the service charge earned per month and for the year."""
+    cost = {month: 0.0 for month in range(1, 13)}
+    for row in rows:
+        cost[frappe.utils.getdate(row.period).month] += row.meta_cost or 0
+    per_month = [{'period': month['period'], 'meta_cost': round(cost[index + 1], 4),
+                  'margin_amount': round(month['amount'] - cost[index + 1], 4)} for index, month in enumerate(months)]
+    meta_cost = sum(cost.values())
+    return {'margin_percent': margin, 'meta_cost': round(meta_cost, 4),
+            'margin_amount': round(sum(month['amount'] for month in months) - meta_cost, 4), 'months': per_month}
 
 
 def account_channels(account):
@@ -186,16 +250,14 @@ def account_channels(account):
     return channels
 
 
-def message_counts(channels, year):
-    """Outgoing WhatsApp messages per site-timezone month, and per template and month."""
+def template_counts(channels, year):
+    """Outgoing WhatsApp template messages per template and site-timezone month."""
     window = {'channels': tuple(channels), 'sent': SENT, 'start': datetime(year, 1, 1), 'end': datetime(year + 1, 1, 1)}
-    where = ("FROM `tabRelay Message` WHERE channel IN %(channels)s AND direction='Outgoing' "
-             "AND status IN %(sent)s AND sent_at >= %(start)s AND sent_at < %(end)s")
-    months = dict(frappe.db.sql(f"SELECT MONTH(sent_at), COUNT(*) {where} GROUP BY MONTH(sent_at)", window))
-    templates = frappe.db.sql(
+    return frappe.db.sql(
         "SELECT template, month, COUNT(*) FROM (SELECT JSON_UNQUOTE(JSON_EXTRACT(message_data, '$.template.name')) "
-        f"template, MONTH(sent_at) month {where}) sends WHERE template IS NOT NULL GROUP BY template, month", window)
-    return months, templates
+        "template, MONTH(sent_at) month FROM `tabRelay Message` WHERE channel IN %(channels)s AND direction='Outgoing' "
+        "AND status IN %(sent)s AND sent_at >= %(start)s AND sent_at < %(end)s) sends WHERE template IS NOT NULL "
+        "GROUP BY template, month", window)
 
 
 def template_categories(account, names):
@@ -212,46 +274,24 @@ def billing_rows(account, year):
                           order_by='period asc, category asc, pricing_type asc', limit_page_length=0)
 
 
-def add(total, volume, meta_cost):
-    total['volume'] += volume or 0
-    total['meta_cost'] += meta_cost or 0
-
-
-def summarise(year, rows, months_sent, margin):
-    """Twelve months with their category rows, yearly category totals and the year total."""
-    months = {month: {'period': str(date(year, month, 1)), 'messages_sent': int(months_sent.get(month, 0)),
-                      'categories': [], 'volume': 0, 'meta_cost': 0.0} for month in range(1, 13)}
-    categories = {}
-    for row in rows:
-        month = months[frappe.utils.getdate(row.period).month]
-        month['categories'].append({'category': row.category, 'pricing_type': row.pricing_type,
-                                    **priced(row.volume or 0, row.meta_cost or 0, margin)})
-        add(month, row.volume, row.meta_cost)
-        add(categories.setdefault(row.category, {'volume': 0, 'meta_cost': 0.0}), row.volume, row.meta_cost)
-    ordered = [{**month, **priced(month['volume'], month['meta_cost'], margin)} for month in months.values()]
-    total = priced(sum(m['volume'] for m in ordered), sum(m['meta_cost'] for m in ordered), margin)
-    total['messages_sent'] = sum(m['messages_sent'] for m in ordered)
-    by_category = [{'category': name, **priced(value['volume'], value['meta_cost'], margin)}
-                   for name, value in sorted(categories.items())]
-    return ordered, by_category, total
-
-
 @frappe.whitelist(methods=['GET'])
 def get_billing(account, year):
-    """Meta charges per month and category with the margin, plus Relay send counts per month and template."""
+    """The WhatsApp bill: messages, charge per message and amount per month and category, and template counts.
+    Meta cost and the service charge go only to System Managers, under 'internal'."""
     require_access(manage=True)
     year, channels = valid_year(year), account_channels(account)
     margin, rows = margin_percent(), billing_rows(account, year)
-    months_sent, template_rows = message_counts(channels, year)
-    months, categories, total = summarise(year, rows, months_sent, margin)
-    names = {row[0] for row in template_rows}
-    category_of = template_categories(account, names)
+    months, total = summarise(year, rows, margin)
+    template_rows = template_counts(channels, year)
+    category_of = template_categories(account, {row[0] for row in template_rows})
     templates = [{'template': name, 'category': category_of.get(name) or '', 'period': str(date(year, month, 1)),
-                  'messages_sent': count} for name, month, count in template_rows]
-    return {'account': account, 'year': year, 'margin_percent': margin,
-            'currency': next((row.currency for row in rows if row.currency), ''),
-            'fetched_at': str(max(row.fetched_at for row in rows)) if rows else None,
-            'months': months, 'categories': categories, 'templates': templates, 'total': total}
+                  'messages': count} for name, month, count in template_rows]
+    result = {'account': account, 'year': year, 'currency': next((row.currency for row in rows if row.currency), ''),
+              'fetched_at': str(max(row.fetched_at for row in rows)) if rows else None,
+              'months': months, 'total': total, 'templates': templates}
+    if 'System Manager' in frappe.get_roles():
+        result['internal'] = internal_figures(rows, months, margin)
+    return result
 
 
 @frappe.whitelist(methods=['POST'])
