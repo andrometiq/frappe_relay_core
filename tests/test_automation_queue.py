@@ -114,7 +114,7 @@ class AutomationQueueTests(unittest.TestCase):
                 patch.object(queue, 'recover') as recover:
             self.assertEqual(queue.drain(), 300)
         self.assertEqual([c.args[0] for c in process.call_args_list], list(range(300)))
-        self.assertEqual(fake.db.commit.call_count, 301)
+        self.assertEqual(fake.db.commit.call_count, 304)  # Each list read ends its snapshot, then one per message.
         self.assertEqual(fake.get_all.call_args.kwargs['order_by'], 'creation asc, name asc')
         recover.assert_called_once()
 
@@ -131,7 +131,7 @@ class AutomationQueueTests(unittest.TestCase):
                     fake.db.rollback.assert_called_once()
                 else:
                     self.assertEqual(queue.drain(), 2)
-                    self.assertEqual(fake.db.commit.call_count, 3)
+                    self.assertEqual(fake.db.commit.call_count, 4)
             acquire, release = fake.db.sql.call_args_list
             self.assertEqual(acquire.args[0], 'select pg_try_advisory_lock(%s)')
             self.assertEqual(release.args[0], 'select pg_advisory_unlock(%s)')
@@ -168,7 +168,7 @@ class AutomationQueueTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 queue.drain()
         fake.db.rollback.assert_called_once()
-        fake.db.commit.assert_not_called()
+        fake.db.commit.assert_called_once()  # Only the list snapshot; the failed message commits nothing.
         self.assertIn('release_lock', fake.db.sql.call_args.args[0])
         recover.assert_not_called()
 
@@ -188,18 +188,36 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_completed_message_is_not_replayed_and_pause_is_checked_by_admission(self):
         fake = Mock(conf={'relay_automation_enabled': 1})
-        fake.db.get_value.return_value = 'Complete'
+        fake.db.get_value.return_value = ('Complete', 'contact')
         with patch.object(queue, 'frappe', fake):
             queue._process('done')
         fake.get_doc.assert_not_called()
-        fake.db.get_value.side_effect = ['Pending', 1]
-        fake.get_doc.return_value = _dict(direction='Incoming', relay_contact='paused')
+        fake.db.get_value.side_effect = [('Pending', 'contact'), 'contact']
+        fake.get_doc.return_value = _dict(direction='Incoming', relay_contact='contact')
         with patch.object(queue, 'frappe', fake):
             queue._process('paused')
         self.assertEqual([c.args[0] for c in fake.get_attr.call_args_list],
                          list(queue.HANDLERS))
         fake.db.set_value.assert_called_once_with('Relay Message', 'paused', 'automation_status',
                                                  'Complete', update_modified=False)
+
+    def test_the_message_and_its_contact_are_locked_before_the_first_plain_read(self):
+        fake = Mock()
+        order = []
+        fake.db.get_value.side_effect = lambda doctype, *args, **kwargs: order.append((doctype, kwargs.get('for_update'))) or (
+            ('Pending', 'contact') if doctype == 'Relay Message' else 'contact')
+        fake.get_doc.side_effect = lambda *args: order.append('read') or _dict(direction='Incoming')
+        with patch.object(queue, 'frappe', fake):
+            queue._process('message')
+        self.assertEqual(order, [('Relay Message', True), ('Relay Contact', True), 'read'])
+
+    def test_a_message_without_a_contact_takes_no_contact_lock(self):
+        fake = Mock()
+        fake.db.get_value.return_value = ('Pending', None)
+        fake.get_doc.return_value = _dict(direction='Incoming')
+        with patch.object(queue, 'frappe', fake):
+            queue._process('message')
+        fake.db.get_value.assert_called_once()
 
     def test_pre_upgrade_jobs_join_the_durable_drain_without_replaying_completed_rows(self):
         fake = Mock()
