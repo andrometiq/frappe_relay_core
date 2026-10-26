@@ -10,6 +10,9 @@ STATE = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Sent', 'rejec
          'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 REACHABLE = "('Pending', 'Queued', 'Uncertain', 'Sent', 'Delivered', 'Read')"  # Rows a reply may answer once attempted.
 PROGRESS_SECONDS = 3
+# A refresh may sleep out the throttle. Workers take 'short' before 'long', so back-to-back refreshes there
+# held send slices back; in 'long' they take turns with them.
+QUEUE = 'long'
 REPLY_GATE = 'relay-bulk-reply-until'
 DIRTY = 'relay-bulk-dirty'
 PUBLISHED = 'relay-bulk-progress-at:'
@@ -101,7 +104,7 @@ def changed(name):
 
 def mark(name):
     if frappe.cache.execute_command('SADD', frappe.cache.make_key(DIRTY), name):
-        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120)
+        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue=QUEUE, timeout=120)
 
 
 def refresh(name):
@@ -120,7 +123,7 @@ def recover():
     """Refresh campaigns a stopped worker left marked."""
     for name in list(frappe.cache.smembers(DIRTY))[:50]:
         name = name.decode() if isinstance(name, bytes) else name
-        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue='short', timeout=120)
+        frappe.enqueue('relay_core.bulk_updates.refresh', name=name, queue=QUEUE, timeout=120)
 
 
 def tally(rows):
