@@ -74,9 +74,13 @@ These POST methods send one WhatsApp message to a phone number through the same 
 | `relay_core.messaging_api.send_media` | `number, media_url, media_type, caption=None, filename=None, key=None, business_doctype=None, business_name=None` |
 | `relay_core.messaging_api.send_template` | `number, template, language, params=None, header_media_url=None, key=None, business_doctype=None, business_name=None` |
 | `relay_core.messaging_api.send_messages` | `items`, 1–100 objects of `{type: text \| media \| template, number, ...}` |
+| `relay_core.messaging_api.send_status` (GET) | `batch` from `send_messages` |
 
-- Each send returns `action, status, message, number, contact, key`. `send_messages` returns `results`, one per item, with `index`, `ok` and the send result or an `error`. A failed item does not stop the others.
+- `send_text`, `send_media` and `send_template` send at once and return `action, status, message, number, contact, key`.
+- `send_messages` checks each item at once (access, number, reply window and template values) and returns `batch` and `results`, one per item. An accepted item has `index`, `ok: true`, `status: Pending`, `number`, `contact` and `key`. A refused item has `index`, `ok: false` and `error`. A refused item does not stop the others. The accepted items go to one background job on the long queue. `batch` is empty when no item is accepted.
+- `send_status` returns `results` for the accepted items of your batch, for 24 hours. Each result has `index`, `key` and `status`: `Pending` before the job sends it, `Failed` with an `error`, or the send status (`Dispatching`, `Queued`, `Submitted`, `Uncertain` or `Rejected`) with `action` and `message`. Only the user who sent the batch can read it.
 - A repeat with the same `key` is the same message. Without `key`, the key comes from the number, the content and the current 10-minute period. A double click is sent once, and the same content later is sent again. Give a `key` to make a retry safe after 10 minutes.
+- A retry of the same `send_messages` request gets the same `batch` and does not queue a second job. Each item's key makes a rerun of the job safe.
 - Text and media go only inside the 24-hour reply window. Outside it, the send fails with "Outside the 24-hour reply window". Use a template.
 - `media_type` is `image`, `video`, `audio` or `document`. `media_url` must be an HTTPS link. Only a document takes `filename`.
 - `params` is an object of named values (or field keys such as `button:0`), or a list of every value in template order. `header_media_url` fills an image, video or document header.
@@ -160,7 +164,7 @@ Call a typed reply:
 | `relay.messaging.send` | Typed reply/reaction bound to a readable source message |
 | `relay.messages.send`, `relay.messages.bulk` | Durable WhatsApp queue admission |
 | `relay.whatsapp.execute`, `relay.deliveries.list` | WhatsApp operations and delivery management |
-| `relay.whatsapp.send_text`, `relay.whatsapp.send_media`, `relay.whatsapp.send_template`, `relay.whatsapp.send_messages` | [Send to a phone number](#send-to-a-phone-number) |
+| `relay.whatsapp.send_text`, `relay.whatsapp.send_media`, `relay.whatsapp.send_template`, `relay.whatsapp.send_messages`, `relay.whatsapp.send_status` | [Send to a phone number](#send-to-a-phone-number) |
 | `relay.campaigns.create`, `relay.campaigns.append`, `relay.campaigns.read` | [Campaigns from rows](#campaigns-from-rows); manager only |
 | `relay.telegram.send`, `relay.telegram.groups`, `relay.telegram.execute` | Verified Telegram sends and manager group operations |
 | `relay.email.send` | Account-level email send with CC/BCC; does not yet enforce Contact recipient lookup |

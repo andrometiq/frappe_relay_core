@@ -81,6 +81,10 @@ def post(method, who, **data):
     return requests.post(base + method, json=data, headers=headers.get(who, {}), timeout=30)
 
 
+def get(method, who, **params):
+    return requests.get(base + method, params=params, headers=headers.get(who, {}), timeout=30)
+
+
 def ok(response):
     assert response.status_code == 200, (response.status_code, response.text[:400])
     return response.json()['message']
@@ -125,9 +129,24 @@ def check_templates_and_lists():
     items = [{'type': 'text', 'number': known, 'body': 'List text'}, {'type': 'template', 'number': unknown,
              'template': 'order_ready', 'language': 'en', 'params': ['27']},
              {'type': 'text', 'number': other, 'body': 'Closed window'}, {'type': 'call', 'number': known}]
-    results = ok(post('relay_core.messaging_api.send_messages', 'manager', items=items))['results']
-    assert [row['ok'] for row in results] == [True, True, False, False], results
+    calls = hub.call_tool.call_count
+    queued = ok(post('relay_core.messaging_api.send_messages', 'manager', items=items))
+    results = queued['results']
+    assert [(row['ok'], row.get('status')) for row in results] == [(True, 'Pending'), (True, 'Pending'), (False, None), (False, None)], results
     assert '24-hour reply window' in results[2]['error'], results
+    assert hub.call_tool.call_count == calls, 'A list send must not reach the Hub inside the request'
+    job = next(call for call in frappe.enqueue.call_args_list if call.args[:1] == ('relay_core.messaging_api.deliver_batch',))
+    assert (job.kwargs['queue'], job.kwargs['job_id'], job.kwargs['batch']) == ('long', 'relay-send-' + queued['batch'], queued['batch'])
+    assert ok(post('relay_core.messaging_api.send_messages', 'manager', items=items))['batch'] == queued['batch']
+    status = 'relay_core.messaging_api.send_status'
+    assert {row['status'] for row in ok(get(status, 'manager', batch=queued['batch']))['results']} == {'Pending'}
+    frappe.db.rollback()  # A worker starts with a fresh transaction.
+    frappe.set_user(emails['manager'])
+    messaging_api.deliver_batch(job.kwargs['batch'], job.kwargs['messages'])
+    frappe.set_user('Administrator')
+    assert hub.call_tool.call_count == calls + 2, hub.call_tool.call_count - calls
+    assert [row['status'] for row in ok(get(status, 'manager', batch=queued['batch']))['results']] == ['Submitted', 'Submitted']
+    refused(get(status, 'agent', batch=queued['batch']), 404)
     refused(post('relay_core.messaging_api.send_messages', 'manager', items=[items[0]] * 101), 417, '1-100')
     refused(post('relay_core.messaging_api.send_messages', 'outsider', items=items), 403)
     return created
@@ -222,7 +241,7 @@ try:
         campaign = check_campaigns()
         statements = check_projection(campaign)
         check_timeline(sent)
-    print(f'PASS messaging API HTTP: text/media/template/list sends return action shape, repeat and keyed sends are one message, '
+    print(f'PASS messaging API HTTP: text/media/template sends return action shape, list sends queue one job and report per-item status, repeat and keyed sends are one message, '
           f'guests, outsiders and unassigned agents get 403, closed windows and bad links 417; an unknown number gets a Contact '
           f'only from a manager with a business; JSON campaigns skip bad links and duplicates, refuse 5001 rows and non-managers, '
           f'and append numbers on; 500 bulk updates took {statements} statements (3 UPDATEs) and replays changed nothing')
