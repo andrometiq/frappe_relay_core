@@ -8,6 +8,7 @@ import VirtualScroller from "primevue/virtualscroller";
 import RelaySelect from "./RelaySelect.vue";
 import { coreApi } from "../services/coreApi";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
+import { closeRoute, openRoute } from "../useViewRoute";
 
 const types = ref([]);
 const doctype = ref("");
@@ -68,18 +69,33 @@ async function loadRecords(append = false) {
 }
 
 function choose(group) {
+  const params = new URLSearchParams({ business_doctype: doctype.value, group: group.value });
+  openRoute(`#/teams?${params}`, !!selected.value);
+  show(group);
+}
+function show(group) {
   selected.value = group;
   recordQuery.value = "";
   records.value = [];
   recordNext.value = null;
-  history.replaceState(null, "", `#/teams?business_doctype=${encodeURIComponent(doctype.value)}&group=${encodeURIComponent(group.value)}`);
   guarded(() => loadRecords());
 }
-function clearSelection() {
+function reset() {
   selected.value = null;
   records.value = [];
   owner.value = "";
-  history.replaceState(null, "", "#/teams");
+}
+function clearSelection() {
+  closeRoute("#/teams");
+  reset();
+}
+function readRoute() {
+  if (!initialized || location.hash.split("?")[0] !== "#/teams") return;
+  const routed = new URLSearchParams(location.hash.split("?")[1] || "").get("group");
+  if (routed === (selected.value?.value ?? null)) return;
+  const match = groups.value.find((row) => row.value === routed);
+  if (match) show(match);
+  else reset();
 }
 async function claim(release = false) {
   await guarded(async () => {
@@ -116,10 +132,12 @@ onMounted(() => guarded(async () => {
     const routed = params.get("group");
     const match = groups.value.find((row) => row.value === routed);
     if (match) { selected.value = match; await loadRecords(); }
+    else if (routed) closeRoute("#/teams");
   }
   initialized = true;
+  window.addEventListener("popstate", readRoute);
 }));
-onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(recordTimer); });
+onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(recordTimer); window.removeEventListener("popstate", readRoute); });
 </script>
 
 <template>
