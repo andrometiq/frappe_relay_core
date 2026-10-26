@@ -32,6 +32,8 @@ class RoutingFixtures:
         self.enterContext(patch.object(prompts, 'connection_value', return_value='account'))
 
     def get_value(self, dt, filters, fields=None, **kwargs):
+        if dt == 'Relay Contact':
+            return filters
         if dt == 'Relay Contact Endpoint':
             if not self.verified:
                 return None
@@ -185,6 +187,11 @@ class RoutingTests(RoutingFixtures, unittest.TestCase):
         self.assertEqual(self.resolve('before', position=0), (None, 'triage_prompt_pending'))
         self.assertEqual(self.resolve('other-batch', event_name='other-event', position=2),
                          (None, 'triage_prompt_pending'))
+
+    def test_contact_is_locked_before_the_routing_row(self):
+        self.resolve()
+        locks = [call.args[0] for call in self.db.get_value.call_args_list if call.kwargs.get('for_update')]
+        self.assertEqual(locks[:3], ['Relay Contact Endpoint', 'Relay Contact', 'Relay Business Routing'])
 
     def test_waiting_transaction_reads_the_committed_selection(self):
         self.resolve()

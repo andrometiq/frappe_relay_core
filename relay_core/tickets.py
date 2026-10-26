@@ -154,6 +154,8 @@ def _episode_scope(message):
 def _lock_episode_routing(message, conversation):
     """Reuse the routing row as the transaction mutex, including its first insert."""
     from relay_core.automation.service import internal_save
+    # Contact before routing, as the drain and projection lock them; the reverse order deadlocks (1213).
+    frappe.db.get_value('Relay Contact', message.relay_contact, 'name', for_update=True)
     filters = {'conversation_key': conversation}
     name = frappe.db.get_value('Relay Business Routing', filters, 'name')
     if not name:
