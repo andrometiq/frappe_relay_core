@@ -221,7 +221,7 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
         for item in names:validate_reference(item,'MSG')
         filters['name']=['in',names]
     fields=['name','relay_contact','channel','content','direction','status','creation','sent_at','provider_context',
-            'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint']
+            'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group']
     # Frappe applies role/user permissions and the assignment query hook before LIMIT.
     from relay_core.timeline import page_query
     query=page_query(fields,filters,limit+1,before,since or after,ingestion=bool(since),search=query or '')
