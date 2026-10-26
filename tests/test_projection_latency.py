@@ -127,6 +127,20 @@ class ProjectionLatencyTests(unittest.TestCase):
         self.assertEqual(fake.db.commit.call_count, 4)
         self.assertEqual(fake.log_error.call_args.kwargs['reference_name'], 'bad')
 
+    def test_job_timeout_stops_the_batch(self):
+        from rq.timeouts import JobTimeoutException
+        fake = SimpleNamespace(db=Mock(), log_error=Mock(), QueryDeadlockError=type('Conflict', (Exception,), {}))
+        def project(name):
+            if name == 'slow':
+                raise JobTimeoutException('timed out')
+        with patch.object(projection, 'frappe', fake), patch.object(inbound, 'frappe', fake), \
+                patch('rq.get_current_job', return_value=None), \
+                patch.object(projection, 'project', side_effect=project) as projected, \
+                self.assertRaises(JobTimeoutException):
+            projection.project_queued(names=['first', 'slow', 'last'], submitted_ns=1)
+        self.assertEqual([c.args[0] for c in projected.call_args_list], ['first', 'slow'])
+        fake.log_error.assert_not_called()
+
     def test_recovery_retains_queue_routing(self):
         rows = [_dict(name='inbound', payload=json.dumps(text_payload())), _dict(name='status', payload='{}'),
                 _dict(name='later', payload=json.dumps(text_payload()))]
