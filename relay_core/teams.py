@@ -132,6 +132,8 @@ def assign(contact, team=None, assigned_to=None):
     name=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},'name')
     doc=frappe.get_doc('Relay Conversation Assignment',name) if name else frappe.new_doc('Relay Conversation Assignment')
     doc.relay_contact=contact;doc.team=team or None;doc.assigned_to=assigned_to or None;doc.save()
+    from relay_core.queue_counts import invalidate
+    invalidate()
     return {'contact':contact,'team':doc.team,'assigned_to':doc.assigned_to}
 
 
