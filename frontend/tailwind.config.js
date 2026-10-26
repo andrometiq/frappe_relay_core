@@ -21,7 +21,7 @@ export default {
         },
       },
       fontFamily: { sans: ['"Segoe UI Variable Text"', '"Segoe UI Variable"', '"Segoe UI"', 'Inter', 'system-ui', 'sans-serif'] },
-      fontSize: { base: ['13.5px', { lineHeight: '1.45' }] },
+      fontSize: { xs: ['12px', { lineHeight: '16px' }], sm: ['13px', { lineHeight: '18px' }], base: ['13.5px', { lineHeight: '1.45' }], lg: ['15px', { lineHeight: '20px' }] },
     },
   },
 }
