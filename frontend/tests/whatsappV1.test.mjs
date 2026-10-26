@@ -271,3 +271,28 @@ test('Send via switches the source channel without filtering the timeline',async
   assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact'])
   fixture.stop()
 })
+
+test('Also send via adds the chosen channels to one text send and resets with the recipient',async()=>{
+  const calls=[],fixture=setup(async(method,args)=>{calls.push([method,args]);return method==='messaging.send'?{action:'action',status:'Submitted',message:'message'}:{items:[],has_more:false}})
+  try {
+    const source={...row(1,'2026-10-24'),channel:'live-number',relay_contact:'contact'}
+    fixture.state.selected.value='contact';fixture.state.rows.value=[source];fixture.state.source.value=source
+    fixture.state.toggleAlsoVia('telegram-bot');fixture.state.body.value='Order ready'
+    await fixture.state.send()
+    assert.deepEqual(calls.find(([method])=>method==='messaging.send')[1].channels,['telegram-bot'])
+    fixture.state.toggleAlsoVia('telegram-bot');assert.deepEqual(fixture.state.alsoVia.value,[])
+    fixture.state.toggleAlsoVia('telegram-bot');fixture.state.sendVia('live-number')
+    assert.deepEqual(fixture.state.alsoVia.value,[])
+  } finally {fixture.stop()}
+})
+
+test('a one-channel send keeps the original send arguments',async()=>{
+  const calls=[],fixture=setup(async(method,args)=>{calls.push([method,args]);return method==='messaging.send'?{action:'action',status:'Submitted',message:'message'}:{items:[],has_more:false}})
+  try {
+    const source={...row(1,'2026-10-24'),channel:'live-number',relay_contact:'contact'}
+    fixture.state.selected.value='contact';fixture.state.rows.value=[source];fixture.state.source.value=source
+    fixture.state.body.value='Order ready'
+    await fixture.state.send()
+    assert.deepEqual(Object.keys(calls.find(([method])=>method==='messaging.send')[1]),['message','kind','data','request_key','quote'])
+  } finally {fixture.stop()}
+})

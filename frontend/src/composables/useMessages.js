@@ -135,6 +135,7 @@ export function useMessages() {
     longitude = ref("");
   const contactName = ref(""),
     phone = ref(""),
+    alsoVia = ref([]),
     busy = ref(false),
     error = ref(""),
     notice = ref("");
@@ -148,7 +149,7 @@ export function useMessages() {
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
-  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source};
+  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source,alsoVia};
   function clearRecipient() {
     resetRecipient(draftFields);
     error.value = ""; notice.value = "";
@@ -360,6 +361,10 @@ export function useMessages() {
     if (!row) return filterChannel(value);
     selectRecipient(row);
     quoting.value = false;
+  }
+  // More channels for one composed message; the picker offers them only when several channels are enabled.
+  function toggleAlsoVia(value) {
+    alsoVia.value = alsoVia.value.includes(value) ? alsoVia.value.filter(item => item !== value) : [...alsoVia.value, value];
   }
 
   async function history(older = false) {
@@ -591,11 +596,13 @@ export function useMessages() {
     }
     await run(async () => {
       const quote = action === "reaction" || quoting.value;
+      const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
       const intent = JSON.stringify({
         quote,
         message: message.name,
         kind: action,
         data,
+        ...(extraChannels.length ? { channels: extraChannels } : {}),
       });
       const digest = sha256Hex(intent);
       const storage = "relay-typed-action-" + digest;
@@ -615,7 +622,8 @@ export function useMessages() {
       let result;
       try { result = await call(
         "relay_core.messaging.send",
-        { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0 },
+        { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0,
+          ...(extraChannels.length ? { channels: extraChannels } : {}) },
         true,
       ); } catch(err) {if(pending)pending.status='Unconfirmed';throw err;}
       sessionStorage.setItem('relay-typed-result-'+result.action,storage);
@@ -728,6 +736,8 @@ export function useMessages() {
     findContacts,
     filterChannel,
     sendVia,
+    alsoVia,
+    toggleAlsoVia,
     history,
     open,
     reply,

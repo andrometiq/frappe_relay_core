@@ -42,3 +42,8 @@ export function composerKinds(capabilities, context) {
   const cards = context.group_id ? [] : [['location', 'location'], ['contacts', 'contact']].filter(([feature]) => can(feature))
   return ['text', ...media, ...cards.map(([, kind]) => kind)]
 }
+
+// Channels one composed message can also go to: offered only when more than one channel is enabled.
+export function alsoSendChoices(capabilities, choices, current) {
+  return multipleChannels(capabilities) ? [...choices].filter(([value]) => value !== current) : []
+}
