@@ -14,6 +14,7 @@ const capabilities = inject('relayCapabilities')
 const channels = ref([])
 const config = ref({}), channel = ref(null), types = ref([]), loaded = ref(false), verified = ref(false)
 const token = ref(''), callbackSecret = ref(''), tab = ref('setup')
+const margin = ref(''), marginError = ref(''), marginNotice = ref('')
 const { busy, error, notice, run } = useTask()
 async function load() {
   loaded.value = false
@@ -24,6 +25,16 @@ async function save() {
   verified.value = false
   await coreApi('settings.save_connection', { url: config.value.url, account: config.value.account, token: token.value, callback_secret: callbackSecret.value }, true)
   identity.value = null; await refreshIdentity(); token.value = ''; callbackSecret.value = ''; notice.value = 'Connection saved and account/site binding checked.'; await load()
+}
+async function loadMargin() {
+  marginError.value = ''
+  try { margin.value = String((await coreApi('billing.get_margin')).margin_percent) }
+  catch (e) { marginError.value = e.message }
+}
+async function saveMargin() {
+  marginNotice.value = ''
+  margin.value = String((await coreApi('billing.save_margin', { percent: margin.value }, true)).margin_percent)
+  marginNotice.value = 'WhatsApp margin saved.'
 }
 async function verify() { verified.value = false; await coreApi('settings.verify_connection', {}, true); verified.value = true; notice.value = 'Hub credentials and account/site binding verified. Callback delivery is checked separately.' }
 const checklist = computed(() => [
@@ -36,7 +47,7 @@ const checklist = computed(() => [
   { label: 'Teams and access', icon: 'user-check', state: 'Review membership and permissions', href: '#/teams' },
   { label: 'Callback processing and recovery', icon: 'activity', state: 'Review received events and recovery', href: '#/activity' },
 ])
-onMounted(() => run(load))
+onMounted(() => { run(load); loadMargin() })
 function followStep(event, step) { if (step.href === '#hub-connection') { event.preventDefault(); document.getElementById('hub-connection')?.scrollIntoView({ block: 'start' }) } }
 </script>
 <template>
@@ -54,6 +65,13 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
         </template></div><template v-if="capabilities.configure">
           <div class="flex flex-wrap gap-3"><Button type="submit" label="Save connection" variant="solid" :disabled="busy || !loaded" /><Button label="Verify saved connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
         </template><p v-else>A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
+      </form>
+      <form v-if="channelEnabled(capabilities, 'WhatsApp')" class="workflow-card" @submit.prevent="run(saveMargin)">
+        <h2 class="font-semibold">WhatsApp billing</h2><p class="text-sm">Margin added on top of Meta’s WhatsApp charges on the Billing page.</p>
+        <ErrorMessage :message="marginError" />
+        <div class="settings-fields"><FormControl label="Margin percent" type="number" min="0" max="1000" step="0.01" v-model="margin" :disabled="busy || !capabilities.configure" /></div>
+        <div v-if="capabilities.configure"><Button type="submit" label="Save margin" variant="solid" :disabled="busy || margin === ''" /></div><p v-else>A System Manager can change the margin.</p>
+        <p v-if="marginNotice" role="status" class="workspace-success">{{ marginNotice }}</p>
       </form>
       <div class="workflow-card"><h2 class="font-semibold">Channel readiness</h2><p>Identity credentials and provider verification are configured in Hub. Local enablement does not confirm callback delivery.</p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a class="underline" href="#/activity">Review callback and delivery evidence</a></div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/relay-channel">Configure channel</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Review endpoint bindings</a></div>
