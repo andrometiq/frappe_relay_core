@@ -14,7 +14,7 @@ defineEmits(["back"]);
 <template>
   <header class="frappe-page-head">
     <div class="frappe-page-title">
-      <Button v-if="breadcrumbs.length" icon="arrow-left" variant="ghost" :aria-label="backLabel" @click="$emit('back')" />
+      <Button v-if="breadcrumbs.length" icon="chevron-left" variant="ghost" :aria-label="backLabel" @click="$emit('back')" />
       <div>
         <p v-if="breadcrumbs.length" class="frappe-breadcrumbs">
           <template v-for="(crumb, index) in breadcrumbs" :key="`${crumb}-${index}`">

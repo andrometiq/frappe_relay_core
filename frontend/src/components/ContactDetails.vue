@@ -41,7 +41,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
     <LoadingRows v-if="busy" :count="2" label="Loading contact details…" />
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
-      <header v-if="!compact" class="contact-detail-heading"><Button v-if="dismissible" icon="arrow-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div><h3>{{ recordTitle(detail, 'Contact') }}</h3><p>Contact details</p></div></header>
+      <header v-if="!compact" class="contact-detail-heading"><Button v-if="dismissible" icon="chevron-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div><h3>{{ recordTitle(detail, 'Contact') }}</h3><p>Contact details</p></div></header>
       <ContactLinks :contact="detail.name" :detail="detail" @changed="linksChanged" />
       <h4 class="info-group-title">Details</h4>
       <dl class="info-card">

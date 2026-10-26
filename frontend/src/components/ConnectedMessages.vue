@@ -257,7 +257,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
     <Transition name="relay-page" :css="isMobile">
     <div v-if="active" class="connected-thread">
       <header class="conversation-heading">
-        <Button class="mobile-only conversation-back" icon="arrow-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
+        <Button class="mobile-only conversation-back" icon="chevron-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
           <h2><button v-if="isMobile && (frappeContact || conversationContact)" type="button" class="conversation-title-button" aria-label="Open contact info" @click="openInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
@@ -275,10 +275,10 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         </div>
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
-          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :organize-request="organizeRequest">
+          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :organize-request="organizeRequest" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
             <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Tickets and cases" :disabled="busy" @click="casesOpen = true" />
           </ConversationTools>
-          <Dropdown v-else :options="menuActions"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
+          <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
         </div>
       </header>
 

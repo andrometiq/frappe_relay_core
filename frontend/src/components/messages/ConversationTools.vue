@@ -13,6 +13,7 @@ const props = defineProps({
   visibleMessages: Array,
   actions: Array,
   organizeRequest: Number,
+  menuIcon: { type: String, default: "more-horizontal" },
 });
 const { busy, error, notice, run } = useTask(),
   state = ref({}),
@@ -117,7 +118,7 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
     <div class="conversation-tool-buttons">
       <Button class="conversation-assign" icon="user" label="Assign" title="Assign and organize" :disabled="busy" @click="expanded = true" />
       <slot />
-      <Dropdown :options="menu"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
+      <Dropdown :options="menu"><Button :icon="menuIcon" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
     </div>
     <Dialog v-model="expanded" :options="{title:'Organize conversation'}">
     <p v-if="people.length" class="text-xs text-ink-gray-5">
