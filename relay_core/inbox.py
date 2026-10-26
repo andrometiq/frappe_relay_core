@@ -68,10 +68,12 @@ def read(contact):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None):
-    """Filter before pagination and expose only accessible conversation previews."""
+def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None):
+    """Filter before pagination and expose only accessible conversation previews.
+
+    `since` returns only conversations active at or after that time, so a live client can update the changed rows."""
     require_access()
-    if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>50 or before and after:
+    if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>50 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
     if str(starred) not in ('0','1') or mode not in ('all','mine','unread','unassigned'):
         frappe.throw('Invalid conversation filter')
@@ -94,6 +96,8 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         stamp=anchor.last_message_at or anchor.creation
         condition=((activity>stamp)|((activity==stamp)&(contact.name>cursor))) if before else ((activity<stamp)|((activity==stamp)&(contact.name<cursor)))
         search=search.where(condition)
+    if since:
+        search=search.where(activity>=activity_time(since))
     search=search.orderby(activity,order=Order.asc if before else Order.desc).orderby(contact.name,order=Order.asc if before else Order.desc)
     if query.strip():
         pattern='%'+ '%'.join('\\'+c if c in '%_\\' else c for c in query.strip())+'%'
@@ -124,6 +128,14 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     items=directory_items(page,channel_names)
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+def activity_time(value):
+    try:
+        if not isinstance(value,str) or len(value)>32: raise ValueError
+        return frappe.utils.get_datetime(value)
+    except (TypeError, ValueError):
+        frappe.throw('Invalid conversation activity time')
 
 
 PREVIEW_FIELDS = ['name','relay_contact','content','message_data','transcript','channel','creation','sent_at','business_doctype','business_name']

@@ -11,6 +11,7 @@ import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
 import { defaultMedium, mediumChips, mediumOptions } from '../../services/enabledChannels'
 import { countLabel } from '../../services/queueCounts'
+import { mergeChangedRows, newestActivity, onlyChangedRows } from '../../services/inboxRows'
 import { useQueueCounts } from '../../composables/useQueueCounts'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
@@ -27,12 +28,15 @@ const moreQueues = computed(() => [
   ...(capabilities.value.manage ? [{ label: 'Unlinked senders', onClick: () => { location.hash = '/contacts?tab=unlinked' } }] : []),
 ])
 let generation = 0, searchTimer
+function directoryPage(cursor) {
+  return coreApi('inbox.directory', { mode: mode.value, query: query.value, medium: medium.value === 'all' ? undefined : medium.value, ...cursor })
+}
 async function load(cursor = {}) {
   clearTimeout(searchTimer)
   if (mode.value === 'business') return
   const ticket = ++generation; loading.value = true; error.value = ''
   try {
-    const page = await coreApi('inbox.directory', { mode: mode.value, query: query.value, medium: medium.value === 'all' ? undefined : medium.value, ...cursor })
+    const page = await directoryPage(cursor)
     if (ticket === generation) { rows.value = cursor.after ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (ticket === generation) { error.value = e.message; rows.value = []; next.value = null } }
   finally { if (ticket === generation) loading.value = false }
@@ -44,7 +48,20 @@ watch(query, (_value, _previous, onCleanup) => {
 })
 watch([mode, medium], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
-useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'], () => load())
+// A new message updates only the conversations active since the newest loaded row; other changes reload the page.
+async function refreshChanged() {
+  const since = newestActivity(rows.value)
+  if (loading.value || error.value || !since) return load()
+  const ticket = ++generation
+  try {
+    const page = await directoryPage({ since })
+    if (ticket !== generation) return
+    if (page.next) return load()
+    rows.value = mergeChangedRows(rows.value, page.items)
+  } catch { if (ticket === generation) return load() }
+}
+useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'],
+  ({ kinds } = {}) => mode.value !== 'business' && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
 </script>
 <template>
   <header class="inbox-list-head">

@@ -1,4 +1,4 @@
-"""Inbox page details in a fixed number of permission-scoped queries."""
+"""Inbox page details in a fixed number of permission-scoped queries, and live row updates."""
 import unittest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -95,6 +95,18 @@ class DirectoryQueryTests(unittest.TestCase):
         self.assertEqual(second['assignment'], {'team': 'Sales', 'assigned_to': None})
         self.assertEqual(self.fake.get_all.call_count, 2)
         self.assertEqual(inbox.directory_items([]), [])
+
+    def test_live_update_filter_rejects_mixed_cursors_and_bad_times(self):
+        with patch.object(inbox, 'require_access'):
+            with self.assertRaises(ValueError): inbox.directory(since='2026-10-27 10:00:00', after='RELAY-CON-0000000001')
+            with self.assertRaises(ValueError): inbox.directory(since='not a time')
+            with self.assertRaises(ValueError): inbox.directory(since='2026-10-27 10:00:00' * 3)
+        self.assertEqual(self.statements, [])
+
+    def test_live_update_returns_only_conversations_active_since_the_time(self):
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]):
+            inbox.directory(since='2026-10-27 10:00:00')
+        self.assertIn("COALESCE(`last_message_at`,`creation`)>='2026-10-27 10:00:00'", self.statements[0])
 
 
 if __name__ == '__main__':
