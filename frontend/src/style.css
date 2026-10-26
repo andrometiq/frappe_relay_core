@@ -718,6 +718,9 @@
 .v1-shell .compact-composer:not(.email-composer) { grid-template-columns:auto minmax(0,1fr) 40px; align-items:center; }
 .compact-composer .composer-channel { grid-column:1; display:flex; min-width:0; max-width:145px; }
 .composer-channel .relay-button__label { overflow:hidden; text-overflow:ellipsis; }
+.send-via { display:flex; flex-direction:column; min-width:0; gap:1px; }
+.send-via__caption { font-size:11px; line-height:1.2; color:var(--ink-gray-5); padding-left:2px; }
+.send-via .relay-button { max-width:100%; }
 .compact-composer .chat-draft { grid-column:2; }
 .compact-composer > button[type=submit] { grid-column:3; }
 .compact-composer .composer-keyboard-hint { grid-column:1 / -1; }

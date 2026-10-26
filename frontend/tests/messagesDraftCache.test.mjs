@@ -1,6 +1,6 @@
 import test from 'node:test'
 import { injectCapabilities } from './channelCapabilities.js'
-import { composerKinds } from '../src/services/enabledChannels.js'
+import { composerKinds, defaultSendSource } from '../src/services/enabledChannels.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch } from 'vue'
@@ -12,7 +12,7 @@ import { coordinates } from '../src/components/formValidation.js'
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
   .replace(/^import .*\n/gm, '').replace('export function', 'function')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
-  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', source + '\nreturn useMessages();')
+  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', 'defaultSendSource', source + '\nreturn useMessages();')
 const deferred = () => { let resolve; const promise = new Promise(done => resolve = done); return { promise, resolve } }
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t, override = () => {}) {
@@ -47,7 +47,7 @@ function fixture(t, override = () => {}) {
     throw Error('Unexpected method: ' + method)
   }
   const state = scope.run(() => make(ref, computed, watch, () => {}, () => {}, (_rooms, _kinds, fn) => realtime = fn,
-    api, resetRecipient, sha256Hex, () => 'key-' + ++uuid, messageData, objectValue, coordinates, injectCapabilities, composerKinds))
+    api, resetRecipient, sha256Hex, () => 'key-' + ++uuid, messageData, objectValue, coordinates, injectCapabilities, composerKinds, defaultSendSource))
   t.after(() => { scope.stop(); for (const [key, value] of Object.entries(previous)) globalThis[key] = value })
   return {state, calls, records, row, realtime:(kind) => realtime({kinds:new Set([kind])})}
 }

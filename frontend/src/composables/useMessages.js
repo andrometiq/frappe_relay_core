@@ -2,7 +2,7 @@ import { resetRecipient } from '../services/recipientContext.js';
 import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { sha256Hex, randomUUID } from '../services/crypto.js';
 import { computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { composerKinds } from "../services/enabledChannels.js";
+import { composerKinds, defaultSendSource } from "../services/enabledChannels.js";
 import { coordinates } from "../components/formValidation";
 import { coreApi } from "../services/coreApi";
 import { messageData, objectValue } from "../components/messageContent";
@@ -169,7 +169,7 @@ export function useMessages() {
     if (!saved) { viewPosition.value=null; return false; }
     ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
     viewPosition.value=saved.position;restored.value=saved.position?.atBottom?'':saved.position?.name||'';
-    if(!businessName.value && !source.value)source.value=rows.value.at(-1)||null;
+    if(!businessName.value && !source.value)source.value=defaultSendSource(rows.value,capabilities.value);
     restoredRefreshPending = true;
     return true;
   }
@@ -212,7 +212,7 @@ export function useMessages() {
     rows.value=page.items;before.value=page.first;last.value=page.last;more.value=page.has_more;newer.value=page.has_newer;
     viewPosition.value=businessName.value ? saved : {name:target,offset:UNREAD_OFFSET,atBottom:false};
     restored.value=target;firstUnread.value=businessName.value ? '' : target;
-    if(!source.value)source.value=rows.value.at(-1)||null;
+    if(!source.value)source.value=defaultSendSource(rows.value,capabilities.value);
     updateChannels();
   }
   async function latest() {
@@ -352,6 +352,16 @@ export function useMessages() {
     return restoreWindow() ? refreshVisible() : run(restoreSavedView);
   }
 
+  // Sending picks a channel without filtering the timeline; the newest loaded message of that person on it becomes the source.
+  function sendVia(value) {
+    if (busy.value) return;
+    const contact = source.value?.relay_contact;
+    const row = rows.value.findLast(item => item.channel === value && (!contact || item.relay_contact === contact));
+    if (!row) return filterChannel(value);
+    selectRecipient(row);
+    quoting.value = false;
+  }
+
   async function history(older = false) {
     const generation = ++requestSequence,
       identity = conversationIdentity();
@@ -374,7 +384,7 @@ export function useMessages() {
     newer.value = older && (rows.value.length >= 150 || newer.value);
     more.value = page.has_more;
     updateChannels();
-    if (!older && !source.value && !businessName.value) source.value = rows.value.at(-1) || null;
+    if (!older && !source.value && !businessName.value) source.value = defaultSendSource(rows.value, capabilities.value);
   }
   function updateChannels() {
     if(channel.value)return;
@@ -717,6 +727,7 @@ export function useMessages() {
     channels,
     findContacts,
     filterChannel,
+    sendVia,
     history,
     open,
     reply,

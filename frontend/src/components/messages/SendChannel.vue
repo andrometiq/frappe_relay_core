@@ -7,23 +7,31 @@ import { objectValue } from '../messageContent';
 import { useEnabledChannels } from '../../composables/useEnabledChannels';
 const channelEnabled = useEnabledChannels();
 const props=defineProps({disabled:Boolean});
-const {channels,channel,source,rows,busy,quoting,filterChannel}=inject(messagesKey);
+const {channels,channel,source,rows,busy,quoting,filterChannel,sendVia}=inject(messagesKey);
 const sendChannel = computed(() => source.value?.channel || channel.value);
-const sendLabel = computed(() => sendChannel.value
-  ? linkedTitle('Relay Channel', sendChannel.value, source.value?.channel_title || channels.value.find(row => row.value === sendChannel.value)?.label || 'Channel')
-  : 'Choose a channel');
-const options=computed(() => {
-  const choices=new Map(channels.value.filter(row=>channelEnabled(row.label)).map(row=>[row.value,{value:row.value,label:linkedTitle('Relay Channel', row.value, row.label) + (row.unread ? ` · ${row.unread} unread` : '')}]));
+const choices = computed(() => {
+  const found=new Map(channels.value.filter(row=>channelEnabled(row.label)).map(row=>[row.value,linkedTitle('Relay Channel', row.value, row.label)]));
   for (const row of [...rows.value,...(source.value?[source.value]:[])]) {
-    if(row.channel&&!choices.has(row.channel)&&channelEnabled(objectValue(row.provider_context).provider))choices.set(row.channel,{value:row.channel,label:row.channel_title || objectValue(row.provider_context).provider || 'Channel'});
+    const provider=objectValue(row.provider_context).provider;
+    if(row.channel&&!found.has(row.channel)&&channelEnabled(provider))found.set(row.channel,row.channel_title || provider || 'Channel');
   }
-  return [{value:'',label:'View all channels'},...choices.values()].map(row=>({label:row.label,onClick:()=>filterChannel(row.value),disabled:props.disabled||busy.value||quoting.value}));
+  return found;
 });
+const sendLabel = computed(() => choices.value.get(sendChannel.value) || source.value?.channel_title || 'Choose a channel');
+const locked = computed(() => props.disabled || busy.value || quoting.value);
+const options = computed(() => [
+  ...[...choices.value].map(([value,label])=>({label,icon:value===sendChannel.value?'check':undefined,onClick:()=>sendVia(value)})),
+  // A saved channel filter from older views can still be cleared so every channel shows again.
+  ...(channel.value?[{label:'Show all channels',icon:'list',onClick:()=>filterChannel('')}]:[]),
+].map(row=>({...row,disabled:locked.value})));
 </script>
 <template>
-  <Badge v-if="options.length <= 1" label="No channel" />
-  <Dropdown v-else :options="options">
-    <Button :label="sendLabel" icon-right="chevron-down"
-      :disabled="disabled || busy || quoting" :title="'Reply channel: ' + sendLabel" :aria-label="'Reply channel: ' + sendLabel" />
-  </Dropdown>
+  <Badge v-if="!choices.size" label="No channel" />
+  <div v-else class="send-via">
+    <span class="send-via__caption">Send via</span>
+    <Dropdown :options="options">
+      <Button :label="sendLabel" icon-right="chevron-down"
+        :disabled="locked" :title="'Send via ' + sendLabel" :aria-label="'Send via ' + sendLabel" />
+    </Dropdown>
+  </div>
 </template>
