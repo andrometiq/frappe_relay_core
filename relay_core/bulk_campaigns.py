@@ -1,4 +1,4 @@
-"""WhatsApp template, text and media campaigns from an uploaded sheet, pushed to Hub 50 rows at a time."""
+"""WhatsApp template, text and media campaigns from an uploaded sheet or JSON rows, pushed to Hub 50 rows at a time."""
 import base64
 import hashlib
 import json
@@ -9,13 +9,14 @@ from redis.exceptions import LockError
 from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
-from relay_core.identity import default_region
+from relay_core.identity import default_region, phone_number
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
 
 RECIPIENT = 'Relay Campaign Recipient'
 BATCH = 50
 CHUNK = 1000
+CALL_ROWS = 5000  # JSON rows per API call; more go through append_rows.
 HIGH_WATER = 1000
 LOW_WATER = 500
 DEFAULT_RATE = 50
@@ -207,6 +208,76 @@ def import_rows(name, mapping):
     return read(name)
 
 
+def given_rows(rows, after=0):
+    rows = parsed(rows)
+    if not isinstance(rows, list) or not 1 <= len(rows) <= CALL_ROWS:
+        frappe.throw(f'Send 1-{CALL_ROWS} rows in one call')
+    try:
+        return list(bulk_sheet.given_rows(rows, after))
+    except ValueError as exc:
+        frappe.throw(str(exc))
+
+
+def parsed(value):
+    """JSON text from a form post as its value; text that is not JSON stays text and fails the type check."""
+    try:
+        return frappe.parse_json(value) if isinstance(value, str) else value
+    except ValueError:
+        return value
+
+
+@frappe.whitelist(methods=['POST'])
+def create_with_rows(title, rows, message=None, template_name=None, language=None, mapping=None, start=0,
+                     channel=None, reply_window_hours=72):
+    """A campaign whose recipients are JSON objects of column -> value; start=1 starts sending at once.
+    Without a mapping, columns are matched by name as for a sheet."""
+    require_access(manage=True)
+    numbered = given_rows(rows)
+    name = create(title, template_name, language, channel, reply_window_hours, message)['name']
+    doc = frappe.get_doc('Relay Campaign', name)
+    header = list(dict.fromkeys(column for _, row in numbered for column in row))
+    fields = json.loads(doc.arguments)['fields']
+    mapping = parsed(mapping)
+    try:
+        doc.column_map = canonical(bulk_sheet.check_mapping(mapping or bulk_sheet.suggest(header, fields), header, fields))
+    except ValueError as exc:
+        frappe.throw(str(exc))
+    fixed_file(doc)
+    internal_save(doc)
+    add_rows(doc, numbered, set())
+    from relay_core.bulk_updates import changed
+    changed(name)
+    return control(name, 'start') if frappe.utils.cint(start) else read(name)
+
+
+@frappe.whitelist(methods=['POST'])
+def append_rows(name, rows):
+    """More JSON rows for a Draft campaign created with rows. A number the campaign already holds is a duplicate."""
+    doc = bulk(name, ('Draft',))
+    if doc.source_file or not doc.column_map:
+        frappe.throw('Add rows only to a campaign created with rows')
+    with frappe.cache.lock('relay-bulk-append:' + name, timeout=120):
+        last, total = frappe.db.sql(f'SELECT COALESCE(MAX(sheet_row), 0), COUNT(*) FROM `tab{RECIPIENT}` WHERE campaign=%s',
+                                    name)[0]
+        numbered = given_rows(rows, int(last))
+        if total + len(numbered) > bulk_sheet.MAX_ROWS:
+            frappe.throw(f'A campaign supports at most {bulk_sheet.MAX_ROWS} rows')
+        add_rows(doc, numbered, held_numbers(doc, numbered))
+    from relay_core.bulk_updates import changed
+    changed(name)
+    return read(name)
+
+
+def held_numbers(doc, rows):
+    """Numbers of these rows the campaign already holds in a row that was not skipped."""
+    column = json.loads(doc.column_map)['phone']
+    numbers = list({phone_number(row.get(column), doc.country) for _, row in rows} - {None})
+    if not numbers:
+        return set()
+    return set(frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'destination': ['in', numbers],
+                                                  'status': ['!=', 'Skipped']}, pluck='destination', limit_page_length=0))
+
+
 def enqueue(method, name, step=0, slot=None):
     """Short jobs at the back of the queue. A slice continues under the other of two job IDs, because its own
     ID is still running and deduplication would drop it; a manager's action uses a third."""
@@ -220,22 +291,8 @@ def import_job(name):
     if doc.status != 'Importing':
         return
     remove_unsent(name)
-    snapshot, mapping = json.loads(doc.arguments), json.loads(doc.column_map)
-    fields, message = snapshot['fields'], snapshot.get('message')
-    seen, chunk = set(), []
     try:
-        for number, row in bulk_sheet.read_rows(source_path(doc.source_file)):
-            destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country)
-            if not problem and message:
-                problem = bulk_sheet.message_problem(message, values['values'])
-            if not problem and destination in seen:
-                problem = 'Duplicate number'
-            seen.add(destination)
-            chunk.append((number, destination, values, problem))
-            if len(chunk) == CHUNK:
-                insert_chunk(doc, chunk)
-                chunk = []
-        insert_chunk(doc, chunk)
+        add_rows(doc, bulk_sheet.read_rows(source_path(doc.source_file)), set())
         doc.last_error = ''
     except ValueError as exc:
         frappe.db.rollback()
@@ -246,6 +303,25 @@ def import_job(name):
     frappe.db.commit()
     from relay_core.bulk_updates import changed
     changed(name)
+
+
+def add_rows(doc, rows, seen):
+    """Check and insert (row number, column -> text) rows in chunks; sheet and JSON rows share this path."""
+    snapshot, mapping = json.loads(doc.arguments), json.loads(doc.column_map)
+    fields, message = snapshot['fields'], snapshot.get('message')
+    chunk = []
+    for number, row in rows:
+        destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country)
+        if not problem and message:
+            problem = bulk_sheet.message_problem(message, values['values'])
+        if not problem and destination in seen:
+            problem = 'Duplicate number'
+        seen.add(destination)
+        chunk.append((number, destination, values, problem))
+        if len(chunk) == CHUNK:
+            insert_chunk(doc, chunk)
+            chunk = []
+    insert_chunk(doc, chunk)
 
 
 def remove_unsent(campaign):

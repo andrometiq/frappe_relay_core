@@ -1,4 +1,4 @@
-"""Streaming recipient sheets, WhatsApp template parameters and text or media messages for bulk campaigns."""
+"""Recipient rows from a sheet or JSON, WhatsApp template parameters and text or media messages for bulk campaigns."""
 import csv
 import re
 from urllib.parse import unquote, urlsplit
@@ -117,6 +117,15 @@ def labelled(source):
         yield number, {column: cells[i] if i < len(cells) else '' for i, column in enumerate(header) if column}
 
 
+def given_rows(rows, after=0):
+    """(row number, column -> text) for JSON objects, numbered on from after, the same shape read_rows yields."""
+    for number, row in enumerate(rows, start=after + 1):
+        if (not isinstance(row, dict) or not all(isinstance(column, str) and column.strip() for column in row)
+                or any(isinstance(value, (dict, list)) for value in row.values())):
+            raise ValueError(f'Row {number} must map column names to plain values')
+        yield number, {column.strip(): text(value) for column, value in row.items()}
+
+
 def text(value):
     if value is None:
         return ''
@@ -146,7 +155,7 @@ def suggest(header, fields):
         if field in positional:
             continue
         guess = (field.get('name') or field['key'].split(':')[-1]).lower() if field['key'] != 'header_media' else 'image'
-        for candidate in (guess, field['label'].lower(), 'image url', 'media url', 'url'):
+        for candidate in (guess, field['key'].lower(), field['label'].lower(), 'image url', 'media url', 'url'):
             if candidate in by_name:
                 mapping['fields'][field['key']] = by_name[candidate]
                 break

@@ -627,6 +627,107 @@ class ImportTests(unittest.TestCase):
         self.assertEqual((contacts, opted_out), ({}, {number}))
 
 
+class JsonRowTests(unittest.TestCase):
+    message = {'kind': 'photo', 'caption': 'Hi {{name}}'}
+
+    def doc(self, **values):
+        return _dict(dict(name='Promo', channel='WA', country='IN', source_file=None, column_map=None,
+                          arguments=json.dumps({'message': self.message, 'fields': bulk_sheet.message_fields(self.message)})), **values)
+
+    def create(self, rows, doc=None, start=0, mapping=None):
+        doc = doc or self.doc()
+        db = Mock()
+        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc), parse_json=frappe.parse_json, utils=UTILS,
+                               session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
+        fake.utils.now = lambda: '2026-10-26 10:00:00'
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
+                patch.object(bulk_campaigns, 'create', return_value={'name': 'Promo'}) as create, \
+                patch.object(bulk_campaigns, 'internal_save'), patch.object(bulk_campaigns, 'read', return_value='read'), \
+                patch.object(bulk_campaigns, 'control', return_value='started') as control, \
+                patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())), patch('relay_core.bulk_updates.changed'):
+            result = bulk_campaigns.create_with_rows('Promo', rows, message=self.message, start=start, mapping=mapping)
+        return result, doc, db, create, control, fake
+
+    def test_json_rows_follow_the_sheet_path_with_per_row_links(self):
+        rows = [{'phone': '+91 98765 43210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
+                {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'http://cdn.example/b.jpg'},
+                {'phone': '919876543210', 'name': 'Asha again', 'media_url': 'https://cdn.example/c.jpg'},
+                {'phone': '123', 'name': 'Nobody', 'media_url': 'https://cdn.example/d.jpg'}]
+        result, doc, db, create, control, _ = self.create(rows)
+        self.assertEqual(result, 'read')
+        control.assert_not_called()
+        self.assertEqual(json.loads(doc.column_map)['fields'], {'text:name': 'name', 'media_url': 'media_url'})
+        values = db.bulk_insert.call_args.args[2]
+        self.assertEqual([(v[13], v[10], v[14]) for v in values], [
+            (1, 'Pending', ''), (2, 'Skipped', 'Photo link must be an HTTPS link'),
+            (3, 'Skipped', 'Duplicate number'), (4, 'Skipped', 'Invalid phone number')])
+        self.assertEqual(json.loads(values[0][12])['values'], {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'})
+
+    def test_start_sends_at_once_and_a_mapping_names_other_columns(self):
+        rows = [{'Mobile': '9876543210', 'Customer': 'Asha', 'Link': 'https://cdn.example/a.jpg'}]
+        result, doc, _, _, control, _ = self.create(rows, start=1, mapping={'phone': 'Mobile', 'fields': {
+            'text:name': 'Customer', 'media_url': 'Link'}})
+        self.assertEqual(result, 'started')
+        control.assert_called_once_with('Promo', 'start')
+
+    def test_template_rows_carry_their_own_header_media(self):
+        doc = _dict(name='Offer', channel='WA', country='IN', source_file=None, column_map=None,
+                    arguments=json.dumps({'template': NAMED, 'fields': bulk_sheet.template_fields(NAMED)}))
+        rows = [{'phone': '9876543210', 'customer_name': 'Asha', 'discount': '20%', 'button:0': 'winter',
+                 'header_media': 'https://cdn.example/asha.jpg'}]
+        _, _, db, _, _, _ = self.create(rows, doc=doc)
+        stored = json.loads(db.bulk_insert.call_args.args[2][0][12])['values']
+        self.assertEqual(stored['header_media'], 'https://cdn.example/asha.jpg')
+        self.assertEqual(bulk_sheet.build_components(bulk_sheet.template_fields(NAMED), stored)[0]['parameters'][0],
+                         {'type': 'image', 'image': {'link': 'https://cdn.example/asha.jpg'}})
+
+    def test_bad_input_is_refused_before_the_campaign_exists(self):
+        for rows in ([], [{'phone': '9876543210'}] * (bulk_campaigns.CALL_ROWS + 1), [{'phone': {'nested': 1}}], 'not rows'):
+            with self.subTest(rows=str(rows)[:30]), self.assertRaises(frappe.ValidationError):
+                self.create(rows)
+        with self.assertRaises(frappe.ValidationError):  # No phone column to match.
+            self.create([{'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'}])
+
+    def test_rows_are_numbered_in_the_order_given(self):
+        self.assertEqual(list(bulk_sheet.given_rows([{'phone': 9876543210.0, ' name ': ' Asha '}], after=7)),
+                         [(8, {'phone': '9876543210', 'name': 'Asha'})])
+        with self.assertRaisesRegex(ValueError, 'Row 1'):
+            list(bulk_sheet.given_rows([{'': 'x'}]))
+
+    def test_append_continues_numbering_and_marks_numbers_the_campaign_holds(self):
+        doc = self.doc(status='Draft', column_map=json.dumps({'phone': 'phone', 'fields': {'text:name': 'name', 'media_url': 'media_url'},
+                                                              'fixed': {}}))
+        db = Mock(sql=Mock(return_value=[(40, 40)]))
+        fake = SimpleNamespace(db=db, parse_json=frappe.parse_json, cache=FakeCache(), session=_dict(user='manager@example.invalid'),
+                               utils=SimpleNamespace(now=lambda: '2026-10-26 10:00:00'), throw=Mock(side_effect=frappe.ValidationError),
+                               get_all=Mock(return_value=['919876543210']))
+        rows = [{'phone': '9876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
+                {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'https://cdn.example/b.jpg'}]
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, \
+                patch.object(bulk_campaigns, 'read', return_value='read'), patch('relay_core.bulk_updates.changed'), \
+                patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())):
+            self.assertEqual(bulk_campaigns.append_rows('Promo', rows), 'read')
+            bulk.assert_called_once_with('Promo', ('Draft',))
+            values = db.bulk_insert.call_args.args[2]
+            self.assertEqual([(v[13], v[10], v[14]) for v in values], [(41, 'Skipped', 'Duplicate number'), (42, 'Pending', '')])
+            self.assertEqual(fake.get_all.call_args.kwargs['filters']['status'], ['!=', 'Skipped'])
+            db.sql.return_value = [(41, bulk_sheet.MAX_ROWS - 1)]
+            with self.assertRaises(frappe.ValidationError):
+                bulk_campaigns.append_rows('Promo', rows)
+            doc.source_file = '/private/files/sheet.csv'
+            with self.assertRaises(frappe.ValidationError):  # A sheet campaign re-imports its file instead.
+                bulk_campaigns.append_rows('Promo', rows)
+
+    def test_json_campaign_apis_deny_without_manager_access(self):
+        for call in (lambda: bulk_campaigns.create_with_rows('Promo', [{'phone': '9876543210'}], message=self.message),
+                     lambda: bulk_campaigns.append_rows('Promo', [{'phone': '9876543210'}])):
+            with patch.object(bulk_campaigns, 'require_access', side_effect=frappe.PermissionError):
+                with self.assertRaises(frappe.PermissionError):
+                    call()
+        for method in (bulk_campaigns.create_with_rows, bulk_campaigns.append_rows):
+            self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ['POST'])
+
+
 class ProjectionStatementTests(unittest.TestCase):
     def test_a_full_batch_is_one_update_per_status(self):
         db = Mock()
