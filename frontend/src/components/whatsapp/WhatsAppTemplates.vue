@@ -27,9 +27,7 @@ const access = inject('relayCapabilities', ref({ manage: false }));
 const workspace = inject(whatsappKey);
 const {
   busy,
-  loadingMore,
   templates,
-  templateCursor,
   syncStatus,
   editingTemplate,
   template,
@@ -37,7 +35,6 @@ const {
   selectedTemplate,
   supported,
   refresh,
-  nextTemplates,
   deleteTemplate,
 } = workspace;
 
@@ -51,7 +48,6 @@ const selectedPreview = computed(() => {
   catch { return null; } // Templates without a standard body keep the field view only.
 });
 const rejection = (row) => row.rejected_reason || row.rejection_reason || "";
-let restoreInFlight = false;
 const columns = [
   { key: "name", label: "Template name", width: "minmax(210px,1.2fr)" },
   { key: "status", label: "Status", width: "130px" },
@@ -131,23 +127,11 @@ async function removeTemplate() {
   confirmingDelete.value = false;
   openList();
 }
-async function restoreRoute() {
-  if (restoreInFlight) return;
+function restoreRoute() {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const id = params.get("template") || "";
   if (id === "new") { createTemplate(false); return; }
-  let row = templates.value.find((item) => item.id === id);
-  if (id && !row && templateCursor.value && !busy.value) {
-    restoreInFlight = true;
-    try {
-      while (!row && templateCursor.value) {
-        const cursor = templateCursor.value;
-        await nextTemplates();
-        row = templates.value.find((item) => item.id === id);
-        if (templateCursor.value === cursor) break;
-      }
-    } finally { restoreInFlight = false; }
-  }
+  const row = templates.value.find((item) => item.id === id);
   if (!row) {
     if (!id) openList(false);
     return;
@@ -234,11 +218,9 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     :columns="columns"
     :items="filteredTemplates"
     :busy="busy"
-    :loading-more="loadingMore"
     empty-title="No templates found"
     :empty-description="templates.length ? 'Try another name, status, category or language.' : 'Create an approved message to start conversations with your customers.'"
     @open="openTemplate"
-    @near-end="templateCursor && nextTemplates()"
   >
     <template #actions>
       <Button icon="refresh-cw" variant="ghost" aria-label="Refresh templates" :loading="busy" @click="refresh" />
@@ -255,7 +237,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <template #cell-category="{ item }">{{ item.category || "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
     <template #cell-message="{ item }"><span><span v-if="item.status === 'REJECTED'" class="template-row-reason">Rejected{{ rejection(item) ? ': ' + rejection(item) : '' }}</span>{{ templateBody(item) || "No message body" }}</span></template>
-    <template #empty-action><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
-    <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} loaded templates</span><Button v-if="templateCursor" label="Load more templates" :disabled="busy" :loading="loadingMore" @click="nextTemplates" /></template>
+    <template #empty-action><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
+    <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} templates</span></template>
   </FrappeListView>
 </template>
