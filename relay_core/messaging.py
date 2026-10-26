@@ -12,7 +12,7 @@ import json
 import re
 import frappe
 from relay_core.settings import value as connection_value
-from relay_core import whatsapp
+from relay_core import channels, whatsapp
 from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
 from relay_core.automation.service import internal_save, outgoing_run
@@ -172,11 +172,7 @@ def _prepare(source, channel, context, kind, data):
             if kind in ('audio','voice') and caption:raise ValueError('WhatsApp audio does not support captions')
             media_type='image' if kind=='photo' else 'audio' if kind=='voice' else kind
             mime=mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream'
-            allowed_mimes={'image':{'image/jpeg','image/png'},'video':{'video/mp4'},
-                'audio':{'audio/mpeg','audio/mp4','audio/ogg','audio/aac'},
-                'document':{'application/pdf','text/plain','application/msword','application/vnd.ms-excel','application/vnd.ms-powerpoint',
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.openxmlformats-officedocument.presentationml.presentation'}}
-            if mime not in allowed_mimes.get(media_type,set()):raise ValueError('Choose a supported WhatsApp attachment format')
+            if mime not in channels.channel('WhatsApp').features['media'][kind]:raise ValueError('Choose a supported WhatsApp attachment format')
             args={'operation':'messages.media','to':source.sender_endpoint,
                   'reply_to':text(context.get('message_id') or source.provider_id,300,required=True),
                   'media_type':media_type,'content_base64':base64.b64encode(raw).decode(),
