@@ -9,6 +9,8 @@ import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import { useViewRoute } from './useViewRoute'
 import { navAllowed } from './services/navigation'
+import MobileTabBar from './components/shell/MobileTabBar.vue'
+import { useMobileLayout } from './composables/useMobileLayout'
 
 const location = window.location
 const views = {
@@ -37,10 +39,13 @@ const view = useViewRoute(Object.keys(views), 'Messages')
 const capabilities = ref({ manage: false, configure: false, teams: false, billing: false, multi_team: false }), ready = ref(false)
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
-const menu = computed(() => {
-  const visible = navigation.filter(item => navAllowed(item, capabilities.value))
-  return ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.filter(item => (item.group || '') === group) })).filter(section => section.items.length)
-})
+const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))
+const menu = computed(() => ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.value.filter(item => (item.group || '') === group) })).filter(section => section.items.length))
+const isMobile = useMobileLayout(), moreOpen = ref(false)
+function openNavigation() {
+  if (isMobile.value) moreOpen.value = true
+  else mobile.value = true
+}
 const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
 const userTitle = computed(() => linkedTitle('User', user, 'Account'))
 provide('relayCapabilities', capabilities)
@@ -93,16 +98,22 @@ onErrorCaptured(e => {
         <div class="relay-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
-    <main class="workspace" :inert="mobile || undefined">
+    <main class="workspace" :inert="mobile || moreOpen || undefined">
       <header class="page-header v1-header">
-        <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="mobile = true" />
+        <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="openNavigation" />
         <h1>{{ current?.label }}</h1>
-        <div class="ml-auto flex items-center gap-2"><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
+        <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
       </header>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <p v-else-if="current && !navAllowed(current, capabilities)" class="p-4">Your role does not include this page.</p>
       <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events'].includes(view) ? { kind: view === 'Skills' ? 'skills' : 'business_events' } : {}" />
     </main>
+    <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :view="view" @navigate="view = $event">
+      <template #footer>
+        <a href="/desk/relay-core" class="mobile-sheet-item"><span class="mobile-sheet-icon"><FeatherIcon name="grid" :size="18" /></span><span>Frappe Desk</span></a>
+        <div class="relay-account mobile-sheet-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+      </template>
+    </MobileTabBar>
   </div>
 </template>

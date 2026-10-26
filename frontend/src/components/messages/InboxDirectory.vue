@@ -9,11 +9,12 @@ import { relativeTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
-import { mediumOptions } from '../../services/enabledChannels'
+import { mediumChips, mediumOptions } from '../../services/enabledChannels'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business'])
 const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
+const chips = computed(() => mediumChips(capabilities.value))
 const medium = ref(mediums.value[0]?.value || mediums.value[0]);
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
 const moreQueues = computed(() => [
@@ -49,13 +50,17 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
   <template v-else>
     <form class="directory-search inbox-filters" role="search" @submit.prevent="load()">
       <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
-      <FormControl v-if="mediums.length > 1" v-model="medium" type="select" aria-label="Channel" :options="mediums" />
+      <FormControl v-if="mediums.length > 1" v-model="medium" class="desktop-only" type="select" aria-label="Channel" :options="mediums" />
     </form>
+    <div class="inbox-channel-chips mobile-only" role="group" aria-label="Channel">
+      <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
+        <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
+    </div>
     <p v-if="mode === 'mine'" class="px-4 pb-3 text-xs text-ink-gray-5">Conversations assigned directly to you.</p>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry queue" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
       <LoadingRows v-if="loading && !rows.length" label="Loading conversations…" />
-      <button v-for="row in rows" :key="row.name" type="button" :aria-label="'Open conversation: ' + recordTitle(row, 'Contact')" class="directory-contact" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
+      <button v-for="row in rows" :key="row.name" type="button" :aria-label="'Open conversation: ' + recordTitle(row, 'Contact')" class="directory-contact" :class="{ 'is-unread': row.unread }" :aria-pressed="selected === row.name" :disabled="busy" @click="emit('select', row.name)">
         <span class="directory-avatar"><Avatar :label="recordTitle(row, 'Contact')" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
         <span class="directory-contact-copy">
           <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ relativeTime(row.latest_at) }}</time></span>

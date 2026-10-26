@@ -12,15 +12,16 @@ import { useEnabledChannels } from '../composables/useEnabledChannels'
 const channelEnabled = useEnabledChannels()
 const capabilities = inject('relayCapabilities')
 const props = defineProps({ contact: String, dismissible: Boolean })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'loaded'])
 const detail = ref(null), busy = ref(false), error = ref('')
 let generation = 0
+const isPrimary = link => detail.value?.primary?.doctype === link.doctype && detail.value?.primary?.name === link.name
 const desk = (doctype, name) => '/desk/' + doctype.toLowerCase().replaceAll(' ', '-') + '/' + encodeURIComponent(name)
 const conversation = link => '#/messages?' + new URLSearchParams({ business_doctype: link.doctype, business_name: link.name, contact: props.contact })
 async function load() {
   const ticket = ++generation
   detail.value = null; error.value = ''; busy.value = true
-  try { const data = await coreApi('api.contact_details', { contact: props.contact }); if (ticket === generation) detail.value = { ...data, endpoints: data.endpoints.filter(row => channelEnabled(row.provider)) } }
+  try { const data = await coreApi('api.contact_details', { contact: props.contact }); if (ticket === generation) { detail.value = { ...data, endpoints: data.endpoints.filter(row => channelEnabled(row.provider)) }; emit('loaded', detail.value) } }
   catch (e) { if (ticket === generation) error.value = e.message }
   finally { if (ticket === generation) busy.value = false }
 }
@@ -43,8 +44,8 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
       <p>{{ detail.phone || 'No phone number' }} <Badge :label="/^[0-9]{7,15}$/.test((detail.phone || '').replace(/[ +()\-]/g, '')) ? 'Phone format valid' : 'Country code and number required'" /></p>
       <a class="underline" :href="desk('Contact', detail.name)">Edit Contact and business links in Desk</a>
       <h4 class="font-medium">Permitted business links</h4>
-      <div v-for="link in detail.links" :key="link.doctype + link.name" class="flex flex-wrap gap-3">
-        <a class="underline" :href="desk(link.doctype, link.name)">{{ link.doctype }} · {{ linkedTitle(link.doctype, link.name) }}</a>
+      <div v-for="link in detail.links" :key="link.doctype + link.name" class="contact-link-row flex flex-wrap gap-3" :class="{ 'is-primary': isPrimary(link) }">
+        <a class="underline" :href="desk(link.doctype, link.name)">{{ link.doctype }} · {{ linkedTitle(link.doctype, link.name) }}</a><Badge v-if="isPrimary(link)" label="Primary" theme="blue" />
         <a class="underline" :href="conversation(link)">Open conversation</a>
       </div>
       <p v-if="!detail.links.length">No accessible, configured business links. Add a link in Contact and enable its business type in Settings.</p>
