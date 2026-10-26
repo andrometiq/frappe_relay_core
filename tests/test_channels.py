@@ -67,5 +67,23 @@ class AccountFlagTests(unittest.TestCase):
         self.assertEqual(channel('Telegram').get_features(), channel('Telegram').features)
 
 
+class WhatsAppSendFormatTests(unittest.TestCase):
+    def prepare(self, kind, file_name):
+        from frappe import _dict
+        from relay_core import messaging
+        source = _dict(name='source', sender_endpoint='919800000001', provider_id='wamid.1')
+        file = _dict(name='file', file_name=file_name)
+        with patch('relay_core.attachments.file_content', return_value=(file, b'bytes')):
+            return messaging._prepare(source, _dict(channel='WhatsApp'), {'provider': 'WhatsApp'}, kind, {'attachment': 'file'})
+
+    def test_send_accepts_only_the_declared_media_types(self):
+        tool, args, _content = self.prepare('voice', 'note.ogg')
+        self.assertEqual((tool, args['media_type'], args['mime_type']), ('whatsapp.execute', 'audio', 'audio/ogg'))
+        self.assertEqual(self.prepare('document', 'invoice.pdf')[1]['filename'], 'invoice.pdf')
+        for kind, file_name in (('photo', 'sticker.webp'), ('document', 'archive.zip')):
+            with self.assertRaisesRegex(ValueError, 'supported WhatsApp attachment format'):
+                self.prepare(kind, file_name)
+
+
 if __name__ == '__main__':
     unittest.main()
