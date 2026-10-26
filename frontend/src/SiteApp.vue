@@ -94,9 +94,14 @@ onErrorCaptured(e => {
 <template>
   <div class="app-shell relay-shell v1-shell" @keydown.esc="closeNavigation">
     <button v-if="mobile" class="relay-nav-backdrop" aria-label="Close navigation" @click="closeNavigation" />
+    <header class="page-header v1-header" :inert="mobile || moreOpen || undefined">
+      <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="openNavigation" />
+      <span class="relay-brand"><span class="relay-logo" aria-hidden="true"><FeatherIcon name="message-circle" /></span>Relay</span>
+      <h1>{{ current?.label }}</h1>
+      <div id="relay-titlebar-search" class="relay-titlebar-search" />
+      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
+    </header>
     <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }" aria-label="Relay navigation" @keydown="trapNavigation">
-      <div class="relay-brand"><FeatherIcon name="message-circle" class="h-5 w-5" /><strong>Relay</strong><Button class="mobile-only ml-auto" icon="x" aria-label="Close navigation" @click="closeNavigation" /></div>
-      <p class="relay-nav-caption">Communication workspace</p>
       <nav v-for="section in menu" :key="section.group" class="relay-nav-section" :aria-label="section.group || 'Workspace'">
         <p v-if="section.group" class="relay-nav-group" aria-hidden="true">{{ section.group }}</p>
         <template v-for="item in section.items" :key="item.name">
@@ -118,11 +123,7 @@ onErrorCaptured(e => {
       </div>
     </aside>
     <main class="workspace" :inert="mobile || moreOpen || undefined">
-      <header class="page-header v1-header">
-        <Button id="relay-menu" class="relay-mobile-menu" icon="menu" aria-label="Open navigation" :aria-expanded="mobile" @click="openNavigation" />
-        <h1>{{ current?.label }}</h1>
-        <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
-      </header>
+      <h1 v-if="view !== 'Messages'" class="workspace-title">{{ current?.label }}</h1>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <p v-else-if="current && !navAllowed(current, capabilities)" class="p-4">Your role does not include this page.</p>

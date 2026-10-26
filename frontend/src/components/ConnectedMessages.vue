@@ -82,7 +82,13 @@ const visibleRows = computed(() => {
   return all.filter(row => row.frappe_contact === activeBusinessContact.value ||
     (row.channel === target.channel && row.sender_endpoint === target.sender_endpoint));
 });
-const isMobile = useMobileLayout(), infoOpen = ref(false);
+const isMobile = useMobileLayout(), infoOpen = ref(false), organizeRequest = ref(0);
+const menuActions = computed(() => [
+  ...(conversationContact.value ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen.value = true}, {label:'Internal notes',disabled:busy.value,icon:'message-square',onClick:() => openNote()}, {label:'Cases',disabled:busy.value,icon:'briefcase',onClick:() => casesOpen.value = true}, {label:'Topics',disabled:busy.value,icon:'list',onClick:() => topicsOpen.value = true}] : []),
+  ...(frappeContact.value ? [{label:'Business context',icon:'info',onClick:() => contextOpen.value = !contextOpen.value}] : []),
+  ...(businessName.value ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen.value = !summaryOpen.value}] : []),
+  {label:'Search conversation',icon:'search',onClick:() => searchOpen.value = !searchOpen.value},
+]);
 const channelLine = computed(() => {
   if (!source.value) return "";
   const provider = objectValue(source.value.provider_context).provider || "";
@@ -238,7 +244,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
 
     <aside class="contact-directory">
       <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
-        @business="openBusiness" @select="openContact" />
+        @business="openBusiness" @select="openContact" @start="openStart()" />
     </aside>
 
     <Teleport v-if="isMobile && !active" to="#relay-header-actions" defer>
@@ -257,17 +263,19 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
             <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
             <span v-if="contactCount">{{ contactCount }}</span>
-            <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
+            <template v-if="!isMobile && !businessName && contactRecord?.primary">
+              <span class="conversation-record"><FeatherIcon name="file-text" :size="13" />{{ contactRecord.primary.title }}<small>· {{ contactRecord.primary.doctype }}</small></span>
+              <button type="button" class="conversation-linked" @click="contextOpen = !contextOpen">Linked records</button>
+            </template>
+            <span v-if="!isMobile && channelLine" class="conversation-channel">{{ channelLine }}</span>
           </div>
         </div>
         <div class="conversation-heading-actions">
-          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" />
-          <Dropdown :options="[
-            ...(conversationContact ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen = true}, {label:'Internal notes',disabled:busy,icon:'message-square',onClick:() => openNote()}, {label:'Cases',disabled:busy,icon:'briefcase',onClick:() => casesOpen = true}, {label:'Topics',disabled:busy,icon:'list',onClick:() => topicsOpen = true}] : []),
-            ...(frappeContact ? [{label:'Business context',icon:'info',onClick:() => contextOpen = !contextOpen}] : []),
-            ...(businessName ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen = !summaryOpen}] : []),
-            {label:'Search conversation',icon:'search',onClick:() => searchOpen = !searchOpen}
-          ]"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
+          <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
+          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :organize-request="organizeRequest">
+            <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Tickets and cases" :disabled="busy" @click="casesOpen = true" />
+          </ConversationTools>
+          <Dropdown v-else :options="menuActions"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
         </div>
       </header>
 
@@ -317,7 +325,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" @note="openNote()" @template="openStart(source?.frappe_contact || '')">
+      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" :recipient="recipientLabel" @note="openNote()" @template="openStart(source?.frappe_contact || '')">
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
@@ -335,8 +343,9 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
     </Transition>
 
     <Transition name="relay-page">
-      <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine"
-        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" @changed="loadProfile(selected)" />
+      <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :relay-contact="conversationContact" :primary="contactRecord?.primary" :channel="channelLine"
+        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())"
+        @assign="infoAction(() => organizeRequest++)" @changed="loadProfile(selected)" />
     </Transition>
   </section>
 </template>

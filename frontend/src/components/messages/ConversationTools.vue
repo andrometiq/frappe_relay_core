@@ -1,7 +1,7 @@
 <script setup>
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Button, Dialog, FormControl, ErrorMessage } from "@relay/ui";
+import { Button, Dialog, Dropdown, FormControl, ErrorMessage } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import { useConversationPresence } from "../../composables/useConversationPresence";
 import { useTask } from "../../composables/useTask";
@@ -11,6 +11,8 @@ const props = defineProps({
   lastMessage: String,
   lastVisible: String,
   visibleMessages: Array,
+  actions: Array,
+  organizeRequest: Number,
 });
 const { busy, error, notice, run } = useTask(),
   state = ref({}),
@@ -27,6 +29,13 @@ function receiveState(value) {
   state.value = value;
 }
 const { people } = useConversationPresence(props, receiveState);
+const menu = computed(() => [
+  { label: state.value.starred ? "Unstar conversation" : "Star conversation", icon: state.value.starred ? "star" : "bookmark", disabled: busy.value,
+    onClick: () => run(() => update({ starred: state.value.starred ? 0 : 1 })) },
+  { label: "Mark read", icon: "check", disabled: busy.value || !props.lastMessage, onClick: () => run(() => update({ last_read: props.lastMessage })) },
+  ...(props.actions || []),
+]);
+watch(() => props.organizeRequest, () => { expanded.value = true; });
 let generation = 0, contactGeneration = 0;
 async function load(current = ++generation) {
   const result = await coreApi("inbox.read", { contact: props.contact });
@@ -105,27 +114,10 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
 </script>
 <template>
   <div class="conversation-tools">
-    <div class="flex flex-wrap items-center gap-2">
-      <Button
-        :aria-label="state.starred ? 'Unstar conversation' : 'Star conversation'"
-        :title="state.starred ? 'Unstar conversation' : 'Star conversation'"
-        :icon="state.starred ? 'star' : 'bookmark'"
-        :disabled="busy"
-        @click="run(() => update({ starred: state.starred ? 0 : 1 }))"
-      /><Button
-        icon="check" aria-label="Mark read" title="Mark read"
-        :disabled="busy || !lastMessage"
-        @click="run(() => update({ last_read: lastMessage }))"
-      /><span class="conversation-unread text-xs text-ink-gray-5"
-        >{{ state.unread || 0 }}{{ state.unread_more ? "+" : "" }} unread</span
-      ><Button
-        icon="sidebar" aria-label="Organize conversation" title="Organize conversation"
-        :disabled="busy"
-        @click="
-          expanded = !expanded;
-          
-        "
-      />
+    <div class="conversation-tool-buttons">
+      <Button class="conversation-assign" icon="user" label="Assign" title="Assign and organize" :disabled="busy" @click="expanded = true" />
+      <slot />
+      <Dropdown :options="menu"><Button icon="more-horizontal" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
     </div>
     <Dialog v-model="expanded" :options="{title:'Organize conversation'}">
     <p v-if="people.length" class="text-xs text-ink-gray-5">

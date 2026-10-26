@@ -12,8 +12,10 @@ import BusinessDirectory from './BusinessDirectory.vue'
 import { defaultMedium, mediumChips, mediumOptions } from '../../services/enabledChannels'
 import { countLabel } from '../../services/queueCounts'
 import { useQueueCounts } from '../../composables/useQueueCounts'
+import { useMobileLayout } from '../../composables/useMobileLayout'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
-const emit = defineEmits(['select', 'business'])
+const emit = defineEmits(['select', 'business', 'start'])
+const isMobile = useMobileLayout()
 const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
 const chips = computed(() => mediumChips(capabilities.value))
@@ -45,20 +47,27 @@ onMounted(() => load())
 useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'], () => load())
 </script>
 <template>
+  <header class="inbox-list-head">
+    <h2>Inbox</h2>
+    <Dropdown :options="moreQueues"><Button icon="filter" variant="ghost" :aria-pressed="mode === 'business'" aria-label="More inbox views" title="More inbox views" /></Dropdown>
+    <Button variant="solid" icon="plus" aria-label="New conversation" title="New conversation" @click="emit('start')" />
+  </header>
+  <form v-if="mode !== 'business'" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
+    <Teleport to="#relay-titlebar-search" :disabled="isMobile" defer>
+      <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
+    </Teleport>
+  </form>
+  <div v-if="mode !== 'business'" class="inbox-channel-chips" role="group" aria-label="Channel">
+    <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
+      <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
+  </div>
   <nav class="v1-queues" aria-label="Inbox queues">
-    <button v-for="[value, label] in [['all','All'],['mine','Mine'],['unread','Unread'],['unassigned','Unassigned']]" :key="value" :aria-pressed="mode === value"
+    <button v-for="[value, label] in [['mine','Mine'],['unassigned','Unassigned'],['all','All'],['unread','Unread']]" :key="value" :aria-pressed="mode === value"
       :aria-label="countLabel(counts[value]) ? `${label}, ${counts[value]} conversations` : label" @click="mode = value">{{ label }}<span v-if="countLabel(counts[value])" class="queue-count" aria-hidden="true">{{ countLabel(counts[value]) }}</span></button>
-    <Dropdown :options="moreQueues"><Button label="More" icon-right="chevron-down" :aria-pressed="mode === 'business'" aria-label="More inbox views" /></Dropdown>
+    <Dropdown v-if="isMobile" :options="moreQueues"><Button label="More" icon-right="chevron-down" :aria-pressed="mode === 'business'" aria-label="More inbox views" /></Dropdown>
   </nav>
   <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
   <template v-else>
-    <form class="directory-search inbox-filters" role="search" @submit.prevent="load()">
-      <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
-    </form>
-    <div class="inbox-channel-chips" role="group" aria-label="Channel">
-      <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
-        <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
-    </div>
     <p v-if="mode === 'mine'" class="px-4 pb-3 text-xs text-ink-gray-5">Conversations assigned directly to you.</p>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry queue" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
