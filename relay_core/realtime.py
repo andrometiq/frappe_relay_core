@@ -38,7 +38,13 @@ def changed(doc, method=None):
         business_changed(doc.business_doctype,doc.business_name,kind)
 
 
+COUNTED_KINDS = frozenset({'messages', 'reads', 'contacts', 'permissions'})
+
+
 def contact_changed(contact, kind='messages'):
+    if kind in COUNTED_KINDS:
+        from relay_core.queue_counts import invalidate
+        invalidate()
     frappe.publish_realtime('relay_changed', {'kind': kind},
         doctype='Relay Contact', docname=contact, after_commit=True)
 
