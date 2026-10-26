@@ -11,11 +11,15 @@ def relay_contact(person_name):
 
 
 def on_update(person, method=None):
-    """A number or email removed from the Contact stops routing at once.
+    """A number or email removed from the Contact stops routing at once, and a removed
+    primary business link is cleared.
 
     A Relay manager's edit carries the verification to the replacement value."""
     previous = person.get_doc_before_save()
     relay = relay_contact(person.name)
+    if relay:
+        from relay_core.business_access import drop_stale_primary
+        drop_stale_primary(relay)
     if not previous or not relay:
         return
     before, after = contact_identities(previous), contact_identities(person)

@@ -58,7 +58,7 @@ const activeBusinessContact = ref("");
 let contactRequest = 0;
 
 const active = computed(() => selected.value || businessName.value);
-const title = computed(() => (businessContext.value?.title ? recordTitle(businessContext.value) : '') || (businessName.value ? linkedTitle(businessType.value, businessName.value) : recordTitle(contactRecord.value, 'Conversation')));
+const title = computed(() => (businessContext.value?.title ? recordTitle(businessContext.value) : '') || (businessName.value ? linkedTitle(businessType.value, businessName.value) : recordTitle(contactRecord.value?.primary || contactRecord.value, 'Conversation')));
 const groupLabel = computed(() => businessContext.value?.grouping_value || "");
 const contactCount = computed(() => {
   const count = businessContext.value?.contact_count;

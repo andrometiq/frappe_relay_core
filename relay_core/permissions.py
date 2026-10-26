@@ -144,8 +144,8 @@ def contact_permission(doc, user=None, permission_type=None):
 
 
 def message_permission(doc, user=None, permission_type=None):
-    from relay_core.business_access import allowed
-    return assignment_allowed(doc.relay_contact, user) and allowed(doc,user)
+    from relay_core.business_access import message_allowed
+    return assignment_allowed(doc.relay_contact, user) and message_allowed(doc,user)
 
 
 def assignment_condition(user=None, *, message=False):
@@ -185,9 +185,9 @@ def contact_query(user=None):
                     AND l.parenttype='Contact' AND l.parentfield='links' AND ({scope}))"""
 
 def message_query(user=None):
-    from relay_core.business_access import query_condition
+    from relay_core.business_access import message_condition
     assignment=assignment_condition(user,message=True)
-    business=query_condition(user)
+    business=message_condition(user)
     return '('+assignment+') AND '+business if assignment else business
 
 
