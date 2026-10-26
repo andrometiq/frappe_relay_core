@@ -1,7 +1,8 @@
-"""Streaming recipient sheets and WhatsApp template parameters for bulk campaigns."""
+"""Streaming recipient sheets, WhatsApp template parameters and text or media messages for bulk campaigns."""
 import csv
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+from relay_core.channels import channel
 from relay_core.identity import phone_number
 
 PHONE_COLUMNS = ('phone', 'mobile', 'mobile no', 'mobile number', 'phone number', 'whatsapp', 'number')
@@ -10,6 +11,8 @@ COMPONENTS = ('HEADER', 'BODY', 'FOOTER', 'BUTTONS')
 BUTTONS = ('QUICK_REPLY', 'URL', 'PHONE_NUMBER', 'COPY_CODE')
 MAX_ROWS = 100000
 MAX_VALUE = 1024
+MESSAGE_MEDIA = {'photo': 'image', 'video': 'video', 'document': 'document'}  # Registry kind -> Meta media type.
+PLACEHOLDER = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 
 
 def template_fields(template):
@@ -210,3 +213,66 @@ def prepare_row(row, mapping, fields, region):
         values[field['key']] = value
     extra = {column: row.get(column, '')[:MAX_VALUE] for column in mapping.get('extra', [])}
     return destination, {'values': values, **({'extra': extra} if extra else {})}, None
+
+
+def message_fields(message):
+    """Sheet values a text or media message uses: each {{column}} placeholder, then the media link."""
+    fields = [{'key': 'text:' + column, 'label': column, 'component': 'text', 'name': column}
+              for column in dict.fromkeys(PLACEHOLDER.findall(message.get('body') or message.get('caption') or ''))]
+    if message['kind'] in MESSAGE_MEDIA:
+        fields.append({'key': 'media_url', 'label': message['kind'].capitalize() + ' link', 'component': 'media',
+                       'media': MESSAGE_MEDIA[message['kind']]})
+    return fields
+
+
+def check_message(message):
+    """Normalised text or media message. Raises ValueError with the reason."""
+    features = channel('WhatsApp').features
+    kind = message.get('kind') if isinstance(message, dict) else None
+    if kind == 'text':
+        body = str(message.get('body') or '').strip()
+        if not body or len(body) > features['max_text_length']:
+            raise ValueError(f"Write a message of 1-{features['max_text_length']} characters")
+        return {'kind': kind, 'body': body}
+    if kind not in MESSAGE_MEDIA or kind not in features['media']:
+        raise ValueError('Choose text, photo, video or document')
+    caption = str(message.get('caption') or '').strip()
+    if len(caption) > features['max_caption_length']:
+        raise ValueError(f"A caption holds at most {features['max_caption_length']} characters")
+    return {'kind': kind, 'caption': caption}
+
+
+def accepted_types(kind):
+    return channel('WhatsApp').features['media'][kind] if kind in MESSAGE_MEDIA else ()
+
+
+def fill(text, values):
+    return PLACEHOLDER.sub(lambda match: values.get('text:' + match.group(1), ''), text)
+
+
+def message_problem(message, values):
+    """Reason a filled row cannot be sent, else None."""
+    features = channel('WhatsApp').features
+    if message['kind'] == 'text' and len(fill(message['body'], values)) > features['max_text_length']:
+        return 'Message is too long'
+    if len(fill(message.get('caption') or '', values)) > features['max_caption_length']:
+        return 'Caption is too long'
+    return None
+
+
+def build_message(message, values):
+    """Hub messages.send or messages.media arguments for one row, without the recipient."""
+    if message['kind'] == 'text':
+        return {'operation': 'messages.send', 'body': fill(message['body'], values)}
+    payload = {'operation': 'messages.media', 'media_type': MESSAGE_MEDIA[message['kind']], 'media_url': values['media_url']}
+    caption = fill(message['caption'], values)
+    if caption:
+        payload['caption'] = caption
+    if message['kind'] == 'document':
+        payload['filename'] = file_name(values['media_url'])
+    return payload
+
+
+def file_name(url):
+    name = re.sub(r'[\\/\r\n]', '', unquote(urlsplit(url).path.rsplit('/', 1)[-1]))
+    return name[:255] or 'document'

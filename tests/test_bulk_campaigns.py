@@ -632,7 +632,7 @@ class TimelineTests(unittest.TestCase):
                         {'type': 'BUTTONS', 'buttons': [{'type': 'QUICK_REPLY', 'text': 'Stop'}]}])
         components = [{'type': 'header', 'parameters': [{'type': 'text', 'text': 'Asha'}]},
                       {'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha'}, {'type': 'text', 'text': 'Ten'}]}]
-        rows = [_dict(request_key=f'bulk-k-{i}', destination=f'91987654321{i}', components=components) for i in range(3)]
+        rows = [_dict(request_key=f'bulk-k-{i}', destination=f'91987654321{i}', message={'components': components}) for i in range(3)]
         db = Mock()
         fake = SimpleNamespace(db=db, session=_dict(user='manager@example.invalid'), _dict=_dict, publish_realtime=Mock(),
                                get_all=Mock(return_value=[]),

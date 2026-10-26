@@ -69,7 +69,7 @@
       "label": "Operation",
       "fieldtype": "Select",
       "read_only": 1,
-      "options": "messages.send\ntemplates.send\ntelegram.send\nemail.send"
+      "options": "messages.send\nmessages.media\ntemplates.send\ntelegram.send\nemail.send"
     },
     {
       "fieldname": "arguments",
@@ -235,5 +235,5 @@
   ],
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-25 22:00:00.000000"
+  "modified": "2026-10-26 12:00:00.000000"
 }

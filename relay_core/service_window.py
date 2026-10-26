@@ -5,19 +5,34 @@ Reference: https://business.whatsapp.com/policy (24 September 2026).
 import frappe
 from relay_core.timeline import page_query
 
+HOURS = 24
+
+
+def expires_at(row):
+    stamp=frappe.utils.get_datetime(row.sent_at or row.creation)
+    # A future provider clock cannot extend the local reply window.
+    stamp=min(stamp,frappe.utils.get_datetime(row.creation))
+    return frappe.utils.add_to_date(stamp,hours=HOURS)
+
 
 def status(contact, channel, endpoint=None):
     filters={'relay_contact':contact,'channel':channel,'direction':'Incoming','legacy_source':['is','not set']}
     if endpoint:filters['sender_endpoint']=endpoint
     rows=page_query(['name','sent_at','creation'],filters,1).run(as_dict=True)
-    expires=None
-    if rows:
-        stamp=frappe.utils.get_datetime(rows[0].sent_at or rows[0].creation)
-        # A future provider clock cannot extend the local reply window.
-        stamp=min(stamp,frappe.utils.get_datetime(rows[0].creation))
-        expires=frappe.utils.add_to_date(stamp,hours=24)
+    expires=expires_at(rows[0]) if rows else None
     remaining=max(0,(expires-frappe.utils.now_datetime()).total_seconds()) if expires else 0
     return {'open':remaining>0,'expires_at':expires,'remaining_seconds':remaining}
+
+
+def open_numbers(channel, numbers):
+    """Numbers among these with an open reply window on the channel, by the same rule as status."""
+    if not numbers:
+        return set()
+    now=frappe.utils.now_datetime()
+    rows=frappe.get_all('Relay Message',filters={'channel':channel,'direction':'Incoming','legacy_source':['is','not set'],
+        'sender_endpoint':['in',list(numbers)],'creation':['>',frappe.utils.add_to_date(now,hours=-HOURS)]},
+        fields=['sender_endpoint','sent_at','creation'],limit_page_length=0)
+    return {row.sender_endpoint for row in rows if expires_at(row)>now}
 
 
 def require_open(contact, channel, endpoint=None):

@@ -1,10 +1,11 @@
-"""WhatsApp template campaigns from an uploaded sheet, pushed to Hub 50 rows at a time."""
+"""WhatsApp template, text and media campaigns from an uploaded sheet, pushed to Hub 50 rows at a time."""
 import hashlib
 import json
+import mimetypes
 import time
 import frappe
 from redis.exceptions import LockError
-from relay_core import bulk_sheet, whatsapp
+from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
 from relay_core.identity import default_region
@@ -27,12 +28,16 @@ CANCEL_AFTER = 'relay-bulk-cancel-after:'
 NOT_QUEUED = 'queued delivery could not be cancelled'  # Hub already sends it; its update has the outcome.
 CANCEL_REFUSED = ('Hub refused to cancel queued messages, so they may still be sent. Issue a Hub auth key with the '
                   'deliveries:cancel scope and save it in Relay Settings; Relay retries by itself. ')
+OPERATIONS = ('templates.send', 'messages.send', 'messages.media')
+OUTSIDE_WINDOW = 'Outside the 24-hour reply window'
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 
 
 def is_bulk(doc):
-    return doc.operation == 'templates.send' and bool(doc.template_name)
+    if doc.operation == 'templates.send':
+        return bool(doc.template_name)
+    return doc.operation in OPERATIONS and bool(doc.arguments) and 'message' in json.loads(doc.arguments)
 
 
 def bulk(name, statuses=None):
@@ -40,7 +45,7 @@ def bulk(name, statuses=None):
     doc = frappe.get_doc('Relay Campaign', name)
     doc.check_permission('read')
     if not is_bulk(doc):
-        frappe.throw('This is not a WhatsApp template campaign')
+        frappe.throw('This is not a WhatsApp bulk campaign')
     if statuses and doc.status not in statuses:
         frappe.throw(f'Campaign is {doc.status}')
     return doc
@@ -79,7 +84,8 @@ def template_snapshot(template):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(title, template_name, language, channel=None, reply_window_hours=72):
+def create(title, template_name=None, language=None, channel=None, reply_window_hours=72, message=None):
+    """A Draft campaign that sends an approved template, or with message a text or media message."""
     require_access(manage=True)
     title = (title or '').strip() if isinstance(title, str) else ''
     if not 3 <= len(title) <= 100 or any(c in title for c in '/\\%#?<>'):
@@ -91,13 +97,17 @@ def create(title, template_name, language, channel=None, reply_window_hours=72):
         frappe.throw('A campaign with this title already exists')
     target = whatsapp_channel(channel)
     try:
-        hub, _ = whatsapp.checked_client()
-        snapshot = template_snapshot(approved_template(hub, template_name, language))
+        if message:
+            operation, snapshot = campaign_message(frappe.parse_json(message))
+            template_name = language = None
+        else:
+            hub, _ = whatsapp.checked_client()
+            operation, snapshot = 'templates.send', template_snapshot(approved_template(hub, template_name, language))
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
     except ValueError as exc:
         frappe.throw(str(exc))
-    doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation='templates.send',
+    doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation=operation,
         template_name=template_name, language=language, arguments=canonical(snapshot),
         status='Draft', account=connection_value('relay_hub_account'), country=default_region(),
         reply_window_hours=hours, request_key='bulk-' + hashlib.sha256(title.encode()).hexdigest()[:40]))
@@ -105,15 +115,36 @@ def create(title, template_name, language, channel=None, reply_window_hours=72):
     return read(doc.name)
 
 
-def source_path(file_url):
-    if not isinstance(file_url, str) or not file_url.lower().endswith(('.xlsx', '.csv')):
-        frappe.throw('Upload a .xlsx or .csv file')
+def campaign_message(message):
+    """Operation and snapshot of a text or media campaign."""
+    message = bulk_sheet.check_message(message)
+    operation = 'messages.send' if message['kind'] == 'text' else 'messages.media'
+    return operation, {'message': message, 'fields': bulk_sheet.message_fields(message)}
+
+
+@frappe.whitelist(methods=['POST'])
+def media_link(name, file_url):
+    """Public link of one uploaded file that every row of a media campaign sends."""
+    kind = json.loads(bulk(name, ('Draft',)).arguments).get('message', {}).get('kind')
+    file = uploaded_file(file_url)
+    if file.is_private or mimetypes.guess_type(file.file_name or '')[0] not in bulk_sheet.accepted_types(kind):
+        frappe.throw(f'Upload a public {kind or "media"} file in a format WhatsApp accepts')
+    return {'url': frappe.utils.get_url(file.file_url), 'file_name': file.file_name}
+
+
+def uploaded_file(file_url):
     name = frappe.db.get_value('File', {'file_url': file_url}, 'name')
     if not name:
         frappe.throw('Uploaded file not found')
     file = frappe.get_doc('File', name)
     file.check_permission('read')
-    return file.get_full_path()
+    return file
+
+
+def source_path(file_url):
+    if not isinstance(file_url, str) or not file_url.lower().endswith(('.xlsx', '.csv')):
+        frappe.throw('Upload a .xlsx or .csv file')
+    return uploaded_file(file_url).get_full_path()
 
 
 @frappe.whitelist(methods=['POST'])
@@ -162,11 +193,14 @@ def import_job(name):
     if doc.status != 'Importing':
         return
     remove_unsent(name)
-    mapping, fields = json.loads(doc.column_map), json.loads(doc.arguments)['fields']
+    snapshot, mapping = json.loads(doc.arguments), json.loads(doc.column_map)
+    fields, message = snapshot['fields'], snapshot.get('message')
     seen, chunk = set(), []
     try:
         for number, row in bulk_sheet.read_rows(source_path(doc.source_file)):
             destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country)
+            if not problem and message:
+                problem = bulk_sheet.message_problem(message, values['values'])
             if not problem and destination in seen:
                 problem = 'Duplicate number'
             seen.add(destination)
@@ -257,11 +291,23 @@ def read(name, after=None, status=None):
                           'error_code', 'replied_at'], order_by='sheet_row asc', limit_page_length=51)
     issues = frappe.db.sql(f'''SELECT reason, count(*) AS count FROM `tab{RECIPIENT}` WHERE campaign=%s
         AND status IN ('Skipped','Failed') AND reason!='' GROUP BY reason ORDER BY count DESC LIMIT 10''', name, as_dict=True)
-    return {**{key: doc.get(key) for key in ('name', 'title', 'channel', 'status', 'template_name', 'language',
+    snapshot = json.loads(doc.arguments)
+    return {**{key: doc.get(key) for key in ('name', 'title', 'channel', 'status', 'operation', 'template_name', 'language',
                'source_file', 'country', 'reply_window_hours', 'started_at', 'finished_at', 'last_error')},
-            'mapping': json.loads(doc.column_map) if doc.column_map else None,
-            'fields': json.loads(doc.arguments)['fields'], 'counts': counts(doc), 'issues': issues,
+            'mapping': json.loads(doc.column_map) if doc.column_map else None, 'message': snapshot.get('message'),
+            'fields': snapshot['fields'], 'counts': counts(doc), 'issues': issues,
             'recipients': rows[:50], 'next': rows[49].sheet_row if len(rows) > 50 else None}
+
+
+@frappe.whitelist(methods=['GET'])
+def window(name):
+    """Pending numbers that can receive text or media now; the rest fail at send time without a Hub call."""
+    doc = bulk(name)
+    numbers = frappe.get_all(RECIPIENT, filters={'campaign': name, 'status': 'Pending'}, pluck='destination',
+                             limit_page_length=0)
+    reachable = sum(len(service_window.open_numbers(doc.channel, numbers[start:start + CHUNK]))
+                    for start in range(0, len(numbers), CHUNK))
+    return {'open': reachable, 'closed': len(numbers) - reachable}
 
 
 def counts(doc):
@@ -301,7 +347,8 @@ def check_ready(doc):
         frappe.throw('Import recipients with at least one valid row first')
     try:
         hub, _ = whatsapp.checked_client()
-        approved_template(hub, doc.template_name, doc.language)
+        if doc.operation == 'templates.send':
+            approved_template(hub, doc.template_name, doc.language)
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
 
@@ -367,11 +414,13 @@ def push(doc, deadline):
             WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
             return False
+        if 'message' in snapshot:
+            rows = within_window(doc, rows)
+            if not rows:
+                continue
         for row in rows:
-            row.components = bulk_sheet.build_components(snapshot['fields'], json.loads(row.arguments)['values'])
-        messages = [{'key': row.request_key, 'message': {'operation': 'templates.send', 'to': row.destination,
-                     'name': doc.template_name, 'language': doc.language, 'components': row.components}}
-                    for row in rows]
+            row.message = hub_message(doc, snapshot, row)
+        messages = [{'key': row.request_key, 'message': row.message} for row in rows]
         # Attempted before Hub sends: a reply can arrive before this batch's admission commits.
         frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET attempted=1 WHERE name IN %s", (tuple(row.name for row in rows),))
         frappe.db.commit()
@@ -394,6 +443,27 @@ def push(doc, deadline):
             rate = frappe.utils.cint(result.get('messages_per_second')) or DEFAULT_RATE
             wait(doc.name, (queued - LOW_WATER) / rate)
     return True
+
+
+def hub_message(doc, snapshot, row):
+    values = json.loads(row.arguments)['values']
+    if 'message' in snapshot:
+        return {**bulk_sheet.build_message(snapshot['message'], values), 'to': row.destination}
+    return {'operation': 'templates.send', 'to': row.destination, 'name': doc.template_name, 'language': doc.language,
+            'components': bulk_sheet.build_components(snapshot['fields'], values)}
+
+
+def within_window(doc, rows):
+    """Meta delivers text and media only inside the reply window; other rows fail here without a Hub call."""
+    reachable = service_window.open_numbers(doc.channel, [row.destination for row in rows])
+    closed = tuple(row.name for row in rows if row.destination not in reachable)
+    if closed:
+        frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Failed', reason=%s, modified=NOW(6)
+            WHERE name IN %s AND status='Pending' ''', (OUTSIDE_WINDOW, closed))
+        frappe.db.commit()
+        from relay_core.bulk_updates import changed
+        changed(doc.name)
+    return [row for row in rows if row.destination in reachable]
 
 
 def clear_error(doc):
@@ -471,9 +541,11 @@ def finish_cancel(doc):
 
 
 def recover():
-    for row in frappe.get_all('Relay Campaign', filters={'operation': 'templates.send', 'template_name': ['is', 'set'],
-                              'status': ['in', ['Importing', 'Running', 'Cancelling']]}, fields=['name', 'status'],
+    for row in frappe.get_all('Relay Campaign', filters={'operation': ['in', OPERATIONS],
+                              'status': ['in', ['Importing', 'Running', 'Cancelling']]},
+                              fields=['name', 'status', 'operation', 'template_name', 'arguments'],
                               order_by='modified asc', limit_page_length=20):
-        enqueue('import_job' if row.status == 'Importing' else 'send_job', row.name)
+        if is_bulk(row):
+            enqueue('import_job' if row.status == 'Importing' else 'send_job', row.name)
     from relay_core.bulk_updates import recover as publish_marked
     publish_marked()
