@@ -183,7 +183,7 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
   }
   for (const width of [320, 390, 640, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
-    for (const [route, text] of [['messages','Inbox'], ['contacts','Contacts & links'], ['whatsapp','WhatsApp'], ['teams','Teams & access'], ['settings','Settings & setup'], ['activity','Activity & health']]) {
+    for (const [route, text] of [['messages','Inbox'], ['contacts','Contacts & Links'], ['whatsapp','WhatsApp'], ['teams','Teams & Access'], ['settings','Settings & Setup'], ['activity','Activity & Health']]) {
       await page.goto(origin + '/#/' + route)
       await page.getByRole('heading', { name: text, exact: true }).first().waitFor()
       await page.waitForTimeout(160)
@@ -193,7 +193,7 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
   }
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'Open navigation', exact: true }).click()
-  await page.getByRole('button', { name: 'Settings & setup', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings & Setup', exact: true }).click()
   await page.getByRole('heading', { name: 'Setup checklist' }).waitFor()
   await page.goto(origin + '/#/whatsapp')
   await page.getByText('order_update', { exact: true }).waitFor()
