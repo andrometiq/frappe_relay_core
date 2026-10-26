@@ -12,7 +12,8 @@
     "ai_handoff_owner",
     "transcription_provider",
     "send_whatsapp_read_receipts",
-    "send_whatsapp_typing"
+    "send_whatsapp_typing",
+    "whatsapp_margin_percent"
   ],
   "fields": [
     {
@@ -62,6 +63,13 @@
       "fieldtype": "Check",
       "default": "1",
       "description": "While an operator types a reply, the customer sees a typing indicator. WhatsApp also marks their newest message as read."
+    },
+    {
+      "fieldname": "whatsapp_margin_percent",
+      "label": "WhatsApp margin percent",
+      "fieldtype": "Percent",
+      "default": "30",
+      "description": "Added on top of Meta's WhatsApp charges on the Billing page. Only a System Manager can change it."
     }
   ],
   "permissions": [
@@ -72,5 +80,5 @@
       "create": 1
     }
   ],
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-26 21:00:00.000000"
 }
