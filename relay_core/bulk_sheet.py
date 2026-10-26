@@ -134,15 +134,26 @@ def columns(path, sample=5):
 
 
 def suggest(header, fields):
+    """Phone column by name; named values by their column name; positional template values take the
+    remaining columns left to right."""
     by_name = {column.lower(): column for column in header}
     mapping = {'phone': next((by_name[c] for c in PHONE_COLUMNS if c in by_name), ''), 'fields': {}, 'fixed': {}}
+    positional = [field for field in fields if is_positional(field)]
     for field in fields:
-        guess = field['key'].split(':')[-1].lower() if field['key'] != 'header_media' else 'image'
+        if field in positional:
+            continue
+        guess = (field.get('name') or field['key'].split(':')[-1]).lower() if field['key'] != 'header_media' else 'image'
         for candidate in (guess, field['label'].lower(), 'image url', 'media url', 'url'):
             if candidate in by_name:
                 mapping['fields'][field['key']] = by_name[candidate]
                 break
+    used = {mapping['phone'], *mapping['fields'].values()}
+    mapping['fields'].update(zip((field['key'] for field in positional), (c for c in header if c not in used)))
     return mapping
+
+
+def is_positional(field):
+    return field['component'] in ('header', 'body') and not field.get('media') and not field.get('name')
 
 
 def check_mapping(mapping, header, fields):

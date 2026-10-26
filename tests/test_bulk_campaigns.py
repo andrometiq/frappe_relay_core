@@ -125,6 +125,24 @@ class SheetTests(unittest.TestCase):
         self.assertIn('HTTPS', bulk_sheet.prepare_row(dict(row, Image='ftp://x/a.jpg'), mapping, fields, 'IN')[2])
 
 
+class MappingTests(unittest.TestCase):
+    def test_positional_values_take_the_columns_after_the_phone_column_in_order(self):
+        header = ['Name', 'Mobile', 'Offer', 'City']
+        mapping = bulk_sheet.suggest(header, bulk_sheet.template_fields(POSITIONAL))
+        self.assertEqual(mapping['phone'], 'Mobile')
+        self.assertEqual(mapping['fields'], {'header:1': 'Name', 'body:1': 'Offer', 'body:2': 'City'})
+
+    def test_positional_values_skip_columns_named_for_other_values(self):
+        template = dict(POSITIONAL, components=[{'type': 'HEADER', 'format': 'IMAGE'}, {'type': 'BODY', 'text': '{{1}} {{2}}'}])
+        mapping = bulk_sheet.suggest(['Mobile', 'Image', 'Name', 'Offer'], bulk_sheet.template_fields(template))
+        self.assertEqual(mapping['fields'], {'header_media': 'Image', 'body:1': 'Name', 'body:2': 'Offer'})
+
+    def test_named_values_match_columns_with_the_same_name(self):
+        mapping = bulk_sheet.suggest(['Discount', 'phone', 'customer_name', 'Picture'], bulk_sheet.template_fields(NAMED))
+        self.assertEqual(mapping['phone'], 'phone')
+        self.assertEqual(mapping['fields'], {'body:customer_name': 'customer_name', 'body:discount': 'Discount'})
+
+
 class UpdateContractTests(unittest.TestCase):
     secret = 's' * 64
     row = {'id': 1, 'key': 'bulk-abc-2', 'state': 'submitted', 'message_id': 'wamid.one', 'status': 'delivered',
