@@ -151,6 +151,13 @@ def typing(doctype,name,contact,active=1,message=None):
     else:
         frappe.cache.delete_value(key)
     changed(doctype,name,'presence')
+    if message and str(active) in ('1','True'):
+        from relay_core import whatsapp_presence
+        from relay_core.messaging import readable_source
+        try:
+            _,channel,context=readable_source(message)
+            if whatsapp_presence.direct_channel(channel,context):whatsapp_presence.typing(contact,channel.name)
+        except Exception:frappe.log_error('WhatsApp typing indicator was not queued')
     return {'ok':True}
 
 

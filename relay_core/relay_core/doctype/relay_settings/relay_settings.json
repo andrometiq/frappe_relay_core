@@ -10,7 +10,9 @@
     "hub_token",
     "callback_secret",
     "ai_handoff_owner",
-    "transcription_provider"
+    "transcription_provider",
+    "send_whatsapp_read_receipts",
+    "send_whatsapp_typing"
   ],
   "fields": [
     {
@@ -46,6 +48,20 @@
       "fieldtype": "Link",
       "options": "Relay AI Provider",
       "description": "Transcribes received voice notes in the background. Requires an enabled OpenAI provider with a transcription model."
+    },
+    {
+      "fieldname": "send_whatsapp_read_receipts",
+      "label": "Send WhatsApp read receipts",
+      "fieldtype": "Check",
+      "default": "1",
+      "description": "When an operator reads a one-to-one WhatsApp chat, the customer sees blue ticks on the newest message."
+    },
+    {
+      "fieldname": "send_whatsapp_typing",
+      "label": "Show WhatsApp typing indicator",
+      "fieldtype": "Check",
+      "default": "1",
+      "description": "While an operator types a reply, the customer sees a typing indicator. WhatsApp also marks their newest message as read."
     }
   ],
   "permissions": [
@@ -56,5 +72,5 @@
       "create": 1
     }
   ],
-  "modified": "2026-10-25 23:30:00.000000"
+  "modified": "2026-10-26 12:00:00.000000"
 }
