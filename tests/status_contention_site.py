@@ -112,7 +112,7 @@ def verify_recovery(tag, channel, endpoint, work):
         return doc
 
     # Exclude installed workers while checking the pending/ack transaction.
-    lock = queue._lock_name()
+    lock = queue.AUTOMATION.lock_name
     assert frappe.db.sql('select get_lock(%s, 0)', (lock,))[0][0]
     try:
         with patch.object(inbound, 'insert_event', side_effect=fail_after_insert), \

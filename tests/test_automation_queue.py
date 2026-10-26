@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 from frappe import _dict
 from relay_core.automation import queue
@@ -99,8 +99,9 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_expired_jobs_cannot_release_a_successors_signal(self):
         rq = Mock()
-        with patch.object(queue, 'get_queue', return_value=rq), patch.object(queue, '_signal_key', return_value='key'):
-            queue._release_signal('old-token')
+        with patch.object(queue, 'get_queue', return_value=rq), \
+                patch.object(queue.Drain, 'signal_key', new_callable=PropertyMock, return_value='key'):
+            queue.AUTOMATION.release_signal('old-token')
         args = rq.connection.eval.call_args.args
         self.assertIn("redis.call('get', KEYS[1]) == ARGV[1]", args[0])
         self.assertEqual(args[1:], (1, 'key', 'old-token'))
@@ -152,7 +153,7 @@ class AutomationQueueTests(unittest.TestCase):
         fake.db.db_type = 'mariadb'
         fake.db.sql.return_value = [(0,)]
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
-                patch.object(queue, '_release_signal') as release, patch.object(queue, 'wake') as wake:
+                patch.object(queue.AUTOMATION, 'release_signal') as release, patch.object(queue, 'wake') as wake:
             self.assertEqual(queue.drain(token='consumed'), 0)
         process.assert_not_called()
         release.assert_called_once_with('consumed')
@@ -178,7 +179,7 @@ class AutomationQueueTests(unittest.TestCase):
         fake.db.sql.return_value = [(1,)]
         fake.get_all.return_value = ['one', 'two']
         with patch.object(queue, 'frappe', fake), patch.object(queue, '_process') as process, \
-                patch.object(queue, '_release_signal') as release, \
+                patch.object(queue.AUTOMATION, 'release_signal') as release, \
                 patch.object(queue, 'wake') as wake, \
                 patch.object(queue.time, 'monotonic', side_effect=[0, 0, 6, 6]):
             self.assertEqual(queue.drain(token='signal'), 1)

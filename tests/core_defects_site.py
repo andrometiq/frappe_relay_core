@@ -66,8 +66,8 @@ def isolated(tag):
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(queue, 'get_queue', return_value=rq))
-        stack.enter_context(patch.object(queue, '_signal_key', return_value='relay-core-local-wake-' + tag))
-        stack.enter_context(patch.object(queue, '_lock_name', return_value='relay-core-local-lock-' + tag))
+        stack.enter_context(patch.object(queue.AUTOMATION, 'signal', 'relay-core-local-wake-' + tag))
+        stack.enter_context(patch.object(queue.AUTOMATION, 'lock', 'core-lock-' + tag[-12:]))
         stack.enter_context(patch.object(queue, 'recover', side_effect=recover))
         stack.enter_context(patch.object(frappe, 'get_all', side_effect=get_all))
         stack.enter_context(patch('frappe.utils.background_jobs.get_queue', return_value=rq))
@@ -189,7 +189,7 @@ def main():
                 pass
             else:
                 raise AssertionError('Producer fault was not injected')
-        assert not rq.connection.get(queue._signal_key()) and rq.count == fixture_jobs
+        assert not rq.connection.get(queue.AUTOMATION.signal_key) and rq.count == fixture_jobs
 
         for index, medium in enumerate(('Telegram', 'Email'), 1):
             channel, endpoint = channels[medium]
@@ -273,11 +273,11 @@ def main():
         frappe.db.commit()
         # Competing process consumes a wake but cannot acquire the ordering lock.
         # It must leave a successor even if the active owner sees no further work.
-        assert frappe.db.sql('select get_lock(%s, 0)', (queue._lock_name(),))[0][0]
+        assert frappe.db.sql('select get_lock(%s, 0)', (queue.AUTOMATION.lock_name,))[0][0]
         try:
             run_child('--contend', tag)
         finally:
-            frappe.db.sql('select release_lock(%s)', (queue._lock_name(),))
+            frappe.db.sql('select release_lock(%s)', (queue.AUTOMATION.lock_name,))
         started = time.monotonic()
         run_child('--work', tag)
         frappe.db.rollback()
@@ -310,10 +310,10 @@ if __name__ == '__main__':
         connect()
         with isolated(tag) as rq:
             if mode == '--contend':
-                token = rq.connection.get(queue._signal_key())
+                token = rq.connection.get(queue.AUTOMATION.signal_key)
                 assert token
                 assert queue.drain(token=token.decode()) == 0
-                assert rq.connection.get(queue._signal_key()) != token
+                assert rq.connection.get(queue.AUTOMATION.signal_key) != token
                 assert rq.count >= 2
             elif mode == '--work':
                 original = queue._process
