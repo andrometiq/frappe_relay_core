@@ -20,8 +20,8 @@ export default {
           blue: { 1: 'var(--outline-blue-1)', 2: 'var(--outline-blue-2)' }, red: { 1: 'var(--outline-red-1)' },
         },
       },
-      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
-      fontSize: { base: ['13px', { lineHeight: '1.5' }] },
+      fontFamily: { sans: ['"Segoe UI Variable Text"', '"Segoe UI"', 'Selawik', 'system-ui', 'sans-serif'] },
+      fontSize: { base: ['14px', { lineHeight: '1.5' }] },
     },
   },
 }
