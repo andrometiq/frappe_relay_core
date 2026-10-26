@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 
 class TicketTests(unittest.TestCase):
@@ -418,7 +418,7 @@ class EpisodeScopeTests(unittest.TestCase):
     def test_concurrent_unique_routing_insert_reuses_the_winner(self):
         self.f.DuplicateEntryError = type('DuplicateEntryError', (Exception,), {})
         self.f.UniqueValidationError = type('UniqueValidationError', (Exception,), {})
-        self.f.db.get_value.side_effect = [None, 'Sim Routing Winner']
+        self.f.db.get_value.side_effect = ['Sim Contact', None, 'Sim Routing Winner']
         self.f.get_doc.side_effect = None
         self.f.get_doc.return_value = Record(relay_contact='Sim Contact', channel='Sim Channel', endpoint='sim@example.invalid')
         automation = types.SimpleNamespace(internal_save=Mock(side_effect=self.f.UniqueValidationError()))
@@ -426,6 +426,17 @@ class EpisodeScopeTests(unittest.TestCase):
             self.module._lock_episode_routing(self.message, 'Sim Conversation')
         self.f.db.rollback.assert_called_once_with(save_point='episode_routing')
         self.f.get_doc.assert_called_with('Relay Business Routing', 'Sim Routing Winner', for_update=True)
+
+    def test_contact_is_locked_before_the_routing_row(self):
+        self.f.get_doc.side_effect = None
+        self.f.get_doc.return_value = Record(relay_contact='Sim Contact', channel='Sim Channel', endpoint='sim@example.invalid')
+        order = Mock()
+        order.attach_mock(self.f.db.get_value, 'get_value')
+        order.attach_mock(self.f.get_doc, 'get_doc')
+        with patch.dict(sys.modules, {'relay_core.automation.service':types.SimpleNamespace(internal_save=Mock())}):
+            self.module._lock_episode_routing(self.message, 'Sim Conversation')
+        self.assertEqual(order.mock_calls[0], call.get_value('Relay Contact', 'Sim Contact', 'name', for_update=True))
+        self.assertEqual(order.mock_calls[-1], call.get_doc('Relay Business Routing', 'Sim Company', for_update=True))
 
 
 class OwnershipTests(unittest.TestCase):

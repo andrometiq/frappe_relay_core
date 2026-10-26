@@ -16,6 +16,8 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                                   ['name', 'relay_contact'], as_dict=True, for_update=True)
     if not binding or binding.relay_contact != contact:
         return None, 'triage_unverified'
+    # Contact before routing, as the drain and episode admission lock them; the reverse order deadlocks (1213).
+    frappe.db.get_value('Relay Contact', contact, 'name', for_update=True)
     links = candidates(contact)
     if override is not None and tuple(override) not in links:
         raise ValueError('Choose a linked business record')
