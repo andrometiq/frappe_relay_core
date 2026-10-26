@@ -543,6 +543,8 @@ def finish_cancel(doc):
 def recover():
     for row in frappe.get_all('Relay Campaign', filters={'operation': ['in', OPERATIONS],
                               'status': ['in', ['Importing', 'Running', 'Cancelling']]},
+                              # Older non-bulk text campaigns must not take the 20 places.
+                              or_filters={'template_name': ['is', 'set'], 'arguments': ['like', '%"message"%']},
                               fields=['name', 'status', 'operation', 'template_name', 'arguments'],
                               order_by='modified asc', limit_page_length=20):
         if is_bulk(row):
