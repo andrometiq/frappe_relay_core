@@ -165,6 +165,7 @@
 .relay-brand-mark{display:grid;place-items:center;width:27px;height:27px;background:var(--ink-gray-9);color:var(--surface-white);border-radius:7px}
 .relay-nav-caption{font-size:11px;color:var(--ink-gray-5);font-weight:500;padding:0 10px 8px}
 .relay-nav-section{display:flex;flex-direction:column;gap:3px}
+.relay-nav-group{font-size:11px;font-weight:500;color:var(--ink-gray-5);padding:14px 10px 4px}
 .relay-shell .nav-item{height:34px;min-height:34px;padding:0 10px;gap:10px;font-size:13px;color:var(--ink-gray-7);border-radius:6px}
 .relay-shell .nav-item:hover{background:var(--surface-gray-2)}
 .relay-shell .nav-item.active{background:var(--surface-gray-2);color:var(--ink-gray-9);font-weight:550}

@@ -8,7 +8,6 @@ import { useTask } from '../composables/useTask'
 import LoadingRows from './LoadingRows.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import SavedRepliesWorkspace from './SavedRepliesWorkspace.vue'
-import WhatsAppIdentity from './WhatsAppIdentity.vue'
 import { channelEnabled } from '../services/enabledChannels'
 const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: false })
 const capabilities = inject('relayCapabilities')
@@ -56,7 +55,6 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
           <div class="flex flex-wrap gap-3"><Button type="submit" label="Save connection" variant="solid" :disabled="busy || !loaded" /><Button label="Verify saved connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
         </template><p v-else>A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
       </form>
-      <div class="workflow-card"><h2 class="font-semibold">Account and sending number</h2><p>Account: {{ config.account || 'Not configured' }}</p><WhatsAppIdentity v-if="channel?.configured" /><p v-else>Enable this account’s WhatsApp channel to read its identity.</p></div>
       <div class="workflow-card"><h2 class="font-semibold">Channel readiness</h2><p>Identity credentials and provider verification are configured in Hub. Local enablement does not confirm callback delivery.</p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a class="underline" href="#/activity">Review callback and delivery evidence</a></div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/relay-channel">Configure channel</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Review endpoint bindings</a></div>
     </div>

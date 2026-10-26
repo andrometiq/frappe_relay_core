@@ -8,6 +8,7 @@ import LoadingRows from './components/LoadingRows.vue'
 import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import { useViewRoute } from './useViewRoute'
+import { channelEnabled } from './services/enabledChannels'
 
 const location = window.location
 const views = {
@@ -16,8 +17,7 @@ const views = {
   Skills: defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   'Business events': defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   Contacts: defineAsyncComponent(() => import('./components/ContactsWorkspace.vue')),
-  WhatsApp: defineAsyncComponent(() => import('./components/WhatsAppWorkspace.vue')),
-  Campaigns: defineAsyncComponent(() => import('./components/CampaignsWorkspace.vue')),
+  WhatsApp: defineAsyncComponent(() => import('./components/whatsapp/WhatsAppSection.vue')),
   Teams: defineAsyncComponent(() => import('./components/AccessWorkspace.vue')),
   Settings: defineAsyncComponent(() => import('./components/SiteSettings.vue')),
   Activity: defineAsyncComponent(() => import('./components/ActivityWorkspace.vue')),
@@ -25,21 +25,23 @@ const views = {
 const navigation = [
   { name: 'Messages', label: 'Inbox', icon: 'inbox' },
   { name: 'Contacts', label: 'Contacts & links', icon: 'users' },
-  { name: 'WhatsApp', label: 'Templates', icon: 'file-text' },
-  { name: 'Campaigns', label: 'Campaigns', icon: 'send', manage: true },
   { name: 'Tickets', label: 'Tickets', icon: 'bookmark' },
   { name: 'Skills', label: 'AI & skills', icon: 'bot', configure: true },
   { name: 'Business events', label: 'Business events', icon: 'zap', configure: true },
-  { name: 'Teams', label: 'Teams & access', icon: 'user-check' },
-  { name: 'Settings', label: 'Settings & setup', icon: 'settings' },
-  { name: 'Activity', label: 'Activity & health', icon: 'activity', manage: true },
+  { name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp' },
+  { name: 'Teams', label: 'Teams & access', icon: 'user-check', group: 'Admin' },
+  { name: 'Settings', label: 'Settings & setup', icon: 'settings', group: 'Admin' },
+  { name: 'Activity', label: 'Activity & health', icon: 'activity', manage: true, group: 'Admin' },
 ]
-// Preserve the existing triage deep link without adding a seventh screen.
-if (location.hash.split('?')[0] === '#/incoming') location.hash = '/contacts?tab=unlinked'
 const view = useViewRoute(Object.keys(views), 'Messages')
 const capabilities = ref({ manage: false, configure: false }), ready = ref(false)
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
+const menu = computed(() => {
+  const caps = capabilities.value
+  const visible = navigation.filter(item => (!item.manage || caps.manage) && (!item.configure || caps.configure) && channelEnabled(caps, item.channel))
+  return ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.filter(item => (item.group || '') === group) })).filter(section => section.items.length)
+})
 const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
 const userTitle = computed(() => linkedTitle('User', user, 'Account'))
 provide('relayCapabilities', capabilities)
@@ -80,8 +82,9 @@ onErrorCaptured(e => {
     <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }" aria-label="Relay navigation" @keydown="trapNavigation">
       <div class="relay-brand"><FeatherIcon name="message-circle" class="h-5 w-5" /><strong>Relay</strong><Button class="mobile-only ml-auto" icon="x" aria-label="Close navigation" @click="closeNavigation" /></div>
       <p class="relay-nav-caption">Communication workspace</p>
-      <nav class="relay-nav-section" aria-label="Workspace">
-        <button v-for="item in navigation.filter(item => (!item.manage || capabilities.manage) && (!item.configure || capabilities.configure))" :key="item.name"
+      <nav v-for="section in menu" :key="section.group" class="relay-nav-section" :aria-label="section.group || 'Workspace'">
+        <p v-if="section.group" class="relay-nav-group" aria-hidden="true">{{ section.group }}</p>
+        <button v-for="item in section.items" :key="item.name"
           class="nav-item" :class="{ active: view === item.name }" :aria-current="view === item.name ? 'page' : undefined" @click="view = item.name">
           <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
         </button>
