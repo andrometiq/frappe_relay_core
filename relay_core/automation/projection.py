@@ -8,6 +8,7 @@ from relay_core.automation.provenance import conversation_key, telegram_message,
 from relay_core.message_types import normalize, preview, referral
 from relay_core.message_updates import apply_updates, provider_key
 from relay_core.inbound import retry_callback
+from relay_core.realtime import one_incoming_change
 
 
 def extract_messages(payload):
@@ -215,40 +216,75 @@ def on_event(doc, method=None):
         project(doc.name)
         doc.flags.relay_projection_ms = (time.perf_counter_ns() - started) / 1e6
         return
-    frappe.db.after_commit.add(lambda: enqueue_projection(doc.name, doc.payload, doc.flags.get('relay_received_ns')))
+    batch = getattr(frappe.local, 'relay_projection_batch', None)
+    if batch is None:
+        batch = frappe.local.relay_projection_batch = []
+        frappe.db.after_commit.add(enqueue_batch)
+        frappe.db.after_rollback.add(clear_batch)
+    batch.append((doc.name, doc.payload, doc.flags.get('relay_received_ns')))
 
 
-def enqueue_projection(name, payload, received_ns=None):
-    frappe.enqueue('relay_core.automation.projection.project_queued', name=name, queue=projection_queue(payload),
-        submitted_ns=time.time_ns(), received_ns=received_ns)
+def enqueue_batch():
+    batch = frappe.local.relay_projection_batch
+    clear_batch()
+    enqueue_projection([(name, payload) for name, payload, _ in batch], batch[0][2])
 
 
-@retry_callback
-def project_queued(name, submitted_ns, received_ns=None):
+def clear_batch():
+    if hasattr(frappe.local, 'relay_projection_batch'):
+        del frappe.local.relay_projection_batch
+
+
+def enqueue_projection(events, received_ns=None):
+    """One job per queue keeps callback order and pays worker setup once per batch."""
+    queues = {}
+    for name, payload in events:
+        queues.setdefault(projection_queue(payload), []).append(name)
+    for queue, names in queues.items():
+        frappe.enqueue('relay_core.automation.projection.project_queued', names=names, queue=queue,
+            submitted_ns=time.time_ns(), received_ns=received_ns)
+
+
+def project_queued(name=None, submitted_ns=None, received_ns=None, names=()):
+    """Project events in order, each in its own transaction; a failed event stays for recovery."""
     from rq import get_current_job
     started = time.time_ns()
     monotonic = time.monotonic_ns()
+    names = names or [name]
+    with one_incoming_change():
+        for event in names:
+            try:
+                project_committed(event)
+            except Exception:
+                frappe.db.rollback()
+                frappe.log_error('Relay Hub Event projection failed', reference_doctype='Relay Hub Event', reference_name=event)
+                frappe.db.commit()
+    frappe.db.commit()
     job = get_current_job()
-    project(name)
     if job:
-        def completed():
-            finished = time.monotonic_ns()
-            timing = {'projection_ms': (finished - monotonic) / 1e6,
-                      'started_ns': monotonic, 'finished_ns': finished,
-                      'receive_to_enqueue_ms': (submitted_ns - received_ns) / 1e6 if received_ns else None}
-            enqueued = job.enqueued_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
-            picked_up = job.started_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
-            timing.update(enqueue_ms=(enqueued - submitted_ns) / 1e6,
-                          queue_wait_ms=(picked_up - enqueued) / 1e6,
-                          worker_setup_ms=(started - picked_up) / 1e6)
-            job.meta['relay_timing'] = timing
-            job.save_meta()
-        frappe.db.after_commit.add(completed)
+        finished = time.monotonic_ns()
+        timing = {'projection_ms': (finished - monotonic) / 1e6, 'events': len(names),
+                  'started_ns': monotonic, 'finished_ns': finished,
+                  'receive_to_enqueue_ms': (submitted_ns - received_ns) / 1e6 if received_ns else None}
+        enqueued = job.enqueued_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
+        picked_up = job.started_at.replace(tzinfo=timezone.utc).timestamp() * 1e9
+        timing.update(enqueue_ms=(enqueued - submitted_ns) / 1e6,
+                      queue_wait_ms=(picked_up - enqueued) / 1e6,
+                      worker_setup_ms=(started - picked_up) / 1e6)
+        job.meta['relay_timing'] = timing
+        job.save_meta()
+
+
+@retry_callback
+def project_committed(name):
+    project(name)
+    frappe.db.commit()
 
 
 def recover():
-    for row in frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name', 'payload'], order_by='modified asc', limit_page_length=20):
-        enqueue_projection(row.name, row.payload)
+    rows = frappe.get_all('Relay Hub Event', filters={'projection_status': ['in', ['Pending', 'Uncategorized']]}, fields=['name', 'payload'], order_by='modified asc', limit_page_length=20)
+    if rows:
+        enqueue_projection([(row.name, row.payload) for row in rows])
 
 
 def projection_queue(payload):

@@ -1,5 +1,9 @@
 """Payload-free invalidation; clients refetch through permission-checked APIs."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 import frappe
+
+incoming_batch = ContextVar('relay_incoming_batch', default=None)
 
 RESOURCES = {
     'Relay AI Skill': 'skills', 'Relay Business Event Rule': 'business_events',
@@ -38,7 +42,23 @@ def contact_changed(contact, kind='messages'):
         doctype='Relay Contact', docname=contact, after_commit=True)
 
 
+@contextmanager
+def one_incoming_change():
+    """Send the triage-list invalidation once for a projection batch, after its last event."""
+    token = incoming_batch.set(False)
+    try:
+        yield
+    finally:
+        changed = incoming_batch.get()
+        incoming_batch.reset(token)
+    if changed:
+        incoming_changed()
+
+
 def incoming_changed():
+    if incoming_batch.get() is not None:
+        incoming_batch.set(True)
+        return
     # Triage access does not grant REST access to raw Hub event payloads.
     users = frappe.get_all('Has Role', filters={'parenttype':'User',
         'role':['in',['System Manager','Relay Communication Manager']]}, pluck='parent', distinct=True)

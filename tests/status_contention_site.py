@@ -181,7 +181,8 @@ def main():
 
     def enqueue(method, **kwargs):
         assert method == 'relay_core.automation.projection.project_queued', method
-        work.put(kwargs['name'])
+        for name in kwargs['names']:
+            work.put(name)
 
     def settings(key):
         return {'relay_hub_account': tag, 'relay_callback_secret': SECRET}.get(key)
