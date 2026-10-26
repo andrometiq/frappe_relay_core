@@ -127,7 +127,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
         <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="arrow-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
+        <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
         <div v-if="selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />

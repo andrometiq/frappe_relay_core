@@ -29,7 +29,7 @@ watch(() => props.relayContact, async contact => {
 <template>
   <section class="contact-info-page" aria-label="Contact info">
     <header class="contact-info-bar">
-      <Button icon="arrow-left" variant="ghost" aria-label="Back to chat" title="Back to chat" @click="emit('close')" />
+      <Button icon="chevron-left" variant="ghost" aria-label="Back to chat" title="Back to chat" @click="emit('close')" />
       <h2>Contact info</h2>
       <Dropdown v-if="menu.length" :options="menu"><Button icon="more-vertical" variant="ghost" aria-label="Contact actions" title="Contact actions" /></Dropdown>
     </header>
