@@ -1,6 +1,6 @@
 <script setup>
 import { inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
-import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon } from "@relay/ui";
+import { Avatar, avatarInitials, avatarTone, Button, Dropdown, ErrorMessage, FeatherIcon } from "@relay/ui";
 import { recordTitle } from '../services/recordTitle';
 import { linkedTitle } from '../services/linkedTitle';
 import WorkspaceState from "./WorkspaceState.vue";
@@ -251,10 +251,10 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           <h2><button v-if="isMobile && (frappeContact || conversationContact)" type="button" class="conversation-title-button" aria-label="Open contact info" @click="openInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
           <p v-if="isMobile && channelLine" class="conversation-channel-line">{{ channelLine }}</p>
           <div class="conversation-meta">
-            <span v-if="businessContext?.doctype_label || businessType">{{ businessContext?.doctype_label || businessType }}</span>
+            <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
             <span v-if="contactCount">{{ contactCount }}</span>
-            <span v-if="people.length">{{ people.length }} viewing</span>
+            <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
           </div>
         </div>
         <div class="conversation-heading-actions">
@@ -314,7 +314,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" @template="openStart(source?.frappe_contact || '')">
+      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" @note="openNote()" @template="openStart(source?.frappe_contact || '')">
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
