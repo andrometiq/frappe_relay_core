@@ -1,8 +1,9 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import { FeatherIcon } from '@relay/ui'
 import { splitMobileNav } from '../../services/mobileNav'
 import { countLabel } from '../../services/queueCounts'
+import { defaultMedium } from '../../services/enabledChannels'
 import { useQueueCounts } from '../../composables/useQueueCounts'
 
 const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String })
@@ -11,7 +12,8 @@ const open = defineModel('open', { type: Boolean, default: false })
 const split = computed(() => splitMobileNav(props.items))
 const sheet = ref(null)
 const tabLabels = { Messages: 'Inbox' }
-const { counts } = useQueueCounts()
+const capabilities = inject('relayCapabilities')
+const { counts } = useQueueCounts(computed(() => defaultMedium(capabilities.value)))
 const badge = computed(() => countLabel(counts.value.unread))
 function go(name) {
   open.value = false

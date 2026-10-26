@@ -12,6 +12,12 @@ export function mediumOptions(capabilities) {
   return all ? [{ label: 'All channels', value: 'all' }, ...enabled] : enabled
 }
 
+// The inbox opens on the first channel option; the phone Inbox badge counts the same queue.
+export function defaultMedium(capabilities) {
+  const first = mediumOptions(capabilities)[0]
+  return first?.value ?? first
+}
+
 // Message bubbles name their channel only when more than one channel is switched on.
 export function multipleChannels(capabilities) {
   return (capabilities?.enabled_channels || []).length > 1

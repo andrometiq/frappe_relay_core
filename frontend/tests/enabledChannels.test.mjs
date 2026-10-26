@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { channelEnabled, mediumOptions } from '../src/services/enabledChannels.js'
+import { channelEnabled, defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
 
 test('only the enabled channels are offered and messages without a provider stay visible', () => {
   const whatsapp = { enabled_channels: ['WhatsApp'] }
@@ -23,4 +23,10 @@ test('bubbles name their channel only when several channels are enabled', async 
   assert.equal(multipleChannels({ enabled_channels: ['WhatsApp'] }), false)
   assert.equal(multipleChannels({}), false)
   assert.equal(multipleChannels({ enabled_channels: ['WhatsApp', 'Telegram'] }), true)
+})
+
+test('the inbox and its unread badge open on the same channel queue', () => {
+  assert.equal(defaultMedium({ enabled_channels: ['WhatsApp'] }), 'WhatsApp')
+  assert.equal(defaultMedium({ enabled_channels: ['WhatsApp', 'Telegram', 'Email'] }), 'all')
+  assert.equal(defaultMedium({ enabled_channels: [] }), undefined)
 })

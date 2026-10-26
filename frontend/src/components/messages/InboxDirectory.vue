@@ -9,7 +9,7 @@ import { relativeTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
-import { mediumChips, mediumOptions } from '../../services/enabledChannels'
+import { defaultMedium, mediumChips, mediumOptions } from '../../services/enabledChannels'
 import { countLabel } from '../../services/queueCounts'
 import { useQueueCounts } from '../../composables/useQueueCounts'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
@@ -17,7 +17,7 @@ const emit = defineEmits(['select', 'business'])
 const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
 const chips = computed(() => mediumChips(capabilities.value))
-const medium = ref(mediums.value[0]?.value || mediums.value[0]);
+const medium = ref(defaultMedium(capabilities.value))
 const { counts } = useQueueCounts(medium)
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
 const moreQueues = computed(() => [
