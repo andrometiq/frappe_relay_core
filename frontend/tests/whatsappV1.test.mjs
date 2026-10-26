@@ -296,3 +296,20 @@ test('a one-channel send keeps the original send arguments',async()=>{
     assert.deepEqual(Object.keys(calls.find(([method])=>method==='messaging.send')[1]),['message','kind','data','request_key','quote'])
   } finally {fixture.stop()}
 })
+
+test('a copy that another channel refused is reported and joins the thread from pending actions',async()=>{
+  const failed={name:'pending:MA-2',action:'MA-2',scope:'contact',channel:'telegram-bot',status:'Failed',send_group:'group',creation:'2026-10-24'}
+  const fixture=setup(async method=>{
+    if(method==='messaging.send')return {action:'MA-1',status:'Submitted',message:'message',send_group:'group',
+      sends:[{action:'MA-1',status:'Submitted'},{action:'MA-2',status:'Rejected'}]}
+    return method==='messaging.pending_messages'?{items:[failed],next:null}:{items:[],has_more:false}
+  })
+  try {
+    const source={...row(1,'2026-10-24'),channel:'live-number',relay_contact:'contact'}
+    fixture.state.selected.value='contact';fixture.state.rows.value=[source];fixture.state.source.value=source
+    fixture.state.toggleAlsoVia('telegram-bot');fixture.state.body.value='Order ready'
+    await fixture.state.send()
+    assert.match(fixture.state.notice.value,/Some channels did not get this message/)
+    assert.equal(fixture.state.displayRows.value.find(item=>item.action==='MA-2').send_group,'group')
+  } finally {fixture.stop()}
+})
