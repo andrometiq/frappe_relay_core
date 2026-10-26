@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessTypeOptions, isPrimaryLink, linksWith, linksWithout, primaryRequest, recordIcon } from '../src/services/contactLinks.js'
+import { businessTypeOptions, isPrimaryLink, linkedLabel, linksWith, linksWithout, primaryRequest, recordIcon } from '../src/services/contactLinks.js'
 
 const customer = { doctype: 'Customer', name: 'C1' }, order = { doctype: 'Sales Order', name: 'SO-1' }
 
@@ -30,4 +30,13 @@ test('linked record tiles show parties, deliveries and other documents apart', (
   assert.deepEqual(recordIcon('Delivery Note'), { icon: 'truck', tone: 'purple' })
   assert.deepEqual(recordIcon('Sales Order'), { icon: 'file-text', tone: 'blue' })
   assert.deepEqual(recordIcon(undefined), { icon: 'file-text', tone: 'blue' })
+})
+
+test('the chat header counts linked records other than the primary', () => {
+  const primary = { doctype: 'Sales Order', name: 'SO-1', title: 'SO-1' }
+  assert.equal(linkedLabel({ primary, link_count: 3 }), '+2 linked')
+  assert.equal(linkedLabel({ primary, link_count: 1 }), '')
+  assert.equal(linkedLabel({ primary: null, link_count: 2 }), '2 linked')
+  assert.equal(linkedLabel({ primary: null, link_count: 0 }), '')
+  assert.equal(linkedLabel(null), '')
 })
