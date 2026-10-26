@@ -11,6 +11,9 @@ import { routeTab, useViewRoute } from './useViewRoute'
 import { navAllowed, whatsappRoute, whatsappSections } from './services/navigation'
 import MobileTabBar from './components/shell/MobileTabBar.vue'
 import { useMobileLayout } from './composables/useMobileLayout'
+import { useQueueCounts } from './composables/useQueueCounts'
+import { countLabel } from './services/queueCounts'
+import { defaultMedium } from './services/enabledChannels'
 
 const location = window.location
 const views = {
@@ -42,6 +45,8 @@ const current = computed(() => navigation.find(item => item.name === view.value)
 const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))
 const menu = computed(() => ['', 'Channels', 'Admin'].map(group => ({ group, items: visible.value.filter(item => (item.group || '') === group) })).filter(section => section.items.length))
 const isMobile = useMobileLayout(), moreOpen = ref(false)
+const { counts: queueCounts } = useQueueCounts(computed(() => defaultMedium(capabilities.value)))
+const inboxBadge = computed(() => countLabel(queueCounts.value.unread))
 const sections = computed(() => whatsappSections(capabilities.value))
 const hash = ref(location.hash)
 const section = computed(() => view.value === 'WhatsApp' ? routeTab(hash.value, 'templates') : '')
@@ -97,6 +102,7 @@ onErrorCaptured(e => {
         <template v-for="item in section.items" :key="item.name">
           <button class="nav-item" :class="{ active: itemActive(item) }" :aria-current="itemActive(item) ? 'page' : undefined" @click="view = item.name">
             <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
+            <span v-if="item.name === 'Messages' && inboxBadge" class="nav-count" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span>
           </button>
           <template v-if="item.name === 'WhatsApp'">
             <button v-for="row in sections" :key="row.name" class="nav-item nav-sub" :class="{ active: subActive(row.name) }"

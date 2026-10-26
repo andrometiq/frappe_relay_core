@@ -2,7 +2,7 @@
 import { recordTitle } from '../../services/recordTitle'
 import { linkedTitle } from '../../services/linkedTitle'
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon, TextInput, FormControl } from '@relay/ui'
+import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { relativeTime } from '../relativeTime'
@@ -54,9 +54,8 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
   <template v-else>
     <form class="directory-search inbox-filters" role="search" @submit.prevent="load()">
       <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search conversations" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
-      <FormControl v-if="mediums.length > 1" v-model="medium" class="desktop-only" type="select" aria-label="Channel" :options="mediums" />
     </form>
-    <div class="inbox-channel-chips mobile-only" role="group" aria-label="Channel">
+    <div class="inbox-channel-chips" role="group" aria-label="Channel">
       <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
         <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
     </div>
@@ -81,7 +80,6 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
 <style scoped>
 .inbox-filters { align-items:center; }
 .inbox-filters > .relay-input-shell { flex:1; width:0; }
-.inbox-filters > .relay-field { flex:0 0 132px; min-width:0; }
 .queue-count { margin-left:5px; color:var(--ink-gray-5); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; }
 [aria-pressed=true] > .queue-count { color:inherit; font-weight:600; }
 </style>

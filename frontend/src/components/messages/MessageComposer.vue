@@ -6,10 +6,12 @@ import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
 import { channelCan } from "../../services/enabledChannels";
 import { Button, FormControl, Dropdown } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
+import { useMobileLayout } from "../../composables/useMobileLayout";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
 const showReplies=ref(false), focused=ref(false);
+const isMobile = useMobileLayout();
 const expanded = computed(() => focused.value || !!body.value || quoting.value || kind.value !== 'text');
 
 import { compositionScope, telegramLimit } from '../../services/channelComposition';
@@ -87,7 +89,7 @@ async function attachFile(event) {
   if (attachment.value) kind.value=requestedAttachmentKind.value;
   else attachment.value=previous;
 }
-const emit = defineEmits(["template"]);
+const emit = defineEmits(["template", "note"]);
 const windowState = ref({ open: true }),
   windowError = ref("");
 let windowGeneration = 0, expiryTimer;
@@ -186,6 +188,11 @@ function keydown(event) {
 </script>
 <template>
   <form class="message-composer compact-composer" :class="{'is-expanded': expanded}" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="canSend && send()">
+    <div class="composer-tabs" role="group" aria-label="Compose">
+      <button type="button" class="active" aria-pressed="true">Reply</button>
+      <button type="button" aria-pressed="false" :disabled="busy" @click="emit('note')">Internal note</button>
+      <button v-if="can('templates')" type="button" aria-pressed="false" :disabled="busy" @click="emit('template')">Template</button>
+    </div>
     <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
     <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
     <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
@@ -214,8 +221,8 @@ function keydown(event) {
     <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
     <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
     <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
-    <div v-show="expanded" class="composer-toolbar">
-      <Button v-if="can('templates')" label="Template" :disabled="busy" @click="emit('template')" />
+    <div v-show="expanded || !isMobile" class="composer-toolbar">
+      <Button v-if="can('templates')" class="composer-template-button" label="Template" :disabled="busy" @click="emit('template')" />
       <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
       <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
       <Button icon="zap" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />
