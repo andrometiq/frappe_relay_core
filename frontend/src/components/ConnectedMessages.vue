@@ -191,7 +191,7 @@ const { people } = useConversationPresence({
   get visibleMessages() { return visibleMessages.value; },
 }, () => {});
 
-// The chat title and record bar show the primary record, so a link change in contact info reloads the profile.
+// The chat title and record bar show the primary record, so a link change in contact details reloads the profile.
 async function loadProfile(contact) {
   try { const record = await coreApi('api.contact_profile', { contact }); if (selected.value === contact) contactRecord.value = record; }
   catch (e) { if (selected.value === contact) contactsError.value = e.message; }
@@ -289,7 +289,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
       </nav>
 
-      <div v-if="contextOpen && frappeContact" class="v1-context"><ContactDetails :contact="frappeContact" /></div>
+      <div v-if="contextOpen && frappeContact" class="v1-context"><ContactDetails :contact="frappeContact" @changed="loadProfile(selected)" /></div>
       <ConversationCases v-if="casesOpen && conversationContact" :key="conversationContact" :contact="conversationContact" v-bind="activeBusiness" @close="casesOpen = false" />
       <ConversationTopics v-if="topicsOpen && conversationContact" :key="conversationContact" :contact="conversationContact" v-bind="activeBusiness" :messages="contactRows" @close="topicsOpen = false" @open="focusMessage" />
       <InternalNotes v-bind="noteBusiness" v-if="notesOpen && noteContact" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" />
