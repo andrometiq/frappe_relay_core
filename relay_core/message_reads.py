@@ -61,6 +61,9 @@ def mark(contact, messages):
                 contact_changed(contact, 'reads')
             frappe.db.commit()
         finally: frappe.flags.relay_read_write = previous
+    from relay_core import whatsapp_presence
+    try: whatsapp_presence.mark_read(contact, names)
+    except Exception: frappe.log_error('WhatsApp read receipt was not queued')  # Operator reads stay recorded.
     return {'marked':names}
 
 

@@ -202,11 +202,13 @@ def typing(contact, active=1, message=None):
     require_access(); readable_contact(contact)
     if str(active) not in ('0','1','True','False'):
         frappe.throw('Invalid typing state')
-    target=None
+    target=whatsapp_channel=None
     if message:
         from relay_core.messaging import readable_source
         source,channel,context=readable_source(message)
         if source.relay_contact!=contact:frappe.throw('Typing source belongs to another contact',frappe.PermissionError)
+        from relay_core.whatsapp_presence import direct_channel
+        whatsapp_channel=direct_channel(channel,context)
         if channel.channel=='Telegram' and context.get('provider')=='Telegram' and str(context.get('chat_id'))==source.sender_endpoint:
             from relay_core.automation.provenance import integer
             target={'chat_id':integer(context.get('chat_id')),'message_thread_id':integer(context['message_thread_id'],positive=True) if context.get('message_thread_id') else 0}
@@ -224,6 +226,10 @@ def typing(contact, active=1, message=None):
             from relay_core import whatsapp
             try:whatsapp.client().call_tool('telegram.typing',target)
             except Exception:pass  # Ephemeral feedback must never block composing or retry.
+    if whatsapp_channel and str(active) in ('1','True'):
+        from relay_core import whatsapp_presence
+        try:whatsapp_presence.typing(contact,whatsapp_channel)
+        except Exception:frappe.log_error('WhatsApp typing indicator was not queued')
     return {'ok': True}
 
 

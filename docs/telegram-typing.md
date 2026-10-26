@@ -4,7 +4,7 @@ The text composer sends a source-message reference alongside agent typing presen
 
 Hub exposes account-scoped `telegram.typing` under `messages:send`. It calls only `sendChatAction` with `typing`, with a two-second deadline. This ephemeral signal does not enter the message outbox or delivery journal and is not automatically retried. Empty drafts and channel changes stop local typing updates. Telegram expires its own indicator within five seconds: https://core.telegram.org/bots/api#sendchataction .
 
-This implements outbound Telegram typing only. It does not claim customer typing events for bot channels, WhatsApp typing, or email typing support. Existing Relay agent presence remains separate.
+This implements outbound Telegram typing only. It does not claim customer typing events for bot channels or email typing support. For WhatsApp, see [WhatsApp read receipts and typing](whatsapp-read-signals.md). Existing Relay agent presence remains separate.
 
 ## Evidence — 2026-09-24
 
