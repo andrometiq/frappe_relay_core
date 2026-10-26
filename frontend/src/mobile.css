@@ -7,26 +7,33 @@
   .v1-shell.relay-shell>.app-nav,.v1-shell.relay-shell>.relay-nav-backdrop{display:none!important}
   .v1-shell.relay-shell .workspace{position:relative;flex:1;min-height:0;border:0;border-radius:0;box-shadow:none;overflow:hidden}
 
+  /* Phone layers from the mobile mockup */
+  :root,[data-theme="light"]{--relay-mica:rgba(243,245,250,.86);--relay-layer:rgba(255,255,255,.7);--relay-layer-strong:rgba(255,255,255,.92);--relay-hover:rgba(0,0,0,.04);--relay-bubble-in:rgba(255,255,255,.95);--relay-chat:rgba(246,247,250,.6)}
+  [data-theme="dark"]{--relay-mica:rgba(32,33,38,.9);--relay-layer:rgba(255,255,255,.05);--relay-layer-strong:rgba(48,49,55,.95);--relay-hover:rgba(255,255,255,.06);--relay-bubble-in:rgba(56,57,64,.95);--relay-chat:rgba(20,21,25,.4)}
+  body{font-size:14px}
+  .v1-shell.relay-shell .workspace-title,.v1-shell.relay-shell .v1-header>.relay-brand,.relay-titlebar-search,.inbox-list-head{display:none}
+
   /* App bar */
-  .v1-shell.relay-shell .v1-header{gap:4px;height:auto;min-height:56px;padding:env(safe-area-inset-top) 8px 0 4px}
-  .v1-shell.relay-shell .v1-header h1{min-width:0;overflow:hidden;font-size:22px;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
-  .v1-shell.relay-shell .relay-mobile-menu{display:inline-flex;width:40px;height:40px;border:0;background:transparent;box-shadow:none}
+  .v1-shell.relay-shell .v1-header{gap:8px;height:auto;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 12px 10px;border:0;background:transparent}
+  .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:24px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
+  .v1-shell.relay-shell .relay-mobile-menu{display:inline-flex;width:38px;height:38px;min-height:38px;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
   .relay-header-actions{display:flex;align-items:center}
-  .relay-header-new.relay-button{width:38px;min-width:38px;height:38px;box-shadow:var(--relay-shadow-1)}
+  .relay-header-new.relay-button{width:38px;min-width:38px;height:38px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
 
   /* Detail pages own the whole screen: no app bar, no tab bar */
   .v1-shell.relay-shell:has(.connected-inbox.has-conversation,.ticket-detail,.frappe-form-view,.team-workspace.has-selection,.workflow-viewer.has-selection) :is(.v1-header,.mobile-tabbar){display:none}
   .channel-section:has(.frappe-form-view)>:is(.channel-section-header,.v1-tabs){display:none}
 
   /* Bottom tab bar */
-  .mobile-tabbar{display:flex;flex:none;justify-content:space-around;padding:6px 4px calc(4px + env(safe-area-inset-bottom));border-top:1px solid var(--relay-stroke);background:var(--relay-layer);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5)}
-  .mobile-tab{display:flex;flex:1;flex-direction:column;align-items:center;gap:2px;min-height:48px;padding:4px 0;border-radius:var(--relay-radius);color:var(--ink-gray-6);font-size:11px;transition:color var(--relay-fast) ease,transform var(--relay-fast) ease}
+  .mobile-tabbar{display:flex;flex:none;justify-content:space-around;padding:8px 8px calc(2px + env(safe-area-inset-bottom));border-top:1px solid var(--relay-stroke);background:var(--relay-layer);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5)}
+  .mobile-tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:0;min-width:0;padding:2px 10px;color:var(--relay-ink-3);font-size:11px;transition:color var(--relay-fast) ease,transform var(--relay-fast) ease}
   .mobile-tab:active{transform:scale(.94)}
   .mobile-tab.active{color:var(--relay-accent-text);font-weight:600}
-  .mobile-tab-icon{position:relative;display:grid;place-items:center;width:44px;height:26px;border-radius:13px;transition:background-color var(--relay-normal) var(--relay-ease)}
-  .mobile-tab-badge{position:absolute;top:-4px;right:2px;display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--surface-white);border-radius:9px;background:var(--relay-accent);color:var(--relay-accent-ink);font-size:9.5px;font-weight:700;box-sizing:content-box}
+  .mobile-tab-icon{position:relative;display:grid;place-items:center}
+  .mobile-tab-icon svg{width:18px;height:18px}
+  .mobile-tab-badge{position:absolute;top:-6px;right:-14px;display:grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--relay-accent);color:var(--relay-accent-ink);font-size:9.5px;font-weight:700}
 
   /* More sheet */
   .mobile-sheet-backdrop{display:block;position:fixed;inset:0;z-index:70;border:0;background:var(--relay-overlay)}
@@ -43,70 +50,74 @@
 
   /* Conversation list */
   .v1-shell.relay-shell .connected-inbox{position:relative;display:flex;overflow:hidden}
-  .v1-shell.relay-shell .contact-directory{flex:1;min-width:0;border-right:0}
-  .v1-shell.relay-shell .v1-queues{margin:2px 16px 6px;border-radius:var(--relay-radius);overflow:visible}
-  .v1-shell.relay-shell .contact-directory{display:flex;flex-direction:column}
+  .v1-shell.relay-shell .contact-directory{display:flex;flex:1;flex-direction:column;min-width:0;border:0;border-radius:0;background:transparent}
   .v1-shell.relay-shell .connected-inbox.has-conversation .contact-directory{display:none}
-  .v1-shell.relay-shell .contact-directory>.directory-search{padding:4px 16px 0}
-  .v1-shell.relay-shell .v1-queues>button{flex:1 1 auto;justify-content:center;min-width:0;white-space:nowrap;min-height:32px;padding:0 4px;border-radius:6px;font-size:13px}
-  .v1-shell.relay-shell .v1-queues>button[aria-pressed=true]{background:var(--relay-layer-strong);color:var(--ink-gray-9);box-shadow:var(--relay-shadow-1)}
-  .v1-shell.relay-shell .v1-queues>button:nth-child(1){order:3}
-  .v1-shell.relay-shell .v1-queues>button:nth-child(2){order:1}
-  .v1-shell.relay-shell .v1-queues>button:nth-child(3){order:4}
-  .v1-shell.relay-shell .v1-queues>button:nth-child(4){order:2}
-  .v1-shell.relay-shell .v1-queues>:last-child{order:5;flex:0 0 auto}
-  .v1-shell.relay-shell .v1-queues>:last-child .relay-button{min-height:32px;padding:0 6px;border:0;background:transparent;box-shadow:none}
-  .v1-shell.relay-shell .v1-queues>:last-child .relay-button__label{display:none}
-  .v1-shell.relay-shell .inbox-channel-chips{display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
-  .inbox-channel-chip{height:30px;padding:0 12px}
-  .v1-shell.relay-shell .directory-rows{padding:2px 0 8px}
-  .v1-shell.relay-shell .directory-contact{align-items:flex-start;gap:12px;width:calc(100% - 16px);min-height:0;margin:0 8px;padding:11px 10px;border:0;transition:background-color var(--relay-fast) ease,transform 120ms ease}
+  .v1-shell.relay-shell .contact-directory>.directory-search{order:0;padding:0 16px}
+  .v1-shell.relay-shell .contact-directory>.directory-search .relay-input-shell{height:38px;min-height:38px;border-radius:8px;background:var(--relay-layer)}
+  .v1-shell.relay-shell .contact-directory>.directory-search .relay-input{min-height:36px;font-size:14px}
+  .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1;display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
+  .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
+  .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
+  .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
+  .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:28px;min-height:28px;min-width:0;padding:0 4px;border-radius:6px;font-size:13px}
+  .v1-shell.relay-shell .contact-directory>.v1-queues>:last-child{flex:0 0 auto}
+  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{width:28px;height:28px;min-height:28px;min-width:0;padding:0}
+  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button__label{display:none}
+  .v1-shell.relay-shell .directory-rows{padding:2px 8px}
+  .v1-shell.relay-shell .directory-contact{gap:12px;margin:0;padding:11px 10px;border-radius:8px;transition:background-color var(--relay-fast) ease,transform 120ms ease}
   .v1-shell.relay-shell .directory-contact:active:not(:disabled){transform:scale(.985);background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
+  .v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true])::before{display:none}
   .v1-shell.relay-shell .directory-avatar .relay-avatar{width:44px;height:44px;font-size:14px}
+  .v1-shell.relay-shell .directory-channel{right:0;bottom:0;width:12px;height:12px}
+  .v1-shell.relay-shell .directory-contact-top strong{font-size:14px}
+  .v1-shell.relay-shell .directory-contact-top time,.v1-shell.relay-shell .directory-contact-context{font-size:12px}
+  .v1-shell.relay-shell .directory-contact-bottom small{font-size:14px}
 
   /* Chat page */
-  .v1-shell.relay-shell .connected-thread{position:relative;flex:1;min-width:0;background:var(--relay-chat)}
-  .v1-shell.relay-shell .conversation-heading{flex-wrap:nowrap;gap:6px;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 6px 6px 4px}
+  .v1-shell.relay-shell .connected-thread{position:relative;flex:1;min-width:0;border:0;background:var(--relay-mica)}
+  .v1-shell.relay-shell .conversation-heading{gap:8px;padding:calc(4px + env(safe-area-inset-top)) 8px 8px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
+  .v1-shell.relay-shell .conversation-back.relay-button{width:38px;height:38px;min-height:38px;border:0;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .conversation-heading>.relay-avatar{width:36px;height:36px;font-size:12.5px}
   .v1-shell.relay-shell .conversation-title h2{font-size:15.5px}
-  .conversation-title-button{max-width:100%;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
-  .v1-shell.relay-shell .conversation-channel-line{overflow:hidden;font-size:12px;color:var(--relay-green);text-overflow:ellipsis;white-space:nowrap}
-  .v1-shell.relay-shell .conversation-meta{flex-wrap:nowrap;overflow:hidden}
+  .conversation-title-button{display:block;max-width:100%;min-height:0!important;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
+  .v1-shell.relay-shell .conversation-channel-line{overflow:hidden;color:var(--relay-green);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}
-  .v1-shell.relay-shell .conversation-heading-actions{display:flex;flex:none;align-items:center}
-  .v1-shell.relay-shell .conversation-heading-actions .conversation-tools{padding:0;border:0}
-  .v1-shell.relay-shell .conversation-heading-actions .conversation-unread{display:none}
-  .v1-shell.relay-shell .conversation-heading-actions .relay-button{width:36px;min-width:36px;height:36px;padding:0;border:0;background:transparent;box-shadow:none}
-  .v1-shell.relay-shell .conversation-heading-actions .flex{flex-wrap:nowrap;gap:0}
+  .v1-shell.relay-shell .conversation-heading-actions{gap:0}
+  .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-viewers,.conversation-assign,.conversation-ticket){display:none}
+  .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:38px;height:38px;min-height:38px;border-radius:8px}
   .mobile-record-bar{display:flex;flex:none;align-items:center;gap:6px;padding:8px 12px;overflow-x:auto;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);scrollbar-width:none}
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
   .mobile-record-chip small{font-weight:500;opacity:.8}
-  .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;line-height:26px;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--ink-gray-7);font-size:12.5px;font-weight:600}
-  .v1-shell.relay-shell .message-thread{padding:12px}
-  .v1-shell.relay-shell .message-composer{max-height:45%;margin:0;padding:8px 10px calc(6px + env(safe-area-inset-bottom));border:0;border-top:1px solid var(--relay-stroke);border-radius:0;background:var(--relay-layer);box-shadow:none}
-  .v1-shell.relay-shell .message-composer .chat-draft{min-height:40px;padding:9px 14px;border:1px solid var(--relay-stroke);border-radius:20px;background:var(--relay-layer-strong)}
-  .v1-shell.relay-shell .message-composer .chat-draft:focus{border-color:var(--relay-accent)}
-  .v1-shell.relay-shell .message-composer>button[type=submit]{width:40px;height:40px;border-radius:50%;box-shadow:var(--relay-shadow-2)}
+  .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--relay-ink-2);font-size:12.5px;font-weight:600}
+  .v1-shell.relay-shell .message-thread{padding:12px 12px 6px;background:var(--relay-chat)}
+  .v1-shell.relay-shell .conversation-bubble{max-width:80%;font-size:14px;line-height:1.42}
+
+  /* Composer: "+" menu, a rounded input pill with the attach button inside, and a round Send button */
+  .v1-shell.relay-shell .compact-composer:not(.email-composer){grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"extras extras extras" "plus input send";align-items:end;gap:0 6px;max-height:45%;margin:0;padding:8px 10px calc(6px + env(safe-area-inset-bottom));border:0;border-top:1px solid var(--relay-stroke);border-radius:0;background:var(--relay-layer);box-shadow:none}
+  .compact-composer>.composer-extras{padding:0 0 6px;font-size:12px}
+  .compact-composer>.composer-plus{grid-area:plus}
+  .compact-composer>.composer-plus .relay-button{width:38px;height:40px;min-height:40px;color:var(--relay-ink-2)}
+  .compact-composer>.composer-input.is-text{min-height:40px;padding:0 6px 0 14px;border:1px solid var(--relay-stroke);border-radius:20px;background:var(--relay-layer-strong)}
+  .compact-composer>.composer-input:not(.is-text){padding:0}
+  .v1-shell.relay-shell .compact-composer .chat-draft{min-height:38px;padding:9px 0;font-size:16px;line-height:20px}
+  .compact-composer .composer-input .relay-button{width:30px;height:30px;min-height:30px;min-width:0;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .compact-composer>.composer-send{width:40px;height:40px;min-height:40px;margin:0;padding:0;border-radius:50%;box-shadow:var(--relay-shadow-2)}
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
 
   /* Contact info page */
-  .contact-info-page{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;background:var(--relay-mica);background:linear-gradient(var(--relay-mica),var(--relay-mica)),var(--relay-wall)}
-  .contact-info-bar{display:flex;flex:none;align-items:center;gap:6px;min-height:56px;padding:env(safe-area-inset-top) 8px 0 4px}
-  .contact-info-bar h2{font-size:16px;font-weight:600;color:var(--ink-gray-9)}
+  .contact-info-page{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;background:linear-gradient(var(--relay-mica),var(--relay-mica)),var(--relay-wall)}
+  .contact-info-bar{display:flex;flex:none;align-items:center;gap:8px;padding:calc(6px + env(safe-area-inset-top)) 12px 10px}
+  .contact-info-bar .relay-button{width:38px;height:38px;min-height:38px;border-radius:8px;color:var(--relay-ink-2)}
+  .contact-info-bar h2{flex:1;color:var(--relay-ink);font-size:16px;font-weight:600}
   .contact-info-scroll{flex:1;min-height:0;overflow:auto;padding:0 16px calc(24px + env(safe-area-inset-bottom))}
   .contact-info-hero{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 0 16px;text-align:center}
-  .contact-info-hero .relay-avatar{width:84px;height:84px;border:0;font-size:28px}
-  .contact-info-hero strong{margin-top:6px;font-size:20px;font-weight:600;color:var(--ink-gray-9);overflow-wrap:anywhere}
-  .contact-info-hero small{color:var(--ink-gray-6);font-size:13px}
+  .contact-info-hero .relay-avatar{width:84px;height:84px;font-size:28px}
+  .contact-info-hero strong{margin-top:6px;color:var(--relay-ink);font-size:20px;font-weight:600;overflow-wrap:anywhere}
+  .contact-info-hero small{color:var(--relay-ink-3);font-size:smaller}
   .contact-info-actions{display:flex;gap:10px;margin-top:10px}
-  .contact-info-action{display:flex;flex-direction:column;align-items:center;gap:4px;width:76px;padding:9px 0 7px;border-radius:var(--relay-radius);background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1);color:var(--relay-accent-text);font-size:12px;text-decoration:none;transition:transform 120ms ease}
+  .contact-info-action{display:flex;flex-direction:column;align-items:center;gap:4px;width:76px;min-height:0!important;padding:9px 0 7px;border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1);color:var(--relay-accent-text);font-size:11.5px;text-decoration:none;transition:transform 120ms ease}
   .contact-info-action:active{transform:scale(.95)}
-  .contact-info-facts{margin:0 0 12px;border-radius:var(--relay-radius);background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
-  .contact-info-facts>div{display:flex;justify-content:space-between;gap:12px;padding:10px 14px;font-size:13px}
-  .contact-info-facts dt{color:var(--ink-gray-6)}
-  .contact-info-page .contact-details{display:flex;flex-direction:column;gap:10px;padding:14px;border:0;box-shadow:var(--relay-shadow-1)}
-  .contact-info-page .contact-details h4{margin-top:6px;color:var(--ink-gray-6);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
-  .contact-info-page .contact-detail-heading{display:none}
+  .contact-info-page .info-group-title:first-child,.contact-info-page .contact-links>.info-group-title:first-child{margin-top:14px}
 
   /* Tickets: the list and the open ticket are separate pages */
   .v1-screen:has(.ticket-detail) :is(.workspace-heading,.automation-filter-bar){display:none}

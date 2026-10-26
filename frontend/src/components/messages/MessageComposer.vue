@@ -7,6 +7,7 @@ import { channelCan } from "../../services/enabledChannels";
 import { Button, FormControl, Dropdown } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 import { useMobileLayout } from "../../composables/useMobileLayout";
+import { useSendChannel } from "../../composables/useSendChannel";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
@@ -89,7 +90,15 @@ async function attachFile(event) {
   if (attachment.value) kind.value=requestedAttachmentKind.value;
   else attachment.value=previous;
 }
+const props = defineProps({ recipient: String });
 const emit = defineEmits(["template", "note"]);
+const { options: sendOptions } = useSendChannel();
+const plusOptions = computed(() => [
+  ...sendOptions.value,
+  ...(can("templates") ? [{ label: "Template", icon: "file-text", disabled: busy.value, onClick: () => emit("template") }] : []),
+  { label: "Internal note", icon: "edit-3", disabled: busy.value, onClick: () => emit("note") },
+  { label: "Saved replies", icon: "zap", disabled: busy.value, onClick: () => { showReplies.value = true; } },
+]);
 const windowState = ref({ open: true }),
   windowError = ref("");
 let windowGeneration = 0, expiryTimer;
@@ -129,6 +138,11 @@ watch(
   { immediate: true },
 );
 useRealtimeRefresh([], ['messages'], checkWindow);
+const windowHint = computed(() => {
+  const seconds = windowState.value.remaining_seconds;
+  if (!windowState.value.open || !Number.isFinite(seconds)) return "";
+  return "24 h window open · " + Math.max(1, Math.ceil(seconds / 3600)) + " h left";
+});
 onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); });
 const canSend = computed(
   () =>
@@ -188,108 +202,60 @@ function keydown(event) {
 </script>
 <template>
   <form class="message-composer compact-composer" :class="{'is-expanded': expanded}" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="canSend && send()">
-    <div class="composer-tabs" role="group" aria-label="Compose">
+    <div v-if="!isMobile" class="composer-tabs" role="group" aria-label="Compose">
       <button type="button" class="active" aria-pressed="true">Reply</button>
       <button type="button" aria-pressed="false" :disabled="busy" @click="emit('note')">Internal note</button>
       <button v-if="can('templates')" type="button" aria-pressed="false" :disabled="busy" @click="emit('template')">Template</button>
     </div>
-    <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
-    <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
-    <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
-    <div v-else-if="!windowState.open" class="composer-window-notice">
-      <span>The WhatsApp reply window is closed.</span
-      ><Button label="Use an approved template" @click="emit('template')" />
-    </div>
-    <div v-if="quoting" class="composer-quote">
-      Replying to {{ (source.content || "Message").slice(0, 80)
-      }}<span v-if="sourceContext.message_thread_id">
-        · Topic {{ sourceContext.message_thread_id }}</span
-      >
-      <Button
-        icon="x"
-        label="Cancel reply"
-        title="Cancel reply"
-        @click="cancelReply"
-      />
-    </div>
-    <div
-      v-else-if="sourceContext.message_thread_id"
-      class="text-xs text-ink-gray-5"
-    >
-      Topic {{ sourceContext.message_thread_id }}
-    </div>
-    <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-    <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
-    <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
-    <div v-show="expanded || !isMobile" class="composer-toolbar">
-      <Button v-if="can('templates')" class="composer-template-button" label="Template" :disabled="busy" @click="emit('template')" />
-      <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
-      <Dropdown :options="emojiOptions"><Button icon="smile" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
-      <Button icon="zap" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />
+    <div class="composer-extras">
+      <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
+      <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
+      <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
+      <div v-else-if="!windowState.open" class="composer-window-notice">
+        <span>The WhatsApp reply window is closed.</span><Button label="Use an approved template" @click="emit('template')" />
+      </div>
+      <div v-if="quoting" class="composer-quote">
+        Replying to {{ (source.content || "Message").slice(0, 80) }}<span v-if="sourceContext.message_thread_id"> · Topic {{ sourceContext.message_thread_id }}</span>
+        <Button icon="x" label="Cancel reply" title="Cancel reply" @click="cancelReply" />
+      </div>
+      <div v-else-if="sourceContext.message_thread_id" class="text-xs text-ink-gray-5">Topic {{ sourceContext.message_thread_id }}</div>
+      <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
+      <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+      <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
       <span v-if="kind !== 'text'" class="composer-selection">{{attachTypes[kind]?.[0] || kind}}
         <Button icon="x" aria-label="Cancel attachment" title="Cancel attachment" :disabled="busy" @click="kind='text';attachment=null" />
       </span>
     </div>
+    <div v-if="isMobile" class="composer-plus"><Dropdown :options="plusOptions"><Button icon="plus" variant="ghost" aria-label="Send options, templates and notes" title="Send options, templates and notes" /></Dropdown></div>
+    <div class="composer-input" :class="{ 'is-text': kind === 'text' }">
+      <textarea ref="draftInput" v-if="kind === 'text'" v-model="body" class="chat-draft" aria-label="Message"
+        :placeholder="isMobile ? 'Message' : props.recipient ? 'Write a reply to ' + props.recipient + '…' : 'Write a message…'"
+        rows="1" @keydown="keydown" @input="resizeDraft();typing()" />
+      <div v-else-if="kind === 'location'" class="flex flex-wrap gap-3">
+        <FormControl v-model="latitude" type="number" label="Latitude" /><FormControl v-model="longitude" type="number" label="Longitude" />
+      </div>
+      <div v-else-if="kind === 'contact'" class="flex flex-wrap gap-3">
+        <FormControl v-model="contactName" label="Contact name" /><FormControl v-model="phone" label="Phone number" />
+      </div>
+      <div v-else-if="['photo', 'video', 'audio', 'voice', 'document'].includes(kind)" class="space-y-2">
+        <div class="attachment-preview">
+          <span>{{ attachment ? attachment.filename : 'Choose '+(attachTypes[kind]?.[0] || 'attachment').toLowerCase()+' · up to 4 MiB' }}</span>
+          <Button :label="attachment?'Replace':'Choose file'" :disabled="busy" @click="chooseAttachment(kind)" />
+        </div>
+        <FormControl v-if="!(sourceContext.provider === 'WhatsApp' && ['audio', 'voice'].includes(kind))" label="Caption" type="textarea" v-model="body" @keydown="keydown" />
+      </div>
+      <p v-else class="text-sm">Select an existing sticker to resend.</p>
+      <Dropdown v-if="isMobile && kind === 'text' && attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" variant="ghost" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
+    </div>
+    <div v-if="!isMobile" class="composer-toolbar">
+      <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" variant="ghost" aria-label="Add attachment" title="Add attachment" :disabled="busy || !windowState.open" /></Dropdown>
+      <Dropdown :options="emojiOptions"><Button icon="smile" variant="ghost" aria-label="Insert emoji" title="Insert emoji" :disabled="busy" /></Dropdown>
+      <Button icon="zap" variant="ghost" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="showReplies=true" />
+      <span v-if="windowHint" class="composer-window-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
+    </div>
     <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
       :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
-    <span class="composer-channel"><slot name="channel" /></span>
-    <textarea ref="draftInput"
-      v-if="kind === 'text'"
-      v-model="body"
-      class="chat-draft"
-      aria-label="Message"
-      :placeholder="sourceContext.provider ? 'Reply on ' + sourceContext.provider + '…' : 'Write a message…'"
-      rows="1"
-      @keydown="keydown"
-      @input="resizeDraft();typing()"
-    />
-    <div v-else-if="kind === 'location'" class="flex flex-wrap gap-3">
-      <FormControl
-        v-model="latitude"
-        type="number"
-        label="Latitude"
-      /><FormControl v-model="longitude" type="number" label="Longitude" />
-    </div>
-    <div v-else-if="kind === 'contact'" class="flex flex-wrap gap-3">
-      <FormControl v-model="contactName" label="Contact name" /><FormControl
-        v-model="phone"
-        label="Phone number"
-      />
-    </div>
-    <div
-      v-else-if="
-        ['photo', 'video', 'audio', 'voice', 'document'].includes(kind)
-      "
-      class="space-y-2"
-    >
-      <div class="attachment-preview">
-        <span>{{ attachment ? attachment.filename : 'Choose '+(attachTypes[kind]?.[0] || 'attachment').toLowerCase()+' · up to 4 MiB' }}</span>
-        <Button :label="attachment?'Replace':'Choose file'" :disabled="busy" @click="chooseAttachment(kind)" />
-      </div>
-      <FormControl
-        v-if="
-          !(
-            sourceContext.provider === 'WhatsApp' &&
-            ['audio', 'voice'].includes(kind)
-          )
-        "
-        label="Caption"
-        type="textarea"
-        v-model="body"
-        @keydown="keydown"
-      />
-    </div>
-    <p v-else class="text-sm">Select an existing sticker to resend.</p>
-    <Button
-      label="Send"
-      icon="send"
-      title="Send · Enter"
-      type="submit"
-      variant="solid"
-      :disabled="!canSend"
-    />
-    <span v-if="expanded && kind === 'text'" class="composer-keyboard-hint"
-      >Enter to send · Shift+Enter for a new line</span
-    >
+    <span v-if="!isMobile" class="composer-channel"><slot name="channel" /></span>
+    <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" title="Send · Enter" type="submit" variant="solid" :disabled="!canSend" />
   </form>
 </template>
