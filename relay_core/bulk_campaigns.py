@@ -1,4 +1,5 @@
 """WhatsApp template, text and media campaigns from an uploaded sheet, pushed to Hub 50 rows at a time."""
+import base64
 import hashlib
 import json
 import mimetypes
@@ -30,6 +31,7 @@ CANCEL_REFUSED = ('Hub refused to cancel queued messages, so they may still be s
                   'deliveries:cancel scope and save it in Relay Settings; Relay retries by itself. ')
 OPERATIONS = ('templates.send', 'messages.send', 'messages.media')
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window'
+MEDIA_DAYS = 29  # Meta keeps an uploaded media id for 30 days.
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 
@@ -122,14 +124,37 @@ def campaign_message(message):
     return operation, {'message': message, 'fields': bulk_sheet.message_fields(message)}
 
 
-@frappe.whitelist(methods=['POST'])
-def media_link(name, file_url):
-    """Public link of one uploaded file that every row of a media campaign sends."""
-    kind = json.loads(bulk(name, ('Draft',)).arguments).get('message', {}).get('kind')
-    file = uploaded_file(file_url)
-    if file.is_private or mimetypes.guess_type(file.file_name or '')[0] not in bulk_sheet.accepted_types(kind):
-        frappe.throw(f'Upload a public {kind or "media"} file in a format WhatsApp accepts')
-    return {'url': frappe.utils.get_url(file.file_url), 'file_name': file.file_name}
+def fixed_file(doc):
+    """(File, MIME type) that every row of a media campaign sends, or None when rows carry links."""
+    value = (json.loads(doc.column_map or '{}').get('fixed') or {}).get('media_url')
+    if not bulk_sheet.is_site_file(value):
+        return None
+    kind = json.loads(doc.arguments)['message']['kind']
+    file = uploaded_file(value)
+    mime_type = mimetypes.guess_type(file.file_name or '')[0]
+    if mime_type not in bulk_sheet.accepted_types(kind):
+        frappe.throw(f'Upload a {kind} file in a format WhatsApp accepts')
+    return file, mime_type
+
+
+def media_upload(hub, doc):
+    """Campaign fields of the Hub media id for the fixed file: uploaded once, and again when the id would expire."""
+    found = fixed_file(doc)
+    if not found:
+        return {}
+    now = frappe.utils.now_datetime()
+    if doc.media_id and frappe.utils.get_datetime(doc.media_uploaded_at) > frappe.utils.add_to_date(now, days=-MEDIA_DAYS):
+        return {}
+    file, mime_type = found
+    with open(file.get_full_path(), 'rb') as handle:
+        content = base64.b64encode(handle.read()).decode()
+    kind = json.loads(doc.arguments)['message']['kind']
+    payload = whatsapp.prepare('messages.media_upload', {'media_type': bulk_sheet.MESSAGE_MEDIA[kind], 'mime_type': mime_type,
+                               'filename': file.file_name, 'content_base64': content})
+    media_id = str(hub.execute(payload).get('id') or '')
+    if not media_id:
+        raise whatsapp.HubError('Hub returned no media id')
+    return {'media_id': media_id, 'media_uploaded_at': now}
 
 
 def uploaded_file(file_url):
@@ -174,7 +199,9 @@ def import_rows(name, mapping):
         mapping = bulk_sheet.check_mapping(mapping, header, json.loads(doc.arguments)['fields'])
     except ValueError as exc:
         frappe.throw(str(exc))
-    doc.column_map, doc.status, doc.last_error = canonical(mapping), 'Importing', ''
+    doc.column_map = canonical(mapping)
+    fixed_file(doc)
+    doc.status, doc.last_error = 'Importing', ''
     internal_save(doc)
     enqueue('import_job', name)
     return read(name)
@@ -323,14 +350,14 @@ def control(name, action):
         frappe.throw('Invalid campaign action')
     allowed, target = transitions[action]
     require_access(manage=True)
-    if target == 'Running':
-        check_ready(bulk(name, allowed))  # Hub calls stay outside the lock.
+    media = check_ready(bulk(name, allowed)) if target == 'Running' else {}  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
         doc = bulk(name, allowed)
         if target == 'Running':
             doc.execution_user, doc.started_at = frappe.session.user, doc.started_at or frappe.utils.now_datetime()
             from relay_core.bulk_updates import open_reply_window
             open_reply_window(doc.reply_window_hours)
+            doc.update(media)
         doc.status, doc.last_error = target, ''
         internal_save(doc)
     if target in ('Running', 'Cancelling'):
@@ -349,6 +376,7 @@ def check_ready(doc):
         hub, _ = whatsapp.checked_client()
         if doc.operation == 'templates.send':
             approved_template(hub, doc.template_name, doc.language)
+        return media_upload(hub, doc)
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
 
@@ -448,7 +476,7 @@ def push(doc, deadline):
 def hub_message(doc, snapshot, row):
     values = json.loads(row.arguments)['values']
     if 'message' in snapshot:
-        return {**bulk_sheet.build_message(snapshot['message'], values), 'to': row.destination}
+        return {**bulk_sheet.build_message(snapshot['message'], values, doc.media_id), 'to': row.destination}
     return {'operation': 'templates.send', 'to': row.destination, 'name': doc.template_name, 'language': doc.language,
             'components': bulk_sheet.build_components(snapshot['fields'], values)}
 

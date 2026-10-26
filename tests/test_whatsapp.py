@@ -77,6 +77,16 @@ class WhatsAppTests(unittest.TestCase):
         with self.assertRaises(PermissionError):self.api.execute('templates.media_upload',args)
         self.hub.execute.assert_not_called()
 
+    def test_campaign_media_upload_is_manager_scoped_and_not_audited(self):
+        from relay_core import whatsapp_templates
+        args={'media_type':'image','mime_type':'image/png','filename':'offer.png','content_base64':'iVBORw0KGgo='}
+        self.hub.execute.side_effect=[{'site':'http://yrp.site:8002'},{'id':'555'}]
+        self.assertEqual(self.api.execute('messages.media_upload',args),{'id':'555'})
+        self.api.require_access.assert_called_once_with(manage=True)
+        self.assertEqual(self.hub.execute.call_args.args[0],dict(args,operation='messages.media_upload'))
+        whatsapp_templates.record_request.assert_not_called()
+        with self.assertRaises(ValueError):self.api.prepare('messages.media_upload',dict(args,media_url='https://cdn.example/a.png'))
+
     def test_template_sample_upload_rejects_oversized_bytes_and_wrong_site(self):
         with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'x'*(6*1024*1024)})
         self.hub.execute.assert_not_called()

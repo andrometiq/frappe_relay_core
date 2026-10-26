@@ -7,6 +7,7 @@ from relay_core.permissions import require_access, require_business_assignment
 
 READ = {'account.profile','account.metadata','capabilities','templates.list'}
 MANAGE = {'templates.media_upload','templates.delete','templates.create','templates.update'}
+UPLOAD = {'messages.media_upload'}  # Hub returns a media id for later sends; no message goes out.
 
 
 def configured_business_type(doctype):
@@ -44,15 +45,15 @@ def business_contacts(doctype, name, after=None):
 
 
 def prepare(operation, arguments=None, contact=None, business_doctype=None, business_name=None):
-    if not isinstance(operation,str) or operation not in READ | MANAGE | SEND:frappe.throw('Unsupported WhatsApp operation')
-    require_access(manage=operation in MANAGE)
+    if not isinstance(operation,str) or operation not in READ | MANAGE | SEND | UPLOAD:frappe.throw('Unsupported WhatsApp operation')
+    require_access(manage=operation in MANAGE | UPLOAD)
     if arguments is None:arguments={}
     if isinstance(arguments,str):arguments=frappe.parse_json(arguments)
     if not isinstance(arguments,dict):frappe.throw('Arguments must be an object')
     allowed={'request_key','id','name','language','category','parameter_format','message_send_ttl_seconds','body','subject','action','sdp','sdp_type','after','components','reply_to','emoji','media_type','media_id','media_url','caption','filename','description','participants','join_requests','expiration_days','join_approval_mode','photo_base64','location','contacts','content_base64','mime_type'}
     if set(arguments)-allowed:frappe.throw('Unsupported operation arguments')
     if {'content_base64','mime_type'}.intersection(arguments):
-        if operation not in {'messages.media','templates.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
+        if operation not in {'messages.media','templates.media_upload','messages.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
         content = arguments.get('content_base64')
         if not isinstance(content,str) or not 1 <= len(content) <= ((4*1024*1024+2)//3)*4:frappe.throw('Attachment must be at most 4 MiB')
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
