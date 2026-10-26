@@ -12,6 +12,8 @@ SYNC_PAGES = 20  # Hub pages hold 50 templates.
 FIELDS = ('template_name', 'language', 'category', 'status', 'quality', 'reason')
 DEFINITIONS = 'relay-template-definitions:'
 SYNCED = 'relay-template-synced:'
+SYNC_REQUESTED = 'relay-template-sync-requested:'
+SYNC_AFTER_SECONDS = 60
 PLACEHOLDER = re.compile(r'\{\{\s*([a-z0-9_]+)\s*\}\}')
 
 
@@ -111,8 +113,10 @@ def listed(hub):
     return rows, False
 
 
-def sync():
-    """Scheduled local copy; Meta may deliver WABA status webhooks to another site."""
+def sync(notify=False):
+    """Scheduled or requested local copy; Meta may deliver WABA status webhooks to another site.
+
+    `notify` publishes the finished sync even without changes, so an open list leaves its syncing state."""
     account = connection_value('relay_hub_account')
     if not account or not frappe.db.exists('Relay Channel', {'account':account, 'channel':'WhatsApp', 'enabled':1}):
         return False
@@ -125,19 +129,20 @@ def sync():
         rows, complete = listed(hub)
     except (HubError, ValueError, frappe.ValidationError) as error:
         frappe.log_error('Relay WhatsApp template sync failed', getattr(error, 'detail', '') or str(error))
+        if notify: publish()
         return False
     changed = store(account, rows, complete)
     remember(account, rows)
     frappe.cache.set_value(SYNCED + account, {'synced_at': frappe.utils.now(), 'templates': len(rows)})
+    if notify and not changed: publish()
     return changed
 
 
 def remember(account, rows):
-    """Cache listed template content so sends render without another Hub list."""
+    """Cache listed template rows so sends render and the Templates tab lists without another Hub list."""
     for row in rows:
         if row.get('name') and row.get('language'):
-            frappe.cache.hset(DEFINITIONS + account, row['name'] + '|' + row['language'],
-                              {key: row.get(key) for key in ('parameter_format', 'components')})
+            frappe.cache.hset(DEFINITIONS + account, row['name'] + '|' + row['language'], row)
 
 
 def definition(name, language):
@@ -205,6 +210,42 @@ def sync_status():
     from relay_core.permissions import require_access
     require_access()
     return frappe.cache.get_value(SYNCED + (connection_value('relay_hub_account') or '')) or {'synced_at': None, 'templates': 0}
+
+
+@frappe.whitelist(methods=['GET'])
+def directory():
+    """The local template copy in the Hub list shape, without a Hub call; a stale copy queues one background sync."""
+    from relay_core.permissions import require_access
+    require_access()
+    account = connection_value('relay_hub_account') or ''
+    rows = frappe.get_all('Relay WhatsApp Template', filters={'account':account, 'status':['!=', 'DELETED']},
+        fields=['template_id', 'template_name', 'language', 'category', 'status', 'quality', 'reason'],
+        order_by='template_name asc, language asc', limit_page_length=SYNC_PAGES * 50)
+    definitions = {key.decode() if isinstance(key, bytes) else key: value
+                   for key, value in (frappe.cache.hgetall(DEFINITIONS + account) or {}).items()}
+    data = [local_row(row, definitions.get(f'{row.template_name}|{row.language}')) for row in rows]
+    synced = frappe.cache.get_value(SYNCED + account) or {'synced_at': None, 'templates': 0}
+    missing = any(not row.get('components') for row in data)
+    return {'data': data, 'sync': dict(synced, syncing=request_sync(account, synced, missing))}
+
+
+def local_row(row, listed=None):
+    """The last listed Hub row with the newer local status, quality and rejection reason."""
+    values = {'id':row.template_id, 'name':row.template_name, 'language':row.language, 'category':row.category,
+              'status':row.status, 'quality_score':{'score':row.quality} if row.quality else None, 'rejected_reason':row.reason}
+    return {**(listed or {}), **{key:value for key, value in values.items() if value is not None}}
+
+
+def request_sync(account, synced, missing_content=False):
+    """Queue one background sync when the copy is stale; at most one request per account each minute."""
+    if not account: return False
+    synced_at = synced.get('synced_at')
+    fresh = synced_at and frappe.utils.time_diff_in_seconds(frappe.utils.now(), synced_at) < SYNC_AFTER_SECONDS
+    if fresh and not missing_content: return False
+    if not frappe.cache.set(frappe.cache.make_key(SYNC_REQUESTED + account), '1', nx=True, ex=SYNC_AFTER_SECONDS):
+        return False
+    frappe.enqueue('relay_core.whatsapp_templates.sync', queue='short', timeout=300, notify=True)
+    return True
 
 
 def record_request(operation, arguments, result=None, error=''):

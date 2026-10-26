@@ -138,11 +138,11 @@ test('template lifecycle events refresh after an in-flight request without polli
   let handler,release,lists=0
   const api=async(method,args)=>{
     if(method==='whatsapp.connection')return {configured:true}
-    if(method==='whatsapp_templates.sync_status')return {synced_at:null,templates:0}
-    if(args.operation==='capabilities')return {templates:true}
+    if(args?.operation==='capabilities')return {templates:true}
+    assert.equal(method,'whatsapp_templates.directory')
     lists++
     if(lists===1)await new Promise(resolve=>release=resolve)
-    return {data:[{id:'1',status:lists===1?'PENDING':'APPROVED'}]}
+    return {data:[{id:'1',status:lists===1?'PENDING':'APPROVED'}],sync:{synced_at:null,templates:0}}
   }
   const make=new Function('computed','onMounted','ref','coreApi','templateParameterDescriptors','useRealtimeRefresh',text+'\nreturn useWhatsAppTemplatesWorkspace();')
   const state=make(computed,()=>{},ref,api,()=>[],(dt,kinds,fn)=>{

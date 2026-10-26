@@ -65,6 +65,7 @@ export function filterTemplates(
 
 // One sentence for the scheduled local template copy, e.g. "Synced 3 minutes ago".
 export function templateSyncLabel(status, now = Date.now()) {
+  if (status?.syncing) return "Syncing with Meta…";
   const date = new Date(String(status?.synced_at || "").replace(" ", "T"));
   if (!Number.isFinite(date.getTime())) return "Not synced yet";
   const minutes = Math.floor(Math.max(0, now - date.getTime()) / 60000);
