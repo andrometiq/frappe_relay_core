@@ -61,7 +61,9 @@ try:
     base = f'http://127.0.0.1:{server.server_port}/api/method/relay_core.'
 
     status, body = call('api.capabilities', operator)
-    assert status == 200 and body['message'] == {'manage': False, 'configure': False, 'enabled_channels': ['WhatsApp']}, body
+    assert status == 200 and {key: body['message'][key] for key in ('manage', 'configure', 'enabled_channels')} == {'manage': False, 'configure': False, 'enabled_channels': ['WhatsApp']}, body
+    whatsapp_features = body['message']['channels']['WhatsApp']
+    assert list(body['message']['channels']) == ['WhatsApp'] and whatsapp_features['templates'] and not whatsapp_features['forms'], body
     status, body = call('api.capabilities', manager)
     assert status == 200 and body['message']['manage'] and body['message']['enabled_channels'] == ['WhatsApp'], body
     assert call('api.capabilities', outsider)[0] == 403
