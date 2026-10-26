@@ -11,7 +11,7 @@ import { Button, FeatherIcon, Dropdown, Dialog } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL } from "../messageContent";
-import { multipleChannels } from "../../services/enabledChannels";
+import { channelCan, multipleChannels } from "../../services/enabledChannels";
 import { createScrollHold } from "./scrollHold";
 const props = defineProps({
   rows: Array,
@@ -41,6 +41,7 @@ const emit = defineEmits([
 ]);
 const capabilities = inject("relayCapabilities", ref({}));
 const showChannel = computed(() => multipleChannels(capabilities.value));
+const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
 const readersByMessage=computed(()=>{const result={};for(const reader of cursorReaders.value)(result[reader.last_read_message]||=[]).push(reader);return result;});
@@ -56,8 +57,7 @@ const scroll = createScrollHold(() => viewport.value);
 const reactionTarget = ref(null);
 const reactionChoices = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
 function canReact(message) {
-  const context = objectValue(message.provider_context);
-  return !context.group_id && context.provider === "WhatsApp";
+  return !objectValue(message.provider_context).group_id && can(message, "reactions");
 }
 function deliveryKind(message) {
   const status = String(message.status || "");
@@ -214,14 +214,13 @@ function actions(message) {
     link.click();
     link.remove();
   }});
-  const context = objectValue(message.provider_context);
   if (props.canComment)
     items.push({
       label: "Discuss internally",
       icon: "message-square",
       onClick: () => emit("note", message),
     });
-  if (!context.group_id && context.provider !== "Email")
+  if (canReact(message))
     items.push(
       {
         label: "React",
@@ -333,7 +332,7 @@ function actions(message) {
                 class="h-3 w-3"
             /></span>
           </span>
-          <span v-if="!message._pending && message.direction === 'Outgoing' && objectValue(message.provider_context).provider !== 'WhatsApp'" class="pending-status">{{ channelStatus(message) }}</span>
+          <span v-if="!message._pending && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
           <span v-if="message._pending" class="pending-status">{{channelStatus(message)}}
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
@@ -388,7 +387,7 @@ function actions(message) {
           <dt>Message reference</dt>
           <dd>{{ info.name }}</dd>
         </dl>
-        <ParticipantReceipts v-if="info.direction==='Outgoing' && objectValue(info.provider_context).provider==='WhatsApp' && objectValue(info.provider_context).group_id" :message="info.name" />
+        <ParticipantReceipts v-if="info.direction==='Outgoing' && can(info, 'group_receipts') && objectValue(info.provider_context).group_id" :message="info.name" />
         <section aria-label="Operator read coverage" class="mt-4 space-y-2">
           <h3 class="font-medium">Seen by your team</h3>
           <p v-if="coverageError" role="alert">{{ coverageError }}</p>

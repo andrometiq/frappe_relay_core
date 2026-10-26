@@ -1,5 +1,5 @@
 <script setup>
-import { provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
+import { inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
 import { Avatar, Button, Dropdown, ErrorMessage } from "@relay/ui";
 import { recordTitle } from '../services/recordTitle';
 import { linkedTitle } from '../services/linkedTitle';
@@ -25,9 +25,11 @@ import { useConversationPresence } from "../composables/useConversationPresence"
 import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
 import { useEnabledChannels } from "../composables/useEnabledChannels";
+import { channelCan } from "../services/enabledChannels";
 
 const state = useMessages();
 const channelEnabled = useEnabledChannels();
+const capabilities = inject("relayCapabilities", ref({}));
 const deliveriesOpen = ref(false), contactRecord = ref(null);
 const casesOpen = ref(false), topicsOpen = ref(false);
 const activeBusiness = computed(() => ({
@@ -274,7 +276,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <EmailComposer v-if="source && objectValue(source.provider_context).provider === 'Email' && channelEnabled('Email')" :key="source.name">
+      <EmailComposer v-if="source && channelCan(capabilities, objectValue(source.provider_context).provider, 'email_threading')" :key="source.name">
         <template #channel><SendChannel /></template>
         <template #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>

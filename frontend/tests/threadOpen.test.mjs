@@ -1,4 +1,6 @@
 import test from 'node:test'
+import { injectCapabilities } from './channelCapabilities.js'
+import { composerKinds } from '../src/services/enabledChannels.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, ref, watch } from 'vue'
@@ -10,7 +12,7 @@ import { coordinates } from '../src/components/formValidation.js'
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
   .replace(/^import .*\n/gm, '').replace('export function', 'function')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
-  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', source + '\nreturn useMessages();')
+  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', source + '\nreturn useMessages();')
 const name = index => 'RELAY-MSG-' + String(index).padStart(10, '0')
 const thread = Array.from({ length: 30 }, (_, index) => ({ name: name(index + 1), channel: 'whatsapp', direction: 'Incoming',
   content: 'Message ' + (index + 1), creation: name(index + 1), provider_context: { provider: 'WhatsApp' } }))
@@ -39,7 +41,7 @@ function fixture(t, viewState) {
     throw Error('Unexpected method: ' + method)
   }
   const state = scope.run(() => make(ref, computed, watch, () => {}, () => {}, () => {}, api, resetRecipient, sha256Hex,
-    () => 'key', messageData, objectValue, coordinates))
+    () => 'key', messageData, objectValue, coordinates, injectCapabilities, composerKinds))
   t.after(() => { scope.stop(); for (const [key, value] of Object.entries(previous)) globalThis[key] = value })
   return { state, calls }
 }

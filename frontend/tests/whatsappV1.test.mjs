@@ -1,5 +1,7 @@
 import { resetRecipient } from '../src/services/recipientContext.js'
 import test from 'node:test'
+import { injectCapabilities } from './channelCapabilities.js'
+import { composerKinds } from '../src/services/enabledChannels.js'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {computed,ref,watch,reactive,nextTick,effectScope} from 'vue'
@@ -8,7 +10,7 @@ import {sha256Hex} from '../src/services/crypto.js'
 
 const source=(await readFile(new URL('../src/composables/useMessages.js',import.meta.url),'utf8'))
   .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','function')
-const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','"use strict";\n'+source+'\nreturn useMessages();')
+const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','inject','composerKinds','"use strict";\n'+source+'\nreturn useMessages();')
 function storage(){
   const value={}
   Object.defineProperties(value,{
@@ -21,7 +23,7 @@ function setup(api){
   globalThis.sessionStorage=storage()
   let refresh,id=0
   const scope=effectScope()
-  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue,resetRecipient))
+  const state=scope.run(()=>factory((dt,kinds,fn)=>refresh=fn,sha256Hex,()=>`key-${++id}`,computed,()=>{},()=>{},ref,watch,reactive,()=>{},api,messageData,objectValue,resetRecipient,injectCapabilities,composerKinds))
   return {state,refresh:(...kinds)=>refresh({kinds:new Set(kinds)}),stop:()=>scope.stop()}
 }
 const row=(number,time)=>({name:`RELAY-MSG-${String(number).padStart(10,'0')}`,channel:'channel',content:'Hello',creation:'2026-10-24',sent_at:time,provider_context:{provider:'WhatsApp'},sender_endpoint:'15550000001'})
