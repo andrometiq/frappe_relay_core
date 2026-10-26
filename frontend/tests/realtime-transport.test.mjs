@@ -16,7 +16,7 @@ test('production client uses WebSocket, rejoins rooms and catches up once after 
  io.listen(0,{host:'127.0.0.1'})
  await once(io.httpServer,'listening')
  const port=io.httpServer.address().port
- globalThis.location={origin:'http://127.0.0.1'}
+ globalThis.location={origin:'http://127.0.0.1:8000',port:'8000'}
  globalThis.document={getElementById:()=>({dataset:{site:'relay-test',socketPort:String(port)}})}
  const connections=[],subscriptions=[],batches=[],opened=[],viewers=[]
  io.of('/relay-test').on('connection',s=>{connections.push(s);s.on('doctype_subscribe',dt=>subscriptions.push(dt));s.on('doc_open',(dt,name)=>{opened.push([dt,name]);s.emit('doc_viewers',{doctype:dt,docname:name,users:['fixture-user']})})})
@@ -47,4 +47,11 @@ test('production client uses WebSocket, rejoins rooms and catches up once after 
   assert.deepEqual(subscriptions,['Relay Message','Relay Message'])
   assert.deepEqual(batches.slice(initial),[['reconnect']])
  }finally{stopViewers();leave();off();queue.dispose();client.disconnect();await io.close();delete globalThis.document;delete globalThis.location}
+})
+
+test('the socket uses its own port only when the browser reaches the web port directly', async () => {
+ const {socketOrigin}=await import('../src/services/realtime.js')
+ assert.equal(socketOrigin({origin:'http://relay.localhost:8001',port:'8001'},'9001'),'http://relay.localhost:9001')
+ assert.equal(socketOrigin({origin:'https://relay.trycloudflare.com',port:''},'9001'),'https://relay.trycloudflare.com')
+ assert.equal(socketOrigin({origin:'https://relay.example.com',port:''},''),'https://relay.example.com')
 })
