@@ -19,6 +19,8 @@
   .v1-shell.relay-shell .relay-mobile-menu{display:inline-flex;width:38px;height:38px;min-height:38px;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
+  .v1-shell.relay-shell .v1-connection.is-connected{display:none}
+  .v1-shell.relay-shell .v1-header .notification-toggle{width:40px;height:40px;border-radius:8px;color:var(--relay-ink-2)}
   .relay-header-actions{display:flex;align-items:center}
   .relay-header-new.relay-button{width:38px;min-width:38px;height:38px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
 
@@ -56,8 +58,12 @@
   .v1-shell.relay-shell .contact-directory>.directory-search .relay-input-shell{height:38px;min-height:38px;border-radius:8px;background:var(--relay-layer)}
   .v1-shell.relay-shell .contact-directory>.directory-search .relay-input{min-height:36px;font-size:14px}
   .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1;display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
-  .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
-  .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
+  .v1-shell.relay-shell .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
+
+  /* Small controls keep the mockup size; an invisible band makes each touch target 40px tall */
+  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues>button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove){position:relative}
+  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues>button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove)::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
+  .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px;overflow:visible}
   .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
   .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:28px;min-height:28px;min-width:0;padding:0 4px;border-radius:6px;font-size:13px}
   .v1-shell.relay-shell .contact-directory>.v1-queues>:last-child{flex:0 0 auto}
