@@ -146,7 +146,7 @@ class BackendFindings(unittest.TestCase):
 
     def test_unsupported_drain_fails_before_locking_or_consuming_signal(self):
         f=self.fake(); f.db.db_type='sqlite'
-        with patch.object(queue,'frappe',f), patch.object(queue,'_release_signal') as release:
+        with patch.object(queue,'frappe',f), patch.object(queue.AUTOMATION,'release_signal') as release:
             with self.assertRaisesRegex(RuntimeError,'supports MariaDB and PostgreSQL'): queue.drain('token')
             release.assert_not_called(); f.db.sql.assert_not_called()
 

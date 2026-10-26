@@ -95,8 +95,8 @@ def isolated(tag, *, child=False):
         return result
     with ExitStack() as stack:
         stack.enter_context(patch.object(queue, 'get_queue', return_value=rq))
-        stack.enter_context(patch.object(queue, '_signal_key', return_value='sim-event-wake-' + tag))
-        stack.enter_context(patch.object(queue, '_lock_name', return_value='sim-event-lock-' + tag))
+        stack.enter_context(patch.object(queue.AUTOMATION, 'signal', 'sim-event-wake-' + tag))
+        stack.enter_context(patch.object(queue.AUTOMATION, 'lock', 'sim-lock-' + tag[-12:]))
         stack.enter_context(patch.object(frappe, 'get_all', side_effect=get_all))
         stack.enter_context(patch.object(type(frappe.local.db), 'exists', exists))
         stack.enter_context(patch.object(frappe, 'init', side_effect=init))
@@ -173,13 +173,13 @@ def main():
                 try: queue.wake()
                 except SystemExit: pass
                 else: raise AssertionError('Producer did not die')
-            assert not rq.connection.get(queue._signal_key()) and rq.count == 0
+            assert not rq.connection.get(queue.AUTOMATION.signal_key) and rq.count == 0
             # Redis loss at commit cannot lose the durable message marker.
             with patch.object(queue, 'get_queue', side_effect=ConnectionError('Injected queue outage')):
                 first = message('Redis Recovery'); frappe.db.commit()
             assert frappe.db.get_value('Relay Message', first.name, 'automation_status') == 'Pending'
             assert not frappe.db.exists('Relay Automation Run', {'message': first.name})
-            assert rq.count == 0 and not rq.connection.get(queue._signal_key())
+            assert rq.count == 0 and not rq.connection.get(queue.AUTOMATION.signal_key)
             batch = [first.name]
             with patch.object(queue, 'wake'):
                 for index in range(79):
@@ -191,9 +191,9 @@ def main():
             queue.recover()
             assert rq.count == 1
             # Process contention also proves the database lock releases on exit.
-            assert frappe.db.sql('select get_lock(%s, 0)', (queue._lock_name(),))[0][0]
+            assert frappe.db.sql('select get_lock(%s, 0)', (queue.AUTOMATION.lock_name,))[0][0]
             try: run_child('--contend', tag)
-            finally: frappe.db.sql('select release_lock(%s)', (queue._lock_name(),))
+            finally: frappe.db.sql('select release_lock(%s)', (queue.AUTOMATION.lock_name,))
             run_child('--work', tag)
             frappe.db.rollback()
             runs = frappe.get_all('Relay Automation Run', filters={'message':['in', batch]}, fields=['name','status','ticket','stage','reason'])
@@ -248,7 +248,7 @@ def main():
             for job in rq.get_jobs() + [Job.fetch(name, connection=rq.connection)
                     for name in rq.finished_job_registry.get_job_ids() + rq.failed_job_registry.get_job_ids()]:
                 job.delete()
-            rq.connection.delete(queue._signal_key())
+            rq.connection.delete(queue.AUTOMATION.signal_key)
             rq.delete()
     frappe.destroy()
 
@@ -269,9 +269,9 @@ if __name__ == '__main__':
                     assert frappe.db.exists('Relay Automation Run', {'message':sys.argv[3]})
                     os._exit(17)
             elif mode == '--contend':
-                token = rq.connection.get(queue._signal_key())
+                token = rq.connection.get(queue.AUTOMATION.signal_key)
                 assert token and queue.drain(token=token.decode()) == 0
-                assert rq.connection.get(queue._signal_key()) != token and rq.count == 2
+                assert rq.connection.get(queue.AUTOMATION.signal_key) != token and rq.count == 2
             elif mode == '--work':
                 SimpleWorker([rq], connection=rq.connection).work(burst=True, logging_level='ERROR')
                 assert not rq.failed_job_registry.count
