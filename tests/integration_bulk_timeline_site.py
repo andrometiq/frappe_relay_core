@@ -46,9 +46,9 @@ try:
                 'endpoint': number, 'verified': 1})
     frappe.db.commit()
     doc = _dict(name=label, channel=channel.name, template_name='winter_offer', language='en')
-    rows = [_dict(request_key=f'bulk-timeline-{words}-{index}', destination=number,
-                  components=[{'type': 'header', 'parameters': [{'type': 'text', 'text': f'Customer {index}'}]},
-                              {'type': 'body', 'parameters': [{'type': 'text', 'text': 'winter'}]}])
+    rows = [_dict(request_key=f'bulk-timeline-{words}-{index}', destination=number, message={'components': [
+                  {'type': 'header', 'parameters': [{'type': 'text', 'text': f'Customer {index}'}]},
+                  {'type': 'body', 'parameters': [{'type': 'text', 'text': 'winter'}]}]})
             for index, number in enumerate(numbers)]
     with patch.object(frappe, 'publish_realtime') as realtime:
         started = time.perf_counter()

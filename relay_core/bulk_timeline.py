@@ -69,25 +69,28 @@ def sent_content(doc, snapshot, message):
 
 
 def apply(rows):
-    """Bulk update rows -> timeline message status, provider ID and failure reason. Monotonic in SQL."""
+    """Bulk update rows -> timeline message status, provider ID and failure reason. One monotonic UPDATE per status."""
+    from relay_core.bulk_updates import derived
     from relay_core.message_updates import provider_key
     if not rows:
         return
     messages = frappe.get_all('Relay Message', filters={'source_key': ['in', [row['key'] for row in rows]]},
                               fields=['name', 'source_key', 'channel', 'sender_endpoint'], limit_page_length=0)
-    by_key = {message.source_key: message for message in messages}
+    by_key, groups = {message.source_key: message for message in messages}, {}
     for row in rows:
         message, status = by_key.get(row['key']), STATUS[row['status']]
         if message and status != 'Pending':
             identifier = row.get('message_id') or ''
-            frappe.db.sql('''UPDATE `tabRelay Message` SET status=%(status)s,
-                provider_id=IF(%(id)s='', provider_id, %(id)s),
-                provider_message_key=IF(%(id)s='', provider_message_key, %(key)s),
-                delivery_error=IF(%(status)s='Failed', %(error)s, '') WHERE name=%(name)s AND status IN %(lower)s''',
-                dict(status=status, id=identifier, name=message.name,
-                     error=row['reason'] or (CANCELLED if row['status'] == 'Cancelled' else ''),
-                     key=provider_key(message.channel, message.sender_endpoint, identifier) if identifier else None,
-                     lower=tuple(name for name, rank in RANK.items() if rank < RANK[status])))
+            groups.setdefault(status, []).append((message.name, identifier,
+                provider_key(message.channel, message.sender_endpoint, identifier) if identifier else '',
+                row['reason'] or (CANCELLED if row['status'] == 'Cancelled' else '')))
+    for status in sorted(groups, key=RANK.get):
+        table, values = derived(('name', 'message_id', 'message_key', 'error'), groups[status])
+        frappe.db.sql(f'''UPDATE `tabRelay Message` m JOIN ({table}) u ON m.name=u.name SET m.status=%s,
+            m.provider_id=IF(u.message_id='', m.provider_id, u.message_id),
+            m.provider_message_key=IF(u.message_id='', m.provider_message_key, u.message_key),
+            m.delivery_error={'u.error' if status == 'Failed' else "''"} WHERE m.status IN %s''',
+            (*values, status, tuple(name for name, rank in RANK.items() if rank < RANK[status])))
     if messages:
         changed()
 
