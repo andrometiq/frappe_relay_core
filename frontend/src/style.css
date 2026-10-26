@@ -222,6 +222,7 @@
 
 /* Relay chat workspace:compact conversation layout, independent of the legacy UI. */
 .relay-shell .message-thread{background-color:var(--surface-gray-1);background-image:radial-gradient(color-mix(in srgb,var(--ink-gray-4) 14%,transparent) .7px,transparent .7px);background-size:18px 18px;padding:20px 28px;display:flex;flex-direction:column;gap:5px}
+.relay-shell .message-thread-content{display:flex;flex-direction:column;gap:5px}
 .relay-shell .conversation-bubble{position:relative;align-self:flex-start;width:fit-content;min-width:100px;max-width:min(76%,560px);margin:0;padding:8px 12px 5px;border:1px solid var(--outline-gray-2);border-radius:10px 10px 10px 3px;background:var(--surface-white);box-shadow:0 1px 2px #19202b08;font-size:14px}
 .relay-shell .conversation-bubble.ml-auto{align-self:flex-end;background:var(--surface-gray-1);border-color:var(--outline-blue-1);border-radius:10px 10px 3px 10px}
 .relay-shell .conversation-bubble>div+div{margin-top:4px}

@@ -220,7 +220,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <div class="conversation-title">
           <h2>{{ title }}</h2>
           <div class="conversation-meta">
-            <span>{{ businessContext?.doctype_label || businessType }}</span>
+            <span v-if="businessContext?.doctype_label || businessType">{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
             <span v-if="contactCount">{{ contactCount }}</span>
             <span v-if="people.length">{{ people.length }} viewing</span>

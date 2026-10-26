@@ -41,7 +41,7 @@ onBeforeUnmount(close)
  </div></Teleport>
 </template>
 <style scoped>
-.message-readers{position:absolute;right:7px;bottom:-15px;z-index:3}
+.message-readers{position:absolute;right:7px;top:calc(100% + 3px);z-index:3}
 .reader-summary{display:flex;align-items:center;gap:5px;min-height:26px;padding:2px 7px 2px 4px;border-radius:999px;box-shadow:0 2px 8px #10231d1f;cursor:pointer;@apply border border-outline-gray-2 bg-surface-white}
 .reader-stack{display:flex;padding-left:4px}.reader-avatar{display:grid;place-items:center;width:22px;height:22px;margin-left:-5px;border-radius:50%;flex:0 0 auto;overflow:hidden;@apply border-2 border-outline-gray-1 bg-surface-blue-1 text-ink-blue-3}
 .reader-avatar img{width:100%;height:100%;object-fit:cover}.reader-avatar em{font-size:8px;font-style:normal;font-weight:800}

@@ -255,7 +255,7 @@ function actions(message) {
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
     </div>
-    <div ref="content">
+    <div ref="content" class="message-thread-content">
     <template v-for="(message, index) in rows" :key="message.name">
       <div
         v-if="
@@ -418,5 +418,5 @@ function actions(message) {
 </template>
 
 <style scoped>
-.conversation-bubble:has(.message-readers){margin-bottom:18px}
+.conversation-bubble:has(.message-readers){margin-bottom:32px}
 </style>
