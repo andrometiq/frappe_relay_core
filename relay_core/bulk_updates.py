@@ -34,21 +34,24 @@ def reason(error):
 
 
 def project_batch(event, rows):
-    """Monotonic per-row apply; the status guard lives in SQL so replays and races cannot regress."""
+    """Monotonic apply with one UPDATE per target status; the status guard lives in SQL so replays and races
+    cannot regress."""
     if event.account != connection_value('relay_hub_account'):
         raise ValueError('Bulk updates belong to another account')
-    timeline = []
+    timeline, groups = [], {}
     for row in sorted(rows, key=lambda item: item['key']):
         status = target(row)
         error = row.get('error') or {}
-        failed = status == 'Failed'
         timeline.append({'key': row['key'], 'status': status, 'message_id': row['message_id'], 'reason': reason(error)})
-        frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status=%(status)s,
-            provider_id=IF(%(message)s='', provider_id, %(message)s), delivery_id=%(delivery)s,
-            error_code=IF(%(failed)s, %(code)s, error_code), reason=IF(%(failed)s, %(reason)s, reason), modified=NOW(6)
-            WHERE request_key=%(key)s AND status IN %(lower)s''',
-            dict(status=status, message=row['message_id'], delivery=str(row['id']), failed=failed,
-                 code=error.get('code') or 0, reason=reason(error), key=row['key'], lower=lower(status)))
+        groups.setdefault(status, []).append((row['key'], row['message_id'], str(row['id']), error.get('code') or 0,
+                                              reason(error)))
+    for status in sorted(groups, key=RANK.get):
+        failure = ', r.error_code=u.code, r.reason=u.reason' if status == 'Failed' else ''
+        table, values = derived(('request_key', 'message_id', 'delivery_id', 'code', 'reason'), groups[status])
+        frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` r JOIN ({table}) u ON r.request_key=u.request_key
+            SET r.status=%s, r.provider_id=IF(u.message_id='', r.provider_id, u.message_id),
+            r.delivery_id=u.delivery_id{failure}, r.modified=NOW(6) WHERE r.status IN %s''',
+            (*values, status, lower(status)))
     names = frappe.get_all(RECIPIENT, filters={'request_key': ['in', [row['key'] for row in rows]]},
                            pluck='campaign', distinct=True, limit_page_length=0)
     from relay_core.bulk_timeline import apply
@@ -56,6 +59,13 @@ def project_batch(event, rows):
     frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
     for name in names:
         changed(name)  # Also after cancel: rows Hub still sent keep moving, and so do the counters.
+
+
+def derived(columns, rows):
+    """A derived table of rows for one multi-row UPDATE ... JOIN, and its flat parameters."""
+    first = 'SELECT ' + ', '.join(f'%s AS {column}' for column in columns)
+    other = ' UNION ALL SELECT ' + ', '.join(['%s'] * len(columns))
+    return first + other * (len(rows) - 1), [value for row in rows for value in row]
 
 
 def open_reply_window(hours):

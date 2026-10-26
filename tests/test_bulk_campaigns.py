@@ -202,10 +202,13 @@ class ApplyTests(unittest.TestCase):
             bulk_updates.project_batch(_dict(name='event', account='site-a'), rows)
             with self.assertRaises(ValueError):
                 bulk_updates.project_batch(_dict(name='event', account='other'), rows)
-        params = [call.args[1] for call in db.sql.call_args_list]
-        self.assertEqual([p['key'] for p in params], ['a', 'b'])
-        self.assertEqual((params[0]['status'], params[0]['code'], params[0]['failed']), ('Failed', 132001, True))
-        self.assertEqual(params[1]['lower'], ('Pending', 'Queued', 'Uncertain', 'Cancelled', 'Sent', 'Failed'))
+        failed, delivered = [call.args for call in db.sql.call_args_list][:2]
+        self.assertIn('r.error_code=u.code', failed[0])
+        self.assertNotIn('error_code', delivered[0])
+        self.assertEqual(failed[1], ('a', '', '2', 132001, 'Meta error 132001: Template missing', 'Failed',
+                                     ('Pending', 'Queued', 'Uncertain', 'Cancelled', 'Sent')))
+        self.assertEqual(delivered[1][:5], ('b', 'wamid.one', '1', 0, ''))
+        self.assertEqual(delivered[1][-2:], ('Delivered', ('Pending', 'Queued', 'Uncertain', 'Cancelled', 'Sent', 'Failed')))
         self.assertEqual(timeline.call_args.args[0], [
             {'key': 'a', 'status': 'Failed', 'message_id': '', 'reason': 'Meta error 132001: Template missing'},
             {'key': 'b', 'status': 'Delivered', 'message_id': 'wamid.one', 'reason': ''}])
@@ -624,6 +627,21 @@ class ImportTests(unittest.TestCase):
         self.assertEqual((contacts, opted_out), ({}, {number}))
 
 
+class ProjectionStatementTests(unittest.TestCase):
+    def test_a_full_batch_is_one_update_per_status(self):
+        db = Mock()
+        rows = [dict(UpdateContractTests.row, id=i + 1, key=f'bulk-{i}', status=('read', 'delivered', 'failed')[i % 3],
+                     **({'error': {'code': 131026}} if i % 3 == 2 else {})) for i in range(500)]
+        fake = SimpleNamespace(db=db, get_all=Mock(return_value=['Promo']))
+        with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'changed'), \
+                patch.object(bulk_updates, 'connection_value', return_value='site-a'), patch('relay_core.bulk_timeline.apply'):
+            bulk_updates.project_batch(_dict(name='event', account='site-a'), rows)
+        updates = [call.args for call in db.sql.call_args_list]
+        self.assertEqual([args[1][-2] for args in updates], ['Failed', 'Delivered', 'Read'])
+        self.assertEqual(sum((len(args[1]) - 2) // 5 for args in updates), 500)
+        self.assertTrue(all('WHERE r.status IN %s' in args[0] for args in updates))
+
+
 class TimelineTests(unittest.TestCase):
     def test_admitted_rows_with_a_relay_contact_become_one_rendered_batch(self):
         from relay_core import bulk_timeline
@@ -682,10 +700,12 @@ class TimelineTests(unittest.TestCase):
             bulk_timeline.apply([{'key': 'a', 'status': 'Read', 'message_id': 'wamid.a', 'reason': ''},
                                  {'key': 'b', 'status': 'Cancelled', 'message_id': '', 'reason': ''},
                                  {'key': 'c', 'status': 'Queued', 'message_id': '', 'reason': ''}])
-        first, second = [call.args[1] for call in db.sql.call_args_list]
-        self.assertEqual((first['status'], first['id'], first['key'], first['lower']),
-                         ('Read', 'wamid.a', provider_key('WA', '919876543210', 'wamid.a'), ('Pending', 'Sent', 'Failed', 'Delivered')))
-        self.assertEqual((second['status'], second['error'], second['lower']), ('Failed', 'Cancelled before sending', ('Pending', 'Sent')))
+        failed, read = [call.args for call in db.sql.call_args_list]
+        self.assertEqual(read[1], ('MSG-A', 'wamid.a', provider_key('WA', '919876543210', 'wamid.a'), '', 'Read',
+                                   ('Pending', 'Sent', 'Failed', 'Delivered')))
+        self.assertEqual(failed[1], ('MSG-B', '', '', 'Cancelled before sending', 'Failed', ('Pending', 'Sent')))
+        self.assertIn('m.delivery_error=u.error', failed[0])
+        self.assertIn("m.delivery_error=''", read[0])
         fake.publish_realtime.assert_called_once()
 
 
