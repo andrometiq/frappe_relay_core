@@ -22,3 +22,8 @@ class RelayMessage(Document):
         self.automation_status = (
             'Pending' if self.direction == 'Incoming' and not self.get('legacy_source') else ''
         )
+
+
+def on_doctype_update():
+    # Unread counts seek to each contact's read position and read only this index.
+    frappe.db.add_index('Relay Message', ['direction', 'relay_contact', 'name', 'legacy_source', 'channel'], 'relay_unread_messages')

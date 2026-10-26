@@ -44,3 +44,8 @@ class RelayContactEndpoint(Document):
             self.save()
         finally:
             self.flags.canonicalize_identity = False
+
+
+def on_doctype_update():
+    # Channel filters on the inbox and its counts read contacts per channel from this index.
+    frappe.db.add_index('Relay Contact Endpoint', ['channel', 'relay_contact'], 'relay_channel_contacts')
