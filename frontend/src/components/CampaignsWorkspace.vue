@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
 import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
 import FrappeFormSection from "./frappe/FrappeFormSection.vue";
 import FrappeFormView from "./frappe/FrappeFormView.vue";
@@ -7,6 +7,7 @@ import FrappeListView from "./frappe/FrappeListView.vue";
 import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
 import { useCampaigns } from "../composables/useCampaigns";
+import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { COUNTERS, campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
   statusTheme, windowNotice } from "../services/campaignProgress";
@@ -33,14 +34,20 @@ const columnsUsed = computed(() => placeholders(text.value));
 const ready = computed(() => title.value.trim().length >= 3 && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
 const labels = { start: "Start sending", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
 
-function startCreate() {
+const listRoute = "#/whatsapp?tab=campaigns";
+function routeCampaign(name) {
+  openRoute(`${listRoute}&campaign=${encodeURIComponent(name)}`, !!(campaign.value || creating.value));
+}
+function openCampaign(name) { routeCampaign(name); workspace.open(name); }
+function startCreate(updateRoute = true) {
+  if (updateRoute) routeCampaign("new");
   creating.value = true; title.value = ""; type.value = "template"; template.value = ""; text.value = "";
   workspace.loadTemplates();
 }
 async function create() {
   const [template_name, language] = template.value.split("|");
   const values = type.value === "template" ? { template_name, language } : { message: campaignMessage(type.value, text.value) };
-  if (await workspace.create({ title: title.value, ...values })) creating.value = false;
+  if (await workspace.create({ title: title.value, ...values })) { routeCampaign(campaign.value.name); creating.value = false; }
 }
 async function chooseFile(event) {
   const file = event.target.files?.[0];
@@ -62,14 +69,27 @@ async function chooseMedia(event) {
   if (fileUrl) { mapping.value.fixed.media_url = fileUrl; mediaFile.value = file.name; }
   event.target.value = "";
 }
-function back() { campaign.value = null; sheet.value = null; workspace.refresh(); }
+function showList() { creating.value = false; campaign.value = null; sheet.value = null; workspace.refresh(); }
+function back() { closeRoute(listRoute); showList(); }
+async function readRoute() {
+  if (location.hash.split("?")[0] !== "#/whatsapp") return;
+  const name = new URLSearchParams(location.hash.split("?")[1] || "").get("campaign");
+  if (!name) { if (campaign.value || creating.value) showList(); return; }
+  if (name === "new") { if (!creating.value) startCreate(false); return; }
+  if (name === campaign.value?.name) return;
+  creating.value = false;
+  await workspace.open(name);
+  if (campaign.value?.name !== name) { campaign.value = null; closeRoute(listRoute); }
+}
+onMounted(() => { readRoute(); window.addEventListener("popstate", readRoute); });
+onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
 </script>
 
 <template>
   <div class="campaign-workspace">
     <div v-if="error" class="v1-template-feedback"><ErrorMessage :message="error" /></div>
 
-    <FrappeFormView v-if="creating" title="New campaign" :breadcrumbs="['Campaigns', 'New']" @back="creating = false">
+    <FrappeFormView v-if="creating" title="New campaign" :breadcrumbs="['Campaigns', 'New']" @back="back">
       <FrappeFormSection description="Send one WhatsApp message to every mobile number in a sheet.">
         <div class="frappe-field-grid">
           <label class="campaign-field"><span>Title</span><TextInput v-model="title" placeholder="Winter launch Oct 2026" /></label>
@@ -145,7 +165,7 @@ function back() { campaign.value = null; sheet.value = null; workspace.refresh()
 
     <FrappeListView v-else title="Campaigns" description="Send a WhatsApp template, text or media to many numbers and track replies."
       label="Campaigns" :columns="columns" :items="items" :busy="busy" empty-title="No campaigns yet"
-      empty-description="Create a campaign, upload a sheet of numbers and start sending." @open="workspace.open($event.name)">
+      empty-description="Create a campaign, upload a sheet of numbers and start sending." @open="openCampaign($event.name)">
       <template #actions><Button label="New campaign" icon-left="plus" variant="solid" @click="startCreate" /></template>
       <template #cell-title="{ item }"><strong>{{ item.title }}</strong></template>
       <template #cell-status="{ item }"><Badge :label="item.status" :theme="statusTheme(item.status)" /></template>

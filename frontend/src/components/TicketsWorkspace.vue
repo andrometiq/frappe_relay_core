@@ -1,7 +1,7 @@
 <script setup>
 import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
@@ -9,6 +9,7 @@ import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
 import { relativeTime } from './relativeTime'
+import { closeRoute, openRoute } from '../useViewRoute'
 const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' })
 const page = ref({ items: [] }), selected = ref(null), owner = ref(''), error = ref(''), feedback = ref('')
 const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
@@ -38,7 +39,7 @@ async function detail(name) {
     if (request !== detailGeneration || selected.value?.name !== name) return
     selected.value = ticket; transcript.value = messages; history.value = ai; deliveries.value = sent
   } catch (e) {
-    if (request === detailGeneration) { dismiss(); error.value = e.message }
+    if (request === detailGeneration) { close(); error.value = e.message }
   } finally { if (request === detailGeneration) detailBusy.value = false }
 }
 async function load(cursor = {}) {
@@ -59,8 +60,19 @@ function dismiss() {
   history.value = { items: [] }; transcript.value = { items: [] }; deliveries.value = { items: [] }; feedback.value = ''
 }
 function select(row) {
+  openRoute('#/tickets?ticket=' + encodeURIComponent(row.name), !!selected.value)
+  show(row)
+}
+function show(row) {
   dismiss(); selected.value = row; owner.value = row.assigned_to || ''; error.value = ''
   detail(row.name)
+}
+function close() { closeRoute('#/tickets'); dismiss() }
+function readRoute() {
+  if (location.hash.split('?')[0] !== '#/tickets') return
+  const name = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket')
+  if (!name) { if (selected.value) dismiss() }
+  else if (name !== selected.value?.name) show(page.value.items.find(row => row.name === name) || { name })
 }
 async function more(method) {
   const target = method === 'ai_history' ? history : method === 'deliveries' ? deliveries : transcript
@@ -71,7 +83,7 @@ async function more(method) {
     if (request === detailGeneration && selected.value?.name === name)
       target.value = { items: [...target.value.items, ...result.items], next: result.next }
   } catch (e) {
-    if (request === detailGeneration) { dismiss(); error.value = e.message }
+    if (request === detailGeneration) { close(); error.value = e.message }
   } finally { if (request === detailGeneration) detailBusy.value = false }
 }
 async function update(method, values = {}) {
@@ -87,7 +99,8 @@ async function update(method, values = {}) {
   } catch (e) { error.value = e.message }
   finally { saving.value = false }
 }
-onMounted(load)
+onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute) })
+onBeforeUnmount(() => window.removeEventListener('popstate', readRoute))
 useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
 </script>
 <template>
@@ -114,7 +127,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
         <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <div class="automation-card-heading"><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button label="Dismiss" @click="dismiss" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
+        <div class="automation-card-heading"><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button label="Dismiss" @click="close" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
         <div v-if="selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
