@@ -104,9 +104,14 @@ def _lock_name():
 def _process(message):
     # The acknowledgement and all hook intents share this transaction. Death
     # before commit rolls both back; death afterwards cannot replay the hooks.
-    status = frappe.db.get_value('Relay Message', message, 'automation_status', for_update=True)
+    # Lock the contact before the first plain read: under snapshot isolation a
+    # later lock of a contact that a new message changed meanwhile fails (1020).
+    status, contact = frappe.db.get_value('Relay Message', message, ['automation_status', 'relay_contact'],
+                                          for_update=True) or (None, None)
     if status != 'Pending':
         return
+    if contact:
+        frappe.db.get_value('Relay Contact', contact, 'name', for_update=True)
     doc = frappe.get_doc('Relay Message', message)
     if doc.direction == 'Incoming' and not doc.get('legacy_source'):
         for handler in HANDLERS:
@@ -140,6 +145,7 @@ def drain(token=None):
                 pluck='name', order_by='creation asc, name asc', limit_page_length=BATCH_SIZE)
             if not messages:
                 break
+            frappe.db.commit()  # End the list's snapshot, so each message locks before it reads.
             for message in messages:
                 try:
                     _process(message)
