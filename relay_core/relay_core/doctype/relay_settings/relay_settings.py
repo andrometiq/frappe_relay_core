@@ -22,3 +22,7 @@ class RelaySettings(Document):
             provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)
             if provider.provider!='OpenAI' or not provider.enabled:
                 frappe.throw('Voice transcription requires an enabled OpenAI provider with a transcription model')
+
+    def on_update(self):
+        from relay_core.whatsapp import clear_hub_capabilities
+        clear_hub_capabilities()
