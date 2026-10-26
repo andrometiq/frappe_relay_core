@@ -149,6 +149,26 @@ def margin_percent():
     return DEFAULT_MARGIN if value in (None, '') else number(value)
 
 
+@frappe.whitelist(methods=['GET'])
+def get_margin():
+    require_access(manage=True)
+    return {'margin_percent': margin_percent()}
+
+
+@frappe.whitelist(methods=['POST'])
+def save_margin(percent):
+    """System Manager only; Relay Settings validates the 0-1000 range."""
+    require_access(configure=True)
+    try:
+        percent = float(percent)
+    except (TypeError, ValueError):
+        frappe.throw('Margin percent must be a number')
+    settings = frappe.get_single('Relay Settings')
+    settings.whatsapp_margin_percent = percent
+    settings.save()
+    return {'margin_percent': margin_percent()}
+
+
 def priced(volume, meta_cost, margin):
     meta_cost = float(meta_cost or 0)
     margin_amount = round(meta_cost * margin / 100, 4)

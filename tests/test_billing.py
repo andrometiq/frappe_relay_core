@@ -98,6 +98,24 @@ class BillingTests(unittest.TestCase):
         with self.assertRaisesRegex(frappe.ValidationError, 'between 0 and 1000'):
             RelaySettings.validate(settings)
 
+    def test_margin_is_read_by_managers_and_saved_by_system_managers(self):
+        settings = Mock(whatsapp_margin_percent=30)
+        self.frappe.get_single.return_value = settings
+        self.assertEqual(billing.get_margin(), {'margin_percent': 30.0})
+        with self.assertRaises(frappe.PermissionError):
+            billing.save_margin('25')
+        settings.save.assert_not_called()
+        self.roles = ['System Manager']
+        self.sql.return_value = [('25',)]
+        self.assertEqual(billing.save_margin('25'), {'margin_percent': 25.0})
+        self.assertEqual(settings.whatsapp_margin_percent, 25.0)
+        settings.save.assert_called_once()
+        with self.assertRaisesRegex(frappe.ValidationError, 'must be a number'):
+            billing.save_margin('ten')
+        self.roles = ['WhatsApp User']
+        with self.assertRaises(frappe.PermissionError):
+            billing.get_margin()
+
     def test_non_managers_are_denied_billing(self):
         self.roles = ['WhatsApp User']
         with self.assertRaises(frappe.PermissionError):
