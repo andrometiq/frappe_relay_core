@@ -111,7 +111,8 @@ def cursors(messages):
         .select(business_state.user,business_state.business_doctype,business_state.business_name,
             business_state.last_read,read.creation.as_('read_at'))
         .where(business_state.last_read.isin(allowed)).orderby(business_state.user).limit(101).run(as_dict=True))
-    documents={row.name:frappe.get_doc('Relay Message',row.name) for row in rows}
+    marked={row.last_read for row in markers[:100]+business_markers[:100]}
+    documents={name:frappe.get_doc('Relay Message',name) for name in marked}
     visible=[row for row in markers[:100] if can_read_message_as(documents[row.last_read],row.user)]
     for row in business_markers[:100]:
         doc=documents.get(row.last_read)
