@@ -28,9 +28,11 @@ export function useCampaigns() {
     items.value = page.items; next.value = page.next;
   });
   const open = (name) => run(async () => { campaign.value = await coreApi("bulk_campaigns.read", { name }); sheet.value = null; filter.value = ""; });
-  const loadTemplates = () => run(async () => {
+  // `channel` lists the templates of that WhatsApp number's account.
+  const loadTemplates = (channel = "") => run(async () => {
+    templates.value = [];
     templates.value = await approvedTemplates((after) =>
-      coreApi("whatsapp.execute", { operation: "templates.list", arguments: after ? { after } : {} }, true));
+      coreApi("whatsapp.execute", { operation: "templates.list", arguments: after ? { after } : {}, ...(channel ? { channel } : {}) }, true));
   });
   const create = (values) => run(async () => { campaign.value = await coreApi("bulk_campaigns.create", values, true); return campaign.value; });
   const upload = (file) => run(async () => {

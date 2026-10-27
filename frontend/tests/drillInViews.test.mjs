@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { computed, effectScope, ref, watch } from 'vue'
 import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
+import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -61,17 +62,46 @@ test('a ticket link opens its detail and a missing ticket falls back to the list
   assert.equal(page.location.hash, '#/tickets')
 })
 
-function campaigns(t) {
+function campaigns(t, capabilities = {}, calls = []) {
   const campaign = ref(null), error = ref('')
   const workspace = {
     busy: ref(false), error, items: ref([]), campaign, sheet: ref(null), templates: ref([]), filter: ref(''), replyWindow: ref(null),
-    refresh() {}, loadTemplates() {},
+    refresh() {}, loadTemplates(channel) { calls.push(['templates', channel]) },
+    async create(values) { calls.push(['create', values]); campaign.value = { name: 'C-NEW', counts: {} }; return campaign.value },
     async open(name) { if (name === 'C-MISSING') error.value = 'Campaign not found'; else campaign.value = { name, counts: {} } },
   }
-  const values = { inject: () => ref({}), useCampaigns: () => workspace, channelFeature: () => false, messageTypes: () => [],
-    placeholders: () => [], missingMapping: () => [] }
-  return component(t, 'CampaignsWorkspace.vue', values, ['campaign', 'creating', 'openCampaign', 'startCreate', 'back'])
+  const values = { inject: () => ref(capabilities), useCampaigns: () => workspace, channelFeature: () => false, messageTypes: () => [],
+    placeholders: () => [], missingMapping: () => [], hasManyNumbers, numberName, whatsappNumbers, campaignMessage: () => ({}) }
+  return component(t, 'CampaignsWorkspace.vue', values, ['campaign', 'creating', 'openCampaign', 'startCreate', 'back', 'ready', 'title',
+    'template', 'number', 'chooseNumber', 'create'])
 }
+
+test('a campaign on a site with two numbers names its number and lists that number\'s templates', async t => {
+  browser(t, '#/whatsapp?tab=campaigns')
+  const calls = []
+  const state = await campaigns(t, { whatsapp_numbers: [{ name: 'WA-1', label: 'Sales line' }, { name: 'WA-2', label: 'Support line' }] }, calls)
+  state.startCreate()
+  assert.deepEqual(calls, [])
+  state.title.value = 'Winter launch'; state.template.value = 'offer|en'
+  assert.equal(Boolean(state.ready.value), false)
+  state.chooseNumber('WA-2')
+  assert.equal(state.template.value, '')
+  state.template.value = 'offer|en'
+  assert.equal(Boolean(state.ready.value), true)
+  await state.create()
+  assert.deepEqual(calls, [['templates', 'WA-2'], ['create', { title: 'Winter launch', template_name: 'offer', language: 'en', channel: 'WA-2' }]])
+})
+
+test('a one-number site creates a campaign as before', async t => {
+  browser(t, '#/whatsapp?tab=campaigns')
+  const calls = []
+  const state = await campaigns(t, { whatsapp_numbers: [{ name: 'WA-1', label: 'Sales line' }] }, calls)
+  state.startCreate()
+  state.title.value = 'Winter launch'; state.template.value = 'offer|en'
+  assert.equal(Boolean(state.ready.value), true)
+  await state.create()
+  assert.deepEqual(calls, [['templates', undefined], ['create', { title: 'Winter launch', template_name: 'offer', language: 'en' }]])
+})
 
 test('a campaign opened from the list adds one entry and Back shows the list', async t => {
   const page = browser(t, '#/whatsapp?tab=campaigns')
