@@ -85,7 +85,7 @@ These POST methods send one WhatsApp message to a phone number through the same 
 - `media_type` is `image`, `video`, `audio` or `document`. `media_url` must be an HTTPS link. Only a document takes `filename`.
 - `params` is an object of named values (or field keys such as `button:0`), or a list of every value in template order. `header_media_url` fills an image, video or document header.
 - The number must be the main mobile number of a verified Contact that you can access. Without `business_doctype` and `business_name`, the send uses the Contact's primary (or only) business record.
-- An unknown number gets a new Contact linked to `business_doctype` and `business_name`. Only WhatsApp Managers can do this (the old Relay Communication Manager role still works).
+- An unknown number gets a new Contact linked to `business_doctype` and `business_name`. Only a Relay Communication Manager can do this.
 
 ```json
 {"number": "+919876543210", "template": "order_ready", "language": "en", "params": ["SO-25"], "key": "so-25-ready"}
@@ -93,7 +93,7 @@ These POST methods send one WhatsApp message to a phone number through the same 
 
 ## Campaigns from rows
 
-These POST methods create a bulk WhatsApp campaign from JSON rows instead of a sheet. They require WhatsApp Manager (the old Relay Communication Manager role still works). The rows go through the same checks and send job as sheet rows.
+These POST methods create a bulk WhatsApp campaign from JSON rows instead of a sheet. They require write access on Relay Campaign (Relay Communication Manager). The rows go through the same checks and send job as sheet rows.
 
 | Method | Arguments |
 | --- | --- |
