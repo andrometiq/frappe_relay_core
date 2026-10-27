@@ -12,7 +12,7 @@ from frappe.commands import get_site, pass_context
 @click.option('--source-password-file', help='File with the source password (else RELAY_SOURCE_DB_PASSWORD).')
 @click.option('--source-site-label', required=True, help='Stable name of the old site, such as sales.essdee.fit. Part of each message\'s import key.')
 @click.option('--channel', 'channels', multiple=True, help='SOURCE_CHANNEL=RELAY_CHANNEL; repeat per source channel.')
-@click.option('--files-dir', help='Directory with the old private files; media found here are copied, others are linked as is.')
+@click.option('--files-dir', help='Directory with the old private files. Every source File of a message must be here; a missing one is a failure.')
 @click.option('--batch', default=2000, show_default=True, help='Messages per insert and per transaction.')
 @click.option('--dry-run', is_flag=True, help='Count only; write nothing.')
 @click.option('--undo', is_flag=True, help='Delete what the import with this --source-site-label created.')

@@ -25,7 +25,7 @@ class Importer(legacy_database.Importer):
 
     def __init__(self, dry_run=False, files_dir=None, database='sales_source'):
         self.site_label, self.batch, self.dry_run = 'sales.example', 100, dry_run
-        self.source = frappe._dict(database=database)
+        self.source = Mock(database=database, sql=Mock(return_value=[]))
         self.files_dir = Path(files_dir) if files_dir else None
         self.counts, self.failures, self.phones = Counter(), [], {}
         self.committed_counts, self.phone_changes, self.copied = Counter(), [], set()
@@ -82,7 +82,7 @@ class Mapping(Case):
         job = frappe._dict(channel='RELAY-CH-1', relay_contact='RELAY-CON-1')
         manifest = {'source_site': 'sales.example', 'endpoint': '919000000001', 'identifier_type': 'Phone'}
         failed = row(direction='Outbound', delivery_status='Failed', failure=json.dumps({'message': 'Re-engagement'}))
-        values = Importer(dry_run=True).message(failed, job, manifest)
+        values = Importer(dry_run=True).message(failed, job, manifest, [])
         self.assertEqual((values['direction'], values['status'], values['legacy_triage']), ('Outgoing', 'Failed', 0))
         self.assertEqual(values['delivery_error'], 'Re-engagement')
         self.assertEqual(str(values['sent_at']), '2026-09-01 10:00:00')
@@ -134,16 +134,42 @@ class Idempotency(Case):
 
 
 class Media(Case):
-    def test_file_in_files_dir_is_copied_else_url_is_linked(self):
+    def attachments(self, files, payload_url=None, names=None):
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / 'a.jpg').write_bytes(b'image')
+            for name in names or ('a.jpg',):
+                (Path(directory) / name).write_bytes(b'image')
             importer = Importer(files_dir=directory)
-            with patch.object(legacy_database, 'attach', return_value={'attachment': 'copied', 'availability': 'available'}) as attach, \
-                 patch.object(legacy_database, 'link_file', return_value={'attachment': 'linked', 'availability': 'linked'}):
-                self.assertEqual(importer.attachment('/private/files/a.jpg', 'RELAY-MSG-1')['attachment'], 'copied')
-                self.assertEqual(importer.attachment('/private/files/b.jpg', 'RELAY-MSG-2')['attachment'], 'linked')
-            self.assertEqual(attach.call_args.args[1]['size'], 5)
-            self.assertEqual((importer.counts['media_copied'], importer.counts['media_linked']), (1, 1))
+            content = json.dumps({'payload': {'local_file_url': payload_url}}) if payload_url else '{}'
+            copied = lambda stream, metadata, message: {'attachment': 'copy-' + metadata['sha256'][:6], 'availability': 'available'}
+            with patch.object(legacy_database, 'attach', side_effect=copied):
+                result = importer.attachments(row(message_type='image', content=content), files, 'RELAY-MSG-1', {'kind': 'text', 'text': 'x'})
+        return importer, result
+
+    def test_every_source_file_is_copied_and_a_missing_one_is_a_failure(self):
+        files = [frappe._dict(file_url='/private/files/a.jpg'), frappe._dict(file_url='/private/files/gone.jpg')]
+        importer, result = self.attachments(files, payload_url='/private/files/other.jpg')
+        self.assertEqual((importer.counts['media_copied'], importer.counts['media_failed']), (1, 1))
+        self.assertEqual(importer.failures, [{'message': 'm1', 'error': 'Media file not found: /private/files/gone.jpg'}])
+        self.assertEqual([item['availability'] for item in result['legacy_attachments']], ['available', 'missing'])
+        self.assertEqual((result['attachment'], result['kind']), (result['legacy_attachments'][0]['attachment'], 'document'))
+
+    def test_payload_url_is_used_only_without_file_rows(self):
+        importer, result = self.attachments([], payload_url='/private/files/a.jpg')
+        self.assertEqual(importer.counts['media_copied'], 1)
+        importer, result = self.attachments([], payload_url=None)
+        self.assertEqual((result, importer.counts['media_copied']), ({}, 0))
+
+    def test_same_bytes_in_several_file_rows_give_one_attachment(self):
+        files = [frappe._dict(file_url='/private/files/a.jpg'), frappe._dict(file_url='/private/files/b.jpg')]
+        importer, result = self.attachments(files, names=('a.jpg', 'b.jpg'))
+        self.assertEqual((importer.counts['media_copied'], len(result['legacy_attachments'])), (1, 1))
+
+    def test_dry_run_checks_files_without_copying(self):
+        importer = Importer(dry_run=True, files_dir=tempfile.gettempdir())
+        with patch.object(legacy_database, 'attach') as attach:
+            result = importer.attachments(row(), [frappe._dict(file_url='/private/files/relay-missing-x.jpg')], 'dry-run', {'kind': 'image'})
+        attach.assert_not_called()
+        self.assertEqual((importer.counts['media_failed'], result['legacy_attachments'][0]['availability']), (1, 'missing'))
 
     def test_same_site_import_copies_a_file_found_at_its_own_url(self):
         with tempfile.TemporaryDirectory() as site:

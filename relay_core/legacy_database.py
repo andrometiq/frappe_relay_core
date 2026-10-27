@@ -5,7 +5,6 @@ written with direct inserts, so no hook, notification, socket event, hub send or
 event runs. Every message keeps its source name in legacy_source and a site-scoped
 source_key, so a re-run skips what is already imported.
 """
-import hashlib
 import os
 import re
 import tempfile
@@ -152,13 +151,14 @@ class Importer:
         existing = {row.source_key: row for row in frappe.get_all('Relay Message', filters={'source_key': ['in', list(keys)]},
                                                                   fields=['name', 'source_key', 'legacy_checksum'])}
         self.counts['read'] += len(rows)
+        files = self.source_files([row.name for row in rows])
         records = []
         for key, row in keys.items():
             try:
                 if key in existing:
                     self.refresh(existing[key], row, job, manifest)
                 else:
-                    records.append(self.message(row, job, manifest))
+                    records.append(self.message(row, job, manifest, files.get(row.name, [])))
             except ValueError as exc:
                 self.failures.append({'message': row.name, 'error': str(exc)})
         provider_keys = [record['provider_message_key'] for record in records if record['provider_message_key']]
@@ -182,12 +182,10 @@ class Importer:
                                 ('status', 'legacy_checksum', 'legacy_data')}, update_modified=False)
         self.counts['updated'] += 1
 
-    def message(self, row, job, manifest):
+    def message(self, row, job, manifest, files):
         values, data, _ = legacy.projection(row, job, manifest)
         name = 'dry-run' if self.dry_run else sequential_name('message')
-        url = legacy.converted(row)[2]
-        if url and not self.dry_run:
-            data.update(self.attachment(url, name))
+        data.update(self.attachments(row, files, name, data))
         failure = legacy.object_value(row.failure)
         now = frappe.utils.now_datetime()
         values.update(name=name, legacy_triage=0, message_type=data['kind'], message_data=bundles.canonical(data),
@@ -195,20 +193,52 @@ class Importer:
                       owner=frappe.session.user, modified_by=frappe.session.user, creation=now, modified=now, docstatus=0, idx=0)
         return values
 
-    def attachment(self, url, message):
-        """Copy the source bytes when they are found (see source_file), else link the source File URL as it is."""
-        path = self.source_file(url)
-        if path:
-            with open(path, 'rb') as source, tempfile.TemporaryFile() as temporary:
-                digest, size = copy_stream(source, temporary)
-                temporary.seek(0)
-                result = attach(temporary, {'sha256': digest, 'size': size, 'filename': path.name}, message)
-            self.copied.add('/private/files/relay-archive-' + digest)
-            self.counts['media_copied'] += 1
-        else:
-            result = link_file(url, message)
-            self.counts['media_linked'] += 1
-        return {'attachment': result['attachment'], 'attachment_source': message, 'legacy_attachments': [result]}
+    def source_files(self, messages):
+        """Source message name -> its registered File rows. These, not payload URLs, list a message's media."""
+        rows = self.source.sql("""SELECT name, file_name, file_url, attached_to_name FROM `tabFile`
+            WHERE attached_to_doctype = 'WhatsApp Core Message' AND attached_to_name IN %s ORDER BY creation, name""", (messages,))
+        result = {}
+        for row in rows:
+            result.setdefault(row.attached_to_name, []).append(row)
+        return result
+
+    def attachments(self, row, files, message, data):
+        """Copy every source File of the message (the payload URL only when it has none).
+        A file that cannot be found is a counted failure, never a link to the old site."""
+        urls = list(dict.fromkeys(file.file_url for file in files if file.file_url))
+        payload_url = legacy.converted(row)[2]
+        if not urls and payload_url:
+            urls = [payload_url]
+        results = {}
+        for url in urls:
+            path = self.source_file(url)
+            if not path:
+                self.counts['media_failed'] += 1
+                self.failures.append({'message': row.name, 'error': 'Media file not found: ' + url})
+                results[url] = {'availability': 'missing', 'source_url': url}
+            elif not self.dry_run:
+                result = self.copy(path, message)
+                if result['attachment'] not in results:
+                    self.counts['media_copied'] += 1
+                    results[result['attachment']] = result
+        if not results:
+            return {}
+        listed = list(results.values())
+        available = [item for item in listed if item['availability'] == 'available']
+        update = {'legacy_attachments': listed}
+        if available:
+            update.update(attachment=available[0]['attachment'], attachment_source=message)
+            if data['kind'] in ('text', 'unsupported'):
+                update.update(kind='document', caption=data.get('text') or row.body or '')
+        return update
+
+    def copy(self, path, message):
+        with open(path, 'rb') as source, tempfile.TemporaryFile() as temporary:
+            digest, size = copy_stream(source, temporary)
+            temporary.seek(0)
+            result = attach(temporary, {'sha256': digest, 'size': size, 'filename': path.name}, message)
+        self.copied.add('/private/files/relay-archive-' + digest)
+        return result
 
     def source_file(self, url):
         """The file in --files-dir by name, else, when the source is this site, the file at its own URL.
@@ -321,14 +351,6 @@ def insert_with_children(doc):
     for child in doc.get_all_children():
         child.parent, child.parenttype = doc.name, doc.doctype
         child.db_insert()
-
-
-def link_file(url, message):
-    """A File record that points at the source URL as it is; the bytes stay where they are."""
-    name = 'relay-archive-' + hashlib.sha256((message + ':' + url).encode()).hexdigest()
-    direct_document('File', {'file_name': Path(url).name[:140], 'file_url': url, 'is_private': int(url.startswith('/private/')),
-                             'attached_to_doctype': 'Relay Message', 'attached_to_name': message}, name)
-    return {'attachment': name, 'availability': 'linked', 'source_url': url}
 
 
 def refresh_activity(contact):
