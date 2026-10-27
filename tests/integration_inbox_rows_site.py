@@ -35,12 +35,10 @@ class Fixtures:
             self.insert('Has Role', parent=name, parenttype='User', parentfield='roles', role=role, idx=index)
         return name
 
-    def team(self, members=(), viewers=()):
+    def team(self, members=()):
         team = self.insert('Relay Team', title=self.tag + '-team-' + str(self.count))
-        for parentfield, users in (('members', members), ('access', viewers)):
-            for index, user in enumerate(users, 1):
-                self.insert('Relay Team ' + ('Member' if parentfield == 'members' else 'Access'),
-                            parent=team, parenttype='Relay Team', parentfield=parentfield, user=user, idx=index)
+        for index, user in enumerate(members, 1):
+            self.insert('Relay Team Member', parent=team, parenttype='Relay Team', parentfield='members', user=user, idx=index)
         return team
 
 
@@ -55,7 +53,7 @@ def build(fixtures):
     contacts = [row[0] for row in rows]
     assert len(contacts) >= 100, 'The site needs at least 100 Relay Contacts'
     frappe.db.delete('Relay Conversation Assignment', {'relay_contact': ['in', contacts]})
-    shared = fixtures.team(members=[users['team'], users['restricted']], viewers=[users['multi']])
+    shared = fixtures.team(members=[users['team'], users['restricted']])
     own = fixtures.team(members=[users['multi']])
     other = fixtures.team()
     plan = ([(shared, None)] * 40 + [(shared, 'someone@example.invalid')] * 15 + [(own, users['team'])] * 15
