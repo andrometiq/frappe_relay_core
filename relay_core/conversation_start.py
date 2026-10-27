@@ -123,7 +123,7 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
             raise ValueError('Choose a valid template')
         if not isinstance(data.get('components',[]),list) or len(json.dumps(data))>32000:raise ValueError('Invalid template parameters')
         tool='whatsapp.execute';args={'operation':'templates.send','to':source.sender_endpoint,**data}
-        content=whatsapp_templates.message_content(data)
+        content=whatsapp_templates.message_content(data,channel=channel.name)
     else:raise ValueError('Unsupported starting message')
     return source,channel,context,tool,args,content
 

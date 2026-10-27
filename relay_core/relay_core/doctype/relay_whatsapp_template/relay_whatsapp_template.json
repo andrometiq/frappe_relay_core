@@ -19,6 +19,12 @@
       "reqd": 1
     },
     {
+      "fieldname": "waba_id",
+      "label": "WhatsApp Business Account",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
       "fieldname": "template_id",
       "label": "Template id",
       "fieldtype": "Data",
@@ -79,6 +85,7 @@
   "field_order": [
     "record_key",
     "account",
+    "waba_id",
     "template_id",
     "template_name",
     "language",
@@ -89,5 +96,5 @@
     "hub_event_id"
   ],
   "title_field": "template_name",
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }

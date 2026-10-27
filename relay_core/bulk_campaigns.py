@@ -9,6 +9,7 @@ from redis.exceptions import LockError
 from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
+from relay_core.hub_channels import hub_arguments
 from relay_core.identity import default_region, phone_number
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
@@ -60,11 +61,19 @@ def whatsapp_channel(channel=None):
     return choose('WhatsApp', requested=channel)
 
 
-def approved_template(hub, name, language):
+def campaign_channel(channel=None):
+    """A campaign names its number once the site has more than one; the template list is that number's WABA."""
+    if not channel and frappe.db.count('Relay Channel', {'channel': 'WhatsApp', 'enabled': 1,
+                                                         'account': connection_value('relay_hub_account')}) > 1:
+        frappe.throw('Choose the WhatsApp number this campaign sends from')
+    return whatsapp_channel(channel)
+
+
+def approved_template(hub, name, language, channel=None):
     from relay_core.whatsapp_templates import overlay
     after = ''
     for _ in range(20):
-        page = overlay(hub.execute({'operation': 'templates.list', **({'after': after} if after else {})}))
+        page = overlay(hub.execute(hub_arguments(channel, {'operation': 'templates.list', **({'after': after} if after else {})})))
         for row in page.get('data') or []:
             if row.get('name') == name and row.get('language') == language:
                 if row.get('status') != 'APPROVED':
@@ -94,14 +103,14 @@ def create(title, template_name=None, language=None, channel=None, reply_window_
         frappe.throw('Reply window must be 1-720 hours')
     if frappe.db.exists('Relay Campaign', title):
         frappe.throw('A campaign with this title already exists')
-    target = whatsapp_channel(channel)
+    target = campaign_channel(channel)
     try:
         if message:
             operation, snapshot = campaign_message(frappe.parse_json(message))
             template_name = language = None
         else:
             hub, _ = whatsapp.checked_client()
-            operation, snapshot = 'templates.send', template_snapshot(approved_template(hub, template_name, language))
+            operation, snapshot = 'templates.send', template_snapshot(approved_template(hub, template_name, language, target))
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
     except ValueError as exc:
@@ -148,7 +157,7 @@ def media_upload(hub, doc):
     kind = json.loads(doc.arguments)['message']['kind']
     payload = whatsapp.prepare('messages.media_upload', {'media_type': bulk_sheet.MESSAGE_MEDIA[kind], 'mime_type': mime_type,
                                'filename': file.file_name, 'content_base64': content})
-    media_id = str(hub.execute(payload).get('id') or '')
+    media_id = str(hub.execute(hub_arguments(doc.channel, payload)).get('id') or '')
     if not media_id:
         raise whatsapp.HubError('Hub returned no media id')
     return {'media_id': media_id, 'media_uploaded_at': now}
@@ -447,7 +456,7 @@ def check_ready(doc):
     try:
         hub, _ = whatsapp.checked_client()
         if doc.operation == 'templates.send':
-            approved_template(hub, doc.template_name, doc.language)
+            approved_template(hub, doc.template_name, doc.language, doc.channel)
         return media_upload(hub, doc)
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
@@ -525,7 +534,7 @@ def push(doc, deadline):
         frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET attempted=1 WHERE name IN %s", (tuple(row.name for row in rows),))
         frappe.db.commit()
         try:
-            result = hub.call_tool('whatsapp.bulk', {'messages': messages})
+            result = hub.call_tool('whatsapp.bulk', hub_arguments(doc.channel, {'messages': messages}))
         except whatsapp.HubError as exc:
             retry_later(doc, whatsapp.failure_message(exc))  # The same keys go again; Hub returns rows it holds.
             continue
@@ -617,7 +626,7 @@ def cancel_remaining(doc, deadline):
 def cancel_row(hub, doc, row):
     """False when Hub refused, so the row stays Queued and counted as queued."""
     try:
-        if hub.call_tool('whatsapp.deliveries', {'cancel_id': row.delivery_id}).get('cancelled') is True:
+        if hub.call_tool('whatsapp.deliveries', hub_arguments(doc.channel, {'cancel_id': row.delivery_id})).get('cancelled') is True:
             frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET status='Cancelled' WHERE name=%s AND status='Queued'", row.name)
             from relay_core.bulk_timeline import cancelled
             cancelled(row.request_key)

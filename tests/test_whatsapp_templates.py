@@ -18,6 +18,7 @@ class Cache:
     def set_value(self, name, value): self.values[name] = value
     def get_value(self, name): return self.values.get(name)
     def delete_value(self, name): self.values.pop(name, None)
+    def delete_keys(self, prefix): self.values = {k: v for k, v in self.values.items() if not k.startswith(prefix)}
 
 
 class Store:
@@ -64,7 +65,9 @@ class TemplateSyncTests(unittest.TestCase):
         self.patches = [patch.object(whatsapp_templates, 'frappe', self.store.frappe),
             patch.object(whatsapp_templates, 'internal_save', side_effect=self.store.save),
             patch.object(whatsapp_templates, 'connection_value', return_value='essdee'),
-            patch('relay_core.whatsapp.checked_client', return_value=(self.hub, {'templates': True}))]
+            patch('relay_core.whatsapp.checked_client', return_value=(self.hub, {'templates': True})),
+            patch.object(whatsapp_templates, 'waba_channels', return_value=[_dict(name='WA', waba_id='')]),
+            patch('relay_core.hub_channels.hub_arguments', side_effect=lambda channel, arguments: arguments)]
         for item in self.patches: item.start()
 
     def tearDown(self):
@@ -182,7 +185,9 @@ class TemplateRenderTests(unittest.TestCase):
         self.patches = [patch.object(whatsapp_templates, 'frappe', self.store.frappe),
             patch.object(whatsapp_templates, 'internal_save', side_effect=self.store.save),
             patch.object(whatsapp_templates, 'connection_value', return_value='essdee'),
-            patch('relay_core.whatsapp.checked_client', return_value=(self.hub, {'templates': True}))]
+            patch('relay_core.whatsapp.checked_client', return_value=(self.hub, {'templates': True})),
+            patch.object(whatsapp_templates, 'waba_channels', return_value=[_dict(name='WA', waba_id='')]),
+            patch('relay_core.hub_channels.hub_arguments', side_effect=lambda channel, arguments: arguments)]
         for item in self.patches: item.start()
 
     def tearDown(self):
