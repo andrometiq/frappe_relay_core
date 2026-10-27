@@ -325,9 +325,12 @@ def undo(site_label):
     messages = frappe.db.sql_list("""SELECT name FROM `tabRelay Message` WHERE legacy_source IS NOT NULL
         AND JSON_UNQUOTE(JSON_EXTRACT(legacy_data, '$.source_site')) = %s""", site_label)
     contacts = set(frappe.get_all('Relay Message', filters={'name': ['in', messages]}, pluck='relay_contact', distinct=True)) if messages else set()
+    file_urls = set()
     for start in range(0, len(messages), 1000):
         chunk = messages[start:start + 1000]
-        frappe.db.delete('File', {'attached_to_doctype': 'Relay Message', 'attached_to_name': ['in', chunk]})
+        files = {'attached_to_doctype': 'Relay Message', 'attached_to_name': ['in', chunk]}
+        file_urls.update(frappe.get_all('File', filters=files, pluck='file_url'))
+        frappe.db.delete('File', files)
         frappe.db.delete('Relay Message', {'name': ['in', chunk]})
     removed = Counter(messages=len(messages))
     for job in frappe.get_all('Relay Legacy Import', filters={'source_site': site_label}, fields=['name', 'source_metadata']):
@@ -338,7 +341,18 @@ def undo(site_label):
             frappe.db.set_value('Relay Contact', contact, {'last_message_at': None, 'last_message': None}, update_modified=False)
             refresh_activity(contact)
     frappe.db.commit()
+    removed['media_files'] = remove_unused_copies(file_urls)
     return dict(removed)
+
+
+def remove_unused_copies(file_urls):
+    """Delete the media bytes the import copied (see legacy_media.attach) that no File row uses any more.
+    Linked source files are never touched."""
+    copies = {url for url in file_urls if url and url.startswith('/private/files/relay-archive-')}
+    used = set(frappe.get_all('File', filters={'file_url': ['in', list(copies)]}, pluck='file_url')) if copies else set()
+    for url in copies - used:
+        Path(frappe.get_site_path(url.lstrip('/'))).unlink(missing_ok=True)
+    return len(copies - used)
 
 
 def assign_team(site_label, team):

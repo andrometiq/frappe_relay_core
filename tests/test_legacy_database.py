@@ -171,6 +171,18 @@ class Undo(Case):
         frappe.db.delete.assert_not_called()
         self.assertEqual(removed, Counter({'contacts_kept_with_new_messages': 1}))
 
+    def test_copied_media_is_deleted_unless_another_file_row_uses_it(self):
+        with tempfile.TemporaryDirectory() as site:
+            files = Path(site, 'private', 'files')
+            files.mkdir(parents=True)
+            for name in ('relay-archive-a', 'relay-archive-b', 'source.jpg'):
+                (files / name).write_bytes(b'x')
+            urls = {'/private/files/relay-archive-a', '/private/files/relay-archive-b', '/private/files/source.jpg', None}
+            with patch.object(legacy_database.frappe, 'get_site_path', side_effect=lambda *parts: str(Path(site, *parts))), \
+                 patch.object(frappe, 'get_all', return_value=['/private/files/relay-archive-b']):
+                self.assertEqual(legacy_database.remove_unused_copies(urls), 1)
+            self.assertEqual(sorted(path.name for path in files.iterdir()), ['relay-archive-b', 'source.jpg'])
+
 
 class TeamAssignment(Case):
     def test_only_unassigned_imported_conversations_get_the_team(self):
