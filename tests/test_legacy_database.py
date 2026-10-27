@@ -146,6 +146,26 @@ class Identity(Case):
                          {'endpoint': 'E1', 'links': ['L1', 'L2']})
 
 
+class Reactions(Case):
+    def test_reactions_are_projected_and_live_targets_saved_for_undo(self):
+        importer = Importer()
+        job = frappe._dict(channel='RELAY-CH-1', relay_contact='RELAY-CON-1')
+        reactions = [frappe._dict(message_data=json.dumps({'reaction': {'message_id': 'wamid.t', 'emoji': 'x'}}), sender_endpoint='9190')]
+        live = [frappe._dict(name='RELAY-MSG-LIVE', reactions='{"a": 1}', message_updates='{}')]
+        def project(job, report):
+            report['mismatches'].append({'source': 'RELAY-MSG-2', 'detail': 'Reaction target unavailable'})
+        created = {'reactions': {'RELAY-MSG-LIVE': {'reactions': 'first', 'message_updates': None}}}
+        with patch.object(frappe, 'get_all', side_effect=[reactions * 2, live]) as get_all, \
+             patch.object(legacy_database, 'project_reactions', side_effect=project) as projected:
+            importer.project_reactions(job, created)
+        projected.assert_called_once()
+        target_filter = get_all.call_args_list[1].kwargs['filters']['provider_message_key'][1]
+        self.assertEqual(target_filter, [legacy_database.provider_key('RELAY-CH-1', '9190', 'wamid.t')] * 2)
+        self.assertEqual(created['reactions']['RELAY-MSG-LIVE']['reactions'], 'first')
+        self.assertEqual(importer.counts['reactions_projected'], 1)
+        self.assertEqual(importer.failures, [{'message': 'RELAY-MSG-2', 'error': 'Reaction target unavailable'}])
+
+
 class Idempotency(Case):
     def setUp(self):
         super().setUp()
@@ -333,6 +353,7 @@ class Transactions(Case):
              patch.object(importer, 'import_rows', side_effect=import_rows), \
              patch.object(importer, 'commit') as commit, \
              patch.object(legacy_database, 'refresh_activity'), patch.object(legacy_database, 'apply_history'), \
+             patch.object(importer, 'project_reactions'), \
              patch('relay_core.identity.default_region', return_value='IN'):
             importer.import_conversation(conversation())
         self.assertEqual(commit.call_count, 2)
