@@ -222,6 +222,7 @@ class PushTests(unittest.TestCase):
         self.db = Mock()
         self.db.get_value.return_value = 'Running'
         self.enterContext(patch.object(bulk_campaigns, 'frappe', SimpleNamespace(db=self.db, utils=UTILS, cache=FakeCache())))
+        self.enterContext(patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
         self.enterContext(patch('relay_core.bulk_timeline.reserve', return_value=41))
         self.changed = self.enterContext(patch('relay_core.bulk_updates.changed'))
@@ -278,7 +279,8 @@ class RecoverTests(unittest.TestCase):
                       arguments=json.dumps({'message': PHOTO, 'fields': []}))]
         get_all = Mock(return_value=rows)
         with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(get_all=get_all)), \
-                patch.object(bulk_campaigns, 'enqueue') as enqueue, patch('relay_core.bulk_updates.recover'):
+                patch.object(bulk_campaigns, 'enqueue') as enqueue, patch('relay_core.bulk_updates.recover'), \
+                patch('relay_core.campaign_schedule.start_due'):
             bulk_campaigns.recover()
         self.assertEqual(get_all.call_args.kwargs['or_filters'],
                          {'template_name': ['is', 'set'], 'arguments': ['like', '%"message"%']})

@@ -338,6 +338,7 @@ class SenderTests(unittest.TestCase):
         self.db.get_value.return_value = 'Running'
         self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
+        self.enterContext(patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
         self.reserve = self.enterContext(patch('relay_core.bulk_timeline.reserve', return_value=41))
         self.enterContext(patch('relay_core.bulk_updates.changed'))

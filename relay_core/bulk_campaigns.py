@@ -33,6 +33,7 @@ CANCEL_REFUSED = ('Hub refused to cancel queued messages, so they may still be s
                   'deliveries:cancel scope and save it in Relay Settings; Relay retries by itself. ')
 OPERATIONS = ('templates.send', 'messages.send', 'messages.media')
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window'
+OPTED_OUT = 'Opted out'
 MEDIA_DAYS = 29  # Meta keeps an uploaded media id for 30 days.
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
@@ -188,7 +189,7 @@ def inspect(name, file_url):
         frappe.throw(str(exc))
     if not header:
         frappe.throw('The file has no recipient rows')
-    doc.source_file = file_url
+    doc.source_file, doc.recipient_filters = file_url, None
     internal_save(doc)
     fields = json.loads(doc.arguments)['fields']
     return {'columns': header, 'sample': sample, 'fields': fields, 'mapping': bulk_sheet.suggest(header, fields)}
@@ -205,12 +206,16 @@ def import_rows(name, mapping):
         mapping = bulk_sheet.check_mapping(mapping, header, json.loads(doc.arguments)['fields'])
     except ValueError as exc:
         frappe.throw(str(exc))
-    doc.column_map = canonical(mapping)
+    doc.column_map, doc.recipient_filters = canonical(mapping), None
+    start_import(doc)
+    return read(name)
+
+
+def start_import(doc):
     fixed_file(doc)
     doc.status, doc.last_error = 'Importing', ''
     internal_save(doc)
-    enqueue('import_job', name)
-    return read(name)
+    enqueue('import_job', doc.name)
 
 
 def given_rows(rows, after=0):
@@ -259,7 +264,7 @@ def create_with_rows(title, rows, message=None, template_name=None, language=Non
 def append_rows(name, rows):
     """More JSON rows for a Draft campaign created with rows. A number the campaign already holds is a duplicate."""
     doc = bulk(name, ('Draft',))
-    if doc.source_file or not doc.column_map:
+    if doc.source_file or doc.recipient_filters or not doc.column_map:
         frappe.throw('Add rows only to a campaign created with rows')
     with frappe.cache.lock('relay-bulk-append:' + name, timeout=120):
         last, total = frappe.db.sql(f'SELECT COALESCE(MAX(sheet_row), 0), COUNT(*) FROM `tab{RECIPIENT}` WHERE campaign=%s',
@@ -297,7 +302,7 @@ def import_job(name):
         return
     remove_unsent(name)
     try:
-        add_rows(doc, bulk_sheet.read_rows(source_path(doc.source_file)), set())
+        add_rows(doc, recipient_rows(doc), set())
         doc.last_error = ''
     except ValueError as exc:
         frappe.db.rollback()
@@ -308,6 +313,13 @@ def import_job(name):
     frappe.db.commit()
     from relay_core.bulk_updates import changed
     changed(name)
+
+
+def recipient_rows(doc):
+    if doc.recipient_filters:
+        from relay_core.campaign_audience import contact_rows
+        return contact_rows(doc)
+    return bulk_sheet.read_rows(source_path(doc.source_file))
 
 
 def add_rows(doc, rows, seen):
@@ -356,14 +368,15 @@ def endpoint_facts(channel, destinations):
         return {}, set()
     keys = {hashlib.sha256((channel + ':' + number).encode()).hexdigest(): number for number in destinations}
     endpoints = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(keys)]},
-                               fields=['name', 'endpoint_key', 'relay_contact', 'verified'], limit_page_length=0)
+                               fields=['name', 'endpoint_key', 'relay_contact', 'verified', 'marketing_opt_out'],
+                               limit_page_length=0)
     verified = [e for e in endpoints if e.verified]
     people = dict(frappe.get_all('Relay Contact', filters={'name': ['in', [e.relay_contact for e in verified]]},
                                  fields=['name', 'contact'], as_list=True, limit_page_length=0)) if verified else {}
     denied = set(frappe.get_all('Relay Channel Preference', filters={'endpoint': ['in', [e.name for e in endpoints]],
                  'consent': 'Denied'}, pluck='endpoint', limit_page_length=0)) if endpoints else set()
     contacts = {keys[e.endpoint_key]: people.get(e.relay_contact) for e in verified}
-    return contacts, {keys[e.endpoint_key] for e in endpoints if e.name in denied}
+    return contacts, {keys[e.endpoint_key] for e in endpoints if e.name in denied or e.marketing_opt_out}
 
 
 def insert_chunk(doc, chunk):
@@ -374,7 +387,7 @@ def insert_chunk(doc, chunk):
     values = []
     for number, destination, arguments, problem in chunk:
         if not problem and destination in opted_out:
-            problem = 'Opted out'
+            problem = OPTED_OUT
         key = recipient_key(doc.name, number)
         values.append((key, now, now, user, user, 0, doc.name, contacts.get(destination), key, key,
                        'Skipped' if problem else 'Pending', destination or '', canonical(arguments) if arguments else None,
@@ -401,8 +414,10 @@ def read(name, after=None, status=None):
         AND status IN ('Skipped','Failed') AND reason!='' GROUP BY reason ORDER BY count DESC LIMIT 10''', name, as_dict=True)
     snapshot = json.loads(doc.arguments)
     return {**{key: doc.get(key) for key in ('name', 'title', 'channel', 'status', 'operation', 'template_name', 'language',
-               'source_file', 'country', 'reply_window_hours', 'started_at', 'finished_at', 'last_error')},
+               'source_file', 'country', 'reply_window_hours', 'scheduled_at', 'started_at', 'finished_at', 'last_error')},
             'mapping': json.loads(doc.column_map) if doc.column_map else None, 'message': snapshot.get('message'),
+            'audience': json.loads(doc.recipient_filters) if doc.recipient_filters else None,
+            'time_zone': frappe.utils.get_system_timezone(),
             'fields': snapshot['fields'], 'counts': counts(doc), 'issues': issues,
             'recipients': rows[:50], 'next': rows[49].sheet_row if len(rows) > 50 else None}
 
@@ -424,21 +439,32 @@ def counts(doc):
 
 
 @frappe.whitelist(methods=['POST'])
-def control(name, action):
-    transitions = {'start': (('Draft',), 'Running'), 'pause': (('Running',), 'Paused'),
-                   'resume': (('Paused',), 'Running'), 'cancel': (('Draft', 'Running', 'Paused'), 'Cancelling')}
+def control(name, action, scheduled_at=None):
+    """Start, schedule, pause, resume or cancel. A schedule runs the start checks now and starts at scheduled_at
+    in the site time zone."""
+    transitions = {'start': (('Draft', 'Scheduled'), 'Running'), 'schedule': (('Draft',), 'Scheduled'),
+                   'unschedule': (('Scheduled',), 'Draft'), 'pause': (('Running',), 'Paused'),
+                   'resume': (('Paused',), 'Running'), 'cancel': (('Draft', 'Scheduled', 'Running', 'Paused'), 'Cancelling')}
     if action not in transitions:
         frappe.throw('Invalid campaign action')
     allowed, target = transitions[action]
     require_access('Relay Campaign', 'write')
-    media = check_ready(bulk(name, allowed)) if target == 'Running' else {}  # Hub calls stay outside the lock.
+    if target == 'Scheduled':
+        from relay_core.campaign_schedule import start_time
+        scheduled_at = start_time(scheduled_at)
+    checked = target in ('Running', 'Scheduled')
+    media = check_ready(bulk(name, allowed)) if checked else {}  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
         doc = bulk(name, allowed)
+        if checked:
+            doc.execution_user = frappe.session.user
+            doc.update(media)
         if target == 'Running':
-            doc.execution_user, doc.started_at = frappe.session.user, doc.started_at or frappe.utils.now_datetime()
+            doc.started_at = doc.started_at or frappe.utils.now_datetime()
             from relay_core.bulk_updates import open_reply_window
             open_reply_window(doc.reply_window_hours)
-            doc.update(media)
+        if target in ('Scheduled', 'Draft'):
+            doc.scheduled_at = scheduled_at if target == 'Scheduled' else None
         doc.status, doc.last_error = target, ''
         internal_save(doc)
     if target in ('Running', 'Cancelling'):
@@ -523,10 +549,11 @@ def push(doc, deadline):
             WHERE campaign=%s AND status='Pending' ORDER BY sheet_row LIMIT {BATCH}''', doc.name, as_dict=True)
         if not rows:
             return False
-        if 'message' in snapshot:
+        rows = without_opted_out(doc, rows)
+        if rows and 'message' in snapshot:
             rows = within_window(doc, rows)
-            if not rows:
-                continue
+        if not rows:
+            continue
         for row in rows:
             row.message = hub_message(doc, snapshot, row)
         messages = [{'key': row.request_key, 'message': row.message} for row in rows]
@@ -560,6 +587,19 @@ def hub_message(doc, snapshot, row):
         return {**bulk_sheet.build_message(snapshot['message'], values, doc.media_id), 'to': row.destination}
     return {'operation': 'templates.send', 'to': row.destination, 'name': doc.template_name, 'language': doc.language,
             'components': bulk_sheet.build_components(snapshot['fields'], values)}
+
+
+def without_opted_out(doc, rows):
+    """A number that opted out after the import is skipped here without a Hub call."""
+    _, opted_out = endpoint_facts(doc.channel, [row.destination for row in rows])
+    skipped = tuple(row.name for row in rows if row.destination in opted_out)
+    if skipped:
+        frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Skipped', reason=%s, modified=NOW(6)
+            WHERE name IN %s AND status='Pending' ''', (OPTED_OUT, skipped))
+        frappe.db.commit()
+        from relay_core.bulk_updates import changed
+        changed(doc.name)
+    return [row for row in rows if row.destination not in opted_out]
 
 
 def within_window(doc, rows):
@@ -650,6 +690,8 @@ def finish_cancel(doc):
 
 
 def recover():
+    from relay_core.campaign_schedule import start_due
+    start_due()
     for row in frappe.get_all('Relay Campaign', filters={'operation': ['in', OPERATIONS],
                               'status': ['in', ['Importing', 'Running', 'Cancelling']]},
                               # Older non-bulk text campaigns must not take the 20 places.

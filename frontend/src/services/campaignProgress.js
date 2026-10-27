@@ -35,12 +35,12 @@ export async function approvedTemplates(listPage) {
 
 export function campaignActions(status) {
   return {
-    Draft: ["start", "cancel"], Running: ["pause", "cancel"], Paused: ["resume", "cancel"],
+    Draft: ["start", "cancel"], Scheduled: ["start", "unschedule", "cancel"], Running: ["pause", "cancel"], Paused: ["resume", "cancel"],
   }[status] || [];
 }
 
 export function statusTheme(status) {
-  return { Running: "blue", Completed: "green", Paused: "orange", Cancelled: "gray", Cancelling: "gray", Importing: "blue" }[status] || "gray";
+  return { Scheduled: "blue", Running: "blue", Completed: "green", Paused: "orange", Cancelled: "gray", Cancelling: "gray", Importing: "blue" }[status] || "gray";
 }
 
 export function missingMapping(fields, mapping) {

@@ -5,6 +5,7 @@ import { computed, effectScope, ref, watch } from 'vue'
 import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
 import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
+import { inputTime, siteTime } from '../src/services/campaignAudience.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -71,7 +72,8 @@ function campaigns(t, capabilities = {}, calls = []) {
     async open(name) { if (name === 'C-MISSING') error.value = 'Campaign not found'; else campaign.value = { name, counts: {} } },
   }
   const values = { inject: () => ref(capabilities), useCampaigns: () => workspace, channelFeature: () => false, messageTypes: () => [],
-    placeholders: () => [], missingMapping: () => [], hasManyNumbers, numberName, whatsappNumbers, campaignMessage: () => ({}) }
+    placeholders: () => [], missingMapping: () => [], hasManyNumbers, numberName, whatsappNumbers, campaignMessage: () => ({}),
+    inputTime, siteTime }
   return component(t, 'CampaignsWorkspace.vue', values, ['campaign', 'creating', 'openCampaign', 'startCreate', 'back', 'ready', 'title',
     'template', 'number', 'chooseNumber', 'create'])
 }

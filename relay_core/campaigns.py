@@ -42,7 +42,7 @@ def directory(after=None,query='',status=None):
     require_access('Relay Campaign')
     query=(query or '').strip()
     if len(query)>140:frappe.throw('Campaign search is too long')
-    allowed_statuses=('Draft','Running','Paused','Cancelling','Completed','Cancelled')
+    allowed_statuses=('Draft','Scheduled','Running','Paused','Cancelling','Completed','Cancelled')
     if status and status not in allowed_statuses:frappe.throw('Invalid campaign status')
     filters={'name':['>',after]} if after else {}
     if status:filters['status']=status
