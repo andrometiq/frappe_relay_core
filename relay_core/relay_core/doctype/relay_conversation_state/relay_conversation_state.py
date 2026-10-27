@@ -11,3 +11,4 @@ class RelayConversationState(Document):
 def on_doctype_update():
     # Unread queries join each message to the current user's read position.
     frappe.db.add_index('Relay Conversation State', ['user', 'relay_contact'], 'relay_user_states')
+    frappe.db.add_index('Relay Conversation State', ['user', 'folder'], 'relay_user_folders')

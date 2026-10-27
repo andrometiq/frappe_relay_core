@@ -1,11 +1,13 @@
 <script setup>
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
+import MoveToFolderDialog from "./MoveToFolderDialog.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Button, Dialog, Dropdown, FormControl, ErrorMessage } from "@relay/ui";
+import { Button, Dialog, Dropdown, ErrorMessage } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import { useConversationPresence } from "../../composables/useConversationPresence";
 import { useTask } from "../../composables/useTask";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
+import { useChatFolders } from "../../composables/useChatFolders";
 const props = defineProps({
   contact: String,
   lastMessage: String,
@@ -17,23 +19,23 @@ const props = defineProps({
 });
 const { busy, error, notice, run } = useTask(),
   state = ref({}),
-  folder = ref(""),
-  savedFolder = ref(""),
+  moving = ref(false),
   team = ref(""),
   agent = ref(""),
   expanded = ref(false);
 const assignment = ref({team:'', assigned_to:''}), assignmentChanged = ref(false);
 const assignmentDirty = computed(() => team.value !== assignment.value.team || agent.value !== assignment.value.assigned_to);
 function receiveState(value) {
-  if (folder.value === savedFolder.value) folder.value = value.folder || "";
-  savedFolder.value = value.folder || "";
   state.value = value;
 }
 const { people } = useConversationPresence(props, receiveState);
+const { move } = useChatFolders();
 const menu = computed(() => [
   { label: state.value.starred ? "Unstar conversation" : "Star conversation", icon: state.value.starred ? "star" : "bookmark", disabled: busy.value,
     onClick: () => run(() => update({ starred: state.value.starred ? 0 : 1 })) },
   { label: "Mark read", icon: "check", disabled: busy.value || !props.lastMessage, onClick: () => run(() => update({ last_read: props.lastMessage })) },
+  { label: "Move to folder", icon: "folder-input", disabled: busy.value, onClick: () => { moving.value = true; } },
+  ...(state.value.folder ? [{ label: "Remove from folder", icon: "folder-minus", disabled: busy.value, onClick: () => run(() => move(props.contact, "").then(receiveState)) }] : []),
   ...(props.actions || []),
 ]);
 watch(() => props.organizeRequest, () => { expanded.value = true; });
@@ -83,8 +85,7 @@ watch(
     ++contactGeneration;
     expanded.value = false;
     state.value = {};
-    folder.value = "";
-    savedFolder.value = "";
+    moving.value = false;
     team.value = "";
     agent.value = "";
     assignment.value = {team:'', assigned_to:''};
@@ -129,17 +130,6 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
     <p v-if="notice" role="status" class="text-xs">{{ notice }}</p>
     <p v-if="assignmentChanged" role="status" class="text-xs">Assignment changed elsewhere. Your edits are preserved; saving will replace the current assignment.</p>
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
-      <div class="flex items-end gap-2">
-        <FormControl
-          label="Folder"
-          v-model="folder"
-          placeholder="e.g. Follow up"
-        /><Button
-          label="Save folder"
-          :disabled="busy"
-          @click="run(() => update({ folder }))"
-        />
-      </div>
       <template v-if="state.can_assign"
         ><RemoteLinkField v-model="team" :field="{label:'Assign team',method:'teams.directory',readOnly:busy}" /><RemoteLinkField v-model="agent" :field="{label:'Assign agent',method:'teams.agents',readOnly:busy}" /><Button
           label="Save assignment"
@@ -148,6 +138,7 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
       /></template>
     </div>
     </Dialog>
+    <MoveToFolderDialog v-model="moving" :contact="contact" :current="state.folder" @moved="receiveState" />
     <ErrorMessage v-if="!expanded" :message="error" />
   </div>
 </template>
