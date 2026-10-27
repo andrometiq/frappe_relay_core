@@ -6,10 +6,13 @@ import re
 import time
 import frappe
 from relay_core import bulk_sheet, service_window, whatsapp
-from relay_core.bulk_campaigns import parsed, whatsapp_channel
+from relay_core.bulk_campaigns import parsed
+from relay_core.contact_lifecycle import sibling_contact
+from relay_core.hub_channels import choose
 from relay_core.hub import HubError
 from relay_core.identity import phone_number
 from relay_core.permissions import require_access
+from relay_core.settings import value as connection_value
 
 MAX_ITEMS = 100
 KEY = re.compile(r'[A-Za-z0-9_-]{1,100}')
@@ -22,49 +25,52 @@ OUTSIDE_WINDOW = 'Outside the 24-hour reply window. Send an approved template in
 
 
 @frappe.whitelist(methods=['POST'])
-def send_text(number, body, key=None, business_doctype=None, business_name=None):
+def send_text(number, body, key=None, business_doctype=None, business_name=None, channel=None):
     """One text inside the 24-hour reply window."""
     require_access()
-    return sent(*text_message(number, body, key, business_doctype, business_name))
+    return sent(*text_message(number, body, key, business_doctype, business_name, channel))
 
 
 @frappe.whitelist(methods=['POST'])
 def send_media(number, media_url, media_type, caption=None, filename=None, key=None, business_doctype=None,
-               business_name=None):
+               business_name=None, channel=None):
     """One photo, video, audio or document from an HTTPS link, inside the 24-hour reply window."""
     require_access()
-    return sent(*media_message(number, media_url, media_type, caption, filename, key, business_doctype, business_name))
+    return sent(*media_message(number, media_url, media_type, caption, filename, key, business_doctype, business_name,
+                               channel))
 
 
 @frappe.whitelist(methods=['POST'])
 def send_template(number, template, language, params=None, header_media_url=None, key=None, business_doctype=None,
-                  business_name=None):
+                  business_name=None, channel=None):
     """One approved template. params is an object of named values (or field keys such as button:0), or a list
     of every value in template order; header_media_url fills an image, video or document header."""
     require_access()
     return sent(*template_message(number, template, language, params, header_media_url, key, business_doctype,
-                                  business_name))
+                                  business_name, channel))
 
 
-def text_message(number, body, key=None, business_doctype=None, business_name=None):
-    return prepared(number, 'messages.send', {'body': body}, key, business_doctype, business_name)
+def text_message(number, body, key=None, business_doctype=None, business_name=None, channel=None):
+    return prepared(number, 'messages.send', {'body': body}, key, business_doctype, business_name, channel)
 
 
 def media_message(number, media_url, media_type, caption=None, filename=None, key=None, business_doctype=None,
-                  business_name=None):
+                  business_name=None, channel=None):
     if media_type not in MEDIA:
         frappe.throw('media_type must be image, video, audio or document')
     if filename and media_type != 'document':
         frappe.throw('Only a document has a file name')
     arguments = {'media_type': media_type, 'media_url': link(media_url),
                  **({'caption': caption} if caption else {}), **({'filename': filename} if filename else {})}
-    return prepared(number, 'messages.media', arguments, key, business_doctype, business_name)
+    return prepared(number, 'messages.media', arguments, key, business_doctype, business_name, channel)
 
 
 def template_message(number, template, language, params=None, header_media_url=None, key=None, business_doctype=None,
-                     business_name=None):
+                     business_name=None, channel=None):
     from relay_core.whatsapp_templates import definition
-    found = definition(template, language) if isinstance(template, str) and isinstance(language, str) else None
+    destination = destination_number(number)
+    channel = sending_channel(destination, channel)
+    found = definition(template, language, channel) if isinstance(template, str) and isinstance(language, str) else None
     if not found:
         frappe.throw('Template not found for this WhatsApp account')
     params = parsed(params)
@@ -74,7 +80,7 @@ def template_message(number, template, language, params=None, header_media_url=N
     except ValueError as exc:
         frappe.throw(str(exc))
     return prepared(number, 'templates.send', {'name': template, 'language': language, 'components': components}, key,
-                    business_doctype, business_name)
+                    business_doctype, business_name, channel)
 
 
 MESSAGES = {'text': text_message, 'media': media_message, 'template': template_message}
@@ -209,17 +215,32 @@ def link(value):
         frappe.throw(str(exc))
 
 
-def prepared(number, operation, arguments, key, business_doctype, business_name):
-    """(journal message, number) after the number, reply window, recipient and key checks."""
+def destination_number(number):
     destination = phone_number(number) if isinstance(number, (str, int)) and not isinstance(number, bool) else None
     if not destination:
         frappe.throw('Give the phone number with its country code')
-    channel = whatsapp_channel()
+    return destination
+
+
+def sending_channel(destination, requested=None):
+    """The number a send leaves from: the caller's pick, else the one the customer wrote to last, else the default."""
+    names = frappe.get_all('Relay Channel', pluck='name', filters={
+        'channel': 'WhatsApp', 'enabled': 1, 'account': connection_value('relay_hub_account')})
+    keys = [endpoint_key(name, destination) for name in names]
+    contact = keys and frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': ['in', keys], 'verified': 1},
+                                           'relay_contact')
+    return choose('WhatsApp', contact=contact or None, requested=requested)
+
+
+def prepared(number, operation, arguments, key, business_doctype, business_name, channel=None):
+    """(journal message, number) after the number, reply window, recipient and key checks."""
+    destination = destination_number(number)
+    channel = sending_channel(destination, channel)
     if operation != 'templates.send' and not service_window.open_numbers(channel, [destination]):
         frappe.throw(OUTSIDE_WINDOW)
     contact, business = recipient(channel, destination, business_doctype, business_name)
     return {'key': message_key(key, destination, operation, arguments), 'operation': operation, 'arguments': arguments,
-            'contact': contact, 'business_doctype': business[0], 'business_name': business[1]}, destination
+            'contact': contact, 'business_doctype': business[0], 'business_name': business[1], 'channel': channel}, destination
 
 
 def sent(message, destination):
@@ -245,8 +266,9 @@ def message_key(key, destination, operation, arguments):
 def recipient(channel, destination, business_doctype, business_name):
     """(Frappe Contact, business record) of the number. An unknown number gets a new Contact (managers only)."""
     from relay_core.business_access import primary
-    binding = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, destination)},
-                                  ['relay_contact', 'verified'], as_dict=True)
+    binding = endpoint_binding(channel, destination)
+    if not binding and sibling_contact(channel, destination):
+        binding = endpoint_binding(channel, destination)
     if not binding:
         return new_contact(channel, destination, business_doctype, business_name), (business_doctype, business_name)
     if not binding.verified:
@@ -260,6 +282,11 @@ def recipient(channel, destination, business_doctype, business_name):
     if phone_number(mobile.get('mobile_no') or mobile.get('phone') or '') != destination:
         frappe.throw('The number is not the main mobile number of its Contact')
     return person, (business_doctype, business_name)
+
+
+def endpoint_binding(channel, destination):
+    return frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, destination)},
+                               ['relay_contact', 'verified'], as_dict=True)
 
 
 def endpoint_key(channel, destination):

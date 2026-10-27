@@ -121,6 +121,28 @@ class MCPTests(unittest.TestCase):
         self.assertTrue(manager_tools)
         self.assertTrue(all('WhatsApp Manager' in text for text in manager_tools))
 
+    def test_send_tools_take_a_channel_and_channels_are_listed(self):
+        import relay_core
+        api=types.SimpleNamespace(**{name:Mock(return_value={}) for name in ('send_text','send_media','send_template','send_messages')})
+        email=types.SimpleNamespace(send=Mock(return_value={}));telegram=types.SimpleNamespace(send=Mock(return_value={}),groups=Mock(),execute=Mock())
+        core_api=types.SimpleNamespace(channel_options=Mock(return_value={'items':[{'name':'Support'}]}))
+        with patch.object(relay_core,'messaging_api',api,create=True),patch.object(relay_core,'email',email,create=True), \
+                patch.object(relay_core,'telegram',telegram,create=True),patch.dict(sys.modules,{'relay_core.api':core_api}):
+            self.api.dispatch('tools/call',{'name':'relay.whatsapp.send_text','arguments':{'number':'91','body':'Hi','channel':'Support'}})
+            api.send_text.assert_called_once_with(number='91',body='Hi',channel='Support')
+            self.api.dispatch('tools/call',{'name':'relay.messages.send','arguments':{'message':{'key':'k','operation':'messages.send','channel':'Support'}}})
+            self.assertEqual(self.wa.send.call_args.kwargs['message']['channel'],'Support')
+            self.api.dispatch('tools/call',{'name':'relay.whatsapp.execute','arguments':{'operation':'messages.send','channel':'Support'}})
+            self.wa.execute.assert_called_once_with(operation='messages.send',channel='Support')
+            self.api.dispatch('tools/call',{'name':'relay.email.send','arguments':{'to':['a@example.invalid'],'subject':'S','body':'B','channel':'Mail'}})
+            email.send.assert_called_once_with(to=['a@example.invalid'],subject='S',body='B',channel_name='Mail')
+            self.api.dispatch('tools/call',{'name':'relay.telegram.send','arguments':{'chat_id':1,'text':'t','channel':'Bot'}})
+            telegram.send.assert_called_once_with(chat_id=1,text='t',channel='Bot')
+            listed=self.api.dispatch('tools/call',{'name':'relay.channels.list','arguments':{}})
+        self.assertEqual(listed['structuredContent'],{'items':[{'name':'Support'}]})
+        for name in ('relay.whatsapp.send_media','relay.whatsapp.send_template'):
+            self.assertIn('channel',next(tool for tool in self.api.TOOLS if tool['name']==name)['inputSchema']['properties'])
+
     def test_telegram_mcp_uses_checked_facade_for_groups_and_topics(self):
         import relay_core
         service=types.SimpleNamespace(groups=Mock(return_value={'success':True}),execute=Mock(return_value={'success':True}),send=Mock(return_value={'accepted':1}))

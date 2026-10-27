@@ -189,5 +189,21 @@ class ReceiptTests(unittest.TestCase):
         self.assertFalse(hub_channels.applying_receipt.get())
 
 
+class TelegramChannelTests(unittest.TestCase):
+    def test_a_chat_sends_only_from_its_own_bot(self):
+        from relay_core import telegram
+        import frappe as real_frappe
+        def throw(message, exc=real_frappe.ValidationError):
+            raise exc(message)
+        with patch.object(telegram, 'require_access'), patch.object(telegram, 'group_binding', return_value=('C1', 'Bot')), \
+                patch.object(telegram.frappe, 'throw', throw), \
+                patch('relay_core.telegram_delivery.send_group', return_value={'accepted': 1}) as send_group:
+            telegram.send(-1001, 'Hi', channel='Bot')
+            self.assertEqual(send_group.call_args.args[1], 'Bot')
+            with self.assertRaises(real_frappe.PermissionError):
+                telegram.send(-1001, 'Hi', channel='Other bot')
+        send_group.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
