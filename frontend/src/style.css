@@ -1188,3 +1188,20 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 @keyframes relay-pop{from{opacity:0;transform:translateY(-4px)}}
 @keyframes relay-pill{from{transform:scaleY(.3)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}
+
+/* Desktop sidebar: an icon rail that expands over the content on hover or keyboard focus. */
+@media(min-width:769px){
+  .v1-shell.relay-shell{grid-template-columns:56px minmax(0,1fr)}
+  .v1-shell.relay-shell>.app-nav{position:relative;z-index:30;width:56px;overflow-x:hidden;border-radius:0 10px 10px 0;transition:width 160ms var(--relay-ease),background-color 160ms var(--relay-ease),box-shadow 160ms var(--relay-ease)}
+  .v1-shell.relay-shell>.app-nav:is(:hover,:has(:focus-visible)){width:232px;background:var(--surface-modal);box-shadow:var(--relay-shadow-2);transition-delay:60ms}
+  .v1-shell.relay-shell .app-nav .nav-item{flex-shrink:0;white-space:nowrap;transition:background-color var(--relay-fast) ease,padding 160ms var(--relay-ease)}
+  .relay-nav-label,.v1-shell.relay-shell .relay-nav-group,.v1-shell.relay-shell .app-nav :is(.nav-chevron,.relay-user-name,.relay-account .relay-button),.v1-shell.relay-shell .nav-item.nav-sub::after{opacity:0;white-space:nowrap;transition:opacity 120ms var(--relay-ease)}
+  .v1-shell.relay-shell .app-nav .nav-chevron{pointer-events:none}
+  .v1-shell.relay-shell .app-nav:not(:hover,:has(:focus-visible)) .nav-item.nav-sub{padding-left:12px}
+  .v1-shell.relay-shell .app-nav:not(:hover,:has(:focus-visible)) .nav-count{position:absolute;top:2px;left:24px;min-width:16px;height:15px;padding:0 4px;font-size:10px}
+  .v1-shell.relay-shell .app-nav:not(:hover,:has(:focus-visible)) .relay-account{padding:6px 4px;border-color:transparent;background:transparent}
+  .v1-shell.relay-shell>.app-nav:is(:hover,:has(:focus-visible)) :is(.relay-nav-label,.relay-nav-group,.nav-chevron,.relay-user-name,.relay-account .relay-button,.nav-item.nav-sub::after){opacity:1;pointer-events:auto;transition-delay:80ms}
+}
+@media(min-width:769px) and (prefers-reduced-motion:reduce){
+  .v1-shell.relay-shell>.app-nav,.v1-shell.relay-shell>.app-nav *,.v1-shell.relay-shell>.app-nav *::after{transition:none!important}
+}

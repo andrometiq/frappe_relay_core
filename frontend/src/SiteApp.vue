@@ -117,7 +117,7 @@ onErrorCaptured(e => {
         <template v-for="item in section.items" :key="item.name">
           <div class="nav-row">
             <button class="nav-item" :class="{ active: itemActive(item) }" :data-channel="item.channel" :aria-current="itemActive(item) ? 'page' : undefined" @click="view = item.name">
-              <FeatherIcon :name="item.icon" class="h-4 w-4" /><span>{{ item.label }}</span>
+              <FeatherIcon :name="item.icon" class="h-4 w-4" /><span class="relay-nav-label">{{ item.label }}</span>
               <span v-if="item.name === 'Messages' && inboxBadge" class="nav-count" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span>
             </button>
             <button v-if="item.name === 'WhatsApp' && sections.length" type="button" class="nav-chevron" :aria-expanded="whatsappOpen"
@@ -126,13 +126,13 @@ onErrorCaptured(e => {
           <template v-if="item.name === 'WhatsApp' && whatsappOpen">
             <button v-for="row in sections" :key="row.name" class="nav-item nav-sub" :class="{ active: subActive(row.name) }"
               :aria-current="subActive(row.name) ? 'page' : undefined" @click="openSection(row.name)">
-              <FeatherIcon :name="row.icon" class="h-4 w-4" /><span>{{ row.label }}</span>
+              <FeatherIcon :name="row.icon" class="h-4 w-4" /><span class="relay-nav-label">{{ row.label }}</span>
             </button>
           </template>
         </template>
       </nav>
       <div class="relay-nav-footer">
-        <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" />Frappe Desk</a>
+        <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" /><span class="relay-nav-label">Frappe Desk</span></a>
         <div class="relay-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
