@@ -16,8 +16,8 @@ def target(doc):
     chat_id=intent['chat_id']
     key=hashlib.sha256((channel.name+':'+str(chat_id)).encode()).hexdigest()
     contact=frappe.db.get_value('Relay Contact Endpoint',{'endpoint_key':key,'verified':1},'relay_contact')
-    if (not channel.enabled or channel.channel!='Telegram' or channel.account!=connection_value('relay_hub_account')
-            or contact!=doc.start_contact):
+    from relay_core.hub_channels import is_current
+    if not is_current(channel,connection_value('relay_hub_account')) or channel.channel!='Telegram' or contact!=doc.start_contact:
         frappe.throw('Telegram destination is no longer available',frappe.PermissionError)
     context={'provider':'Telegram','chat_id':chat_id,'chat_type':'supergroup' if chat_id < 0 else 'private'}
     if intent.get('message_thread_id'):context['message_thread_id']=intent['message_thread_id']
@@ -72,7 +72,8 @@ def send_group(contact,channel,chat_id,text,reply_to,thread,request_key,business
     except (frappe.PermissionError,frappe.DoesNotExistError):
         action.status='Rejected';internal_save(action);frappe.db.commit();raise
     try:
-        result=whatsapp.client().call_tool('telegram.message',dict(args,request_key=key))
+        from relay_core.hub_channels import hub_arguments
+        result=whatsapp.client().call_tool('telegram.message',hub_arguments(channel_doc,dict(args,request_key=key)))
     except Exception as exc:
         return messaging.record_submission_error(action, exc)
     return messaging.finish(action,source,channel_doc,context,content,result)

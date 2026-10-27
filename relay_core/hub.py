@@ -211,11 +211,13 @@ class HubClient:
     def telegram_message(self, **arguments):
         return self.call_tool('telegram.message', arguments)
 
-    def media(self, provider, file_id, *, sticker=False):
+    def media(self, provider, file_id, *, sticker=False, channel=None):
+        """Media a channel received; `channel` is its Hub key when the site has several of that type."""
+        routing = {'channel': channel} if channel else {}
         if provider == 'Telegram':
-            return self.call_tool('telegram.media', {'file_id': file_id})
+            return self.call_tool('telegram.media', {'file_id': file_id, **routing})
         if provider == 'WhatsApp':
-            return self.call_tool('whatsapp.media' if sticker else 'whatsapp.attachment', {'media_id': file_id})
+            return self.call_tool('whatsapp.media' if sticker else 'whatsapp.attachment', {'media_id': file_id, **routing})
         raise HubError('Unsupported media provider')
 
     def email_send(self, to, subject, body, cc=None, bcc=None, request_key=None):

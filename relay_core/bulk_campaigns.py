@@ -55,13 +55,9 @@ def bulk(name, statuses=None):
 
 
 def whatsapp_channel(channel=None):
-    filters = {'channel': 'WhatsApp', 'account': connection_value('relay_hub_account'), 'enabled': 1}
-    if channel:
-        filters['name'] = channel
-    rows = frappe.get_all('Relay Channel', filters=filters, pluck='name', limit_page_length=2)
-    if len(rows) != 1:
-        frappe.throw('Choose the enabled WhatsApp channel for this Hub account')
-    return rows[0]
+    """The given enabled WhatsApp channel, else the site's default number."""
+    from relay_core.hub_channels import choose
+    return choose('WhatsApp', requested=channel)
 
 
 def approved_template(hub, name, language):

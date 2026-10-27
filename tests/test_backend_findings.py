@@ -246,7 +246,7 @@ class BackendFindings(unittest.TestCase):
             self.assertFalse(tickets.permission(ticket))
 
     def test_telegram_group_admin_requires_verified_readable_binding(self):
-        f=self.fake();f.db.get_value.return_value=None;f.get_all.return_value=['channel']
+        f=self.fake();f.db.get_value.return_value=None;f.get_all.side_effect=[['channel'],[]]
         with patch.object(telegram,'frappe',f),patch.object(telegram,'require_access'),patch.object(telegram,'connection_value',return_value='account'),patch.object(telegram,'client') as hub:
             with self.assertRaises(PermissionError):telegram.groups('members.ban',{'chat_id':-123,'user_id':42})
             hub.assert_not_called()

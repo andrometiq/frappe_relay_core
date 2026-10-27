@@ -51,11 +51,8 @@ def observe(payload, channel):
     remember(channel,chat_id,thread,title=title,state=state,timestamp=timestamp)
 
 
-def action(operation, arguments, result):
+def action(operation, arguments, result, channel):
     if not operation.startswith('topics.'):return
-    account=connection_value('relay_hub_account')
-    channels=frappe.get_all('Relay Channel',filters={'account':account,'channel':'Telegram','enabled':1},pluck='name',limit_page_length=2)
-    if len(channels)!=1:return
     response=result.get('result') if isinstance(result,dict) else None
     if not response:return
     thread=1 if operation.startswith('topics.general.') else arguments.get('message_thread_id')
@@ -64,7 +61,7 @@ def action(operation, arguments, result):
     suffix=operation.split('.')[-1]
     state={'create':'Open','close':'Closed','reopen':'Open','hide':'Hidden','unhide':'Open','delete':'Deleted'}.get(suffix)
     title=arguments.get('name') if suffix in ('create','edit') else None
-    remember(channels[0],arguments['chat_id'],thread,title=title,state=state)
+    remember(channel,arguments['chat_id'],thread,title=title,state=state)
 
 
 @frappe.whitelist(methods=['GET'])

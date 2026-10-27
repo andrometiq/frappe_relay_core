@@ -64,8 +64,8 @@ def target(action):
     channel = frappe.get_doc('Relay Channel', state.channel)
     payload = json.loads(action.payload)
     context = payload.get('context') or {'provider': 'WhatsApp'}
-    if (binding != state.relay_contact or not channel.enabled or channel.channel != context['provider']
-            or channel.account != connection_value('relay_hub_account')):
+    from relay_core.hub_channels import is_current
+    if binding != state.relay_contact or not is_current(channel, connection_value('relay_hub_account')) or channel.channel != context['provider']:
         raise ValueError('Business prompt destination is unavailable')
     source = frappe._dict(relay_contact=state.relay_contact, channel=state.channel,
                          sender_endpoint=state.endpoint, conversation_key=state.conversation_key)

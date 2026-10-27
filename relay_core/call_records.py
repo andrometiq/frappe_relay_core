@@ -9,10 +9,9 @@ from relay_core.automation.service import internal_save
 from relay_core.timeline import provider_time
 
 
-def active_channel():
-    names=frappe.get_all('Relay Channel',filters={'channel':'WhatsApp','enabled':1,'account':connection_value('relay_hub_account')},pluck='name',limit_page_length=2)
-    if len(names)!=1:frappe.throw('Configure one active WhatsApp channel')
-    doc=frappe.get_doc('Relay Channel',names[0]);doc.check_permission('read');return doc
+def active_channel(name=None):
+    from relay_core.hub_channels import choose
+    doc=frappe.get_doc('Relay Channel',choose('WhatsApp',requested=name));doc.check_permission('read');return doc
 
 
 def binding(channel, endpoint):
@@ -111,12 +110,13 @@ def history(contact=None, before=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def events(after=None):
-    require_access();channel=active_channel()
+def events(after=None, channel=None):
+    require_access();channel=active_channel(channel)
     if after and (not isinstance(after,str) or not after.isdigit()):frappe.throw('Invalid call event cursor')
     from relay_core.whatsapp import checked_client
     hub,_=checked_client()
-    result=hub.execute({'operation':'events.list','after':after} if after else {'operation':'events.latest'})
+    from relay_core.hub_channels import hub_arguments
+    result=hub.execute(hub_arguments(channel,{'operation':'events.list','after':after} if after else {'operation':'events.latest'}))
     output=[]
     from relay_core.hub_channels import event_channel
     for event in result.get('events',[])[:100]:
