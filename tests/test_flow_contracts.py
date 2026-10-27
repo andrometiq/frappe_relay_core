@@ -72,6 +72,8 @@ class FlowContracts(unittest.TestCase):
    {'id':'done','kind':'end','text':'Thank you'}]
   definition(nodes)
   nodes[2]['next']='answer'
+  definition(nodes)
+  nodes[2]['next']='branch'
   with self.assertRaises(ValueError):definition(nodes)
 
  def test_numbered_choices_reject_conflicting_numeric_aliases(self):

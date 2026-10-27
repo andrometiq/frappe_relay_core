@@ -12,7 +12,8 @@
     "execution_user",
     "business_doctype",
     "channel",
-    "template_button"
+    "template_button",
+    "legacy_version"
   ],
   "fields": [
     {
@@ -60,6 +61,13 @@
       "fieldname": "template_button",
       "label": "Template Button Payload",
       "fieldtype": "Data"
+    },
+    {
+      "fieldname": "legacy_version",
+      "label": "WhatsApp Core version",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1
     }
   ],
   "permissions": [

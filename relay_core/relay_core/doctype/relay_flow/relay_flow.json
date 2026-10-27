@@ -9,6 +9,7 @@
     "title",
     "channel",
     "command",
+    "keywords",
     "trigger_key",
     "execution_user",
     "business_doctype",
@@ -16,7 +17,8 @@
     "nodes",
     "published_version",
     "template_button",
-    "button_key"
+    "button_key",
+    "legacy_key"
   ],
   "fields": [
     {
@@ -36,7 +38,13 @@
       "fieldname": "command",
       "label": "Command",
       "fieldtype": "Data",
-      "reqd": 1
+      "description": "Optional slash command such as /help."
+    },
+    {
+      "fieldname": "keywords",
+      "label": "Keywords",
+      "fieldtype": "Small Text",
+      "description": "Optional whole-message keywords that start the flow, one per line."
     },
     {
       "fieldname": "trigger_key",
@@ -89,6 +97,14 @@
       "fieldtype": "Data",
       "unique": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "legacy_key",
+      "label": "WhatsApp Core flow",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1,
+      "description": "Set by relay-import-whatsapp-flows."
     }
   ],
   "permissions": [

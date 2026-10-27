@@ -7,7 +7,15 @@ from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access, readable_contact, can_configure
 from relay_core.automation.service import internal_save, check_actor, business_scope, message_hash
 from relay_core.automation.provenance import context_of, conversation_key
-from relay_core.flows.contracts import definition, parse_input, render, matches, choice_options
+from relay_core import features
+from relay_core.flows.contracts import DEFAULT_VISITS, LAST_INPUT, definition, parse_input, prompt, render, matches
+
+COMMAND = r'/[a-z][a-z0-9_]{0,31}'
+FLOW_FIELDS = {'title', 'command', 'keywords', 'channel', 'execution_user', 'business_doctype', 'enabled', 'nodes', 'template_button'}
+KEYWORD_CACHE = 'relay_flow_keywords'
+EXIT_WORDS = {'exit', '/exit', 'cancel', '/cancel', 'stop', '/stop'}
+RUN_DAYS = 7
+CLAIMED_TYPES = {'', None, 'text', 'image', 'video', 'audio', 'voice', 'document', 'sticker', 'location', 'contact', 'contacts'}
 
 
 def digest(*parts):
@@ -18,19 +26,22 @@ def validate_flow(doc):
     require_access(configure=True)
     if not isinstance(doc.title,str) or not 1<=len(doc.title.strip())<=140:
         frappe.throw('Flow title must contain 1–140 characters')
-    if not isinstance(doc.command,str) or not re.fullmatch(r'/[a-z][a-z0-9_]{0,31}',doc.command):
+    if doc.command and (not isinstance(doc.command,str) or not re.fullmatch(COMMAND,doc.command)):
         frappe.throw('Choose a slash command such as /support')
+    doc.keywords='\n'.join(keywords(doc.get('keywords')))
+    if not (doc.command or doc.keywords or doc.get('template_button')):
+        frappe.throw('Choose a slash command, a keyword or a template button that starts the flow')
     validated=definition(doc.nodes)
-    from relay_core.flows.actions import definitions
-    registered=definitions(context='flow')
-    if any(node['kind']=='action' and node['action'] not in registered for node in validated):
+    # Imported flows may name actions their business app has not registered yet; only an enabled flow needs them.
+    if doc.enabled and missing_actions(validated):
         frappe.throw('Choose an installed, replay-safe business action')
     check_actor(doc)
     if not frappe.db.exists('Relay Contact Type',{'business_doctype':doc.business_doctype,'enabled':1}):
         frappe.throw('Choose a configured business type')
     channel=frappe.get_doc('Relay Channel',doc.channel);channel.check_permission('read')
     if channel.channel!='WhatsApp' or not channel.enabled:frappe.throw('Choose an enabled WhatsApp channel')
-    doc.trigger_key=digest(doc.channel,doc.command)
+    doc.trigger_key=digest(doc.channel,doc.command) if doc.command else None
+    check_keywords(doc)
     button=doc.get('template_button') or ''
     if not isinstance(button,str) or len(button)>140:frappe.throw('Template button payload must contain at most 140 characters')
     doc.button_key=digest(doc.channel,button) if button else None
@@ -41,16 +52,62 @@ def validate_flow(doc):
         frappe.throw('Publish a version before enabling the flow')
 
 
+def missing_actions(nodes):
+    from relay_core.flows.actions import definitions
+    registered=definitions(context='flow')
+    return sorted({node['action'] for node in nodes if node['kind']=='action' and node['action'] not in registered})
+
+
+def keywords(value):
+    """Whole-message keywords, one per line or comma separated, compared without case."""
+    if value in (None,''):return []
+    if not isinstance(value,str) or len(value)>2000:frappe.throw('Keywords must contain at most 2,000 characters')
+    result=[]
+    for word in re.split(r'[\n,]',value):
+        word=' '.join(word.split())
+        if not word:continue
+        if len(word)>60:frappe.throw('Each keyword must contain at most 60 characters')
+        if word.casefold() not in (item.casefold() for item in result):result.append(word)
+    if len(result)>20:frappe.throw('Choose at most 20 keywords')
+    return result
+
+
+def check_keywords(doc):
+    """Two enabled flows on one channel cannot claim the same keyword."""
+    if not doc.enabled or not doc.keywords:return
+    mine={word.casefold() for word in keywords(doc.keywords)}
+    others=frappe.get_all('Relay Flow',filters={'channel':doc.channel,'enabled':1,'name':['!=',doc.name or ''],'keywords':['is','set']},
+        fields=['title','keywords'],limit_page_length=0)
+    for row in others:
+        clash=mine & {word.casefold() for word in keywords(row.keywords)}
+        if clash:frappe.throw('Keyword {} already starts the flow {}'.format(sorted(clash)[0],row.title))
+
+
+def keyword_map():
+    """Enabled keywords per channel, cached until a flow changes."""
+    def build():
+        result={}
+        for row in frappe.get_all('Relay Flow',filters={'enabled':1,'keywords':['is','set']},fields=['name','channel','keywords'],limit_page_length=0):
+            for word in keywords(row.keywords):result.setdefault(row.channel,{})[word.casefold()]=row.name
+        return result
+    return frappe.cache.get_value(KEYWORD_CACHE,generator=build)
+
+
+def clear_keywords(doc=None,method=None):
+    frappe.cache.delete_value(KEYWORD_CACHE)
+
+
 @frappe.whitelist(methods=['GET'])
 def directory(after=None,query=''):
     require_access(manage=True)
+    features.require('flows')
     if not isinstance(query,str) or len(query)>80:
         frappe.throw('Invalid flow search')
     filters={'name':['>',after]} if after else {}
     needle='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
     rows=frappe.get_list('Relay Flow',filters=filters,
-        or_filters=[['title','like',needle],['command','like',needle]],
-        fields=['name','title','command','channel','enabled','published_version'],order_by='name asc',page_length=31)
+        or_filters=[['title','like',needle],['command','like',needle],['keywords','like',needle],['legacy_key','like',needle]],
+        fields=['name','title','command','keywords','template_button','channel','enabled','published_version','legacy_key','modified'],order_by='name asc',page_length=31)
     return {'items':rows[:30],'next':rows[29].name if len(rows)>30 else None,
             'can_configure':can_configure()}
 
@@ -58,9 +115,11 @@ def directory(after=None,query=''):
 @frappe.whitelist(methods=['GET'])
 def read(name):
     require_access(manage=True)
+    features.require('flows')
     doc=frappe.get_doc('Relay Flow',name);doc.check_permission('read')
-    result={key:doc.get(key) for key in ('name','title','command','channel','execution_user','business_doctype','enabled','nodes','published_version','template_button')}
+    result={key:doc.get(key) for key in ('name','title','command','keywords','channel','execution_user','business_doctype','enabled','nodes','published_version','template_button','legacy_key')}
     result['published_nodes']=None
+    result['missing_actions']=missing_actions(definition(doc.nodes))
     if doc.published_version:
         version=frappe.get_doc('Relay Flow Version',doc.published_version)
         if version.flow!=doc.name:frappe.throw('Published workflow version is invalid')
@@ -105,9 +164,9 @@ def references(kind,query=''):
 @frappe.whitelist(methods=['POST'])
 def save(values,name=None):
     require_access(configure=True)
+    features.require('flows')
     if isinstance(values,str):values=frappe.parse_json(values)
-    allowed={'title','command','channel','execution_user','business_doctype','enabled','nodes','template_button'}
-    if not isinstance(values,dict) or set(values)-allowed:frappe.throw('Invalid flow fields')
+    if not isinstance(values,dict) or set(values)-FLOW_FIELDS:frappe.throw('Invalid flow fields')
     if 'nodes' in values:values=dict(values,nodes=json.dumps(definition(values['nodes'])))
     doc=frappe.get_doc('Relay Flow',name) if name else frappe.new_doc('Relay Flow')
     doc.update(values);doc.save()
@@ -119,8 +178,7 @@ def validate_draft(values,name=None):
     """Validate a complete AI-authored draft without writing it."""
     require_access(configure=True)
     if isinstance(values,str):values=frappe.parse_json(values)
-    allowed={'title','command','channel','execution_user','business_doctype','enabled','nodes','template_button'}
-    if not isinstance(values,dict) or set(values)-allowed:frappe.throw('Invalid flow fields')
+    if not isinstance(values,dict) or set(values)-FLOW_FIELDS:frappe.throw('Invalid flow fields')
     doc=frappe.get_doc('Relay Flow',name) if name else frappe.new_doc('Relay Flow')
     doc.update(values)
     validate_flow(doc)
@@ -129,6 +187,7 @@ def validate_draft(values,name=None):
         'name':doc.name if name else None,
         'title':doc.title,
         'command':doc.command,
+        'keywords':doc.keywords,
         'channel':doc.channel,
         'execution_user':doc.execution_user,
         'business_doctype':doc.business_doctype,
@@ -141,6 +200,7 @@ def validate_draft(values,name=None):
 @frappe.whitelist(methods=['POST'])
 def publish(name):
     require_access(configure=True)
+    features.require('flows')
     with frappe.cache.lock('relay-flow-publish-'+name,timeout=15,blocking_timeout=3):
         doc=frappe.get_doc('Relay Flow',name);doc.check_permission('write')
         data={key:doc.get(key) for key in ('nodes','channel','execution_user','business_doctype','template_button')}
@@ -155,6 +215,7 @@ def publish(name):
 def set_enabled(name,enabled):
     """Enable or disable a published flow through an explicit MCP-safe action."""
     require_access(configure=True)
+    features.require('flows')
     if enabled not in (0,1,False,True,'0','1'):
         frappe.throw('Enabled must be 0 or 1')
     with frappe.cache.lock('relay-flow-state-'+name,timeout=15,blocking_timeout=3):
@@ -186,25 +247,34 @@ def matching(message):
         if isinstance(payload,str) and payload:
             return frappe.db.get_value('Relay Flow',{'button_key':digest(message.channel,payload),'enabled':1},'name')
     command=(message.content or '').strip()
-    if re.fullmatch(r'/[a-z][a-z0-9_]{0,31}',command):
-        return frappe.db.get_value('Relay Flow',{'trigger_key':digest(message.channel,command),'enabled':1},'name')
-    return None
+    first=(command.split() or [''])[0]
+    if re.fullmatch(COMMAND,first):
+        return frappe.db.get_value('Relay Flow',{'trigger_key':digest(message.channel,first),'enabled':1},'name')
+    return keyword_map().get(message.channel,{}).get(' '.join(command.split()).casefold())
 
 
 def active(key):
-    return frappe.db.get_value('Relay Flow Run',{'conversation_key':key,'status':['in',['Running','Waiting']]},'name',order_by='name desc')
+    """The conversation's open run. A run left unanswered for a week no longer captures replies."""
+    since=frappe.utils.add_to_date(frappe.utils.now_datetime(),days=-RUN_DAYS)
+    return frappe.db.get_value('Relay Flow Run',{'conversation_key':key,'status':['in',['Running','Waiting']],
+        'creation':['>',since]},'name',order_by='name desc')
 
 
 def claims(message):
-    if message.get('legacy_source') or message.direction!='Incoming' or message.message_type not in ('',None,'text'):
+    """A text can start a flow; any reply a step accepts (text, media, location, contact) continues one."""
+    if message.get('legacy_source') or message.direction!='Incoming' or message.message_type not in CLAIMED_TYPES:
+        return False
+    if not features.is_enabled('flows'):
         return False
     try:
         context=context_of(message)
     except (ValueError,TypeError):
         return False
     if context.get('provider')!='WhatsApp':return False
-    return bool(matching(message) or active(route(message)) or frappe.db.exists(
-        'Relay Flow Event', {'conversation_key': route(message), 'status': 'Pending'}))
+    if message.message_type in ('',None,'text') and matching(message):
+        return True
+    key=route(message)
+    return bool(active(key) or frappe.db.exists('Relay Flow Event', {'conversation_key': key, 'status': 'Pending'}))
 
 
 @after_message_commit
@@ -294,9 +364,30 @@ def flow_ticket(source, text):
         frappe.set_user(actor)
 
 
+class StepLimit(ValueError):
+    pass
+
+
 def next_step(nodes,index):
     target=nodes[index].get('next')
     return next(i for i,node in enumerate(nodes) if node['id']==target) if target else index+1
+
+
+def visit(run,nodes,values,index):
+    """Move the run to a step and count the visit; a loop stops at the step's repeat limit."""
+    run.step=index
+    if index<len(nodes):
+        node=nodes[index];visits=values.setdefault('_visits',{})
+        visits[node['id']]=visits.get(node['id'],0)+1
+        if visits[node['id']]>node.get('max_visits',DEFAULT_VISITS):
+            raise StepLimit('Step '+node['id']+' repeated more than '+str(node.get('max_visits',DEFAULT_VISITS))+' times')
+    run.values=json.dumps(values)
+
+
+def step_key(run,node,values):
+    """Stable per visit, so a retry reuses its delivery and action keys but a loop gets new ones."""
+    count=values.get('_visits',{}).get(node['id'],1)
+    return 'flow-'+run.name+'-'+node['id']+('-'+str(count) if count>1 else '')
 
 
 def finish(event):
@@ -313,7 +404,7 @@ def _process(event):
         current=active(event.conversation_key)
         if flow_name:
             if current:
-                old=frappe.get_doc('Relay Flow Run',current);old.status='Cancelled';old.reason='Restarted by slash command';internal_save(old)
+                old=frappe.get_doc('Relay Flow Run',current);old.status='Cancelled';old.reason='Restarted by a new trigger';internal_save(old)
             flow=frappe.get_doc('Relay Flow',flow_name)
             contact=frappe.get_doc('Relay Contact',message.relay_contact)
             from relay_core.business_access import reference
@@ -323,7 +414,8 @@ def _process(event):
                 'conversation_key':event.conversation_key,'start_message':message.name,'last_message':message.name,
                 'relay_contact':message.relay_contact,'business_doctype':target[0],'business_name':target[1],
                 'generation':contact.automation_generation or 0,
-                'status':'Running','step':0,'values':'{}'})
+                'status':'Running','step':0})
+            visit(run,definition(frappe.db.get_value('Relay Flow Version',flow.published_version,'nodes')),{},0)
             internal_save(run,new=True);event.input_applied=1
         elif current:
             run=frappe.get_doc('Relay Flow Run',current)
@@ -335,14 +427,18 @@ def _process(event):
     version,source,channel=scope(run,message)
     run.reason=''
     nodes=definition(version.nodes);values=json.loads(run.get('values') or '{}')
+    if run.status=='Waiting' and not event.input_applied and (message.content or '').strip().casefold() in EXIT_WORDS:
+        send(run,event,source,channel,'The current flow has been closed.',step_key(run,{'id':'exit'},values))
+        run.status='Cancelled';run.reason='Closed by the customer';internal_save(run);finish(event);return
     if run.status=='Waiting' and not event.input_applied:
         node=nodes[run.step]
-        try:value=parse_input(node,message.content)
+        try:value=parse_input(node,message.content,{'message_type':message.message_type,'name':message.name})
         except ValueError as error:
-            send(run,event,source,channel,str(error)+'\n'+render(node['text'],values),'flow-'+event.name+'-invalid')
+            text=node.get('error_text') or str(error)+'\n'+prompt(node,values)
+            send(run,event,source,channel,text,'flow-'+event.name+'-invalid')
             finish(event);return
-        values[node['variable']]=value
-        run.values=json.dumps(values);run.step=next_step(nodes,run.step);run.status='Running';run.last_message=message.name
+        values[node['variable']]=values[LAST_INPUT]=value
+        visit(run,nodes,values,next_step(nodes,run.step));run.status='Running';run.last_message=message.name
         event.input_applied=1;internal_save(run);internal_save(event);frappe.db.commit()
     elif run.status=='Waiting':
         finish(event);return
@@ -351,31 +447,29 @@ def _process(event):
         if run.step>=len(nodes):
             run.status='Completed';internal_save(run);finish(event);return
         version,source,channel=scope(run,message)
-        node=nodes[run.step];text=render(node['text'],values);key='flow-'+run.name+'-'+node['id']
+        node=nodes[run.step];text=render(node['text'],values);key=step_key(run,node,values)
         if node['kind']=='end':
             if text.strip():send(run,event,source,channel,text,key+'-end')
             run.status='Completed';internal_save(run);finish(event);return
         if node['kind']=='condition':
             target=node['then'] if matches(node,values) else node['otherwise']
-            run.step=next(index for index,item in enumerate(nodes) if item['id']==target)
+            visit(run,nodes,values,next(index for index,item in enumerate(nodes) if item['id']==target))
             internal_save(run);frappe.db.commit();continue
         if node['kind']=='wait':
-            run.step=next_step(nodes,run.step)
+            visit(run,nodes,values,next_step(nodes,run.step))
             event.next_attempt=frappe.utils.add_to_date(frappe.utils.now_datetime(),seconds=node['seconds'])
             run.reason='Waiting until '+str(event.next_attempt);internal_save(run)
             internal_save(event);frappe.db.commit();return
         if node['kind']=='input':
-            if node['input_type']=='choice':text+='\n'+', '.join(c['label'] for c in choice_options(node['choices']))
-            if node['input_type']=='multi_choice':text+='\n'+'\n'.join(str(index+1)+'. '+choice['label'] for index,choice in enumerate(choice_options(node['choices'])))+'\nReply with choice numbers separated by commas.'
-            if node.get('optional'):text+='\nReply skip to leave this blank.'
-            send(run,event,source,channel,text,key+'-prompt');run.status='Waiting';internal_save(run);finish(event);return
+            send(run,event,source,channel,prompt(node,values),key+'-prompt');run.status='Waiting';internal_save(run);finish(event);return
         if node['kind']=='reply':
             send(run,event,source,channel,text,key)
         elif node['kind']=='ticket':
             flow_ticket(source, text)
         elif node['kind']=='action':
             from relay_core.flows.actions import execute
-            execute(run,node,values,key)
+            result=execute(run,node,values,key)
+            if node.get('variable'):values[node['variable']]=result
         elif node['kind']=='topic':
             from relay_core.topics import upsert
             sources=frappe.get_all('Relay Flow Event',filters={'run':run.name,'input_applied':1},pluck='message',order_by='name asc',limit_page_length=501)
@@ -389,7 +483,7 @@ def _process(event):
             hold_episode(ticket.name)
             run.status='Handoff';internal_save(run);finish(event)
             return
-        run.step=next_step(nodes,run.step);internal_save(run);frappe.db.commit()
+        visit(run,nodes,values,next_step(nodes,run.step));internal_save(run);frappe.db.commit()
     frappe.enqueue('relay_core.flows.service.process',name=event.name,queue=QUEUE,enqueue_after_commit=True)
 
 
@@ -399,6 +493,8 @@ def process(name):
     with frappe.cache.lock('relay-flow-conversation-'+event.conversation_key,timeout=300,blocking_timeout=1):
         event.reload()
         if event.status!='Pending':return
+        if not features.is_enabled('flows'):
+            event.status='Rejected';event.reason='Flows are turned off';internal_save(event);frappe.db.commit();return
         if event.next_attempt and frappe.utils.get_datetime(event.next_attempt)>frappe.utils.now_datetime():return
         first=None
         pending=frappe.get_all('Relay Flow Event',filters={'conversation_key':event.conversation_key,'status':'Pending'},fields=['name','run'],order_by='name asc',limit_page_length=100)
@@ -409,10 +505,11 @@ def process(name):
             first=item.name;break
         if first!=event.name and not matching(frappe.get_doc('Relay Message',event.message)):return
         try:_process(event)
-        except (frappe.PermissionError,frappe.ValidationError,ValueError):
+        except (frappe.PermissionError,frappe.ValidationError,ValueError) as error:
             frappe.db.rollback();event.reload()
             if event.status == 'Complete': return
-            event.status='Rejected';event.reason='Flow, input or conversation is no longer permitted'
+            event.status='Rejected'
+            event.reason=str(error) if isinstance(error,StepLimit) else 'Flow, input or conversation is no longer permitted'
             internal_save(event)
             if event.run:frappe.db.set_value('Relay Flow Run',event.run,{'status':'Cancelled','reason':event.reason})
             frappe.db.commit()
@@ -425,7 +522,17 @@ def process(name):
             internal_save(event)
             if event.run:frappe.db.set_value('Relay Flow Run',event.run,'reason',event.reason)
             frappe.db.commit()
-        finally:frappe.set_user(actor)
+        finally:
+            frappe.set_user(actor)
+            wake_next(event)
+
+
+def wake_next(event):
+    """A reply that arrived while this one ran waits in order; start it now instead of at the next recovery pass."""
+    if event.status=='Pending':return
+    following=frappe.db.get_value('Relay Flow Event',{'conversation_key':event.conversation_key,'status':'Pending'},'name',order_by='name asc')
+    if following:
+        frappe.enqueue('relay_core.flows.service.process',name=following,queue=QUEUE,job_id='relay-flow-'+following,deduplicate=True)
 
 
 def recover():
@@ -467,6 +574,7 @@ def runs(flow,after=None):
 @frappe.whitelist(methods=['POST'])
 def cancel(name):
     require_access(manage=True)
+    features.require('flows')
     run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
     with frappe.cache.lock('relay-flow-conversation-'+run.conversation_key,timeout=10,blocking_timeout=3):
         run.reload()

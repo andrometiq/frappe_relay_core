@@ -55,7 +55,7 @@ class ApiTests(unittest.TestCase):
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
         self.assertEqual(result,{'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
-                                 'ai':True,'skills':True,'business_events':True,
+                                 'ai':True,'skills':True,'business_events':True,'flows':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
         listed.assert_called_once_with('WhatsApp')

@@ -1,12 +1,17 @@
 """Site switches in Relay Settings that a System Manager turns on or off. All are off by default."""
 import frappe
 
-FIELDS = {'ai': 'enable_ai_features', 'folders': 'enable_chat_folders', 'teams': 'enable_teams'}
-OFF_MESSAGES = {'ai': 'AI features are turned off', 'folders': 'Chat folders are turned off', 'teams': 'Teams are turned off'}
+FIELDS = {'ai': 'enable_ai_features', 'folders': 'enable_chat_folders', 'teams': 'enable_teams', 'flows': 'enable_flows'}
+OFF_MESSAGES = {'ai': 'AI features are turned off', 'folders': 'Chat folders are turned off', 'teams': 'Teams are turned off',
+                'flows': 'Flows are turned off'}
 
 
 def is_enabled(feature: str) -> bool:
-    return bool(frappe.db.get_single_value('Relay Settings', FIELDS[feature]))
+    try:
+        return bool(frappe.db.get_single_value('Relay Settings', FIELDS[feature]))
+    except frappe.ValidationError:
+        # Code runs before the migrate that adds a new switch; a switch the site does not have yet is off.
+        return False
 
 
 def require(feature: str):

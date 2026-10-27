@@ -150,7 +150,8 @@ class BackendFindings(unittest.TestCase):
         f=self.fake(); f.db.exists.return_value=True
         source=_dict(direction='Incoming',message_type='text')
         with patch.object(flows,'frappe',f), patch.object(flows,'context_of',return_value={'provider':'WhatsApp'}), \
-             patch.object(flows,'matching',return_value=None), patch.object(flows,'active',return_value=None),patch.object(flows,'route',return_value='route'):
+             patch.object(flows,'matching',return_value=None), patch.object(flows,'active',return_value=None),patch.object(flows,'route',return_value='route'), \
+             patch.object(flows.features,'is_enabled',return_value=True):
             self.assertTrue(flows.claims(source))
             f.db.exists.assert_called_with('Relay Flow Event',{'conversation_key':'route','status':'Pending'})
 

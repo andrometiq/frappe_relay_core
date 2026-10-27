@@ -70,7 +70,8 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
       </form>
       <div v-if="config.can_switch_ai" class="workflow-card"><FormControl type="checkbox" label="Enable AI features" :model-value="Boolean(config.ai_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature('ai', value))" />
         <FormControl type="checkbox" label="Enable chat folders" :model-value="Boolean(config.folders_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature('folders', value))" />
-        <FormControl type="checkbox" label="Enable teams" :model-value="Boolean(config.teams_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature('teams', value))" /></div>
+        <FormControl type="checkbox" label="Enable teams" :model-value="Boolean(config.teams_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature('teams', value))" />
+        <FormControl type="checkbox" label="Enable flows" :model-value="Boolean(config.flows_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature('flows', value))" /></div>
       <form v-if="capabilities.configure && channelEnabled(capabilities, 'WhatsApp')" class="workflow-card" @submit.prevent="run(saveMargin)">
         <h2 class="font-semibold">WhatsApp billing</h2><p class="text-sm">Included in the rate per message on the Billing page.</p>
         <ErrorMessage :message="marginError" />

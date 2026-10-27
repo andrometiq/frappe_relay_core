@@ -9,10 +9,11 @@ def resolve(value, answers, *, depth=0, references=True):
         raise ValueError('Action input nesting exceeds eight levels')
     if isinstance(value, dict):
         if references and set(value) == {'var'}:
+            from relay_core.flows.contracts import PATH, lookup, root
             key = value['var']
-            if not isinstance(key, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,39}', key) or key not in answers:
+            if not isinstance(key, str) or not re.fullmatch(PATH, key) or root(key) not in answers:
                 raise ValueError('Action refers to an input that has not been collected')
-            return resolve(answers[key], {}, depth=depth+1, references=False)
+            return resolve(lookup(answers, key), {}, depth=depth+1, references=False)
         if len(value) > 50 or any(not isinstance(k, str) or len(k) > 100 for k in value):
             raise ValueError('Action input contains too many fields')
         return {k: resolve(v, answers, depth=depth+1, references=references) for k, v in value.items()}
