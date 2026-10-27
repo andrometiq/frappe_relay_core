@@ -170,9 +170,9 @@ class Importer:
         return values
 
     def attachment(self, url, message):
-        """Copy the bytes from --files-dir when present, else link the source File URL as it is."""
-        path = self.files_dir / Path(url).name if self.files_dir else None
-        if path and path.is_file():
+        """Copy the source bytes when they are found (see source_file), else link the source File URL as it is."""
+        path = self.source_file(url)
+        if path:
             with open(path, 'rb') as source, tempfile.TemporaryFile() as temporary:
                 digest, size = copy_stream(source, temporary)
                 temporary.seek(0)
@@ -182,6 +182,17 @@ class Importer:
             result = link_file(url, message)
             self.counts['media_linked'] += 1
         return {'attachment': result['attachment'], 'attachment_source': message, 'legacy_attachments': [result]}
+
+    def source_file(self, url):
+        """The file in --files-dir by name, else, when the source is this site, the file at its own URL.
+        Relay opens only private copies, so a public file of this site is copied too."""
+        name = Path(url).name
+        if self.files_dir and (self.files_dir / name).is_file():
+            return self.files_dir / name
+        if self.source.database or not url.startswith(('/files/', '/private/files/')):
+            return None
+        path = Path(frappe.get_site_path('private' if url.startswith('/private/') else 'public', 'files', name))
+        return path if path.is_file() else None
 
     def contact_for(self, channel, endpoint, is_phone, conversation, created):
         """Relay Contact of the number on this channel, else of the same verified number on another

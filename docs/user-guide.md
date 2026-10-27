@@ -554,7 +554,7 @@ bench --site <your-site> relay-import-whatsapp-core \
 | `--source-password-file` | A file with the database password. Or set `RELAY_SOURCE_DB_PASSWORD`. |
 | `--source-site-label` | A fixed name for the old site. Required. It marks every imported message. |
 | `--channel OLD=NEW` | Maps an old WhatsApp number to a Relay channel. Repeat it for each number. |
-| `--files-dir` | The old private files folder. Media found there is copied. |
+| `--files-dir` | The old private files folder. Media found there is copied. When the source is the same site, media found at their own URL on the site are copied too. |
 | `--batch` | Messages per insert. Default 2000. |
 | `--dry-run` | Counts only. Writes nothing. |
 | `--undo` | Deletes everything that the import with this label created. |
