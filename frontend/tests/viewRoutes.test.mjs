@@ -19,3 +19,14 @@ test('redirect targets open the matching WhatsApp tab and template links keep th
   assert.equal(routeTab('#/whatsapp?template=123&edit=1', 'templates'), 'templates')
   assert.equal(routeTab('#/whatsapp?tab=account', 'templates'), 'account')
 })
+
+test('WhatsApp Core screen and record links open the matching Relay screen', () => {
+  assert.equal(movedRoute('#/inbox'), '/messages')
+  assert.equal(movedRoute('#/inbox/vs31e5rmoj?comment=1'), '/messages?legacy_conversation=vs31e5rmoj')
+  assert.equal(movedRoute('#/flows/automation/hnoems91bf'), '/flows?legacy=hnoems91bf')
+  assert.equal(movedRoute('#/flows/hnoems91bf'), '/flows?legacy=hnoems91bf')
+  assert.equal(movedRoute('#/flows/meta/abc'), '/whatsapp?tab=forms')
+  assert.equal(movedRoute('#/health'), '/activity')
+  assert.equal(movedRoute('#/ai-queue'), '/tickets')
+  for (const hash of ['#/flows', '#/flows?legacy=x', '#/messages?legacy_conversation=x']) assert.equal(movedRoute(hash), null)
+})

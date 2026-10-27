@@ -15,6 +15,7 @@ import { useMobileLayout } from './composables/useMobileLayout'
 import { useQueueCounts } from './composables/useQueueCounts'
 import { countLabel } from './services/queueCounts'
 import { defaultMedium, pageCapabilities } from './services/enabledChannels'
+import { openLegacyConversation } from './services/legacyLinks'
 
 const location = window.location
 const views = {
@@ -94,7 +95,7 @@ function focusSearch(event) {
   event.preventDefault()
   input.focus()
 }
-onMounted(() => { startRealtime(); initialize(); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
+onMounted(() => { startRealtime(); initialize(); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
