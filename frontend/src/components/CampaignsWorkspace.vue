@@ -9,6 +9,7 @@ import RelaySelect from "./RelaySelect.vue";
 import { useCampaigns } from "../composables/useCampaigns";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
+import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { COUNTERS, campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
   statusTheme, windowNotice } from "../services/campaignProgress";
 
@@ -16,6 +17,10 @@ const capabilities = inject("relayCapabilities");
 const workspace = useCampaigns();
 const { busy, error, items, campaign, sheet, templates, filter, replyWindow } = workspace;
 const creating = ref(false), title = ref(""), type = ref("template"), template = ref(""), text = ref(""), mapping = ref(null);
+// A site with two or more WhatsApp numbers names the number each campaign sends from.
+const manyNumbers = computed(() => hasManyNumbers(capabilities.value));
+const number = ref("");
+const numberOptions = computed(() => whatsappNumbers(capabilities.value).map((row) => ({ value: row.name, label: [row.label, row.address].filter(Boolean).join(" · ") })));
 const mediaFile = ref("");
 const columns = [
   { key: "title", label: "Campaign", width: "minmax(200px,1.4fr)" },
@@ -31,7 +36,7 @@ const counts = computed(() => campaign.value?.counts || {});
 const media = (kind) => channelFeature(capabilities.value, "WhatsApp", "media." + kind);
 const types = computed(() => messageTypes(["photo", "video", "document"].filter(media)));
 const columnsUsed = computed(() => placeholders(text.value));
-const ready = computed(() => title.value.trim().length >= 3 && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
+const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
 const labels = { start: "Start sending", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
 
 const listRoute = "#/whatsapp?tab=campaigns";
@@ -42,12 +47,17 @@ function openCampaign(name) { routeCampaign(name); workspace.open(name); }
 function startCreate(updateRoute = true) {
   if (updateRoute) routeCampaign("new");
   creating.value = true; title.value = ""; type.value = "template"; template.value = ""; text.value = "";
-  workspace.loadTemplates();
+  number.value = "";
+  if (!manyNumbers.value) workspace.loadTemplates();
+}
+function chooseNumber(value) {
+  number.value = value; template.value = "";
+  workspace.loadTemplates(value);
 }
 async function create() {
   const [template_name, language] = template.value.split("|");
   const values = type.value === "template" ? { template_name, language } : { message: campaignMessage(type.value, text.value) };
-  if (await workspace.create({ title: title.value, ...values })) { routeCampaign(campaign.value.name); creating.value = false; }
+  if (await workspace.create({ title: title.value, ...values, ...(number.value ? { channel: number.value } : {}) })) { routeCampaign(campaign.value.name); creating.value = false; }
 }
 async function chooseFile(event) {
   const file = event.target.files?.[0];
@@ -93,8 +103,9 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
       <FrappeFormSection description="Send one WhatsApp message to every mobile number in a sheet.">
         <div class="frappe-field-grid">
           <label class="campaign-field"><span>Title</span><TextInput v-model="title" placeholder="Winter launch Oct 2026" /></label>
+          <RelaySelect v-if="manyNumbers" :model-value="number" label="WhatsApp number" :options="numberOptions" @update:model-value="chooseNumber" />
           <RelaySelect v-model="type" label="Message type" :options="types" />
-          <RelaySelect v-if="type === 'template'" v-model="template" label="Approved template" :options="templateOptions" />
+          <RelaySelect v-if="type === 'template'" v-model="template" label="Approved template" :options="templateOptions" :disabled="manyNumbers && !number" />
         </div>
         <div v-if="type !== 'template'" class="campaign-actions">
           <FormControl v-model="text" type="textarea" :rows="4" :label="type === 'text' ? 'Message' : 'Caption (optional)'"
@@ -157,6 +168,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
         <div class="frappe-field-grid">
           <FrappeReadField v-if="campaign.template_name" label="Template" :value="`${campaign.template_name} (${campaign.language})`" wide />
           <FrappeReadField v-else label="Message" :value="campaign.message?.body || campaign.message?.caption || messageLabel(campaign)" wide />
+          <FrappeReadField v-if="manyNumbers && campaign.channel" label="WhatsApp number" :value="numberName(capabilities, campaign.channel) || campaign.channel" wide />
           <FrappeReadField label="Reply window" :value="`${campaign.reply_window_hours} hours`" wide />
           <FrappeReadField label="Started" :value="campaign.started_at" wide />
         </div>
