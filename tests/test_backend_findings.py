@@ -131,7 +131,7 @@ class BackendFindings(unittest.TestCase):
         f=self.fake(); f.get_all.return_value=[]
         for payload, status in [('invalid','Failed'), ('{}','Uncategorized')]:
             f.get_doc.return_value=_dict(projection_status='Pending',payload=payload,account='account')
-            with patch.object(projection,'frappe',f), patch('relay_core.realtime.incoming_changed') as publish:
+            with patch.object(projection,'frappe',f), patch('relay_core.hub_channels.frappe',f), patch('relay_core.realtime.incoming_changed') as publish:
                 projection.project('event')
                 publish.assert_called_once()
                 f.db.set_value.assert_called_with('Relay Hub Event','event','projection_status',status)

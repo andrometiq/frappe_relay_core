@@ -65,14 +65,28 @@ def authenticated_payload(raw, timestamp, signature, secret, expected_account):
     return payload
 
 
+def channel_key(*values):
+    """The first Hub channel key given, or None; the Hub sends none before multi-channel."""
+    from relay_core.channel_sync import KEY
+    for value in values:
+        if value is None:
+            continue
+        if not isinstance(value, str) or not KEY.fullmatch(value):
+            raise ValueError('Invalid channel key')
+        return value
+    return None
+
+
 def validate_callback(raw, timestamp, signature, secret, expected_account):
     payload = authenticated_payload(raw, timestamp, signature, secret, expected_account)
+    channel_key(payload.get('channel_key'))
     events = payload.get('events')
     if not isinstance(events, list) or not 1 <= len(events) <= 50:
         raise ValueError('Expected 1 to 50 events')
     for event in events:
         if not isinstance(event, dict) or type(event.get('id')) is not int or not 1 <= event['id'] <= 9223372036854775807 or not isinstance(event.get('payload'), dict):
             raise ValueError('Invalid event')
+        channel_key(event.get('channel_key'), event['payload'].get('channel_key'))
     return payload
 
 
@@ -94,6 +108,7 @@ def receive(**_ignored):
     if not isinstance(account, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', account):
         frappe.throw('Invalid account')
     for event in payload['events']:
+        hub_channel = channel_key(event.get('channel_key'), event['payload'].get('channel_key'), payload.get('channel_key'))
         medium = event['payload'].get('channel', 'WhatsApp')
         if medium not in ('WhatsApp', 'Telegram', 'Email'):
             frappe.throw('Unsupported event channel')
@@ -110,7 +125,7 @@ def receive(**_ignored):
                 if json.loads(existing.payload) != part:
                     frappe.throw('Conflicting Hub event')
                 continue
-            doc = insert_event({'event_key':part_key,'account':account,'hub_event_id':str(event['id']),'payload':encoded},
+            doc = insert_event({'event_key':part_key,'account':account,'hub_channel':hub_channel,'hub_event_id':str(event['id']),'payload':encoded},
                 inline=len(payload['events']) == 1 and single_text(part))
             projection_ms += doc.flags.get('relay_projection_ms', 0)
     # Frappe commits successful POST methods before returning the acknowledgement.
@@ -149,18 +164,37 @@ def single_text(payload):
         return False
 
 
+ROUTING = {'channel_key', 'to'}  # Optional on every Hub row since multi-channel.
+
+
+def routing(row):
+    channel_key(row.get('channel_key'))
+    if 'to' in row and (not isinstance(row['to'], str) or not 1 <= len(row['to']) <= 200 or '\x00' in row['to']):
+        raise ValueError('Invalid receiving channel address')
+
+
+def by_channel(payload, rows):
+    """Rows grouped by the channel key of the row, else of the batch, in their order."""
+    groups = {}
+    for row in rows:
+        groups.setdefault(row.get('channel_key') or payload.get('channel_key'), []).append(row)
+    return groups
+
+
 def validate_status_callback(raw, timestamp, signature, secret, expected_account):
     payload = authenticated_payload(raw, timestamp, signature, secret, expected_account)
-    if set(payload) != {'account', 'statuses'}:
+    if not {'account', 'statuses'} <= set(payload) <= {'account', 'statuses', 'channel_key'}:
         raise ValueError('Invalid status callback fields')
+    channel_key(payload.get('channel_key'))
     statuses = payload['statuses']
     if not isinstance(statuses, list) or not 1 <= len(statuses) <= 500:
         raise ValueError('Expected 1 to 500 statuses')
     previous = (0, -1)
     for row in statuses:
         required={'event_id','position','message_id','recipient','status','timestamp'}
-        if not isinstance(row, dict) or not required.issubset(row) or set(row)-required-{'participant','recipient_type'}:
+        if not isinstance(row, dict) or not required.issubset(row) or set(row)-required-{'participant','recipient_type'}-ROUTING:
             raise ValueError('Invalid compact status')
+        routing(row)
         if type(row['event_id']) is not int or not 1 <= row['event_id'] <= 9223372036854775807:
             raise ValueError('Invalid status event identity')
         if type(row['position']) is not int or not 0 <= row['position'] <= 1000000:
@@ -200,17 +234,22 @@ def receive_statuses(**_ignored):
     if not isinstance(account,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',account):
         frappe.throw('Invalid account')
     encoded = json.dumps(payload,sort_keys=True,separators=(',',':'))
-    key = 'statuses:' + hashlib.sha256(encoded.encode()).hexdigest()
-    if not frappe.db.exists('Relay Hub Event', {'event_key':key}):
+    digest = 'statuses:' + hashlib.sha256(encoded.encode()).hexdigest()
+    groups = by_channel(payload, payload['statuses'])
+    for hub_channel, rows in groups.items():
+        # One event per receiving channel; a single-channel batch keeps its original key.
+        key = digest if len(groups) == 1 else f'{digest}:{hub_channel or ""}'
+        if frappe.db.exists('Relay Hub Event', {'event_key':key}):
+            continue
         # Retain the existing projection's verified endpoint binding, receipt
         # ordering, retry handling and update_modified=False behavior.
         statuses = [{'id':row['message_id'],'recipient_id':row['recipient'],
                      'status':row['status'],'timestamp':str(row['timestamp']),
                      **({'recipient_type':row['recipient_type']} if 'recipient_type' in row else {}),
-                     **({'recipient_participant_id':row['participant']} if 'participant' in row else {})} for row in payload['statuses']]
+                     **({'recipient_participant_id':row['participant']} if 'participant' in row else {})} for row in rows]
         projection = {'entry':[{'changes':[{'value':{'statuses':statuses}}]}]}
-        insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,
-            'hub_event_id':str(payload['statuses'][-1]['event_id']),
+        insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,'hub_channel':hub_channel,
+            'hub_event_id':str(rows[-1]['event_id']),
             'payload':json.dumps(projection,sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['statuses']), 'timing': {'receive_ms': (time.time_ns() - started) / 1e6}}
 
@@ -219,8 +258,9 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
     """Validate the compact Telegram/email delivery-journal contract."""
     from datetime import datetime
     payload = authenticated_payload(raw, timestamp, signature, secret, expected_account)
-    if set(payload) != {'account', 'statuses'}:
+    if not {'account', 'statuses'} <= set(payload) <= {'account', 'statuses', 'channel_key'}:
         raise ValueError('Invalid channel status fields')
+    channel_key(payload.get('channel_key'))
     rows = payload['statuses']
     if not isinstance(rows, list) or not 1 <= len(rows) <= 500:
         raise ValueError('Expected 1 to 500 channel statuses')
@@ -228,8 +268,9 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
         raise ValueError('Channel status batch exceeds byte limit')
     previous = 0
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {'id','delivery_id','request_key','operation','state','receipt','occurred_at'}:
+        if not isinstance(row, dict) or set(row) - ROUTING != {'id','delivery_id','request_key','operation','state','receipt','occurred_at'}:
             raise ValueError('Invalid channel status row')
+        routing(row)
         if type(row['id']) is not int or not previous < row['id'] <= 9223372036854775807:
             raise ValueError('Invalid channel status identity')
         previous = row['id']
@@ -293,7 +334,7 @@ def receive_channel_statuses(**_ignored):
     key='channel-statuses:'+hashlib.sha256(encoded.encode()).hexdigest()
     if not frappe.db.exists('Relay Hub Event',{'event_key':key}):
         insert_event({'doctype':'Relay Hub Event','event_key':key,'account':payload['account'],
-            'hub_event_id':str(payload['statuses'][-1]['id']),
+            'hub_channel':payload.get('channel_key'),'hub_event_id':str(payload['statuses'][-1]['id']),
             'payload':json.dumps({'channel_statuses':payload['statuses']},sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['statuses'])}
 
@@ -305,8 +346,9 @@ def validate_bulk_update_callback(raw, timestamp, signature, secret, expected_ac
     """Latest-state rows for campaign deliveries, coalesced by Hub."""
     from datetime import datetime
     payload = authenticated_payload(raw, timestamp, signature, secret, expected_account)
-    if set(payload) != {'account', 'updates'}:
+    if not {'account', 'updates'} <= set(payload) <= {'account', 'updates', 'channel_key'}:
         raise ValueError('Invalid bulk update fields')
+    channel_key(payload.get('channel_key'))
     rows = payload['updates']
     if not isinstance(rows, list) or not 1 <= len(rows) <= 500:
         raise ValueError('Expected 1 to 500 bulk updates')
@@ -314,8 +356,9 @@ def validate_bulk_update_callback(raw, timestamp, signature, secret, expected_ac
         raise ValueError('Bulk update batch exceeds byte limit')
     previous = 0
     for row in rows:
-        if not isinstance(row, dict) or not {'id','key','state','message_id','status','updated_at'} <= set(row) <= {'id','key','state','message_id','status','error','updated_at'}:
+        if not isinstance(row, dict) or not {'id','key','state','message_id','status','updated_at'} <= set(row) <= {'id','key','state','message_id','status','error','updated_at'} | ROUTING:
             raise ValueError('Invalid bulk update row')
+        routing(row)
         if type(row['id']) is not int or not previous < row['id'] <= 9223372036854775807:
             raise ValueError('Bulk updates must be ordered by delivery identity')
         previous = row['id']
@@ -357,7 +400,8 @@ def receive_bulk_updates(**_ignored):
     encoded=json.dumps(payload,sort_keys=True,separators=(',',':'))
     key='bulk-updates:'+hashlib.sha256(encoded.encode()).hexdigest()
     if not frappe.db.exists('Relay Hub Event',{'event_key':key}):
-        insert_event({'event_key':key,'account':payload['account'],'hub_event_id':str(payload['updates'][-1]['id']),
+        insert_event({'event_key':key,'account':payload['account'],'hub_channel':payload.get('channel_key'),
+            'hub_event_id':str(payload['updates'][-1]['id']),
             'payload':json.dumps({'bulk_updates':payload['updates']},sort_keys=True,separators=(',',':'))})
     return {'accepted':len(payload['updates'])}
 

@@ -12,14 +12,15 @@ def event_rows(name):
     event=frappe.get_doc('Relay Hub Event',name)
     if event.account!=connection_value('relay_hub_account'):frappe.throw('Event belongs to another Hub account',frappe.PermissionError)
     payload=json.loads(event.payload);medium=payload.get('channel','WhatsApp')
-    channels=frappe.get_all('Relay Channel',filters={'account':event.account,'channel':medium,'enabled':1},pluck='name',limit_page_length=2)
-    if len(channels)!=1:frappe.throw('Configure one enabled channel for this account in Desk')
-    channel = frappe.get_doc('Relay Channel',channels[0])
+    from relay_core.hub_channels import event_channel
+    name=event_channel(event.account,medium,event.get('hub_channel'))
+    if not name:frappe.throw('The channel that received this event is not set up on this site')
+    channel = frappe.get_doc('Relay Channel',name)
     channel.check_permission('read')
     from relay_core.permissions import company_allowed
     if not company_allowed(channel.get('company')):
         frappe.throw('Triage company is not accessible', frappe.PermissionError)
-    return event,channels[0],medium,extract_messages(payload)
+    return event,name,medium,extract_messages(payload)
 
 
 def source_ticket(channel, row):

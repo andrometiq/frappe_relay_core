@@ -42,6 +42,15 @@ def event_reason(value):
     return ' · '.join(text for text in map(safe_text, parts) if text and text != 'NONE')
 
 
+def template_event(payload):
+    """True when every change of a Meta envelope is a template status update."""
+    try:
+        changes = [change for entry in payload['entry'] for change in entry['changes']]
+        return bool(changes) and all(change.get('field') == 'message_template_status_update' for change in changes)
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
 def project(payload, event):
     applied = False
     for entry in payload.get('entry', []):

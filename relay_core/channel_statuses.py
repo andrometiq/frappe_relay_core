@@ -33,7 +33,9 @@ def project_batch(event, rows):
                 action.check_permission('read')
                 source,channel,context=messaging.action_target(action)
                 medium={'telegram.message':'Telegram','email.send':'Email','whatsapp.execute':'WhatsApp'}[row['operation']]
-                if channel.channel!=medium or channel.account!=event.account:
+                received = row.get('channel_key') or event.get('hub_channel')
+                if (channel.channel!=medium or channel.account!=event.account
+                        or received and channel.hub_channel and received!=channel.hub_channel):
                     raise ValueError('Status receipt channel mismatch')
                 if medium=='Email' and action.operation != 'business_prompt':
                     if evidence:

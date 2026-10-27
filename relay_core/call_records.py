@@ -118,8 +118,11 @@ def events(after=None):
     hub,_=checked_client()
     result=hub.execute({'operation':'events.list','after':after} if after else {'operation':'events.latest'})
     output=[]
+    from relay_core.hub_channels import event_channel
     for event in result.get('events',[])[:100]:
-        payload=event.get('payload') or {};ingest(payload,channel.name)
+        payload=event.get('payload') or {}
+        if event.get('channel_key') and event_channel(channel.account,'WhatsApp',event['channel_key'])!=channel.name:continue
+        ingest(payload,channel.name)
         safe=[]
         for entry in payload.get('entry',[])[:100]:
             for change in entry.get('changes',[])[:100]:
