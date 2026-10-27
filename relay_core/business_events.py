@@ -446,3 +446,37 @@ def template_preview(name):
             break
         after = cursor
     raise ValueError('Template wording unavailable; refresh Templates and try again')
+
+
+@frappe.whitelist(methods=['GET'])
+def template_options(query='', channel=None):
+    """Templates of the WhatsApp numbers the user can read, approved first, matched by every word of `query`."""
+    require_access('Relay Business Event Rule', 'write')
+    if not isinstance(query, str) or len(query) > 80 or (channel is not None and not isinstance(channel, str)):
+        frappe.throw('Invalid template search')
+    from relay_core.settings import value
+    account = value('relay_hub_account') or ''
+    numbers = frappe.get_list('Relay Channel', filters={'account': account, 'channel': 'WhatsApp', 'enabled': 1,
+        **({'name': channel} if channel else {})}, fields=['name', 'title', 'label', 'address', 'waba_id'],
+        order_by='is_default desc, creation asc', page_length=100)
+    if not numbers:
+        return {'items': []}
+    filters = [['account', '=', account], ['status', '!=', 'DELETED']]
+    if all(row.waba_id for row in numbers):
+        filters.append(['waba_id', 'in', sorted({row.waba_id for row in numbers})])
+    for word in query.replace('_', ' ').replace('-', ' ').split():
+        filters.append(['template_name', 'like', '%' + word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'])
+    fields = ['name', 'template_name', 'language', 'status', 'waba_id']
+    rows = frappe.get_list('Relay WhatsApp Template', filters=[*filters, ['status', '=', 'APPROVED']],
+        fields=fields, order_by='template_name asc, language asc', page_length=30)
+    if len(rows) < 30:
+        rows += frappe.get_list('Relay WhatsApp Template', filters=[*filters, ['status', '!=', 'APPROVED']],
+            fields=fields, order_by='template_name asc, language asc', page_length=30 - len(rows))
+    return {'items': [template_option(row, numbers) for row in rows]}
+
+
+def template_option(row, numbers):
+    names = [number.title or number.label or number.address or number.name for number in numbers
+             if not row.waba_id or not number.waba_id or number.waba_id == row.waba_id]
+    return {'value': row.name, 'label': f'{row.template_name} · {row.language}',
+            'description': ' · '.join([row.status or 'UNKNOWN', ', '.join(names)]), 'status': row.status}

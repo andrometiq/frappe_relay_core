@@ -316,7 +316,7 @@ A business event rule sends a template when a document changes. "New event rule"
 | Source DocType | The document that triggers it, such as `Sales Order`. |
 | Event | On submit, When created or On cancel. |
 | Recipient business field | The field on the document that links to the business type, such as `customer`. It must be a Link field to that business type. |
-| Approved WhatsApp template | The template record. In this box you must paste the template record ID. It is easier to use the Desk form (Frappe Desk > Relay Business Event Rule), where you can search the template by its name. |
+| Approved WhatsApp template | Type part of the template name and pick it from the list. Each row shows the name, the language, the status and the sending number. Approved templates show first. With a fixed Channel, the list shows only the templates of that number. |
 | Use this business/person's consent and channel priorities | Leave off for a fixed WhatsApp number. Recipient choices and PDFs need it off. |
 | Explicit Contact | One contact to send to. Needed when several people are linked to the business and Recipients is left on "The only linked contact". |
 | Template parameters in order | One document field per line, for `{{1}}`, `{{2}}` and so on, such as `customer_name`, `name`, `grand_total`. `items_summary` gives each item with its quantity and unit. |
