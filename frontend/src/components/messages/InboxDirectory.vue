@@ -14,13 +14,13 @@ import { countLabel } from '../../services/queueCounts'
 import { mergeChangedRows, newestActivity, onlyChangedRows } from '../../services/inboxRows'
 import { useQueueCounts } from '../../composables/useQueueCounts'
 import { useMobileLayout } from '../../composables/useMobileLayout'
-import NumberFilter from './NumberFilter.vue'
+import InboxFilterPanel from './InboxFilterPanel.vue'
 import InboxFolders from './InboxFolders.vue'
 import MoveToFolderDialog from './MoveToFolderDialog.vue'
 import { useChatFolders } from '../../composables/useChatFolders'
 import { folderLabel } from '../../services/chatFolders'
-import { assignmentLabel } from '../../services/assignment'
-import { hasManyNumbers, numberName, whatsappNumbers } from '../../services/whatsappNumbers'
+import { hasManyNumbers, numberName } from '../../services/whatsappNumbers'
+import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../../services/inboxFilters'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business', 'start'])
 const isMobile = useMobileLayout()
@@ -28,23 +28,27 @@ const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
 const chips = computed(() => mediumChips(capabilities.value))
 const medium = ref(defaultMedium(capabilities.value))
-// A site with two or more WhatsApp numbers can show one number's chats; rows then name their number.
+// A site with two or more WhatsApp numbers names the number on each row.
 const manyNumbers = computed(() => hasManyNumbers(capabilities.value))
-const number = ref('')
-const numberFilter = computed(() => medium.value === 'WhatsApp' && manyNumbers.value ? number.value : '')
-const { counts } = useQueueCounts(medium, numberFilter)
-const mode = ref('all'), folder = ref(''), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
-const moreQueues = computed(() => [
-  { label: 'Businesses', onClick: () => { mode.value = 'business' } },
-  ...(capabilities.value.manage ? [{ label: 'Unlinked senders', onClick: () => { location.hash = '/contacts?tab=unlinked' } }] : []),
-])
-const queues = computed(() => [['mine', 'Mine', 'Chats assigned to you'],
-  ['unassigned', 'Unassigned', capabilities.value.teams_enabled ? 'Chats with no agent and no team' : 'Chats with no assigned agent'],
-  ['all', 'All', 'All chats you can see'], ['unread', 'Unread', 'Chats with messages you have not read']])
+// The tab and filters are kept per user in this browser.
+const user = globalThis.frappe?.session?.user, storage = globalThis.localStorage
+const filters = ref(loadFilters(storage, user))
+const options = computed(() => channelOptions(capabilities.value, medium.value))
+const params = computed(() => filterParams(filters.value, options.value))
+const activeFilters = computed(() => filterChips(filters.value, options.value))
+const { counts } = useQueueCounts(medium, params)
+const mode = ref(filters.value.tab), folder = ref(''), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
+const filtersOpen = ref(false), filterButton = ref(null), mobileFilterButton = ref(null)
+watch(mode, value => { if (value !== 'business') filters.value = { ...filters.value, tab: value } })
+watch(filters, value => saveFilters(storage, user, value))
+function browse(target) {
+  if (target === 'business') mode.value = 'business'
+  else location.hash = '/contacts?tab=unlinked'
+}
 let generation = 0, searchTimer
 function directoryPage(cursor) {
   return coreApi('inbox.directory', { mode: mode.value, query: query.value, medium: medium.value === 'all' ? undefined : medium.value,
-    channel: numberFilter.value || undefined, folder: folder.value || undefined, ...cursor })
+    ...params.value, folder: folder.value || undefined, ...cursor })
 }
 async function load(cursor = {}) {
   clearTimeout(searchTimer)
@@ -61,8 +65,7 @@ watch(query, (_value, _previous, onCleanup) => {
   searchTimer = setTimeout(() => load(), 300)
   onCleanup(() => { ++generation; clearTimeout(searchTimer) })
 })
-watch(medium, () => { number.value = '' })
-watch([mode, medium, numberFilter, folder], () => { ++generation; rows.value = []; next.value = null; load() })
+watch([mode, medium, () => JSON.stringify(params.value), folder], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
 const { folders, changes, moved, move } = useChatFolders()
 // A move changes only that row; a folder view or a deleted folder reloads the page.
@@ -96,13 +99,13 @@ async function refreshChanged() {
     rows.value = mergeChangedRows(rows.value, page.items)
   } catch { if (ticket === generation) return load() }
 }
-useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'],
+useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'],
   ({ kinds } = {}) => mode.value !== 'business' && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
 </script>
 <template>
   <header class="inbox-list-head">
     <h2>Inbox</h2>
-    <Dropdown :options="moreQueues"><Button icon="filter" variant="ghost" :aria-pressed="mode === 'business'" aria-label="More inbox views" title="More inbox views" /></Dropdown>
+    <span ref="filterButton" class="inbox-filter-trigger"><Button icon="filter" variant="ghost" :aria-pressed="activeFilters.length > 0 || mode === 'business'" :aria-expanded="filtersOpen" aria-label="Filter chats" title="Filter chats" @click="filtersOpen = !filtersOpen" /><span v-if="activeFilters.length" class="inbox-filter-count" aria-hidden="true">{{ activeFilters.length }}</span></span>
     <Button variant="solid" icon="plus" aria-label="New conversation" title="New conversation" @click="emit('start')" />
   </header>
   <form v-if="mode !== 'business'" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
@@ -114,12 +117,15 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
     <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
       <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}<span v-if="!chip.enabled" class="inbox-chip-soon">soon</span></button>
   </div>
-  <NumberFilter v-if="mode !== 'business' && medium === 'WhatsApp' && manyNumbers" v-model="number" :numbers="whatsappNumbers(capabilities)" />
   <nav class="v1-queues" aria-label="Inbox queues">
-    <button v-for="[value, label, hint] in queues" :key="value" :title="hint" :aria-pressed="mode === value"
+    <button v-for="[value, label, hint] in TABS" :key="value" :title="hint" :aria-pressed="mode === value"
       :aria-label="countLabel(counts[value]) ? `${label}, ${counts[value]} conversations` : label" @click="mode = value">{{ label }}<span v-if="countLabel(counts[value])" class="queue-count" aria-hidden="true">{{ countLabel(counts[value]) }}</span></button>
-    <Dropdown v-if="isMobile" :options="moreQueues"><Button label="More" icon-right="chevron-down" :aria-pressed="mode === 'business'" aria-label="More inbox views" /></Dropdown>
+    <span v-if="isMobile" ref="mobileFilterButton" class="inbox-filter-trigger"><Button icon="filter" :aria-pressed="activeFilters.length > 0 || mode === 'business'" :aria-expanded="filtersOpen" aria-label="Filter chats" title="Filter chats" @click="filtersOpen = !filtersOpen" /><span v-if="activeFilters.length" class="inbox-filter-count" aria-hidden="true">{{ activeFilters.length }}</span></span>
   </nav>
+  <div v-if="activeFilters.length && mode !== 'business'" class="inbox-filter-chips" role="group" aria-label="Active filters">
+    <span v-for="item in activeFilters" :key="item.key" class="inbox-filter-chip">{{ item.label }}<button type="button" :aria-label="'Remove filter ' + item.label" @click="filters = withoutFilter(filters, item.key)"><FeatherIcon name="x" :size="12" /></button></span>
+  </div>
+  <InboxFilterPanel v-model="filters" v-model:open="filtersOpen" :anchor="isMobile ? mobileFilterButton : filterButton" :options="options" :manage="!!capabilities.manage" @browse="browse" />
   <InboxFolders v-if="capabilities.folders && mode !== 'business'" v-model="folder" />
   <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
   <template v-else>
@@ -131,10 +137,10 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
         <span class="directory-contact-copy">
           <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
           <span class="directory-contact-bottom"><span v-if="manyNumbers && numberName(capabilities, row.channel)" class="number-tag">{{ numberName(capabilities, row.channel) }}</span><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
-          <span class="directory-contact-context"><span v-if="capabilities.folders && row.folder && folderLabel(folders, row.folder)" class="directory-folder"><FeatherIcon name="folder" :size="12" />{{ folderLabel(folders, row.folder) }}</span><span v-if="row.business" class="directory-business" :title="linkedTitle(row.business.doctype, row.business.name)">{{ linkedTitle(row.business.doctype, row.business.name) }}</span><span class="directory-assignee"><FeatherIcon name="user" :size="12" />{{ assignmentLabel(row.assignment, { teams: capabilities.teams_enabled, title: linkedTitle }) }}</span></span>
+          <span class="directory-contact-context"><span v-if="capabilities.folders && row.folder && folderLabel(folders, row.folder)" class="directory-folder"><FeatherIcon name="folder" :size="12" />{{ folderLabel(folders, row.folder) }}</span><span v-if="row.business" class="directory-business" :title="linkedTitle(row.business.doctype, row.business.name)">{{ linkedTitle(row.business.doctype, row.business.name) }}</span></span>
         </span>
       </button>
-      <WorkspaceState v-if="!loading && !rows.length && !error" compact :title="query ? 'No conversations found' : folder ? 'No conversations in this folder' : mode === 'unread' ? 'You’re all caught up' : 'No conversations yet'" :description="query ? 'Try a different name or clear your search.' : folder ? 'Use Move to folder on a conversation to file it here.' : 'Browse your businesses to start a conversation.'"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else label="Browse businesses" @click="mode = 'business'" /></WorkspaceState>
+      <WorkspaceState v-if="!loading && !rows.length && !error" compact :title="query || activeFilters.length ? 'No conversations found' : folder ? 'No conversations in this folder' : mode === 'unread' ? 'You’re all caught up' : 'No conversations yet'" :description="query ? 'Try a different name or clear your search.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Use Move to folder on a conversation to file it here.' : 'Browse your businesses to start a conversation.'"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else label="Browse businesses" @click="mode = 'business'" /></WorkspaceState>
       <Button v-if="next" class="directory-load-more" label="More conversations" :loading="loading" @click="load(next)" />
     </div>
     <template v-if="capabilities.folders">
@@ -150,4 +156,11 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
 .queue-count { margin-left:5px; color:var(--ink-gray-5); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; }
 [aria-pressed=true] > .queue-count { color:inherit; font-weight:600; }
 .directory-folder { display:inline-flex; align-items:center; gap:3px; margin-right:8px; color:var(--ink-gray-5); }
+.inbox-filter-trigger { position:relative; display:inline-flex; }
+.inbox-filter-count { position:absolute; top:-3px; right:-3px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--relay-accent); color:var(--relay-accent-ink); font-size:10.5px; font-weight:600; line-height:16px; text-align:center; pointer-events:none; }
+.v1-queues > .inbox-filter-trigger { margin-left:auto; }
+.inbox-filter-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 16px 0; }
+.inbox-filter-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; min-height:24px; padding:0 4px 0 10px; border-radius:12px; background:var(--relay-accent-soft); color:var(--relay-accent-text); font-size:12px; overflow-wrap:anywhere; }
+.inbox-filter-chip button { display:grid; place-items:center; width:20px; height:20px; border-radius:10px; }
+.inbox-filter-chip button:hover { background:var(--relay-select); }
 </style>

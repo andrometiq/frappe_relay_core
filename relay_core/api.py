@@ -213,6 +213,7 @@ def capabilities():
     manage=can_manage()
     from relay_core.hub_channels import site_numbers
     enabled_names=[item.name for item in channels]
+    numbers={medium:site_numbers(medium) for medium in enabled_names}
     teams=features.is_enabled('teams')
     return {'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
@@ -222,7 +223,8 @@ def capabilities():
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
             'enabled_channels':enabled_names,
             'channels':{item.name:item.get_features() for item in channels},
-            'whatsapp_numbers':site_numbers('WhatsApp') if 'WhatsApp' in enabled_names else []}
+            'whatsapp_numbers':numbers.get('WhatsApp',[]),
+            'inbox_channels':[dict(row,medium=medium) for medium,rows in numbers.items() for row in rows]}
 
 
 @frappe.whitelist(methods=['GET'])

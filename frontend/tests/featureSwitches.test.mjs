@@ -21,14 +21,13 @@ test('the inbox shows folder controls only while folders are on', async () => {
   assert.match(inbox, /if \(!capabilities\.value\.folders\) return/)
   const tools = await read('components/messages/ConversationTools.vue')
   assert.match(tools, /<MoveToFolderDialog v-if="capabilities\.folders"/)
-  assert.match(tools, /<RemoteLinkField v-if="capabilities\.teams_enabled" v-model="team"/)
 })
 
-test('the inbox queues are Mine, Unassigned, All and Unread, and Mine explains itself in one tooltip', async () => {
+test('the inbox tabs are All, Unread and Read, with no chat assignment anywhere in the list', async () => {
   const inbox = await read('components/messages/InboxDirectory.vue')
-  assert.match(inbox, /\['mine', 'Mine', 'Chats assigned to you'\]/)
-  assert.deepEqual([...inbox.matchAll(/\['(mine|unassigned|all|unread)', '/g)].map(match => match[1]), ['mine', 'unassigned', 'all', 'unread'])
+  assert.match(inbox, /v-for="\[value, label, hint\] in TABS"/)
   assert.match(inbox, /:title="hint"/)
+  assert.doesNotMatch(inbox, /assign|Mine|Unassigned/i)
 })
 
 test('the assignment line says who has the chat and who chose them', () => {

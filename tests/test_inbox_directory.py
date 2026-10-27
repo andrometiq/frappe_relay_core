@@ -7,7 +7,7 @@ from frappe import _dict
 from frappe.query_builder.utils import get_query_builder
 from pypika import CustomFunction
 from pypika.queries import QueryBuilder, _SetOperation
-from relay_core import inbox, timeline
+from relay_core import inbox, inbox_filters, timeline
 from test_contact_primary import fake_frappe
 
 SCOPE = 'relay_scope_marker'
@@ -26,6 +26,7 @@ class DirectoryQueryTests(unittest.TestCase):
         self.fake.qb = self.qb
         self.enterContext(patch.object(inbox, 'frappe', self.fake))
         self.enterContext(patch.object(timeline, 'frappe', self.fake))
+        self.enterContext(patch.object(inbox_filters, 'frappe', self.fake))
         self.statements, self.rows = [], []
         def run(query, **kwargs):
             self.statements.append(query.get_sql()); return self.rows
@@ -118,6 +119,47 @@ class DirectoryQueryTests(unittest.TestCase):
         self.assertIn("`channel` IN ('WA-2')", self.statements[0])
         self.assertEqual(items.call_args.args[1], ['WA-2'])
         self.assertEqual(len(self.statements), 1)
+
+    def test_several_channels_narrow_the_list_and_unread_tab(self):
+        self.fake.get_list.side_effect = lambda doctype, filters, **kwargs: ['WA-1', 'WA-2', 'WA-3'] if filters == {'channel': 'WhatsApp'} else ['TG-1']
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]) as items:
+            inbox.directory(medium='WhatsApp', channels='["WA-3", "WA-1"]', mode='unread')
+            inbox.directory(channels=['TG-1'])
+            for channels in ('["WA-1"', '{"a": 1}', '["bad\\nname"]', '[' + ','.join(['"WA-1"'] * 51) + ']'):
+                with self.subTest(channels=channels), self.assertRaises(ValueError):
+                    inbox.directory(medium='WhatsApp', channels=channels)
+        self.assertEqual(items.call_args_list[0].args[1], ['WA-1', 'WA-3'])
+        self.assertEqual(self.statements[0].count("IN ('WA-1','WA-3')"), 2, 'Contacts and unread messages use the same channels')
+        self.assertIn("IN ('TG-1')", self.statements[1])
+
+    def test_read_tab_lists_conversations_without_unread_messages(self):
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]):
+            inbox.directory(mode='read')
+            inbox.directory(mode='unread')
+            for mode in ('mine', 'unassigned'):
+                with self.subTest(mode=mode), self.assertRaises(ValueError):
+                    inbox.directory(mode=mode)
+        read, unread = self.statements
+        self.assertIn('`name` NOT IN (SELECT `tabRelay Message`.`relay_contact`', read)
+        self.assertIn('`name` IN (SELECT `tabRelay Message`.`relay_contact`', unread)
+        self.assertIn("`tabRelay Message Read`.`user`='agent@example.invalid'", read, 'Read means read by the session user')
+        self.assertNotIn('Relay Conversation Assignment', read + unread)
+
+    def test_business_filter_keeps_chats_of_one_type_record_or_none(self):
+        self.fake.get_all.return_value = ['Customer', 'Supplier']
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]), \
+                patch('relay_core.api.business_types', return_value=['Customer', 'Supplier']):
+            inbox.directory(business_type='Customer')
+            inbox.directory(business_type='Customer', business_name='CUST-1', mode='read')
+            inbox.directory(business_type='none')
+            for values in ({'business_type': 'Employee'}, {'business_name': 'CUST-1'}, {'business_type': 'none', 'business_name': 'CUST-1'},
+                           {'business_type': 'Customer', 'business_name': 'x' * 141}):
+                with self.subTest(values=values), self.assertRaises(ValueError):
+                    inbox.directory(**values)
+        one_type, one_record, none = self.statements
+        self.assertIn("`contact` IN (SELECT `parent` FROM `tabDynamic Link` WHERE `parenttype`='Contact' AND NOT `parent` IS NULL AND `link_doctype`='Customer')", one_type)
+        self.assertIn("`link_doctype`='Customer' AND `link_name`='CUST-1'", one_record)
+        self.assertIn("(`contact` IS NULL OR `contact` NOT IN (SELECT `parent` FROM `tabDynamic Link` WHERE `parenttype`='Contact' AND NOT `parent` IS NULL AND `link_doctype` IN ('Customer','Supplier')))", none)
 
     def test_a_medium_passes_every_one_of_its_channels_to_the_rows(self):
         names = [f'WA-{i}' for i in range(150)]

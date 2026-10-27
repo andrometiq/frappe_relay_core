@@ -34,7 +34,8 @@ class ChannelQueryTests(unittest.TestCase):
 
     def test_directory_channel_filter_rejects_unknown_before_execution(self):
         fake=Mock();fake.throw.side_effect=ValueError
-        with patch.object(inbox,'frappe',fake), patch.object(inbox,'require_access'):
+        from relay_core import inbox_filters
+        with patch.object(inbox,'frappe',fake), patch.object(inbox_filters,'frappe',fake), patch.object(inbox,'require_access'):
             with self.assertRaises(ValueError):inbox.directory(medium='SMS')
             fake.qb.get_query.assert_not_called()
 
