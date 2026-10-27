@@ -105,32 +105,68 @@ class Idempotency(Case):
         self.job = frappe._dict(channel='RELAY-CH-1', relay_contact='RELAY-CON-1')
         self.manifest = {'source_site': 'sales.example', 'endpoint': '919000000001', 'identifier_type': 'Phone'}
 
-    def run_rows(self, rows, existing):
+    def run_rows(self, rows, existing, live=(), files=()):
         importer = Importer()
+        importer.source.sql.return_value = list(files)
         inserted = []
-        with patch.object(legacy_database.frappe, 'get_all', side_effect=[existing, []]), \
+        with patch.object(legacy_database.frappe, 'get_all', side_effect=[existing, list(live)]), \
              patch.object(legacy_database, 'sequential_name', side_effect=lambda kind: 'RELAY-MSG-' + str(len(inserted))), \
              patch.object(legacy_database.legacy, 'insert_rows', side_effect=lambda doctype, records: inserted.extend(records)), \
+             patch.object(importer, 'source_file', return_value=Path('/x/a.jpg')), \
+             patch.object(importer, 'copy', return_value={'attachment': 'FILE-1', 'availability': 'available'}) as copy, \
              patch.object(legacy_database.frappe.db, 'set_value') as set_value:
             importer.import_rows(rows, self.job, self.manifest)
-        return importer, inserted, set_value
+        return importer, inserted, set_value, copy
+
+    def imported(self, source, **values):
+        data = dict(name='RELAY-MSG-9', source_key=legacy.source_key('sales.example', source.name), relay_contact='RELAY-CON-1',
+                    channel='RELAY-CH-1', legacy_checksum=legacy_bundle.checksum(source), message_data='{}',
+                    legacy_data=json.dumps({'row': {'modified': str(source.modified)}}))
+        return frappe._dict(data, **values)
 
     def test_rerun_skips_imported_and_inserts_only_new(self):
         old, new = row('m1'), row('m2')
-        existing = [frappe._dict(name='RELAY-MSG-9', source_key=legacy.source_key('sales.example', 'm1'), legacy_checksum=legacy_bundle.checksum(old))]
-        importer, inserted, set_value = self.run_rows([old, new], existing)
+        importer, inserted, set_value, _ = self.run_rows([old, new], [self.imported(old)])
         self.assertEqual([record['legacy_source'] for record in inserted], ['m2'])
         self.assertEqual((importer.counts['skipped'], importer.counts['created']), (1, 1))
         set_value.assert_not_called()
 
-    def test_changed_source_row_updates_status_only(self):
+    def test_changed_source_row_refreshes_status_and_content(self):
         before = row('m1', direction='Outbound', delivery_status='Delivered')
-        after = row('m1', direction='Outbound', delivery_status='Read', modified='2026-09-02 10:00:00')
-        existing = [frappe._dict(name='RELAY-MSG-9', source_key=legacy.source_key('sales.example', 'm1'), legacy_checksum=legacy_bundle.checksum(before))]
-        importer, inserted, set_value = self.run_rows([after], existing)
+        after = row('m1', direction='Outbound', delivery_status='Read', body='Edited', modified='2026-09-02 10:00:00')
+        importer, inserted, set_value, _ = self.run_rows([after], [self.imported(before)])
         self.assertEqual(inserted, [])
         self.assertEqual(importer.counts['updated'], 1)
-        self.assertEqual(set_value.call_args.args[2]['status'], 'Read')
+        self.assertEqual((set_value.call_args.args[2]['status'], set_value.call_args.args[2]['content']), ('Read', 'Edited'))
+        self.assertEqual(set(set_value.call_args.args[2]), set(legacy_database.REFRESHED))
+
+    def test_older_source_row_never_replaces_newer_history(self):
+        newer = row('m1', delivery_status='Read', modified='2026-09-03 10:00:00')
+        importer, _, set_value, _ = self.run_rows([row('m1')], [self.imported(newer)])
+        set_value.assert_not_called()
+        self.assertEqual(importer.counts['stale_skipped'], 1)
+
+    def test_imported_message_of_another_conversation_is_a_failure(self):
+        old = row('m1', modified='2026-09-02 10:00:00')
+        importer, _, set_value, _ = self.run_rows([old], [self.imported(row('m1'), relay_contact='RELAY-CON-2')])
+        set_value.assert_not_called()
+        self.assertIn('belongs to another conversation', importer.failures[0]['error'])
+
+    def test_rerun_repairs_missing_media(self):
+        image = row('m1', message_type='image')
+        file = frappe._dict(attached_to_name='m1', file_url='/private/files/a.jpg')
+        importer, _, set_value, copy = self.run_rows([image], [self.imported(image)], files=[file])
+        copy.assert_called_once()
+        self.assertEqual(json.loads(set_value.call_args.args[2]['message_data'])['attachment'], 'FILE-1')
+        self.assertEqual(importer.counts['updated'], 1)
+
+    def test_live_copy_is_dropped_before_its_files_are_copied(self):
+        image = row('m1', message_type='image')
+        file = frappe._dict(attached_to_name='m1', file_url='/private/files/a.jpg')
+        live = [legacy_database.provider_key('RELAY-CH-1', '919000000001', 'wamid.m1')]
+        importer, inserted, _, copy = self.run_rows([image], [], live=live, files=[file])
+        copy.assert_not_called()
+        self.assertEqual((inserted, importer.failures[0]['error']), ([], 'Provider message already in Relay (live copy kept)'))
 
 
 class Media(Case):
