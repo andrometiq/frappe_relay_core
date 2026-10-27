@@ -5,8 +5,8 @@ import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { useTask } from '../src/composables/useTask.js'
 const source = (await readFile(new URL('../src/components/messages/ConversationTools.vue', import.meta.url), 'utf8'))
   .split('<script setup>')[1].split('</script>')[0].replace(/^import .*\n/gm, '')
-const make = new Function('ref', 'computed', 'watch', 'onBeforeUnmount', 'defineProps', 'coreApi', 'useTask', 'useConversationPresence', 'useRealtimeRefresh',
-  source + '\nreturn {team,agent,folder,state,assign,update,assignmentChanged,error};')
+const make = new Function('ref', 'computed', 'watch', 'onBeforeUnmount', 'defineProps', 'coreApi', 'useTask', 'useConversationPresence', 'useRealtimeRefresh', 'useChatFolders',
+  source + '\nreturn {team,agent,state,menu,moving,assign,update,assignmentChanged,error};')
 const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t) {
   const requests = [], props = reactive({contact:'A'}), scope = effectScope()
@@ -15,38 +15,24 @@ function fixture(t) {
     (method, values) => new Promise((resolve, reject) => requests.push({method,values,resolve,reject})), useTask,
     (_props, callback) => { presence = callback; return {people:ref([])} }, (rooms, kinds, fn) => {
       assert.deepEqual(rooms, ['Relay Conversation Assignment']); assert.ok(kinds.includes('inbox')); refresh = fn
-    }))
+    }, () => ({ move: (contact, folder) => new Promise((resolve, reject) => requests.push({method:'move',values:{contact,folder},resolve,reject})) })))
   t.after(() => { unmount(); scope.stop() })
   return {state, requests, props, refresh, unmount, presence}
 }
 const assignment = (team, agent) => ({can_assign:true, assignment:{team, assigned_to:agent}})
 
-test('presence before the initial read initializes the folder and Save preserves it', async t => {
+test('the menu moves into a folder and removes from the current folder', async t => {
   const {state, requests, presence} = fixture(t)
-  presence({folder:'Follow up',unread:2})
-  requests[0].resolve({...assignment('Sales','alice'),folder:'Follow up'}); await tick()
-  assert.equal(state.folder.value,'Follow up')
-  const saved = state.update({folder:state.folder.value})
-  assert.deepEqual(requests[1].values,{contact:'A',folder:'Follow up'})
-  requests[1].resolve({folder:'Follow up'}); await saved
-  presence({folder:'New folder'})
-  assert.equal(state.folder.value,'New folder')
-})
-
-test('folder edits survive presence, initial read and save responses', async t => {
-  const {state, requests, presence, refresh} = fixture(t)
-  state.folder.value = 'Local edit'
-  presence({folder:'Server folder'})
-  requests[0].resolve({folder:'Server folder'}); await tick()
-  assert.equal(state.folder.value,'Local edit')
-  const saved = state.update({folder:state.folder.value})
-  state.folder.value = 'Next edit'
-  requests[1].resolve({folder:'Local edit'}); await saved
-  assert.equal(state.folder.value,'Next edit')
-  state.folder.value = ''
-  const live = refresh()
-  requests[2].resolve({folder:'Server folder'}); await live
-  assert.equal(state.folder.value,'','Explicitly clearing the folder is an edit')
+  requests[0].resolve(assignment('Sales','alice')); await tick()
+  const labels = () => state.menu.value.map(item => item.label)
+  assert.ok(labels().includes('Move to folder')); assert.ok(!labels().includes('Remove from folder'))
+  state.menu.value.find(item => item.label === 'Move to folder').onClick()
+  assert.equal(state.moving.value, true)
+  presence({folder:'F1'})
+  state.menu.value.find(item => item.label === 'Remove from folder').onClick()
+  assert.deepEqual(requests[1].values, {contact:'A', folder:''})
+  requests[1].resolve({folder:null}); await tick()
+  assert.equal(state.state.value.folder, null); assert.ok(!labels().includes('Remove from folder'))
 })
 
 test('socket and reconnect refresh assignment fields while preserving local edits', async t => {
@@ -55,12 +41,11 @@ test('socket and reconnect refresh assignment fields while preserving local edit
   const live = refresh({kinds:new Set(['inbox'])})
   requests[1].resolve(assignment('Support', 'bob')); await live
   assert.equal(state.team.value, 'Support'); assert.equal(state.agent.value, 'bob')
-  state.agent.value = 'local-agent'; state.folder.value = 'Unfinished folder'
+  state.agent.value = 'local-agent'
   const reconnected = refresh({kinds:new Set(['reconnect'])})
   requests[2].resolve(assignment('Accounts', 'carol')); await reconnected
   assert.equal(state.team.value, 'Support'); assert.equal(state.agent.value, 'local-agent')
   assert.equal(state.assignmentChanged.value, true)
-  assert.equal(state.folder.value, 'Unfinished folder')
   const saved = state.assign()
   assert.deepEqual(requests[3].values, {contact:'A', team:'Support', assigned_to:'local-agent'})
   requests[3].resolve({}); await tick()

@@ -21,8 +21,9 @@ def validate_state(doc):
     if (bool(doc.get('exact_reads')) != bool(previous.get('exact_reads') if previous else False) or (doc.get('read_baseline') or '') != (previous.get('read_baseline') or '' if previous else '')) and not getattr(frappe.flags,'relay_read_write',False):
         frappe.throw('Read evidence is maintained by the inbox service', frappe.PermissionError)
     if doc.state_key != state_key(doc.relay_contact): frappe.throw('Invalid conversation state key')
-    if doc.folder and (not isinstance(doc.folder,str) or len(doc.folder)>50 or any(ord(c)<32 for c in doc.folder)):
-        frappe.throw('Folder names must contain at most 50 printable characters')
+    if doc.folder:
+        from relay_core.chat_folders import own_folder
+        own_folder(doc.folder)
     if doc.last_read:
         validate_reference(doc.last_read,'MSG')
         message=frappe.get_doc('Relay Message',doc.last_read);message.check_permission('read')
@@ -48,7 +49,7 @@ def update(contact, last_read=None, starred=None, folder=None):
         if starred is not None:
             if str(starred) not in ('0','1','True','False'): frappe.throw('Invalid starred flag')
             doc.starred=int(str(starred) in ('1','True'))
-        if folder is not None: doc.folder=folder.strip() if isinstance(folder,str) else folder
+        if folder is not None: doc.folder=folder or None
         old_cursor=frappe.db.get_value('Relay Conversation State',name,'last_read') if name else None
         doc.last_seen=frappe.utils.now_datetime();doc.save()
         if doc.last_read != old_cursor:
@@ -74,7 +75,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     `since` returns only conversations active at or after that time, so a live client can update the changed rows.
     `channel` narrows a medium to one Relay Channel, such as one WhatsApp number."""
     require_access()
-    if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>50 or bool(before)+bool(after)+bool(since)>1:
+    if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>140 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
     if str(starred) not in ('0','1') or mode not in ('all','mine','unread','unassigned'):
         frappe.throw('Invalid conversation filter')

@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "Relay Conversation State",
-  "modified": "2026-10-27 12:00:00.000000",
+  "modified": "2026-10-27 18:00:00.000000",
   "module": "Relay Core",
   "engine": "InnoDB",
   "autoname": "RELAY-CS-.##########",
@@ -43,7 +43,8 @@
     {
       "fieldname": "folder",
       "label": "Folder",
-      "fieldtype": "Data"
+      "fieldtype": "Link",
+      "options": "Relay Chat Folder"
     },
     {
       "fieldname": "last_seen",

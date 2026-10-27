@@ -6,3 +6,4 @@ relay_core.patches.v1_0.link_billing_numbers
 relay_core.patches.v1_0.remove_untouched_samples
 relay_core.patches.v1_0.remove_team_access
 relay_core.patches.v1_0.move_policy_providers_to_ai_model
+relay_core.patches.v1_0.move_typed_folders_to_chat_folders

@@ -11,7 +11,7 @@ assert Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()==sites.resolve(
 os.chdir(sites)
 import frappe
 from frappe.permissions import add_permission
-from relay_core import api, teams, inbox, email, tickets, business_inbox, message_reads
+from relay_core import api, teams, inbox, chat_folders, email, tickets, business_inbox, message_reads
 from relay_core.permissions import readable_contact, require_business_assignment
 frappe.init(site='relay-ai-test.local')
 assert frappe.conf.db_name=='relay_ai_test_20260922' and frappe.conf.db_port==18433
@@ -90,13 +90,22 @@ try:
  frappe.set_user(users[1]);assert len(business_inbox.messages(business_type,business.name)['items'])==3
  print('PASS business inbox combines Contacts, keyset pages without duplicates and filters other assignments')
  frappe.set_user('Administrator');frappe.db.rollback(save_point='business_whatsapp_fixture')
- frappe.set_user(users[0]);state=inbox.update(contact.name,last_read=messages[1].name,starred=1,folder='Follow up');assert state['unread']==1 and state['starred']==1
+ frappe.set_user(users[0]);folder=chat_folders.create('Follow up')['name'];other=chat_folders.create('Other')['name']
+ state=inbox.update(contact.name,last_read=messages[1].name,starred=1,folder=folder);assert state['unread']==1 and state['starred']==1
  state=inbox.update(contact.name,last_read=messages[0].name);assert state['last_read']==messages[1].name
- assert any(row['name']==contact.name for row in inbox.directory(starred=1,folder='Follow up')['items'])
- assert not inbox.directory(starred=1,folder='Other')['items']
+ assert any(row['name']==contact.name for row in inbox.directory(starred=1,folder=folder)['items'])
+ assert not inbox.directory(starred=1,folder=other)['items']
+ assert {row['name']:row['count'] for row in chat_folders.folders()}=={folder:1,other:0}
  assert any(row['name']==contact.name for row in inbox.directory(query='Ibx '+run,starred=1)['items'])
  assert not inbox.directory(query='%',starred=1)['items']
- frappe.set_user(users[1]);assert not inbox.directory(starred=1,folder='Follow up')['items'];state=inbox.read(contact.name);assert state['unread']==3 and not state.get('starred')
+ frappe.set_user(users[1]);assert not inbox.directory(starred=1,folder=folder)['items'] and not chat_folders.folders()
+ for attempt in (lambda:chat_folders.rename(folder,'Mine'),lambda:chat_folders.delete(folder),lambda:inbox.update(contact.name,folder=folder)):
+  try:attempt()
+  except frappe.DoesNotExistError:frappe.db.rollback()
+  else:raise AssertionError('Another user changed a private folder')
+ assert not frappe.get_list('Relay Chat Folder',filters={'name':folder})
+ frappe.set_user(users[0]);chat_folders.delete(folder);assert inbox.read(contact.name)['folder'] is None
+ frappe.set_user(users[1]);state=inbox.read(contact.name);assert state['unread']==3 and not state.get('starred')
  frappe.set_user(users[0]);inbox.typing(contact.name)
  frappe.set_user(users[1]);assert any(row['name']==users[0] and row['typing'] for row in inbox.presence(contact.name)['users'])
  frappe.set_user(users[0]);inbox.typing(contact.name,0)

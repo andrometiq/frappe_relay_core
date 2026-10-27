@@ -68,3 +68,5 @@ doc_events['*'] = {event: 'relay_core.business_events.on_event' for event in ('a
 
 has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.permission'
 permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'
+has_permission['Relay Chat Folder'] = 'relay_core.chat_folders.permission'
+permission_query_conditions['Relay Chat Folder'] = 'relay_core.chat_folders.query'

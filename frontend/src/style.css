@@ -1034,6 +1034,8 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .contact-directory>.v1-queues>button:hover{background:transparent;color:var(--relay-ink)}
 .v1-shell.relay-shell .contact-directory>.v1-queues>button[aria-pressed=true]{background:var(--relay-layer-strong);color:var(--relay-ink);font-weight:600;box-shadow:var(--relay-shadow-1)}
 .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{height:26px;min-height:26px;padding:0 6px;border:0;background:transparent;box-shadow:none;font-size:12.5px}
+.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders{overflow-x:auto;margin-top:0;scrollbar-width:none}
+.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders>*{flex:0 0 auto;padding:0 8px}
 .v1-shell.relay-shell .directory-rows{padding:4px 8px 12px}
 .v1-shell.relay-shell .directory-contact{position:relative;align-items:flex-start;gap:11px;width:100%;min-height:0;margin:0 0 2px;padding:10px;border:0;border-radius:7px;transition:background-color var(--relay-fast) ease,box-shadow var(--relay-fast) ease}
 .v1-shell.relay-shell .directory-contact:hover{background:var(--relay-hover)}
