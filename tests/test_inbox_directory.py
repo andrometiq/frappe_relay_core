@@ -119,6 +119,13 @@ class DirectoryQueryTests(unittest.TestCase):
         self.assertEqual(items.call_args.args[1], ['WA-2'])
         self.assertEqual(len(self.statements), 1)
 
+    def test_a_medium_passes_every_one_of_its_channels_to_the_rows(self):
+        names = [f'WA-{i}' for i in range(150)]
+        self.fake.get_list.side_effect = lambda doctype, filters, limit_page_length, **kwargs: names[:limit_page_length or None]
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]) as items:
+            inbox.directory(medium='WhatsApp', mode='unread')
+        self.assertEqual(items.call_args.args[1], names, 'Row unread counts and previews must cover the same channels as the queue')
+
 
 if __name__ == '__main__':
     unittest.main()

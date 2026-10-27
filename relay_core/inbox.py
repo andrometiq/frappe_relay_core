@@ -85,7 +85,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     assignment=frappe.qb.DocType('Relay Conversation Assignment');message=frappe.qb.DocType('Relay Message')
     filters={}
     if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Invalid medium')
-    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=100) if medium else None
+    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=0) if medium else None
     if channel:
         if channel not in (channel_names or []):frappe.throw('Invalid channel')
         channel_names=[channel]
