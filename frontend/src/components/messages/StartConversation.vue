@@ -13,12 +13,14 @@ import {
   buildTemplateComponents,
 } from "../../services/templateParameters";
 // `channel` is the WhatsApp number staff picked in "Send via"; the message and its templates go through that number.
+// A business record lists one endpoint per number, so the picked number is preselected there and staff may change it.
 const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String, channel:String });
 const emit = defineEmits(["close", "sent"]);
 const channelEnabled = useEnabledChannels();
 const capabilities = inject("relayCapabilities", ref({}));
+const sendChannel = computed(() => props.businessName ? destination.value?.channel || "" : props.channel);
 const numberLabel = computed(() => {
-  const row = (capabilities.value.whatsapp_numbers || []).find(item => item.name === props.channel);
+  const row = (capabilities.value.whatsapp_numbers || []).find(item => item.name === sendChannel.value);
   return row ? [row.label, row.address].filter(Boolean).join(' · ') : '';
 });
 const can = feature => channelCan(capabilities.value, destination.value?.provider, feature);
@@ -114,7 +116,7 @@ async function destinations() {
     );
     if (current !== generation) return;
     endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
-    endpoint.value = endpoints.value[0]?.value || "";
+    endpoint.value = (endpoints.value.find(row => props.businessName && row.channel === props.channel) || endpoints.value[0])?.value || "";
   } catch (e) {
     if (current === generation) error.value = e.message;
   }
@@ -128,6 +130,7 @@ watch(contact, () => {
   if (contact.value) destinations();
 }, {flush:'sync'});
 watch(templateId, () => (parameters.value = {}), {flush:'sync'});
+watch(sendChannel, (now, before) => { if (before) { templates.value = []; templateId.value = ""; cursor.value = ""; } });
 const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
   () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
@@ -140,7 +143,7 @@ async function loadTemplates(next = false) {
       {
         operation: "templates.list",
         arguments: { ...(next && cursor.value ? { after: cursor.value } : {}) },
-        ...(props.channel ? { channel: props.channel } : {}),
+        ...(props.channel && sendChannel.value ? { channel: sendChannel.value } : {}),
       },
       true,
     );

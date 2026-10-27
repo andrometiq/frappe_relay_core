@@ -10,7 +10,7 @@ import {whatsappCapabilities} from './channelCapabilities.js'
 const inject=()=>ref({...whatsappCapabilities,channels:{...whatsappCapabilities.channels,Email:{email_threading:true}}})
 import {templateParameterDescriptors,buildTemplateComponents} from '../src/services/templateParameters.js'
 const source=(await readFile(new URL('../src/components/messages/StartConversation.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm,'')
-const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates};')
+const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations};')
 for(const status of ['Queued','Submitted','Uncertain'])test(`conversation start ${status}`,async()=>{
  const events=[],calls=[],storage=new Map()
  const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan)
@@ -97,4 +97,20 @@ for (const viaReconcile of [false, true]) test(`rejected start can be edited and
  await state.send()
  assert.notEqual(calls.at(-1).args.request_key,calls[0].args.request_key)
  assert.equal(calls.at(-1).args.business_doctype,'Customer');assert.equal(calls.at(-1).args.business_name,'local-customer')
+})
+
+test('a business start preselects the WhatsApp number picked in Send via and lists its templates', async () => {
+ const calls = []
+ const rows = [{value:'WA-1',endpoint:'E1',provider:'WhatsApp',window:{open:false}},{value:'WA-2',endpoint:'E2',provider:'WhatsApp',window:{open:false}}]
+ const api = async (method,args) => { calls.push({method,args}); return method === 'conversation_start.business_options' ? rows : {data:[]} }
+ const state = make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer',channel:'WA-2'}),()=>()=>{},api,
+   ()=> 'digest',()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan)
+ await state.destinations()
+ assert.equal(state.endpoint.value,'E2')
+ assert.equal(state.kind.value,'template')
+ await state.loadTemplates()
+ assert.equal(calls.at(-1).args.channel,'WA-2')
+ state.endpoint.value = 'E1'
+ await state.loadTemplates()
+ assert.equal(calls.at(-1).args.channel,'WA-1')
 })

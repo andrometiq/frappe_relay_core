@@ -38,5 +38,5 @@ export function useSendNumbers(state, capabilities) {
   const wroteTo = computed(() => items.value.find(item => item.channel === defaultChannel.value && item.has_chat) || null)
   const choices = computed(() => items.value.map(item => ({ ...sendNumberChoice(item, defaultChannel.value), inline: true })))
 
-  return { active, items, current, chosen, wroteTo, choices, pick: pickNumber, load }
+  return { active, contact, items, current, chosen, wroteTo, choices, pick: pickNumber, load }
 }
