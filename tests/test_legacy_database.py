@@ -146,6 +146,18 @@ class Identity(Case):
                          {'endpoint': 'E1', 'links': ['L1', 'L2']})
 
 
+class Finish(Case):
+    def test_resumed_run_records_no_earlier_values_for_what_the_interrupted_run_created(self):
+        importer = Importer()
+        frappe.db.get_value.return_value = json.dumps({'created': {'relay_contact': 'RELAY-CON-1', 'endpoint': 'EP-1'}})
+        job = frappe._dict(channel='CH', relay_contact='RELAY-CON-1', marker='IMPORT-1')
+        created = {}
+        with patch.object(importer, 'project_reactions'), patch.object(importer, 'mark'), \
+             patch.object(legacy_database, 'refresh_activity'), patch.object(legacy_database, 'apply_history'):
+            importer.finish(conversation(), '9190', job, created)
+        self.assertEqual(created, {})
+
+
 class Reactions(Case):
     def test_reactions_are_projected_and_live_targets_saved_for_undo(self):
         importer = Importer()

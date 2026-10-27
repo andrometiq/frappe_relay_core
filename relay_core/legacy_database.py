@@ -162,17 +162,19 @@ class Importer:
 
     def finish(self, conversation, endpoint, job, created):
         self.project_reactions(job, created)
-        self.finish_contact(job.channel, endpoint, job.relay_contact, created)
+        # A resumed run must know what the interrupted run created, not only what it created itself.
+        stored = legacy.object_value(frappe.db.get_value('Relay Legacy Import', job.marker, 'source_metadata')).get('created', {})
+        self.finish_contact(job.channel, endpoint, job.relay_contact, created, merge_created(stored, created))
         self.mark(conversation, job.channel, job.relay_contact, created)
         frappe.db.set_value('Relay Legacy Import', job.marker, 'status', 'Completed', update_modified=False)
 
-    def finish_contact(self, channel, endpoint, contact, created):
+    def finish_contact(self, channel, endpoint, contact, created, owned):
         """Set the directory activity and opt-out choice from the imported history. On a contact or
-        endpoint the import did not create, the marker keeps the earlier values for undo."""
-        if not created.get('relay_contact'):
+        endpoint the import did not create (`owned` lists what it did), the marker keeps the earlier values for undo."""
+        if not owned.get('relay_contact'):
             created['activity'] = frappe.db.get_value('Relay Contact', contact, ACTIVITY, as_dict=True)
         refresh_activity(contact)
-        before = None if created.get('endpoint') else frappe.db.get_value(
+        before = None if owned.get('endpoint') else frappe.db.get_value(
             'Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)}, ('name',) + OPT_OUT, as_dict=True)
         apply_history(channel, endpoint)
         after = before and frappe.db.get_value('Relay Contact Endpoint', before.name, OPT_OUT, as_dict=True)
