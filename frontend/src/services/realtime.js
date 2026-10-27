@@ -31,6 +31,7 @@ export function startRealtime() {
   })
   socket.on('update_user_permissions',()=>{for(const fn of listeners)fn({kind:'permissions'})})
   socket.on('relay_changed',event=>{for(const fn of listeners)fn(event)})
+  socket.on('relay_ticket_notice',event=>{for(const fn of listeners)fn({...event,kind:'ticket_notice'})})
   socket.on('relay_campaign_progress',event=>{for(const fn of listeners)fn({...event,kind:'campaign_progress'})})
   return socket
 }

@@ -30,6 +30,7 @@ class TicketTests(unittest.TestCase):
         self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence',category='Payment evidence',status='Open',messages=[types.SimpleNamespace(message=self.message.name)])
 
         self.doc.get_doc_before_save=lambda:None
+        self.doc.has_permission=Mock(return_value=True)
         self.doc.get=lambda key:getattr(self.doc,key,None)
         self.f.PermissionError = PermissionError
         self.f.DoesNotExistError = LookupError
@@ -76,6 +77,16 @@ class TicketTests(unittest.TestCase):
         self.module.directory(business_doctype='Supplier', business_name='SUP-A', assigned_to='agent', category='Support', status='Open')
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(business_doctype='Supplier',
             business_name='SUP-A', assigned_to='agent', category='Support', status='Open'))
+
+    def test_directory_filters_assigned_to_me_and_tagged_me(self):
+        self.f.get_list = Mock(return_value=[])
+        self.f.session = types.SimpleNamespace(user='agent@example.invalid')
+        self.module.directory(mine='assigned', assigned_to='someone-else')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(assigned_to='agent@example.invalid'))
+        self.module.directory(mine='tagged', status='Open')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], [['status', '=', 'Open'],
+            ['Relay Ticket Watcher', 'user', '=', 'agent@example.invalid']])
+        with self.assertRaises(ValueError): self.module.directory(mine='everyone')
 
     def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
         self.doc.name = 'RELAY-TKT-0000000001'

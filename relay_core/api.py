@@ -195,7 +195,7 @@ def message_snapshots(contact, names):
     if not isinstance(names,list) or len(names)>50:frappe.throw('Refresh at most 50 messages')
     for name in names:validate_reference(name,'MSG')
     rows=frappe.get_list('Relay Message',filters={'relay_contact':contact,'name':['in',names]},
-        fields=['name','channel','content','direction','status','creation','sent_at','provider_context',
+        fields=['name','relay_contact','business_doctype','business_name','channel','content','direction','status','creation','sent_at','provider_context',
                 'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group','legacy_author'],page_length=50)
     channels = {row.channel: frappe.get_doc('Relay Channel', row.channel) for row in rows}
     for channel in channels.values():

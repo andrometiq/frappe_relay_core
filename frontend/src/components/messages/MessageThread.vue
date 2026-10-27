@@ -228,6 +228,10 @@ function actions(message) {
       label: "Discuss internally",
       icon: "message-square",
       onClick: () => emit("note", message),
+    }, {
+      label: "Create ticket",
+      icon: "bookmark",
+      onClick: () => emit("ticket", message),
     });
   if (canReact(message))
     items.push(

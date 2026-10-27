@@ -331,6 +331,8 @@ def validate_ticket(doc, check_assignment=True):
         frappe.throw('Invalid ticket category')
     if doc.status not in ('Open', 'In progress', 'Resolved', 'Closed'):
         frappe.throw('Invalid ticket status')
+    from relay_core import ticket_tags
+    ticket_tags.validate(doc)
     previous = doc.get_doc_before_save()
     if any(record and any(record.get(key) for key in
             ('company', 'conversation_key', 'active_scope_key', 'source_hub_event'))
@@ -367,7 +369,9 @@ def validate_ticket(doc, check_assignment=True):
     if not check_assignment:
         return
     if check_assignment and (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
-        require_access(manage=True)
+        # The creator picks the first owner; reassignment needs team management.
+        if previous:
+            require_access(manage=True)
         if doc.assigned_to:
             if not frappe.db.get_value('User', doc.assigned_to, 'enabled'):
                 frappe.throw('Choose an enabled agent')
@@ -396,14 +400,23 @@ def validate_ticket(doc, check_assignment=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(subject, messages, brief='', category='Query'):
+def create(subject, messages, brief='', category='Query', priority='Medium', assigned_to='', tagged=None):
+    from relay_core import ticket_tags
     require_access()
     if isinstance(messages, str):
         messages = frappe.parse_json(messages)
     if not isinstance(messages, list) or not 1 <= len(messages) <= 50 or any(not isinstance(m, str) for m in messages):
         frappe.throw('Messages must be a list of 1–50 references')
+    if assigned_to and not isinstance(assigned_to, str):
+        frappe.throw('Invalid ticket assignee')
+    users = ticket_tags.user_list(tagged)
+    for name in messages:
+        validate_reference(name, 'MSG')
+    business_doctype, business_name = ticket_tags.message_business(messages)
     doc = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
-                          'category': category, 'status': 'Open',
+                          'category': category, 'status': 'Open', 'priority': priority or 'Medium',
+                          'assigned_to': assigned_to or None, 'watchers': [{'user': user} for user in users],
+                          'business_doctype': business_doctype, 'business_name': business_name,
                           'messages': [{'message': name} for name in messages]})
     # insert runs the controller validation and Frappe create permissions.
     doc.insert()
@@ -424,6 +437,7 @@ def update_status(name, status):
 @frappe.whitelist(methods=['GET'])
 def read(name):
     require_access()
+    from relay_core import ticket_tags
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name)
     doc.check_permission('read')
@@ -454,7 +468,9 @@ def read(name):
             continue
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief, 'linked_drafts': drafts,
             'category': doc.category, 'status': doc.status, 'messages': links, 'creation': doc.creation,
-            'assigned_to': doc.get('assigned_to'),
+            'assigned_to': doc.get('assigned_to'), 'priority': doc.get('priority') or 'Medium',
+            'tagged': [{'user': user, 'full_name': frappe.utils.get_fullname(user)} for user in ticket_tags.tagged(doc)],
+            'can_edit': bool(doc.has_permission('write')),
             'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),
             'handoff_reason': doc.get('handoff_reason'), 'source_run': doc.get('source_run'),
             'company': doc.get('company'), 'conversation_key': doc.get('conversation_key'),
@@ -734,10 +750,12 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None):
+def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None, mine=None):
     require_access()
     if not isinstance(query,str) or len(query)>80 or before and after: frappe.throw('Invalid ticket search')
+    if mine not in (None, '', 'assigned', 'tagged'): frappe.throw('Invalid ticket filter')
     filters={}
+    if mine == 'assigned': assigned_to = frappe.session.user
     for key, value in dict(business_doctype=business_doctype, business_name=business_name, assigned_to=assigned_to, category=category).items():
         if value:
             if not isinstance(value, str) or len(value) > 140: frappe.throw('Invalid ticket filter')
@@ -748,6 +766,9 @@ def directory(query='', before=None, after=None, status=None, business_doctype=N
     if before or after:
         validate_reference(before or after,'TKT');filters['name']=['<' if before else '>',before or after]
     if query:filters['subject']=['like','%'+query.replace('%','\\%').replace('_','\\_')+'%']
+    if mine == 'tagged':
+        filters=[[key, *value] if isinstance(value, list) else [key, '=', value] for key, value in filters.items()]
+        filters.append(['Relay Ticket Watcher', 'user', '=', frappe.session.user])
     rows=frappe.get_list('Relay Ticket',filters=filters,fields=['name'],order_by='name desc' if before else 'name asc',page_length=31)
     more=len(rows)>30;page=rows[:30]
     if before:page.reverse()

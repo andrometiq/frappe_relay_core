@@ -7,6 +7,7 @@ import { realtimeStatus, startRealtime } from './services/realtime'
 import LoadingRows from './components/LoadingRows.vue'
 import ConnectedMessages from './components/ConnectedMessages.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
+import TicketNotices from './components/TicketNotices.vue'
 import { routeTab, useViewRoute } from './useViewRoute'
 import { navAllowed, whatsappRoute, whatsappSections } from './services/navigation'
 import MobileTabBar from './components/shell/MobileTabBar.vue'
@@ -109,7 +110,7 @@ onErrorCaptured(e => {
       <span class="relay-brand"><span class="relay-logo" aria-hidden="true"><FeatherIcon name="message-circle" /></span>Relay</span>
       <h1>{{ current?.label }}</h1>
       <div id="relay-titlebar-search" class="relay-titlebar-search" />
-      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /></div>
+      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /><TicketNotices /></div>
     </header>
     <aside class="app-nav" :class="{ 'mobile-nav-open': mobile }" aria-label="Relay navigation" @keydown="trapNavigation">
       <nav v-for="section in menu" :key="section.group" class="relay-nav-section" :aria-label="section.group || 'Workspace'">
