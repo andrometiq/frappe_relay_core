@@ -14,6 +14,8 @@ import { countLabel } from '../../services/queueCounts'
 import { mergeChangedRows, newestActivity, onlyChangedRows } from '../../services/inboxRows'
 import { useQueueCounts } from '../../composables/useQueueCounts'
 import { useMobileLayout } from '../../composables/useMobileLayout'
+import NumberFilter from './NumberFilter.vue'
+import { hasManyNumbers, numberName, whatsappNumbers } from '../../services/whatsappNumbers'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business', 'start'])
 const isMobile = useMobileLayout()
@@ -21,7 +23,11 @@ const capabilities = inject('relayCapabilities')
 const mediums = computed(() => mediumOptions(capabilities.value))
 const chips = computed(() => mediumChips(capabilities.value))
 const medium = ref(defaultMedium(capabilities.value))
-const { counts } = useQueueCounts(medium)
+// A site with two or more WhatsApp numbers can show one number's chats; rows then name their number.
+const manyNumbers = computed(() => hasManyNumbers(capabilities.value))
+const number = ref('')
+const numberFilter = computed(() => medium.value === 'WhatsApp' && manyNumbers.value ? number.value : '')
+const { counts } = useQueueCounts(medium, numberFilter)
 const mode = ref('all'), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
 const moreQueues = computed(() => [
   { label: 'Businesses', onClick: () => { mode.value = 'business' } },
@@ -29,7 +35,8 @@ const moreQueues = computed(() => [
 ])
 let generation = 0, searchTimer
 function directoryPage(cursor) {
-  return coreApi('inbox.directory', { mode: mode.value, query: query.value, medium: medium.value === 'all' ? undefined : medium.value, ...cursor })
+  return coreApi('inbox.directory', { mode: mode.value, query: query.value, medium: medium.value === 'all' ? undefined : medium.value,
+    channel: numberFilter.value || undefined, ...cursor })
 }
 async function load(cursor = {}) {
   clearTimeout(searchTimer)
@@ -46,7 +53,8 @@ watch(query, (_value, _previous, onCleanup) => {
   searchTimer = setTimeout(() => load(), 300)
   onCleanup(() => { ++generation; clearTimeout(searchTimer) })
 })
-watch([mode, medium], () => { ++generation; rows.value = []; next.value = null; load() })
+watch(medium, () => { number.value = '' })
+watch([mode, medium, numberFilter], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
 // A new message updates only the conversations active since the newest loaded row; other changes reload the page.
 async function refreshChanged() {
@@ -76,8 +84,9 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
   </form>
   <div v-if="mode !== 'business'" class="inbox-channel-chips" role="group" aria-label="Channel">
     <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" :disabled="!chip.enabled" @click="medium = chip.value">
-      <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
+      <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}<span v-if="!chip.enabled" class="inbox-chip-soon">soon</span></button>
   </div>
+  <NumberFilter v-if="mode !== 'business' && medium === 'WhatsApp' && manyNumbers" v-model="number" :numbers="whatsappNumbers(capabilities)" />
   <nav class="v1-queues" aria-label="Inbox queues">
     <button v-for="[value, label] in [['mine','Mine'],['unassigned','Unassigned'],['all','All'],['unread','Unread']]" :key="value" :aria-pressed="mode === value"
       :aria-label="countLabel(counts[value]) ? `${label}, ${counts[value]} conversations` : label" @click="mode = value">{{ label }}<span v-if="countLabel(counts[value])" class="queue-count" aria-hidden="true">{{ countLabel(counts[value]) }}</span></button>
@@ -93,7 +102,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Conversation Assignment'], ['message
         <span class="directory-avatar"><Avatar :label="recordTitle(row, 'Contact')" /><span class="directory-channel" :title="row.provider || 'Conversation'" :aria-label="row.provider || 'Conversation'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
         <span class="directory-contact-copy">
           <span class="directory-contact-top"><strong>{{ recordTitle(row, 'Contact') }}</strong><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
-          <span class="directory-contact-bottom"><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
+          <span class="directory-contact-bottom"><span v-if="manyNumbers && numberName(capabilities, row.channel)" class="number-tag">{{ numberName(capabilities, row.channel) }}</span><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
           <span class="directory-contact-context"><span v-if="row.business" class="directory-business" :title="linkedTitle(row.business.doctype, row.business.name)">{{ linkedTitle(row.business.doctype, row.business.name) }}</span><span class="directory-assignee"><FeatherIcon name="user" :size="12" />{{ row.assignment?.assigned_to ? linkedTitle('User', row.assignment.assigned_to, 'Assigned') : linkedTitle('Relay Team', row.assignment?.team, 'Unassigned') }}</span></span>
         </span>
       </button>

@@ -108,6 +108,17 @@ class DirectoryQueryTests(unittest.TestCase):
             inbox.directory(since='2026-10-27 10:00:00')
         self.assertIn("COALESCE(`last_message_at`,`creation`)>='2026-10-27 10:00:00'", self.statements[0])
 
+    def test_number_filter_narrows_the_medium_to_one_channel(self):
+        self.fake.get_list.side_effect = lambda doctype, filters, **kwargs: ['WA-1', 'WA-2'] if filters == {'channel': 'WhatsApp'} else []
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]) as items:
+            inbox.directory(medium='WhatsApp', channel='WA-2')
+            for medium, channel in (('WhatsApp', 'WA-9'), ('Telegram', 'WA-2'), (None, 'WA-2')):
+                with self.subTest(medium=medium, channel=channel), self.assertRaises(ValueError):
+                    inbox.directory(medium=medium, channel=channel)
+        self.assertIn("`channel` IN ('WA-2')", self.statements[0])
+        self.assertEqual(items.call_args.args[1], ['WA-2'])
+        self.assertEqual(len(self.statements), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

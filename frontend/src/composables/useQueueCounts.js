@@ -9,11 +9,11 @@ const acquire = sharedQueueCounts(
   load => watchRealtime(['Relay Message', 'Relay Conversation Assignment'], ['messages', 'inbox', 'reads', 'permissions', 'contacts'], load),
 )
 
-export function useQueueCounts(medium) {
+export function useQueueCounts(medium, channel = null) {
   const lease = shallowRef(null)
-  watch(() => unref(medium), value => {
+  watch(() => [unref(medium), unref(channel)], ([value, number]) => {
     lease.value?.release()
-    lease.value = acquire(value)
+    lease.value = acquire(value, number)
   }, { immediate: true })
   onScopeDispose(() => lease.value?.release())
   return { counts: computed(() => lease.value.counts.value) }

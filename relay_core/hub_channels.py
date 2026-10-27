@@ -33,6 +33,16 @@ def event_channel(account: str, medium: str, hub_channel: str | None = None, rec
     return None
 
 
+def site_numbers(medium: str = 'WhatsApp') -> list[dict]:
+    """Enabled channels of one type on the site's Hub account that the user may read, oldest first.
+    `label` is the name staff see: the channel label, else its title."""
+    from relay_core.settings import value as connection_value
+    rows = frappe.get_list('Relay Channel', fields=['name', 'label', 'title', 'address'], order_by='creation asc',
+                           filters={'channel': medium, 'account': connection_value('relay_hub_account'), 'enabled': 1},
+                           limit_page_length=100)
+    return [{'name': row.name, 'label': row.label or row.title or row.name, 'address': row.address or ''} for row in rows]
+
+
 def hub_arguments(channel, arguments: dict) -> dict:
     """Hub tool arguments that name the sending channel when the site has more than one of its type.
 
