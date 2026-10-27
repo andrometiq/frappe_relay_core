@@ -3,46 +3,68 @@
 Every change the import made is listed on its Relay Legacy Import markers (source_metadata.created).
 Undo reverses exactly these changes, newest marker first, and keeps whatever live messages use.
 """
+import time
 from collections import Counter
 
 import frappe
 
 from relay_core import legacy
-from relay_core.legacy_database import ACTIVITY, OPT_OUT, refresh_activity, remove_unused_copies
+from relay_core.legacy_database import ACTIVITY, OPT_OUT, RETRIES, refresh_activity, remove_unused_copies
 
 CHUNK = 1000
 
 
 def undo(site_label: str, chunk: int = CHUNK) -> dict:
     removed = Counter()
-    while remove_messages(site_label, chunk, removed):
-        pass
+    while urls := transaction(lambda: remove_messages(site_label, chunk, removed), removed):
+        # Bytes go only after the commit, so a rolled-back step never loses a file still in use.
+        removed['media_files'] += remove_unused_copies(urls - {None})
     for job in frappe.get_all('Relay Legacy Import', filters={'source_site': site_label},
                               fields=['name', 'relay_contact', 'source_metadata'], order_by='name desc'):
-        revert(job.relay_contact, legacy.object_value(job.source_metadata).get('created', {}), removed)
-        frappe.db.delete('Relay Legacy Import', job.name)
-        frappe.db.commit()
+        transaction(lambda: remove_marker(job, removed), removed)
     from relay_core.queue_counts import invalidate
     invalidate()
     return dict(removed)
 
 
-def remove_messages(site_label: str, chunk: int, removed: Counter) -> int:
-    """Delete one chunk of imported messages, their Files and read receipts in its own transaction."""
+def transaction(work, removed: Counter):
+    """Run and commit one step. A deadlock or lock timeout with live traffic rolls the step back
+    (and its counts) and runs it again, up to RETRIES times."""
+    for attempt in range(1, RETRIES + 1):
+        counts = Counter(removed)
+        try:
+            result = work()
+            frappe.db.commit()
+            return result
+        except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+            frappe.db.rollback()
+            removed.clear()
+            removed.update(counts)
+            if attempt == RETRIES:
+                raise
+            time.sleep(attempt)
+
+
+def remove_marker(job, removed: Counter) -> None:
+    revert(job.relay_contact, legacy.object_value(job.source_metadata).get('created', {}), removed)
+    frappe.db.delete('Relay Legacy Import', job.name)
+
+
+def remove_messages(site_label: str, chunk: int, removed: Counter) -> set:
+    """Delete one chunk of imported messages, their Files and read receipts. Returns the File URLs
+    (with None, so a chunk without files still continues the loop); empty when nothing is left."""
     messages = frappe.db.sql_list("""SELECT name FROM `tabRelay Message` WHERE legacy_source IS NOT NULL
         AND JSON_UNQUOTE(JSON_EXTRACT(legacy_data, '$.source_site')) = %s LIMIT %s""", (site_label, chunk))
     if not messages:
-        return 0
+        return set()
     files = {'attached_to_doctype': 'Relay Message', 'attached_to_name': ['in', messages]}
     urls = set(frappe.get_all('File', filters=files, pluck='file_url'))
     frappe.db.delete('File', files)
     # Users' read receipts of imported messages go with them.
     frappe.db.delete('Relay Message Read', {'message': ['in', messages]})
     frappe.db.delete('Relay Message', {'name': ['in', messages]})
-    frappe.db.commit()
     removed['messages'] += len(messages)
-    removed['media_files'] += remove_unused_copies(urls)
-    return len(messages)
+    return urls | {None}
 
 
 def revert(contact: str, created: dict, removed: Counter) -> None:
