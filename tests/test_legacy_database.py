@@ -416,13 +416,35 @@ class Transactions(Case):
              patch.object(importer, 'mark', return_value='IMPORT-1'), \
              patch.object(importer, 'import_rows', side_effect=import_rows), \
              patch.object(importer, 'commit') as commit, \
-             patch.object(importer, 'finish_contact'), patch.object(importer, 'project_reactions'), \
+             patch.object(importer, 'finish'), \
              patch('relay_core.identity.default_region', return_value='IN'):
             importer.import_conversation(conversation())
-        self.assertEqual(commit.call_count, 2)
+        self.assertEqual(commit.call_count, 3)
         added = [call.args[1][0] for call in frappe.db.sql.call_args_list if 'imported = imported' in call.args[0]]
         self.assertEqual(added, [2, 1])
 
+
+    def test_deadlock_with_live_traffic_is_retried_from_a_clean_state(self):
+        importer = Importer()
+        calls = []
+        def work():
+            calls.append(1)
+            importer.failures.append({'message': 'm1', 'error': 'listed in the failed attempt'})
+            if len(calls) == 1:
+                raise frappe.QueryDeadlockError('1020')
+            return 'done'
+        with patch.object(importer, 'rollback') as rollback, patch.object(importer, 'commit') as commit, \
+             patch.object(legacy_database.time, 'sleep'):
+            self.assertEqual(importer.transaction(work), 'done')
+        rollback.assert_called_once()
+        commit.assert_called_once()
+        self.assertEqual(len(importer.failures), 1)
+
+    def test_deadlock_that_keeps_coming_back_is_raised(self):
+        importer = Importer()
+        with patch.object(importer, 'rollback'), patch.object(importer, 'commit'), patch.object(legacy_database.time, 'sleep'), \
+             self.assertRaises(frappe.QueryDeadlockError):
+            importer.transaction(Mock(side_effect=frappe.QueryDeadlockError('1020')))
 
 
 class Command(unittest.TestCase):
