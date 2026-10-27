@@ -17,11 +17,11 @@ Two opt-in live-Hub smoke tests are normally skipped unless `RELAY_LIVE_TEST=1`.
 Do not treat those skips as provider validation. Unit tests alone do not exercise
 Frappe transactions and installed permissions.
 
-Build the frontend from `frontend/`:
+Build the frontend from the app root:
 
 ```sh
-npm ci
-npm run build
+yarn install --frozen-lockfile
+yarn build
 ```
 
 ## Database and provider simulations

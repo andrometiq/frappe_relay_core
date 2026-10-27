@@ -38,11 +38,11 @@ Relay roles and conversation indexes through `permissions.after_migrate`.
 
 ## Build the installed workspace
 
-From the app's `frontend` directory, run:
+The standard app build installs the frontend packages and builds the workspace. Run it from the bench, for example `pilot build --apps relay_core` or `bench build --app relay_core`. To build it by hand from the app root, run:
 
 ```sh
-npm ci
-npm run build:site
+yarn install --frozen-lockfile
+yarn build
 ```
 
 Restart the site's web workers, then open `/relay`. Guests use the site's normal
