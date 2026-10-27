@@ -48,12 +48,40 @@ def on_update(person, method=None):
 
 def enroll(relay, channel, provider, value):
     """Shared values stay with their existing binding; nothing is reassigned."""
-    key = hashlib.sha256((channel + ':' + value).encode()).hexdigest()
-    with frappe.cache.lock('relay-enroll:' + key, timeout=30):
+    with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
         if any(bindings(channel, provider, value)):
             return
         set_verified(frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': channel,
                                      'relay_contact': relay, 'endpoint': value}), 1)
+
+
+def sibling_contact(channel: str, endpoint: str) -> str | None:
+    """The Relay Contact of a first private message on another business number, bot or mailbox of this site.
+
+    The same WhatsApp number, Telegram user or email address with a verified endpoint on another channel of
+    the same type is the same person, so this channel gets a verified endpoint for that contact. Groups,
+    revoked bindings and identities shared by two contacts stay in triage."""
+    provider, account = frappe.db.get_value('Relay Channel', channel, ['channel', 'account'])
+    try:
+        value = normalize(provider, endpoint)
+    except ValueError:
+        return None
+    if provider != 'Email' and not value.isdigit():
+        return None
+    siblings = frappe.get_all('Relay Channel', pluck='name',
+                              filters={'channel': provider, 'account': account, 'name': ['!=', channel]})
+    keys = [endpoint_key(name, value) for name in siblings]
+    contacts = set(frappe.get_all('Relay Contact Endpoint', pluck='relay_contact',
+                                  filters={'endpoint_key': ['in', keys], 'verified': 1})) if keys else set()
+    if len(contacts) != 1:
+        return None
+    enroll(contacts.pop(), channel, provider, value)
+    return frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, value), 'verified': 1},
+                               'relay_contact')
+
+
+def endpoint_key(channel, value):
+    return hashlib.sha256((channel + ':' + value).encode()).hexdigest()
 
 
 def set_verified(endpoint, verified):

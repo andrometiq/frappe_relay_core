@@ -41,7 +41,10 @@ class FakeDoc(_dict):
         return self
 
     def save(self, ignore_permissions=False):
-        self._store.write(self)
+        if self.get('name'):
+            self._store.write(self)
+        else:
+            self._store.insert(self)
         return self
 
     def check_permission(self, permission='read'):
@@ -51,7 +54,8 @@ class FakeDoc(_dict):
 class FakeSite:
     """Tables by DocType; get_all/get_value/exists/set_value read and write them in creation order."""
 
-    def __init__(self, **tables):
+    def __init__(self, on_insert=None, **tables):
+        self.on_insert = on_insert or {}
         self.counter = itertools.count(1)
         self.tables = {}
         for doctype, rows in tables.items():
@@ -72,7 +76,9 @@ class FakeSite:
 
     def insert(self, doc):
         values = {key: value for key, value in doc.items() if not key.startswith('_') and key != 'flags'}
-        doc.update(self.add(values.pop('doctype'), values))
+        doctype = values.pop('doctype')
+        self.on_insert.get(doctype, lambda row: None)(values)
+        doc.update(self.add(doctype, values))
 
     def write(self, doc):
         row = next(row for rows in self.tables.values() for row in rows if row.name == doc.name)
@@ -97,7 +103,9 @@ class FakeSite:
                             order_by=order_by)
         if not rows:
             return None
-        return rows[0] if as_dict or isinstance(fieldname, list) else rows[0][fieldname]
+        if as_dict:
+            return rows[0]
+        return tuple(rows[0].values()) if isinstance(fieldname, list) else rows[0][fieldname]
 
     def get_doc(self, doctype, name=None):
         if isinstance(doctype, dict):
@@ -112,7 +120,7 @@ class FakeSite:
         db = SimpleNamespace(get_value=self.get_value, exists=lambda doctype, filters: bool(
             self.rows(doctype, {'name': filters} if isinstance(filters, str) else filters)),
             set_value=self.set_value, commit=Mock(), count=lambda doctype, filters=None: len(self.rows(doctype, filters)))
-        return SimpleNamespace(db=db, get_all=self.get_all, get_list=self.get_all, get_doc=self.get_doc,
+        return SimpleNamespace(db=db, flags=SimpleNamespace(), get_all=self.get_all, get_list=self.get_all, get_doc=self.get_doc,
                                cache=SimpleNamespace(lock=lambda *a, **k: nullcontext()),
                                enqueue=lambda *a, **k: self.queued.append((a, k)), throw=throw,
                                PermissionError=PermissionError, ValidationError=ValueError, DuplicateEntryError=DuplicateEntryError,
