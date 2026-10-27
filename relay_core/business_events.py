@@ -125,23 +125,32 @@ def enabled_rule_pairs():
 
 
 def on_event(doc, method=None):
+    """Capture configured business events; a Relay failure never fails the business transaction.
+
+    Only a deadlock or a failed savepoint rollback escapes, as the transaction is then no longer usable."""
     if any(getattr(frappe.flags, flag, False) for flag in ('in_import', 'in_migrate', 'in_install', 'in_patch')):
         return
     if method not in EVENTS or doc.doctype in RELAY_DOCTYPES or getattr(frappe.flags, 'relay_business_event', False):
         return
     frappe.flags.relay_business_event = True
     try:
-        if (doc.doctype, method) not in enabled_rule_pairs():
+        try:
+            if (doc.doctype, method) not in enabled_rule_pairs():
+                return
+            rules = frappe.get_all('Relay Business Event Rule', filters={'enabled': 1,
+                'source_doctype': doc.doctype, 'event': method}, pluck='name')
+        except frappe.QueryDeadlockError:
+            raise
+        except Exception:
+            log_failure(f'{doc.doctype}/{doc.name}; {method}; rule lookup')
             return
-        rules = frappe.get_all('Relay Business Event Rule', filters={'enabled': 1,
-            'source_doctype': doc.doctype, 'event': method}, pluck='name')
         for name in rules:
             try:
                 frappe.db.savepoint('relay_business_event')
                 capture(frappe.get_doc('Relay Business Event Rule', name), doc, method)
             except frappe.QueryDeadlockError:
                 raise
-            except (ValueError, frappe.ValidationError, frappe.DoesNotExistError, frappe.PermissionError):
+            except Exception:
                 frappe.db.rollback(save_point='relay_business_event')
                 log_failure(f'{doc.doctype}/{doc.name}; {method}; rule {name}')
     finally:
