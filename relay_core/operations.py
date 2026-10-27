@@ -3,15 +3,15 @@ import frappe
 from relay_core.permissions import require_access
 
 JOBS = {
- 'relay_core.automation.service.recover':'AI reply recovery',
- 'relay_core.automation.projection.recover':'Incoming event recovery',
- 'relay_core.ticket_notifications.recover':'Ticket notification recovery',
- 'relay_core.flows.service.recover':'Conversation flow recovery',
- 'relay_core.messaging.recover':'Message receipt recovery',
- 'relay_core.learning.service.recover':'Learning evaluation recovery',
- 'relay_core.summaries.recover':'Summary recovery',
- 'relay_core.campaigns.recover':'Campaign recovery',
- 'relay_core.translations.recover':'Translation recovery',
+ 'relay_core.scheduled_jobs.recover_automation':'AI reply recovery',
+ 'relay_core.scheduled_jobs.recover_projection':'Incoming event recovery',
+ 'relay_core.scheduled_jobs.recover_ticket_notifications':'Ticket notification recovery',
+ 'relay_core.scheduled_jobs.recover_flows':'Conversation flow recovery',
+ 'relay_core.scheduled_jobs.recover_messages':'Message receipt recovery',
+ 'relay_core.scheduled_jobs.recover_learning':'Learning evaluation recovery',
+ 'relay_core.scheduled_jobs.recover_summaries':'Summary recovery',
+ 'relay_core.scheduled_jobs.recover_campaigns':'Campaign recovery',
+ 'relay_core.scheduled_jobs.recover_translations':'Translation recovery',
 }
 
 @frappe.whitelist(methods=['GET'])

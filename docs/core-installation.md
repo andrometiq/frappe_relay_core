@@ -74,6 +74,8 @@ settings read API, and preserved when an edit leaves them blank.
 
 Private site configuration remains supported as a fallback for older installs.
 
+Until a Hub URL is saved in Relay Settings or set as `relay_hub_url`, every Relay scheduled job reads that one value and returns.
+
 
 Set these private site configuration values using your normal Frappe
 configuration or secret-provisioning process:
