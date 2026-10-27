@@ -40,7 +40,8 @@ def save(signature):
 
 @after_message_commit
 def on_message(doc,method=None):
-    if not doc.get('legacy_source') and doc.direction=='Incoming' and frappe.db.exists('Relay Email Rule',{'channel':doc.channel,'enabled':1}):
+    from relay_core.opt_out import is_keyword
+    if not doc.get('legacy_source') and doc.direction=='Incoming' and not is_keyword(doc) and frappe.db.exists('Relay Email Rule',{'channel':doc.channel,'enabled':1}):
         if not automatic_allowed(context_of(doc)) or skill_claims(doc):return
         from relay_core.flows.service import claims
         if claims(doc):return

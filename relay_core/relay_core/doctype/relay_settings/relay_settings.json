@@ -14,7 +14,10 @@
     "transcription_provider",
     "send_whatsapp_read_receipts",
     "send_whatsapp_typing",
-    "whatsapp_margin_percent"
+    "whatsapp_margin_percent",
+    "opt_out_section",
+    "opt_out_keywords",
+    "opt_in_keywords"
   ],
   "fields": [
     {
@@ -80,6 +83,25 @@
       "fieldtype": "Percent",
       "default": "30",
       "description": "Added on top of Meta's WhatsApp charges on the Billing page. Only a System Manager can change it."
+    },
+    {
+      "fieldname": "opt_out_section",
+      "label": "Marketing opt-out",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "opt_out_keywords",
+      "label": "Opt-out keywords",
+      "fieldtype": "Small Text",
+      "default": "STOP\nUNSUBSCRIBE",
+      "description": "One per line. An incoming message that is exactly one of these words, in any case, opts the number out of campaigns and gets no automatic reply."
+    },
+    {
+      "fieldname": "opt_in_keywords",
+      "label": "Opt-in keywords",
+      "fieldtype": "Small Text",
+      "default": "START",
+      "description": "One per line. An incoming message that is exactly one of these words opts the number back in."
     }
   ],
   "permissions": [
@@ -91,5 +113,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-27 12:00:00.000000"
+  "modified": "2026-10-27 18:00:00.000000"
 }
