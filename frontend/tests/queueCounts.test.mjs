@@ -21,6 +21,12 @@ test('counts follow the chosen channel and drop the all-channels choice', () => 
   assert.deepEqual(queueCountParams(undefined), {})
 })
 
+test('a WhatsApp number narrows the counts only together with its medium', () => {
+  assert.deepEqual(queueCountParams('WhatsApp', 'WA-2'), { medium: 'WhatsApp', channel: 'WA-2' })
+  assert.deepEqual(queueCountParams('WhatsApp', ''), { medium: 'WhatsApp' })
+  assert.deepEqual(queueCountParams('all', 'WA-2'), {})
+})
+
 test('views of one channel share a single count read and live refresh', async () => {
   const reads = [], refreshers = [], stopped = []
   const acquire = sharedQueueCounts(async params => { reads.push(params); return { unread: reads.length } },

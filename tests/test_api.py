@@ -36,10 +36,18 @@ class ApiTests(unittest.TestCase):
     def test_capabilities_keep_enabled_channels_and_add_their_features(self):
         self.f.get_roles=Mock(return_value=['Relay Communication Manager'])
         whatsapp=Mock();whatsapp.name='WhatsApp';whatsapp.get_features.return_value={'templates':True}
-        with patch('relay_core.channels.enabled',return_value=[whatsapp]):
+        numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
+        with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
         self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':False,'configure':False,
-                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}}})
+                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers})
+        listed.assert_called_once_with('WhatsApp')
+
+    def test_capabilities_list_no_numbers_when_whatsapp_is_off(self):
+        self.f.get_roles=Mock(return_value=['WhatsApp User'])
+        with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.hub_channels.site_numbers') as listed:
+            self.assertEqual(self.api.capabilities()['whatsapp_numbers'],[])
+        listed.assert_not_called()
 
     def test_capabilities_follow_each_role(self):
         flags=('manage','teams','billing','multi_team','configure')

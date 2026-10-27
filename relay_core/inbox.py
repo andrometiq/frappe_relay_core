@@ -68,10 +68,11 @@ def read(contact):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None):
+def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None, channel=None):
     """Filter before pagination and expose only accessible conversation previews.
 
-    `since` returns only conversations active at or after that time, so a live client can update the changed rows."""
+    `since` returns only conversations active at or after that time, so a live client can update the changed rows.
+    `channel` narrows a medium to one Relay Channel, such as one WhatsApp number."""
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>50 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
@@ -83,13 +84,17 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     assignment=frappe.qb.DocType('Relay Conversation Assignment');message=frappe.qb.DocType('Relay Message')
     filters={}
     if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Invalid medium')
+    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=100) if medium else None
+    if channel:
+        if channel not in (channel_names or []):frappe.throw('Invalid channel')
+        channel_names=[channel]
     activity=Coalesce(contact.last_message_at,contact.creation)
     search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters=filters,
                                ignore_permissions=False,order_by='',limit=31)
     if medium:
         channels=frappe.qb.DocType('Relay Channel')
         endpoints=frappe.qb.DocType('Relay Contact Endpoint')
-        available=frappe.qb.from_(channels).select(channels.name).where(channels.channel==medium)
+        available=[channel] if channel else frappe.qb.from_(channels).select(channels.name).where(channels.channel==medium)
         search=search.where(contact.name.isin(frappe.qb.from_(endpoints).select(endpoints.relay_contact).where(endpoints.channel.isin(available))))
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
@@ -122,7 +127,6 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         from relay_core.teams import readable_filter_team
         readable_filter_team(team)
         search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.team==team)))
-    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=100) if medium else None
     rows=search.run(as_dict=True);more=len(rows)>30;page=rows[:30]
     if before:page.reverse()
     items=directory_items(page,channel_names)
@@ -164,7 +168,7 @@ def directory_items(rows, channels=None):
         state=states.get(row.name) or {}
         business=({'doctype':last['business_doctype'],'name':last['business_name']}
                   if last.get('business_doctype') in configured and last.get('business_name') else None)
-        items.append(dict(row,provider=providers.get(last.get('channel')),business=business,assignment=assignments.get(row.name,{}),id=row.name,
+        items.append(dict(row,provider=providers.get(last.get('channel')),channel=last.get('channel'),business=business,assignment=assignments.get(row.name,{}),id=row.name,
                           starred=state.get('starred',0),folder=state.get('folder',''),
                           latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
                           unread=unread.get(row.name,0),unread_more=False))

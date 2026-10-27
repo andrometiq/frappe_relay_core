@@ -12,8 +12,10 @@ export function countLabel(value) {
   return count < 1000 ? String(count) : compact.format(count)
 }
 
-export function queueCountParams(medium) {
-  return medium && medium !== 'all' ? { medium } : {}
+// A number (Relay Channel) narrows the medium; it counts only with its medium.
+export function queueCountParams(medium, channel) {
+  if (!medium || medium === 'all') return {}
+  return channel ? { medium, channel } : { medium }
 }
 
 // Views of the same channel share one count, one read and one live refresh until the last view releases it.
@@ -36,8 +38,8 @@ export function sharedQueueCounts(read, watchChanges) {
     load()
     return entry
   }
-  return function acquire(medium) {
-    const params = queueCountParams(medium), key = JSON.stringify(params)
+  return function acquire(medium, channel) {
+    const params = queueCountParams(medium, channel), key = JSON.stringify(params)
     const entry = entries.get(key) || create(key, params)
     entry.users++
     let released = false

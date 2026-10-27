@@ -210,9 +210,12 @@ def capabilities():
     roles=set(frappe.get_roles())
     channels=enabled()
     manage=bool(roles & MANAGER_ROLES)
+    from relay_core.hub_channels import site_numbers
+    enabled_names=[item.name for item in channels]
     return {'manage':manage, 'teams':manage, 'billing':manage, 'multi_team':WA_MULTI in roles,
-            'configure':'System Manager' in roles, 'enabled_channels':[item.name for item in channels],
-            'channels':{item.name:item.get_features() for item in channels}}
+            'configure':'System Manager' in roles, 'enabled_channels':enabled_names,
+            'channels':{item.name:item.get_features() for item in channels},
+            'whatsapp_numbers':site_numbers('WhatsApp') if 'WhatsApp' in enabled_names else []}
 
 
 @frappe.whitelist(methods=['GET'])

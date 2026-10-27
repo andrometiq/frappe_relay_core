@@ -68,11 +68,43 @@ class QueueCountTests(unittest.TestCase):
             queue_counts.read('SMS')
         self.assertEqual(self.sql, [])
 
+    def test_one_number_limits_every_count_to_that_channel(self):
+        queue_counts.get_counts('WhatsApp', ['WA-2'])
+
+        for sql in self.sql + self.unread_sql:
+            self.assertIn("IN ('WA-2')", sql)
+
+    def test_read_rejects_a_number_of_another_medium(self):
+        self.fake.get_all.side_effect = lambda doctype, filters, **kwargs: ['WA-1'] if filters == {'channel': 'WhatsApp'} else []
+        self.fake.cache.get_value.return_value = None
+        with patch.object(queue_counts, 'get_counts', return_value={}) as compute:
+            for medium, channel in ((None, 'WA-1'), ('Telegram', 'WA-1'), ('WhatsApp', 'WA-9')):
+                with self.subTest(medium=medium, channel=channel), self.assertRaises(ValueError):
+                    queue_counts.read(medium, channel)
+            queue_counts.read('WhatsApp', 'WA-1')
+        compute.assert_called_once_with('WhatsApp', ['WA-1'])
+
+    def test_number_counts_scope_each_number_and_all_numbers(self):
+        self.fake.cache.get_value.return_value = None
+        numbers = [{'name': 'WA-1', 'label': 'Sales', 'address': '+91 1'}, {'name': 'WA-2', 'label': 'Support', 'address': '+91 2'}]
+        with patch('relay_core.hub_channels.site_numbers', return_value=numbers):
+            result = queue_counts.numbers()
+        self.assertEqual(result, {'all': 1, 'numbers': {'WA-1': 2, 'WA-2': 3}})
+        self.assertIn("IN ('WA-1','WA-2')", self.sql[0])
+        self.assertIn("IN ('WA-1')", self.sql[1])
+        for sql in self.sql:
+            self.assertIn(SCOPE + "('Relay Contact')", sql)
+
+    def test_number_counts_deny_users_without_relay_access(self):
+        self.access.side_effect = PermissionError
+        with self.assertRaises(PermissionError):
+            queue_counts.numbers()
+
     def test_cache_is_per_user_and_dropped_by_a_new_generation(self):
         store = {}
         self.fake.cache.get_value.side_effect = store.get
         self.fake.cache.set_value.side_effect = lambda key, value, **kwargs: store.__setitem__(key, value)
-        with patch.object(queue_counts, 'get_counts', side_effect=lambda medium: {'user': self.fake.session.user}) as compute:
+        with patch.object(queue_counts, 'get_counts', side_effect=lambda *args: {'user': self.fake.session.user}) as compute:
             self.assertEqual(queue_counts.read(), {'user': 'agent@example.invalid'})
             queue_counts.read()
             self.assertEqual(compute.call_count, 1)
