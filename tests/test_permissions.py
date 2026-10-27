@@ -184,7 +184,6 @@ class ConversationRowRuleTests(unittest.TestCase):
         self.assertIn('`tabRelay Team Member`', condition)
         self.assertIn("a.assigned_to='agent@example.com'", condition)
         self.assertIn('GROUP', condition)
-        self.assertNotIn('Relay Team Access', condition)
         self.assertIn('`tabRelay Message`.relay_contact', message)
 
 
@@ -204,6 +203,17 @@ class RoleMigrationTests(unittest.TestCase):
         self.assertEqual(inserted, [('a@example.com', USER), ('m@example.com', MANAGER), ('v@example.com', TEAM_USER)])
         self.assertEqual(cleared, ['a@example.com', 'm@example.com', 'v@example.com'])
         self.assertIn('relay_core.patches.v1_0.use_four_relay_roles', Path('relay_core/patches.txt').read_text().split())
+
+    def test_patch_drops_the_team_access_doctype(self):
+        import importlib
+        deleted = []
+        fake = types.SimpleNamespace(delete_doc=lambda *args, **kwargs: deleted.append((args, kwargs)))
+        with patch.dict(sys.modules, frappe=fake):
+            sys.modules.pop('relay_core.patches.v1_0.remove_team_access', None)
+            importlib.import_module('relay_core.patches.v1_0.remove_team_access').execute()
+        self.assertEqual(deleted, [(('DocType', 'Relay Team Access'), {'ignore_missing': True, 'force': True})])
+        self.assertIn('relay_core.patches.v1_0.remove_team_access', Path('relay_core/patches.txt').read_text().split())
+        self.assertFalse(Path('relay_core/relay_core/doctype/relay_team_access').exists())
 
 
 class MetadataTests(unittest.TestCase):

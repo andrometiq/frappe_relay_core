@@ -20,13 +20,6 @@
       "reqd": 1
     },
     {
-      "fieldname": "access",
-      "label": "Viewers from other teams",
-      "fieldtype": "Table",
-      "options": "Relay Team Access",
-      "description": "WhatsApp Multi-Channel Users who may view this team's conversations."
-    },
-    {
       "fieldname": "default_channels",
       "label": "Default channels",
       "fieldtype": "Section Break",
@@ -54,7 +47,6 @@
   "field_order": [
     "title",
     "members",
-    "access",
     "default_channels",
     "default_whatsapp_channel",
     "default_telegram_channel",
@@ -89,5 +81,5 @@
   ],
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-27 12:00:00.000000"
+  "modified": "2026-10-27 13:00:00.000000"
 }
