@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from frappe import _dict
-from relay_core.business_references import RELAY_DOCTYPES, allow_cancel
+from relay_core.business_references import RELAY_DOCTYPES
 
 
 class BusinessReferenceTests(unittest.TestCase):
@@ -16,19 +16,16 @@ class BusinessReferenceTests(unittest.TestCase):
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
             meta = json.loads(path.read_text())
             self.assertIn(meta['name'], hooks.ignore_links_on_delete)
+            # Cancel link checks block only on submitted rows, so Relay rows never block a cancel.
+            self.assertFalse(meta.get('is_submittable'), meta['name'])
             for field in meta['fields']:
                 if field['fieldname'] == 'business_name':
                     self.assertEqual(field['fieldtype'], 'Data')
-        self.assertEqual(hooks.doc_events['*']['before_cancel'], 'relay_core.business_references.allow_cancel')
 
-    def test_cancel_extends_existing_exemptions_without_disabling_business_checks(self):
-        doc = _dict(ignore_linked_doctypes=['Existing exemption'])
-        allow_cancel(doc)
-        allow_cancel(doc)
-        self.assertEqual(len(doc.ignore_linked_doctypes), len(RELAY_DOCTYPES) + 1)
-        self.assertIn('Existing exemption', doc.ignore_linked_doctypes)
-        self.assertNotIn('Sales Invoice', doc.ignore_linked_doctypes)
-        self.assertFalse(doc.get('ignore_links'))
+    def test_cancel_of_other_documents_has_no_relay_hook(self):
+        from relay_core import hooks
+        self.assertNotIn('before_cancel', hooks.doc_events['*'])
+        self.assertEqual(hooks.doc_events['*']['on_cancel'], 'relay_core.business_events.on_event')
 
     def test_framework_delete_and_cancel_leave_relay_rows_intact(self):
         delete = importlib.import_module('frappe.model.delete_doc')
@@ -38,22 +35,23 @@ class BusinessReferenceTests(unittest.TestCase):
                   for dt in RELAY_DOCTYPES]
         history = {dt: _dict(name='local-only-' + dt, business_name='local-only-customer') for dt in RELAY_DOCTYPES}
         original = {dt: dict(row) for dt, row in history.items()}
-        fake = SimpleNamespace(get_hooks=lambda key: list(RELAY_DOCTYPES), db=Mock())
+        fake = SimpleNamespace(get_hooks=lambda key: list(RELAY_DOCTYPES), db=Mock(),
+                               get_meta=lambda dt: _dict(istable=0, issingle=0))
+        fake.db.get_values.side_effect = lambda dt, *args, **kwargs: [_dict(history[dt], docstatus=0)]
         with patch.object(delete, 'frappe', fake), patch.object(rename, 'get_link_fields', return_value=fields), \
              patch.object(delete, 'get_dynamic_link_map', return_value={'Customer': fields}):
-            for method in ('Delete', 'Cancel'):
-                doc = _dict(doctype='Customer', name='local-only-customer')
-                if method == 'Cancel': allow_cancel(doc)
-                delete.check_if_doc_is_linked(doc, method)
-                delete.check_if_doc_is_dynamically_linked(doc, method)
+            doc = _dict(doctype='Customer', name='local-only-customer')
+            delete.check_if_doc_is_linked(doc, 'Delete')
+            delete.check_if_doc_is_dynamically_linked(doc, 'Delete')
+            self.assertFalse(fake.db.mock_calls)
+            self.assertEqual(delete.get_linked_docs(doc, 'Cancel'), [])
         self.assertEqual(history, original)
-        self.assertFalse(fake.db.mock_calls)
+        self.assertIsNone(doc.get('ignore_linked_doctypes'))
 
     def test_unrelated_business_backlink_still_blocks(self):
         delete = importlib.import_module('frappe.model.delete_doc')
         rename = importlib.import_module('frappe.model.rename_doc')
         doc = _dict(doctype='Customer', name='local-only-customer')
-        allow_cancel(doc)
         fake = SimpleNamespace(get_hooks=lambda key: list(RELAY_DOCTYPES), db=Mock(),
                                get_meta=lambda dt: _dict(istable=0, issingle=0))
         fake.db.get_values.return_value = [_dict(name='invoice', docstatus=1)]

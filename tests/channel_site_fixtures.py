@@ -89,14 +89,12 @@ def push_status(account, rows):
 
 def check_business_lifecycle(doc):
     from frappe.model.delete_doc import get_linked_docs, get_dynamic_linked_docs
-    from relay_core.business_references import allow_cancel
     actor = frappe.session.user
     try:
         frappe.set_user('Administrator');doc.reload()
         field = 'customer_details' if doc.doctype == 'Customer' else 'title'
         doc.set(field, 'Local Relay C1 lifecycle check quantity 25');doc.save();frappe.db.commit()
         for method in ('Delete','Cancel'):
-            if method == 'Cancel':allow_cancel(doc)
             links = get_linked_docs(doc,method) + get_dynamic_linked_docs(doc,method)
             assert not any(link['reference_doctype'].startswith('Relay ') for link in links)
     finally:
