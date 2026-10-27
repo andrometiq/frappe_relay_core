@@ -18,7 +18,7 @@ from relay_core import legacy_bundle as bundles
 from relay_core.contact_lifecycle import endpoint_key
 from relay_core.identity import phone_number
 from relay_core.legacy_media import attach, copy_stream
-from relay_core.legacy_metadata import direct_document
+from relay_core.legacy_metadata import direct_document, project_reactions
 from relay_core.message_updates import provider_key
 from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
@@ -130,9 +130,30 @@ class Importer:
             self.commit()
             rows = self.page(conversation.name, bundles.order_key(rows[-1]))
         if not self.dry_run:
+            self.project_reactions(job, created)
             refresh_activity(contact)
             apply_history(channel, endpoint)
+            self.mark(conversation, channel, contact, created)
             frappe.db.set_value('Relay Legacy Import', marker, 'status', 'Completed', update_modified=False)
+
+    def project_reactions(self, job, created):
+        """Show imported reactions on their target messages the way live reactions are shown.
+        A live target keeps its earlier reaction state in the marker, so undo can put it back."""
+        rows = frappe.get_all('Relay Message', filters={'relay_contact': job.relay_contact, 'channel': job.channel,
+                              'legacy_source': ['is', 'set'], 'message_type': 'reaction'}, fields=['message_data', 'sender_endpoint'])
+        if not rows:
+            return
+        targets = [provider_key(job.channel, row.sender_endpoint, target) for row in rows
+                   if (target := legacy.object_value(row.message_data).get('reaction', {}).get('message_id'))]
+        saved = created.setdefault('reactions', {})
+        for target in frappe.get_all('Relay Message', filters={'provider_message_key': ['in', targets], 'legacy_source': ['is', 'not set']},
+                                     fields=['name', 'reactions', 'message_updates']) if targets else []:
+            saved.setdefault(target.name, {'reactions': target.reactions, 'message_updates': target.message_updates})
+        report = {'mismatches': []}
+        project_reactions(job, report)
+        self.counts['reactions_projected'] += len(rows) - len(report['mismatches'])
+        for item in report['mismatches']:
+            self.failures.append({'message': item['source'], 'error': item['detail']})
 
     def page(self, conversation, after):
         return self.source.sql(f'SELECT * FROM `{MESSAGE}` WHERE conversation=%s AND (creation, name) > (%s, %s) '
@@ -444,6 +465,8 @@ def merge_created(stored, created):
     for key, value in created.items():
         if isinstance(value, list):
             merged[key] = list(dict.fromkeys(merged.get(key, []) + value))
+        elif isinstance(value, dict):
+            merged[key] = {**value, **merged.get(key, {})}
         else:
             merged.setdefault(key, value)
     return merged
