@@ -363,6 +363,17 @@ class Undo(Case):
         frappe.db.delete.assert_not_called()
         self.assertEqual(removed['contacts_kept_with_new_messages'], 1)
 
+    def test_step_that_hits_a_lock_timeout_is_rolled_back_and_run_again(self):
+        removed = Counter(messages=5)
+        def work():
+            removed['messages'] += 1
+            if frappe.db.rollback.call_count == 0:
+                raise frappe.QueryTimeoutError('1205')
+            return 'done'
+        with patch.object(legacy_undo.time, 'sleep'):
+            self.assertEqual(legacy_undo.transaction(work, removed), 'done')
+        self.assertEqual((frappe.db.rollback.call_count, removed['messages']), (1, 6))
+
     def test_undo_commits_each_message_chunk_and_each_marker(self):
         frappe.db.sql_list.side_effect = [['M1', 'M2'], ['M3'], []]
         markers = [frappe._dict(name='IMPORT-2', relay_contact='C2', source_metadata='{}'),
@@ -373,7 +384,7 @@ class Undo(Case):
             result = legacy_undo.undo('sales.example', chunk=2)
         self.assertEqual(result['messages'], 3)
         frappe.db.delete.assert_any_call('Relay Message Read', {'message': ['in', ['M1', 'M2']]})
-        self.assertEqual(frappe.db.commit.call_count, 4)
+        self.assertEqual(frappe.db.commit.call_count, 5)
         self.assertEqual([call.args[0] for call in revert.call_args_list], ['C2', 'C1'])
         self.assertEqual([call.kwargs.get('order_by') for call in get_all.call_args_list if call.args[0] == 'Relay Legacy Import'], ['name desc'])
 
