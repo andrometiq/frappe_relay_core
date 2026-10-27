@@ -160,7 +160,7 @@ function showAllContacts() {
 }
 function openStart(contact = "") {
   startContact.value = businessName.value ? contact : selected.value;
-  startChannel.value = !businessName.value && numbers.active.value ? numbers.current.value : "";
+  startChannel.value = numbers.active.value && startContact.value === numbers.contact.value ? numbers.current.value : "";
   startContactLabel.value = linkedContacts.value.find(item => item.value === contact)?.label || "";
   startOpen.value = true;
 }
