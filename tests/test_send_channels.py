@@ -32,6 +32,7 @@ class Patched(unittest.TestCase):
         stack.enter_context(patch.object(messaging, 'readable_contact'))
         stack.enter_context(patch.object(messaging, 'request_hash', side_effect=lambda key: 'hash-' + key))
         stack.enter_context(patch.object(messaging, 'validate_reference'))
+        stack.enter_context(patch('relay_core.timeline.newest', site.newest))
         stack.enter_context(patch.object(messaging, 'readable_source', side_effect=lambda name: (
             site.rows('Relay Message', {'name': name})[0], None, {})))
         return stack
@@ -76,6 +77,17 @@ class ReplyChannelTests(Patched):
                           message('M3', 'Shop', 'Outgoing', creation=3)])
         with self.patched(site):
             self.assertEqual(messaging.reply_source('M3', 'text', 'k1', 'auto', 1), ('M2', 0))
+            self.assertEqual(messaging.reply_channel('C1')['channel'], 'Support')
+
+    def test_imported_history_ranks_by_its_message_time_not_its_import_time(self):
+        site = fake_site([message('M1', 'Shop', creation=5),
+                          dict(message('L1', 'Support', creation=9), sent_at=1, legacy_source='old-1')])
+        with self.patched(site):
+            self.assertEqual(messaging.reply_channel('C1')['channel'], 'Shop')
+            self.assertEqual(messaging.reply_source('L1', 'text', 'k1', 'auto', 1), ('M1', 0))
+        newer = fake_site([message('M1', 'Shop', creation=5),
+                           dict(message('L1', 'Support', creation=9), sent_at=7, legacy_source='old-1')])
+        with self.patched(newer):
             self.assertEqual(messaging.reply_channel('C1')['channel'], 'Support')
 
     def test_a_reply_to_the_newest_incoming_message_keeps_its_quote(self):

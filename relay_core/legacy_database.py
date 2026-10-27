@@ -20,6 +20,7 @@ from relay_core.contact_lifecycle import endpoint_key
 from relay_core.identity import phone_number
 from relay_core.legacy_media import attach, copy_stream
 from relay_core.legacy_metadata import direct_document
+from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
 
 MESSAGE = 'tabWhatsApp Core Message'
@@ -102,6 +103,7 @@ class Importer:
             rows = self.page(conversation.name, bundles.order_key(rows[-1]))
         if not self.dry_run:
             refresh_activity(contact)
+            apply_history(channel, endpoint)
             self.mark(conversation, channel, contact, self.counts['created'] - before, created)
 
     def page(self, conversation, after):
@@ -291,10 +293,10 @@ def link_file(url, message):
 def refresh_activity(contact):
     """Directory order follows the newest message, imported or live."""
     from relay_core.inbox import message_created
-    row = frappe.db.sql("""SELECT name, relay_contact, sent_at, creation FROM `tabRelay Message` WHERE relay_contact=%s
-        ORDER BY sent_at DESC, name DESC LIMIT 1""", contact, as_dict=True)
+    from relay_core.timeline import newest
+    row = newest({'relay_contact': contact}, ('name', 'relay_contact', 'sent_at', 'creation'))
     if row:
-        message_created(row[0])
+        message_created(row)
 
 
 def source_password(path=None):

@@ -107,6 +107,11 @@ class FakeSite:
             return rows[0]
         return tuple(rows[0].values()) if isinstance(fieldname, list) else rows[0][fieldname]
 
+    def newest(self, filters, fields=('name',)):
+        """timeline.newest: the newest Relay Message by message time (sent_at, else creation), then name."""
+        rows = sorted(self.rows('Relay Message', filters), key=lambda row: (row.get('sent_at') or row.get('creation'), row.name))
+        return _dict({field: rows[-1].get(field) for field in fields}) if rows else None
+
     def get_doc(self, doctype, name=None):
         if isinstance(doctype, dict):
             return FakeDoc(self, doctype)

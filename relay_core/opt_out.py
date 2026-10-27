@@ -17,7 +17,7 @@ def keywords(field: str, default: tuple[str, ...]) -> set[str]:
 
 def choice(message) -> bool | None:
     """True for an opt-out keyword, False for an opt-in keyword, None for any other message."""
-    if message.get('legacy_source') or message.direction != 'Incoming':
+    if message.direction != 'Incoming':
         return None
     text = (message.content or '').strip().casefold()
     if not text or len(text) > LONGEST:
@@ -34,6 +34,8 @@ def is_keyword(message) -> bool:
 
 
 def on_message(doc, method=None):
+    if doc.get('legacy_source'):
+        return  # apply_history sets imported keywords with their own time.
     opted_out = choice(doc)
     if opted_out is None or not doc.sender_endpoint:
         return
@@ -42,3 +44,22 @@ def on_message(doc, method=None):
     if endpoint:
         frappe.db.set_value('Relay Contact Endpoint', endpoint, {
             'marketing_opt_out': int(opted_out), 'opt_out_changed_at': frappe.utils.now_datetime()})
+
+
+def apply_history(channel: str, endpoint: str) -> None:
+    """Give the number the choice of the newest keyword in its imported history, unless it changed later."""
+    row = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)},
+                              ['name', 'opt_out_changed_at'], as_dict=True)
+    if not row:
+        return
+    messages = frappe.get_all('Relay Message', filters={'channel': channel, 'sender_endpoint': endpoint, 'direction': 'Incoming',
+                              'legacy_source': ['is', 'set']}, fields=['content', 'direction', 'sent_at', 'creation'],
+                              limit_page_length=0)
+    keyed = [(message.sent_at or message.creation, choice(message)) for message in messages]
+    keyed = [item for item in keyed if item[1] is not None]
+    if not keyed:
+        return
+    stamp, opted_out = max(keyed, key=lambda item: item[0])
+    if row.opt_out_changed_at and row.opt_out_changed_at >= stamp:
+        return
+    frappe.db.set_value('Relay Contact Endpoint', row.name, {'marketing_opt_out': int(opted_out), 'opt_out_changed_at': stamp})

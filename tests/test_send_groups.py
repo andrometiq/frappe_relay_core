@@ -42,20 +42,20 @@ class ChannelSourceTests(unittest.TestCase):
         def get_value(doctype, filters, field, **kwargs):
             if doctype == 'Relay Channel':
                 return providers.get(filters)
-            return tried if doctype == 'Relay Message Action' else newest
+            return tried if doctype == 'Relay Message Action' else None
         enabled = [SimpleNamespace(name='WhatsApp'), SimpleNamespace(name='Telegram')]
         with patch.object(messaging, 'readable_source', return_value=(source, None, {})), \
              patch.object(messaging.channels, 'enabled', return_value=enabled), \
              patch.object(messaging.frappe, 'session', _dict(user='agent')), \
-             patch.object(messaging.frappe, 'db', Mock(get_value=Mock(side_effect=get_value))) as db:
-            return messaging.channel_sources('MSG-1', kind, names, 'key'), db.get_value
+             patch.object(messaging.timeline, 'newest', return_value=_dict(name=newest) if newest else None) as latest, \
+             patch.object(messaging.frappe, 'db', Mock(get_value=Mock(side_effect=get_value))):
+            return messaging.channel_sources('MSG-1', kind, names, 'key'), latest
 
     def test_extra_channel_uses_the_newest_message_of_the_same_person(self):
         found, lookup = self.sources(json.dumps(['CH-WA', 'CH-TG']))
         self.assertEqual([source for _, source in found], ['MSG-TG'])
         self.assertRegex(found[0][0], r'^[a-f0-9]{40}$')
-        lookup.assert_called_with('Relay Message', {'relay_contact': 'CON-1', 'channel': 'CH-TG'}, 'name',
-            order_by='creation desc')
+        lookup.assert_called_with({'relay_contact': 'CON-1', 'channel': 'CH-TG'})
 
     def test_retry_keeps_the_key_and_source_of_its_first_try(self):
         first = self.sources(['CH-TG'])[0]

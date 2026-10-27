@@ -11,7 +11,7 @@ def read():
     from pypika.functions import Coalesce
     cutoff=frappe.utils.get_datetime(frappe.utils.add_days(frappe.utils.today(),-6))
     message=frappe.qb.DocType('Relay Message')
-    query=page_query(['name','relay_contact','channel','direction','status','sent_at','creation'],{'legacy_source':['is','not set']},501)
+    query=page_query(['name','relay_contact','channel','direction','status','sent_at','creation'],{},501)
     rows=query.where(Coalesce(message.sent_at,message.creation)>=cutoff).run(as_dict=True)
     visible=[];contacts={};channels={}
     for row in rows[:500]:

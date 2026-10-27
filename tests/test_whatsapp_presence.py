@@ -44,9 +44,9 @@ class PresenceTests(unittest.TestCase):
         account = patch.object(whatsapp_presence, 'connection_value', return_value='hub-account')
         account.start()
         self.addCleanup(account.stop)
-
-    def message_query(self):
-        return next(call.kwargs for call in self.frappe.get_all.call_args_list if call.args[0] == 'Relay Message')
+        latest = patch.object(whatsapp_presence, 'latest', side_effect=lambda *args, **kwargs: self.rows)
+        self.latest = latest.start()
+        self.addCleanup(latest.stop)
 
     def test_read_receipt_queues_the_newest_recent_direct_message_once(self):
         self.assertTrue(whatsapp_presence.mark_read('CON-1', ['MSG-2', 'MSG-3']))
@@ -54,10 +54,12 @@ class PresenceTests(unittest.TestCase):
         self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_presence.send', queue='short',
             job_id='relay-whatsapp-read:MSG-3', deduplicate=True, message_id='wamid.MSG-3', typing=False, channel='WA')
         self.assertEqual(self.cache.keys, {'site|relay-whatsapp-read:CON-1:MSG-3': 5})
-        filters = self.message_query()['filters']
+        filters = self.latest.call_args.args[0]
         self.assertEqual(filters['name'], ['in', ['MSG-2', 'MSG-3']])
-        self.assertEqual((filters['channel'], filters['direction'], filters['creation']), (['in', ['CH-WA']], 'Incoming', ['>', ('days', -30)]))
-        self.assertEqual(filters['legacy_source'], ['is', 'not set'])
+        self.assertEqual((filters['channel'], filters['direction']), (['in', ['CH-WA']], 'Incoming'))
+        # Imported history qualifies by its real message time, like a live message.
+        self.assertNotIn('legacy_source', filters)
+        self.assertEqual(self.latest.call_args.kwargs, {'since': ('days', -30), 'limit': 20})
         self.frappe.get_all.assert_any_call('Relay Channel', filters={'channel': 'WhatsApp', 'account': 'hub-account'}, pluck='name')
 
     def test_a_newer_message_gets_its_own_receipt_inside_the_lease(self):
@@ -88,7 +90,7 @@ class PresenceTests(unittest.TestCase):
         self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_presence.send', queue='short',
             job_id='relay-whatsapp-read:MSG-3:typing', deduplicate=True, message_id='wamid.MSG-3', typing=True, channel='WA')
         self.assertEqual(self.cache.keys, {'site|relay-whatsapp-typing:CON-1': 4})
-        filters = self.message_query()['filters']
+        filters = self.latest.call_args.args[0]
         self.assertEqual(filters['channel'], ['in', ['CH-WA']])
         self.assertNotIn('name', filters)
 
