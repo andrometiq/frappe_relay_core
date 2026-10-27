@@ -841,16 +841,14 @@ class EventContractTests(unittest.TestCase):
 
     def test_disabled_drafts_do_not_need_channel_model_identity_or_owner(self):
         self.config.validate_skill(self.doc)
-        self.assertIsNone(self.doc.active_key)
         self.assertEqual((self.doc.search_confirmation, self.doc.execution_policy), ('Always', 'Ticket only'))
         self.f.get_doc.assert_not_called()
 
     def test_multiple_targets_share_channel_and_business_without_scope_reservation(self):
         self.enable()
         for name, target in [('Sim Ledger', 'Explain ledger'), ('Sim Payment', 'Review payment evidence')]:
-            self.doc.update(name=name, target=target, active_key='legacy-scope')
+            self.doc.update(name=name, target=target)
             self.config.validate_skill(self.doc)
-            self.assertIsNone(self.doc.active_key)
         self.f.get_all.assert_not_called()
 
     def test_activation_requires_target_company_triage_and_live_model(self):
@@ -935,7 +933,7 @@ class EventContractTests(unittest.TestCase):
         self.assertEqual(set(result), {'items', 'next'})
         self.assertEqual(result['items'][0].target, 'Review payment')
         self.assertTrue(set(self.config.FIELDS) <= set(self.f.get_list.call_args.kwargs['fields']))
-        with self.assertRaises(ValueError): self.config.save({'active_key': 'client-scope'})
+        with self.assertRaises(ValueError): self.config.save({'sample_key': 'client-scope'})
         self.access.side_effect = PermissionError('Denied')
         for call in (lambda: self.config.save({'target': 'Denied'}), self.config.directory,
                      lambda: self.config.validate_skill(self.doc)):
@@ -1019,7 +1017,6 @@ def site_tests():
             second = configuration.save(values | activation | {'title': 'Sim Receipt Review ' + stamp,
                 'target': 'Ask staff to review a receipt', 'execution_policy': 'Ticket only'})['name']
             created.append(('Relay AI Skill', second))
-            assert all(frappe.get_doc('Relay AI Skill', key).active_key is None for key in (name, second))
             for invalid in ({'target': ''}, {'allowed_tools': json.dumps([contract | {'identity_fields': {'Email': 'api_secret'}}])},
                     {'allowed_tools': json.dumps([contract | {'company_field': 'paid_amount'}])},
                     {'allowed_actions': '[{"action":"retailer.create_follow_up"}]'}, {'allowed_actions': '[{"action":"frappe.client.submit"}]'}):

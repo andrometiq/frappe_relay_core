@@ -132,8 +132,6 @@ def validate_skill(doc):
     if doc.enabled or doc.handoff_owner:
         with as_user(doc.handoff_owner):
             require_access()
-    # Retain the legacy column for recovery; never reserve a channel/business scope.
-    doc.active_key = None
     channel = None
     if doc.enabled:
         if not doc.channel or not doc.ai_model:

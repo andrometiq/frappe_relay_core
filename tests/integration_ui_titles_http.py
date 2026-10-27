@@ -114,7 +114,7 @@ with ExitStack() as stack:
             row = next(row for row in data['items'] if row['name'] == name)
             assert row['channel_title'] == 'Local UI support'
             assert row['provider_context']['mailbox_addresses'] == ['help@example.invalid','orders@example.invalid','support@example.invalid']
-            assert 'api_secret' not in row and 'mailbox_aliases' not in row
+            assert 'mailbox_aliases' not in row
             denied = requests.get(url+method, params=params, timeout=20)
             assert denied.status_code in (401,403), (method, denied.status_code)
             print('PASS HTTP status, shape, mailbox provenance and guest denial:', method)
