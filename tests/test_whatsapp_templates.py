@@ -224,6 +224,11 @@ class TemplateRenderTests(unittest.TestCase):
         missing = whatsapp_templates.message_content({'name': 'retired_offer', 'language': 'en'})
         self.assertEqual(missing, {'kind': 'text', 'text': 'Template: retired_offer', 'template': {'name': 'retired_offer', 'language': 'en'}})
 
+    def test_document_header_file_name_is_kept_with_the_message(self):
+        header = {'type': 'header', 'parameters': [{'type': 'document', 'document': {'id': '9001', 'filename': 'Order_ORD-1.pdf'}}]}
+        content = whatsapp_templates.message_content({'name': 'retired_offer', 'language': 'en', 'components': [header]}, template={'components': []})
+        self.assertEqual(content['template']['document'], {'file_name': 'Order_ORD-1.pdf'})
+
     def test_hub_failure_does_not_block_the_send(self):
         self.hub.execute.side_effect = HubError('down')
         self.assertEqual(whatsapp_templates.message_content({'name': 'relay_test_marketing', 'language': 'en'})['text'],

@@ -9,6 +9,7 @@ import {
   unsupportedNotice,
   orderLines,
   templateParts,
+  templateDocumentURL,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
 const chat=inject(messagesKey,null), translationOpen=ref(false);
@@ -48,6 +49,8 @@ const video = computed(
     <template v-if="!translationOpen || !['text','email'].includes(data.kind)">
     <EmailContent v-if="data.email" :message="message" :email="data.email" />
     <div v-if="data.kind === 'text' && template" class="message-template">
+      <a v-if="template.document && templateDocumentURL(message)" class="message-template-document underline" :href="templateDocumentURL(message)" target="_blank" rel="noopener noreferrer">{{ template.document }}</a>
+      <span v-else-if="template.document" class="message-template-document">{{ template.document }}</span>
       <strong v-if="template.header">{{ template.header }}</strong>
       <p class="whitespace-pre-wrap break-words">{{ data.text }}</p>
       <small v-if="template.footer" class="message-template-footer">{{ template.footer }}</small>

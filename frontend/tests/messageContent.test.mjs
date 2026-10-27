@@ -38,8 +38,17 @@ test('unsupported messages show the WhatsApp reason and order lines stay readabl
 test('sent templates show rendered parts with a template or campaign caption', async () => {
   const { templateParts } = await import('../src/components/messageContent.js')
   const data = { kind: 'text', text: 'Hi Ravi', template: { name: 'relay_test_marketing', header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'] } }
-  assert.deepEqual(templateParts(data), { header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'], caption: 'Template · relay_test_marketing' })
+  assert.deepEqual(templateParts(data), { header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'], document: '', caption: 'Template · relay_test_marketing' })
+  assert.equal(templateParts({ ...data, template: { ...data.template, document: { file_name: 'Order_ORD-1.pdf' } } }).document, 'Order_ORD-1.pdf')
   assert.equal(templateParts({ ...data, campaign: 'Winter launch' }).caption, 'Campaign: Winter launch')
   assert.deepEqual(templateParts({ kind: 'text', text: 'Hi', template: { name: 'plain', buttons: 'bad' } }).buttons, [])
   assert.equal(templateParts({ kind: 'text', text: 'Hello' }), null)
+})
+
+test('template document link needs a kept PDF copy', async () => {
+  const { templateDocumentURL } = await import('../src/components/messageContent.js')
+  const message = { name: 'RELAY-MSG-0000000001', message_data: JSON.stringify({ kind: 'text', template: { name: 'order', document: { file_name: 'Order.pdf' } } }) }
+  assert.equal(templateDocumentURL(message), null)
+  message.message_data = JSON.stringify({ kind: 'text', attachment: 'FILE-1', template: { name: 'order' } })
+  assert.equal(templateDocumentURL(message), '/api/method/relay_core.attachments.read?message=RELAY-MSG-0000000001&download=1')
 })
