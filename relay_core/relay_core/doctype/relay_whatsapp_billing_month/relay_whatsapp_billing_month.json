@@ -14,7 +14,7 @@
       "unique": 1,
       "reqd": 1,
       "read_only": 1,
-      "description": "Hash of account, month, category and pricing type."
+      "description": "Hash of the number (or the account), month, category and pricing type."
     },
     {
       "fieldname": "account",
@@ -23,6 +23,27 @@
       "reqd": 1,
       "in_list_view": 1,
       "in_standard_filter": 1
+    },
+    {
+      "fieldname": "relay_channel",
+      "label": "Number",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "phone_number",
+      "label": "Phone number",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unsplit",
+      "label": "Not split per number",
+      "fieldtype": "Check",
+      "read_only": 1,
+      "description": "Meta returned these charges for the whole WhatsApp Business Account. Only System Managers see them."
     },
     {
       "fieldname": "period",
@@ -99,6 +120,9 @@
   "field_order": [
     "record_key",
     "account",
+    "relay_channel",
+    "phone_number",
+    "unsplit",
     "period",
     "category",
     "pricing_type",
@@ -110,5 +134,5 @@
   ],
   "sort_field": "period",
   "sort_order": "DESC",
-  "modified": "2026-10-26 21:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }

@@ -6,12 +6,14 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from relay_core.hub import HubError
+from relay_core.hub_channels import hub_arguments
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
 
 DOCTYPE = 'Relay WhatsApp Billing Month'
 DEFAULT_MARGIN = 30.0
 DIMENSIONS = ['PRICING_CATEGORY', 'PRICING_TYPE']
+CHANNEL_FIELDS = ['name', 'channel', 'account', 'hub_channel', 'label', 'address', 'waba_id']
 SENT = ('Sent', 'Delivered', 'Read')
 PAID_ORDER = ['MARKETING', 'UTILITY', 'AUTHENTICATION']
 
@@ -78,12 +80,25 @@ def record_key(identity):
     return 'RWB-' + hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:20]
 
 
-def upsert(account, key, values, fetched_at):
+def owner(account, channel, waba=''):
+    """Extra identity and link fields of a row. `channel` None means charges Meta did not split per number.
+    The legacy channel, keyed by the account id, keeps the account-wide identity so its rows update in place."""
+    if channel is None:
+        return {'channel': '', 'waba': waba}, {'relay_channel': None, 'unsplit': 1}
+    keyed = channel.hub_channel and channel.hub_channel != account
+    return ({'channel': channel.hub_channel} if keyed else {}), {'relay_channel': channel.name, 'unsplit': 0}
+
+
+def upsert(account, key, values, fetched_at, channel=None, waba=''):
     period, category, pricing_type = key
+    extra, link = owner(account, channel, waba)
     identity = {'account': account, 'period': period, 'category': category, 'pricing_type': pricing_type}
+    phone = next((str(point['phone_number'])[:40] for point in values['raw'] if point.get('phone_number')), '')
     fields = {'volume': values['volume'], 'meta_cost': round(values['meta_cost'], 6), 'currency': values['currency'],
-              'fetched_at': fetched_at, 'raw_data': json.dumps(values['raw'], sort_keys=True, default=str)}
-    name = record_key(identity)
+              'fetched_at': fetched_at, 'raw_data': json.dumps(values['raw'], sort_keys=True, default=str),
+              'phone_number': phone, **link}
+    identity_key = dict(identity, **extra)
+    name = record_key(identity_key)
     if not frappe.db.exists(DOCTYPE, name):
         try:
             return insert({'doctype': DOCTYPE, 'record_key': name, **identity, **fields})
@@ -107,25 +122,66 @@ def configured_account(account):
     return account
 
 
+def pricing(hub, request):
+    result = hub.execute(request)
+    points = result.get('data_points') if isinstance(result, dict) else None
+    if not isinstance(points, list):
+        raise HubError('Hub returned no pricing data points')
+    return points, result.get('currency') if isinstance(result.get('currency'), str) else ''
+
+
+def digits(value):
+    return ''.join(character for character in str(value or '') if character.isdigit())
+
+
+def point_channel(point, channels):
+    """The number a data point belongs to: the Hub's channel key first, then Meta's phone number.
+    None means Meta did not split the charge per number, or named a number this site does not own."""
+    if not isinstance(point, dict):
+        return None
+    key, phone = point.get('channel_key'), digits(point.get('phone_number'))
+    return next((channel for channel in channels if (key and channel.hub_channel == key)
+                 or (not key and phone and digits(channel.address) == phone)), None)
+
+
+def billing_channels(account):
+    """Enabled WhatsApp channels of the account, grouped per WABA; one Meta read covers each WABA."""
+    rows = frappe.get_all('Relay Channel', fields=CHANNEL_FIELDS, order_by='is_default desc, creation asc',
+                          filters={'account': account, 'channel': 'WhatsApp', 'enabled': 1})
+    wabas = {}
+    for row in rows:
+        wabas.setdefault(row.waba_id or '', []).append(row)
+    return wabas, len(rows) > 1
+
+
 def refresh(account, year):
-    """Read the year's monthly Meta charges and the WABA currency through the Hub, and upsert one row per month,
-    category and type."""
+    """Read the year's monthly Meta charges and the WABA currency through the Hub, and upsert one row per number,
+    month, category and type. A site with one number keeps the request of a single-number Hub."""
     from relay_core.whatsapp import checked_client
     year, account = valid_year(year), configured_account(account)
     start, end = year_bounds(year)
     if end <= start:
         return {'rows': 0, 'data_points': 0}
+    wabas, split = billing_channels(account)
+    if not wabas:
+        frappe.throw('Configure an enabled WhatsApp channel')
     hub, _ = checked_client()
-    result = hub.execute({'operation': 'billing.pricing', 'start': start, 'end': end,
-                          'granularity': 'MONTHLY', 'dimensions': DIMENSIONS})
-    points = result.get('data_points') if isinstance(result, dict) else None
-    if not isinstance(points, list):
-        raise HubError('Hub returned no pricing data points')
-    currency = result.get('currency') if isinstance(result.get('currency'), str) else ''
-    rows, fetched_at = parse(points, currency), frappe.utils.now_datetime()
-    for key, values in rows.items():
-        upsert(account, key, values, fetched_at)
-    return {'rows': len(rows), 'data_points': len(points)}
+    request = {'operation': 'billing.pricing', 'start': start, 'end': end, 'granularity': 'MONTHLY', 'dimensions': DIMENSIONS}
+    fetched_at, rows, read = frappe.utils.now_datetime(), 0, 0
+    for waba, channels in wabas.items():
+        points, currency = pricing(hub, hub_arguments(channels[0], dict(request, dimensions=['PHONE', *DIMENSIONS]))
+                                   if split else request)
+        groups, by_name = {}, {channel.name: channel for channel in channels}
+        for point in points:
+            channel = point_channel(point, channels) if split else channels[0]
+            groups.setdefault(channel and channel.name, []).append(point)
+        for name, channel_points in groups.items():
+            parsed = parse(channel_points, currency)
+            for key, values in parsed.items():
+                upsert(account, key, values, fetched_at, by_name.get(name), waba)
+            rows += len(parsed)
+        read += len(points)
+    return {'rows': rows, 'data_points': read}
 
 
 def refresh_configured():
@@ -270,7 +326,8 @@ def template_categories(account, names):
 
 def billing_rows(account, year):
     return frappe.get_all(DOCTYPE, filters={'account': account, 'period': ['between', [date(year, 1, 1), date(year, 12, 31)]]},
-                          fields=['period', 'category', 'pricing_type', 'volume', 'meta_cost', 'currency', 'fetched_at'],
+                          fields=['period', 'category', 'pricing_type', 'volume', 'meta_cost', 'currency', 'fetched_at',
+                                  'relay_channel', 'unsplit'],
                           order_by='period asc, category asc, pricing_type asc', limit_page_length=0)
 
 
@@ -280,7 +337,8 @@ def get_billing(account, year):
     Meta cost and the service charge go only to System Managers, under 'internal'."""
     require_access(manage=True)
     year, channels = valid_year(year), account_channels(account)
-    margin, rows = margin_percent(), billing_rows(account, year)
+    margin, all_rows = margin_percent(), billing_rows(account, year)
+    rows = [row for row in all_rows if not row.unsplit]
     months, total = summarise(year, rows, margin)
     template_rows = template_counts(channels, year)
     category_of = template_categories(account, {row[0] for row in template_rows})
@@ -288,10 +346,27 @@ def get_billing(account, year):
                   'messages': count} for name, month, count in template_rows]
     result = {'account': account, 'year': year, 'currency': next((row.currency for row in rows if row.currency), ''),
               'fetched_at': str(max(row.fetched_at for row in rows)) if rows else None,
-              'months': months, 'total': total, 'templates': templates}
+              'months': months, 'total': total, 'numbers': number_bills(channels, year, rows, margin),
+              'templates': templates}
     if 'System Manager' in frappe.get_roles():
-        result['internal'] = internal_figures(rows, months, margin)
+        unsplit = [row for row in all_rows if row.unsplit]
+        unsplit_months, unsplit_total = summarise(year, unsplit, margin)
+        result['internal'] = dict(internal_figures(rows, months, margin), unsplit={
+            'months': unsplit_months, 'total': unsplit_total, 'meta_cost': round(sum(row.meta_cost or 0 for row in unsplit), 4)})
     return result
+
+
+def number_bills(channels, year, rows, margin):
+    """One bill per WhatsApp number (Relay Account) with rows; the site bill is their total."""
+    bills = []
+    for channel in frappe.get_all('Relay Channel', filters={'name': ['in', channels]}, fields=CHANNEL_FIELDS,
+                                  order_by='creation asc'):
+        own = [row for row in rows if row.relay_channel == channel.name]
+        if own:
+            months, total = summarise(year, own, margin)
+            bills.append({'channel': channel.name, 'label': channel.label or channel.name, 'address': channel.address or '',
+                          'waba_id': channel.waba_id or '', 'months': months, 'total': total})
+    return bills
 
 
 @frappe.whitelist(methods=['POST'])
