@@ -2,7 +2,7 @@
 import hashlib
 import json
 import frappe
-from relay_core.permissions import require_access, readable_contact, MANAGER_ROLES
+from relay_core.permissions import require_access, readable_contact
 from relay_core.case_contracts import lifecycle, transition
 
 
@@ -27,7 +27,7 @@ def authorize(doc, user=None):
 def _read(doc):
     authorize(doc)
     return {**{k:doc.get(k) for k in ('name','title','case_type','relay_contact','priority','stage','state','modified','closed_at','assigned_to','business_doctype','business_name')},
-            'can_assign':bool(MANAGER_ROLES.intersection(frappe.get_roles())),
+            'can_assign':frappe.has_permission('Relay Conversation Assignment', 'write'),
             'field_values':json.loads(doc.field_values),'definition':json.loads(doc.definition)}
 
 

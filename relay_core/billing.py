@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from relay_core.hub import HubError
 from relay_core.hub_channels import hub_arguments
-from relay_core.permissions import require_access
+from relay_core.permissions import require_access, can_configure
 from relay_core.settings import value as connection_value
 
 DOCTYPE = 'Relay WhatsApp Billing Month'
@@ -335,7 +335,7 @@ def billing_rows(account, year):
 def get_billing(account, year):
     """The WhatsApp bill: messages, charge per message and amount per month and category, and template counts.
     Meta cost and the service charge go only to System Managers, under 'internal'."""
-    require_access(manage=True)
+    require_access('Relay WhatsApp Billing Month')
     year, channels = valid_year(year), account_channels(account)
     margin, all_rows = margin_percent(), billing_rows(account, year)
     rows = [row for row in all_rows if not row.unsplit]
@@ -348,7 +348,7 @@ def get_billing(account, year):
               'fetched_at': str(max(row.fetched_at for row in rows)) if rows else None,
               'months': months, 'total': total, 'numbers': number_bills(channels, year, rows, margin),
               'templates': templates}
-    if 'System Manager' in frappe.get_roles():
+    if can_configure():
         unsplit = [row for row in all_rows if row.unsplit]
         unsplit_months, unsplit_total = summarise(year, unsplit, margin)
         result['internal'] = dict(internal_figures(rows, months, margin), unsplit={
@@ -373,7 +373,7 @@ def number_bills(channels, year, rows, margin):
 def refresh_billing(account, year):
     """Manager-triggered Meta read for one account and year."""
     from relay_core.whatsapp import failure_message
-    require_access(manage=True)
+    require_access('Relay WhatsApp Billing Month')
     account_channels(account)
     try:
         return refresh(account, year)

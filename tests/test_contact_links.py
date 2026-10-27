@@ -128,6 +128,7 @@ class BusinessTypeApiTests(unittest.TestCase):
         self.fake = fake_frappe()
         self.enterContext(patch.object(business_types, 'frappe', self.fake))
         self.access = self.enterContext(patch.object(business_types, 'require_access'))
+        self.enterContext(patch.object(business_types, 'can_configure', lambda: 'System Manager' in self.fake.get_roles()))
 
     def test_list_shows_readable_types_and_disabled_only_to_system_managers(self):
         self.fake.get_all.return_value = [_dict(business_doctype='Customer'), _dict(business_doctype='Supplier')]

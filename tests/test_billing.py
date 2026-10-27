@@ -21,6 +21,11 @@ def utc(*parts):
     return int(datetime(*parts, tzinfo=timezone.utc).timestamp())
 
 
+
+# DocPerm rights this module relies on, per role.
+RIGHTS = {'Relay Communication Manager': {('Relay WhatsApp Billing Month', 'read'), ('Relay Team', 'write')},
+          'System Manager': {('Relay WhatsApp Billing Month', 'read'), ('Relay Team', 'write'), ('Relay Settings', 'write')}}
+
 class Store:
     """Billing month rows keyed by name, standing in for the database."""
     def __init__(self):
@@ -53,7 +58,7 @@ class BillingTests(unittest.TestCase):
 
     def setUp(self):
         self.zone = 'Asia/Kolkata'
-        self.roles = ['WhatsApp Manager']
+        self.roles = ['Relay Communication Manager']
         self.store = Store()
         self.sql = Mock(return_value=[])
         self.frappe = Mock()
@@ -72,6 +77,8 @@ class BillingTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         for name, value in (('get_roles', lambda user=None: self.roles), ('throw', thrown),
+                            ('has_permission', lambda doctype, ptype='read', *args, **kwargs:
+                                any((doctype, ptype) in RIGHTS.get(role, ()) for role in self.roles)),
                             ('session', SimpleNamespace(user='manager@example.com'))):
             patcher = patch.object(frappe, name, value, create=True)
             patcher.start()
@@ -129,17 +136,17 @@ class BillingTests(unittest.TestCase):
         settings.save.assert_called_once()
         with self.assertRaisesRegex(frappe.ValidationError, 'must be a number'):
             billing.save_margin('ten')
-        self.roles = ['WhatsApp User']
+        self.roles = ['Relay Communication User']
         with self.assertRaises(frappe.PermissionError):
             billing.get_margin()
 
     def test_non_managers_are_denied_billing(self):
-        self.roles = ['WhatsApp User']
+        self.roles = ['Relay Communication User']
         with self.assertRaises(frappe.PermissionError):
             billing.get_billing('acct-1', 2026)
         with self.assertRaises(frappe.PermissionError):
             billing.refresh_billing('acct-1', 2026)
-        self.roles = ['WhatsApp Manager']
+        self.roles = ['Relay Communication Manager']
         self.frappe.get_list.return_value = []
         with self.assertRaisesRegex(frappe.PermissionError, 'not accessible'):
             billing.get_billing('other-account', 2026)
@@ -260,7 +267,7 @@ class BillingTests(unittest.TestCase):
             return billing.get_billing('acct-1', 2026)
 
     def test_get_billing_returns_the_bill_and_template_counts(self):
-        result = self.billing_for(['WhatsApp Manager'])
+        result = self.billing_for(['Relay Communication Manager'])
         self.assertEqual(result['currency'], 'INR')
         self.assertEqual(result['months'][2]['lines'], [{'category': 'UTILITY', 'messages': 5, 'rate': 0.26, 'amount': 1.3}])
         self.assertEqual((result['total']['messages'], result['total']['amount']), (5, 1.3))
@@ -274,7 +281,7 @@ class BillingTests(unittest.TestCase):
                 return {key for item in value for key in keys(item)}
             return set()
         leaked = {'internal', 'meta_cost', 'margin_percent', 'margin_amount', 'raw_data', 'pricing_type'}
-        self.assertFalse(keys(self.billing_for(['WhatsApp Manager'])) & leaked)
+        self.assertFalse(keys(self.billing_for(['Relay Communication Manager'])) & leaked)
         self.assertFalse(keys(self.billing_for(['Relay Communication Manager'])) & leaked)
         internal = self.billing_for(['System Manager'])['internal']
         self.assertEqual((internal['margin_percent'], internal['meta_cost'], internal['margin_amount']), (30.0, 1.0, 0.3))
@@ -314,7 +321,7 @@ class BillingTests(unittest.TestCase):
             period=date(2026, 3, 1), category='MARKETING', pricing_type='REGULAR', volume=volume, meta_cost=cost,
             currency='INR', fetched_at='2026-10-26 10:00:00', relay_channel=channel, unsplit=unsplit)
         self.month_rows = [row('CH-WA', 10, 2.5), row('CH-SUPPORT', 4, 1.0), row(None, 9, 1.9, 1)]
-        result = self.billing_for(['WhatsApp Manager'])
+        result = self.billing_for(['Relay Communication Manager'])
         self.assertEqual((result['total']['messages'], result['total']['amount']), (14, 4.55))
         self.assertEqual([(bill['channel'], bill['label'], bill['waba_id'], bill['total']['messages'], bill['total']['amount'])
                           for bill in result['numbers']], [('CH-WA', 'Shop', '111', 10, 3.25), ('CH-SUPPORT', 'Support', '111', 4, 1.3)])

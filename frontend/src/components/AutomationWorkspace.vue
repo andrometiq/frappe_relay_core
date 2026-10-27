@@ -18,6 +18,7 @@ const configurationLinks = [
   { label: 'Fallback handoff owner', onClick: () => { location.href = '/desk/relay-settings' } },
 ]
 const skill = computed(() => props.kind === 'skills')
+const allowed = computed(() => Boolean(skill.value ? capabilities.value.skills : capabilities.value.business_events))
 const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
 const channels = ref([]), editor = ref(null)
 const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
@@ -48,7 +49,7 @@ watch(() => draft.value?.template, name => {
 })
 onBeforeUnmount(() => { clearTimeout(previewTimer); ++previewGeneration; ++generation })
 async function load(append = false) {
-  if (!capabilities.value.configure) return
+  if (!allowed.value) return
   const request = ++generation; busy.value = true; error.value = ''
   try {
     const [page, available, catalog] = await Promise.all([coreApi(api.value + '.directory', { after: append ? next.value : null }), coreApi('api.channel_options'), skill.value ? coreApi('ai.configuration.editor_options', {kind:'action'}) : Promise.resolve({items:[]})])
@@ -104,7 +105,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
 </script>
 <template>
   <section class="v1-screen" :class="{ 'event-workspace': skill }"><div class="v1-content space-y-4">
-    <p v-if="!capabilities.configure">A System Manager role is required to configure automation.</p>
+    <p v-if="!allowed">A Relay Communication Manager role is required to configure automation.</p>
     <template v-else>
       <header v-if="skill" class="event-toolbar"><strong>Events</strong><Dropdown :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New event" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
       <WorkspaceHeading v-else description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>

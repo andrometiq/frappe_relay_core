@@ -51,5 +51,13 @@
     "status",
     "provider_timestamp"
   ],
-  "permissions": []
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    }
+  ]
 }

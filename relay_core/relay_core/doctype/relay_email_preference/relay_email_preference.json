@@ -28,46 +28,36 @@
   ],
   "permissions": [
     {
-      "role": "System Manager",
+      "role": "Relay Communication User",
       "read": 1,
       "write": 1,
       "create": 1,
-      "if_owner": 1
+      "if_owner": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Team User",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "if_owner": 1,
+      "print": 1
     },
     {
       "role": "Relay Communication Manager",
       "read": 1,
       "write": 1,
       "create": 1,
-      "if_owner": 1
+      "if_owner": 1,
+      "print": 1
     },
     {
-      "role": "WhatsApp Manager",
+      "role": "System Manager",
       "read": 1,
       "write": 1,
       "create": 1,
-      "if_owner": 1
-    },
-    {
-      "role": "Relay Communication User",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "if_owner": 1
-    },
-    {
-      "role": "WhatsApp User",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "if_owner": 1
-    },
-    {
-      "role": "WhatsApp Multi-Channel User",
-      "read": 1,
-      "write": 1,
-      "create": 1,
-      "if_owner": 1
+      "if_owner": 1,
+      "print": 1
     }
   ]
 }

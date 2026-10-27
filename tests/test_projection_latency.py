@@ -34,6 +34,7 @@ class ProjectionLatencyTests(unittest.TestCase):
             fake.db.get_value.return_value = None
             doc = _dict(flags=_dict(relay_projection_ms=12))
             with patch.object(inbound, 'frappe', fake), patch.object(inbound, 'connection_value'), \
+                    patch.object(inbound, 'require_access'), \
                     patch.object(inbound, 'validate_callback', return_value=payload), \
                     patch.object(inbound, 'insert_event', return_value=doc) as insert:
                 reply = inbound.receive()
@@ -73,6 +74,7 @@ class ProjectionLatencyTests(unittest.TestCase):
             for count in (1, 2):
                 batch = {'account': 'local', 'events': [{'id': i + 1, 'payload': payload} for i in range(count)]}
                 with patch.object(inbound, 'frappe', fake), patch.object(inbound, 'connection_value'), \
+                    patch.object(inbound, 'require_access'), \
                         patch.object(inbound, 'validate_callback', return_value=batch), \
                         patch.object(inbound, 'insert_event', return_value=_dict(flags=_dict())) as insert:
                     inbound.receive()
@@ -267,7 +269,8 @@ class ProjectionLatencyTests(unittest.TestCase):
     def test_batch_sends_one_triage_invalidation_after_all_events(self):
         from relay_core import realtime
         fake = SimpleNamespace(get_all=Mock(return_value=['manager']), publish_realtime=Mock())
-        with patch.object(realtime, 'frappe', fake):
+        with patch.object(realtime, 'frappe', fake), \
+                patch('frappe.permissions.get_doctype_roles', return_value=['Relay Communication Manager']):
             with realtime.one_incoming_change():
                 realtime.incoming_changed()
                 realtime.incoming_changed()

@@ -10,7 +10,7 @@ from contextvars import ContextVar
 import frappe
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
-from relay_core.permissions import require_access, AGENT_MANAGER_ROLES
+from relay_core.permissions import require_access, can_manage
 from relay_core.automation.contracts import canonical, event_key
 from relay_core.automation.providers import ProviderError
 
@@ -41,8 +41,7 @@ def check_actor(policy):
     user = policy.execution_user
     if user in ('Guest', 'Administrator') or not frappe.db.get_value('User', user, 'enabled'):
         raise ValueError('Execution identity is disabled')
-    roles = frappe.get_roles(user)
-    if 'System Manager' in roles or not AGENT_MANAGER_ROLES.intersection(roles):
+    if 'System Manager' in frappe.get_roles(user) or not can_manage(user):
         raise ValueError('Execution identity is not permitted')
 
 

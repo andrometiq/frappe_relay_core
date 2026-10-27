@@ -1,5 +1,5 @@
 relay_core.patches.v1_0.use_linked_entity_names
-relay_core.patches.v1_0.grant_whatsapp_roles
+relay_core.patches.v1_0.use_four_relay_roles
 relay_core.patches.v1_0.enable_whatsapp_read_signals
 relay_core.patches.v1_0.set_hub_channel
 relay_core.patches.v1_0.link_billing_numbers

@@ -36,9 +36,10 @@ useRealtimeRefresh(['Relay Team'], ['teams'], () => { if (capabilities.value.man
     <TeamsWorkspace v-if="tab === 'groups'" />
     <div v-else-if="tab === 'access'" class="v1-content space-y-4">
       <WorkspaceHeading description="Give each teammate the right level of access." />
-      <article class="workflow-card"><h3>Relay Communication User</h3><p>Works on accessible business records and conversations assigned directly, through a communication team, or through business-group responsibility.</p></article>
-      <article class="workflow-card"><h3>Relay Communication Manager</h3><p>Manages communication teams, conversation assignments, templates, sender linking and delivery health. Business document permissions still apply.</p></article>
-      <article class="workflow-card"><h3>System Manager</h3><p>Configures the Hub connection, channels, business types, endpoints and Frappe permissions.</p></article>
+      <article class="workflow-card"><h3>Relay Communication User</h3><p>Works the inbox, tickets and contacts for the teams the user belongs to, plus conversations assigned to the user. Business document permissions still apply.</p></article>
+      <article class="workflow-card"><h3>Relay Communication Team User</h3><p>Does the same work as a User and sees the conversations of all teams without being added to them.</p></article>
+      <article class="workflow-card"><h3>Relay Communication Manager</h3><p>Everything a Team User does, plus bulk campaigns, business events, templates, AI skills, saved replies, billing, teams and assignments.</p></article>
+      <article class="workflow-card"><h3>System Manager</h3><p>Everything, including settings, setup, channels, health and Frappe permissions.</p></article>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/user">Users and roles</a><a class="v1-link" href="/desk/permission-manager">Role permissions</a><a class="v1-link" href="/desk/user-permission">User permissions</a></div>
     </div>
     <div v-else class="v1-content space-y-4">

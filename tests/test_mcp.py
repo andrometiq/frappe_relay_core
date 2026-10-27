@@ -119,7 +119,7 @@ class MCPTests(unittest.TestCase):
         self.assertTrue({'relay.whatsapp.send_media','relay.whatsapp.send_template','relay.campaigns.append','relay.campaigns.read'}<=names)
         manager_tools=[tool['description'] for tool in self.api.TOOLS if 'Relay Communication Manager' in tool['description']]
         self.assertTrue(manager_tools)
-        self.assertTrue(all('WhatsApp Manager' in text for text in manager_tools))
+        self.assertFalse(any('WhatsApp Manager' in text for text in manager_tools))
 
     def test_send_tools_take_a_channel_and_channels_are_listed(self):
         import relay_core

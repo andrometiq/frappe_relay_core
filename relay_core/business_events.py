@@ -42,7 +42,7 @@ def approved(rule):
 
 
 def validate_rule(rule):
-    require_access(configure=True)
+    require_access('Relay Business Event Rule', 'write')
     if rule.event not in EVENTS or rule.source_doctype in RELAY_DOCTYPES:
         raise ValueError('Choose a business document and supported event')
     field = frappe.get_meta(rule.source_doctype).get_field(rule.recipient_field)
@@ -346,7 +346,7 @@ def recover():
 
 @frappe.whitelist(methods=['GET'])
 def directory(after=None):
-    require_access(configure=True)
+    require_access('Relay Business Event Rule')
     rows = frappe.get_list('Relay Business Event Rule', filters={'name': ['>', after]} if after else {},
         fields=['name', *FIELDS], order_by='name asc', page_length=31)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
@@ -354,7 +354,7 @@ def directory(after=None):
 
 @frappe.whitelist(methods=['POST'])
 def save(values, name=None):
-    require_access(configure=True)
+    require_access('Relay Business Event Rule', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
     if not isinstance(values, dict) or set(values) - set(FIELDS): raise ValueError('Invalid event rule fields')
     doc = frappe.get_doc('Relay Business Event Rule', name) if name else frappe.new_doc('Relay Business Event Rule')
@@ -365,7 +365,7 @@ def save(values, name=None):
 @frappe.whitelist(methods=['GET'])
 def template_preview(name):
     """Read template wording from Hub for the editor; never sends a message."""
-    require_access(configure=True)
+    require_access('Relay Business Event Rule', 'write')
     template = frappe.get_doc('Relay WhatsApp Template', name)
     template.check_permission('read')
     from relay_core.whatsapp import execute

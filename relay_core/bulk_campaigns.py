@@ -45,7 +45,7 @@ def is_bulk(doc):
 
 
 def bulk(name, statuses=None):
-    require_access(manage=True)
+    require_access('Relay Campaign', 'write')
     doc = frappe.get_doc('Relay Campaign', name)
     doc.check_permission('read')
     if not is_bulk(doc):
@@ -94,7 +94,7 @@ def template_snapshot(template):
 @frappe.whitelist(methods=['POST'])
 def create(title, template_name=None, language=None, channel=None, reply_window_hours=72, message=None):
     """A Draft campaign that sends an approved template, or with message a text or media message."""
-    require_access(manage=True)
+    require_access('Relay Campaign', 'write')
     title = (title or '').strip() if isinstance(title, str) else ''
     if not 3 <= len(title) <= 100 or any(c in title for c in '/\\%#?<>'):
         frappe.throw('Give the campaign a readable title of 3-100 characters')
@@ -236,7 +236,7 @@ def create_with_rows(title, rows, message=None, template_name=None, language=Non
                      channel=None, reply_window_hours=72):
     """A campaign whose recipients are JSON objects of column -> value; start=1 starts sending at once.
     Without a mapping, columns are matched by name as for a sheet."""
-    require_access(manage=True)
+    require_access('Relay Campaign', 'write')
     numbered = given_rows(rows)
     name = create(title, template_name, language, channel, reply_window_hours, message)['name']
     doc = frappe.get_doc('Relay Campaign', name)
@@ -430,7 +430,7 @@ def control(name, action):
     if action not in transitions:
         frappe.throw('Invalid campaign action')
     allowed, target = transitions[action]
-    require_access(manage=True)
+    require_access('Relay Campaign', 'write')
     media = check_ready(bulk(name, allowed)) if target == 'Running' else {}  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
         doc = bulk(name, allowed)

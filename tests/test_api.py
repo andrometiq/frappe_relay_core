@@ -33,34 +33,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(doc.account,'Account');self.assertEqual(doc.enabled,1)
         doc.check_permission.assert_any_call('write');doc.save.assert_called_once()
 
+    def use_role(self, role):
+        """Answer permission checks from the role -> DocType rights of the DocPerm matrix."""
+        rights={
+            'Relay Communication User':set(),
+            'Relay Communication Team User':{'all_teams'},
+            'Relay Communication Manager':{'all_teams',('Relay Team','write'),('Relay WhatsApp Billing Month','read'),
+                                           ('Relay AI Skill','write'),('Relay Business Event Rule','write')},
+            'System Manager':{'all_teams',('Relay Team','write'),('Relay WhatsApp Billing Month','read'),
+                              ('Relay AI Skill','write'),('Relay Business Event Rule','write'),('Relay Settings','write')},
+        }[role]
+        self.f.has_permission=lambda doctype,ptype='read',**kwargs:(doctype,ptype) in rights
+        self.api.can_manage=lambda:('Relay Team','write') in rights
+        self.api.can_configure=lambda:('Relay Settings','write') in rights
+        self.api.sees_all_teams=lambda:'all_teams' in rights
+
     def test_capabilities_keep_enabled_channels_and_add_their_features(self):
-        self.f.get_roles=Mock(return_value=['Relay Communication Manager'])
+        self.use_role('Relay Communication Manager')
         whatsapp=Mock();whatsapp.name='WhatsApp';whatsapp.get_features.return_value={'templates':True}
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':False,'configure':False,
+        self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':True,'configure':False,
+                                 'skills':True,'business_events':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers})
         listed.assert_called_once_with('WhatsApp')
 
     def test_capabilities_list_no_numbers_when_whatsapp_is_off(self):
-        self.f.get_roles=Mock(return_value=['WhatsApp User'])
+        self.use_role('Relay Communication User')
         with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.hub_channels.site_numbers') as listed:
             self.assertEqual(self.api.capabilities()['whatsapp_numbers'],[])
         listed.assert_not_called()
 
     def test_capabilities_follow_each_role(self):
-        flags=('manage','teams','billing','multi_team','configure')
+        flags=('manage','teams','billing','multi_team','configure','skills','business_events')
         expected={
-            'WhatsApp User':(False,False,False,False,False),
-            'Relay Communication User':(False,False,False,False,False),
-            'WhatsApp Multi-Channel User':(False,False,False,True,False),
-            'WhatsApp Manager':(True,True,True,False,False),
-            'Relay Communication Manager':(True,True,True,False,False),
-            'System Manager':(True,True,True,False,True),
+            'Relay Communication User':(False,False,False,False,False,False,False),
+            'Relay Communication Team User':(False,False,False,True,False,False,False),
+            'Relay Communication Manager':(True,True,True,True,False,True,True),
+            'System Manager':(True,True,True,True,True,True,True),
         }
         for role,values in expected.items():
-            self.f.get_roles=Mock(return_value=[role])
+            self.use_role(role)
             with patch('relay_core.channels.enabled',return_value=[]):
                 result=self.api.capabilities()
             self.assertEqual(tuple(result[flag] for flag in flags),values,role)

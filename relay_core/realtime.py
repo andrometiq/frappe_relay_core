@@ -2,7 +2,6 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 import frappe
-from relay_core.permissions import MANAGER_ROLES
 
 incoming_batch = ContextVar('relay_incoming_batch', default=None)
 
@@ -67,7 +66,8 @@ def incoming_changed():
         incoming_batch.set(True)
         return
     # Triage access does not grant REST access to raw Hub event payloads.
+    from frappe.permissions import get_doctype_roles
     users = frappe.get_all('Has Role', filters={'parenttype':'User',
-        'role':['in',list(MANAGER_ROLES)]}, pluck='parent', distinct=True)
+        'role':['in',get_doctype_roles('Relay Team', 'write')]}, pluck='parent', distinct=True)
     for user in set(users) | {'Administrator'}:
         frappe.publish_realtime('relay_changed', {'kind':'incoming'}, user=user, after_commit=True)

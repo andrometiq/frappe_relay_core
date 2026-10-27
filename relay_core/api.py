@@ -1,7 +1,8 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
-from relay_core.permissions import require_access, readable_contact, contact_query, MANAGER_ROLES, WA_MULTI
+from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
+                                    can_configure, sees_all_teams)
 
 
 def validate_reference(value, prefix):
@@ -207,13 +208,15 @@ def message_snapshots(contact, names):
 def capabilities():
     require_access()
     from relay_core.channels import enabled
-    roles=set(frappe.get_roles())
     channels=enabled()
-    manage=bool(roles & MANAGER_ROLES)
+    manage=can_manage()
     from relay_core.hub_channels import site_numbers
     enabled_names=[item.name for item in channels]
-    return {'manage':manage, 'teams':manage, 'billing':manage, 'multi_team':WA_MULTI in roles,
-            'configure':'System Manager' in roles, 'enabled_channels':enabled_names,
+    return {'manage':manage, 'teams':manage, 'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
+            'multi_team':sees_all_teams(), 'configure':can_configure(),
+            'skills':frappe.has_permission('Relay AI Skill', 'write'),
+            'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
+            'enabled_channels':enabled_names,
             'channels':{item.name:item.get_features() for item in channels},
             'whatsapp_numbers':site_numbers('WhatsApp') if 'WhatsApp' in enabled_names else []}
 

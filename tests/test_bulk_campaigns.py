@@ -327,7 +327,7 @@ FAILURE_MESSAGE = bulk_campaigns.whatsapp.failure_message
 
 
 def manager_text(error):
-    with patch.object(bulk_campaigns.whatsapp, 'frappe', SimpleNamespace(get_roles=lambda: ['Relay Communication Manager'])):
+    with patch.object(bulk_campaigns.whatsapp, 'can_manage', return_value=True):
         return FAILURE_MESSAGE(error)
 
 

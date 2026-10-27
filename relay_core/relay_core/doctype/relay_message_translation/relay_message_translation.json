@@ -84,12 +84,10 @@
   "permissions": [
     {
       "role": "System Manager",
-      "read": 1
-    },
-    {
-      "role": "System Manager",
-      "permlevel": 1,
-      "read": 1
+      "read": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
     }
   ]
 }

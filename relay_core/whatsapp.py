@@ -3,7 +3,7 @@ import re
 import frappe
 from relay_core.settings import value as connection_value
 from relay_core.hub import HubClient, HubError
-from relay_core.permissions import require_access, require_business_assignment, MANAGER_ROLES
+from relay_core.permissions import require_access, require_business_assignment, can_manage
 
 READ = {'account.profile','account.metadata','capabilities','templates.list'}
 MANAGE = {'templates.media_upload','templates.delete','templates.create','templates.update'}
@@ -46,7 +46,12 @@ def business_contacts(doctype, name, after=None):
 
 def prepare(operation, arguments=None, contact=None, business_doctype=None, business_name=None):
     if not isinstance(operation,str) or operation not in READ | MANAGE | SEND | UPLOAD:frappe.throw('Unsupported WhatsApp operation')
-    require_access(manage=operation in MANAGE | UPLOAD)
+    if operation in MANAGE:
+        require_access('Relay WhatsApp Template', 'write')
+    elif operation in UPLOAD:
+        require_access('Relay Campaign', 'write')
+    else:
+        require_access()
     if arguments is None:arguments={}
     if isinstance(arguments,str):arguments=frappe.parse_json(arguments)
     if not isinstance(arguments,dict):frappe.throw('Arguments must be an object')
@@ -115,7 +120,7 @@ FAILURE = 'Hub could not complete this operation. Check account configuration, c
 def failure_message(error):
     """Managers see the Hub's redacted rejection text; others see a generic notice."""
     detail = getattr(error, 'detail', '')
-    if detail and MANAGER_ROLES.intersection(frappe.get_roles()):
+    if detail and can_manage():
         return 'Hub rejected this operation: ' + detail
     return FAILURE
 

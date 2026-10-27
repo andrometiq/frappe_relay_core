@@ -1,7 +1,7 @@
 """Site-owned connection settings. Password values never enter read responses."""
 import re
 import frappe
-from relay_core.permissions import require_access
+from relay_core.permissions import require_access, can_configure
 from relay_core.hub import HubClient
 
 # Channels the Relay UI offers. Telegram and Email backends stay intact for a later switch-on.
@@ -25,7 +25,7 @@ def connection():
     return {'url':value('relay_hub_url') or '', 'account':value('relay_hub_account') or '',
             'token_configured':bool(value('relay_hub_token')),
             'callback_configured':bool(value('relay_callback_secret')),
-            'can_configure':'System Manager' in frappe.get_roles()}
+            'can_configure':can_configure()}
 
 @frappe.whitelist(methods=['POST'])
 def save_connection(url,account,token='',callback_secret=''):

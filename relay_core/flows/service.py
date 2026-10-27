@@ -4,7 +4,7 @@ import json
 import re
 import frappe
 from relay_core.automation.queue import QUEUE, after_message_commit
-from relay_core.permissions import require_access, readable_contact
+from relay_core.permissions import require_access, readable_contact, can_configure
 from relay_core.automation.service import internal_save, check_actor, business_scope, message_hash
 from relay_core.automation.provenance import context_of, conversation_key
 from relay_core.flows.contracts import definition, parse_input, render, matches, choice_options
@@ -52,7 +52,7 @@ def directory(after=None,query=''):
         or_filters=[['title','like',needle],['command','like',needle]],
         fields=['name','title','command','channel','enabled','published_version'],order_by='name asc',page_length=31)
     return {'items':rows[:30],'next':rows[29].name if len(rows)>30 else None,
-            'can_configure':'System Manager' in frappe.get_roles()}
+            'can_configure':can_configure()}
 
 
 @frappe.whitelist(methods=['GET'])

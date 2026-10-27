@@ -1,4 +1,4 @@
-"""Team viewers and System-Manager-only health endpoints, with an isolated Frappe boundary."""
+"""Team membership and System-Manager-only health endpoints, with an isolated Frappe boundary."""
 import importlib.util
 from pathlib import Path
 import sys
@@ -19,57 +19,49 @@ def denied(*args):
     raise PermissionError(args[0] if args else '')
 
 
-class TeamAccessTests(unittest.TestCase):
+class TeamTests(unittest.TestCase):
     def setUp(self):
-        self.roles = {'agent@example.com': ['WhatsApp User'], 'viewer@example.com': ['WhatsApp Multi-Channel User']}
+        self.roles = {'agent@example.com': ['Relay Communication User'], 'viewer@example.com': ['Relay Communication Team User']}
         self.f = types.SimpleNamespace(whitelist=lambda **kwargs: lambda fn: fn, throw=denied, PermissionError=PermissionError,
-                                       get_roles=lambda user=None: self.roles.get(user, ['WhatsApp Manager']),
+                                       get_roles=lambda user=None: self.roles.get(user, ['Relay Communication Manager']),
+                                       has_permission=lambda doctype, ptype='read', user=None, **kwargs: user != 'stranger@example.com',
                                        db=types.SimpleNamespace(get_value=lambda doctype, name, field: 1),
                                        parse_json=__import__('json').loads, session=types.SimpleNamespace(user='manager@example.com'))
         self.teams = load('relay_core/teams.py', self.f)
         self.teams.require_access = Mock()
 
-    def team(self, members, access):
+    def team(self, members):
         row = lambda user: types.SimpleNamespace(user=user)
-        return types.SimpleNamespace(title='Sales', members=[row(user) for user in members],
-                                     get=lambda field: [row(user) for user in access] if field == 'access' else None)
+        return types.SimpleNamespace(title='Sales', members=[row(user) for user in members], get=lambda field: None)
 
-    def test_viewers_need_the_multi_channel_role(self):
-        self.teams.validate_team(self.team(['agent@example.com'], ['viewer@example.com']))
-        with self.assertRaisesRegex(PermissionError, 'Multi-Channel'):
-            self.teams.validate_team(self.team(['agent@example.com'], ['agent@example.com']))
+    def test_members_need_a_relay_role(self):
+        self.teams.validate_team(self.team(['agent@example.com', 'viewer@example.com']))
+        with self.assertRaisesRegex(PermissionError, 'Relay communication role'):
+            self.teams.validate_team(self.team(['stranger@example.com']))
         with self.assertRaisesRegex(PermissionError, 'once'):
-            self.teams.validate_team(self.team(['agent@example.com'], ['viewer@example.com', 'viewer@example.com']))
+            self.teams.validate_team(self.team(['agent@example.com', 'agent@example.com']))
 
-    def test_save_keeps_viewers_unless_given_and_read_returns_them(self):
+    def test_save_and_read_return_members_only(self):
         doc = Mock(); doc.name = 'Sales-001'; doc.title = 'Sales'
         doc.members = [types.SimpleNamespace(user='agent@example.com')]
-        doc.get.return_value = [types.SimpleNamespace(user='viewer@example.com')]
         self.f.get_doc = Mock(return_value=doc)
         result = self.teams.save('Sales', '["agent@example.com"]', name='Sales-001')
         self.assertEqual([call.args[0] for call in doc.set.call_args_list], ['members'])
-        self.assertEqual(result['access'], ['viewer@example.com'])
-        self.teams.save('Sales', ['agent@example.com'], name='Sales-001', access='["viewer@example.com"]')
-        doc.set.assert_called_with('access', [{'user': 'viewer@example.com'}])
-        with self.assertRaisesRegex(PermissionError, 'Invalid team viewers'):
-            self.teams.save('Sales', ['agent@example.com'], name='Sales-001', access='"viewer@example.com"')
-        self.assertEqual(self.teams.read('Sales-001')['access'], ['viewer@example.com'])
+        self.assertEqual(result, {'name': 'Sales-001', 'title': 'Sales', 'members': ['agent@example.com']})
+        self.assertEqual(self.teams.read('Sales-001'), result)
         self.teams.require_access.assert_called_with(manage=True)
 
-    def test_filter_team_open_to_listed_viewer_only(self):
-        doc = self.team(['agent@example.com'], ['viewer@example.com'])
+    def test_filter_team_open_to_members_and_team_readers(self):
+        doc = self.team(['agent@example.com'])
         doc.has_permission = lambda permission: False
         self.f.get_doc = Mock(return_value=doc)
-        self.f.get_roles = lambda user=None: ['WhatsApp Multi-Channel User']
-        self.f.session.user = 'viewer@example.com'
+        self.f.session.user = 'agent@example.com'
         self.assertIs(self.teams.readable_filter_team('Sales-001'), doc)
-        self.f.session.user = 'stranger@example.com'
-        with self.assertRaises(PermissionError):
-            self.teams.readable_filter_team('Sales-001')
         self.f.session.user = 'viewer@example.com'
-        self.f.get_roles = lambda user=None: ['WhatsApp User']
         with self.assertRaises(PermissionError):
             self.teams.readable_filter_team('Sales-001')
+        doc.has_permission = lambda permission: True
+        self.assertIs(self.teams.readable_filter_team('Sales-001'), doc)
 
 
 class HealthEndpointTests(unittest.TestCase):

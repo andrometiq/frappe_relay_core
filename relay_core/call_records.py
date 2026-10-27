@@ -296,8 +296,8 @@ def pending_call():
 @frappe.whitelist(methods=['GET'])
 def uncertain_attempts(contact=None, before=None):
     require_access()
-    from relay_core.permissions import MANAGER_ROLES
-    can_resolve = bool(MANAGER_ROLES.intersection(frappe.get_roles()))
+    from relay_core.permissions import can_manage
+    can_resolve = can_manage()
     filters = {'state': 'Uncertain'}
     if not can_resolve:
         filters['requested_by'] = frappe.session.user

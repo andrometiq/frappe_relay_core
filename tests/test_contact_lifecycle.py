@@ -68,6 +68,7 @@ class ContactUpdateTests(unittest.TestCase):
                                     get_all=Mock(return_value=list(self.endpoints.values())),
                                     get_roles=lambda: self.roles, cache=SimpleNamespace(lock=MagicMock()))
         self.enterContext(patch.object(lifecycle, 'frappe', self.fake))
+        self.enterContext(patch.object(lifecycle, 'can_manage', lambda: 'Relay Communication Manager' in self.roles))
         self.enterContext(patch.object(identity, 'default_region', return_value='IN'))
         self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))
         self.bindings = self.enterContext(patch.object(lifecycle, 'bindings', return_value=iter(())))
