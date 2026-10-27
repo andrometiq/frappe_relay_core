@@ -272,7 +272,10 @@ def send(message, kind, data, request_key, quote=1, channels=None, via=None):
     sending channel: empty keeps the source's channel, `auto` uses the reply channel at send time,
     and a channel name is the staff's own pick.
     """
+    original = message
     message, quote = reply_source(message, kind, request_key, via, quote)
+    if message != original and kind in MEDIA_SENDS:
+        data = rebind_attachment(data, original, message)
     group = request_hash(request_key)[:32]
     sources = channel_sources(message, kind, channels, request_key)
     if not sources:
@@ -316,6 +319,7 @@ def channel_sources(message, kind, names, request_key):
 
 
 SWITCHABLE = ('text', 'location', 'contact')  # Kinds that do not point at one message on the source channel.
+MEDIA_SENDS = ('photo', 'video', 'audio', 'voice', 'document')
 
 
 def reply_source(message, kind, request_key, via, quote):
@@ -331,14 +335,29 @@ def reply_source(message, kind, request_key, via, quote):
     target = reply_channel(source.relay_contact)['channel'] if via == 'auto' else via
     if target == source.channel:
         return message, quote
-    if kind not in SWITCHABLE:
-        raise ValueError('Only text, location and contact messages can go from another channel')
+    if kind not in SWITCHABLE + MEDIA_SENDS:
+        raise ValueError('Only text, media, location and contact messages can go from another channel')
     validate_reference(target, 'CH')
     newest = frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': target},
                                  'name', order_by='creation desc')
     if not newest:
         raise ValueError('This person has no conversation on the chosen channel')
     return newest, 0
+
+
+def rebind_attachment(data, original, target):
+    """The send data with its attachment copied onto the source message of the sending channel.
+
+    The composer uploads to the message it shows; a retry reuses the copy made on the first try."""
+    from frappe.utils.file_manager import save_file
+    from relay_core.attachments import file_content
+    data = object_value(data)
+    file, raw = file_content(data.get('attachment'), readable_source(original)[0])
+    copy = frappe.db.get_value('File', {'attached_to_doctype': 'Relay Message', 'attached_to_name': target, 'is_private': 1,
+                                        'file_name': file.file_name, 'content_hash': file.content_hash}, 'name')
+    if not copy:
+        copy = save_file(file.file_name, raw, 'Relay Message', target, is_private=1).name
+    return dict(data, attachment=copy)
 
 
 @frappe.whitelist(methods=['GET'])

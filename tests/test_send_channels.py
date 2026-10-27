@@ -99,6 +99,11 @@ class ReplyChannelTests(Patched):
             with self.assertRaises(ValueError):
                 messaging.reply_source('M1', 'reaction', 'k1', 'Support', 1)
 
+    def test_media_goes_from_the_picked_number_without_a_loaded_message_there(self):
+        site = fake_site([message('M1', 'Shop', creation=1), message('M2', 'Support', creation=2)])
+        with self.patched(site):
+            self.assertEqual(messaging.reply_source('M2', 'document', 'k1', 'Shop', 1), ('M1', 0))
+
     def test_a_retry_keeps_the_source_of_its_first_try(self):
         site = fake_site([message('M1', 'Shop', creation=1), message('M2', 'Support', creation=2)],
                          Relay_Message_Action=[{'request_key': 'hash-k1', 'source_message': 'M1'}])
@@ -113,6 +118,46 @@ class ReplyChannelTests(Patched):
             messaging.send('M1', 'text', {'text': 'Hi'}, 'k1', 1, via='auto')
         pick.assert_called_once_with('M1', 'text', 'k1', 'auto', 1)
         send_one.assert_called_once_with('M2', 'text', {'text': 'Hi'}, 'k1', 0)
+
+    def test_send_moves_the_attachment_to_the_sending_channel_source(self):
+        moved = {'attachment': 'F2', 'caption': 'Bill'}
+        with patch.object(messaging, 'reply_source', return_value=('M2', 0)), \
+                patch.object(messaging, 'rebind_attachment', return_value=moved) as rebind, \
+                patch.object(messaging, 'send_one', return_value={'action': 'A'}) as send_one, \
+                patch.object(messaging, 'channel_sources', return_value=[]), \
+                patch.object(messaging, 'request_hash', return_value='hash'):
+            messaging.send('M1', 'document', {'attachment': 'F1', 'caption': 'Bill'}, 'k1', 1, via='Support')
+        rebind.assert_called_once_with({'attachment': 'F1', 'caption': 'Bill'}, 'M1', 'M2')
+        send_one.assert_called_once_with('M2', 'document', moved, 'k1', 0)
+
+
+class RebindAttachmentTests(Patched):
+    file = _dict(name='F1', file_name='bill.pdf', content_hash='h1')
+
+    def rebind(self, site):
+        with self.patched(site), patch('relay_core.attachments.file_content', return_value=(self.file, b'pdf')) as content, \
+                patch('frappe.utils.file_manager.save_file', return_value=_dict(name='F2')) as save:
+            result = messaging.rebind_attachment({'attachment': 'F1', 'caption': 'Bill'}, 'M1', 'M2')
+        return result, content, save
+
+    def test_the_attachment_is_copied_onto_the_sending_source(self):
+        result, content, save = self.rebind(fake_site([message('M1', 'Shop'), message('M2', 'Support')], File=[]))
+        self.assertEqual(result, {'attachment': 'F2', 'caption': 'Bill'})
+        self.assertEqual(content.call_args.args[1]['name'], 'M1')
+        save.assert_called_once_with('bill.pdf', b'pdf', 'Relay Message', 'M2', is_private=1)
+
+    def test_a_retry_reuses_the_copy(self):
+        copy = {'name': 'F3', 'attached_to_doctype': 'Relay Message', 'attached_to_name': 'M2', 'is_private': 1,
+                'file_name': 'bill.pdf', 'content_hash': 'h1'}
+        result, _, save = self.rebind(fake_site([message('M1', 'Shop'), message('M2', 'Support')], File=[copy]))
+        self.assertEqual(result['attachment'], 'F3')
+        save.assert_not_called()
+
+    def test_an_attachment_of_another_conversation_is_denied(self):
+        with self.patched(fake_site([message('M1', 'Shop')], File=[])), patch(
+                'relay_core.attachments.file_content', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                messaging.rebind_attachment({'attachment': 'F9'}, 'M1', 'M2')
 
 
 class ChooseTests(Patched):
