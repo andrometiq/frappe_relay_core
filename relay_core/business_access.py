@@ -74,17 +74,6 @@ def message_allowed(doc, user=None):
     except frappe.DoesNotExistError: return False
 
 
-def message_condition(user=None):
-    user = user or frappe.session.user
-    business = query_condition(user)
-    if not business or not frappe.has_permission('Relay Contact', 'read', user=user): return business
-    contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
-                                   user=user, order_by='').get_sql()
-    conversation = (f"(COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND "
-                    f"`tabRelay Message`.relay_contact IN ({contacts}))")
-    return '(' + business + ' OR ' + conversation + ')'
-
-
 def allowed(doc,user=None):
     if (user or frappe.session.user) == 'Administrator': return True
     if doc.get('legacy_triage'): return False
@@ -113,33 +102,6 @@ def associate(doc,method=None):
         return
     target=reference(doc)
     if target:doc.business_doctype,doc.business_name=target
-
-
-def query_condition(user=None):
-    # Business permission conditions belong inside the query, before pagination.
-    user=user or frappe.session.user
-    if user == 'Administrator': return ''
-    clauses=[]
-    for dt in frappe.get_all('Relay Contact Type',filters={'enabled':1},pluck='business_doctype',limit_page_length=200):
-        if not frappe.has_permission(dt,'read',user=user):continue
-        query=frappe.qb.get_query(dt,fields=['name'],ignore_permissions=False,user=user,order_by='')
-        subquery=query.get_sql()
-        value=frappe.db.escape(dt)
-        explicit=f"""(`tabRelay Message`.business_doctype={value} AND `tabRelay Message`.business_name IN ({subquery})
-        AND (COALESCE(`tabRelay Message`.ticket_notification,'')!='' OR EXISTS (SELECT 1 FROM `tabRelay Contact` c JOIN `tabDynamic Link` k ON k.parent=c.contact
-         WHERE c.name=`tabRelay Message`.relay_contact AND k.parenttype='Contact' AND k.parentfield='links'
-         AND k.link_doctype={value} AND k.link_name=`tabRelay Message`.business_name)))"""
-        # Records without a business resolve to the only configured link, or the primary one.
-        legacy=f"""(COALESCE(`tabRelay Message`.business_name,'')='' AND `tabRelay Message`.relay_contact IN
-        (SELECT r.name FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact
-         WHERE l.parenttype='Contact' AND l.parentfield='links' AND l.link_doctype={value}
-         AND l.link_name IN ({subquery}) AND
-         ((SELECT count(*) FROM `tabDynamic Link` x JOIN `tabRelay Contact Type` t ON t.business_doctype=x.link_doctype AND t.enabled=1
-          WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links')=1
-          OR (r.primary_doctype={value} AND r.primary_name=l.link_name))))"""
-        clauses.append('('+explicit+' OR '+legacy+')')
-    business = '(COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND ('+' OR '.join(clauses)+'))' if clauses else '1=0'
-    return business
 
 
 def incoming_reference(contact, channel, endpoint, context, links=None):

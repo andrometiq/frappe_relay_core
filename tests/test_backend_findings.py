@@ -63,14 +63,6 @@ class BackendFindings(unittest.TestCase):
                 self.assertEqual(current['body'],'Locally edited')
                 self.assertEqual(current['title'],'Locally edited')
 
-    def test_contact_share_cannot_override_independent_business_guard(self):
-        f=self.fake(); relay=Mock(contact='person',name='contact')
-        relay.has_permission.return_value=True; f.get_doc.return_value=relay
-        with patch.dict('sys.modules',frappe=f), patch.object(permissions,'contact_business_allowed',return_value=False), \
-                patch.object(permissions,'assignment_allowed',return_value=True):
-            with self.assertRaises(PermissionError): permissions.readable_contact('contact')
-            self.assertFalse(permissions.can_read_contact_as('contact','manager'))
-
     def test_telegram_shared_group_requires_every_business_before_hub(self):
         f=self.fake(); f.get_doc.side_effect=[Mock(has_permission=lambda *a:True),Mock(has_permission=lambda *a:False)]
         with patch.object(telegram,'frappe',f), patch.object(telegram,'require_access'), \
@@ -268,10 +260,6 @@ class BackendFindings(unittest.TestCase):
         self.assertEqual(result,{'items':[_dict(name='MODEL',provider='OpenRouter',model='model-id')],'next':None})
         self.assertEqual(f.get_list.call_args.args,('AI Model',))
         self.assertEqual(f.get_list.call_args.kwargs['filters'],{'enabled':1,'account':['in',['account']]})
-
-    def test_manager_contact_permission_still_requires_business_access(self):
-        with patch.object(permissions,'assignment_allowed',return_value=True),patch.object(permissions,'contact_business_allowed',return_value=False):
-            self.assertFalse(permissions.contact_permission(_dict(name='private'),'manager'))
 
     def test_case_lists_filter_each_business_in_shared_contact(self):
         f=self.fake();f.get_all.return_value=[_dict(name='own'),_dict(name='private')]

@@ -70,7 +70,9 @@ Give each staff member one Relay role in Desk (User form, Roles section). A user
 | System Manager | The owner or IT | Everything, including Settings, Hub connection, channels and health. |
 | Relay Hub Service | Not a person. One API user for the Hub. | None. It cannot open Desk or `/relay`. It is only for Hub callbacks. |
 
-All roles also need normal Frappe permission to read the Contact and the linked business record, such as the Customer. Relay does not show a conversation whose customer the user cannot read.
+The Relay role alone decides which conversations a user sees. The user does not need ERPNext roles for this. The linked customer or supplier (name, ledger and other record data) shows only when the user can read that record in ERPNext. Otherwise the chat shows only the contact's name and phone.
+
+A chat without a team or an assigned user is visible only to Team Users, Managers and System Managers. A Relay Communication User does not see it.
 
 Menu and actions by role:
 
@@ -556,6 +558,7 @@ bench --site <your-site> relay-import-whatsapp-core \
 | `--batch` | Messages per insert. Default 2000. |
 | `--dry-run` | Counts only. Writes nothing. |
 | `--undo` | Deletes everything that the import with this label created. |
+| `--team` | Gives this Relay Team every imported chat that has no assignment yet. |
 
 Steps:
 
@@ -564,6 +567,12 @@ Steps:
 3. Open a few old customers in the Inbox and check the history.
 
 What happens: each old chat is matched to a Relay contact by phone number and to the Relay channel of its number. A second run skips messages already imported and updates changed statuses. Imported messages never trigger automatic replies or opt-outs.
+
+Imported chats have no team. Only Team Users, Managers and System Managers see them. To show them to a team of Relay Communication Users, assign them to that team. Chats that already have an assignment are not changed:
+
+```sh
+bench --site <your-site> relay-assign-imported-chats --source-site-label sales.example.com --team <Relay Team>
+```
 
 ### 5.11 Troubleshooting
 

@@ -68,16 +68,6 @@ class PrimaryLinkTests(unittest.TestCase):
         record.has_permission.return_value = False
         self.assertIsNone(access.primary_record('contact'))
 
-    def test_legacy_query_resolves_to_the_only_or_primary_link(self):
-        self.fake.get_all.return_value = ['Customer']
-        self.fake.has_permission.return_value = True
-        self.fake.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM `tabCustomer`'
-        self.fake.db.escape = lambda value: f"'{value}'"
-        condition = access.query_condition()
-        self.assertIn("OR (r.primary_doctype='Customer' AND r.primary_name=l.link_name)", condition)
-        self.assertEqual(condition.count('('), condition.count(')'))
-
-
 class ConversationAccessTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe()
@@ -100,19 +90,6 @@ class ConversationAccessTests(unittest.TestCase):
         self.assertFalse(access.message_allowed(_dict(message, legacy_triage=1), user='reader'))
         self.fake.get_doc.side_effect = LookupError
         self.assertFalse(access.message_allowed(message, user='reader'))
-
-    def test_query_adds_the_readable_contact_scope(self):
-        self.fake.has_permission.return_value = True
-        self.fake.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM `tabRelay Contact`'
-        with patch.object(access, 'query_condition', return_value='business'):
-            condition = access.message_condition('reader')
-        self.assertEqual(condition, "(business OR (COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND "
-                                    "`tabRelay Message`.relay_contact IN (SELECT name FROM `tabRelay Contact`)))")
-        self.fake.has_permission.return_value = False
-        with patch.object(access, 'query_condition', return_value='business'):
-            self.assertEqual(access.message_condition('reader'), 'business')
-        with patch.object(access, 'query_condition', return_value=''):
-            self.assertEqual(access.message_condition('Administrator'), '')
 
     def test_business_timeline_takes_unstamped_messages_only_from_resolved_contacts(self):
         linked = Mock()

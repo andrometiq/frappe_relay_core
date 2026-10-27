@@ -16,9 +16,10 @@ from frappe.commands import get_site, pass_context
 @click.option('--batch', default=2000, show_default=True, help='Messages per insert.')
 @click.option('--dry-run', is_flag=True, help='Count only; write nothing.')
 @click.option('--undo', is_flag=True, help='Delete what the import with this --source-site-label created.')
+@click.option('--team', help='Relay Team for imported conversations that have no assignment yet.')
 @pass_context
 def relay_import_whatsapp_core(context, source_db, source_host, source_port, source_user, source_password_file,
-                               source_site_label, channels, files_dir, batch, dry_run, undo):
+                               source_site_label, channels, files_dir, batch, dry_run, undo, team):
     """Import frappe_whatsapp_core messages into Relay. Safe to re-run: imported messages are skipped."""
     import frappe
 
@@ -40,10 +41,31 @@ def relay_import_whatsapp_core(context, source_db, source_host, source_port, sou
         result = legacy_database.Importer(source, source_site_label, channel_map, batch, dry_run, files_dir).run()
         result['seconds'] = round((frappe.utils.now_datetime() - started).total_seconds(), 1)
         result['dry_run'] = dry_run
+        if team and not dry_run:
+            result['team'] = legacy_database.assign_team(source_site_label, team)
         click.echo(json.dumps(result, indent=1, default=str))
     finally:
         source.close()
         frappe.destroy()
 
 
-commands = [relay_import_whatsapp_core]
+@click.command('relay-assign-imported-chats')
+@click.option('--source-site-label', required=True, help='The --source-site-label of the import.')
+@click.option('--team', required=True, help='Relay Team for its conversations that have no assignment yet.')
+@pass_context
+def relay_assign_imported_chats(context, source_site_label, team):
+    """Assign the conversations of one WhatsApp Core import to a team. Assigned conversations are kept."""
+    import frappe
+
+    from relay_core import legacy_database
+
+    frappe.init(get_site(context))
+    frappe.connect()
+    frappe.set_user('Administrator')
+    try:
+        click.echo(json.dumps(legacy_database.assign_team(source_site_label, team), indent=1))
+    finally:
+        frappe.destroy()
+
+
+commands = [relay_import_whatsapp_core, relay_assign_imported_chats]

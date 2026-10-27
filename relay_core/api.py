@@ -246,16 +246,19 @@ def contact_details(contact):
     """Read permitted business links and channel endpoint provenance for a Contact."""
     require_access()
     person = frappe.get_doc('Contact', contact)
-    person.check_permission('read')
+    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
+    # A visible conversation shows its contact's name and phone without Contact read.
+    if relay:
+        readable_contact(relay)
+    else:
+        person.check_permission('read')
     configured = set(business_types())
     links = [{'doctype': row.link_doctype, 'name': row.link_name}
              for row in person.links
              if row.link_doctype in configured
              and frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')]
-    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
     endpoints, primary = [], None
     if relay:
-        readable_contact(relay)
         from relay_core.business_access import primary_record
         primary = primary_record(relay)
         rows = frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': relay},
