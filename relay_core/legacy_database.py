@@ -28,6 +28,8 @@ MESSAGE = 'tabWhatsApp Core Message'
 RETRIES = 3
 ACTIVITY = ('last_message_at', 'last_message')
 OPT_OUT = ('marketing_opt_out', 'opt_out_changed_at', 'modified')
+REACTION = ('reactions', 'message_updates')
+ARCHIVE = '/private/files/relay-archive-'
 # What a re-run takes from a changed source row; identity, contact and channel never change.
 REFRESHED = ('status', 'content', 'message_type', 'message_data', 'delivery_error', 'provider_id', 'provider_context',
              'sent_at', 'legacy_author', 'legacy_checksum', 'legacy_data')
@@ -191,11 +193,16 @@ class Importer:
         targets = [provider_key(job.channel, row.sender_endpoint, target) for row in rows
                    if (target := legacy.object_value(row.message_data).get('reaction', {}).get('message_id'))]
         saved = created.setdefault('reactions', {})
-        for target in frappe.get_all('Relay Message', filters={'provider_message_key': ['in', targets], 'legacy_source': ['is', 'not set']},
-                                     fields=['name', 'reactions', 'message_updates']) if targets else []:
+        live = frappe.get_all('Relay Message', filters={'provider_message_key': ['in', targets], 'legacy_source': ['is', 'not set']},
+                              fields=['name', 'reactions', 'message_updates']) if targets else []
+        for target in live:
             saved.setdefault(target.name, {'reactions': target.reactions, 'message_updates': target.message_updates})
         report = {'mismatches': []}
         project_reactions(job, report)
+        # The state after the import: undo puts back the earlier state only while the target still has it.
+        if live:
+            created['reactions_after'] = {target.name: frappe.db.get_value('Relay Message', target.name, REACTION, as_dict=True)
+                                          for target in live}
         self.counts['reactions_projected'] += len(rows) - len(report['mismatches'])
         for item in report['mismatches']:
             self.failures.append({'message': item['source'], 'error': item['detail']})
@@ -249,6 +256,7 @@ class Importer:
         """Rows whose provider message is not in Relay yet (a live copy wins) and not repeated in this page."""
         keys = {row.name: provider_key(job.channel, manifest['endpoint'], row.provider_message_id)
                 for row in rows if row.provider_message_id}
+        # A row without a provider ID is unique by its source name, so only provider keys are compared.
         live = set(frappe.get_all('Relay Message', filters={'provider_message_key': ['in', list(set(keys.values()))]},
                                   pluck='provider_message_key')) if keys else set()
         result, seen = [], set()
@@ -256,7 +264,7 @@ class Importer:
             key = keys.get(row.name)
             if key in live:
                 self.failures.append({'message': row.name, 'error': 'Provider message already in Relay (live copy kept)'})
-            elif key in seen:
+            elif key and key in seen:
                 self.failures.append({'message': row.name, 'error': 'Provider message repeats in the source'})
             else:
                 seen.add(key)
@@ -286,7 +294,7 @@ class Importer:
         data = legacy.object_value(message.message_data)
         stored = data.get('legacy_attachments') or []
         return (not data.get('attachment') or any(item.get('availability') != 'available' for item in stored)
-                or not frappe.db.exists('File', data['attachment']))
+                or not all(has_copy(item) for item in stored or [{'attachment': data['attachment']}]))
 
     def message(self, row, job, manifest, files, name=None):
         values, data, _ = legacy.projection(row, job, manifest)
@@ -342,9 +350,9 @@ class Importer:
         with open(path, 'rb') as source, tempfile.TemporaryFile() as temporary:
             digest, size = copy_stream(source, temporary)
             temporary.seek(0)
-            result = attach(temporary, {'sha256': digest, 'size': size, 'filename': path.name}, message)
-        self.copied.add('/private/files/relay-archive-' + digest)
-        return result
+            # Tracked before attach() writes the bytes, so a failed File insert never leaves them behind.
+            self.copied.add(ARCHIVE + digest)
+            return attach(temporary, {'sha256': digest, 'size': size, 'filename': path.name}, message)
 
     def source_file(self, url):
         """The file in --files-dir by name, else, when the source is this site, the file at its own URL.
@@ -510,6 +518,8 @@ def merge_created(stored, created):
     for key, value in created.items():
         if isinstance(value, list):
             merged[key] = list(dict.fromkeys(merged.get(key, []) + value))
+        elif key == 'reactions_after':
+            merged[key] = {**merged.get(key, {}), **value}
         elif isinstance(value, dict):
             merged[key] = {**value, **merged.get(key, {})}
         else:
@@ -547,14 +557,29 @@ def source_password(path=None):
     return os.environ.get('RELAY_SOURCE_DB_PASSWORD')
 
 
+def has_copy(item):
+    """The File row of one copied attachment exists and, when its checksum is known, so do its bytes."""
+    if not frappe.db.exists('File', item.get('attachment')):
+        return False
+    return not item.get('sha256') or copy_path(ARCHIVE + item['sha256']).is_file()
+
+
+def copy_path(url):
+    return Path(frappe.get_site_path(url.lstrip('/')))
+
+
 def remove_unused_copies(file_urls):
     """Delete the media bytes the import copied (see legacy_media.attach) that no File row uses any more.
-    Linked source files are never touched."""
-    copies = {url for url in file_urls if url and url.startswith('/private/files/relay-archive-')}
+    Linked source files are never touched. Safe to repeat; returns how many files it deleted."""
+    copies = {url for url in file_urls if url and url.startswith(ARCHIVE)}
     used = set(frappe.get_all('File', filters={'file_url': ['in', list(copies)]}, pluck='file_url')) if copies else set()
+    deleted = 0
     for url in copies - used:
-        Path(frappe.get_site_path(url.lstrip('/'))).unlink(missing_ok=True)
-    return len(copies - used)
+        path = copy_path(url)
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            deleted += 1
+    return deleted
 
 
 def assign_team(site_label, team):
