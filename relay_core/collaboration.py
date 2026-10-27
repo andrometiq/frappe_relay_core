@@ -3,7 +3,7 @@ import hashlib
 import json
 import re
 import frappe
-from relay_core.permissions import require_access, readable_contact, MANAGER_ROLES
+from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.api import validate_reference
 
 
@@ -68,7 +68,7 @@ def authorize(doc, user=None):
 
 
 def editable(doc):
-    return doc.owner == frappe.session.user or bool(MANAGER_ROLES.intersection(frappe.get_roles()))
+    return doc.owner == frappe.session.user or can_manage()
 
 
 def serialize(doc):

@@ -14,7 +14,7 @@ def digest(value):return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
 def campaign(name,active=False):
-    require_access(manage=True);doc=frappe.get_doc('Relay Campaign',name);doc.check_permission('read')
+    require_access('Relay Campaign');doc=frappe.get_doc('Relay Campaign',name);doc.check_permission('read')
     if doc.business_doctype:
         frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
     channel=frappe.get_doc('Relay Channel',doc.channel);channel.check_permission('read')
@@ -33,13 +33,13 @@ def prepared(doc,contact,arguments=None):
 
 @frappe.whitelist(methods=['GET'])
 def channels():
-    require_access(manage=True)
+    require_access('Relay Campaign')
     return frappe.get_list('Relay Channel',filters={'channel':'WhatsApp','account':connection_value('relay_hub_account'),'enabled':1},fields=['name','account','channel'],page_length=20)
 
 
 @frappe.whitelist(methods=['GET'])
 def directory(after=None,query='',status=None):
-    require_access(manage=True)
+    require_access('Relay Campaign')
     query=(query or '').strip()
     if len(query)>140:frappe.throw('Campaign search is too long')
     allowed_statuses=('Draft','Running','Paused','Cancelling','Completed','Cancelled')

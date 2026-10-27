@@ -47,7 +47,7 @@ class BusinessEventTests(unittest.TestCase):
             template.account, template.denied = 'sim-v1', True
             with self.assertRaises(PermissionError): self.service.template_preview('TPL-1')
         self.assertEqual(execute.call_count, 2)
-        self.service.require_access.assert_called_with(configure=True)
+        self.service.require_access.assert_called_with('Relay Business Event Rule', 'write')
 
     def test_missing_template_preview_fails_without_looping_on_repeated_cursor(self):
         self.service.require_access = Mock()

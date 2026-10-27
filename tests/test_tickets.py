@@ -10,7 +10,8 @@ from unittest.mock import Mock, call, patch
 class TicketTests(unittest.TestCase):
     def setUp(self):
         def throw(message, exception=ValueError): raise exception(message)
-        self.f = types.SimpleNamespace(get_roles=lambda: ['Relay Communication User'], throw=throw, whitelist=lambda **kw: lambda fn: fn, get_doc=Mock())
+        self.f = types.SimpleNamespace(get_roles=lambda: ['Relay Communication User'], throw=throw, whitelist=lambda **kw: lambda fn: fn, get_doc=Mock(),
+                                       has_permission=lambda doctype, ptype='read', **kwargs: False)
         spec = importlib.util.spec_from_file_location('tested_tickets', Path('relay_core/tickets.py'))
         self.api = types.ModuleType('relay_core.api')
         def reference(value, prefix):

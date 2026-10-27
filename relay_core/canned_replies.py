@@ -7,7 +7,7 @@ def directory(query='',after=None):
     require_access()
     if not isinstance(query,str) or len(query)>80:frappe.throw('Invalid search')
     if after is not None and (not isinstance(after,str) or len(after)>140):frappe.throw('Invalid cursor')
-    configure='System Manager' in frappe.get_roles()
+    configure=frappe.has_permission('Relay Canned Reply', 'write')
     filters={'channel':'WhatsApp'}
     # Communication users can use published replies without Desk configuration access.
     # Drafts remain visible only to the users who can configure this library.

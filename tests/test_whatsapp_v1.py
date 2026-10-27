@@ -313,11 +313,13 @@ class DisabledSurfaceTests(unittest.TestCase):
     def test_triage_realtime_is_manager_scoped_without_raw_event_rest_access(self):
         from relay_core import realtime
         fake=SimpleNamespace(get_all=Mock(return_value=['manager']),publish_realtime=Mock())
-        with patch.object(realtime,'frappe',fake):realtime.changed(_dict(doctype='Relay Hub Event'))
+        with patch.object(realtime,'frappe',fake),patch('frappe.permissions.get_doctype_roles',return_value=['Relay Communication Manager']):
+            realtime.changed(_dict(doctype='Relay Hub Event'))
         self.assertEqual({call.kwargs['user'] for call in fake.publish_realtime.call_args_list},{'Administrator','manager'})
         self.assertTrue(all(call.args[1]=={'kind':'incoming'} for call in fake.publish_realtime.call_args_list))
         metadata=json.loads(__import__('pathlib').Path('relay_core/relay_core/doctype/relay_hub_event/relay_hub_event.json').read_text())
-        self.assertFalse(any(row.get('create') or row.get('write') for row in metadata['permissions']))
+        self.assertFalse(any(row.get('write') for row in metadata['permissions']))
+        self.assertEqual({row['role'] for row in metadata['permissions'] if row.get('create')},{'System Manager','Relay Hub Service'})
 
     def test_malformed_provider_event_is_retained_for_failed_projection(self):
         from relay_core.inbound import split_payload

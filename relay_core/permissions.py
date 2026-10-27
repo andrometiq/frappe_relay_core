@@ -1,33 +1,16 @@
-"""Server-side Relay authorization. Never trust role names supplied by a client."""
-MANAGER = 'Relay Communication Manager'
+"""Server-side Relay authorization. DocPerm decides DocType access; one row rule decides conversations."""
 USER = 'Relay Communication User'
-WA_MANAGER = 'WhatsApp Manager'
-WA_USER = 'WhatsApp User'
-WA_MULTI = 'WhatsApp Multi-Channel User'
-# Old Relay roles stay as aliases of the WhatsApp roles.
-AGENT_MANAGER_ROLES = frozenset({MANAGER, WA_MANAGER})
-MANAGER_ROLES = AGENT_MANAGER_ROLES | {'System Manager'}
-USER_ROLES = frozenset({USER, WA_USER, WA_MULTI})
-RELAY_ROLES = MANAGER_ROLES | USER_ROLES
+TEAM_USER = 'Relay Communication Team User'
+MANAGER = 'Relay Communication Manager'
+HUB_SERVICE = 'Relay Hub Service'
+# These roles see every team's conversations; a User sees only its own teams.
+ALL_TEAMS_ROLES = frozenset({TEAM_USER, MANAGER, 'System Manager'})
 
 
-def roles_of(user=None):
-    import frappe
-    return set(frappe.get_roles(user) if user else frappe.get_roles())
-
-
-def is_manager(user=None):
-    return bool(roles_of(user) & MANAGER_ROLES)
-
-
-def internal_record_permission(doc=None, user=None, permission_type=None):
+def sees_all_teams(user=None):
     import frappe
     user = user or frappe.session.user
-    return user == 'Administrator'
-
-
-def internal_record_query(user=None):
-    return '' if internal_record_permission(user=user) else '1=0'
+    return user == 'Administrator' or bool(ALL_TEAMS_ROLES.intersection(frappe.get_roles(user)))
 
 
 def readable_contact(name):
@@ -60,22 +43,33 @@ def require_administrator():
         frappe.throw('Account-wide operations require Administrator', frappe.PermissionError)
 
 
-def require_access(*, configure=False, manage=False):
+def can_manage(user=None):
     import frappe
-    roles = set(frappe.get_roles(frappe.session.user))
-    allowed = {'System Manager'} if configure else MANAGER_ROLES
-    if not configure and not manage:
-        allowed = RELAY_ROLES
-    if not roles.intersection(allowed):
+    return frappe.has_permission('Relay Team', 'write', user=user)
+
+
+def can_configure(user=None):
+    import frappe
+    return frappe.has_permission('Relay Settings', 'write', user=user)
+
+
+def require_access(doctype='Relay Contact', ptype='read', *, configure=False, manage=False):
+    """Check DocPerm on a DocType. manage and configure name the Relay Team and Relay Settings rights."""
+    import frappe
+    if configure:
+        doctype, ptype = 'Relay Settings', 'write'
+    elif manage:
+        doctype, ptype = 'Relay Team', 'write'
+    if not frappe.has_permission(doctype, ptype):
         frappe.throw('Not permitted', frappe.PermissionError)
 
 
 def install_roles():
     """Run through the app installer, never from a public endpoint."""
     import frappe
-    for name in (MANAGER, USER, WA_MANAGER, WA_USER, WA_MULTI, 'Relay Hub Service'):
+    for name in (USER, TEAM_USER, MANAGER, HUB_SERVICE):
         if not frappe.db.exists('Role', name):
-            frappe.get_doc({'doctype': 'Role', 'role_name': name, 'desk_access': 0 if name == 'Relay Hub Service' else 1}).insert()
+            frappe.get_doc({'doctype': 'Role', 'role_name': name, 'desk_access': 0 if name == HUB_SERVICE else 1}).insert()
 
 
 def sequential_name(kind):
@@ -117,26 +111,19 @@ def after_migrate():
 
 
 def assignment_allowed(contact, user=None):
+    """The conversation row rule: all teams, or assigned to me, my team, or my claimed business group."""
     import frappe
     user = user or frappe.session.user
-    roles = set(frappe.get_roles(user))
-    if user == 'Administrator' or roles & MANAGER_ROLES:
+    if sees_all_teams(user):
         return True
-    if not roles & USER_ROLES:
+    if not frappe.has_permission('Relay Contact', 'read', user=user):
         return False
     from relay_core.business_groups import responsible
-    if responsible(contact,user):return True
+    if responsible(contact, user): return True
     row = frappe.db.get_value('Relay Conversation Assignment', {'relay_contact':contact}, ['team','assigned_to'], as_dict=True)
     if not row: return False
-    if row.team and WA_MULTI in roles and team_access_allowed(row.team, user): return True
-    if row.assigned_to: return row.assigned_to == user
+    if row.assigned_to == user: return True
     return bool(row.team and frappe.db.exists('Relay Team Member', {'parent':row.team, 'parenttype':'Relay Team','user':user}))
-
-
-def team_access_allowed(team, user):
-    """Explicit Relay Team Access rows; no rows means no extra teams."""
-    import frappe
-    return bool(frappe.db.exists('Relay Team Access', {'parent':team, 'parenttype':'Relay Team', 'user':user}))
 
 
 def contact_permission(doc, user=None, permission_type=None):
@@ -149,18 +136,16 @@ def message_permission(doc, user=None, permission_type=None):
 
 
 def assignment_condition(user=None, *, message=False):
+    """SQL twin of assignment_allowed."""
     import frappe
     user = user or frappe.session.user
-    roles=set(frappe.get_roles(user))
-    if user=='Administrator' or roles & MANAGER_ROLES: return ''
-    if not roles & USER_ROLES: return '1=0'
+    if sees_all_teams(user): return ''
+    if not frappe.has_permission('Relay Contact', 'read', user=user): return '1=0'
     contact='`tabRelay Message`.relay_contact' if message else '`tabRelay Contact`.name'
     quoted=frappe.db.escape(user)
-    extra=(f""" OR a.team IN (SELECT t.parent FROM `tabRelay Team Access` t
-        WHERE t.parenttype='Relay Team' AND t.user={quoted})""" if WA_MULTI in roles else '')
     direct=f"""{contact} IN (SELECT a.relay_contact FROM `tabRelay Conversation Assignment` a
-        WHERE a.assigned_to={quoted} OR (COALESCE(a.assigned_to,'')='' AND a.team IN
-        (SELECT m.parent FROM `tabRelay Team Member` m WHERE m.parenttype='Relay Team' AND m.user={quoted})){extra})"""
+        WHERE a.assigned_to={quoted} OR a.team IN
+        (SELECT m.parent FROM `tabRelay Team Member` m WHERE m.parenttype='Relay Team' AND m.user={quoted}))"""
     from relay_core.business_groups import responsibility_condition
     return '('+direct+' OR '+responsibility_condition(user,contact)+')'
 
@@ -193,7 +178,7 @@ def message_query(user=None):
 
 def require_business_assignment(contact):
     import frappe
-    if frappe.session.user=='Administrator' or is_manager(): return
+    if sees_all_teams(): return
     relay=frappe.db.get_value('Relay Contact',{'contact':contact},'name')
     if not relay or not assignment_allowed(relay):
         frappe.throw('This business contact is not assigned to you',frappe.PermissionError)
@@ -201,7 +186,7 @@ def require_business_assignment(contact):
 
 def has_app_permission():
     import frappe
-    return frappe.session.user != 'Guest' and bool(roles_of() & RELAY_ROLES)
+    return frappe.session.user != 'Guest' and frappe.has_permission('Relay Contact', 'read')
 
 
 def can_read_contact_as(name,user):

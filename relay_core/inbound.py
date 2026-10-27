@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from functools import wraps
 import frappe
 from relay_core.settings import value as connection_value
+from relay_core.permissions import require_access
 
 
 callback_write = ContextVar('relay_authenticated_callback', default=False)
@@ -95,8 +96,7 @@ def validate_callback(raw, timestamp, signature, secret, expected_account):
 def receive(**_ignored):
     started = time.time_ns()
     projection_ms = 0
-    if not {'System Manager', 'Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
-        frappe.throw('Not permitted', frappe.PermissionError)
+    require_access('Relay Hub Event', 'create')
     try:
         payload = validate_callback(
             frappe.request.get_data(), frappe.request.headers.get('X-Relay-Timestamp'),
@@ -222,8 +222,7 @@ def validate_status_callback(raw, timestamp, signature, secret, expected_account
 def receive_statuses(**_ignored):
     """Durably accept a bounded compact receipt batch for background projection."""
     started = time.time_ns()
-    if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
-        frappe.throw('Not permitted',frappe.PermissionError)
+    require_access('Relay Hub Event', 'create')
     try:
         payload = validate_status_callback(frappe.request.get_data(),
             frappe.request.headers.get('X-Relay-Timestamp'),frappe.request.headers.get('X-Relay-Signature'),
@@ -322,8 +321,7 @@ def validate_channel_status_callback(raw, timestamp, signature, secret, expected
 @retry_callback
 def receive_channel_statuses(**_ignored):
     """Acknowledge only after a signed channel status batch is durably stored."""
-    if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
-        frappe.throw('Not permitted',frappe.PermissionError)
+    require_access('Relay Hub Event', 'create')
     try:
         payload = validate_channel_status_callback(frappe.request.get_data(),
             frappe.request.headers.get('X-Relay-Timestamp'),frappe.request.headers.get('X-Relay-Signature'),
@@ -389,8 +387,7 @@ def validate_bulk_update_callback(raw, timestamp, signature, secret, expected_ac
 @retry_callback
 def receive_bulk_updates(**_ignored):
     """Store one signed campaign update batch; projection applies it in a worker."""
-    if not {'System Manager','Relay Hub Service'}.intersection(frappe.get_roles(frappe.session.user)):
-        frappe.throw('Not permitted',frappe.PermissionError)
+    require_access('Relay Hub Event', 'create')
     try:
         payload = validate_bulk_update_callback(frappe.request.get_data(),
             frappe.request.headers.get('X-Relay-Timestamp'),frappe.request.headers.get('X-Relay-Signature'),

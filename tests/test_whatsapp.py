@@ -11,7 +11,7 @@ class WhatsAppTests(unittest.TestCase):
         self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),db=Mock(),get_roles=Mock(return_value=['Relay Communication Manager']),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'),cache=types.SimpleNamespace(get_value=lambda key:None,set_value=Mock()))
         spec=importlib.util.spec_from_file_location('wa_test',Path('relay_core/whatsapp.py'));self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
-        self.api.require_business_assignment=Mock();self.api.connection_value=lambda key:'';self.api.require_access=Mock();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
+        self.api.require_business_assignment=Mock();self.api.connection_value=lambda key:'';self.api.require_access=Mock();self.api.can_manage=lambda:'Relay Communication Manager' in self.f.get_roles();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
         self.audit=patch.multiple('relay_core.whatsapp_templates',record_request=Mock(),apply_request=Mock(),overlay=Mock(side_effect=lambda page:page))
         self.audit.start();self.addCleanup(self.audit.stop)
         self.channels=patch.multiple('relay_core.hub_channels',hub_arguments=Mock(side_effect=lambda channel,args:args),
@@ -73,7 +73,7 @@ class WhatsAppTests(unittest.TestCase):
     def test_template_sample_upload_is_manager_scoped(self):
         args={'media_type':'document','filename':'sample.pdf','mime_type':'application/pdf','content_base64':'JVBERi0xLjc='}
         self.api.execute('templates.media_upload',args)
-        self.api.require_access.assert_called_once_with(manage=True)
+        self.api.require_access.assert_called_once_with('Relay WhatsApp Template','write')
         self.assertEqual(self.hub.execute.call_args.args[0],dict(args,operation='templates.media_upload'))
         self.api.require_access.side_effect=PermissionError('Denied')
         self.hub.reset_mock()
@@ -85,7 +85,7 @@ class WhatsAppTests(unittest.TestCase):
         args={'media_type':'image','mime_type':'image/png','filename':'offer.png','content_base64':'iVBORw0KGgo='}
         self.hub.execute.side_effect=[{'site':'http://yrp.site:8002'},{'id':'555'}]
         self.assertEqual(self.api.execute('messages.media_upload',args),{'id':'555'})
-        self.api.require_access.assert_called_once_with(manage=True)
+        self.api.require_access.assert_called_once_with('Relay Campaign','write')
         self.assertEqual(self.hub.execute.call_args.args[0],dict(args,operation='messages.media_upload'))
         whatsapp_templates.record_request.assert_not_called()
         with self.assertRaises(ValueError):self.api.prepare('messages.media_upload',dict(args,media_url='https://cdn.example/a.png'))

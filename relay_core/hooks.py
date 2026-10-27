@@ -25,11 +25,6 @@ scheduler_events = {
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
 has_permission = {'Relay Contact':'relay_core.permissions.contact_permission', 'Relay Message':'relay_core.permissions.message_permission', 'Relay Ticket':'relay_core.tickets.permission'}
-for _doctype in ('Relay Automation Run', 'Relay Business Event Delivery', 'Relay Hub Event', 'Relay Business Routing',
-                 'Relay Automation Outbox', 'Relay Conversation Summary', 'Relay Message Translation',
-                 'Relay Internal Comment', 'Relay Flow Run', 'Relay Case', 'Relay Conversation Topic'):
-    has_permission[_doctype] = 'relay_core.permissions.internal_record_permission'
-    permission_query_conditions[_doctype] = 'relay_core.permissions.internal_record_query'
 has_permission['Relay Message Action'] = 'relay_core.business_access.action_permission'
 permission_query_conditions['Relay Message Action'] = 'relay_core.business_access.action_query'
 

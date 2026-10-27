@@ -306,10 +306,11 @@ class BackendFindings(unittest.TestCase):
         changed=_dict(row,delivery_status='Queued')
         with self.assertRaisesRegex(ValueError,'Conflicting'):legacy.check_revision(existing,changed,{'watermark':'2026-02-01'})
 
-    def test_native_auxiliary_records_and_outbox_are_administrator_only(self):
+    def test_native_auxiliary_records_and_outbox_are_system_manager_only(self):
         from relay_core import hooks
         for dt in ('Relay Conversation Summary','Relay Message Translation','Relay Internal Comment','Relay Flow Run','Relay Automation Outbox'):
-            self.assertEqual(hooks.has_permission[dt],'relay_core.permissions.internal_record_permission')
-            self.assertFalse(permissions.internal_record_permission(user='system-manager'))
-            self.assertEqual(permissions.internal_record_query(user='system-manager'),'1=0')
-            self.assertTrue(permissions.internal_record_permission(user='Administrator'))
+            slug=dt.lower().replace(' ','_')
+            meta=json.loads(Path(f'relay_core/relay_core/doctype/{slug}/{slug}.json').read_text())
+            self.assertEqual({row['role'] for row in meta['permissions']},{'System Manager'},dt)
+            self.assertNotIn(dt,hooks.has_permission)
+            self.assertNotIn(dt,hooks.permission_query_conditions)

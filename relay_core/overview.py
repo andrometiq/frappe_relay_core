@@ -1,7 +1,7 @@
 """Bounded, permission-filtered recent workspace activity; no provider requests."""
 from collections import Counter
 import frappe
-from relay_core.permissions import require_access,readable_contact
+from relay_core.permissions import require_access, readable_contact, can_configure
 
 
 @frappe.whitelist(methods=['GET'])
@@ -27,7 +27,7 @@ def read():
         if date in daily:daily[date][row.direction.lower()]+=1
     operations=None
     recovery=None
-    if 'System Manager' in frappe.get_roles():
+    if can_configure():
         from relay_core.operations import recovery_status
         recovery=recovery_status()
         from relay_core.settings import value

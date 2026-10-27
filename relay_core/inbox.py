@@ -2,7 +2,7 @@
 import hashlib
 import json
 import frappe
-from relay_core.permissions import require_access, readable_contact, MANAGER_ROLES
+from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
 
 
@@ -64,7 +64,7 @@ def read(contact):
     state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(contact)},['last_read','starred','folder','last_seen'],as_dict=True) or {}
     unread=unread_count(contact)
     assignment=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},['team','assigned_to'],as_dict=True) or {}
-    return dict(state, unread=unread, unread_more=False, assignment=assignment, can_assign=bool(MANAGER_ROLES.intersection(frappe.get_roles())))
+    return dict(state, unread=unread, unread_more=False, assignment=assignment, can_assign=frappe.has_permission('Relay Conversation Assignment', 'write'))
 
 
 @frappe.whitelist(methods=['GET'])

@@ -47,8 +47,10 @@ class ReceiveTests(unittest.TestCase):
         fake.db.exists.return_value = False
         settings = {'relay_callback_secret': SECRET, 'relay_hub_account': 'site-a'}
         with patch.object(inbound, 'frappe', fake), patch.object(inbound, 'connection_value', settings.get), \
+                patch.object(inbound, 'require_access') as access, \
                 patch.object(inbound, 'insert_event', return_value=_dict(flags=_dict())) as insert:
             getattr(inbound, method)()
+        access.assert_called_once_with('Relay Hub Event', 'create')
         return [call.args[0] for call in insert.call_args_list]
 
     def test_events_store_their_channel_key_and_legacy_events_store_none(self):

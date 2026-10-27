@@ -1,6 +1,6 @@
 """Business DocTypes whose records a contact can be linked to."""
 import frappe
-from relay_core.permissions import require_access
+from relay_core.permissions import require_access, can_configure
 
 FIELDS = ['business_doctype', 'label', 'enabled', 'grouping_field']
 
@@ -9,7 +9,7 @@ FIELDS = ['business_doctype', 'label', 'enabled', 'grouping_field']
 def list_types():
     """Configured types the user can read; System Managers also see disabled ones."""
     require_access()
-    filters = {} if 'System Manager' in frappe.get_roles() else {'enabled': 1}
+    filters = {} if can_configure() else {'enabled': 1}
     rows = frappe.get_all('Relay Contact Type', filters=filters, fields=FIELDS,
                           order_by='business_doctype asc', limit_page_length=200)
     return [row for row in rows if frappe.has_permission(row.business_doctype, 'read')]

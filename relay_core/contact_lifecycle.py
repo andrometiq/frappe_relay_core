@@ -3,7 +3,7 @@ import hashlib
 
 import frappe
 from relay_core.identity import bindings, contact_identities, normalize
-from relay_core.permissions import MANAGER_ROLES
+from relay_core.permissions import can_manage
 
 
 def relay_contact(person_name):
@@ -39,7 +39,7 @@ def on_update(person, method=None):
             set_verified(frappe.get_doc('Relay Contact Endpoint', row.name), 0)
             replaced.add((row.channel, provider))
 
-    if not MANAGER_ROLES.intersection(frappe.get_roles()):
+    if not can_manage():
         return
     for channel, provider in replaced:
         for value in after[provider] - before[provider]:

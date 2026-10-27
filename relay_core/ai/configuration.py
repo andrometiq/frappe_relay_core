@@ -110,7 +110,7 @@ def action_contracts(doc):
 
 
 def validate_skill(doc):
-    require_access(configure=True)
+    require_access('Relay AI Skill', 'write')
     for field, limit, required in (('instructions', 8000, True), ('target', 2000, bool(doc.enabled)),
             ('reply_style', 2000, False), ('exact_trigger', 140, False)):
         value = doc.get(field) or ''
@@ -153,7 +153,7 @@ def validate_skill(doc):
 
 @frappe.whitelist(methods=['GET'])
 def directory(after=None):
-    require_access(configure=True)
+    require_access('Relay AI Skill')
     rows = frappe.get_list('Relay AI Skill', filters={'name': ['>', after]} if after else {},
         fields=['name', *FIELDS], order_by='name asc', page_length=31)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
@@ -161,7 +161,7 @@ def directory(after=None):
 
 @frappe.whitelist(methods=['POST'])
 def save(values, name=None):
-    require_access(configure=True)
+    require_access('Relay AI Skill', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
     if not isinstance(values, dict) or set(values) - set(FIELDS):
         raise ValueError('Invalid skill fields')
@@ -172,7 +172,7 @@ def save(values, name=None):
 
 @frappe.whitelist(methods=['POST'])
 def test_skill(name, message):
-    require_access(configure=True)
+    require_access('Relay AI Skill', 'write')
     skill = frappe.get_doc('Relay AI Skill', name); skill.check_permission('read')
     source = frappe.get_doc('Relay Message', message); source.check_permission('read')
     import time
@@ -209,7 +209,7 @@ def test_skill(name, message):
 @frappe.whitelist(methods=['GET'])
 def editor_options(kind, query='', doctype=None, business_doctype=None, action=None, selected=None, skill=None):
     """Bounded, permission-checked captions; identifiers are values, never labels."""
-    require_access(configure=True)
+    require_access('Relay AI Skill', 'write')
     from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
     if not isinstance(query, str) or len(query) > 80:
         raise ValueError('Use at most 80 search characters')
