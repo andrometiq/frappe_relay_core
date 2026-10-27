@@ -70,6 +70,7 @@ for _event in ('after_insert', 'on_submit', 'on_cancel'):
 scheduler_events['cron']['* * * * *'].append('relay_core.business_events.recover')
 scheduler_events['cron']['*/10 * * * *'] = ['relay_core.whatsapp_templates.sync']
 scheduler_events.setdefault('daily', []).append('relay_core.billing.refresh_configured')
+scheduler_events['daily'].append('relay_core.channel_sync.sync')
 
 after_migrate.append('relay_core.ai.samples.install_samples')
 after_install.append('relay_core.ai.samples.install_samples')

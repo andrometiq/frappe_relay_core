@@ -106,6 +106,10 @@ def project(name, business_overrides=None):
             raise ValueError('Unsupported channel')
     except (ValueError, TypeError):
         set_status(name, 'Failed'); return
+    if payload.get('object') == 'relay_channels':
+        from relay_core.channel_sync import queue_sync
+        queue_sync()
+        set_status(name, 'Projected'); return
     if 'channel_statuses' in payload:
         from relay_core.channel_statuses import project_batch
         project_batch(event, payload['channel_statuses'])

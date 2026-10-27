@@ -8,6 +8,7 @@
   "field_order": [
     "event_key",
     "account",
+    "hub_channel",
     "hub_event_id",
     "payload",
     "projection_status",
@@ -26,6 +27,12 @@
       "label": "Account",
       "fieldtype": "Data",
       "reqd": 1
+    },
+    {
+      "fieldname": "hub_channel",
+      "label": "Hub channel",
+      "fieldtype": "Data",
+      "read_only": 1
     },
     {
       "fieldname": "hub_event_id",

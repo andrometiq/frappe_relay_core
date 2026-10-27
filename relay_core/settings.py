@@ -45,7 +45,8 @@ def save_connection(url,account,token='',callback_secret=''):
     if token:doc.hub_token=token
     if callback_secret:doc.callback_secret=callback_secret
     doc.save()
-    return {'saved':True}
+    from relay_core.channel_sync import sync
+    return {'saved':True,'channels':sync()}
 
 
 @frappe.whitelist(methods=['POST'])
@@ -55,4 +56,5 @@ def verify_connection():
     binding=hub.call_tool('account.get',{})
     if binding.get('account')!=value('relay_hub_account') or str(binding.get('site','')).rstrip('/')!=frappe.utils.get_url().rstrip('/'):
         frappe.throw('Hub account does not match this Frappe site',frappe.PermissionError)
-    return {'verified':True}
+    from relay_core.channel_sync import sync
+    return {'verified':True,'channels':sync()}
