@@ -88,8 +88,9 @@ def choose(medium: str, names: list[str] | None = None, contact: str | None = No
 def latest_incoming(contact, names):
     if not contact or not names:
         return None
-    return frappe.db.get_value('Relay Message', {'relay_contact': contact, 'direction': 'Incoming',
-                                                 'channel': ['in', names]}, 'channel', order_by='creation desc')
+    from relay_core.timeline import newest
+    row = newest({'relay_contact': contact, 'direction': 'Incoming', 'channel': ['in', names]}, ('channel',))
+    return row and row.channel
 
 
 def team_default(contact, medium):

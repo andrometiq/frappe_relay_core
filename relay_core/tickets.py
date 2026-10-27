@@ -657,18 +657,18 @@ def transcript(name, after=None, limit=50):
         if after:
             frappe.throw('Transcript cursor is not linked to this ticket', frappe.PermissionError)
         return {'items': [], 'next': None}
-    filters = {'name': ['in', sorted(linked)]} if legacy else {'ticket': name}
+    filters = {'ticket': name}
     if after:
         validate_reference(after, 'MSG')
         if legacy:
             if after not in linked:
                 frappe.throw('Transcript cursor is not linked to this ticket', frappe.PermissionError)
             _read_message(after)
-            filters['name'] = ['in', sorted(item for item in linked if item > after)]
         else:
             _episode_message(ticket, after)
             filters['name'] = ['>', after]
-    rows = frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name asc', page_length=int(limit)+1)
+    rows = (_linked_page(linked, after, int(limit)) if legacy else
+            frappe.get_list('Relay Message', filters=filters, fields=['name'], order_by='name asc', page_length=int(limit)+1))
     items = []
     fields = ('name', 'content', 'direction', 'status', 'creation', 'sent_at', 'message_type', 'channel')
     for row in rows[:int(limit)]:
@@ -681,6 +681,18 @@ def transcript(name, after=None, limit=50):
             message = _episode_message(ticket, row.name)
         items.append({key: message.get(key) for key in fields})
     return {'items': items, 'next': {'after': rows[int(limit)-1].name} if len(rows) > int(limit) else None}
+
+
+def _linked_page(linked, after, limit):
+    """Linked messages after the cursor in message-time order: imported and live names do not follow time."""
+    rows = frappe.get_list('Relay Message', filters={'name': ['in', sorted(linked)]}, fields=['name', 'sent_at', 'creation'],
+                           page_length=len(linked))
+    rows.sort(key=lambda row: (row.sent_at or row.creation, row.name))
+    names = [row.name for row in rows]
+    if after and after not in names:
+        frappe.throw('Transcript cursor is not linked to this ticket', frappe.PermissionError)
+    start = names.index(after) + 1 if after else 0
+    return rows[start:start + limit + 1]
 
 
 @frappe.whitelist(methods=['POST'])

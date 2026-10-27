@@ -1,6 +1,7 @@
 """Private, bounded media bound to a permission-checked source conversation."""
 import base64
 import binascii
+import os
 import re
 import frappe
 from frappe.utils import get_datetime, now_datetime
@@ -87,6 +88,8 @@ def archived_attachment(message,download=0):
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
     file.check_permission('read')
+    if str(file.file_url).startswith(('/private/files/', '/files/')) and not os.path.isfile(file.get_full_path()):
+        frappe.throw('This historical attachment was not copied to this site', frappe.DoesNotExistError)
     from relay_core.legacy_media import source_file, CHUNK
     def chunks():
         with source_file(file) as stream:

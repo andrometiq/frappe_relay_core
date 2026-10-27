@@ -28,6 +28,20 @@ def timeline_time():
             else Coalesce(message.sent_at, message.creation))
 
 
+def latest(filters, fields=('name',), since=None, limit=1):
+    """Newest messages by message time, not insert time, so imported history ranks by when it happened."""
+    message = frappe.qb.DocType('Relay Message')
+    query = frappe.qb.get_query('Relay Message', fields=list(fields), filters=filters, order_by='', limit=limit)
+    if since:
+        query = query.where(timeline_time() > since)
+    return query.orderby(timeline_time(), order=Order.desc).orderby(message.name, order=Order.desc).run(as_dict=True)
+
+
+def newest(filters, fields=('name',)):
+    rows = latest(filters, fields)
+    return rows[0] if rows else None
+
+
 def page_query(fields, filters, limit, before=None, after=None, contact=None, ingestion=False, search=''):
     message = frappe.qb.DocType('Relay Message')
     timestamp = timeline_time()

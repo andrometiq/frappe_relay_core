@@ -339,6 +339,18 @@ class TranscriptTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: Record(check_permission=Mock(side_effect=PermissionError)) if dt == 'Relay Channel' else original(dt,name)
         with self.assertRaises(PermissionError): self.module.transcript(self.ticket.name)
 
+    def test_linked_transcript_follows_message_time_for_imported_history(self):
+        self.ticket.company = None
+        live, imported = self.rows[0], self.rows[1]
+        live.creation = live.sent_at = '2026-10-25 10:00:00'
+        imported.creation, imported.sent_at = '2026-10-27 18:00:00', '2026-10-21 09:00:00'
+        self.ticket.messages = [Record(message=row.name) for row in (live, imported)]
+        self.f.get_list.side_effect = lambda dt, **kw: [row for row in self.rows if row.name in kw['filters']['name'][1]]
+        first = self.module.transcript(self.ticket.name, limit=1)
+        second = self.module.transcript(self.ticket.name, limit=1, **first['next'])
+        self.assertEqual([row['name'] for row in first['items'] + second['items']], [imported.name, live.name])
+        self.assertIsNone(second['next'])
+
     def test_legacy_journals_are_empty_and_cannot_use_episode_cursors(self):
         self.ticket.company = None
         for method in (self.module.ai_history, self.module.deliveries):

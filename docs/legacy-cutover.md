@@ -132,6 +132,27 @@ Reconciliation mismatches do not roll back otherwise valid imported history.
 Rows rejected for mapping/status/direction conflicts retain their complete original
 row and checksum in the restricted report, including same-site imports.
 
+## Imported messages in daily use
+
+An imported message is a normal message. The inbox, search, ticket links,
+folders, reply windows, quotes, reactions, media and the overview use its real
+message time (`sent_at`), not its import time. A reply quotes the WhatsApp
+message ID of an imported message. When the ID is missing, the reply goes
+without a quote. The newest STOP or START keyword in the imported history sets
+the opt-out of the number, unless the number changed later.
+
+These differences stay, because the event already happened in WhatsApp Core:
+
+- Import does not run arrival actions: AI replies, flows, email rules,
+  automatic translation and automatic transcription. Users can still ask for a
+  translation or a transcript of an imported message.
+- Imported messages arrive as read. They do not add to unread counts, and the
+  read cursor does not move to an imported message, because imported names do
+  not follow message time.
+- Billing template counts leave out imported messages. They are not new spend.
+- Rows with `legacy_triage` (bundle import only) stay visible only to managers
+  until a business is assigned. The database import sets `legacy_triage` to 0.
+
 ## Reloaded schema
 
 No new DocTypes were added. These standard fields were loaded on `yrp.site`

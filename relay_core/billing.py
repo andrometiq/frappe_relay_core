@@ -307,12 +307,12 @@ def account_channels(account):
 
 
 def template_counts(channels, year):
-    """Outgoing WhatsApp template messages per template and site-timezone month."""
+    """Outgoing WhatsApp template messages per template and site-timezone month. Imported history is not new spend."""
     window = {'channels': tuple(channels), 'sent': SENT, 'start': datetime(year, 1, 1), 'end': datetime(year + 1, 1, 1)}
     return frappe.db.sql(
         "SELECT template, month, COUNT(*) FROM (SELECT JSON_UNQUOTE(JSON_EXTRACT(message_data, '$.template.name')) "
         "template, MONTH(sent_at) month FROM `tabRelay Message` WHERE channel IN %(channels)s AND direction='Outgoing' "
-        "AND status IN %(sent)s AND sent_at >= %(start)s AND sent_at < %(end)s) sends WHERE template IS NOT NULL "
+        "AND legacy_source IS NULL AND status IN %(sent)s AND sent_at >= %(start)s AND sent_at < %(end)s) sends WHERE template IS NOT NULL "
         "GROUP BY template, month", window)
 
 

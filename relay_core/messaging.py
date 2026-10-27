@@ -13,7 +13,7 @@ import re
 import frappe
 from relay_core import ai_features
 from relay_core.settings import value as connection_value
-from relay_core import channels, whatsapp
+from relay_core import channels, timeline, whatsapp
 from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
 from relay_core.automation.service import internal_save, outgoing_run
@@ -157,7 +157,7 @@ def _prepare(source, channel, context, kind, data):
         initial=data.get('initial_data') or {}
         if not isinstance(initial,dict) or len(json.dumps(initial).encode())>12000:raise ValueError('Form initial values must be an object up to 12000 bytes')
         args={'operation':'messages.flow','to':source.sender_endpoint,'id':identifier,'body':body,'flow_cta':cta,'flow_screen':screen,'flow_token':token,'flow_data':initial,
-              'reply_to':text(context.get('message_id') or source.provider_id,300,required=True)}
+              'reply_to':text(context.get('message_id') or source.provider_id or '',300)}
         return 'whatsapp.execute',args,{'kind':'text','text':body,'form_name':cta,'flow':dict(data)}
     if kind in ('photo','video','audio','voice','document'):
         from relay_core.attachments import file_content
@@ -176,7 +176,7 @@ def _prepare(source, channel, context, kind, data):
             mime=mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream'
             if mime not in channels.channel('WhatsApp').features['media'][kind]:raise ValueError('Choose a supported WhatsApp attachment format')
             args={'operation':'messages.media','to':source.sender_endpoint,
-                  'reply_to':text(context.get('message_id') or source.provider_id,300,required=True),
+                  'reply_to':text(context.get('message_id') or source.provider_id or '',300),
                   'media_type':media_type,'content_base64':base64.b64encode(raw).decode(),
                   'mime_type':mime}
             if caption:args['caption']=caption
@@ -246,7 +246,9 @@ def _prepare(source, channel, context, kind, data):
         return 'telegram.message', args, content
     if context.get('provider') != 'WhatsApp' or group and group != source.sender_endpoint:
         raise ValueError('WhatsApp conversation provenance is required')
-    target = text(context.get('message_id') or source.provider_id, 300, required=True)
+    target = text(context.get('message_id') or source.provider_id or '', 300)
+    if kind == 'reaction' and not target:
+        raise ValueError('This message has no WhatsApp message ID to react to')
     args = {'operation': 'messages.send', 'to': source.sender_endpoint, 'reply_to': target}
     if kind == 'text': args['body'] = content['text']
     elif kind == 'sticker': args.update(operation='messages.media', media_type='sticker', media_id=content['media']['id'])
@@ -260,7 +262,8 @@ def prepare(source, channel, context, kind, data, quote=True):
     if channel.channel == 'WhatsApp' and context.get('group_id'):
         raise ValueError('WhatsApp group sending is unavailable in v1')
     tool, arguments, content = _prepare(source, channel, context, kind, data)
-    if not quote and kind != 'reaction':
+    # Without a provider message ID (some imported history) the reply goes without a quote.
+    if (not quote or not arguments.get('reply_to')) and kind != 'reaction':
         arguments.pop('reply_to', None)
     return tool, arguments, content
 
@@ -311,8 +314,7 @@ def channel_sources(message, kind, names, request_key):
             raise ValueError('This channel is switched off')
         key = hashlib.sha256((request_key + ':' + name).encode()).hexdigest()[:40]
         newest = (frappe.db.get_value('Relay Message Action', {'request_key': request_hash(key)}, 'source_message')
-            or frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': name},
-                'name', order_by='creation desc'))
+            or (timeline.newest({'relay_contact': source.relay_contact, 'channel': name}) or {}).get('name'))
         if not newest:
             raise ValueError('This person has no conversation on the chosen channel')
         sources.append((key, newest))
@@ -339,8 +341,7 @@ def reply_source(message, kind, request_key, via, quote):
     if kind not in SWITCHABLE + MEDIA_SENDS:
         raise ValueError('Only text, media, location and contact messages can go from another channel')
     validate_reference(target, 'CH')
-    newest = frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': target},
-                                 'name', order_by='creation desc')
+    newest = (timeline.newest({'relay_contact': source.relay_contact, 'channel': target}) or {}).get('name')
     if not newest:
         raise ValueError('This person has no conversation on the chosen channel')
     return newest, 0

@@ -16,7 +16,7 @@ def expires_at(row):
 
 
 def status(contact, channel, endpoint=None):
-    filters={'relay_contact':contact,'channel':channel,'direction':'Incoming','legacy_source':['is','not set']}
+    filters={'relay_contact':contact,'channel':channel,'direction':'Incoming'}
     if endpoint:filters['sender_endpoint']=endpoint
     rows=page_query(['name','sent_at','creation'],filters,1).run(as_dict=True)
     expires=expires_at(rows[0]) if rows else None
@@ -29,7 +29,7 @@ def open_numbers(channel, numbers):
     if not numbers:
         return set()
     now=frappe.utils.now_datetime()
-    rows=frappe.get_all('Relay Message',filters={'channel':channel,'direction':'Incoming','legacy_source':['is','not set'],
+    rows=frappe.get_all('Relay Message',filters={'channel':channel,'direction':'Incoming',
         'sender_endpoint':['in',list(numbers)],'creation':['>',frappe.utils.add_to_date(now,hours=-HOURS)]},
         fields=['sender_endpoint','sent_at','creation'],limit_page_length=0)
     return {row.sender_endpoint for row in rows if expires_at(row)>now}

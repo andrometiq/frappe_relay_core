@@ -6,6 +6,7 @@ both go through the Hub's direct `messages.read` operation.
 import frappe
 from relay_core.automation.provenance import context_of
 from relay_core.settings import value as connection_value
+from relay_core.timeline import latest
 
 RECEIPT_DAYS = 30  # Meta refuses read receipts for older messages.
 READ_LEASE_SECONDS = 5
@@ -23,13 +24,11 @@ def newest_incoming(contact, names=None, channel=None):
         filters={'channel': 'WhatsApp', 'account': connection_value('relay_hub_account')}, pluck='name')
     if not channels:
         return None
-    filters = {'relay_contact': contact, 'channel': ['in', channels], 'direction': 'Incoming', 'provider_id': ['is', 'set'],
-               'legacy_source': ['is', 'not set'],
-               'creation': ['>', frappe.utils.add_days(frappe.utils.now_datetime(), -RECEIPT_DAYS)]}
+    filters = {'relay_contact': contact, 'channel': ['in', channels], 'direction': 'Incoming', 'provider_id': ['is', 'set']}
     if names is not None:
         filters['name'] = ['in', names]
-    rows = frappe.get_all('Relay Message', filters=filters, fields=['name', 'provider_id', 'provider_context', 'channel'],
-                          order_by='creation desc, name desc', limit_page_length=20)
+    rows = latest(filters, ('name', 'provider_id', 'provider_context', 'channel'),
+                  since=frappe.utils.add_days(frappe.utils.now_datetime(), -RECEIPT_DAYS), limit=20)
     for row in rows:
         context = context_of(row)
         if context.get('provider') == 'WhatsApp' and not context.get('group_id'):
