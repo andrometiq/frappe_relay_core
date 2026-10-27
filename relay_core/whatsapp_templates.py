@@ -241,6 +241,11 @@ def message_content(arguments, template=None, channel=None):
     template = template or definition(sent['name'], sent.get('language') or '', channel)
     rendered = render(template, sent.get('components')) if template else {}
     body = rendered.pop('body', '') or 'Template: ' + sent['name']
+    document = next((parameter['document'] for component in sent.get('components') or []
+                     if str(component.get('type')).lower() == 'header'
+                     for parameter in component.get('parameters') or [] if parameter.get('type') == 'document'), None)
+    if document:
+        rendered['document'] = {'file_name': str(document.get('filename') or 'document.pdf')[:120]}
     return {'kind': 'text', 'text': body[:4096], 'template': {**sent, **rendered}}
 
 

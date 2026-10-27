@@ -11,7 +11,9 @@ from relay_core.inbound import retry_callback
 
 FIELDS = ('title', 'enabled', 'source_doctype', 'event', 'recipient_field', 'business_doctype',
           'channel', 'run_as_user', 'template', 'parameter_mapping', 'contact',
-          'use_preferences', 'telegram_body', 'email_subject', 'email_body', 'email_signature')
+          'use_preferences', 'telegram_body', 'email_subject', 'email_body', 'email_signature',
+          'condition', 'recipients', 'contact_field', 'attachment_type', 'print_format', 'report_name',
+          'report_filters', 'file_name')
 EVENTS = ('after_insert', 'on_submit', 'on_cancel')
 RULE_PAIRS_CACHE_KEY = 'relay_business_event_rule_pairs'
 outgoing_event = ContextVar('relay_outgoing_business_event', default=None)
@@ -49,6 +51,7 @@ def validate_rule(rule):
     if not field or field.fieldtype != 'Link' or field.options != rule.business_doctype:
         raise ValueError('Recipient field must link to the business DocType')
     mapping(rule)
+    validate_document_options(rule)
     if rule.enabled:
         with as_user(rule.run_as_user): require_access(manage=True)
         if rule.use_preferences:
@@ -74,6 +77,21 @@ def validate_rule(rule):
             render_text(rule.telegram_body, values, limit=4096)
         if rule.email_body:
             render(rule.email_subject, rule.email_body, values, rule.email_signature or '')
+
+
+def validate_document_options(rule):
+    from relay_core.document_sends import validate
+    validate(rule, rule.source_doctype)
+    if rule.get('condition'):
+        condition_met(rule.condition, frappe._dict())
+    if (rule.get('recipients') or rule.get('attachment_type')) and (rule.get('use_preferences') or not rule.get('channel')
+            or frappe.db.get_value('Relay Channel', rule.channel, 'channel') != 'WhatsApp'):
+        raise ValueError('Recipient choices and PDFs need a fixed WhatsApp channel')
+
+
+def condition_met(condition, doc):
+    """Evaluate the rule condition, such as `doc.commitment_level_label`, with Frappe's safe evaluator."""
+    return bool(frappe.safe_eval(condition, None, {'doc': doc}))
 
 
 def parameters(rule, doc):
@@ -160,35 +178,66 @@ def on_event(doc, method=None):
 def capture(rule, doc, event):
     business = doc.get(rule.recipient_field)
     if not business: raise ValueError('Business recipient is missing')
-    # No guessing among several contacts. Configuration can be corrected and replayed.
-    people = [rule.contact] if rule.get('contact') else frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
-        'link_doctype': rule.business_doctype, 'link_name': business}, pluck='parent', distinct=True, limit_page_length=2)
-    if len(people) != 1: raise ValueError('Business needs exactly one recipient contact')
-    key = hashlib.sha256(json.dumps([frappe.local.site, doc.doctype, doc.name, event, rule.name, people[0]], separators=(',', ':')).encode()).hexdigest()
+    if rule.get('condition') and not condition_met(rule.condition, doc):
+        return
+    for contact, endpoint in recipients(rule, doc, business):
+        try:
+            frappe.db.savepoint('relay_business_recipient')
+            capture_one(rule, doc, event, business, contact, endpoint)
+        except frappe.QueryDeadlockError:
+            raise
+        except Exception:
+            frappe.db.rollback(save_point='relay_business_recipient')
+            log_failure(f'{doc.doctype}/{doc.name}; {event}; rule {rule.name}; contact {contact}')
+
+
+def recipients(rule, doc, business):
+    """(contact, endpoint) pairs. Without a recipient choice the business needs exactly one contact."""
+    if not rule.get('recipients'):
+        # No guessing among several contacts. Configuration can be corrected and replayed.
+        people = [rule.contact] if rule.get('contact') else frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
+            'link_doctype': rule.business_doctype, 'link_name': business}, pluck='parent', distinct=True, limit_page_length=2)
+        if len(people) != 1: raise ValueError('Business needs exactly one recipient contact')
+        return [(people[0], None)]
+    from relay_core.document_sends import contacts, targets
+    found = []
+    with as_user(rule.run_as_user):
+        for contact in contacts(rule, doc, rule.business_doctype, business):
+            try:
+                found += targets(rule, contact, rule.channel)
+            except (ValueError, frappe.ValidationError, frappe.PermissionError):
+                log_failure(f'{doc.doctype}/{doc.name}; rule {rule.name}; contact {contact} has no usable number')
+    if not found: raise ValueError('No business contact has a usable WhatsApp number')
+    return found
+
+
+def capture_one(rule, doc, event, business, contact, endpoint=None):
+    identity = [frappe.local.site, doc.doctype, doc.name, event, rule.name, contact] + ([endpoint] if endpoint else [])
+    key = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
     # The business document transaction serializes lifecycle callbacks; unique key is final protection.
     if frappe.db.exists('Relay Business Event Delivery', {'event_key': key}): return
-    payload = snapshot(rule, doc, people[0], business)
-    snapshot_ownership(payload, rule, people[0], business)
+    payload = snapshot(rule, doc, contact, business)
+    snapshot_ownership(payload, rule, contact, business, endpoint)
     delivery = frappe.get_doc({'doctype': 'Relay Business Event Delivery', 'event_key': key,
         'rule': rule.name, 'rule_version': str(rule.modified), 'source_doctype': doc.doctype,
         'source_name': doc.name, 'event': event, 'business_doctype': rule.business_doctype,
-        'business_name': business, 'contact': people[0], 'payload': json.dumps(payload),
+        'business_name': business, 'contact': contact, 'payload': json.dumps(payload),
         'payload_hash': hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
         'execution_user': rule.run_as_user,
         'channel': payload.get('selection', {}).get('channel') or rule.channel,
-        'endpoint': payload.get('selection', {}).get('endpoint'), 'status': 'Pending'})
+        'endpoint': payload.get('selection', {}).get('endpoint') or endpoint, 'status': 'Pending'})
     internal_save(delivery, new=True)
     frappe.db.after_commit.add(lambda: enqueue_delivery(delivery.name))
 
 
-def snapshot_ownership(payload, rule, contact, business):
+def snapshot_ownership(payload, rule, contact, business, endpoint=None):
     """Freeze lifecycle ownership with the intent, before any queued dispatch."""
     from relay_core.conversation_start import ensure_business_binding, target
     from relay_core.messaging import delivery_episodes
     selection = payload.get('selection', {})
     with as_user(rule.run_as_user):
         relay, endpoint = ensure_business_binding(contact, selection.get('channel') or rule.channel,
-            rule.business_doctype, business, selection.get('endpoint'))
+            rule.business_doctype, business, selection.get('endpoint') or endpoint)
         source, _, context = target(relay, endpoint, rule.business_doctype, business)
         payload['delivery_episodes'] = [[row.name, int(row.generation or 0)]
                                        for row in delivery_episodes(source, context)]
@@ -265,14 +314,9 @@ def dispatch(name):
         else:
             rule = delivery_scope(delivery)
             with as_user(rule.run_as_user):
-                from relay_core.conversation_start import send_business
                 token = outgoing_event.set(delivery.name)
                 try:
-                    payload = json.loads(delivery.payload)
-                    selection = payload.get('selection', {})
-                    result = send_business(delivery.contact, selection.get('channel') or rule.channel,
-                        payload.get('kind', 'template'), payload.get('data') or {key: payload[key] for key in ('name', 'language', 'components')}, delivery.event_key,
-                        delivery.business_doctype, delivery.business_name, **({'endpoint': selection['endpoint']} if selection else {}))
+                    result = send_delivery(delivery, rule)
                 finally:
                     outgoing_event.reset(token)
         frappe.db.get_value('Relay Business Event Delivery', name, 'name', for_update=True)
@@ -296,6 +340,24 @@ def dispatch(name):
         frappe.db.set_value('Relay Business Event Delivery', name,
                             {'status': delivery.status, 'action': delivery.action})
         log_failure(type(exc).__name__); frappe.db.commit()
+
+
+def send_delivery(delivery, rule):
+    from relay_core.conversation_start import send_business
+    from relay_core.document_sends import render_pdf, send_template, with_document
+    payload = json.loads(delivery.payload)
+    selection = payload.get('selection', {})
+    channel = selection.get('channel') or rule.channel
+    kind = payload.get('kind', 'template')
+    data = payload.get('data') or {key: payload[key] for key in ('name', 'language', 'components')}
+    endpoint = selection.get('endpoint') or delivery.get('endpoint')
+    business = (delivery.business_doctype, delivery.business_name)
+    if kind != 'template' or not rule.get('attachment_type'):
+        return send_business(delivery.contact, channel, kind, data, delivery.event_key, *business,
+                             **({'endpoint': endpoint} if endpoint else {}))
+    source = frappe.get_doc(delivery.source_doctype, delivery.source_name)
+    data, document = with_document(data, channel, *render_pdf(rule, source))
+    return send_template((delivery.contact, endpoint), channel, data, delivery.event_key, business, document)
 
 
 def delivery_scope(delivery):

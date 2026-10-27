@@ -1,7 +1,8 @@
 export function newConfiguration(skill) {
   const common = { title: '', enabled: 0, channel: '', business_doctype: '', run_as_user: '' }
   return skill ? { ...common, ai_model: '', handoff_owner: '', mode: 'Shadow', daily_limit: 100, target: '', instructions: '', reply_style: '', search_confirmation: 'Always', exact_trigger: '', execution_policy: 'Ticket only', allowed_tools: '[]', allowed_actions: '[]' }
-    : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]', contact: '', use_preferences: 0, telegram_body: '', email_subject: '', email_body: '', email_signature: '' }
+    : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]', contact: '', use_preferences: 0, telegram_body: '', email_subject: '', email_body: '', email_signature: '',
+      condition: '', recipients: '', contact_field: '', attachment_type: '', print_format: '', report_name: '', report_filters: '', file_name: '' }
 }
 
 // Existing configurations can reference a channel outside the current account's

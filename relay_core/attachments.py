@@ -117,7 +117,8 @@ def read(message,download=0,index=None):
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
         if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
         return response(raw,result.get('content_type','application/octet-stream'),result.get('filename'),download)
-    if source.message_type not in MEDIA_KINDS:frappe.throw('This message has no supported attachment')
+    template_document=bool((data.get('template') or {}).get('document'))
+    if source.message_type not in MEDIA_KINDS and not template_document:frappe.throw('This message has no supported attachment')
     if data.get('attachment'):
         original,original_channel,_=messaging.readable_source(data.get('attachment_source'))
         if original.relay_contact!=source.relay_contact or original_channel.name!=channel.name:frappe.throw('Attachment is not accessible',frappe.PermissionError)

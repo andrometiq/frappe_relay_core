@@ -23,7 +23,16 @@
     "telegram_body",
     "email_subject",
     "email_body",
-    "email_signature"
+    "email_signature",
+    "condition",
+    "recipients_section",
+    "recipients",
+    "contact_field",
+    "attachment_type",
+    "print_format",
+    "report_name",
+    "report_filters",
+    "file_name"
   ],
   "fields": [
     {
@@ -124,6 +133,64 @@
       "fieldname": "email_signature",
       "label": "Email Signature",
       "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "condition",
+      "label": "Condition",
+      "fieldtype": "Small Text",
+      "description": "Optional Python expression on doc, such as doc.commitment_level_label. The rule runs only when it is true."
+    },
+    {
+      "fieldname": "recipients_section",
+      "label": "Recipients and PDF",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "recipients",
+      "label": "Recipients",
+      "fieldtype": "Select",
+      "options": "\nPrimary contact\nAll business contacts\nDocument contact field",
+      "description": "Empty: the business must have exactly one contact."
+    },
+    {
+      "fieldname": "contact_field",
+      "label": "Contact Field",
+      "fieldtype": "Data",
+      "depends_on": "eval:doc.recipients=='Document contact field'"
+    },
+    {
+      "fieldname": "attachment_type",
+      "label": "Attach PDF",
+      "fieldtype": "Select",
+      "options": "\nPrint Format\nReport"
+    },
+    {
+      "fieldname": "print_format",
+      "label": "Print Format",
+      "fieldtype": "Link",
+      "options": "Print Format",
+      "depends_on": "eval:doc.attachment_type=='Print Format'"
+    },
+    {
+      "fieldname": "report_name",
+      "label": "Report",
+      "fieldtype": "Link",
+      "options": "Report",
+      "depends_on": "eval:doc.attachment_type=='Report'"
+    },
+    {
+      "fieldname": "report_filters",
+      "label": "Report Filters",
+      "fieldtype": "JSON",
+      "depends_on": "eval:doc.attachment_type=='Report'",
+      "description": "JSON object. Use {{doc.field}} for values of the document."
+    },
+    {
+      "fieldname": "file_name",
+      "label": "File Name",
+      "fieldtype": "Data",
+      "depends_on": "attachment_type",
+      "description": "For example Order_{{doc.name}}.pdf"
     }
   ],
   "permissions": [
@@ -148,5 +215,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }

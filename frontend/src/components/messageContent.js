@@ -43,6 +43,12 @@ export function attachmentDownloadURL(message) {
   return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
 }
 
+// The PDF sent as a template's document header, kept on the message by Core.
+export function templateDocumentURL(message) {
+  if (message._pending || !message.name || !messageData(message).attachment) return null;
+  return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
+}
+
 export function transcriptState(message) {
   if (message.transcript) return { state: 'available', text: message.transcript }
   const labels = { Pending: 'Transcript pending…', Failed: 'Transcript unavailable: transcription failed',
@@ -73,6 +79,7 @@ export function templateParts(data) {
     header: template.header || '',
     footer: template.footer || '',
     buttons: Array.isArray(template.buttons) ? template.buttons : [],
+    document: typeof template.document?.file_name === 'string' ? template.document.file_name : '',
     caption: typeof data.campaign === 'string' && data.campaign ? `Campaign: ${data.campaign}` : `Template · ${template.name}`,
   }
 }
