@@ -5,6 +5,7 @@ import FrappeFormSection from "../frappe/FrappeFormSection.vue";
 import FrappeFormView from "../frappe/FrappeFormView.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
+import { sentenceCase } from "../../services/textCase";
 import {
   TEMPLATE_BUTTON_TYPES,
   addTemplateButton,
@@ -31,7 +32,8 @@ const form = ref(
 const attempted = ref(false);
 const issues = computed(() => templateIssues(form.value));
 const preview = computed(() => templatePreview(form.value));
-const headerTypes = computed(() => ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", ...(form.value.header_type === "LOCATION" ? ["LOCATION"] : [])]);
+const headerTypes = computed(() => ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", ...(form.value.header_type === "LOCATION" ? ["LOCATION"] : [])]
+  .map((value) => ({ value, label: sentenceCase(value) })));
 const variableHint = computed(() => `Add variables like ${form.value.parameter_format === "NAMED" ? "{{customer_name}}" : "{{1}}"} with text before and after them.`);
 function addButton() {
   addTemplateButton(form.value);

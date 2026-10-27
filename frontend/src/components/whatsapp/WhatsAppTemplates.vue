@@ -9,6 +9,7 @@ import FrappeReadField from "../frappe/FrappeReadField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { whatsappKey } from "../../composables/whatsapp/context";
 import { languageLabel } from "../../services/templateLanguages";
+import { sentenceCase } from "../../services/textCase";
 import {
   filterTemplates,
   templateBody,
@@ -73,7 +74,7 @@ const statuses = computed(() => [
     ),
   ]
     .sort()
-    .map((value) => ({ value, label: value.replaceAll("_", " ") })),
+    .map((value) => ({ value, label: sentenceCase(value) })),
 ]);
 
 function routeTemplate(id = "", edit = false) {
@@ -174,9 +175,9 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <FrappeFormSection>
       <div class="frappe-field-grid">
         <FrappeReadField label="Template name" :value="selectedTemplate.name" />
-        <FrappeReadField label="Status" :value="selectedTemplate.status || 'Unknown'" />
+        <FrappeReadField label="Status" :value="selectedTemplate.status ? sentenceCase(selectedTemplate.status) : 'Unknown'" />
         <FrappeReadField v-if="['REJECTED', 'PAUSED', 'DISABLED'].includes(selectedTemplate.status)" label="Reason from Meta" :value="rejection(selectedTemplate) || 'Meta has not provided a reason. Review the template in WhatsApp Manager.'" wide />
-        <FrappeReadField label="Category" :value="selectedTemplate.category" />
+        <FrappeReadField label="Category" :value="sentenceCase(selectedTemplate.category)" />
         <FrappeReadField label="Language" :value="languageLabel(selectedTemplate.language)" />
         <FrappeReadField label="Parameter format" :value="String(selectedTemplate.parameter_format || '').toUpperCase() === 'NAMED' ? 'Named' : 'Numbered'" />
         <FrappeReadField label="Meta template ID" :value="selectedTemplate.id" />
@@ -229,12 +230,12 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <template #filters>
       <TextInput v-model="query" type="search" placeholder="Search templates" aria-label="Search templates"><template #prefix><FeatherIcon name="search" /></template></TextInput>
       <RelaySelect v-model="status" label="Status" :options="statuses" />
-      <RelaySelect v-model="category" label="Category" :options="[{ value: 'ALL', label: 'All categories' }, 'UTILITY', 'MARKETING', 'AUTHENTICATION']" />
+      <RelaySelect v-model="category" label="Category" :options="[{ value: 'ALL', label: 'All categories' }, ...['UTILITY', 'MARKETING', 'AUTHENTICATION'].map(value => ({ value, label: sentenceCase(value) }))]" />
       <RelaySelect v-model="language" label="Language" :options="[{ value: 'ALL', label: 'All languages' }, ...new Set(templates.map(row => row.language).filter(Boolean))]" />
     </template>
     <template #cell-name="{ item }"><strong>{{ recordTitle(item, 'Template') }}</strong></template>
-    <template #cell-status="{ item }"><Badge :label="item.status || 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
-    <template #cell-category="{ item }">{{ item.category || "—" }}</template>
+    <template #cell-status="{ item }"><Badge :label="item.status ? sentenceCase(item.status) : 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
+    <template #cell-category="{ item }">{{ item.category ? sentenceCase(item.category) : "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
     <template #cell-message="{ item }"><span><span v-if="item.status === 'REJECTED'" class="template-row-reason">Rejected{{ rejection(item) ? ': ' + rejection(item) : '' }}</span>{{ templateBody(item) || "No message body" }}</span></template>
     <template #empty-action><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>

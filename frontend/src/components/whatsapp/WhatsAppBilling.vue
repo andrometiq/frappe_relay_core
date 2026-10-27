@@ -9,6 +9,7 @@ import {
 } from '../../services/billing'
 import LoadingRows from '../LoadingRows.vue'
 import { numberName } from '../../services/whatsappNumbers'
+import { sentenceCase } from '../../services/textCase'
 
 const props = defineProps({ account: { type: String, default: '' } })
 const capabilities = inject('relayCapabilities', ref({}))
@@ -141,7 +142,7 @@ onMounted(() => run(load))
             <thead><tr><th scope="col">Template</th><th scope="col">Category</th><th scope="col" class="num">Messages</th></tr></thead>
             <tbody>
               <tr v-for="row in templates" :key="row.template">
-                <th scope="row">{{ row.template }}</th><td>{{ row.category }}</td><td class="num">{{ formatCount(row.messages) }}</td>
+                <th scope="row">{{ row.template }}</th><td>{{ sentenceCase(row.category) }}</td><td class="num">{{ formatCount(row.messages) }}</td>
               </tr>
             </tbody>
           </table>
