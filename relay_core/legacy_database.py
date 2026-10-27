@@ -363,6 +363,10 @@ def remove_created(created, removed):
         if created.get(key):
             frappe.db.delete(doctype, created[key])
             removed[doctype] += 1
+    if created.get('relay_contact'):
+        # --team assignments and per-user inbox state belong to the removed conversation.
+        for doctype in ('Relay Conversation Assignment', 'Relay Conversation State'):
+            frappe.db.delete(doctype, {'relay_contact': created['relay_contact']})
     if created.get('contact'):
         frappe.db.delete('Contact Phone', {'parent': created['contact']})
         frappe.db.delete('Dynamic Link', {'parenttype': 'Contact', 'parent': created['contact']})
