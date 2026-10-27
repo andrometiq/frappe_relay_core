@@ -32,7 +32,8 @@ def relay_import_whatsapp_core(context, source_db, source_host, source_port, sou
     frappe.set_user('Administrator')
     frappe.flags.mute_emails = True
     if undo:
-        click.echo(json.dumps(legacy_database.undo(source_site_label), indent=1))
+        from relay_core.legacy_undo import undo as undo_import
+        click.echo(json.dumps(undo_import(source_site_label), indent=1))
         frappe.destroy()
         return
     source = legacy_database.Source(source_db, source_host, source_port, source_user,

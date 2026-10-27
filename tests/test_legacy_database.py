@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import frappe
-from relay_core import legacy, legacy_bundle, legacy_database
+from relay_core import legacy, legacy_bundle, legacy_database, legacy_undo
 
 
 def conversation(**values):
@@ -286,20 +286,84 @@ class Media(Case):
 
 
 class Undo(Case):
-    def test_removed_conversation_loses_its_team_assignment_and_inbox_state(self):
-        frappe.db.exists.return_value = False
-        removed = Counter()
-        legacy_database.remove_created({'relay_contact': 'RELAY-CON-1', 'endpoint': 'RELAY-EP-1'}, removed)
-        frappe.db.delete.assert_any_call('Relay Conversation Assignment', {'relay_contact': 'RELAY-CON-1'})
-        frappe.db.delete.assert_any_call('Relay Conversation State', {'relay_contact': 'RELAY-CON-1'})
-        self.assertEqual(removed, Counter({'Relay Contact Endpoint': 1, 'Relay Contact': 1}))
+    def setUp(self):
+        super().setUp()
+        self.live = []
+        self.rows = {('Relay Contact Endpoint', 'EP-1'): frappe._dict(relay_contact='RELAY-CON-1', channel='CH', endpoint='9190'),
+                     ('Relay Conversation Assignment', 'ASG-1'): '2026-10-01'}
+        frappe.db.exists.side_effect = lambda doctype, filters=None: self.exists(doctype, filters)
+        frappe.db.get_value.side_effect = lambda doctype, name, *args, **kwargs: self.rows.get((doctype, name))
 
-    def test_conversation_with_live_messages_is_kept_whole(self):
-        frappe.db.exists.return_value = True
+    def exists(self, doctype, filters):
+        if doctype == 'Relay Message' and not isinstance(filters, dict):
+            return True
+        if doctype == 'Relay Message':
+            return any(all(filters.get(key, value) == value for key, value in message.items() if key != 'creation')
+                       for message in self.live if filters.get('creation') is None or message['creation'] > filters['creation'][1])
+        return doctype == 'Relay Contact'
+
+    def revert(self, created):
         removed = Counter()
-        legacy_database.remove_created({'relay_contact': 'RELAY-CON-1', 'endpoint': 'RELAY-EP-1'}, removed)
+        with patch('relay_core.legacy_undo.refresh_activity') as refresh:
+            legacy_undo.revert('RELAY-CON-1', created, removed)
+        return removed, refresh
+
+    def test_changes_on_a_reused_contact_are_reversed_exactly(self):
+        self.rows[('Relay Contact Endpoint', 'EP-OLD')] = frappe._dict(marketing_opt_out=1, opt_out_changed_at='2026-09-01', modified='m2')
+        created = {'endpoint': 'EP-1', 'links': ['LINK-1'], 'assignment': 'ASG-1',
+                   'activity': {'last_message_at': None, 'last_message': None},
+                   'opt_out': {'EP-OLD': {'before': {'marketing_opt_out': 0, 'opt_out_changed_at': None, 'modified': 'm1'},
+                                          'after': {'marketing_opt_out': 1, 'opt_out_changed_at': '2026-09-01', 'modified': 'm2'}}},
+                   'reactions': {'RELAY-MSG-LIVE': {'reactions': '{}', 'message_updates': None}}}
+        removed, _ = self.revert(created)
+        for call in (('Dynamic Link', 'LINK-1'), ('Relay Conversation Assignment', 'ASG-1'), ('Relay Contact Endpoint', 'EP-1')):
+            frappe.db.delete.assert_any_call(*call)
+        frappe.db.set_value.assert_any_call('Relay Contact Endpoint', 'EP-OLD', created['opt_out']['EP-OLD']['before'], update_modified=False)
+        frappe.db.set_value.assert_any_call('Relay Message', 'RELAY-MSG-LIVE', {'reactions': '{}', 'message_updates': None}, update_modified=False)
+        frappe.db.set_value.assert_any_call('Relay Contact', 'RELAY-CON-1', {'last_message_at': None, 'last_message': None}, update_modified=False)
+        self.assertNotIn(('Relay Contact', 'RELAY-CON-1'), [call.args for call in frappe.db.delete.call_args_list])
+        self.assertEqual(removed['opt_out_restored'], 1)
+
+    def test_endpoint_and_assignment_that_live_messages_use_are_kept(self):
+        self.live.append(frappe._dict(relay_contact='RELAY-CON-1', channel='CH', sender_endpoint='9190', creation='2026-10-02'))
+        removed, refresh = self.revert({'endpoint': 'EP-1', 'assignment': 'ASG-1', 'activity': {}})
         frappe.db.delete.assert_not_called()
-        self.assertEqual(removed, Counter({'contacts_kept_with_new_messages': 1}))
+        refresh.assert_called_once_with('RELAY-CON-1')
+        self.assertEqual(removed['endpoints_kept_with_new_messages'], 1)
+
+    def test_assignment_older_than_the_live_messages_is_removed(self):
+        self.live.append(frappe._dict(relay_contact='RELAY-CON-1', channel='CH', sender_endpoint='other', creation='2026-09-01'))
+        self.revert({'assignment': 'ASG-1'})
+        frappe.db.delete.assert_called_once_with('Relay Conversation Assignment', 'ASG-1')
+
+    def test_created_conversation_is_removed_whole(self):
+        frappe.db.exists.side_effect = lambda doctype, filters=None: False
+        removed, _ = self.revert({'relay_contact': 'RELAY-CON-1', 'endpoint': 'EP-1', 'contact': 'Pat'})
+        for call in (('Relay Contact', 'RELAY-CON-1'), ('Relay Conversation Assignment', {'relay_contact': 'RELAY-CON-1'}),
+                     ('Relay Conversation State', {'relay_contact': 'RELAY-CON-1'}), ('Contact', 'Pat'),
+                     ('Dynamic Link', {'parenttype': 'Contact', 'parent': 'Pat'})):
+            frappe.db.delete.assert_any_call(*call)
+        self.assertEqual(removed, Counter({'Relay Contact Endpoint': 1, 'Relay Contact': 1, 'Contact': 1}))
+
+    def test_created_conversation_with_live_messages_is_kept(self):
+        self.live.append(frappe._dict(relay_contact='RELAY-CON-1', channel='CH', sender_endpoint='9190', creation='2026-10-02'))
+        removed, _ = self.revert({'relay_contact': 'RELAY-CON-1', 'endpoint': 'EP-1', 'contact': 'Pat'})
+        frappe.db.delete.assert_not_called()
+        self.assertEqual(removed['contacts_kept_with_new_messages'], 1)
+
+    def test_undo_commits_each_message_chunk_and_each_marker(self):
+        frappe.db.sql_list.side_effect = [['M1', 'M2'], ['M3'], []]
+        markers = [frappe._dict(name='IMPORT-2', relay_contact='C2', source_metadata='{}'),
+                   frappe._dict(name='IMPORT-1', relay_contact='C1', source_metadata='{}')]
+        with patch.object(frappe, 'get_all', side_effect=lambda doctype, **kwargs: markers if doctype == 'Relay Legacy Import' else []) as get_all, \
+             patch.object(legacy_undo, 'revert') as revert, patch.object(legacy_undo, 'remove_unused_copies', return_value=0), \
+             patch('relay_core.queue_counts.invalidate'):
+            result = legacy_undo.undo('sales.example', chunk=2)
+        self.assertEqual(result['messages'], 3)
+        frappe.db.delete.assert_any_call('Relay Message Read', {'message': ['in', ['M1', 'M2']]})
+        self.assertEqual(frappe.db.commit.call_count, 4)
+        self.assertEqual([call.args[0] for call in revert.call_args_list], ['C2', 'C1'])
+        self.assertEqual([call.kwargs.get('order_by') for call in get_all.call_args_list if call.args[0] == 'Relay Legacy Import'], ['name desc'])
 
     def test_copied_media_is_deleted_unless_another_file_row_uses_it(self):
         with tempfile.TemporaryDirectory() as site:
@@ -352,13 +416,13 @@ class Transactions(Case):
              patch.object(importer, 'mark', return_value='IMPORT-1'), \
              patch.object(importer, 'import_rows', side_effect=import_rows), \
              patch.object(importer, 'commit') as commit, \
-             patch.object(legacy_database, 'refresh_activity'), patch.object(legacy_database, 'apply_history'), \
-             patch.object(importer, 'project_reactions'), \
+             patch.object(importer, 'finish_contact'), patch.object(importer, 'project_reactions'), \
              patch('relay_core.identity.default_region', return_value='IN'):
             importer.import_conversation(conversation())
         self.assertEqual(commit.call_count, 2)
         added = [call.args[1][0] for call in frappe.db.sql.call_args_list if 'imported = imported' in call.args[0]]
         self.assertEqual(added, [2, 1])
+
 
 
 class Command(unittest.TestCase):
@@ -379,14 +443,16 @@ class Command(unittest.TestCase):
 
 
 class TeamAssignment(Case):
-    def test_only_unassigned_imported_conversations_get_the_team(self):
-        lists = {'Relay Legacy Import': ['RELAY-CON-1', 'RELAY-CON-2', 'RELAY-CON-1'],
-                 'Relay Conversation Assignment': ['RELAY-CON-2']}
+    def test_only_unassigned_imported_conversations_get_the_team_and_the_marker_records_it(self):
+        markers = [frappe._dict(name='IMPORT-1', relay_contact='RELAY-CON-1'), frappe._dict(name='IMPORT-2', relay_contact='RELAY-CON-2'),
+                   frappe._dict(name='IMPORT-3', relay_contact='RELAY-CON-1')]
+        lists = {'Relay Legacy Import': markers, 'Relay Conversation Assignment': ['RELAY-CON-2']}
         inserted = []
         def get_doc(*args):
             if isinstance(args[0], dict):
-                return Mock(insert=lambda: inserted.append(args[0]))
+                return Mock(insert=lambda: inserted.append(args[0]) or frappe._dict(name='ASG-1'))
             return Mock()
+        frappe.db.get_value.return_value = json.dumps({'created': {'endpoint': 'EP-1'}})
         with patch.object(frappe, 'get_all', side_effect=lambda doctype, **kwargs: lists[doctype]), \
              patch.object(frappe, 'get_doc', side_effect=get_doc) as get, \
              patch('relay_core.queue_counts.invalidate') as invalidate:
@@ -394,7 +460,10 @@ class TeamAssignment(Case):
         get.assert_any_call('Relay Team', 'Sales-001')
         self.assertEqual(result, {'assigned': 1, 'already_assigned': 1})
         self.assertEqual(inserted, [{'doctype': 'Relay Conversation Assignment', 'relay_contact': 'RELAY-CON-1', 'team': 'Sales-001'}])
+        marker, field, value = frappe.db.set_value.call_args.args[1:4]
+        self.assertEqual((marker, field, json.loads(value)), ('IMPORT-1', 'source_metadata', {'created': {'endpoint': 'EP-1', 'assignment': 'ASG-1'}}))
         invalidate.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

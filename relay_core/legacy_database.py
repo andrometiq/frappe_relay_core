@@ -24,6 +24,8 @@ from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
 
 MESSAGE = 'tabWhatsApp Core Message'
+ACTIVITY = ('last_message_at', 'last_message')
+OPT_OUT = ('marketing_opt_out', 'opt_out_changed_at', 'modified')
 # What a re-run takes from a changed source row; identity, contact and channel never change.
 REFRESHED = ('status', 'content', 'message_type', 'message_data', 'delivery_error', 'provider_id', 'provider_context',
              'sent_at', 'legacy_author', 'legacy_checksum', 'legacy_data')
@@ -131,10 +133,22 @@ class Importer:
             rows = self.page(conversation.name, bundles.order_key(rows[-1]))
         if not self.dry_run:
             self.project_reactions(job, created)
-            refresh_activity(contact)
-            apply_history(channel, endpoint)
+            self.finish_contact(channel, endpoint, contact, created)
             self.mark(conversation, channel, contact, created)
             frappe.db.set_value('Relay Legacy Import', marker, 'status', 'Completed', update_modified=False)
+
+    def finish_contact(self, channel, endpoint, contact, created):
+        """Set the directory activity and opt-out choice from the imported history. On a contact or
+        endpoint the import did not create, the marker keeps the earlier values for undo."""
+        if not created.get('relay_contact'):
+            created['activity'] = frappe.db.get_value('Relay Contact', contact, ACTIVITY, as_dict=True)
+        refresh_activity(contact)
+        before = None if created.get('endpoint') else frappe.db.get_value(
+            'Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)}, ('name',) + OPT_OUT, as_dict=True)
+        apply_history(channel, endpoint)
+        after = before and frappe.db.get_value('Relay Contact Endpoint', before.name, OPT_OUT, as_dict=True)
+        if before and after != {field: before[field] for field in OPT_OUT}:
+            created['opt_out'] = {before.pop('name'): {'before': before, 'after': after}}
 
     def project_reactions(self, job, created):
         """Show imported reactions on their target messages the way live reactions are shown.
@@ -502,32 +516,6 @@ def source_password(path=None):
     return os.environ.get('RELAY_SOURCE_DB_PASSWORD')
 
 
-def undo(site_label):
-    """Delete what one --source-site-label import created: messages, their Files, and the
-    Contacts, Relay Contacts and endpoints it made. Matched existing contacts stay."""
-    messages = frappe.db.sql_list("""SELECT name FROM `tabRelay Message` WHERE legacy_source IS NOT NULL
-        AND JSON_UNQUOTE(JSON_EXTRACT(legacy_data, '$.source_site')) = %s""", site_label)
-    contacts = set(frappe.get_all('Relay Message', filters={'name': ['in', messages]}, pluck='relay_contact', distinct=True)) if messages else set()
-    file_urls = set()
-    for start in range(0, len(messages), 1000):
-        chunk = messages[start:start + 1000]
-        files = {'attached_to_doctype': 'Relay Message', 'attached_to_name': ['in', chunk]}
-        file_urls.update(frappe.get_all('File', filters=files, pluck='file_url'))
-        frappe.db.delete('File', files)
-        frappe.db.delete('Relay Message', {'name': ['in', chunk]})
-    removed = Counter(messages=len(messages))
-    for job in frappe.get_all('Relay Legacy Import', filters={'source_site': site_label}, fields=['name', 'source_metadata']):
-        remove_created(legacy.object_value(job.source_metadata).get('created', {}), removed)
-        frappe.db.delete('Relay Legacy Import', job.name)
-    for contact in contacts:
-        if frappe.db.exists('Relay Contact', contact):
-            frappe.db.set_value('Relay Contact', contact, {'last_message_at': None, 'last_message': None}, update_modified=False)
-            refresh_activity(contact)
-    frappe.db.commit()
-    removed['media_files'] = remove_unused_copies(file_urls)
-    return dict(removed)
-
-
 def remove_unused_copies(file_urls):
     """Delete the media bytes the import copied (see legacy_media.attach) that no File row uses any more.
     Linked source files are never touched."""
@@ -542,30 +530,19 @@ def assign_team(site_label, team):
     """Give a team every conversation of one import that has no assignment yet.
     A Relay Communication User sees only its own teams' conversations."""
     frappe.get_doc('Relay Team', team)
-    contacts = set(frappe.get_all('Relay Legacy Import', filters={'source_site': site_label}, pluck='relay_contact'))
+    markers = {}
+    for job in frappe.get_all('Relay Legacy Import', filters={'source_site': site_label}, fields=['name', 'relay_contact'], order_by='name'):
+        markers.setdefault(job.relay_contact, job.name)
+    contacts = set(markers)
     assigned = set(frappe.get_all('Relay Conversation Assignment', filters={'relay_contact': ['in', list(contacts)]},
                                   pluck='relay_contact')) if contacts else set()
     for contact in sorted(contacts - assigned):
-        frappe.get_doc({'doctype': 'Relay Conversation Assignment', 'relay_contact': contact, 'team': team}).insert()
+        assignment = frappe.get_doc({'doctype': 'Relay Conversation Assignment', 'relay_contact': contact, 'team': team}).insert()
+        # The first marker of the chat records the assignment, so undo removes exactly it.
+        metadata = legacy.object_value(frappe.db.get_value('Relay Legacy Import', markers[contact], 'source_metadata'))
+        metadata['created'] = merge_created(metadata.get('created', {}), {'assignment': assignment.name})
+        frappe.db.set_value('Relay Legacy Import', markers[contact], 'source_metadata', bundles.canonical(metadata), update_modified=False)
     from relay_core.queue_counts import invalidate
     invalidate()
     frappe.db.commit()
     return {'assigned': len(contacts - assigned), 'already_assigned': len(assigned)}
-
-
-def remove_created(created, removed):
-    """Delete the endpoint, Relay Contact and Contact one conversation import made, unless live messages use them."""
-    if created.get('relay_contact') and frappe.db.exists('Relay Message', {'relay_contact': created['relay_contact']}):
-        removed['contacts_kept_with_new_messages'] += 1
-        return
-    for doctype, key in (('Relay Contact Endpoint', 'endpoint'), ('Relay Contact', 'relay_contact'), ('Contact', 'contact')):
-        if created.get(key):
-            frappe.db.delete(doctype, created[key])
-            removed[doctype] += 1
-    if created.get('relay_contact'):
-        # --team assignments and per-user inbox state belong to the removed conversation.
-        for doctype in ('Relay Conversation Assignment', 'Relay Conversation State'):
-            frappe.db.delete(doctype, {'relay_contact': created['relay_contact']})
-    if created.get('contact'):
-        frappe.db.delete('Contact Phone', {'parent': created['contact']})
-        frappe.db.delete('Dynamic Link', {'parenttype': 'Contact', 'parent': created['contact']})
