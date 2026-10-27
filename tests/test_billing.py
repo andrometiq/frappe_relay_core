@@ -7,7 +7,8 @@ from unittest.mock import Mock, patch
 
 import frappe
 from frappe import _dict
-from relay_core import billing
+from relay_core import billing, hub_channels
+from channel_fakes import FakeSite
 from relay_core.hub import HubError
 from relay_core.relay_core.doctype.relay_settings.relay_settings import RelaySettings
 
@@ -37,7 +38,19 @@ class Store:
         self.rows[name].update(fields)
 
 
+LEGACY = _dict(name='CH-WA', channel='WhatsApp', account='acct-1', hub_channel='acct-1', label='Shop', address='+91 98400 00001',
+               waba_id='111')
+SUPPORT = _dict(LEGACY, name='CH-SUPPORT', hub_channel='wa-2', label='Support', address='+91 98400 00002')
+EXPORT = _dict(LEGACY, name='CH-EXPORT', hub_channel='wa-3', label='Export', address='+91 98400 00003', waba_id='222')
+
+
 class BillingTests(unittest.TestCase):
+    def get_all(self, doctype, **kwargs):
+        if doctype != 'Relay Channel':
+            return []
+        names = (kwargs.get('filters') or {}).get('name')
+        return [row for row in self.channels if not names or row.name in names[1]]
+
     def setUp(self):
         self.zone = 'Asia/Kolkata'
         self.roles = ['WhatsApp Manager']
@@ -53,6 +66,8 @@ class BillingTests(unittest.TestCase):
         self.frappe.db = SimpleNamespace(exists=self.store.exists, set_value=self.store.set_value, sql=self.sql,
                                          commit=Mock(), rollback=Mock())
         self.frappe.flags = SimpleNamespace()
+        self.channels = [LEGACY]
+        self.frappe.get_all.side_effect = self.get_all
         patcher = patch.object(billing, 'frappe', self.frappe)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -133,7 +148,7 @@ class BillingTests(unittest.TestCase):
         rows = billing.parse([self.point(), self.point('UTILITY', volume=3, cost=0.3)])
         for _ in range(2):
             for key, values in rows.items():
-                billing.upsert('acct-1', key, values, 'now')
+                billing.upsert('acct-1', key, values, 'now', LEGACY)
         self.assertEqual((len(self.store.rows), self.store.inserts, self.store.updates), (2, 2, 2))
         row = next(row for row in self.store.rows.values() if row.get('category') == 'MARKETING')
         self.assertEqual((row['period'], row['volume'], row['meta_cost']), (date(2026, 2, 1), 10, 2.5))
@@ -146,7 +161,7 @@ class BillingTests(unittest.TestCase):
         self.store.rows[name] = {}
         self.store.exists = lambda doctype, name: False
         self.frappe.db.exists = self.store.exists
-        billing.upsert('acct-1', key, values, 'now')
+        billing.upsert('acct-1', key, values, 'now', LEGACY)
         self.assertEqual(self.store.rows[name]['volume'], 10)
 
     def test_parse_sums_points_and_reads_missing_fields_defensively(self):
@@ -234,10 +249,12 @@ class BillingTests(unittest.TestCase):
     def billing_for(self, roles):
         self.roles = roles
         self.frappe.get_roles = lambda user=None: self.roles
-        self.frappe.get_list.return_value = ['CH-WA']
+        rows = getattr(self, 'month_rows', None) or [
+            _dict(period=date(2026, 3, 1), category='UTILITY', pricing_type='REGULAR', volume=5, meta_cost=1.0, currency='INR',
+                  fetched_at='2026-10-26 10:00:00', raw_data='[{"cost": 1}]', relay_channel='CH-WA', unsplit=0)]
+        self.frappe.get_list.return_value = [row.name for row in self.channels]
         self.frappe.get_all.side_effect = lambda doctype, **kwargs: (
-            [_dict(period=date(2026, 3, 1), category='UTILITY', pricing_type='REGULAR', volume=5, meta_cost=1.0,
-                   currency='INR', fetched_at='2026-10-26 10:00:00', raw_data='[{"cost": 1}]')] if doctype == billing.DOCTYPE
+            rows if doctype == billing.DOCTYPE else self.get_all(doctype, **kwargs) if doctype == 'Relay Channel'
             else [_dict(template_name='order_ready', category='UTILITY')])
         with patch.object(billing, 'template_counts', return_value=[('order_ready', 3, 4)]):
             return billing.get_billing('acct-1', 2026)
@@ -262,6 +279,49 @@ class BillingTests(unittest.TestCase):
         internal = self.billing_for(['System Manager'])['internal']
         self.assertEqual((internal['margin_percent'], internal['meta_cost'], internal['margin_amount']), (30.0, 1.0, 0.3))
         self.assertEqual(internal['months'][2], {'period': '2026-03-01', 'meta_cost': 1.0, 'margin_amount': 0.3})
+
+    def test_a_shared_waba_is_read_once_and_split_per_number(self):
+        self.channels = [LEGACY, SUPPORT, EXPORT]
+        hub = Mock()
+        hub.execute.side_effect = lambda request: {'currency': 'INR', 'data_points': {
+            'acct-1': [dict(self.point(volume=10, cost=2.5), channel_key='acct-1'),
+                   dict(self.point(volume=4, cost=1.0), phone_number='919840000002'),
+                   dict(self.point(volume=7, cost=1.4), channel_key='wa-9'),
+                   self.point(volume=2, cost=0.5)],
+            'wa-3': [dict(self.point('UTILITY', volume=3, cost=0.3), channel_key='wa-3')]}[request.get('channel')]}
+        site = FakeSite(Relay_Channel=self.channels)
+        with patch('relay_core.whatsapp.checked_client', return_value=(hub, {})), \
+                patch.object(billing, 'year_bounds', return_value=(100, 200)), patch.object(hub_channels, 'frappe', site.frappe):
+            self.assertEqual(billing.refresh('acct-1', 2026), {'rows': 4, 'data_points': 5})
+        requests = [call.args[0] for call in hub.execute.call_args_list]
+        self.assertEqual([(request.get('channel'), request['dimensions']) for request in requests],
+                         [('acct-1', ['PHONE', 'PRICING_CATEGORY', 'PRICING_TYPE']), ('wa-3', ['PHONE', 'PRICING_CATEGORY', 'PRICING_TYPE'])])
+        owned = {(row['relay_channel'], row['unsplit']): row['volume'] for row in self.store.rows.values()}
+        self.assertEqual(owned, {('CH-WA', 0): 10, ('CH-SUPPORT', 0): 4, (None, 1): 9, ('CH-EXPORT', 0): 3})
+        legacy = billing.record_key({'account': 'acct-1', 'period': date(2026, 2, 1), 'category': 'MARKETING', 'pricing_type': 'REGULAR'})
+        self.assertEqual(self.store.rows[legacy]['relay_channel'], 'CH-WA')
+        self.assertEqual(self.store.rows[legacy]['phone_number'], '')
+
+    def test_refresh_reads_only_whatsapp_numbers(self):
+        self.frappe.get_all = Mock(return_value=[])
+        with self.assertRaisesRegex(frappe.ValidationError, 'enabled WhatsApp channel'):
+            billing.refresh('acct-1', 2026)
+        self.assertEqual(self.frappe.get_all.call_args.kwargs['filters']['channel'], 'WhatsApp')
+
+    def test_the_bill_has_one_section_per_number_and_unsplit_charges_only_for_system_managers(self):
+        self.channels = [LEGACY, SUPPORT]
+        row = lambda channel, volume, cost, unsplit=0: _dict(
+            period=date(2026, 3, 1), category='MARKETING', pricing_type='REGULAR', volume=volume, meta_cost=cost,
+            currency='INR', fetched_at='2026-10-26 10:00:00', relay_channel=channel, unsplit=unsplit)
+        self.month_rows = [row('CH-WA', 10, 2.5), row('CH-SUPPORT', 4, 1.0), row(None, 9, 1.9, 1)]
+        result = self.billing_for(['WhatsApp Manager'])
+        self.assertEqual((result['total']['messages'], result['total']['amount']), (14, 4.55))
+        self.assertEqual([(bill['channel'], bill['label'], bill['waba_id'], bill['total']['messages'], bill['total']['amount'])
+                          for bill in result['numbers']], [('CH-WA', 'Shop', '111', 10, 3.25), ('CH-SUPPORT', 'Support', '111', 4, 1.3)])
+        self.assertEqual({line['category'] for line in result['total']['lines']}, {'MARKETING'})
+        self.assertNotIn('internal', result)
+        internal = self.billing_for(['System Manager'])['internal']
+        self.assertEqual((internal['meta_cost'], internal['unsplit']['meta_cost'], internal['unsplit']['total']['messages']), (3.5, 1.9, 9))
 
 if __name__ == '__main__':
     unittest.main()
