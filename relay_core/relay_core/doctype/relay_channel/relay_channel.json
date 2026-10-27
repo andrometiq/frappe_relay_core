@@ -18,8 +18,6 @@
     "company",
     "triage_owner",
     "configuration",
-    "endpoint",
-    "api_secret",
     "mailbox_address",
     "mailbox_aliases"
   ],
@@ -86,18 +84,6 @@
       "fieldname": "configuration",
       "label": "Configuration",
       "fieldtype": "Section Break",
-      "permlevel": 1
-    },
-    {
-      "fieldname": "endpoint",
-      "label": "Endpoint",
-      "fieldtype": "Data",
-      "permlevel": 1
-    },
-    {
-      "fieldname": "api_secret",
-      "label": "API secret",
-      "fieldtype": "Password",
       "permlevel": 1
     },
     {

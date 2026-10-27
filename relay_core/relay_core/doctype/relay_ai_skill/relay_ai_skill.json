@@ -24,8 +24,7 @@
     "instructions",
     "allowed_tools",
     "allowed_actions",
-    "sample_key",
-    "active_key"
+    "sample_key"
   ],
   "fields": [
     {
@@ -111,15 +110,6 @@
       "hidden": 1,
       "unique": 1,
       "read_only": 1
-    },
-    {
-      "fieldname": "active_key",
-      "fieldtype": "Data",
-      "label": "Legacy active scope",
-      "unique": 1,
-      "hidden": 1,
-      "read_only": 1,
-      "length": 64
     },
     {
       "fieldname": "target",

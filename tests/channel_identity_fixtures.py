@@ -115,10 +115,7 @@ def cleanup(fixture):
     channels = [channel.name for channel in fixture.channels.values()]
     for doctype in ('Relay AI Skill', 'Relay Flow', 'Relay Email Rule', 'Relay Business Event Rule'):
         for name in frappe.get_all(doctype, filters={'channel': ['in', channels]}, pluck='name'):
-            values = {'enabled': 0}
-            if doctype == 'Relay AI Skill':
-                values['active_key'] = None
-            frappe.db.set_value(doctype, name, values)
+            frappe.db.set_value(doctype, name, 'enabled', 0)
     for name in frappe.get_all('Relay Message', filters={'channel':['in',channels], 'automation_status':'Pending'}, pluck='name'):
         frappe.db.set_value('Relay Message', name, 'automation_status', 'Complete', update_modified=False)
     for channel in channels:

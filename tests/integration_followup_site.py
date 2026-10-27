@@ -66,7 +66,6 @@ def main():
             account=account.name, provider='OpenRouter', model_id='local-no-network', enabled=1)); model.db_insert()
         skills = []
         for title, provider in (('Primary', 'WhatsApp'), ('Backup', 'WhatsApp'), ('Telegram', 'Telegram')):
-            # Legacy rows predate active_key. Reproduce that data, then test normal validation.
             skill = frappe.get_doc(dict(doctype='Relay AI Skill', name='Sim ' + title + ' ' + f.stamp,
                 title='Sim ' + title + ' ' + f.stamp, enabled=1, channel=f.channels[provider].name,
                 business_doctype='Customer', run_as_user=f.actor, handoff_owner=f.actor,
