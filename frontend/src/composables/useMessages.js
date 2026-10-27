@@ -609,7 +609,9 @@ export function useMessages() {
     await run(async () => {
       const quote = action === "reaction" || quoting.value;
       // A picked number sends from its newest loaded message of this person, else the server finds that message.
-      const picked = !quote && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
+      // Media stays on the message it was uploaded to; the server moves the attachment to the picked number.
+      const media = ["photo", "video", "audio", "voice", "document"].includes(action);
+      const picked = !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
       if (picked) message = picked;
       const via = quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
       const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];

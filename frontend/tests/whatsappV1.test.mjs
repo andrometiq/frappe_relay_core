@@ -332,6 +332,10 @@ test('a picked WhatsApp number sends from its newest loaded message, else names 
     fixture.state.pickNumber('dealer');fixture.state.body.value='From dealer'
     await fixture.state.send()
     assert.deepEqual([sends()[1].message,sends()[1].via],[latest.name,'dealer'])
+    fixture.state.rows.value=[first,latest];fixture.state.pickNumber('support')
+    fixture.state.attachment.value={name:'F1',filename:'bill.pdf'};fixture.state.body.value='Bill'
+    await fixture.state.send(latest,'document')
+    assert.deepEqual([sends()[2].message,sends()[2].via,sends()[2].data.attachment],[latest.name,'support','F1'])
     fixture.state.clearRecipient()
     assert.equal(fixture.state.viaNumber.value,'')
   } finally {fixture.stop()}
