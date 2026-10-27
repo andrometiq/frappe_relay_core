@@ -5,8 +5,9 @@ import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } fr
 import { Badge, Button, Dropdown, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { configurationChannels, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors } from '../services/automationEditor'
+import { configurationChannels, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
 import EventPicker from './fields/EventPicker.vue'
+import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
@@ -38,6 +39,7 @@ const dirty = computed(() => snapshot() !== saved.value)
 const enabledFilter = ref('all'), templateBody = ref(''), previewError = ref('')
 const visibleRows = computed(() => rows.value.filter(row => enabledFilter.value === 'all' || Boolean(row.enabled) === (enabledFilter.value === 'enabled')))
 const livePreview = computed(() => messagePreview(templateBody.value, parameters.value))
+const template = computed(() => draft.value && templateField(draft.value, busy.value, linkedTitle('Relay WhatsApp Template', draft.value.template, 'Saved template')))
 let generation = 0, previewGeneration = 0, previewTimer
 watch(() => draft.value?.template, name => {
   clearTimeout(previewTimer); const current = ++previewGeneration; templateBody.value = ''; previewError.value = ''
@@ -177,7 +179,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             </fieldset>
           </template>
           <template v-else>
-            <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.source_doctype" label="Source DocType" placeholder="Delivery Note" required :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><FormControl v-model="draft.recipient_field" label="Recipient business field" placeholder="customer" required :disabled="busy" /><FormControl v-if="variant('WhatsApp')" v-model="draft.template" label="Approved WhatsApp template" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy" /></div>
+            <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.source_doctype" label="Source DocType" placeholder="Delivery Note" required :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><FormControl v-model="draft.recipient_field" label="Recipient business field" placeholder="customer" required :disabled="busy" /><RemoteLinkField v-if="variant('WhatsApp')" v-model="draft.template" :field="template" /></div>
             <FormControl v-model="draft.use_preferences" type="checkbox" label="Use this business/person’s consent and channel priorities" :disabled="busy" />
             <FormControl v-model="draft.contact" label="Explicit Contact (required when several people are linked)" :disabled="busy" />
             <FormControl v-if="variant('Telegram')" v-model="draft.telegram_body" label="Telegram template" type="textarea" rows="4" :disabled="busy" />

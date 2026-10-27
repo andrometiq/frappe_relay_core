@@ -68,3 +68,12 @@ export function eventErrors(draft, references, actions, provider) {
   if (draft.execution_policy === 'Execute' && actions.some(row => row.action === 'create_draft' && (!row.doctype || !row.fields.length))) errors.push('Choose a draft DocType and its required fields.')
   return [...new Set(errors)]
 }
+// Templates are searched on the server by name; a fixed number limits them to its WABA.
+export function templateField(draft, readOnly, currentLabel) {
+  return {
+    label: 'Approved WhatsApp template', method: 'business_events.template_options',
+    params: draft.use_preferences || !draft.channel ? {} : { channel: draft.channel },
+    placeholder: 'Search templates by name…', required: Boolean(draft.enabled) && !draft.use_preferences, readOnly,
+    initialOptions: draft.template ? [{ value: draft.template, label: currentLabel }] : [],
+  }
+}
