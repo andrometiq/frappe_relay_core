@@ -60,10 +60,11 @@ class Importer:
         self.channels = self.target_channels(channel_map or {})
         self.counts = Counter()
         self.failures = []
-        self.phones = None
-        # Undo log of the open transaction: rewound on rollback, cleared on commit.
+        self.phones = self.links = self.bindings = None
+        self.unresolved = []
+        # What the open transaction did: rewound on rollback, kept on commit.
         self.committed_counts = Counter()
-        self.phone_changes = []
+        self.pending_unresolved = []
         self.copied = set()
 
     def target_channels(self, channel_map):
@@ -90,24 +91,21 @@ class Importer:
                 self.rollback()
                 self.failures.append({'conversation': conversation.name, 'error': f'{type(exc).__name__}: {exc}'})
         self.counts['conversations'] = len(conversations)
-        return {'counts': dict(self.counts), 'failures': self.failures}
+        return {'counts': dict(self.counts), 'failures': self.failures, 'identity_unresolved': self.unresolved}
 
     def commit(self):
         frappe.db.commit()
         self.committed_counts = Counter(self.counts)
-        self.phone_changes, self.copied = [], set()
+        self.unresolved += self.pending_unresolved
+        self.pending_unresolved, self.copied = [], set()
 
     def rollback(self):
-        """Forget what the open transaction did: counts, cached phone matches and copied bytes."""
+        """Forget what the open transaction did: counts, cached contact matches and copied bytes."""
         frappe.db.rollback()
         self.counts = Counter(self.committed_counts)
-        for number, previous in reversed(self.phone_changes):
-            if previous is None:
-                self.phones.pop(number, None)
-            else:
-                self.phones[number] = previous
+        self.phones = self.links = None
         remove_unused_copies(self.copied)
-        self.phone_changes, self.copied = [], set()
+        self.pending_unresolved, self.copied = [], set()
 
     def import_conversation(self, conversation):
         rows = self.page(conversation.name, ('', ''))
@@ -144,9 +142,14 @@ class Importer:
         """One Relay Legacy Import row per source conversation: the undo and audit marker.
         It is written before the first message, so undo finds what an interrupted run made."""
         filters = {'source_site': self.site_label, 'source_conversation': conversation.name, 'channel': channel}
-        name = frappe.db.get_value('Relay Legacy Import', filters, 'name')
-        if name:
-            return name
+        row = frappe.db.get_value('Relay Legacy Import', filters, ['name', 'source_metadata'], as_dict=True)
+        if row:
+            metadata = legacy.object_value(row.source_metadata)
+            merged = merge_created(metadata.get('created', {}), created)
+            if merged != metadata.get('created', {}):
+                frappe.db.set_value('Relay Legacy Import', row.name, 'source_metadata',
+                                    bundles.canonical(dict(metadata, created=merged)), update_modified=False)
+            return row.name
         return direct_document('Relay Legacy Import', dict(filters, source_channel=conversation.channel, relay_contact=contact,
                                status='Running', imported=0, source_metadata=bundles.canonical({'created': created}))).name
 
@@ -289,21 +292,31 @@ class Importer:
         return path if path.is_file() else None
 
     def contact_for(self, channel, endpoint, is_phone, conversation, created):
-        """Relay Contact of the number on this channel, else of the same verified number on another
-        channel, else of the Frappe Contact with this phone, else a new Contact."""
-        found = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)}, 'relay_contact')
-        if found:
+        """Relay Contact of the number on this channel, else a new endpoint (see new_endpoint).
+        Its Contact gets a link to every Customer the source party bindings name."""
+        bound = self.bound_customers(conversation)
+        self.check_identity(conversation, endpoint, is_phone, bound)
+        relay = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)}, 'relay_contact')
+        if relay:
             self.counts['relay_contacts_reused'] += 1
-            return found
+        else:
+            relay = self.new_endpoint(channel, endpoint, is_phone, conversation, bound, created)
+        if not self.dry_run:
+            self.link_customers(frappe.db.get_value('Relay Contact', relay, 'contact'), bound, created)
+        return relay
+
+    def new_endpoint(self, channel, endpoint, is_phone, conversation, bound, created):
+        """Relay Contact of the same verified number on another channel, else of the Frappe Contact
+        with this phone (the one linked to a bound Customer first), else a new Contact."""
         relay = frappe.db.get_value('Relay Contact Endpoint', {'endpoint': endpoint, 'verified': 1}, 'relay_contact')
-        person = None if relay or not is_phone else self.phone_contact(endpoint)
+        person = None if relay or not is_phone else self.phone_contact(endpoint, bound)
         if person:
             relay = frappe.db.get_value('Relay Contact', {'contact': person}, 'name')
         self.counts['relay_contacts_reused' if relay else 'frappe_contacts_matched' if person else 'contacts_created'] += 1
         if self.dry_run:
             return relay or 'dry-run'
         if not person and not relay:
-            person = created['contact'] = self.new_contact(endpoint, is_phone, conversation)
+            person = created['contact'] = self.new_contact(endpoint, is_phone, conversation, bound)
         if not relay:
             relay = created['relay_contact'] = direct_document('Relay Contact', {'contact': person, 'display_name': contact_title(person)},
                                                                sequential_name('contact')).name
@@ -311,31 +324,80 @@ class Importer:
                                               'verified': 1, 'endpoint_key': endpoint_key(channel, endpoint)}).name
         return relay
 
-    def phone_contact(self, endpoint):
+    def phone_contact(self, endpoint, bound):
+        candidates = self.candidates(endpoint)
+        links = self.customer_links()
+        return next((person for person in candidates if links.get(person, set()) & bound), candidates[0] if candidates else None)
+
+    def candidates(self, endpoint):
         if self.phones is None:
             self.phones = contacts_by_phone()
-        return self.phones.get(endpoint)
+        return self.phones.get(endpoint, [])
 
-    def new_contact(self, endpoint, is_phone, conversation):
+    def customer_links(self):
+        if self.links is None:
+            self.links = {}
+            for row in frappe.db.sql("""SELECT parent, link_name FROM `tabDynamic Link`
+                    WHERE parenttype = 'Contact' AND link_doctype = 'Customer'""", as_dict=True):
+                self.links.setdefault(row.parent, set()).add(row.link_name)
+        return self.links
+
+    def link_customers(self, person, bound, created):
+        """Link the chat's Contact to the bound Customers it lacks; undo removes exactly these links."""
+        links = self.customer_links().setdefault(person, set())
+        for customer in sorted(bound - links):
+            idx = frappe.db.sql("""SELECT COALESCE(MAX(idx), 0) + 1 FROM `tabDynamic Link`
+                WHERE parent = %s AND parenttype = 'Contact' AND parentfield = 'links'""", person)[0][0]
+            link = direct_document('Dynamic Link', {'parent': person, 'parenttype': 'Contact', 'parentfield': 'links',
+                                   'link_doctype': 'Customer', 'link_name': customer, 'idx': idx}, frappe.generate_hash(length=10))
+            created.setdefault('links', []).append(link.name)
+            links.add(customer)
+            self.counts['customer_links_added'] += 1
+
+    def bound_customers(self, conversation):
+        """Customers that verified source party bindings name for this identity and that exist on this site."""
+        if self.bindings is None:
+            self.bindings = {}
+            for row in self.source.sql("""SELECT identity, attributes FROM `tabWhatsApp Core Party Binding`
+                    WHERE status = 'Verified'"""):
+                customer = legacy.object_value(row.attributes).get('erpnext_customer')
+                if customer:
+                    self.bindings.setdefault(row.identity, set()).add(customer)
+        names = self.bindings.get(conversation.identity, set())
+        existing = set(frappe.get_all('Customer', filters={'name': ['in', list(names)]}, pluck='name')) if names else set()
+        for customer in sorted(names - existing):
+            self.unresolve(conversation, 'Bound Customer not on this site', customer=customer)
+        return existing
+
+    def check_identity(self, conversation, endpoint, is_phone, bound):
+        """Count bound chats and list chats whose phone has several Contacts and no binding to choose by."""
+        if bound:
+            self.counts['customer_bound_conversations'] += 1
+        candidates = self.candidates(endpoint) if is_phone else []
+        if len(candidates) < 2:
+            return
+        if bound:
+            self.counts['ambiguous_resolved_by_binding'] += 1
+        else:
+            self.unresolve(conversation, 'Phone on several Contacts and no Customer binding', phone=endpoint, candidates=candidates)
+
+    def unresolve(self, conversation, reason, **detail):
+        self.counts['identity_unresolved'] += 1
+        self.pending_unresolved.append(dict(conversation=conversation.name, reason=reason, **detail))
+
+    def new_contact(self, endpoint, is_phone, conversation, bound):
         number = '+' + endpoint if is_phone else None
         title = (conversation.display_value or '').strip()[:140] or number or endpoint
         person = frappe.get_doc({'doctype': 'Contact', 'first_name': title, 'full_name': title, 'mobile_no': number,
                                  'phone_nos': [{'phone': number, 'is_primary_mobile_no': 1}] if number else [],
-                                 'links': [{'link_doctype': 'Customer', 'link_name': name} for name in self.customers(conversation)]})
+                                 'links': [{'link_doctype': 'Customer', 'link_name': name} for name in sorted(bound)]})
         from frappe.model.naming import set_new_name
         set_new_name(person)
         insert_with_children(person)
         if number:
-            self.phone_changes.append((endpoint, self.phones.get(endpoint)))
-            self.phones[endpoint] = person.name
+            self.phones[endpoint] = [person.name]
+        self.customer_links()[person.name] = set(bound)
         return person.name
-
-    def customers(self, conversation):
-        """ERPNext Customers that the old party bindings name, when they exist on this site."""
-        rows = self.source.sql("SELECT attributes FROM `tabWhatsApp Core Party Binding` WHERE identity=%s AND status='Verified'",
-                               (conversation.identity,))
-        names = {legacy.object_value(row.attributes).get('erpnext_customer') for row in rows}
-        return sorted(name for name in names if name and frappe.db.exists('Customer', name))
 
 
 def matching_channel(row):
@@ -360,7 +422,7 @@ def legacy_endpoint(conversation):
 
 
 def contacts_by_phone():
-    """Normalized number -> Frappe Contact: one with a Relay Contact first, then one linked to a Customer, else the oldest."""
+    """Normalized number -> its Frappe Contacts: ones with a Relay Contact first, then ones linked to a Customer, then oldest."""
     rows = frappe.db.sql("""SELECT c.name, c.creation, p.phone, c.mobile_no, c.phone contact_phone, r.name relay,
             EXISTS(SELECT 1 FROM `tabDynamic Link` l WHERE l.parent = c.name AND l.parenttype = 'Contact'
                 AND l.link_doctype = 'Customer') customer
@@ -371,9 +433,20 @@ def contacts_by_phone():
     for row in rows:
         for value in (row.phone, row.mobile_no, row.contact_phone):
             number = phone_number(value) if value else None
-            if number:
-                result.setdefault(number, row.name)
+            if number and row.name not in result.setdefault(number, []):
+                result[number].append(row.name)
     return result
+
+
+def merge_created(stored, created):
+    """What earlier runs of one conversation created plus what this run created."""
+    merged = dict(stored)
+    for key, value in created.items():
+        if isinstance(value, list):
+            merged[key] = list(dict.fromkeys(merged.get(key, []) + value))
+        else:
+            merged.setdefault(key, value)
+    return merged
 
 
 def contact_title(person):

@@ -27,8 +27,8 @@ class Importer(legacy_database.Importer):
         self.site_label, self.batch, self.dry_run = 'sales.example', 100, dry_run
         self.source = Mock(database=database, sql=Mock(return_value=[]))
         self.files_dir = Path(files_dir) if files_dir else None
-        self.counts, self.failures, self.phones = Counter(), [], {}
-        self.committed_counts, self.phone_changes, self.copied = Counter(), [], set()
+        self.counts, self.failures, self.phones, self.links, self.bindings = Counter(), [], {}, {}, {}
+        self.committed_counts, self.unresolved, self.pending_unresolved, self.copied = Counter(), [], [], set()
 
 
 class Case(unittest.TestCase):
@@ -64,11 +64,11 @@ class Mapping(Case):
                                 relay=relay, customer=customer)
         oldest, customer = contact('Old', '2026-01-01'), contact('Shop', '2026-02-01', customer=1)
         with patch.object(legacy_database.frappe.db, 'sql', return_value=[oldest, customer]):
-            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Shop'})
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': ['Shop', 'Old']})
         with patch.object(legacy_database.frappe.db, 'sql', return_value=[oldest, customer, contact('Chat', '2026-03-01', relay='RELAY-CON-1')]):
-            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Chat'})
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': ['Chat', 'Shop', 'Old']})
         with patch.object(legacy_database.frappe.db, 'sql', return_value=[contact('New', '2026-02-01'), oldest]):
-            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Old'})
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': ['Old', 'New']})
 
     def test_channel_matches_by_number_only_when_unique(self):
         source = frappe._dict(phone_number_id='979157361944731', display_name='421 224 2924')
@@ -97,6 +97,53 @@ class Mapping(Case):
             importer.import_rows([row(delivery_status='Bogus')], job, {'source_site': 'sales.example', 'endpoint': '1', 'identifier_type': 'Phone'})
         self.assertEqual(importer.failures[0]['message'], 'm1')
         self.assertEqual(importer.counts['created'], 0)
+
+
+class Identity(Case):
+    def test_shared_phone_prefers_the_contact_of_the_bound_customer(self):
+        importer = Importer()
+        importer.phones = {'919000000001': ['Chat', 'Shop', 'Old']}
+        importer.links = {'Shop': {'Other Customer'}, 'Old': {'Bound Customer'}}
+        self.assertEqual(importer.phone_contact('919000000001', {'Bound Customer'}), 'Old')
+        self.assertEqual(importer.phone_contact('919000000001', set()), 'Chat')
+        self.assertIsNone(importer.phone_contact('919000000009', set()))
+
+    def test_missing_customer_link_is_added_and_recorded_for_undo(self):
+        importer = Importer()
+        importer.links = {'Old': {'Have'}}
+        frappe.db.sql.return_value = [[2]]
+        created = {}
+        with patch.object(legacy_database, 'direct_document', return_value=frappe._dict(name='LINK-1')) as document, \
+             patch.object(frappe, 'generate_hash', return_value='hash'):
+            importer.link_customers('Old', {'Have', 'Bound'}, created)
+        values = document.call_args.args[1]
+        self.assertEqual((values['parent'], values['link_doctype'], values['link_name'], values['idx']), ('Old', 'Customer', 'Bound', 2))
+        self.assertEqual((created, importer.links['Old'], importer.counts['customer_links_added']), ({'links': ['LINK-1']}, {'Have', 'Bound'}, 1))
+
+    def test_bound_customers_come_from_verified_bindings_and_must_exist(self):
+        importer = Importer()
+        importer.bindings = None
+        importer.source.sql.return_value = [frappe._dict(identity='i1', attributes=json.dumps({'erpnext_customer': 'Shop'})),
+                                            frappe._dict(identity='i1', attributes=json.dumps({'erpnext_customer': 'Gone'})),
+                                            frappe._dict(identity='i1', attributes=json.dumps({'erpnext_customer': ''}))]
+        with patch.object(frappe, 'get_all', return_value=['Shop']):
+            self.assertEqual(importer.bound_customers(conversation()), {'Shop'})
+        self.assertEqual(importer.pending_unresolved, [{'conversation': 'c1', 'reason': 'Bound Customer not on this site', 'customer': 'Gone'}])
+
+    def test_ambiguous_phone_without_binding_is_reported(self):
+        importer = Importer()
+        importer.phones = {'919000000001': ['A', 'B'], '919000000002': ['C']}
+        importer.check_identity(conversation(), '919000000001', True, {'Shop'})
+        importer.check_identity(conversation(name='c2'), '919000000002', True, set())
+        importer.check_identity(conversation(name='c3'), '919000000001', True, set())
+        self.assertEqual((importer.counts['customer_bound_conversations'], importer.counts['ambiguous_resolved_by_binding'],
+                          importer.counts['identity_unresolved']), (1, 1, 1))
+        self.assertEqual(importer.pending_unresolved[0]['conversation'], 'c3')
+        self.assertEqual(importer.pending_unresolved[0]['candidates'], ['A', 'B'])
+
+    def test_rerun_adds_new_undo_entries_to_the_marker(self):
+        self.assertEqual(legacy_database.merge_created({'endpoint': 'E1', 'links': ['L1']}, {'endpoint': 'E2', 'links': ['L1', 'L2']}),
+                         {'endpoint': 'E1', 'links': ['L1', 'L2']})
 
 
 class Idempotency(Case):
@@ -248,22 +295,22 @@ class Undo(Case):
 
 
 class Transactions(Case):
-    def test_rollback_forgets_counts_phone_matches_and_copied_bytes(self):
+    def test_rollback_forgets_counts_contact_matches_report_rows_and_copied_bytes(self):
         importer = Importer()
         importer.counts['created'] = 5
-        importer.phones = {'919000000001': 'Old'}
+        importer.pending_unresolved = [{'conversation': 'c1'}]
         importer.commit()
         importer.counts['created'] += 3
-        importer.phone_changes = [('919000000001', 'Old'), ('919000000002', None)]
-        importer.phones.update({'919000000001': 'Rolled', '919000000002': 'Rolled'})
+        importer.pending_unresolved = [{'conversation': 'c2'}]
+        importer.phones, importer.links = {'919000000002': ['Rolled']}, {'Rolled': {'Shop'}}
         importer.copied = {'/private/files/relay-archive-x'}
         with patch.object(legacy_database, 'remove_unused_copies') as remove:
             importer.rollback()
         frappe.db.rollback.assert_called_once()
         remove.assert_called_once_with({'/private/files/relay-archive-x'})
         self.assertEqual(importer.counts['created'], 5)
-        self.assertEqual(importer.phones, {'919000000001': 'Old'})
-        self.assertEqual((importer.phone_changes, importer.copied), ([], set()))
+        self.assertEqual((importer.phones, importer.links), (None, None))
+        self.assertEqual((importer.unresolved, importer.pending_unresolved, importer.copied), ([{'conversation': 'c1'}], [], set()))
 
     def test_failed_conversation_is_rolled_back_and_listed(self):
         importer = Importer()
