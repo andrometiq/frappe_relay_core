@@ -69,12 +69,7 @@ from relay_core.business_references import RELAY_DOCTYPES as _relay_doctypes
 ignore_links_on_delete = list(_relay_doctypes)
 
 required_apps = ["frappe_tools"]
-after_migrate = [after_migrate, 'relay_core.business_events.install_samples']
-after_install = [after_install, 'relay_core.business_events.install_samples']
 doc_events['*'] = {event: 'relay_core.business_events.on_event' for event in ('after_insert', 'on_submit', 'on_cancel')}
-
-after_migrate.append('relay_core.ai.samples.install_samples')
-after_install.append('relay_core.ai.samples.install_samples')
 
 has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.permission'
 permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'

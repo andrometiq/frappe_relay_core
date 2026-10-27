@@ -119,7 +119,7 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             <span v-if="skill">{{ row.business_doctype }} · {{ row.mode }} · {{ linkedTitle('Relay Channel', row.channel, 'Choose a channel') }} · {{ toolCount(row.allowed_tools) }} {{ toolCount(row.allowed_tools) === 1 ? 'reference' : 'references' }}</span>
             <span v-else>{{ eventDescription(row) }}</span>
           </button>
-          <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="skill ? 'No matching events' : 'No matching event rules'" description="Start with a disabled configuration and enable it when ready." :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New event' : 'New event rule'" @click="edit(newConfiguration(skill))" /></WorkspaceState>
+          <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="(rows.length ? 'No matching ' : 'No ') + (skill ? 'events' : 'event rules') + (rows.length ? '' : ' yet')" :description="rows.length ? 'Change the filter to see other configurations.' : 'Create one when you need it. It starts disabled until you enable it.'" :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New event' : 'New event rule'" variant="solid" icon-left="plus" @click="edit(newConfiguration(skill))" /></WorkspaceState>
           <Button v-if="next" label="Load more" :disabled="busy" @click="load(true)" />
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
