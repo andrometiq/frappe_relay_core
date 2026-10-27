@@ -920,7 +920,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .v1-connection:not(.is-connected)>span{background:var(--relay-ink-4);box-shadow:none}
 .v1-shell.relay-shell .app-nav{gap:1px;padding:6px 8px 10px;border:0;background:transparent}
 .v1-shell.relay-shell .relay-nav-section{gap:1px}
-.v1-shell.relay-shell .relay-nav-group{padding:14px 12px 5px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+.v1-shell.relay-shell .relay-nav-group{padding:14px 12px 5px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:normal}
 .v1-shell.relay-shell .nav-item{position:relative;gap:12px;height:36px;min-height:36px;padding:0 12px;border-radius:6px;color:var(--relay-ink);font-size:13.5px;font-weight:400;transition:background-color var(--relay-fast) ease}
 .v1-shell.relay-shell .nav-item:hover{background:var(--relay-hover)}
 .v1-shell.relay-shell .nav-item.active{background:var(--relay-select);color:var(--relay-ink);font-weight:400}
@@ -1006,7 +1006,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .number-wa{flex:none;color:#25a35a}
 .number-pop{position:fixed;z-index:80;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--relay-stroke-strong);border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);animation:relay-pop var(--relay-fast) var(--relay-ease)}
 .number-pop hr{margin:4px 6px;border:0;border-top:1px solid var(--relay-stroke)}
-.number-menu-title{padding:6px 10px 4px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+.number-menu-title{padding:6px 10px 4px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:normal}
 .number-option{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:8px 10px;border-radius:6px;color:var(--relay-ink);font-size:13px;text-align:left}
 .number-option:hover,.number-option:focus-visible,.number-option[aria-selected=true]{background:var(--relay-select);outline:0}
 .number-option svg{width:16px;height:16px}
@@ -1149,7 +1149,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .compact-composer .composer-identity{font-size:12px}
 
 /* Contact details: grouped cards with icon tiles, switches and key-value rows */
-.info-group-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:14px 4px 6px;color:var(--relay-ink-3);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.01em;list-style:none;cursor:default}
+.info-group-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:14px 4px 6px;color:var(--relay-ink-3);font-size:12px;font-weight:600;letter-spacing:normal;list-style:none;cursor:default}
 .info-group-title::-webkit-details-marker{display:none}
 .info-group-action{min-height:0!important;min-width:0!important;padding:0;color:var(--relay-accent-text);font-size:12px;font-weight:600;text-transform:none}
 .info-card{overflow:hidden;border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
@@ -1164,7 +1164,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .info-item-copy b{display:block;min-width:0;overflow:hidden;color:var(--relay-ink);font-size:13.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .info-item-copy small{display:block;margin-top:1px;overflow:hidden;color:var(--relay-ink-3);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .info-item-copy small a{display:inline;min-height:0;color:var(--relay-accent-text)}
-.info-primary{flex:none;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:10.5px;font-weight:700;text-transform:uppercase}
+.info-primary{flex:none;margin-left:6px;padding:1px 6px;border-radius:4px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:10.5px;font-weight:700}
 .info-switch{position:relative;flex:none;width:40px;height:20px;min-height:0!important;min-width:0!important;padding:0;border:1px solid var(--relay-ink-3);border-radius:10px;background:transparent;transition:background-color var(--relay-fast) ease}
 .info-switch::after{content:"";position:absolute;left:4px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--relay-ink-3);transition:left var(--relay-fast) var(--relay-ease)}
 .info-switch[aria-checked=true]{border-color:var(--relay-accent);background:var(--relay-accent)}

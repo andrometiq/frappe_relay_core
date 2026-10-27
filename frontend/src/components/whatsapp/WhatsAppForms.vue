@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
+import { sentenceCase } from '../../services/textCase'
 import FrappeListView from '../frappe/FrappeListView.vue'
 
 const items = ref([]), after = ref(''), busy = ref(false), error = ref('')
@@ -29,8 +30,8 @@ onMounted(load)
       empty-description="Forms created for this WhatsApp account show here.">
       <template #actions><Button label="Refresh" icon-left="refresh-cw" :loading="busy" @click="load()" /></template>
       <template #cell-title="{ item }"><strong>{{ item.name }}</strong></template>
-      <template #cell-status="{ item }"><Badge :label="item.status" :theme="item.status === 'PUBLISHED' ? 'green' : 'gray'" /></template>
-      <template #cell-categories="{ item }">{{ (item.categories || []).join(', ') || '—' }}</template>
+      <template #cell-status="{ item }"><Badge :label="sentenceCase(item.status)" :theme="item.status === 'PUBLISHED' ? 'green' : 'gray'" /></template>
+      <template #cell-categories="{ item }">{{ (item.categories || []).map(sentenceCase).join(', ') || '—' }}</template>
       <template v-if="after" #footer><Button label="Load more forms" :loading="busy" @click="load(true)" /></template>
     </FrappeListView>
   </div>
