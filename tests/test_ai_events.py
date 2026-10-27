@@ -149,6 +149,15 @@ class AdmissionTests(unittest.TestCase):
         self.claims = self.enterContext(patch.object(flows,'claims',return_value=False))
         self.event = self.enterContext(patch.object(flows,'create_event'))
         self.confirm = self.enterContext(patch.object(ai,'continue_search',return_value=False))
+        self.keyword = self.enterContext(patch('relay_core.opt_out.is_keyword', return_value=False))
+
+    def test_an_opt_out_keyword_gets_no_automatic_reply(self):
+        self.keyword.return_value = True
+        self.claims.return_value = True
+        self.assertEqual(service.create_run(self.message), {'status': 'Ignored'})
+        self.save.assert_not_called()
+        self.event.assert_not_called()
+        self.fake.enqueue.assert_not_called()
 
     def test_flow_and_event_exclusion_with_one_source_journal(self):
         self.claims.return_value = True

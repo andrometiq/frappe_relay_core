@@ -187,8 +187,9 @@ def configuration_failure(message, error):
 
 def create_run(doc):
     """The sole admission transaction for automatic inbound handlers and APIs."""
-    if doc.get('legacy_source') or doc.direction != 'Incoming':
-        return {'status': 'Ignored'}
+    from relay_core.opt_out import is_keyword
+    if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc):
+        return {'status': 'Ignored'}  # An opt-out or opt-in keyword gets no automatic reply.
     from relay_core.flows.service import claims, create_event
     from relay_core.ai.matching import human_request
     from relay_core.email_preferences import automatic_allowed, automatic_reply_exists
