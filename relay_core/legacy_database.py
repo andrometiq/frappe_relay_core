@@ -265,11 +265,13 @@ def legacy_endpoint(conversation):
 
 
 def contacts_by_phone():
-    """Normalized number -> Frappe Contact: one with a Relay Contact first, else the oldest."""
-    rows = frappe.db.sql("""SELECT c.name, c.creation, p.phone, c.mobile_no, c.phone contact_phone, r.name relay
+    """Normalized number -> Frappe Contact: one with a Relay Contact first, then one linked to a Customer, else the oldest."""
+    rows = frappe.db.sql("""SELECT c.name, c.creation, p.phone, c.mobile_no, c.phone contact_phone, r.name relay,
+            EXISTS(SELECT 1 FROM `tabDynamic Link` l WHERE l.parent = c.name AND l.parenttype = 'Contact'
+                AND l.link_doctype = 'Customer') customer
         FROM `tabContact` c LEFT JOIN `tabContact Phone` p ON p.parent = c.name AND p.parenttype = 'Contact'
         LEFT JOIN `tabRelay Contact` r ON r.contact = c.name""", as_dict=True)
-    rows.sort(key=lambda row: (not row.relay, row.creation, row.name))
+    rows.sort(key=lambda row: (not row.relay, not row.customer, row.creation, row.name))
     result = {}
     for row in rows:
         for value in (row.phone, row.mobile_no, row.contact_phone):
