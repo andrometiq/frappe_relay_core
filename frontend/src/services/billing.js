@@ -37,7 +37,7 @@ export function monthName(period) {
 }
 
 export function categoryLabel(category) {
-  if (category === 'SERVICE') return 'Service / free'
+  if (category === 'SERVICE') return 'Service replies'
   return String(category || 'Other').toLowerCase().replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())
 }
 
@@ -59,16 +59,31 @@ export function statementLines(lines) {
   return (lines || []).map(line => ({ ...line, label: categoryLabel(line.category), free: line.category === 'SERVICE' }))
 }
 
-// Messages, amount and, when some messages were charged, the average charge per charged message.
-export function summaryCards(statement, periodLabel, currency) {
-  const paid = (statement?.lines || []).filter(line => line.category !== 'SERVICE' && line.amount)
-  const paidMessages = paid.reduce((sum, line) => sum + line.messages, 0)
-  const cards = [
-    { label: 'Messages sent', value: formatCount(statement?.messages) },
-    { label: `Amount for ${periodLabel}`, value: formatMoney(statement?.amount, currency), accent: true },
+const CATEGORY_COLORS = { MARKETING: '#8a5cf6', UTILITY: '#0f6cbd', AUTHENTICATION: '#c2410c', SERVICE: 'var(--relay-green)' }
+
+export function categoryColor(category) {
+  return CATEGORY_COLORS[category] || 'var(--relay-ink-4)'
+}
+
+// The bill summary like a phone bill: messages, free replies, paid messages and the amount to pay.
+export function summaryCards(statement, periodLabel, numberCount, currency) {
+  const lines = statement?.lines || []
+  const free = lines.filter(line => line.category === 'SERVICE').reduce((sum, line) => sum + line.messages, 0)
+  const messages = statement?.messages || 0
+  return [
+    { label: 'Messages', value: formatCount(messages), note: numberCount > 1 ? `All ${numberCount} numbers` : 'All WhatsApp messages' },
+    { label: 'Free replies', value: formatCount(free), note: 'Replies within 24 h' },
+    { label: 'Paid messages', value: formatCount(messages - free), note: 'Marketing, utility, login codes' },
+    { label: 'Amount to pay', value: formatMoney(statement?.amount, currency), note: periodLabel, accent: true },
   ]
-  if (paidMessages) cards.push({ label: 'Average per charged message', value: formatRate(statement.amount / paidMessages, currency) })
-  return cards
+}
+
+// One bill per WhatsApp number for a "2026-10" month, or for the whole year without one.
+export function numberBills(numbers, month = '') {
+  return (numbers || []).map(number => ({
+    ...number,
+    statement: month ? number.months.find(row => row.period.startsWith(month)) || { lines: [], messages: 0, amount: 0 } : number.total,
+  }))
 }
 
 export function yearRows(months) {
