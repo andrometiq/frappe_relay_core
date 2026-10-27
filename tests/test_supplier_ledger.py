@@ -1,4 +1,4 @@
-"""Code-owned arithmetic, truncation, sample installation and tool scoping."""
+"""Code-owned arithmetic, truncation and tool scoping."""
 import json
 import sys
 import types
@@ -26,47 +26,6 @@ class LedgerTests(unittest.TestCase):
     def test_non_finite_amounts_are_rejected(self):
         for value in ('NaN', 'Infinity', '-Infinity'):
             with self.assertRaises(ValueError): summarize([dict(company='Local Company', debit=value, credit=0)], False)
-
-    def test_sample_installs_disabled(self):
-        f = framework()
-        f.db.exists.side_effect = lambda dt, name: dt == 'DocType'
-        sample = module('relay_core/ai/samples.py', f)
-        sample.install_samples()
-        values = f.get_doc.call_args.args[0]
-        self.assertEqual(values['enabled'], 0)
-        self.assertEqual(values['mode'], 'Shadow')
-        self.assertNotIn('ai_model', values)
-        self.assertEqual(json.loads(values['allowed_tools']), [sample.LEDGER_TOOL])
-
-    def test_sample_upgrades_only_known_defaults_and_preserves_configuration(self):
-        f = framework()
-        f.db.exists.return_value = 'sample'
-        sample = module('relay_core/ai/samples.py', f)
-        for changes, upgraded in [({}, True),
-                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL])}, True),
-                ({'allowed_tools': json.dumps([{**sample.LEGACY_LEDGER_TOOL, 'fields': ['remarks']}])}, False),
-                ({'allowed_tools': 'invalid'}, False),
-                ({'instructions': 'Customer instructions'}, False),
-                ({'business_doctype': 'Customer'}, False),
-                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'execution_policy': 'Ticket only'}, False),
-                ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]), 'allowed_actions': '[{"action":"reply"}]'}, False)]:
-            with self.subTest(changes=changes):
-                skill = Doc(business_doctype='Supplier', instructions=sample.INSTRUCTIONS,
-                    allowed_tools=json.dumps([sample.LEGACY_LEDGER_TOOL]), enabled=1, mode='Automatic',
-                    channel='local-channel', run_as_user='local-user', daily_limit=7, execution_policy='Execute')
-                skill.update(changes)
-                before = dict(skill)
-                f.get_doc.return_value = skill
-                with patch.object(Doc, 'save') as save:
-                    sample.install_samples()
-                    self.assertEqual(save.call_count, int(upgraded))
-                    expected = before | ({'allowed_tools': json.dumps([sample.LEDGER_TOOL]),
-                        'allowed_actions': '[{"action":"reply"}]',
-                        'enabled': 0} if upgraded else {})
-                    self.assertEqual(skill, expected)
-                    sample.install_samples()
-                    self.assertEqual(save.call_count, int(upgraded), 'Upgrade must be idempotent')
-
 
 class LedgerContractTests(unittest.TestCase):
     def setUp(self):

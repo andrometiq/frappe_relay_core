@@ -941,19 +941,6 @@ class EventContractTests(unittest.TestCase):
                      lambda: self.config.validate_skill(self.doc)):
             with self.assertRaises(PermissionError): call()
 
-    def test_new_sample_has_event_defaults_and_no_assumed_identity_mapping(self):
-        samples = module('relay_core/ai/samples.py', self.f)
-        self.f.db.exists.side_effect = lambda dt, value: dt == 'DocType'
-        self.f.get_doc.side_effect = lambda values: Doc(values)
-        samples.install_samples()
-        values = self.f.get_doc.call_args.args[0]
-        self.assertEqual(values['target'], samples.TARGET)
-        self.assertEqual(values['execution_policy'], 'Execute')
-        self.assertEqual(json.loads(values['allowed_actions']), [{'action': 'reply'}])
-        self.assertFalse(values['enabled'])
-        self.assertNotIn('identity_fields', json.loads(values['allowed_tools'])[0])
-
-
 def site_tests():
     """yrp.site configuration/HTTP acceptance, with local fixtures and no delivery.
 
@@ -1043,30 +1030,6 @@ def site_tests():
                 else:
                     raise AssertionError('Invalid activation was accepted')
             assert frappe.get_doc('Relay AI Skill', name).target == activation['target']
-            # Exercise the actual after_migrate hook against an enabled pre-event
-            # sample, without running migrate or touching the installed sample.
-            from relay_core.ai import samples
-            legacy = frappe.get_doc(dict(doctype='Relay AI Skill', name='Sim Legacy Ledger ' + stamp,
-                title='Sim Legacy Ledger ' + stamp, sample_key='Sim Legacy Ledger ' + stamp,
-                business_doctype='Supplier', instructions=samples.INSTRUCTIONS,
-                allowed_tools=json.dumps([samples.LEGACY_LEDGER_TOOL]), enabled=1,
-                mode='Automatic', daily_limit=25, channel=channel.name, ai_model=model.name,
-                run_as_user=actor.name, handoff_owner=actor.name))
-            legacy.db_insert(); created.append(('Relay AI Skill', legacy.name))
-            original_exists = frappe.db.exists
-            def sample_exists(doctype, filters=None, *args, **kwargs):
-                if doctype == 'Relay AI Skill' and filters == {'sample_key': 'supplier_ledger'}:
-                    return legacy.name
-                return original_exists(doctype, filters, *args, **kwargs)
-            assert 'relay_core.ai.samples.install_samples' in frappe.get_hooks('after_migrate')
-            with patch.object(frappe.db, 'exists', side_effect=sample_exists):
-                samples.install_samples()
-                samples.install_samples()
-            legacy.reload()
-            assert legacy.enabled == 0 and legacy.mode == 'Automatic'
-            assert json.loads(legacy.allowed_tools) == [samples.LEDGER_TOOL]
-            assert not legacy.target and 'identity_fields' not in legacy.allowed_tools
-            print('PASS enabled legacy sample after_migrate hook: disabled editable draft, no invented identity, idempotent upgrade')
             print('PASS yrp.site disabled draft, activation, two targets, invalid identity/company/actions and stored version')
             frappe.db.commit(); frappe.destroy()
 
@@ -1101,11 +1064,6 @@ def site_tests():
                     assert response.json.get('exc_type') == 'PermissionError'
             response = request('GET', 'save', query_string={'name': name, 'values': '{}'})
             assert response.status_code == 403
-            response = request('POST', 'save', json={'name':legacy.name, 'values':{'enabled':1, 'target':samples.TARGET}})
-            assert response.status_code == 500 and response.json['exc_type'] == 'ValueError', ('legacy enable', response.status_code, response.json.get('exc_type'))
-            response = client.post('/api/method/relay_core.ai.samples.install_samples',
-                headers={'Authorization': credentials[actor.name]})
-            assert response.status_code == 403 and response.json['exc_type'] == 'PermissionError'
             connect()
             stored = frappe.get_doc('Relay AI Skill', name)
             assert stored.reply_style == 'Use <plain> words & exact amounts.' and stored.target == activation['target']

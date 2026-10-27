@@ -362,18 +362,6 @@ def save(values, name=None):
     return {'name': doc.name}
 
 
-def install_samples():
-    for source, title, params in (
-        ('Delivery Note', 'We have delivered {name}: {items_summary}', ['name', 'items_summary']),
-        ('Sales Order', 'Order {name} received: {total_qty}', ['name', 'total_qty']),
-    ):
-        if not frappe.db.exists('DocType', source) or frappe.db.exists('Relay Business Event Rule', {'sample_key': source}): continue
-        frappe.get_doc({'doctype': 'Relay Business Event Rule', 'title': title, 'sample_key': source,
-            'enabled': 0, 'source_doctype': source, 'event': 'on_submit', 'recipient_field': 'customer',
-            'business_doctype': 'Customer', 'parameter_mapping': json.dumps(params)}).insert(ignore_permissions=True)
-    clear_rule_cache()
-
-
 @frappe.whitelist(methods=['GET'])
 def template_preview(name):
     """Read template wording from Hub for the editor; never sends a message."""

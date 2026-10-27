@@ -247,18 +247,6 @@ class BusinessEventTests(unittest.TestCase):
         self.assertTrue(all(row.status == 'Failed' for row in rows))
         self.f.db.get_value.assert_any_call('Relay Business Event Delivery', 'DELIVERY-20', 'name', for_update=True)
 
-    def test_samples_are_disabled_and_install_idempotently(self):
-        samples = []
-        self.f.db.exists.side_effect = lambda dt, key: dt == 'DocType' or any(row.sample_key == key['sample_key'] for row in samples)
-        self.f.get_doc.side_effect = lambda values: samples.append(Doc(values)) or samples[-1]
-        for _ in range(2): self.service.install_samples()
-        self.assertEqual(self.f.cache.delete_value.call_count, 2)
-        self.f.cache.delete_value.assert_called_with(self.service.RULE_PAIRS_CACHE_KEY)
-        self.assertEqual(len(samples), 2)
-        self.assertTrue(all(not row.enabled for row in samples))
-        self.assertEqual({row.source_doctype for row in samples}, {'Delivery Note', 'Sales Order'})
-
-
 class ChannelEventTests(unittest.TestCase):
     def setUp(self):
         self.f = framework()
@@ -332,3 +320,27 @@ class ChannelEventTests(unittest.TestCase):
         self.f.db.reset_mock();action.payload='{}'
         self.service.complete(action)
         self.assertEqual(self.f.db.mock_calls,[])
+
+
+class RemoveSamplesPatchTests(unittest.TestCase):
+    def setUp(self):
+        self.f = framework()
+        self.f.LinkExistsError = type('LinkExistsError', (Exception,), {})
+        self.f.delete_doc = Mock()
+        self.patch = module('relay_core/patches/v1_0/remove_untouched_samples.py', self.f)
+
+    def test_deletes_only_untouched_disabled_samples(self):
+        rows = {'Delivery Note': [Doc(name='DN-SAMPLE', creation=1, modified=1), Doc(name='DN-EDITED', creation=1, modified=2)],
+                'Sales Order': [Doc(name='SO-LINKED', creation=1, modified=1)],
+                'supplier_ledger': [Doc(name='SKILL-SAMPLE', creation=1, modified=1)]}
+        self.f.get_all.side_effect = lambda doctype, filters, fields: rows[filters['sample_key']]
+        def delete(doctype, name, **kw):
+            if name == 'SO-LINKED': raise self.f.LinkExistsError()
+        self.f.delete_doc.side_effect = delete
+        self.patch.execute()
+        for call in self.f.get_all.call_args_list:
+            self.assertEqual(call.kwargs['filters']['enabled'], 0)
+            self.assertIn('title', call.kwargs['filters'])
+        deleted = [call.args for call in self.f.delete_doc.call_args_list]
+        self.assertEqual(deleted, [('Relay Business Event Rule', 'DN-SAMPLE'), ('Relay Business Event Rule', 'SO-LINKED'),
+                                   ('Relay AI Skill', 'SKILL-SAMPLE')])
