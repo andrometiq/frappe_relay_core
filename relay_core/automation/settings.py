@@ -8,7 +8,7 @@ def manager_roles():
     return [role for role in get_doctype_roles('Relay Team', 'write') if role != 'System Manager']
 
 
-POLICY_FIELDS=('ai_model','channel','provider','fallback_provider','execution_user','enabled','mode','allow_ticket','allow_reply','business_doctype','daily_limit','instructions','reply_ids','fallback_reply','allow_images','allow_voice','transcription_provider','allow_report','allow_summary','allow_translation')
+POLICY_FIELDS=('ai_model','channel','execution_user','enabled','mode','allow_ticket','allow_reply','business_doctype','daily_limit','instructions','reply_ids','fallback_reply','allow_images','allow_voice','transcription_provider','allow_report','allow_summary','allow_translation')
 
 
 @frappe.whitelist(methods=['GET'])

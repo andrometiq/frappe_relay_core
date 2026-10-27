@@ -5,7 +5,7 @@ import re
 import frappe
 from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.automation import providers
-from relay_core.automation.service import message_hash, internal_save, check_actor, business_scope, reserve_attempt
+from relay_core.automation.service import message_hash, internal_save, check_actor, business_scope, reserve_attempt, complete_with_fallback
 
 
 @after_message_commit
@@ -96,28 +96,18 @@ def _translate_part(text,policy):
         'Return only a JSON object with exactly language (detected ISO language code, or und) and text '
         '(English translation). For an entirely English message return language en and text empty. '
         'Do not invent missing content. Message JSON: '+json.dumps(text,ensure_ascii=False))
-    names=list(dict.fromkeys(filter(None,[policy.provider,policy.fallback_provider])))
-    for index,name in enumerate(names):
-        provider=frappe.get_doc('Relay AI Provider',name)
-        if not provider.enabled:
-            if index+1<len(names):continue
-            raise ValueError('Translation provider unavailable')
-        reserve_attempt(policy)
-        try:
-            result=providers.complete(provider.provider,provider.model,provider.get_password('api_key'),prompt)
-            if not isinstance(result,dict) or set(result)!={'language','text'}:
-                raise providers.ProviderError('Invalid translation shape')
-            language=result['language'];translated=result['text']
-            if not isinstance(language,str) or not re.fullmatch(r'[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*',language):
-                raise providers.ProviderError('Invalid detected language')
-            if not isinstance(translated,str) or len(translated)>12000 or (language.split('-')[0]!='en' and not translated.strip()):
-                raise providers.ProviderError('Invalid translation text')
-            if language.split('-')[0]=='en' and translated:
-                raise providers.ProviderError('English source should remain original')
-            return {'language':language,'text':translated,'target_language':'en','provider':provider.provider,'model':provider.model}
-        except providers.ProviderError:
-            if index+1==len(names):raise
-    raise ValueError('Translation provider unavailable')
+    result=complete_with_fallback(policy,prompt)
+    if not isinstance(result,dict) or set(result)!={'language','text'}:
+        raise providers.ProviderError('Invalid translation shape')
+    language=result['language'];translated=result['text']
+    if not isinstance(language,str) or not re.fullmatch(r'[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*',language):
+        raise providers.ProviderError('Invalid detected language')
+    if not isinstance(translated,str) or len(translated)>12000 or (language.split('-')[0]!='en' and not translated.strip()):
+        raise providers.ProviderError('Invalid translation text')
+    if language.split('-')[0]=='en' and translated:
+        raise providers.ProviderError('English source should remain original')
+    model=frappe.get_doc('AI Model',policy.ai_model)
+    return {'language':language,'text':translated,'target_language':'en','provider':model.provider,'model':model.model_id}
 
 
 def translate(text,policy):

@@ -21,8 +21,6 @@ export default async function testPolicies(page,origin='http://127.0.0.1:18126')
  for(const [label,kind] of [['Channel','channel'],['Primary provider','provider'],['Execution user','execution_user'],['Business type','business_doctype']]){
   await page.getByLabel(label,{exact:true}).selectOption(kind+'-fixture')
  }
- await page.getByLabel('Search Fallback provider',{exact:true}).fill('backup')
- await page.waitForResponse(r=>r.url().includes('references')&&r.url().includes('backup'))
  await page.getByLabel('Instructions',{exact:true}).fill('Preserve this policy draft')
  await page.getByRole('button',{name:'Save policy',exact:true}).click();await page.getByText('You do not have permission for this action.',{exact:true}).waitFor()
  if(await page.getByLabel('Instructions',{exact:true}).inputValue()!=='Preserve this policy draft')throw Error('Policy draft lost after error')

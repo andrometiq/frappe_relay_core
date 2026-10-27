@@ -9,8 +9,6 @@
   "field_order": [
     "channel",
     "ai_model",
-    "provider",
-    "fallback_provider",
     "execution_user",
     "enabled",
     "mode",
@@ -38,21 +36,6 @@
       "reqd": 1,
       "set_only_once": 1,
       "unique": 1
-    },
-    {
-      "fieldname": "provider",
-      "label": "Legacy Provider",
-      "fieldtype": "Link",
-      "options": "Relay AI Provider",
-      "read_only": 1
-    },
-    {
-      "fieldname": "fallback_provider",
-      "label": "Legacy Fallback Provider",
-      "fieldtype": "Link",
-      "options": "Relay AI Provider",
-      "description": "Optional second provider, attempted only when the primary fails. Each attempt counts against the daily limit.",
-      "read_only": 1
     },
     {
       "fieldname": "execution_user",
@@ -153,7 +136,7 @@
       "label": "Automatically translate incoming messages to English",
       "fieldtype": "Check",
       "default": 0,
-      "description": "Detect language and store a separate English translation. Original messages are retained. Uses the policy provider and daily AI attempt budget. Voice requires Allow Voice Transcription."
+      "description": "Detect language and store a separate English translation. Original messages are retained. Uses the policy AI Model and daily AI attempt budget. Voice requires Allow Voice Transcription."
     },
     {
       "fieldname": "ai_model",
