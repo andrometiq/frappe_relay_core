@@ -160,7 +160,7 @@ class ContactDetailsTests(unittest.TestCase):
         self.assertEqual([row.channel for row in result['endpoints']],['wa','email'])
         self.assertEqual([row.provider for row in result['endpoints']],['WhatsApp','Email'])
         self.api.readable_contact.assert_called_once_with('relay-contact')
-        person.check_permission.assert_called_once_with('read')
+        person.check_permission.assert_not_called()
         self.assertEqual(self.api.contact_details.allowed_methods,['GET'])
         self.assertEqual((result['can_edit_links'], result['can_set_primary']), (True, True))
         person.has_permission.assert_called_once_with('write')
@@ -178,6 +178,13 @@ class ContactDetailsTests(unittest.TestCase):
         self.api.readable_contact.side_effect=PermissionError('Not assigned')
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
         self.f.get_all.assert_not_called()
+
+    def test_details_without_a_conversation_need_contact_read(self):
+        person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(side_effect=PermissionError),links=[])
+        self.f.get_doc.return_value=person
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value=None))
+        with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
+        self.api.readable_contact.assert_not_called()
 
 
 class ChannelUITests(unittest.TestCase):

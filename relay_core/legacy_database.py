@@ -328,6 +328,21 @@ def undo(site_label):
     return dict(removed)
 
 
+def assign_team(site_label, team):
+    """Give a team every conversation of one import that has no assignment yet.
+    A Relay Communication User sees only its own teams' conversations."""
+    frappe.get_doc('Relay Team', team)
+    contacts = set(frappe.get_all('Relay Legacy Import', filters={'source_site': site_label}, pluck='relay_contact'))
+    assigned = set(frappe.get_all('Relay Conversation Assignment', filters={'relay_contact': ['in', list(contacts)]},
+                                  pluck='relay_contact')) if contacts else set()
+    for contact in sorted(contacts - assigned):
+        frappe.get_doc({'doctype': 'Relay Conversation Assignment', 'relay_contact': contact, 'team': team}).insert()
+    from relay_core.queue_counts import invalidate
+    invalidate()
+    frappe.db.commit()
+    return {'assigned': len(contacts - assigned), 'already_assigned': len(assigned)}
+
+
 def remove_created(created, removed):
     """Delete the endpoint, Relay Contact and Contact one conversation import made, unless live messages use them."""
     if created.get('relay_contact') and frappe.db.exists('Relay Message', {'relay_contact': created['relay_contact']}):

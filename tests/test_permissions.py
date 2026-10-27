@@ -186,6 +186,36 @@ class ConversationRowRuleTests(unittest.TestCase):
         self.assertIn('GROUP', condition)
         self.assertIn('`tabRelay Message`.relay_contact', message)
 
+    def test_conversation_needs_no_contact_or_business_read(self):
+        from relay_core import permissions
+        relay = types.SimpleNamespace(name='RELAY-CON-1', contact='person', check_permission=lambda ptype: None)
+        frappe = fake_frappe([TEAM_USER], get_doc=lambda doctype, name: relay if doctype == 'Relay Contact' else doctype)
+        with self.scoped(frappe):
+            self.assertTrue(permissions.contact_permission(relay, 'agent@example.com'))
+            self.assertEqual(permissions.contact_query('agent@example.com'), '')
+            self.assertEqual(permissions.readable_contact('RELAY-CON-1'), (relay, 'Contact'))
+
+    def test_contact_rows_follow_the_relay_role_rule(self):
+        from relay_core import permissions
+        for roles, expected in (([USER], True), (['Employee'], False)):
+            team = types.SimpleNamespace(team='Sales-001', assigned_to=None)
+            with self.scoped(fake_frappe(roles, assignment=team, members={('Sales-001', 'agent@example.com')})):
+                self.assertEqual(permissions.contact_permission(types.SimpleNamespace(name='RELAY-CON-1'),
+                                                                'agent@example.com'), expected, roles)
+        with self.scoped(fake_frappe(['Employee'])):
+            self.assertEqual(permissions.contact_query('agent@example.com'), '1=0')
+
+    def test_message_query_hides_triage_except_from_administrator(self):
+        from relay_core import permissions
+        with self.scoped(fake_frappe([MANAGER])):
+            self.assertEqual(permissions.message_query('agent@example.com'),
+                             'COALESCE(`tabRelay Message`.legacy_triage,0)=0')
+            self.assertEqual(permissions.message_query('Administrator'), '')
+        with self.scoped(fake_frappe([USER])):
+            condition = permissions.message_query('agent@example.com')
+        self.assertIn('`tabRelay Team Member`', condition)
+        self.assertTrue(condition.endswith('AND COALESCE(`tabRelay Message`.legacy_triage,0)=0'))
+
 
 class RoleMigrationTests(unittest.TestCase):
     def test_patch_gives_relay_roles_to_whatsapp_role_holders(self):

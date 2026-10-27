@@ -132,5 +132,24 @@ class Media(Case):
             self.assertEqual((importer.counts['media_copied'], importer.counts['media_linked']), (1, 1))
 
 
+
+class TeamAssignment(Case):
+    def test_only_unassigned_imported_conversations_get_the_team(self):
+        lists = {'Relay Legacy Import': ['RELAY-CON-1', 'RELAY-CON-2', 'RELAY-CON-1'],
+                 'Relay Conversation Assignment': ['RELAY-CON-2']}
+        inserted = []
+        def get_doc(*args):
+            if isinstance(args[0], dict):
+                return Mock(insert=lambda: inserted.append(args[0]))
+            return Mock()
+        with patch.object(frappe, 'get_all', side_effect=lambda doctype, **kwargs: lists[doctype]), \
+             patch.object(frappe, 'get_doc', side_effect=get_doc) as get, \
+             patch('relay_core.queue_counts.invalidate') as invalidate:
+            result = legacy_database.assign_team('sales.example', 'Sales-001')
+        get.assert_any_call('Relay Team', 'Sales-001')
+        self.assertEqual(result, {'assigned': 1, 'already_assigned': 1})
+        self.assertEqual(inserted, [{'doctype': 'Relay Conversation Assignment', 'relay_contact': 'RELAY-CON-1', 'team': 'Sales-001'}])
+        invalidate.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()

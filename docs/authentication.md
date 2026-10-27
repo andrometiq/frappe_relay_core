@@ -17,7 +17,9 @@ Relay has four roles. Each role gets its access from the DocType permissions (Do
 | System Manager | Everything. Also settings, setup, channels, AI providers, health and activity, and all internal records. | All conversations of all teams. |
 | Relay Hub Service | API user for Hub callbacks only. It can only create Relay Hub Event records. No desk access. | None. |
 
-Business record permissions still apply to every role except Administrator. A user sees a conversation only when the user can read the Contact and at least one linked business record (for example the Customer).
+The Relay role alone decides which conversations a user sees. The user does not need read permission on the Frappe Contact or on the linked business record. The inbox shows the contact's name and phone from the conversation. A linked business record (for example the Customer name, its ledger links and its data) shows only when the user can read that record.
+
+A conversation without a team or an assigned user is visible only to Team Users, Managers and System Managers. Imported WhatsApp Core conversations have no team. Use `relay-assign-imported-chats` or the `--team` option of the import to give them a team.
 
 The conversation rule is in one place: `relay_core/permissions.py` (`assignment_allowed` and its SQL twin `assignment_condition`). Relay Contact and Relay Message use it, and tickets use it through their messages.
 

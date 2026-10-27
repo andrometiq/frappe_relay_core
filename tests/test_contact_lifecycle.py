@@ -161,19 +161,6 @@ class LinkedBusinessAccessTests(unittest.TestCase):
             record.has_permission.return_value = False
             self.assertFalse(business_access.allowed(_dict(message, ticket_notification='Ticket update')))
 
-    def test_query_exempts_only_marked_notifications_from_the_link_rule(self):
-        fake = MagicMock()
-        fake.session.user = 'reader'
-        fake.get_all.return_value = ['Customer']
-        fake.has_permission.return_value = True
-        fake.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM `tabCustomer`'
-        fake.db.escape = lambda value: f"'{value}'"
-        with patch.object(business_access, 'frappe', fake):
-            condition = business_access.query_condition()
-        explicit = condition.split('OR (COALESCE(`tabRelay Message`.business_name')[0]
-        self.assertIn("(COALESCE(`tabRelay Message`.ticket_notification,'')!='' OR EXISTS", explicit)
-        self.assertIn("`tabRelay Message`.business_name IN (SELECT name FROM `tabCustomer`)", explicit)
-
     def test_only_the_notification_path_may_store_the_marker(self):
         from relay_core.ticket_notifications import message_ownership
         doc = _dict(direction='Outgoing', relay_contact='RELAY-CON-A', channel='CH', sender_endpoint='a@example.invalid',
