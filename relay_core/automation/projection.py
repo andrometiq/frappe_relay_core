@@ -121,12 +121,19 @@ def project(name, business_overrides=None):
         except (ValueError, TypeError, KeyError):
             set_status(name, 'Failed')
         return
-    channels = frappe.get_all('Relay Channel', filters={'account': event.account, 'channel': medium, 'enabled': 1}, pluck='name', limit_page_length=2)
-    if len(channels) != 1:
+    from relay_core.hub_channels import event_channel
+    from relay_core.whatsapp_templates import project as project_templates, template_event
+    channel = event_channel(event.account, medium, event.get('hub_channel'))
+    if not channel:
+        if medium == 'WhatsApp' and template_event(payload):
+            # Template updates belong to the WABA, not to one number.
+            try:
+                set_status(name, 'Projected' if project_templates(payload, event) else 'Ignored')
+            except (ValueError, TypeError, AttributeError):
+                set_status(name, 'Failed')
+            return
         set_status(name, 'Uncategorized'); return
-    channel = channels[0]
     try:
-        from relay_core.whatsapp_templates import project as project_templates
         template_update = project_templates(payload, event) if medium == 'WhatsApp' else False
         incoming = extract_messages(payload)
         update_status = apply_updates(payload, channel, event)
