@@ -10,6 +10,13 @@ from frappe import _dict
 from relay_core import bulk_campaigns, bulk_sheet, service_window
 from test_bulk_campaigns import NAMED, POSITIONAL, UTILS, FakeCache
 
+
+def setUpModule():
+    # One-number sites name no Hub channel; the channel choice has its own tests.
+    patcher = patch('relay_core.bulk_campaigns.hub_arguments', side_effect=lambda channel, arguments: arguments)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
 TEXT = {'kind': 'text', 'body': 'Hi {{Name}}, your order {{ Order No }} is ready'}
 PHOTO = {'kind': 'photo', 'caption': 'Offer for {{Name}}'}
 
@@ -80,7 +87,7 @@ class CreateTests(unittest.TestCase):
         fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), utils=frappe.utils, parse_json=frappe.parse_json,
                                get_doc=lambda values: _dict(values), throw=Mock(side_effect=frappe.ValidationError))
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
-                patch.object(bulk_campaigns, 'whatsapp_channel', return_value='WA'), \
+                patch.object(bulk_campaigns, 'campaign_channel', return_value='WA'), \
                 patch.object(bulk_campaigns.whatsapp, 'checked_client') as hub, \
                 patch.object(bulk_campaigns, 'connection_value', return_value='acct'), \
                 patch.object(bulk_campaigns, 'default_region', return_value='IN'), \

@@ -14,6 +14,13 @@ from frappe import _dict
 from relay_core import bulk_campaigns, bulk_sheet, bulk_updates, inbound
 from relay_core.hub import HubError
 
+
+def setUpModule():
+    # One-number sites name no Hub channel; the channel choice has its own tests.
+    patcher = patch('relay_core.bulk_campaigns.hub_arguments', side_effect=lambda channel, arguments: arguments)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
 NAMED = {'name': 'winter_offer', 'language': 'en', 'parameter_format': 'NAMED', 'components': [
     {'type': 'HEADER', 'format': 'IMAGE'},
     {'type': 'BODY', 'text': 'Hi {{customer_name}}, {{discount}} off. Again {{customer_name}}'},
@@ -61,7 +68,7 @@ class SheetTests(unittest.TestCase):
         def throw(message):
             raise frappe.ValidationError(message)
         fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), utils=frappe.utils, throw=throw)
-        with patch.object(bulk_campaigns, 'require_access'), patch.object(bulk_campaigns, 'whatsapp_channel', return_value='WA'), \
+        with patch.object(bulk_campaigns, 'require_access'), patch.object(bulk_campaigns, 'campaign_channel', return_value='WA'), \
                 patch.object(bulk_campaigns, 'frappe', fake), \
                 patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(hub, {})), \
                 patch('relay_core.whatsapp_templates.overlay', side_effect=lambda page: page):

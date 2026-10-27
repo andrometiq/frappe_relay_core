@@ -52,6 +52,7 @@ def template_event(payload):
 
 
 def project(payload, event):
+    """Apply Meta template status updates; the envelope's entry id is the WABA of the template."""
     applied = False
     for entry in payload.get('entry', []):
         for change in entry.get('changes', []):
@@ -67,7 +68,8 @@ def project(payload, event):
             applied = True
             if not new and int(doc.hub_event_id) >= int(event.hub_event_id): continue
             doc.update({'template_name':value.get('message_template_name'), 'language':value.get('message_template_language'),
-                        'status':status, 'reason':event_reason(value), 'hub_event_id':event.hub_event_id})
+                        'status':status, 'reason':event_reason(value), 'hub_event_id':event.hub_event_id,
+                        'waba_id':waba_of(entry.get('id')) or doc.get('waba_id')})
             internal_save(doc, new=new)
             publish()
     return applied
@@ -85,12 +87,21 @@ def list_values(row):
     return identifier, {key:value for key, value in values.items() if value}
 
 
-def store(account, rows, complete=False):
-    """Upsert listed templates; a complete list also marks missing local rows deleted."""
+def waba_of(value):
+    value = str(value or '')
+    return value if value.isdigit() and len(value) <= 40 else ''
+
+
+def store(account, rows, complete=False, waba=''):
+    """Upsert listed templates of one WABA; a complete list also marks missing local rows of it deleted.
+
+    Template ids are unique across Meta, so the record key stays (account, template id)."""
     lock_account(account)
     changed, seen = False, set()
     for row in rows:
         identifier, values = list_values(row)
+        if waba:
+            values['waba_id'] = waba
         seen.add(identifier)
         doc, new = record(account, identifier)
         if new or any(str(doc.get(key) or '') != str(value) for key, value in values.items()):
@@ -99,7 +110,8 @@ def store(account, rows, complete=False):
             changed = True
     if complete:
         for name in frappe.get_all('Relay WhatsApp Template', pluck='name', filters={'account':account,
-                'status':['!=', 'DELETED'], **({'template_id':['not in', list(seen)]} if seen else {})}):
+                'status':['!=', 'DELETED'], **({'waba_id':waba} if waba else {}),
+                **({'template_id':['not in', list(seen)]} if seen else {})}):
             doc = frappe.get_doc('Relay WhatsApp Template', name)
             doc.status = 'DELETED'
             internal_save(doc)
@@ -109,10 +121,12 @@ def store(account, rows, complete=False):
     return changed
 
 
-def listed(hub):
+def listed(hub, channel=None):
+    """Every template of the channel's WABA, and whether the list is complete."""
+    from relay_core.hub_channels import hub_arguments
     rows, after = [], None
     for _ in range(SYNC_PAGES):
-        page = hub.execute({'operation':'templates.list', **({'after':after} if after else {})})
+        page = hub.execute(hub_arguments(channel, {'operation':'templates.list', **({'after':after} if after else {})}))
         rows += page.get('data') or []
         paging = page.get('paging') or {}
         cursor = (paging.get('cursors') or {}).get('after')
@@ -131,43 +145,60 @@ def sync(notify=False):
         return False
     from relay_core.hub import HubError
     from relay_core.whatsapp import checked_client
-    try:
-        hub, capabilities = checked_client()
-        if not capabilities.get('templates'):
+    changed, total = False, 0
+    for channel in waba_channels(account):
+        try:
+            hub, capabilities = checked_client()
+            if not capabilities.get('templates'):
+                return False
+            rows, complete = listed(hub, channel)
+        except (HubError, ValueError, frappe.ValidationError) as error:
+            frappe.log_error('Relay WhatsApp template sync failed', getattr(error, 'detail', '') or str(error))
+            if notify: publish()
             return False
-        rows, complete = listed(hub)
-    except (HubError, ValueError, frappe.ValidationError) as error:
-        frappe.log_error('Relay WhatsApp template sync failed', getattr(error, 'detail', '') or str(error))
-        if notify: publish()
-        return False
-    changed = store(account, rows, complete)
-    remember(account, rows)
-    frappe.cache.set_value(SYNCED + account, {'synced_at': frappe.utils.now(), 'templates': len(rows)})
+        changed = store(account, rows, complete, channel.waba_id or '') or changed
+        remember(account, rows, channel.waba_id)
+        total += len(rows)
+    frappe.cache.set_value(SYNCED + account, {'synced_at': frappe.utils.now(), 'templates': total})
     if notify and not changed: publish()
     return changed
 
 
-def remember(account, rows):
+def waba_channels(account):
+    """One enabled WhatsApp channel per WABA; templates are synced once per WABA, not per number."""
+    rows = frappe.get_all('Relay Channel', fields=['name', 'channel', 'account', 'hub_channel', 'waba_id'],
+                          filters={'account': account, 'channel': 'WhatsApp', 'enabled': 1},
+                          order_by='is_default desc, creation asc')
+    return list({row.waba_id or '': row for row in reversed(rows)}.values())
+
+
+def definitions_key(account, waba=None):
+    return DEFINITIONS + account + (':' + waba if waba else '')
+
+
+def remember(account, rows, waba=None):
     """Cache listed template rows so sends render and the Templates tab lists without another Hub list."""
     for row in rows:
         if row.get('name') and row.get('language'):
-            frappe.cache.hset(DEFINITIONS + account, row['name'] + '|' + row['language'], row)
+            frappe.cache.hset(definitions_key(account, waba), row['name'] + '|' + row['language'], row)
 
 
-def definition(name, language):
-    """Template content from the sync cache, or from one Hub list scan on a miss."""
+def definition(name, language, channel=None):
+    """Template content of the channel's WABA (the default number's without one) from the sync cache,
+    or from one Hub list scan on a miss."""
     account = connection_value('relay_hub_account')
+    waba = frappe.db.get_value('Relay Channel', channel, 'waba_id') if channel else None
     key = f'{name}|{language}'
-    found = frappe.cache.hget(DEFINITIONS + account, key)
+    found = frappe.cache.hget(definitions_key(account, waba), key)
     if found is None:
         from relay_core.hub import HubError
         from relay_core.whatsapp import checked_client
         try:
-            rows, _ = listed(checked_client()[0])
+            rows, _ = listed(checked_client()[0], channel)
         except (HubError, ValueError):
             return None
-        remember(account, rows)
-        found = frappe.cache.hget(DEFINITIONS + account, key)
+        remember(account, rows, waba)
+        found = frappe.cache.hget(definitions_key(account, waba), key)
     return found
 
 
@@ -204,10 +235,10 @@ def render(template, sent):
     return {key: value for key, value in result.items() if value}
 
 
-def message_content(arguments, template=None):
+def message_content(arguments, template=None, channel=None):
     """Stored outgoing template message: the rendered body as text, the rest beside the template name."""
     sent = {key: arguments[key] for key in ('name', 'language', 'components') if key in arguments}
-    template = template or definition(sent['name'], sent.get('language') or '')
+    template = template or definition(sent['name'], sent.get('language') or '', channel)
     rendered = render(template, sent.get('components')) if template else {}
     body = rendered.pop('body', '') or 'Template: ' + sent['name']
     return {'kind': 'text', 'text': body[:4096], 'template': {**sent, **rendered}}
@@ -222,16 +253,20 @@ def sync_status():
 
 
 @frappe.whitelist(methods=['GET'])
-def directory():
-    """The local template copy in the Hub list shape, without a Hub call; a stale copy queues one background sync."""
+def directory(channel=None):
+    """The local template copy in the Hub list shape, without a Hub call; a stale copy queues one background sync.
+
+    `channel` limits the list to the templates of that number's WABA."""
     from relay_core.permissions import require_access
     require_access()
     account = connection_value('relay_hub_account') or ''
-    rows = frappe.get_all('Relay WhatsApp Template', filters={'account':account, 'status':['!=', 'DELETED']},
+    waba = frappe.db.get_value('Relay Channel', channel, 'waba_id') if channel else None
+    rows = frappe.get_all('Relay WhatsApp Template', filters={'account':account, 'status':['!=', 'DELETED'],
+                                                             **({'waba_id': waba} if waba else {})},
         fields=['template_id', 'template_name', 'language', 'category', 'status', 'quality', 'reason'],
         order_by='template_name asc, language asc', limit_page_length=SYNC_PAGES * 50)
     definitions = {key.decode() if isinstance(key, bytes) else key: value
-                   for key, value in (frappe.cache.hgetall(DEFINITIONS + account) or {}).items()}
+                   for key, value in (frappe.cache.hgetall(definitions_key(account, waba)) or {}).items()}
     data = [local_row(row, definitions.get(f'{row.template_name}|{row.language}')) for row in rows]
     synced = frappe.cache.get_value(SYNCED + account) or {'synced_at': None, 'templates': 0}
     missing = any(not row.get('components') for row in data)
@@ -277,7 +312,7 @@ def apply_request(operation, arguments, result):
                          'category':result.get('category') or arguments.get('category'),
                          'status':result.get('status') or 'PENDING'}])
     if operation in ('templates.update', 'templates.delete'):
-        frappe.cache.delete_value(DEFINITIONS + account)
+        frappe.cache.delete_keys(DEFINITIONS + account)
     if operation == 'templates.delete':
         filters = {'account':account, 'template_name':arguments.get('name'), 'status':['!=', 'DELETED']}
         if arguments.get('id'):
