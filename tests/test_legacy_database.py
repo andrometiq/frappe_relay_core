@@ -145,6 +145,11 @@ class Identity(Case):
         self.assertEqual(legacy_database.merge_created({'endpoint': 'E1', 'links': ['L1']}, {'endpoint': 'E2', 'links': ['L1', 'L2']}),
                          {'endpoint': 'E1', 'links': ['L1', 'L2']})
 
+    def test_rerun_keeps_the_first_reaction_state_and_the_latest_fingerprint(self):
+        stored = {'reactions': {'M': {'reactions': 'before'}}, 'reactions_after': {'M': {'reactions': 'first run'}}}
+        merged = legacy_database.merge_created(stored, {'reactions': {'M': {'reactions': 'later'}}, 'reactions_after': {'M': {'reactions': 'rerun'}}})
+        self.assertEqual((merged['reactions']['M'], merged['reactions_after']['M']), ({'reactions': 'before'}, {'reactions': 'rerun'}))
+
 
 class Finish(Case):
     def test_resumed_run_records_no_earlier_values_for_what_the_interrupted_run_created(self):
@@ -167,10 +172,12 @@ class Reactions(Case):
         def project(job, report):
             report['mismatches'].append({'source': 'RELAY-MSG-2', 'detail': 'Reaction target unavailable'})
         created = {'reactions': {'RELAY-MSG-LIVE': {'reactions': 'first', 'message_updates': None}}}
+        frappe.db.get_value.return_value = {'reactions': '{"a": 1, "9190": "x"}', 'message_updates': '{"r": 1}'}
         with patch.object(frappe, 'get_all', side_effect=[reactions * 2, live]) as get_all, \
              patch.object(legacy_database, 'project_reactions', side_effect=project) as projected:
             importer.project_reactions(job, created)
         projected.assert_called_once()
+        self.assertEqual(created['reactions_after'], {'RELAY-MSG-LIVE': frappe.db.get_value.return_value})
         target_filter = get_all.call_args_list[1].kwargs['filters']['provider_message_key'][1]
         self.assertEqual(target_filter, [legacy_database.provider_key('RELAY-CH-1', '9190', 'wamid.t')] * 2)
         self.assertEqual(created['reactions']['RELAY-MSG-LIVE']['reactions'], 'first')
@@ -239,6 +246,30 @@ class Idempotency(Case):
         self.assertEqual(json.loads(set_value.call_args.args[2]['message_data'])['attachment'], 'FILE-1')
         self.assertEqual(importer.counts['updated'], 1)
 
+    def test_messages_without_provider_ids_are_all_imported(self):
+        rows = [row('m1', provider_message_id=None), row('m2', provider_message_id=None), row('m3'), row('m4', provider_message_id='wamid.m3')]
+        importer, inserted, _, _ = self.run_rows(rows, [], live=[])
+        self.assertEqual([record['legacy_source'] for record in inserted], ['m1', 'm2', 'm3'])
+        self.assertEqual(importer.failures, [{'message': 'm4', 'error': 'Provider message repeats in the source'}])
+
+    def media_message(self, image, files_present, bytes_present):
+        stored = [{'attachment': 'FILE-1', 'sha256': 'aa', 'availability': 'available'},
+                  {'attachment': 'FILE-2', 'sha256': 'bb', 'availability': 'available'}]
+        message = self.imported(image, message_data=json.dumps({'attachment': 'FILE-1', 'legacy_attachments': stored}))
+        frappe.db.exists.side_effect = lambda doctype, name: name in files_present
+        with tempfile.TemporaryDirectory() as site:
+            Path(site, 'private', 'files').mkdir(parents=True)
+            for digest in bytes_present:
+                Path(site, 'private', 'files', 'relay-archive-' + digest).write_bytes(b'x')
+            with patch.object(legacy_database.frappe, 'get_site_path', side_effect=lambda *parts: str(Path(site, *parts))):
+                return Importer().missing_media(message, image, [frappe._dict(file_url='/private/files/a.jpg')])
+
+    def test_rerun_repairs_a_missing_secondary_file_or_missing_bytes(self):
+        image = row('m1', message_type='image')
+        self.assertFalse(self.media_message(image, {'FILE-1', 'FILE-2'}, {'aa', 'bb'}))
+        self.assertTrue(self.media_message(image, {'FILE-1'}, {'aa', 'bb'}))
+        self.assertTrue(self.media_message(image, {'FILE-1', 'FILE-2'}, {'aa'}))
+
     def test_live_copy_is_dropped_before_its_files_are_copied(self):
         image = row('m1', message_type='image')
         file = frappe._dict(attached_to_name='m1', file_url='/private/files/a.jpg')
@@ -267,6 +298,18 @@ class Media(Case):
         self.assertEqual(importer.failures, [{'message': 'm1', 'error': 'Media file not found: /private/files/gone.jpg'}])
         self.assertEqual([item['availability'] for item in result['legacy_attachments']], ['available', 'missing'])
         self.assertEqual((result['attachment'], result['kind']), (result['legacy_attachments'][0]['attachment'], 'document'))
+
+    def test_bytes_are_tracked_before_a_failed_file_registration(self):
+        from relay_core.legacy_media import TargetDatabaseError
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'a.jpg'
+            path.write_bytes(b'image')
+            importer = Importer()
+            with patch.object(legacy_database, 'attach', side_effect=TargetDatabaseError('insert failed')), \
+                 self.assertRaises(TargetDatabaseError):
+                importer.copy(path, 'RELAY-MSG-1')
+        digest = __import__('hashlib').sha256(b'image').hexdigest()
+        self.assertEqual(importer.copied, {'/private/files/relay-archive-' + digest})
 
     def test_payload_url_is_used_only_without_file_rows(self):
         importer, result = self.attachments([], payload_url='/private/files/a.jpg')
@@ -302,7 +345,11 @@ class Undo(Case):
         super().setUp()
         self.live = []
         self.rows = {('Relay Contact Endpoint', 'EP-1'): frappe._dict(relay_contact='RELAY-CON-1', channel='CH', endpoint='9190'),
-                     ('Relay Conversation Assignment', 'ASG-1'): '2026-10-01'}
+                     ('Relay Conversation Assignment', 'ASG-1'): '2026-10-01',
+                     ('Dynamic Link', 'LINK-1'): frappe._dict(parent='Pat', creation='2026-10-01 10:00:00'),
+                     ('Contact', 'Pat'): '2026-09-01 10:00:00',
+                     ('Relay Message', 'RELAY-MSG-LIVE'): frappe._dict(reactions='{"x": 1}', message_updates='{"r": 1}')}
+        frappe.db.sql.return_value = ()
         frappe.db.exists.side_effect = lambda doctype, filters=None: self.exists(doctype, filters)
         frappe.db.get_value.side_effect = lambda doctype, name, *args, **kwargs: self.rows.get((doctype, name))
 
@@ -326,7 +373,8 @@ class Undo(Case):
                    'activity': {'last_message_at': None, 'last_message': None},
                    'opt_out': {'EP-OLD': {'before': {'marketing_opt_out': 0, 'opt_out_changed_at': None, 'modified': 'm1'},
                                           'after': {'marketing_opt_out': 1, 'opt_out_changed_at': '2026-09-01', 'modified': 'm2'}}},
-                   'reactions': {'RELAY-MSG-LIVE': {'reactions': '{}', 'message_updates': None}}}
+                   'reactions': {'RELAY-MSG-LIVE': {'reactions': '{}', 'message_updates': None}},
+                   'reactions_after': {'RELAY-MSG-LIVE': {'reactions': '{"x": 1}', 'message_updates': '{"r": 1}'}}}
         removed, _ = self.revert(created)
         for call in (('Dynamic Link', 'LINK-1'), ('Relay Conversation Assignment', 'ASG-1'), ('Relay Contact Endpoint', 'EP-1')):
             frappe.db.delete.assert_any_call(*call)
@@ -334,7 +382,23 @@ class Undo(Case):
         frappe.db.set_value.assert_any_call('Relay Message', 'RELAY-MSG-LIVE', {'reactions': '{}', 'message_updates': None}, update_modified=False)
         frappe.db.set_value.assert_any_call('Relay Contact', 'RELAY-CON-1', {'last_message_at': None, 'last_message': None}, update_modified=False)
         self.assertNotIn(('Relay Contact', 'RELAY-CON-1'), [call.args for call in frappe.db.delete.call_args_list])
-        self.assertEqual(removed['opt_out_restored'], 1)
+        self.assertEqual((removed['opt_out_restored'], removed['reactions_restored'], removed['customer_links']), (1, 1, 1))
+
+    def test_customer_link_used_by_a_live_chat_or_a_later_contact_edit_is_kept(self):
+        frappe.db.sql.return_value = ((1,),)
+        removed, _ = self.revert({'links': ['LINK-1']})
+        frappe.db.sql.return_value = ()
+        self.rows[('Contact', 'Pat')] = '2026-10-02 10:00:00'
+        removed.update(self.revert({'links': ['LINK-1', 'LINK-GONE']})[0])
+        frappe.db.delete.assert_not_called()
+        self.assertEqual(removed['customer_links_kept_in_use'], 2)
+
+    def test_reactions_changed_after_the_import_are_kept(self):
+        saved = {'RELAY-MSG-LIVE': {'reactions': '{}', 'message_updates': None}}
+        for after in ({'RELAY-MSG-LIVE': {'reactions': '{"x": 1}', 'message_updates': '{"older": 1}'}}, {}):
+            removed, _ = self.revert({'reactions': saved, 'reactions_after': after})
+            self.assertEqual(removed['reactions_kept_changed'], 1)
+        self.assertNotIn('Relay Message', [call.args[0] for call in frappe.db.set_value.call_args_list])
 
     def test_endpoint_and_assignment_that_live_messages_use_are_kept(self):
         self.live.append(frappe._dict(relay_contact='RELAY-CON-1', channel='CH', sender_endpoint='9190', creation='2026-10-02'))
@@ -399,6 +463,37 @@ class Undo(Case):
                  patch.object(frappe, 'get_all', return_value=['/private/files/relay-archive-b']):
                 self.assertEqual(legacy_database.remove_unused_copies(urls), 1)
             self.assertEqual(sorted(path.name for path in files.iterdir()), ['relay-archive-b', 'source.jpg'])
+
+
+class PendingFiles(Case):
+    def setUp(self):
+        super().setUp()
+        self.metadata = {'created': {'endpoint': 'EP-1'}}
+        frappe.db.exists.return_value = True
+        frappe.db.get_value.side_effect = lambda *args, **kwargs: frappe._dict(name='IMPORT-1', source_metadata=json.dumps(self.metadata))
+        frappe.db.set_value.side_effect = lambda doctype, name, field, value, **kwargs: setattr(self, 'metadata', json.loads(value))
+
+    def test_file_deletions_are_recorded_in_the_chunk_transaction(self):
+        frappe.db.sql_list.return_value = ['M1']
+        with patch.object(frappe, 'get_all', return_value=['/private/files/relay-archive-a', None]):
+            self.assertTrue(legacy_undo.remove_messages('sales.example', 10, Counter()))
+        self.assertEqual(self.metadata, {'created': {'endpoint': 'EP-1'}, 'pending_files': ['/private/files/relay-archive-a']})
+
+    def test_interrupted_cleanup_is_finished_by_the_next_undo_and_is_safe_to_repeat(self):
+        self.metadata['pending_files'] = ['/private/files/relay-archive-a']
+        with tempfile.TemporaryDirectory() as site:
+            files = Path(site, 'private', 'files')
+            files.mkdir(parents=True)
+            (files / 'relay-archive-a').write_bytes(b'x')
+            removed = Counter()
+            with patch.object(legacy_database.frappe, 'get_site_path', side_effect=lambda *parts: str(Path(site, *parts))), \
+                 patch.object(frappe, 'get_all', return_value=[]):
+                self.assertEqual(legacy_database.remove_unused_copies({'/private/files/relay-archive-a'}), 1)
+                legacy_undo.remove_pending_copies('sales.example', removed)
+                legacy_undo.remove_pending_copies('sales.example', removed)
+            self.assertEqual(list(files.iterdir()), [])
+        self.assertEqual((self.metadata, removed['media_files']), ({'created': {'endpoint': 'EP-1'}}, 0))
+        frappe.db.commit.assert_called_once()
 
 
 class Transactions(Case):
