@@ -143,6 +143,23 @@ class Media(Case):
                 self.assertIsNone(Importer().source_file('/files/receipt.pdf'))
 
 
+class Undo(Case):
+    def test_removed_conversation_loses_its_team_assignment_and_inbox_state(self):
+        frappe.db.exists.return_value = False
+        removed = Counter()
+        legacy_database.remove_created({'relay_contact': 'RELAY-CON-1', 'endpoint': 'RELAY-EP-1'}, removed)
+        frappe.db.delete.assert_any_call('Relay Conversation Assignment', {'relay_contact': 'RELAY-CON-1'})
+        frappe.db.delete.assert_any_call('Relay Conversation State', {'relay_contact': 'RELAY-CON-1'})
+        self.assertEqual(removed, Counter({'Relay Contact Endpoint': 1, 'Relay Contact': 1}))
+
+    def test_conversation_with_live_messages_is_kept_whole(self):
+        frappe.db.exists.return_value = True
+        removed = Counter()
+        legacy_database.remove_created({'relay_contact': 'RELAY-CON-1', 'endpoint': 'RELAY-EP-1'}, removed)
+        frappe.db.delete.assert_not_called()
+        self.assertEqual(removed, Counter({'contacts_kept_with_new_messages': 1}))
+
+
 class TeamAssignment(Case):
     def test_only_unassigned_imported_conversations_get_the_team(self):
         lists = {'Relay Legacy Import': ['RELAY-CON-1', 'RELAY-CON-2', 'RELAY-CON-1'],
