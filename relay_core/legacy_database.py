@@ -19,10 +19,14 @@ from relay_core.contact_lifecycle import endpoint_key
 from relay_core.identity import phone_number
 from relay_core.legacy_media import attach, copy_stream
 from relay_core.legacy_metadata import direct_document
+from relay_core.message_updates import provider_key
 from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
 
 MESSAGE = 'tabWhatsApp Core Message'
+# What a re-run takes from a changed source row; identity, contact and channel never change.
+REFRESHED = ('status', 'content', 'message_type', 'message_data', 'delivery_error', 'provider_id', 'provider_context',
+             'sent_at', 'legacy_author', 'legacy_checksum', 'legacy_data')
 
 
 class Source:
@@ -149,42 +153,75 @@ class Importer:
     def import_rows(self, rows, job, manifest):
         keys = {legacy.source_key(self.site_label, row.name): row for row in rows}
         existing = {row.source_key: row for row in frappe.get_all('Relay Message', filters={'source_key': ['in', list(keys)]},
-                                                                  fields=['name', 'source_key', 'legacy_checksum'])}
+                    fields=['name', 'source_key', 'relay_contact', 'channel', 'legacy_checksum', 'legacy_data', 'message_data'])}
         self.counts['read'] += len(rows)
         files = self.source_files([row.name for row in rows])
-        records = []
+        new = []
         for key, row in keys.items():
             try:
                 if key in existing:
-                    self.refresh(existing[key], row, job, manifest)
+                    self.refresh(existing[key], row, job, manifest, files.get(row.name, []))
                 else:
-                    records.append(self.message(row, job, manifest, files.get(row.name, [])))
+                    new.append(row)
             except ValueError as exc:
                 self.failures.append({'message': row.name, 'error': str(exc)})
-        provider_keys = [record['provider_message_key'] for record in records if record['provider_message_key']]
-        live = set(frappe.get_all('Relay Message', filters={'provider_message_key': ['in', provider_keys]},
-                                  pluck='provider_message_key')) if provider_keys else set()
-        for record in [record for record in records if record['provider_message_key'] in live]:
-            records.remove(record)
-            self.failures.append({'message': record['legacy_source'], 'error': 'Provider message already in Relay (live copy kept)'})
+        records = []
+        # Live copies are dropped before any File is made for them.
+        for row in self.without_live_copies(new, job, manifest):
+            try:
+                records.append(self.message(row, job, manifest, files.get(row.name, [])))
+            except ValueError as exc:
+                self.failures.append({'message': row.name, 'error': str(exc)})
         if not self.dry_run:
             legacy.insert_rows('Relay Message', records)
         self.counts['created'] += len(records)
 
-    def refresh(self, message, row, job, manifest):
-        """A source row changed since the last run (such as a later read receipt): take its status and payload."""
-        if message.legacy_checksum == bundles.checksum(row):
+    def without_live_copies(self, rows, job, manifest):
+        """Rows whose provider message is not in Relay yet (a live copy wins) and not repeated in this page."""
+        keys = {row.name: provider_key(job.channel, manifest['endpoint'], row.provider_message_id)
+                for row in rows if row.provider_message_id}
+        live = set(frappe.get_all('Relay Message', filters={'provider_message_key': ['in', list(set(keys.values()))]},
+                                  pluck='provider_message_key')) if keys else set()
+        result, seen = [], set()
+        for row in rows:
+            key = keys.get(row.name)
+            if key in live:
+                self.failures.append({'message': row.name, 'error': 'Provider message already in Relay (live copy kept)'})
+            elif key in seen:
+                self.failures.append({'message': row.name, 'error': 'Provider message repeats in the source'})
+            else:
+                seen.add(key)
+                result.append(row)
+        return result
+
+    def refresh(self, message, row, job, manifest, files):
+        """Bring an imported message up to its source row (such as a later read receipt) and repair
+        missing media. The message must belong to this conversation, and an older source row never wins."""
+        if (message.relay_contact, message.channel) != (job.relay_contact, job.channel):
+            raise ValueError(f'Imported message {message.name} belongs to another conversation')
+        stored = legacy.object_value(message.legacy_data).get('row', {}).get('modified')
+        if stored and row.modified and frappe.utils.get_datetime(row.modified) < frappe.utils.get_datetime(stored):
+            self.counts['stale_skipped'] += 1
+            return
+        if message.legacy_checksum == bundles.checksum(row) and not self.missing_media(message, row, files):
             self.counts['skipped'] += 1
             return
-        values, _, _ = legacy.projection(row, job, manifest)
+        values = self.message(row, job, manifest, files, message.name)
         if not self.dry_run:
-            frappe.db.set_value('Relay Message', message.name, {field: values[field] for field in
-                                ('status', 'legacy_checksum', 'legacy_data')}, update_modified=False)
+            frappe.db.set_value('Relay Message', message.name, {field: values[field] for field in REFRESHED}, update_modified=False)
         self.counts['updated'] += 1
 
-    def message(self, row, job, manifest, files):
+    def missing_media(self, message, row, files):
+        if not files and not legacy.converted(row)[2]:
+            return False
+        data = legacy.object_value(message.message_data)
+        stored = data.get('legacy_attachments') or []
+        return (not data.get('attachment') or any(item.get('availability') != 'available' for item in stored)
+                or not frappe.db.exists('File', data['attachment']))
+
+    def message(self, row, job, manifest, files, name=None):
         values, data, _ = legacy.projection(row, job, manifest)
-        name = 'dry-run' if self.dry_run else sequential_name('message')
+        name = name or ('dry-run' if self.dry_run else sequential_name('message'))
         data.update(self.attachments(row, files, name, data))
         failure = legacy.object_value(row.failure)
         now = frappe.utils.now_datetime()
