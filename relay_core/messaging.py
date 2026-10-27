@@ -363,6 +363,31 @@ def reply_channel(contact):
     return {'channel': doc.name, 'provider': doc.channel, 'label': doc.label or doc.title, 'address': doc.address}
 
 
+@frappe.whitelist(methods=['GET'])
+def send_numbers(contact):
+    """The site's WhatsApp numbers for the composer's "Send via" picker on a site with several numbers.
+
+    Each number says whether the person has a chat there and its reply window. The default is the number of
+    the person's newest incoming WhatsApp message, else the team or site default, the same as a reply."""
+    from relay_core.hub_channels import choose, latest_incoming, site_numbers
+    from relay_core.service_window import status
+    require_access()
+    readable_contact(contact)
+    numbers = site_numbers('WhatsApp')
+    names = [row['name'] for row in numbers]
+    items = []
+    for row in numbers:
+        has_chat = bool(frappe.db.exists('Relay Message', {'relay_contact': contact, 'channel': row['name']}))
+        window = status(contact, row['name']) if has_chat else {'open': False, 'expires_at': None, 'remaining_seconds': 0}
+        items.append({'channel': row['name'], 'label': row['label'], 'address': row['address'], 'has_chat': has_chat, 'window': window})
+    default = latest_incoming(contact, names)
+    if not default and names:
+        try:
+            default = choose('WhatsApp', names, contact)
+        except frappe.ValidationError:
+            default = None
+    return {'default': default, 'items': items}
+
 def request_hash(request_key):
     if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}', request_key):
         raise ValueError('A stable request key is required')

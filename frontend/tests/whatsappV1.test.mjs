@@ -318,3 +318,21 @@ test('a copy that another channel refused is reported and joins the thread from 
     assert.equal(fixture.state.displayRows.value.find(item=>item.action==='MA-2').send_group,'group')
   } finally {fixture.stop()}
 })
+
+test('a picked WhatsApp number sends from its newest loaded message, else names the number for the server',async()=>{
+  const calls=[],fixture=setup(async(method,args)=>{calls.push([method,args]);return method==='messaging.send'?{action:'action',status:'Submitted',message:'message'}:{items:[],has_more:false}})
+  try {
+    const first={...row(1,'2026-10-24'),channel:'support',relay_contact:'contact'},latest={...row(2,'2026-10-25'),channel:'sales',relay_contact:'contact'}
+    const sends=()=>calls.filter(([method])=>method==='messaging.send').map(([,args])=>args)
+    fixture.state.selected.value='contact';fixture.state.rows.value=[first,latest];fixture.state.source.value=latest
+    fixture.state.pickNumber('support');fixture.state.body.value='From support'
+    await fixture.state.send()
+    assert.deepEqual([sends()[0].message,sends()[0].via],[first.name,undefined])
+    fixture.state.rows.value=[latest];fixture.state.source.value=latest
+    fixture.state.pickNumber('dealer');fixture.state.body.value='From dealer'
+    await fixture.state.send()
+    assert.deepEqual([sends()[1].message,sends()[1].via],[latest.name,'dealer'])
+    fixture.state.clearRecipient()
+    assert.equal(fixture.state.viaNumber.value,'')
+  } finally {fixture.stop()}
+})

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectiveNumber, hasManyNumbers, numberFilterOptions, numberName, sendNumberChoice, whatsappNumbers, windowHint } from '../src/services/whatsappNumbers.js'
+import { effectiveNumber, hasManyNumbers, hoursLeft, messageNumberTags, numberFilterOptions, numberName, sendNumberChoice, whatsappNumbers, windowHint } from '../src/services/whatsappNumbers.js'
 
 const SALES = { name: 'WA-1', label: 'Sales line', address: '+91 90030 12345' }
 const SUPPORT = { name: 'WA-2', label: 'Support line', address: '+91 90030 67890' }
@@ -50,4 +50,14 @@ test('the window hint follows the chosen number', () => {
   assert.equal(windowHint({ window: { open: true, remaining_seconds: 3 * 3600 } }), '24 h window open · 3 h left')
   assert.equal(windowHint({ window: { open: false, remaining_seconds: 0 } }), '')
   assert.equal(windowHint(null), '')
+  assert.equal(hoursLeft({ window: { open: true, remaining_seconds: 90 } }), '1 h left')
+})
+
+test('a thread names the number when it changes within one direction', () => {
+  const capabilities = { whatsapp_numbers: [SALES, SUPPORT] }
+  const rows = [['M1', 'WA-2', 'Incoming'], ['M2', 'WA-2', 'Outgoing'], ['M3', 'WA-1', 'Incoming'], ['M4', 'WA-1', 'Outgoing'],
+    ['M5', 'WA-1', 'Incoming'], ['M6', 'TG-1', 'Incoming']].map(([name, channel, direction]) => ({ name, channel, direction }))
+  assert.deepEqual(messageNumberTags(rows, capabilities),
+    { M1: 'to Support line', M2: 'via Support line', M3: 'to Sales line', M4: 'via Sales line' })
+  assert.deepEqual(messageNumberTags(rows, { whatsapp_numbers: [SALES] }), {})
 })

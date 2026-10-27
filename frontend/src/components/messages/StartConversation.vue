@@ -12,10 +12,15 @@ import {
   templateParameterDescriptors,
   buildTemplateComponents,
 } from "../../services/templateParameters";
-const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String });
+// `channel` is the WhatsApp number staff picked in "Send via"; the message and its templates go through that number.
+const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String, channel:String });
 const emit = defineEmits(["close", "sent"]);
 const channelEnabled = useEnabledChannels();
 const capabilities = inject("relayCapabilities", ref({}));
+const numberLabel = computed(() => {
+  const row = (capabilities.value.whatsapp_numbers || []).find(item => item.name === props.channel);
+  return row ? [row.label, row.address].filter(Boolean).join(' · ') : '';
+});
 const can = feature => channelCan(capabilities.value, destination.value?.provider, feature);
 const shown = ref(true),
   contact = ref(props.contact || ""),
@@ -26,7 +31,7 @@ const shown = ref(true),
   notice = ref(""),
   body = ref(""),
   subject = ref(""),
-  kind = ref("text");
+  kind = ref(props.channel ? "template" : "text");
 const contactQuery = ref(""), contactOptions = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const templates = ref([]),
   templateId = ref(""),
@@ -108,7 +113,7 @@ async function destinations() {
         business_doctype:props.businessDoctype,business_name:props.businessName },
     );
     if (current !== generation) return;
-    endpoints.value = result.filter(row => channelEnabled(row.provider)).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
+    endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
     endpoint.value = endpoints.value[0]?.value || "";
   } catch (e) {
     if (current === generation) error.value = e.message;
@@ -135,6 +140,7 @@ async function loadTemplates(next = false) {
       {
         operation: "templates.list",
         arguments: { ...(next && cursor.value ? { after: cursor.value } : {}) },
+        ...(props.channel ? { channel: props.channel } : {}),
       },
       true,
     );
@@ -156,6 +162,7 @@ function sendPayload() {
     contact:contact.value,
     business_doctype:props.businessDoctype, business_name:props.businessName,
     endpoint:endpoint.value, kind:kind.value, data,
+    ...(props.channel && !props.businessName ? { channel: props.channel } : {}),
   };
 }
 function editRejected() {
@@ -256,7 +263,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             : "No eligible channel identity is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
         </p>
         <template v-if="destination">
-          <p v-if="can('reply_window_hours')" class="text-sm">
+          <p v-if="channel && numberLabel" class="text-sm">Sends an approved template through {{ numberLabel }}.</p>
+          <p v-else-if="can('reply_window_hours')" class="text-sm">
             {{
               destination.window.open
                 ? "The reply window is open. You can send a message or an approved template."
@@ -269,7 +277,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             v-model="kind"
             :disabled="busy || !!pending"
             :options="[
-              ...(destination.window.open
+              ...(destination.window.open && !channel
                 ? [{ value: 'text', label: 'Message' }]
                 : []),
               { value: 'template', label: 'Approved template' },

@@ -139,6 +139,8 @@ export function useMessages() {
   const contactName = ref(""),
     phone = ref(""),
     alsoVia = ref([]),
+    // The WhatsApp number staff picked in "Send via"; empty lets the server reply from the newest incoming number.
+    viaNumber = ref(""),
     busy = ref(false),
     error = ref(""),
     notice = ref("");
@@ -152,7 +154,7 @@ export function useMessages() {
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
-  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source,alsoVia};
+  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source,alsoVia,viaNumber};
   function clearRecipient() {
     resetRecipient(draftFields);
     error.value = ""; notice.value = "";
@@ -364,6 +366,12 @@ export function useMessages() {
     if (!row) return filterChannel(value);
     selectRecipient(row);
     quoting.value = false;
+  }
+  // A WhatsApp number from "Send via" on a site with several numbers; the draft stays as typed.
+  function pickNumber(value) {
+    if (busy.value) return;
+    quoting.value = false;
+    viaNumber.value = value;
   }
   // More channels for one composed message; the picker offers them only when several channels are enabled.
   function toggleAlsoVia(value) {
@@ -600,10 +608,14 @@ export function useMessages() {
     }
     await run(async () => {
       const quote = action === "reaction" || quoting.value;
-      const via = quote || message === pinnedSource.value ? "" : "auto";
+      // A picked number sends from its newest loaded message of this person, else the server finds that message.
+      const picked = !quote && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
+      if (picked) message = picked;
+      const via = quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
       const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
       const intent = JSON.stringify({
         quote,
+        ...(via && via !== "auto" ? { via } : {}),
         message: message.name,
         kind: action,
         data,
@@ -750,6 +762,9 @@ export function useMessages() {
     findContacts,
     filterChannel,
     sendVia,
+    viaNumber,
+    pinnedSource,
+    pickNumber,
     alsoVia,
     toggleAlsoVia,
     history,
