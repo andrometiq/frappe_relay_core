@@ -23,8 +23,9 @@ def row(name='m1', **values):
 class Importer(legacy_database.Importer):
     """The importer without a database: no channel lookup, no contact lookup."""
 
-    def __init__(self, dry_run=False, files_dir=None):
+    def __init__(self, dry_run=False, files_dir=None, database='sales_source'):
         self.site_label, self.batch, self.dry_run = 'sales.example', 100, dry_run
+        self.source = frappe._dict(database=database)
         self.files_dir = Path(files_dir) if files_dir else None
         self.counts, self.failures, self.phones = Counter(), [], {}
 
@@ -131,6 +132,15 @@ class Media(Case):
             self.assertEqual(attach.call_args.args[1]['size'], 5)
             self.assertEqual((importer.counts['media_copied'], importer.counts['media_linked']), (1, 1))
 
+    def test_same_site_import_copies_a_file_found_at_its_own_url(self):
+        with tempfile.TemporaryDirectory() as site:
+            (Path(site) / 'public' / 'files').mkdir(parents=True)
+            (Path(site) / 'public' / 'files' / 'receipt.pdf').write_bytes(b'pdf')
+            site_path = lambda *parts: str(Path(site, *parts))
+            with patch.object(legacy_database.frappe, 'get_site_path', side_effect=site_path):
+                self.assertEqual(Importer(database=None).source_file('/files/receipt.pdf'), Path(site, 'public', 'files', 'receipt.pdf'))
+                self.assertIsNone(Importer(database=None).source_file('/files/missing.pdf'))
+                self.assertIsNone(Importer().source_file('/files/receipt.pdf'))
 
 
 class TeamAssignment(Case):
