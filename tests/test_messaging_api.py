@@ -21,7 +21,7 @@ class SendTests(unittest.TestCase):
         self.sent = Mock(return_value={'action': 'ACT-1', 'status': 'Submitted', 'message': 'RELAY-MSG-0000000001'})
         self.window = Mock(return_value={NUMBER})
         patches = [patch.object(messaging_api, 'require_access'), patch.object(messaging_api.frappe, 'throw', throw),
-                   patch.object(messaging_api, 'whatsapp_channel', return_value='WA'),
+                   patch.object(messaging_api, 'sending_channel', return_value='WA'),
                    patch.object(messaging_api.service_window, 'open_numbers', self.window),
                    patch.object(messaging_api, 'recipient', return_value=('Contact Asha', ('Customer', 'Asha Stores'))),
                    patch.object(messaging_api.whatsapp, 'send', self.sent), patch('relay_core.identity.default_region', return_value='IN')]
@@ -211,7 +211,8 @@ class RecipientTests(unittest.TestCase):
     def setUp(self):
         self.db = Mock()
         patches = [patch.object(messaging_api.frappe, 'db', self.db), patch.object(messaging_api.frappe, 'throw', throw),
-                   patch('relay_core.identity.default_region', return_value='IN')]
+                   patch('relay_core.identity.default_region', return_value='IN'),
+                   patch.object(messaging_api, 'sibling_contact', return_value=None)]
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
@@ -251,6 +252,48 @@ class RecipientTests(unittest.TestCase):
             create.side_effect = frappe.PermissionError('Not permitted')
             with self.assertRaises(frappe.PermissionError):  # Only managers create contacts.
                 messaging_api.recipient('WA', NUMBER, 'Customer', 'Asha Stores')
+
+
+class ChannelTests(unittest.TestCase):
+    """An API send names its number, or leaves from the number the customer wrote to last."""
+    def test_the_customer_number_is_found_across_channels_for_the_choice(self):
+        fake = Mock()
+        fake.get_all.return_value = ['Shop', 'Support']
+        fake.db.get_value.return_value = 'RELAY-CON-1'
+        with patch.object(messaging_api, 'frappe', fake), patch.object(messaging_api, 'connection_value', return_value='site-a'), \
+                patch.object(messaging_api, 'choose', return_value='Support') as choose:
+            self.assertEqual(messaging_api.sending_channel(NUMBER, None), 'Support')
+            messaging_api.sending_channel(NUMBER, 'Shop')
+        self.assertEqual(fake.db.get_value.call_args.args[1]['endpoint_key'][1],
+                         [messaging_api.endpoint_key(name, NUMBER) for name in ('Shop', 'Support')])
+        self.assertEqual(choose.call_args_list[0].kwargs, {'contact': 'RELAY-CON-1', 'requested': None})
+        self.assertEqual(choose.call_args_list[1].kwargs['requested'], 'Shop')
+
+    def test_the_chosen_number_goes_into_the_journal_and_the_template_lookup(self):
+        sent = Mock(return_value={'action': 'A'})
+        with patch.object(messaging_api, 'require_access'), patch.object(messaging_api, 'sending_channel', side_effect=lambda number, channel: channel or 'Shop') as pick, \
+                patch.object(messaging_api.service_window, 'open_numbers', return_value={NUMBER}), \
+                patch.object(messaging_api, 'recipient', return_value=('Contact Asha', ('Customer', 'Asha Stores'))), \
+                patch.object(messaging_api.whatsapp, 'send', sent), patch('relay_core.identity.default_region', return_value='IN'), \
+                patch('relay_core.whatsapp_templates.definition', return_value=POSITIONAL) as definition:
+            messaging_api.send_text(NUMBER, 'Hi', channel='Support')
+            self.assertEqual(sent.call_args.args[0]['channel'], 'Support')
+            messaging_api.send_template(NUMBER, 'order', 'en', ['SO-25', 'Asha'], channel='Support')
+            self.assertEqual(definition.call_args.args, ('order', 'en', 'Support'))
+            result, message = messaging_api.checked_item(0, {'type': 'text', 'number': NUMBER, 'body': 'Hi', 'channel': 'Support'})
+            self.assertEqual((result['ok'], message['channel']), (True, 'Support'))
+        self.assertEqual(pick.call_args_list[0].args, (NUMBER, 'Support'))
+
+    def test_a_number_known_on_another_channel_is_enrolled_not_duplicated(self):
+        db = Mock()
+        found = iter([None, _dict(relay_contact='RELAY-CON-1', verified=1)])
+        db.get_value.side_effect = lambda doctype, *args, **kwargs: next(found) if doctype == 'Relay Contact Endpoint' else (
+            'Contact Asha' if doctype == 'Relay Contact' else _dict(mobile_no='+' + NUMBER))
+        with patch.object(messaging_api.frappe, 'db', db), patch.object(messaging_api, 'sibling_contact', return_value='RELAY-CON-1') as sibling, \
+                patch.object(messaging_api, 'new_contact') as new_contact, patch('relay_core.identity.default_region', return_value='IN'):
+            self.assertEqual(messaging_api.recipient('Support', NUMBER, 'Customer', 'Asha Stores'), ('Contact Asha', ('Customer', 'Asha Stores')))
+        sibling.assert_called_once_with('Support', NUMBER)
+        new_contact.assert_not_called()
 
 
 if __name__ == '__main__':

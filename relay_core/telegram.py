@@ -52,7 +52,9 @@ def execute(operation, arguments=None):
 
 
 @frappe.whitelist(methods=['POST'])
-def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, business_doctype=None, business_name=None):
+def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, business_doctype=None, business_name=None,
+         channel=None):
+    """`channel` may name the bot; a chat is bound to one bot, which always sends."""
     require_access()
     integer(chat_id)
     if not isinstance(text, str) or not 1 <= len(text) <= 4096:
@@ -62,9 +64,11 @@ def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, busin
             integer(value, positive=True)
         elif type(value) is not int:
             frappe.throw('Invalid Telegram message reference')
-    contact, channel = group_binding(chat_id)
+    contact, bot = group_binding(chat_id)
+    if channel and channel != bot:
+        frappe.throw('This Telegram chat belongs to another bot', frappe.PermissionError)
     from relay_core.telegram_delivery import send_group
-    return send_group(contact, channel, chat_id, text, reply_to, message_thread_id, request_key, business_doctype, business_name)
+    return send_group(contact, bot, chat_id, text, reply_to, message_thread_id, request_key, business_doctype, business_name)
 
 
 def authorize_group(contact):
