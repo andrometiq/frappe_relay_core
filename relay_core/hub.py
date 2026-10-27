@@ -177,7 +177,7 @@ class HubClient:
         return self.call_tool("whatsapp.execute", arguments)
 
     def call_tool(self, name, arguments):
-        if name not in {"account.get", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment"}:
+        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment"}:
             raise HubError("Unsupported Hub tool")
         if not self.protocol:
             self.initialize()

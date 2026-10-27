@@ -9,6 +9,11 @@
     "title",
     "channel",
     "account",
+    "hub_channel",
+    "label",
+    "address",
+    "waba_id",
+    "is_default",
     "enabled",
     "company",
     "triage_owner",
@@ -37,6 +42,40 @@
       "label": "Account",
       "fieldtype": "Data",
       "reqd": 1
+    },
+    {
+      "fieldname": "hub_channel",
+      "label": "Hub channel",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Hub channel key of this number, bot or mailbox. Inbound events and sends use it."
+    },
+    {
+      "fieldname": "label",
+      "label": "Label",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "address",
+      "label": "Address",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Display number, bot username or mailbox address from the Hub."
+    },
+    {
+      "fieldname": "waba_id",
+      "label": "WhatsApp Business Account",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "depends_on": "eval:doc.channel=='WhatsApp'"
+    },
+    {
+      "fieldname": "is_default",
+      "label": "Default for new conversations",
+      "fieldtype": "Check",
+      "description": "One default per channel type."
     },
     {
       "fieldname": "enabled",
@@ -135,5 +174,5 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }
