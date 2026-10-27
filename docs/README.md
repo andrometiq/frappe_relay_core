@@ -6,6 +6,8 @@ provider accounts and transport.
 
 ## Get started
 
+Owners, managers and staff: start with the [user guide](user-guide.md).
+
 1. [Install Core on a test Frappe site](core-installation.md).
 2. [Configure authentication and permissions](authentication.md).
 3. [Read and reply to a verified conversation](messaging.md).
