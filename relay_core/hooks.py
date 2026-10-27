@@ -57,16 +57,11 @@ doc_events['Contact'] = {event: 'relay_core.contact_lifecycle.' + event
 
 from relay_core.business_references import RELAY_DOCTYPES as _relay_doctypes
 ignore_links_on_delete = list(_relay_doctypes)
-doc_events['*'] = {event: 'relay_core.business_references.allow_cancel'
-                   for event in ('before_cancel', 'on_cancel')}
 
 required_apps = ["frappe_tools"]
 after_migrate = [after_migrate, 'relay_core.business_events.install_samples']
 after_install = [after_install, 'relay_core.business_events.install_samples']
-for _event in ('after_insert', 'on_submit', 'on_cancel'):
-    _handlers = doc_events['*'].get(_event, [])
-    if isinstance(_handlers, str): _handlers = [_handlers]
-    doc_events['*'][_event] = [*_handlers, 'relay_core.business_events.on_event']
+doc_events['*'] = {event: 'relay_core.business_events.on_event' for event in ('after_insert', 'on_submit', 'on_cancel')}
 scheduler_events['cron']['* * * * *'].append('relay_core.business_events.recover')
 scheduler_events['cron']['*/10 * * * *'] = ['relay_core.whatsapp_templates.sync']
 scheduler_events.setdefault('daily', []).append('relay_core.billing.refresh_configured')
