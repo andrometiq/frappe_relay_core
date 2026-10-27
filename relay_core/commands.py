@@ -13,14 +13,15 @@ from frappe.commands import get_site, pass_context
 @click.option('--source-site-label', required=True, help='Stable name of the old site, such as sales.essdee.fit. Part of each message\'s import key.')
 @click.option('--channel', 'channels', multiple=True, help='SOURCE_CHANNEL=RELAY_CHANNEL; repeat per source channel.')
 @click.option('--files-dir', help='Directory with the old private files; media found here are copied, others are linked as is.')
-@click.option('--batch', default=2000, show_default=True, help='Messages per insert.')
+@click.option('--batch', default=2000, show_default=True, help='Messages per insert and per transaction.')
 @click.option('--dry-run', is_flag=True, help='Count only; write nothing.')
 @click.option('--undo', is_flag=True, help='Delete what the import with this --source-site-label created.')
 @click.option('--team', help='Relay Team for imported conversations that have no assignment yet.')
 @pass_context
 def relay_import_whatsapp_core(context, source_db, source_host, source_port, source_user, source_password_file,
                                source_site_label, channels, files_dir, batch, dry_run, undo, team):
-    """Import frappe_whatsapp_core messages into Relay. Safe to re-run: imported messages are skipped."""
+    """Import frappe_whatsapp_core messages into Relay. Safe to re-run: imported messages are skipped.
+    Exits with status 1 when any conversation, message or media file failed."""
     import frappe
 
     from relay_core import legacy_database
@@ -36,6 +37,7 @@ def relay_import_whatsapp_core(context, source_db, source_host, source_port, sou
         return
     source = legacy_database.Source(source_db, source_host, source_port, source_user,
                     legacy_database.source_password(source_password_file) if source_db else None)
+    result = {}
     try:
         started = frappe.utils.now_datetime()
         result = legacy_database.Importer(source, source_site_label, channel_map, batch, dry_run, files_dir).run()
@@ -47,6 +49,8 @@ def relay_import_whatsapp_core(context, source_db, source_host, source_port, sou
     finally:
         source.close()
         frappe.destroy()
+    if result.get('failures'):
+        raise SystemExit(1)
 
 
 @click.command('relay-assign-imported-chats')

@@ -28,6 +28,7 @@ class Importer(legacy_database.Importer):
         self.source = frappe._dict(database=database)
         self.files_dir = Path(files_dir) if files_dir else None
         self.counts, self.failures, self.phones = Counter(), [], {}
+        self.committed_counts, self.phone_changes, self.copied = Counter(), [], set()
 
 
 class Case(unittest.TestCase):
@@ -182,6 +183,69 @@ class Undo(Case):
                  patch.object(frappe, 'get_all', return_value=['/private/files/relay-archive-b']):
                 self.assertEqual(legacy_database.remove_unused_copies(urls), 1)
             self.assertEqual(sorted(path.name for path in files.iterdir()), ['relay-archive-b', 'source.jpg'])
+
+
+class Transactions(Case):
+    def test_rollback_forgets_counts_phone_matches_and_copied_bytes(self):
+        importer = Importer()
+        importer.counts['created'] = 5
+        importer.phones = {'919000000001': 'Old'}
+        importer.commit()
+        importer.counts['created'] += 3
+        importer.phone_changes = [('919000000001', 'Old'), ('919000000002', None)]
+        importer.phones.update({'919000000001': 'Rolled', '919000000002': 'Rolled'})
+        importer.copied = {'/private/files/relay-archive-x'}
+        with patch.object(legacy_database, 'remove_unused_copies') as remove:
+            importer.rollback()
+        frappe.db.rollback.assert_called_once()
+        remove.assert_called_once_with({'/private/files/relay-archive-x'})
+        self.assertEqual(importer.counts['created'], 5)
+        self.assertEqual(importer.phones, {'919000000001': 'Old'})
+        self.assertEqual((importer.phone_changes, importer.copied), ([], set()))
+
+    def test_failed_conversation_is_rolled_back_and_listed(self):
+        importer = Importer()
+        importer.source = Mock(sql=Mock(return_value=[conversation(name='c1'), conversation(name='c2')]))
+        with patch.object(importer, 'import_conversation', side_effect=[None, RuntimeError('boom')]), \
+             patch.object(importer, 'commit'), patch.object(importer, 'rollback') as rollback:
+            result = importer.run()
+        rollback.assert_called_once()
+        self.assertEqual(result['failures'], [{'conversation': 'c2', 'error': 'RuntimeError: boom'}])
+
+    def test_long_conversation_commits_once_per_batch(self):
+        importer = Importer()
+        pages = [[row('m1'), row('m2')], [row('m3')], []]
+        def import_rows(rows, job, manifest):
+            importer.counts['created'] += len(rows)
+        with patch.object(importer, 'page', side_effect=pages), \
+             patch.object(importer, 'channels', {'old': 'RELAY-CH-1'}, create=True), \
+             patch.object(importer, 'contact_for', return_value='RELAY-CON-1'), \
+             patch.object(importer, 'mark', return_value='IMPORT-1'), \
+             patch.object(importer, 'import_rows', side_effect=import_rows), \
+             patch.object(importer, 'commit') as commit, \
+             patch.object(legacy_database, 'refresh_activity'), patch.object(legacy_database, 'apply_history'), \
+             patch('relay_core.identity.default_region', return_value='IN'):
+            importer.import_conversation(conversation())
+        self.assertEqual(commit.call_count, 2)
+        added = [call.args[1][0] for call in frappe.db.sql.call_args_list if 'imported = imported' in call.args[0]]
+        self.assertEqual(added, [2, 1])
+
+
+class Command(unittest.TestCase):
+    def test_exit_status_is_one_when_anything_failed(self):
+        from click.testing import CliRunner
+        from relay_core.commands import relay_import_whatsapp_core
+        frappe.local.flags = frappe._dict()
+        self.addCleanup(lambda: delattr(frappe.local, 'flags'))
+        for failures, code in (([], 0), ([{'message': 'm1', 'error': 'x'}], 1)):
+            importer = Mock(return_value=Mock(run=Mock(return_value={'counts': {}, 'failures': failures})))
+            with patch.object(frappe, 'init'), patch.object(frappe, 'connect'), patch.object(frappe, 'set_user'), \
+                 patch.object(frappe, 'destroy'), patch.object(legacy_database, 'Source'), \
+                 patch.object(legacy_database, 'Importer', importer), \
+                 patch.object(frappe.utils, 'now_datetime', return_value=__import__('datetime').datetime(2026, 1, 1)):
+                result = CliRunner().invoke(relay_import_whatsapp_core, ['--source-site-label', 'sales.example'],
+                                            obj=frappe._dict(sites=['site.test']))
+            self.assertEqual(result.exit_code, code, (result.output, result.exception))
 
 
 class TeamAssignment(Case):
