@@ -232,9 +232,10 @@ def permission(doc, user=None, permission_type=None):
 
 
 def file_permission(doc, user=None, permission_type=None):
+    """Only files of Relay's own report are checked; other reports' files keep Frappe's rules."""
     if doc.attached_to_doctype!='Prepared Report' or not doc.attached_to_name:return True
-    report=frappe.get_doc('Prepared Report',doc.attached_to_name)
-    return permission(report,user,permission_type)
+    if frappe.db.get_value('Prepared Report',doc.attached_to_name,'report_name')!=REPORT:return True
+    return permission(frappe.get_doc('Prepared Report',doc.attached_to_name),user,permission_type)
 
 
 @frappe.whitelist(methods=['GET'])
