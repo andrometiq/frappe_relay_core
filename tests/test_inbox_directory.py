@@ -77,7 +77,7 @@ class DirectoryQueryTests(unittest.TestCase):
                 _dict(name='C-2', contact='P-2', display_name='Two', last_message_at='2026-10-27 09:00:00', creation='2026-10-01')]
         self.fake.get_list.return_value = [('WA-1', 'WhatsApp')]
         states = [_dict(relay_contact='C-1', starred=1, folder='Follow up', exact_reads=1, last_read='', read_baseline='M-3')]
-        assignments = [_dict(relay_contact='C-2', team='Sales', assigned_to=None)]
+        assignments = [_dict(relay_contact='C-2', team='Sales', assigned_to=None, assigned_by=None)]
         self.fake.get_all.side_effect = lambda doctype, **kwargs: states if doctype == 'Relay Conversation State' else assignments
         latest = {'C-1': _dict(name='M-9', channel='WA-1', content='Hello', business_doctype='Customer', business_name='CU-1'),
                   'C-2': _dict(name='M-8', channel='Hidden', content='Secret')}
@@ -92,7 +92,7 @@ class DirectoryQueryTests(unittest.TestCase):
         self.assertEqual(first['business'], {'doctype': 'Customer', 'name': 'CU-1'})
         self.assertEqual(first['assignment'], {})
         self.assertEqual((second['provider'], second['latest_preview'], second['unread']), (None, '', 0))
-        self.assertEqual(second['assignment'], {'team': 'Sales', 'assigned_to': None})
+        self.assertEqual(second['assignment'], {'team': 'Sales', 'assigned_to': None, 'assigned_by': None})
         self.assertEqual(self.fake.get_all.call_count, 2)
         self.assertEqual(inbox.directory_items([]), [])
 

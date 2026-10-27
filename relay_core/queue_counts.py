@@ -1,6 +1,6 @@
 """Exact inbox queue counts with the inbox list's permission scope, cached briefly per user."""
 import frappe
-from pypika.functions import Coalesce, Count
+from pypika.functions import Count
 from relay_core.permissions import require_access
 
 CACHE_SECONDS = 10
@@ -56,8 +56,8 @@ def get_counts(medium=None, channels=None):
     message = frappe.qb.DocType('Relay Message')
     mine = frappe.qb.from_(assignment).select(assignment.relay_contact).where(
         assignment.assigned_to == frappe.session.user)
-    assigned = frappe.qb.from_(assignment).select(assignment.relay_contact).where(
-        (Coalesce(assignment.assigned_to, '') != '') | (Coalesce(assignment.team, '') != ''))
+    from relay_core.inbox import assigned_contacts
+    assigned = assigned_contacts()
     # One pass over unread messages gives both the conversation and the message total.
     unseen = unread_messages(names, ['relay_contact']).where(message.relay_contact.isin(visible_contacts()))
     if names:

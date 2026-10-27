@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core import features
 from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
 
@@ -49,7 +50,9 @@ def update(contact, last_read=None, starred=None, folder=None):
         if starred is not None:
             if str(starred) not in ('0','1','True','False'): frappe.throw('Invalid starred flag')
             doc.starred=int(str(starred) in ('1','True'))
-        if folder is not None: doc.folder=folder or None
+        if folder is not None:
+            features.require('folders')
+            doc.folder=folder or None
         old_cursor=frappe.db.get_value('Relay Conversation State',name,'last_read') if name else None
         doc.last_seen=frappe.utils.now_datetime();doc.save()
         if doc.last_read != old_cursor:
@@ -64,7 +67,7 @@ def read(contact):
     require_access();readable_contact(contact)
     state=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(contact)},['last_read','starred','folder','last_seen'],as_dict=True) or {}
     unread=unread_count(contact)
-    assignment=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},['team','assigned_to'],as_dict=True) or {}
+    assignment=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},['team','assigned_to','assigned_by'],as_dict=True) or {}
     return dict(state, unread=unread, unread_more=False, assignment=assignment, can_assign=frappe.has_permission('Relay Conversation Assignment', 'write'))
 
 
@@ -108,6 +111,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     if query.strip():
         pattern='%'+ '%'.join('\\'+c if c in '%_\\' else c for c in query.strip())+'%'
         search=search.where(contact.display_name.like(pattern)|contact.name.like(pattern))
+    if folder: features.require('folders')
     if folder or str(starred)=='1':
         states=frappe.qb.from_(saved).select(saved.relay_contact).where(saved.user==frappe.session.user)
         if folder:states=states.where(saved.folder==folder)
@@ -121,8 +125,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         mine=frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.assigned_to==frappe.session.user)
         search=search.where(contact.name.isin(mine))
     if mode=='unassigned':
-        assigned=frappe.qb.from_(assignment).select(assignment.relay_contact).where((Coalesce(assignment.assigned_to,'')!='')|(Coalesce(assignment.team,'')!=''))
-        search=search.where(contact.name.notin(assigned))
+        search=search.where(contact.name.notin(assigned_contacts()))
     if team:
         if not isinstance(team,str) or len(team)>140:frappe.throw('Invalid team')
         from relay_core.teams import readable_filter_team
@@ -133,6 +136,15 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     items=directory_items(page,channel_names)
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+def assigned_contacts():
+    """Conversations with an agent, or with a team while teams are on. The Unassigned tab shows the rest."""
+    from pypika.functions import Coalesce
+    assignment=frappe.qb.DocType('Relay Conversation Assignment')
+    taken=Coalesce(assignment.assigned_to,'')!=''
+    if features.is_enabled('teams'):taken=taken|(Coalesce(assignment.team,'')!='')
+    return frappe.qb.from_(assignment).select(assignment.relay_contact).where(taken)
 
 
 def activity_time(value):
@@ -160,8 +172,8 @@ def directory_items(rows, channels=None):
     states={row.relay_contact:row for row in frappe.get_all('Relay Conversation State',
         filters={'state_key':['in',[state_key(name) for name in names]]},fields=['relay_contact','starred','folder',*READ_FIELDS])}
     unread=unread_counts({name:read_position(states.get(name)) for name in names},channels)
-    assignments={row.relay_contact:{'team':row.team,'assigned_to':row.assigned_to} for row in frappe.get_all(
-        'Relay Conversation Assignment',filters={'relay_contact':['in',names]},fields=['relay_contact','team','assigned_to'])}
+    assignments={row.relay_contact:{'team':row.team,'assigned_to':row.assigned_to,'assigned_by':row.assigned_by} for row in frappe.get_all(
+        'Relay Conversation Assignment',filters={'relay_contact':['in',names]},fields=['relay_contact','team','assigned_to','assigned_by'])}
     items=[]
     for row in rows:
         last=latest.get(row.name) or {}

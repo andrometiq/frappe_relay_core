@@ -7,6 +7,8 @@ import { Dialog, Button, FormControl, ErrorMessage } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
 import { randomUUID } from "../../services/crypto.js";
 import { coreApi } from "../../services/coreApi";
+import { linkedTitle } from "../../services/linkedTitle";
+import { assignmentLabel } from "../../services/assignment";
 const props = defineProps({ contact: String, businessDoctype: String, businessName: String, initialCase: String });
 const emit = defineEmits(["close"]);
 const shown = ref(true),
@@ -239,7 +241,7 @@ onMounted(() => (props.initialCase ? open(props.initialCase) : load()));
             {{ record.priority }} priority
           </p>
           <p v-if="!record.isNew" class="text-sm text-ink-gray-5">
-            Assigned to {{ record.assigned_to || "Unassigned" }}
+            {{ assignmentLabel({ assigned_to: record.assigned_to }, { title: linkedTitle }) }}
           </p>
           <Button
             v-if="record.can_assign && !record.isNew"

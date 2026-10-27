@@ -1,13 +1,15 @@
 <script setup>
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import MoveToFolderDialog from "./MoveToFolderDialog.vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { Button, Dialog, Dropdown, ErrorMessage } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import { useConversationPresence } from "../../composables/useConversationPresence";
 import { useTask } from "../../composables/useTask";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import { useChatFolders } from "../../composables/useChatFolders";
+import { linkedTitle } from "../../services/linkedTitle";
+import { assignmentLabel } from "../../services/assignment";
 const props = defineProps({
   contact: String,
   lastMessage: String,
@@ -23,7 +25,9 @@ const { busy, error, notice, run } = useTask(),
   team = ref(""),
   agent = ref(""),
   expanded = ref(false);
-const assignment = ref({team:'', assigned_to:''}), assignmentChanged = ref(false);
+const capabilities = inject("relayCapabilities", ref({}));
+const assignment = ref({team:'', assigned_to:'', assigned_by:''}), assignmentChanged = ref(false);
+const assignmentText = computed(() => assignmentLabel(assignment.value, { teams: capabilities.value.teams_enabled, title: linkedTitle }));
 const assignmentDirty = computed(() => team.value !== assignment.value.team || agent.value !== assignment.value.assigned_to);
 function receiveState(value) {
   state.value = value;
@@ -34,8 +38,8 @@ const menu = computed(() => [
   { label: state.value.starred ? "Unstar conversation" : "Star conversation", icon: state.value.starred ? "star" : "bookmark", disabled: busy.value,
     onClick: () => run(() => update({ starred: state.value.starred ? 0 : 1 })) },
   { label: "Mark read", icon: "check", disabled: busy.value || !props.lastMessage, onClick: () => run(() => update({ last_read: props.lastMessage })) },
-  { label: "Move to folder", icon: "folder-input", disabled: busy.value, onClick: () => { moving.value = true; } },
-  ...(state.value.folder ? [{ label: "Remove from folder", icon: "folder-minus", disabled: busy.value, onClick: () => run(() => move(props.contact, "").then(receiveState)) }] : []),
+  ...(capabilities.value.folders ? [{ label: "Move to folder", icon: "folder-input", disabled: busy.value, onClick: () => { moving.value = true; } }] : []),
+  ...(capabilities.value.folders && state.value.folder ? [{ label: "Remove from folder", icon: "folder-minus", disabled: busy.value, onClick: () => run(() => move(props.contact, "").then(receiveState)) }] : []),
   ...(props.actions || []),
 ]);
 watch(() => props.organizeRequest, () => { expanded.value = true; });
@@ -44,7 +48,7 @@ async function load(current = ++generation) {
   const result = await coreApi("inbox.read", { contact: props.contact });
   if (current !== generation) return;
   receiveState(result);
-  const next = {team:result.assignment?.team || "", assigned_to:result.assignment?.assigned_to || ""};
+  const next = {team:result.assignment?.team || "", assigned_to:result.assignment?.assigned_to || "", assigned_by:result.assignment?.assigned_by || ""};
   if (assignmentDirty.value) {
     assignmentChanged.value = next.team !== assignment.value.team || next.assigned_to !== assignment.value.assigned_to;
   } else {
@@ -69,11 +73,11 @@ async function assign() {
   const current = contactGeneration, contact = props.contact;
   await coreApi(
     "teams.assign",
-    { contact, team: team.value, assigned_to: agent.value },
+    { contact, ...(capabilities.value.teams_enabled ? { team: team.value } : {}), assigned_to: agent.value },
     true,
   );
   if (current !== contactGeneration) return;
-  assignment.value = {team:team.value, assigned_to:agent.value};
+  assignment.value = {...assignment.value, team:team.value, assigned_to:agent.value};
   assignmentChanged.value = false;
   notice.value = "Assignment saved";
   await load();
@@ -88,7 +92,7 @@ watch(
     moving.value = false;
     team.value = "";
     agent.value = "";
-    assignment.value = {team:'', assigned_to:''};
+    assignment.value = {team:'', assigned_to:'', assigned_by:''};
     assignmentChanged.value = false;
     error.value = "";
     notice.value = "";
@@ -108,7 +112,7 @@ useRealtimeRefresh(['Relay Conversation Assignment'], ['inbox'], async () => {
     error.value = err.message;
     if ([401,403].includes(err.status)) {
       state.value = {}; team.value = ''; agent.value = '';
-      assignment.value = {team:'', assigned_to:''}; assignmentChanged.value = false;
+      assignment.value = {team:'', assigned_to:'', assigned_by:''}; assignmentChanged.value = false;
     }
   }
 });
@@ -127,18 +131,19 @@ onBeforeUnmount(() => { ++generation; ++contactGeneration; });
       {{ people.map((person) => (person.full_name || person.name) + (person.typing ? ' is typing…' : '')).join(", ") }}
     </p>
     <ErrorMessage :message="error" />
+    <p class="text-sm">{{ assignmentText }}</p>
     <p v-if="notice" role="status" class="text-xs">{{ notice }}</p>
     <p v-if="assignmentChanged" role="status" class="text-xs">Assignment changed elsewhere. Your edits are preserved; saving will replace the current assignment.</p>
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
       <template v-if="state.can_assign"
-        ><RemoteLinkField v-model="team" :field="{label:'Assign team',method:'teams.directory',readOnly:busy}" /><RemoteLinkField v-model="agent" :field="{label:'Assign agent',method:'teams.agents',readOnly:busy}" /><Button
+        ><RemoteLinkField v-if="capabilities.teams_enabled" v-model="team" :field="{label:'Assign team',method:'teams.directory',readOnly:busy}" /><RemoteLinkField v-model="agent" :field="{label:'Assign agent',method:'teams.agents',readOnly:busy}" /><Button
           label="Save assignment"
           :disabled="busy"
           @click="run(assign)"
       /></template>
     </div>
     </Dialog>
-    <MoveToFolderDialog v-model="moving" :contact="contact" :current="state.folder" @moved="receiveState" />
+    <MoveToFolderDialog v-if="capabilities.folders" v-model="moving" :contact="contact" :current="state.folder" @moved="receiveState" />
     <ErrorMessage v-if="!expanded" :message="error" />
   </div>
 </template>

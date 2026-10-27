@@ -1,6 +1,7 @@
 """Personal chat folders: each user names their own folders and files conversations into them."""
 import frappe
 from frappe.query_builder.functions import Count, Max
+from relay_core import features
 from relay_core.permissions import require_access
 
 FOLDER = 'Relay Chat Folder'
@@ -44,6 +45,7 @@ def query(user=None):
 def folders():
     """My folders in display order, each with the number of conversations filed in it."""
     require_access()
+    features.require('folders')
     state = frappe.qb.DocType(STATE)
     counts = dict(frappe.qb.from_(state).select(state.folder, Count('*'))
                   .where((state.user == frappe.session.user) & state.folder.isnotnull() & (state.folder != ''))
@@ -56,6 +58,7 @@ def folders():
 @frappe.whitelist(methods=['POST'])
 def create(folder_name):
     require_access()
+    features.require('folders')
     table = frappe.qb.DocType(FOLDER)
     last = frappe.qb.from_(table).select(Max(table.sort_order)).where(table.user == frappe.session.user).run()[0][0] or 0
     doc = frappe.get_doc({'doctype': FOLDER, 'user': frappe.session.user, 'folder_name': folder_name, 'sort_order': last + 1})
@@ -66,6 +69,7 @@ def create(folder_name):
 @frappe.whitelist(methods=['POST'])
 def rename(folder, folder_name):
     require_access()
+    features.require('folders')
     doc = own_folder(folder)
     doc.folder_name = folder_name
     doc.save()
@@ -76,6 +80,7 @@ def rename(folder, folder_name):
 def delete(folder):
     """Remove the folder; its conversations stay in the inbox without a folder."""
     require_access()
+    features.require('folders')
     doc = own_folder(folder)
     state = frappe.qb.DocType(STATE)
     frappe.qb.update(state).set(state.folder, None).where((state.user == frappe.session.user) & (state.folder == doc.name)).run()

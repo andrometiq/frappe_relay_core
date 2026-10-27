@@ -1,19 +1,17 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { Avatar, Button, Dropdown, FeatherIcon } from '@relay/ui'
 import ContactDetails from '../ContactDetails.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
+import { assignmentLabel } from '../../services/assignment'
 
 const props = defineProps({ title: String, contact: String, relayContact: String, primary: Object, channel: String, canOrganize: Boolean })
 const emit = defineEmits(['close', 'cases', 'notes', 'assign', 'changed'])
 const phone = ref(''), assignment = ref(null)
-const assignee = computed(() => {
-  if (!assignment.value) return ''
-  const { assigned_to: user, team } = assignment.value
-  return user ? linkedTitle('User', user, 'Assigned') : linkedTitle('Relay Team', team, 'Unassigned')
-})
+const capabilities = inject('relayCapabilities', ref({}))
+const assignee = computed(() => assignment.value ? assignmentLabel(assignment.value, { teams: capabilities.value.teams_enabled, title: linkedTitle }) : '')
 const menu = computed(() => [
   ...(props.canOrganize ? [{ label: 'Internal notes', icon: 'message-square', onClick: () => emit('notes') }] : []),
   ...(props.contact ? [{ label: 'Edit Contact in Desk', icon: 'external-link', onClick: () => { location.href = '/desk/contact/' + encodeURIComponent(props.contact) } }] : []),
@@ -49,7 +47,7 @@ watch(() => props.relayContact, async contact => {
         <h4 class="info-group-title">Details</h4>
         <dl class="info-card">
           <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
-          <div v-if="assignee" class="info-kv"><dt>Assigned to</dt><dd>{{ assignee }}</dd></div>
+          <div v-if="assignee" class="info-kv"><dt>Assignment</dt><dd>{{ assignee }}</dd></div>
         </dl>
         <WorkspaceState compact title="No linked Contact" description="This chat has no Frappe Contact yet, so it has no business links." icon="user" />
       </template>

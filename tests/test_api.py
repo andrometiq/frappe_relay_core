@@ -54,7 +54,7 @@ class ApiTests(unittest.TestCase):
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':True,'configure':False,
+        self.assertEqual(result,{'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers})
         listed.assert_called_once_with('WhatsApp')
@@ -78,6 +78,12 @@ class ApiTests(unittest.TestCase):
             with patch('relay_core.channels.enabled',return_value=[]):
                 result=self.api.capabilities()
             self.assertEqual(tuple(result[flag] for flag in flags),values,role)
+
+    def test_folders_and_teams_switches_hide_their_capabilities(self):
+        self.use_role('System Manager')
+        with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.features.is_enabled',return_value=False):
+            result=self.api.capabilities()
+        self.assertEqual((result['manage'],result['teams'],result['teams_enabled'],result['folders']),(True,False,False,False))
 
     def test_invalid_input_does_not_write(self):
         for name,account,enabled in [('','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:
@@ -296,8 +302,9 @@ class MessageDisplayApiTests(unittest.TestCase):
 
 
 def setUpModule():
-    """These tests cover AI behavior, so the AI features switch is on."""
+    """These tests cover AI, folder and team behavior, so every feature switch is on."""
     from unittest import addModuleCleanup, mock
-    switch = mock.patch('relay_core.ai_features.is_enabled', return_value=True)
-    switch.start()
-    addModuleCleanup(switch.stop)
+    for target in ('relay_core.ai_features.is_enabled', 'relay_core.features.is_enabled'):
+        switch = mock.patch(target, return_value=True)
+        switch.start()
+        addModuleCleanup(switch.stop)

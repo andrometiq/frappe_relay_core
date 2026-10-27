@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from frappe import _dict
-from relay_core import chat_folders
+from relay_core import chat_folders, features
 from test_contact_primary import fake_frappe
 
 
@@ -17,6 +17,9 @@ class ChatFolderTests(unittest.TestCase):
         self.fake.db.exists.return_value = False
         self.enterContext(patch.object(chat_folders, 'frappe', self.fake))
         self.access = self.enterContext(patch.object(chat_folders, 'require_access'))
+        self.enterContext(patch.object(features, 'frappe', self.fake))
+        self.fake.db.get_single_value.side_effect = lambda doctype, field: int(field == 'enable_chat_folders' and self.folders_on)
+        self.folders_on = True
 
     def folder(self, **values):
         return _dict(user='agent@example.invalid', owner='agent@example.invalid', name='F-MINE', folder_name='Follow up', **values)
@@ -83,6 +86,16 @@ class ChatFolderTests(unittest.TestCase):
                      lambda: chat_folders.delete('F-MINE')):
             with self.assertRaises(PermissionError):
                 call()
+
+    def test_every_api_refuses_with_a_clear_message_while_folders_are_off(self):
+        self.folders_on = False
+        for call in (chat_folders.folders, lambda: chat_folders.create('A'), lambda: chat_folders.rename('F-MINE', 'B'),
+                     lambda: chat_folders.delete('F-MINE')):
+            with self.assertRaisesRegex(PermissionError, 'Chat folders are turned off'):
+                call()
+        self.fake.get_doc.assert_not_called()
+        self.fake.get_all.assert_not_called()
+        self.fake.qb.update.assert_not_called()
 
 
 if __name__ == '__main__':

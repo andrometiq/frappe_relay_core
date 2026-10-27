@@ -25,12 +25,21 @@
       "label": "Assigned agent",
       "fieldtype": "Link",
       "options": "User"
+    },
+    {
+      "fieldname": "assigned_by",
+      "label": "Assigned by",
+      "fieldtype": "Link",
+      "options": "User",
+      "read_only": 1,
+      "description": "The user who last chose the agent in Relay."
     }
   ],
   "field_order": [
     "relay_contact",
     "team",
-    "assigned_to"
+    "assigned_to",
+    "assigned_by"
   ],
   "permissions": [
     {

@@ -3,19 +3,21 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { useTask } from '../src/composables/useTask.js'
+import { assignmentLabel } from '../src/services/assignment.js'
 const source = (await readFile(new URL('../src/components/messages/ConversationTools.vue', import.meta.url), 'utf8'))
   .split('<script setup>')[1].split('</script>')[0].replace(/^import .*\n/gm, '')
-const make = new Function('ref', 'computed', 'watch', 'onBeforeUnmount', 'defineProps', 'coreApi', 'useTask', 'useConversationPresence', 'useRealtimeRefresh', 'useChatFolders',
-  source + '\nreturn {team,agent,state,menu,moving,assign,update,assignmentChanged,error};')
+const make = new Function('ref', 'computed', 'watch', 'onBeforeUnmount', 'defineProps', 'coreApi', 'useTask', 'useConversationPresence', 'useRealtimeRefresh', 'useChatFolders', 'inject', 'linkedTitle', 'assignmentLabel',
+  source + '\nreturn {team,agent,state,menu,moving,assign,update,assignmentChanged,assignmentText,error};')
 const tick = () => new Promise(resolve => setImmediate(resolve))
-function fixture(t) {
+function fixture(t, capabilities = {folders:true, teams_enabled:true}) {
   const requests = [], props = reactive({contact:'A'}), scope = effectScope()
   let refresh, unmount, presence
   const state = scope.run(() => make(ref, computed, watch, fn => unmount = fn, () => props,
     (method, values) => new Promise((resolve, reject) => requests.push({method,values,resolve,reject})), useTask,
     (_props, callback) => { presence = callback; return {people:ref([])} }, (rooms, kinds, fn) => {
       assert.deepEqual(rooms, ['Relay Conversation Assignment']); assert.ok(kinds.includes('inbox')); refresh = fn
-    }, () => ({ move: (contact, folder) => new Promise((resolve, reject) => requests.push({method:'move',values:{contact,folder},resolve,reject})) })))
+    }, () => ({ move: (contact, folder) => new Promise((resolve, reject) => requests.push({method:'move',values:{contact,folder},resolve,reject})) }),
+    () => ref(capabilities), (_doctype, name) => name, assignmentLabel))
   t.after(() => { unmount(); scope.stop() })
   return {state, requests, props, refresh, unmount, presence}
 }
@@ -92,4 +94,16 @@ test('a save completing after switching away and back cannot reset the new draft
   requests[1].resolve({}); await saved
   assert.equal(state.team.value, 'Current'); assert.equal(state.agent.value, 'New local edit')
   assert.equal(requests.length, 4)
+})
+
+test('with folders and teams off the menu has no folder items and saves only the agent', async t => {
+  const {state, requests} = fixture(t, {folders:false, teams_enabled:false})
+  requests[0].resolve({can_assign:true, folder:'F1', assignment:{team:'Sales', assigned_to:'alice', assigned_by:'bob'}}); await tick()
+  assert.ok(!state.menu.value.some(item => /folder/i.test(item.label)))
+  assert.equal(state.assignmentText.value, 'Assigned to alice by bob')
+  state.agent.value = 'carol'
+  const saved = state.assign()
+  assert.deepEqual(requests[1].values, {contact:'A', assigned_to:'carol'})
+  requests[1].resolve({}); await tick()
+  requests[2].resolve(assignment('Sales', 'carol')); await saved
 })

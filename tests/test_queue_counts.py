@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from frappe.query_builder.utils import get_query_builder
 from pypika import CustomFunction
-from relay_core import inbox, queue_counts
+from relay_core import features, inbox, queue_counts
 from test_contact_primary import fake_frappe
 
 SCOPE = 'relay_scope_marker'
@@ -21,6 +21,7 @@ class QueueCountTests(unittest.TestCase):
         self.enterContext(patch.object(queue_counts, 'frappe', self.fake))
         self.enterContext(patch.object(inbox, 'frappe', self.fake))
         self.access = self.enterContext(patch.object(queue_counts, 'require_access'))
+        self.teams_on = self.enterContext(patch.object(features, 'is_enabled', return_value=True))
         self.sql = []
         self.enterContext(patch.object(queue_counts, 'count', side_effect=lambda query: self.sql.append(query.get_sql()) or len(self.sql)))
         self.unread_sql = []
@@ -48,6 +49,16 @@ class QueueCountTests(unittest.TestCase):
         self.assertIn(SCOPE + "('Relay Message')", unread, 'Unread counts keep the message scope too')
         self.assertIn("`user`='agent@example.invalid'", unread)
         self.assertIn('COUNT(DISTINCT', unread, 'One pass counts conversations and messages')
+
+    def test_unassigned_counts_team_only_chats_while_teams_are_off(self):
+        queue_counts.get_counts()
+        self.assertIn('`team`', self.sql[2])
+        self.sql.clear(); self.unread_sql.clear()
+        self.teams_on.return_value = False
+        queue_counts.get_counts()
+        self.assertIn('`assigned_to`', self.sql[2])
+        self.assertNotIn('`team`', self.sql[2], 'A chat with only a team and no agent is unassigned')
+        self.teams_on.assert_called_with('teams')
 
     def test_medium_limits_contacts_and_unread_messages_to_its_channels(self):
         queue_counts.get_counts('Telegram')

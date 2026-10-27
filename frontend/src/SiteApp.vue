@@ -41,7 +41,7 @@ const navigation = [
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
 const rendered = pageCapabilities(document.getElementById('app'))
-const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, ai: false, skills: false, business_events: false }), ready = ref(Boolean(rendered))
+const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, teams_enabled: false, folders: false, ai: false, skills: false, business_events: false }), ready = ref(Boolean(rendered))
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))

@@ -46,7 +46,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
       <h4 class="info-group-title">Details</h4>
       <dl class="info-card">
         <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
-        <div v-if="assignee" class="info-kv"><dt>Assigned to</dt><dd>{{ assignee }}</dd></div>
+        <div v-if="assignee" class="info-kv"><dt>Assignment</dt><dd>{{ assignee }}</dd></div>
         <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Country code and number required" theme="amber" /></dd></div>
         <div class="info-kv"><dt>Frappe Contact</dt><dd><a :href="desk('Contact', detail.name)">Edit in Desk</a></dd></div>
       </dl>
