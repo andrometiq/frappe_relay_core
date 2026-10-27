@@ -21,6 +21,8 @@
     "language",
     "source_file",
     "column_map",
+    "recipient_filters",
+    "scheduled_at",
     "media_id",
     "media_uploaded_at",
     "country",
@@ -84,7 +86,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "read_only": 1,
-      "options": "Draft\nImporting\nRunning\nPaused\nCancelling\nCancelled\nCompleted",
+      "options": "Draft\nScheduled\nImporting\nRunning\nPaused\nCancelling\nCancelled\nCompleted",
       "search_index": 1
     },
     {
@@ -135,6 +137,18 @@
       "fieldname": "column_map",
       "label": "Column mapping",
       "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "recipient_filters",
+      "label": "Contact filters",
+      "fieldtype": "JSON",
+      "read_only": 1
+    },
+    {
+      "fieldname": "scheduled_at",
+      "label": "Scheduled at",
+      "fieldtype": "Datetime",
       "read_only": 1
     },
     {
@@ -260,5 +274,5 @@
   ],
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-26 13:00:00.000000"
+  "modified": "2026-10-27 18:00:00.000000"
 }

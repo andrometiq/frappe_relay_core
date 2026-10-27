@@ -1,17 +1,19 @@
 <script setup>
-import { computed, inject, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
 import FrappeFormSection from "./frappe/FrappeFormSection.vue";
 import FrappeFormView from "./frappe/FrappeFormView.vue";
 import FrappeListView from "./frappe/FrappeListView.vue";
 import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
+import CampaignAudience from "./campaigns/CampaignAudience.vue";
 import { useCampaigns } from "../composables/useCampaigns";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { COUNTERS, campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
   statusTheme, windowNotice } from "../services/campaignProgress";
+import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
 const workspace = useCampaigns();
@@ -37,7 +39,20 @@ const media = (kind) => channelFeature(capabilities.value, "WhatsApp", "media." 
 const types = computed(() => messageTypes(["photo", "video", "document"].filter(media)));
 const columnsUsed = computed(() => placeholders(text.value));
 const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
-const labels = { start: "Start sending", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
+const labels = { start: "Start sending", unschedule: "Unschedule", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
+const actionLabel = (action) => action === "start" && campaign.value.status === "Scheduled" ? "Send now" : labels[action];
+// Draft recipients come from contacts or from a sheet; a campaign starts now or at a site time.
+const recipientMode = ref("contacts"), sendMode = ref("now"), startAt = ref("");
+const modeOptions = [{ value: "contacts", label: "Relay contacts" }, { value: "file", label: "Upload a file" }];
+const fileHint = computed(() => campaign.value?.message
+  ? "Columns: mobile number, one column per {{column}} in the message, and the media link if each row sends its own file."
+  : "Columns: mobile number, then the template values in order, and the image link if the template has one.");
+function showCampaign(fresh) { campaign.value = fresh; }
+function schedule() { workspace.control("schedule", { scheduled_at: siteTime(startAt.value) }); }
+watch(() => campaign.value?.name, () => {
+  recipientMode.value = campaign.value?.source_file ? "file" : "contacts";
+  sendMode.value = "now"; startAt.value = inputTime(campaign.value?.scheduled_at);
+});
 
 const listRoute = "#/whatsapp?tab=campaigns";
 function routeCampaign(name) {
@@ -100,7 +115,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
     <div v-if="error" class="v1-template-feedback"><ErrorMessage :message="error" /></div>
 
     <FrappeFormView v-if="creating" title="New campaign" :breadcrumbs="['Campaigns', 'New']" @back="back">
-      <FrappeFormSection description="Send one WhatsApp message to every mobile number in a sheet.">
+      <FrappeFormSection description="Send one WhatsApp message to Relay contacts or to every mobile number in a sheet.">
         <div class="frappe-field-grid">
           <label class="campaign-field"><span>Title</span><TextInput v-model="title" placeholder="Winter launch Oct 2026" /></label>
           <RelaySelect v-if="manyNumbers" :model-value="number" label="WhatsApp number" :options="numberOptions" @update:model-value="chooseNumber" />
@@ -121,8 +136,8 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
     <FrappeFormView v-else-if="campaign" :title="campaign.title" :breadcrumbs="['Campaigns', campaign.title]"
       :status="campaign.status" :status-theme="statusTheme(campaign.status)" @back="back">
       <template #actions>
-        <Button v-for="action in campaignActions(campaign.status)" :key="action" :label="labels[action]"
-          :variant="action === 'start' || action === 'resume' ? 'solid' : 'subtle'" :theme="action === 'cancel' ? 'red' : 'gray'"
+        <Button v-for="action in campaignActions(campaign.status)" :key="action"
+          :label="actionLabel(action)" :variant="action === 'start' || action === 'resume' ? 'solid' : 'subtle'" :theme="action === 'cancel' ? 'red' : 'gray'"
           :loading="busy" :disabled="action === 'start' && !(counts.total > 0)" @click="workspace.control(action)" />
       </template>
       <FrappeFormSection title="Progress">
@@ -132,9 +147,17 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
         </div>
         <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaign.last_error }}</p>
         <p v-if="replyWindow" :class="replyWindow.closed ? 'campaign-issue' : 'campaign-hint'" role="status">{{ windowNotice(replyWindow) }}</p>
+        <p v-if="scheduleNotice(campaign)" class="campaign-hint" role="status">{{ scheduleNotice(campaign) }}</p>
       </FrappeFormSection>
-      <FrappeFormSection v-if="campaign.status === 'Draft'" title="Recipients file"
-        :description="campaign.message ? 'Columns: mobile number, one column per {{column}} in the message, and the media link if each row sends its own file.' : 'Columns: mobile number, then the template values in order, and the image link if the template has one.'">
+      <FrappeFormSection v-if="campaign.status === 'Draft'" title="Recipients"
+        description="Pick Relay contacts by filter, or upload a sheet. Adding recipients again replaces the rows not sent yet.">
+        <div class="campaign-modes" role="radiogroup" aria-label="Recipients from">
+          <Button v-for="mode in modeOptions" :key="mode.value" :label="mode.label" role="radio" :aria-checked="recipientMode === mode.value"
+            :variant="recipientMode === mode.value ? 'solid' : 'subtle'" @click="recipientMode = mode.value" />
+        </div>
+        <CampaignAudience v-if="recipientMode === 'contacts'" :key="campaign.name" :campaign="campaign" :upload-media="workspace.uploadMedia" @imported="showCampaign" />
+        <template v-else>
+        <p class="campaign-hint" v-text="fileHint" />
         <input type="file" accept=".xlsx,.csv" aria-label="Recipients file" :disabled="busy" @change="chooseFile" />
         <div v-if="sheet && mapping" class="campaign-mapping">
           <RelaySelect v-model="mapping.phone" label="Phone number column" :options="sheet.columns" />
@@ -150,6 +173,18 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
           <p v-if="missing.length" class="campaign-issue">Still needed: {{ missing.join(", ") }}</p>
           <Button label="Check and import rows" variant="solid" :loading="busy" :disabled="missing.length > 0" @click="workspace.importRows(mapping)" />
         </div>
+        </template>
+      </FrappeFormSection>
+      <FrappeFormSection v-if="campaign.status === 'Draft' && counts.total > 0" title="When to send">
+        <div class="campaign-modes" role="radiogroup" aria-label="When to send">
+          <label><input v-model="sendMode" type="radio" value="now" /> Send now</label>
+          <label><input v-model="sendMode" type="radio" value="later" /> Schedule at</label>
+        </div>
+        <div v-if="sendMode === 'later'" class="campaign-schedule">
+          <label class="campaign-field"><span>Start time ({{ campaign.time_zone }})</span><TextInput v-model="startAt" type="datetime-local" /></label>
+          <Button label="Schedule" variant="solid" :loading="busy" :disabled="!startAt" @click="schedule" />
+        </div>
+        <div v-else class="campaign-schedule"><Button label="Start sending" variant="solid" :loading="busy" @click="workspace.control('start')" /></div>
       </FrappeFormSection>
       <FrappeFormSection v-if="campaign.issues?.length" title="Rows not sent">
         <div class="campaign-issues"><div v-for="row in campaign.issues" :key="row.reason"><span>{{ row.reason }}</span><strong>{{ row.count }}</strong></div></div>
@@ -158,8 +193,8 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
         <RelaySelect v-model="filter" label="Show" :options="[{ value: '', label: 'All rows' }, 'Pending', 'Skipped', 'Sent', 'Delivered', 'Read', 'Failed']" @update:model-value="workspace.page($event)" />
         <div class="campaign-rows" role="table" aria-label="Campaign recipients">
           <div v-for="row in campaign.recipients" :key="row.sheet_row" role="row">
-            <span>Row {{ row.sheet_row }}</span><span>+{{ row.destination }}</span><Badge :label="row.replied_at ? 'Replied' : row.status" />
-            <small v-if="row.reason">{{ row.reason }}</small>
+            <span>Row {{ row.sheet_row }}</span><span>+{{ row.destination }}</span><Badge :label="recipientLabel(row)" />
+            <small v-if="row.reason && recipientLabel(row) === row.status">{{ row.reason }}</small>
           </div>
         </div>
         <Button v-if="campaign.next" label="Load more rows" :loading="busy" @click="workspace.page(filter, campaign.next)" />
@@ -170,6 +205,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
           <FrappeReadField v-else label="Message" :value="campaign.message?.body || campaign.message?.caption || messageLabel(campaign)" wide />
           <FrappeReadField v-if="manyNumbers && campaign.channel" label="WhatsApp number" :value="numberName(capabilities, campaign.channel) || campaign.channel" wide />
           <FrappeReadField label="Reply window" :value="`${campaign.reply_window_hours} hours`" wide />
+          <FrappeReadField v-if="campaign.scheduled_at" label="Scheduled for" :value="`${campaign.scheduled_at} (${campaign.time_zone})`" wide />
           <FrappeReadField label="Started" :value="campaign.started_at" wide />
         </div>
       </template>
@@ -177,7 +213,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
 
     <FrappeListView v-else title="Campaigns" description="Send a WhatsApp template, text or media to many numbers and track replies."
       label="Campaigns" :columns="columns" :items="items" :busy="busy" empty-title="No campaigns yet"
-      empty-description="Create a campaign, upload a sheet of numbers and start sending." @open="openCampaign($event.name)">
+      empty-description="Create a campaign, pick contacts or upload a sheet, then send now or schedule it." @open="openCampaign($event.name)">
       <template #actions><Button label="New campaign" icon-left="plus" variant="solid" @click="startCreate" /></template>
       <template #cell-title="{ item }"><strong>{{ item.title }}</strong></template>
       <template #cell-status="{ item }"><Badge :label="item.status" :theme="statusTheme(item.status)" /></template>
@@ -200,6 +236,8 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
 .campaign-issue { margin-top: 10px; color: var(--ink-red-4); font-size: 13px; }
 .campaign-hint { margin-top: 10px; color: var(--ink-gray-5); font-size: 13px; }
 .campaign-media { display: grid; gap: 6px; }
+.campaign-modes { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px; color: var(--ink-gray-8); }
+.campaign-schedule { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 12px; }
 .campaign-media small { color: var(--ink-gray-5); font-size: 12px; }
 .campaign-rows { display: grid; margin: 12px 0; }
 .campaign-rows > div { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--outline-gray-1); font-size: 13px; color: var(--ink-gray-8); }

@@ -42,7 +42,7 @@ export function useCampaigns() {
   // Relay sends this file to Hub once when the campaign starts; rows carry the Hub media ID.
   const uploadMedia = (file) => run(() => uploadFile(file, "The media file could not be uploaded."));
   const importRows = (mapping) => run(async () => { campaign.value = await coreApi("bulk_campaigns.import_rows", { name: campaign.value.name, mapping }, true); sheet.value = null; });
-  const control = (action) => run(async () => { campaign.value = await coreApi("bulk_campaigns.control", { name: campaign.value.name, action }, true); });
+  const control = (action, values = {}) => run(async () => { campaign.value = await coreApi("bulk_campaigns.control", { name: campaign.value.name, action, ...values }, true); });
   const page = (status, after) => run(async () => {
     filter.value = status || "";
     const result = await coreApi("bulk_campaigns.read", { name: campaign.value.name, status: status || undefined, after: after || undefined });
