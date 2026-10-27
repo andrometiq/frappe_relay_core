@@ -58,6 +58,10 @@ class Importer:
         self.counts = Counter()
         self.failures = []
         self.phones = None
+        # Undo log of the open transaction: rewound on rollback, cleared on commit.
+        self.committed_counts = Counter()
+        self.phone_changes = []
+        self.copied = set()
 
     def target_channels(self, channel_map):
         """Source channel name -> Relay Channel: explicit map, else the WhatsApp channel with the same number."""
@@ -78,12 +82,29 @@ class Importer:
         for conversation in conversations:
             try:
                 self.import_conversation(conversation)
-                frappe.db.commit()
+                self.commit()
             except Exception as exc:
-                frappe.db.rollback()
+                self.rollback()
                 self.failures.append({'conversation': conversation.name, 'error': f'{type(exc).__name__}: {exc}'})
         self.counts['conversations'] = len(conversations)
         return {'counts': dict(self.counts), 'failures': self.failures}
+
+    def commit(self):
+        frappe.db.commit()
+        self.committed_counts = Counter(self.counts)
+        self.phone_changes, self.copied = [], set()
+
+    def rollback(self):
+        """Forget what the open transaction did: counts, cached phone matches and copied bytes."""
+        frappe.db.rollback()
+        self.counts = Counter(self.committed_counts)
+        for number, previous in reversed(self.phone_changes):
+            if previous is None:
+                self.phones.pop(number, None)
+            else:
+                self.phones[number] = previous
+        remove_unused_copies(self.copied)
+        self.phone_changes, self.copied = [], set()
 
     def import_conversation(self, conversation):
         rows = self.page(conversation.name, ('', ''))
@@ -97,29 +118,34 @@ class Importer:
         manifest = {'source_site': self.site_label, 'endpoint': endpoint, 'source_conversation': conversation.name,
                     'identifier_type': 'Phone' if is_phone else conversation.identifier_type}
         job = frappe._dict(channel=channel, relay_contact=contact)
-        before = self.counts['created']
+        marker = None if self.dry_run else self.mark(conversation, channel, contact, created)
         while rows:
+            before = self.counts['created']
             self.import_rows(rows, job, manifest)
+            if marker:
+                frappe.db.sql('UPDATE `tabRelay Legacy Import` SET imported = imported + %s WHERE name = %s',
+                              (self.counts['created'] - before, marker))
+            # One transaction per --batch messages, so one long conversation never holds a huge one.
+            self.commit()
             rows = self.page(conversation.name, bundles.order_key(rows[-1]))
         if not self.dry_run:
             refresh_activity(contact)
             apply_history(channel, endpoint)
-            self.mark(conversation, channel, contact, self.counts['created'] - before, created)
+            frappe.db.set_value('Relay Legacy Import', marker, 'status', 'Completed', update_modified=False)
 
     def page(self, conversation, after):
         return self.source.sql(f'SELECT * FROM `{MESSAGE}` WHERE conversation=%s AND (creation, name) > (%s, %s) '
                                'ORDER BY creation, name LIMIT %s', (conversation, *after, self.batch))
 
-    def mark(self, conversation, channel, contact, imported, created):
-        """One Relay Legacy Import row per source conversation: the undo and audit marker."""
+    def mark(self, conversation, channel, contact, created):
+        """One Relay Legacy Import row per source conversation: the undo and audit marker.
+        It is written before the first message, so undo finds what an interrupted run made."""
         filters = {'source_site': self.site_label, 'source_conversation': conversation.name, 'channel': channel}
         name = frappe.db.get_value('Relay Legacy Import', filters, 'name')
         if name:
-            frappe.db.set_value('Relay Legacy Import', name, 'imported', (frappe.db.get_value('Relay Legacy Import', name, 'imported') or 0) + imported,
-                                update_modified=False)
-            return
-        direct_document('Relay Legacy Import', dict(filters, source_channel=conversation.channel, relay_contact=contact,
-                        status='Completed', imported=imported, source_metadata=bundles.canonical({'created': created})))
+            return name
+        return direct_document('Relay Legacy Import', dict(filters, source_channel=conversation.channel, relay_contact=contact,
+                               status='Running', imported=0, source_metadata=bundles.canonical({'created': created}))).name
 
     def import_rows(self, rows, job, manifest):
         keys = {legacy.source_key(self.site_label, row.name): row for row in rows}
@@ -177,6 +203,7 @@ class Importer:
                 digest, size = copy_stream(source, temporary)
                 temporary.seek(0)
                 result = attach(temporary, {'sha256': digest, 'size': size, 'filename': path.name}, message)
+            self.copied.add('/private/files/relay-archive-' + digest)
             self.counts['media_copied'] += 1
         else:
             result = link_file(url, message)
@@ -232,6 +259,7 @@ class Importer:
         set_new_name(person)
         insert_with_children(person)
         if number:
+            self.phone_changes.append((endpoint, self.phones.get(endpoint)))
             self.phones[endpoint] = person.name
         return person.name
 
