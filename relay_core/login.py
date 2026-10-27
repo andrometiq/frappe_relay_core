@@ -6,6 +6,7 @@ enough for the login request to time out. Approximate table counts are only a
 Desk optimization: when a count is absent, Desk performs an exact existence
 check for the dependency it is rendering. Relay therefore preserves a warm
 cache or seeds a minimal nonempty cache instead of scanning table metadata.
+It is off unless site_config sets ``relay_bounded_login_cache``.
 """
 
 import frappe
@@ -34,8 +35,8 @@ def _relay_table_count_builder(*args, **kwargs):
 
 
 def use_site_scoped_boot_cache(login_manager):
-	"""Keep Frappe's login boot cache bounded to the active MariaDB site."""
-	if frappe.db.db_type != "mariadb":
+	"""Keep Frappe's login boot cache bounded when site_config sets `relay_bounded_login_cache`."""
+	if not frappe.conf.get("relay_bounded_login_cache") or frappe.db.db_type != "mariadb":
 		return
 	frappe.flags.relay_bounded_login_cache = True
 	frappe.cache_manager.build_table_count_cache = _relay_table_count_builder

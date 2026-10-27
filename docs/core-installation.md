@@ -85,6 +85,7 @@ configuration or secret-provisioning process:
 | `relay_hub_account` | Exact Hub account identifier |
 | `relay_callback_secret` | Shared callback-signing secret of at least 32 characters |
 | `relay_automation_enabled` | `false` until automation is deliberately configured |
+| `relay_bounded_login_cache` | Optional. `1` replaces Frappe's table-count scan at login with a minimal cache. Off by default; use it only on a development bench where that scan times out. |
 
 These values belong on the server. Do not put them into Vite variables, frontend
 bundles, screenshots, or Git. Core permits HTTP Hub URLs only for explicit loopback
