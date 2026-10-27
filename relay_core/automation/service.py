@@ -8,6 +8,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
+from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access, can_manage
@@ -135,6 +136,7 @@ def replies(policy, channel):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def enqueue(message):
     require_access(manage=True)
     doc = frappe.get_doc('Relay Message', message)
@@ -200,7 +202,7 @@ def create_run(doc):
     if not automatic_allowed(provenance) or provenance.get('provider') == 'Email' and automatic_reply_exists(doc):
         return {'status': 'Ignored'}
     flow = claims(doc) and not human_request(doc.content)
-    if not flow and not frappe.conf.get('relay_automation_enabled'):
+    if not flow and not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return {'status': 'Disabled'}
     contact = lock_contact(doc.relay_contact)
     run = frappe.get_doc({'doctype': 'Relay Automation Run', 'event_key': event_key(doc.name),
@@ -213,7 +215,7 @@ def create_run(doc):
         triage(run, doc, 'Episode admission requires review')
         return {'name': run.name, 'status': run.status}
     run.ownership_generation = int(ticket.generation or 0)
-    if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled'):
+    if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
         from relay_core.ai.service import continue_search
         try:
             flow = not continue_search(run, doc)
@@ -256,7 +258,7 @@ def complete_with_fallback(policy, prompt, images=None):
 
 
 def _process(name):
-    if not frappe.conf.get('relay_automation_enabled'):
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     run = lock_run(name)
     if run.status not in ('Pending', 'Deciding'):
@@ -300,7 +302,7 @@ def dispatch(name):
         contact = lock_contact(message.relay_contact)
         from relay_core.tickets import check_episode
         check_episode(run)
-        if not frappe.conf.get('relay_automation_enabled') or not policy.enabled or str(policy.modified) != run.policy_version or int(contact.automation_generation or 0) != int(run.generation):
+        if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()) or not policy.enabled or str(policy.modified) != run.policy_version or int(contact.automation_generation or 0) != int(run.generation):
             out.status = 'Cancelled'; internal_save(out); frappe.db.commit(); return
         contact.check_permission('read')
         endpoint_key = hashlib.sha256((message.channel + ':' + (message.sender_endpoint or '')).encode()).hexdigest()
@@ -352,7 +354,7 @@ def recover():
     recover_messages()
     from relay_core.ai.service import recover_deliveries
     recover_deliveries()
-    if not frappe.conf.get('relay_automation_enabled'):
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     # Core owns delivery recovery; the outbox follows its action without resending.
     for row in frappe.get_all('Relay Automation Outbox', filters={'status':['in',['Dispatching','Uncertain']]}, fields=['name'], limit_page_length=20, order_by='modified asc'):
@@ -377,6 +379,7 @@ def recover():
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def takeover(contact, paused=1):
     require_access(manage=True)
     if str(paused) not in ('0', '1'):
@@ -417,6 +420,7 @@ def process(name):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def runs(query='', before=None, after=None):
     require_access(manage=True)
     from relay_core.api import validate_reference

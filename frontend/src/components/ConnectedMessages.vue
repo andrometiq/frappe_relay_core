@@ -94,7 +94,7 @@ const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactR
 const menuActions = computed(() => [
   ...(conversationContact.value ? [{label:'Delivery failures and retry',icon:'activity',onClick:() => deliveriesOpen.value = true}, {label:'Internal notes',disabled:busy.value,icon:'message-square',onClick:() => openNote()}, {label:'Cases',disabled:busy.value,icon:'briefcase',onClick:() => casesOpen.value = true}, {label:'Topics',disabled:busy.value,icon:'list',onClick:() => topicsOpen.value = true}] : []),
   ...(frappeContact.value ? [{label:'Business context',icon:'info',onClick:() => contextOpen.value = !contextOpen.value}] : []),
-  ...(businessName.value ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen.value = !summaryOpen.value}] : []),
+  ...(businessName.value && capabilities.value?.ai ? [{label:'Conversation summary',icon:'file-text',onClick:() => summaryOpen.value = !summaryOpen.value}] : []),
   {label:'Search conversation',icon:'search',onClick:() => searchOpen.value = !searchOpen.value},
 ]);
 const channelLine = computed(() => {
@@ -345,7 +345,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
           :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
       </div>
 
-      <ConversationSummary v-if="summaryOpen && businessName" :business-doctype="businessType" :business-name="businessName"
+      <ConversationSummary v-if="summaryOpen && businessName && capabilities.ai" :business-doctype="businessType" :business-name="businessName"
         @close="summaryOpen = false" @open="focusMessage" />
     </div>
     <div v-else class="connected-thread whatsapp-empty-pane" aria-label="No open conversation">

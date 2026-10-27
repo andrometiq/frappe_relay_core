@@ -3,6 +3,7 @@ import hashlib
 from requests.exceptions import RequestException
 from relay_core.automation.provenance import context_of, email_message_id
 import frappe
+from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access
 
@@ -120,7 +121,7 @@ def skill_claims(message):
     from relay_core.automation.contracts import event_key
     if frappe.db.get_value('Relay Automation Run', {'event_key': event_key(message.name)}, 'name', for_update=True):
         return True
-    return bool(frappe.conf.get('relay_automation_enabled') and candidates(message))
+    return bool(frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled() and candidates(message))
 
 
 def automatic_reply_exists(message):

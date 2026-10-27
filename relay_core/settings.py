@@ -1,6 +1,7 @@
 """Site-owned connection settings. Password values never enter read responses."""
 import re
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access, can_configure
 from relay_core.hub import HubClient
 
@@ -25,7 +26,19 @@ def connection():
     return {'url':value('relay_hub_url') or '', 'account':value('relay_hub_account') or '',
             'token_configured':bool(value('relay_hub_token')),
             'callback_configured':bool(value('relay_callback_secret')),
-            'can_configure':can_configure()}
+            'can_configure':can_configure(),
+            'ai_enabled':ai_features.is_enabled(), 'can_switch_ai':'System Manager' in frappe.get_roles()}
+
+
+@frappe.whitelist(methods=['POST'])
+def save_ai_features(enabled):
+    require_access()
+    if 'System Manager' not in frappe.get_roles():
+        frappe.throw('Only a System Manager can turn AI features on or off', frappe.PermissionError)
+    if str(enabled) not in ('0', '1'):
+        frappe.throw('Enabled must be 0 or 1')
+    frappe.db.set_single_value('Relay Settings', 'enable_ai_features', int(enabled))
+    return {'enabled': ai_features.is_enabled()}
 
 @frappe.whitelist(methods=['POST'])
 def save_connection(url,account,token='',callback_secret=''):

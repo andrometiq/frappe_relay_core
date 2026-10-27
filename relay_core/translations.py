@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.automation import providers
 from relay_core.automation.service import message_hash, internal_save, check_actor, business_scope, reserve_attempt, complete_with_fallback
@@ -10,7 +11,7 @@ from relay_core.automation.service import message_hash, internal_save, check_act
 
 @after_message_commit
 def on_message(doc, method=None):
-    if not frappe.conf.get('relay_automation_enabled') or doc.direction != 'Incoming' or doc.get('legacy_source'):
+    if doc.direction != 'Incoming' or doc.get('legacy_source') or not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     if doc.message_type not in (None, '', 'text', 'audio', 'voice'):
         return
@@ -33,7 +34,7 @@ def on_message(doc, method=None):
 
 
 def authorized(job):
-    if not frappe.conf.get('relay_automation_enabled'):
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         raise ValueError('Automation disabled')
     policy=frappe.get_doc('Relay Automation Policy',job.policy)
     if not policy.enabled or not policy.allow_translation or str(policy.modified)!=job.policy_version:
@@ -133,6 +134,7 @@ def translate(text,policy):
         'segments':[{'start':start,'end':end,**{key:row[key] for key in ('language','provider','model')}} for _,row,start,end in parts]}
 
 
+@ai_features.when_enabled
 def process(name):
     original=frappe.session.user
     claimed_attempt=None
@@ -175,7 +177,7 @@ def process(name):
 
 
 def recover():
-    if not frappe.conf.get('relay_automation_enabled'):return
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):return
     now=frappe.utils.now_datetime()
     for row in frappe.get_all('Relay Message Translation',filters={'status':['in',['Pending','Processing']]},fields=['name','status','lease_until'],order_by='modified asc',limit_page_length=50):
         if row.status=='Pending' or not row.lease_until or row.lease_until<=now:
@@ -183,6 +185,7 @@ def recover():
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def retry(name):
     from relay_core.permissions import require_access,readable_contact
     require_access(configure=True)

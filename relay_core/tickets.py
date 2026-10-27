@@ -3,6 +3,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access, readable_contact, sees_all_teams
 from relay_core.api import validate_reference
 
@@ -53,6 +54,7 @@ def claim(name):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def resume_ai(name):
     require_access()
     validate_reference(name, 'TKT')
@@ -499,6 +501,7 @@ def _history_json(value):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def ai_history(name, before=None, limit=20):
     """Operational evidence only. Internal journals never become public documents."""
     require_access()

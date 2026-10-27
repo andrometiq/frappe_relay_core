@@ -2,6 +2,7 @@
 import hashlib
 import re
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access,readable_contact
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import check_actor,business_scope,complete_with_fallback,internal_save
@@ -103,6 +104,7 @@ def checked_result(value,names):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def options(contact=None,business_doctype=None,business_name=None):
     require_access()
     if business_name:
@@ -120,6 +122,7 @@ def options(contact=None,business_doctype=None,business_name=None):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def generate(contact,channel,period,request_key,business_doctype=None,business_name=None):
     require_access()
     if business_name:
@@ -152,6 +155,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def read(name):
     require_access();doc=frappe.get_doc('Relay Conversation Summary',name)
     if doc.get('business_name'):frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
@@ -166,6 +170,7 @@ def read(name):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def latest(contact=None,business_doctype=None,business_name=None):
     require_access()
     if business_name:
@@ -176,6 +181,7 @@ def latest(contact=None,business_doctype=None,business_name=None):
     return {'summary':read(rows[0]) if rows else None}
 
 
+@ai_features.when_enabled
 def process(name):
     with frappe.cache.lock('relay-summary-process:'+name,timeout=150,blocking_timeout=1):
         doc=frappe.get_doc('Relay Conversation Summary',name)

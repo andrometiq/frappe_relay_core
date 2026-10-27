@@ -257,5 +257,13 @@ class AutomationQueueTests(unittest.TestCase):
         self.assertEqual(fake.enqueue.call_args.kwargs['queue'], 'default')
 
 
+def setUpModule():
+    """These tests cover AI behavior, so the AI features switch is on."""
+    from unittest import addModuleCleanup, mock
+    switch = mock.patch('relay_core.ai_features.is_enabled', return_value=True)
+    switch.start()
+    addModuleCleanup(switch.stop)
+
+
 if __name__ == '__main__':
     unittest.main()

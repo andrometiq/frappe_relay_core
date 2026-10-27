@@ -9,6 +9,7 @@
     "hub_account",
     "hub_token",
     "callback_secret",
+    "enable_ai_features",
     "ai_handoff_owner",
     "transcription_provider",
     "send_whatsapp_read_receipts",
@@ -37,18 +38,27 @@
       "fieldtype": "Password"
     },
     {
+      "fieldname": "enable_ai_features",
+      "fieldtype": "Check",
+      "label": "Enable AI features",
+      "default": "0",
+      "description": "Show AI skills, summaries, translation and AI replies in Relay."
+    },
+    {
       "fieldname": "ai_handoff_owner",
       "label": "AI handoff owner",
       "fieldtype": "Link",
       "options": "User",
-      "description": "Fallback for skill handoffs; must have access to the conversation."
+      "description": "Fallback for skill handoffs; must have access to the conversation.",
+      "depends_on": "enable_ai_features"
     },
     {
       "fieldname": "transcription_provider",
       "label": "Voice transcription provider",
       "fieldtype": "Link",
       "options": "Relay AI Provider",
-      "description": "Transcribes received voice notes in the background. Requires an enabled OpenAI provider with a transcription model."
+      "description": "Transcribes received voice notes in the background. Requires an enabled OpenAI provider with a transcription model.",
+      "depends_on": "enable_ai_features"
     },
     {
       "fieldname": "send_whatsapp_read_receipts",
@@ -81,5 +91,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-26 21:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }

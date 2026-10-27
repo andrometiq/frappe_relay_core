@@ -438,3 +438,11 @@ class OutgoingProjectionTests(unittest.TestCase):
         self.assertEqual(project.call_args.args[-1]['messages'],[{'id':'provider'}])
         self.assertFalse(project.call_args.kwargs['commit'])
         hub.assert_not_called()
+
+
+def setUpModule():
+    """These tests cover AI behavior, so the AI features switch is on."""
+    from unittest import addModuleCleanup, mock
+    switch = mock.patch('relay_core.ai_features.is_enabled', return_value=True)
+    switch.start()
+    addModuleCleanup(switch.stop)

@@ -38,7 +38,7 @@ useRealtimeRefresh(['Relay Team'], ['teams'], () => { if (capabilities.value.man
       <WorkspaceHeading description="Give each teammate the right level of access." />
       <article class="workflow-card"><h3>Relay Communication User</h3><p>Works the inbox, tickets and contacts for the teams the user belongs to, plus conversations assigned to the user. Business document permissions still apply.</p></article>
       <article class="workflow-card"><h3>Relay Communication Team User</h3><p>Does the same work as a User and sees the conversations of all teams without being added to them.</p></article>
-      <article class="workflow-card"><h3>Relay Communication Manager</h3><p>Everything a Team User does, plus bulk campaigns, business events, templates, AI skills, saved replies, billing, teams and assignments.</p></article>
+      <article class="workflow-card"><h3>Relay Communication Manager</h3><p>Everything a Team User does, plus bulk campaigns, business events, templates, <template v-if="capabilities.ai">AI skills, </template>saved replies, billing, teams and assignments.</p></article>
       <article class="workflow-card"><h3>System Manager</h3><p>Everything, including settings, setup, channels, health and Frappe permissions.</p></article>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/user">Users and roles</a><a class="v1-link" href="/desk/permission-manager">Role permissions</a><a class="v1-link" href="/desk/user-permission">User permissions</a></div>
     </div>
