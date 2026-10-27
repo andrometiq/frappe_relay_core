@@ -135,14 +135,21 @@ class BusinessEventTests(unittest.TestCase):
         self.f.get_all.return_value = ['PERSON-B']; self.service.capture(self.rule, self.source, 'on_submit')
         self.assertEqual(len({row.event_key for row in self.intents}), 5)
 
-    def test_validation_failure_rolls_back_but_database_and_logging_errors_escape(self):
-        self.f.get_all.return_value = ['RULE-1']; self.f.get_doc.side_effect = ValueError('Invalid template')
-        self.service.on_event(self.source, 'on_submit')
-        self.f.db.rollback.assert_called_once_with(save_point='relay_business_event')
-        self.f.db.commit.assert_not_called()
-        self.assertFalse(self.f.flags.relay_business_event)
+    def test_rule_failures_roll_back_and_log_without_failing_the_business_transaction(self):
+        self.f.get_all.return_value = ['RULE-1']
+        for error in (ValueError('Invalid template'), KeyError('payload'), TypeError('bad value')):
+            with self.subTest(error=error):
+                self.f.db.rollback.reset_mock(); self.f.log_error.reset_mock()
+                self.f.get_doc.side_effect = error
+                self.service.on_event(self.source, 'on_submit')
+                self.f.db.rollback.assert_called_once_with(save_point='relay_business_event')
+                self.f.log_error.assert_called_once()
+                self.f.db.commit.assert_not_called()
+                self.assertFalse(self.f.flags.relay_business_event)
+        self.f.log_error.reset_mock()
         self.f.get_all.side_effect = RuntimeError('Missing table')
-        with self.assertRaises(RuntimeError): self.service.on_event(self.source, 'on_submit')
+        self.service.on_event(self.source, 'on_submit')
+        self.f.log_error.assert_called_once()
         self.f.get_all.side_effect = None
         self.f.log_error.side_effect = RuntimeError('Log failure')
         with self.assertRaises(RuntimeError): self.service.on_event(self.source, 'on_submit')
