@@ -340,3 +340,20 @@ def save_contact_preference(contact, business_doctype, business_name, endpoint, 
                         endpoint=endpoint, consent=consent, priority=int(priority)))
         doc.save()
     return {'name': doc.name, 'endpoint': doc.endpoint, 'consent': doc.consent, 'priority': doc.priority}
+
+
+@frappe.whitelist(methods=['GET'])
+def preview_document(doctype, name, action):
+    """Filled template text, PDF file name and recipient contacts of a Relay Document Action."""
+    from relay_core.document_actions import preview
+    return preview(doctype, name, action)
+
+
+@frappe.whitelist(methods=['POST'])
+def send_document(doctype, name, action, contacts=None, request_key=None):
+    """Send a Relay Document Action for one document: its template, variables and PDF.
+
+    `contacts` (optional) is a list of Contact names of the business record; the default is the
+    action's recipients. Repeating a `request_key` returns the earlier sends instead of sending again."""
+    from relay_core.document_actions import send
+    return send(doctype, name, action, contacts, request_key)
