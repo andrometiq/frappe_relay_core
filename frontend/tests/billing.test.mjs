@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  categoryLabel, chartBars, formatCount, formatFetched, formatMoney, formatRate, monthName, monthOptions, statementLines, summaryCards, templateRows,
+  categoryColor, categoryLabel, chartBars, formatCount, numberBills, formatFetched, formatMoney, formatRate, monthName, monthOptions, statementLines, summaryCards, templateRows,
   yearOptions, yearRows,
 } from '../src/services/billing.js'
 
@@ -41,18 +41,29 @@ test('periods and the last update read as plain text', () => {
 
 test('statement lines name categories and mark free messages', () => {
   const lines = statementLines(march.lines)
-  assert.deepEqual(lines.map(line => [line.label, line.free]), [['Utility', false], ['Authentication', false], ['Service / free', true]])
+  assert.deepEqual(lines.map(line => [line.label, line.free]), [['Utility', false], ['Authentication', false], ['Service replies', true]])
   assert.equal(categoryLabel('MARKETING_LITE'), 'Marketing lite')
   assert.deepEqual(statementLines(undefined), [])
 })
 
-test('summary cards show messages, amount and the average per charged message', () => {
-  const cards = summaryCards(march, 'March', 'INR')
-  assert.deepEqual(cards.map(card => [card.label, card.value]), [['Messages sent', '1,252'], ['Amount for March', '₹186.03'],
-    ['Average per charged message', '₹0.1506']])
-  const free = summaryCards({ messages: 5, amount: 0, lines: [{ category: 'SERVICE', messages: 5, rate: 0, amount: 0 }] }, 'June', 'INR')
-  assert.deepEqual(free.map(card => card.value), ['5', '₹0.00'])
-  assert.equal(summaryCards(undefined, '2026', 'INR')[1].value, '₹0.00')
+test('summary cards read like a phone bill and never show Meta cost or the service charge', () => {
+  const cards = summaryCards(march, 'March 2026', 2, 'INR')
+  assert.deepEqual(cards.map(card => [card.label, card.value, card.note]), [['Messages', '1,252', 'All 2 numbers'],
+    ['Free replies', '17', 'Replies within 24 h'], ['Paid messages', '1,235', 'Marketing, utility, login codes'], ['Amount to pay', '₹186.03', 'March 2026']])
+  assert.equal(cards.filter(card => card.accent).length, 1)
+  assert.equal(summaryCards(march, 'March 2026', 1, 'INR')[0].note, 'All WhatsApp messages')
+  assert.deepEqual(summaryCards(undefined, '2026', 0, 'INR').map(card => card.value), ['0', '0', '0', '₹0.00'])
+  assert.doesNotMatch(JSON.stringify(cards), /meta|margin|service charge/i)
+})
+
+test('each number gets its own bill for the month or the year', () => {
+  const sales = { channel: 'WA-1', label: 'Sales line', months: [march], total: { lines: [], messages: 1252, amount: 186.03 } }
+  assert.equal(numberBills([sales], '2026-03')[0].statement, march)
+  assert.deepEqual(numberBills([sales], '2026-04')[0].statement, { lines: [], messages: 0, amount: 0 })
+  assert.equal(numberBills([sales])[0].statement, sales.total)
+  assert.deepEqual(numberBills(undefined), [])
+  assert.equal(categoryColor('MARKETING'), '#8a5cf6')
+  assert.equal(categoryColor('MARKETING_LITE'), 'var(--relay-ink-4)')
 })
 
 test('the year shows months with amounts and bars scaled to the largest month', () => {
