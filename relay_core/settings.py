@@ -28,12 +28,12 @@ def connection():
             'callback_configured':bool(value('relay_callback_secret')),
             'can_configure':can_configure(),
             'ai_enabled':features.is_enabled('ai'), 'folders_enabled':features.is_enabled('folders'),
-            'teams_enabled':features.is_enabled('teams'), 'can_switch_ai':'System Manager' in frappe.get_roles()}
+            'teams_enabled':features.is_enabled('teams'), 'flows_enabled':features.is_enabled('flows'), 'can_switch_ai':'System Manager' in frappe.get_roles()}
 
 
 @frappe.whitelist(methods=['POST'])
 def save_feature(feature, enabled):
-    """Turn one Relay Settings switch on or off: ai, folders or teams."""
+    """Turn one Relay Settings switch on or off: ai, folders, teams or flows."""
     require_access()
     if 'System Manager' not in frappe.get_roles():
         frappe.throw('Only a System Manager can turn Relay features on or off', frappe.PermissionError)

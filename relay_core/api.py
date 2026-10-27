@@ -221,6 +221,7 @@ def capabilities():
             'ai':ai_features.is_enabled(),
             'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
+            'flows':manage and features.is_enabled('flows'),
             'enabled_channels':enabled_names,
             'channels':{item.name:item.get_features() for item in channels},
             'whatsapp_numbers':numbers.get('WhatsApp',[]),

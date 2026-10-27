@@ -73,4 +73,42 @@ def relay_assign_imported_chats(context, source_site_label, team):
         frappe.destroy()
 
 
-commands = [relay_import_whatsapp_core, relay_assign_imported_chats]
+@click.command('relay-import-whatsapp-flows')
+@click.option('--source-db', help='Source database name. Leave out to read this site\'s own WhatsApp Core tables.')
+@click.option('--source-host', help='Source database host (default: this site\'s host).')
+@click.option('--source-port', type=int, help='Source database port.')
+@click.option('--source-user', default='root', show_default=True, help='Source database user.')
+@click.option('--source-password-file', help='File with the source password (else RELAY_SOURCE_DB_PASSWORD).')
+@click.option('--source-site-label', required=True, help='Stable name of the old site, such as operations.andrometiq.com. Part of each flow\'s import key.')
+@click.option('--channel', help='Relay Channel for the flows (default: the only enabled WhatsApp channel).')
+@click.option('--execution-user', help='User the flows run as: a Relay Communication Manager who is not a System Manager.')
+@click.option('--business-doctype', help='Business type of the flows (default: the only enabled Relay Contact Type).')
+@click.option('--dry-run', is_flag=True, help='Convert and report only; write nothing.')
+@pass_context
+def relay_import_whatsapp_flows(context, source_db, source_host, source_port, source_user, source_password_file,
+                                source_site_label, channel, execution_user, business_doctype, dry_run):
+    """Import WhatsApp Core flows and their versions as disabled Relay flows. Safe to re-run.
+    Exits with status 1 when any flow failed."""
+    import frappe
+
+    from relay_core import legacy_database
+    from relay_core.flows.legacy_import import FlowImporter
+
+    frappe.init(get_site(context))
+    frappe.connect()
+    frappe.set_user('Administrator')
+    source = legacy_database.Source(source_db, source_host, source_port, source_user,
+                    legacy_database.source_password(source_password_file) if source_db else None)
+    result = {}
+    try:
+        result = FlowImporter(source, source_site_label, channel, execution_user, business_doctype, dry_run).run()
+        result['dry_run'] = dry_run
+        click.echo(json.dumps(result, indent=1, default=str))
+    finally:
+        source.close()
+        frappe.destroy()
+    if result.get('failures'):
+        raise SystemExit(1)
+
+
+commands = [relay_import_whatsapp_core, relay_assign_imported_chats, relay_import_whatsapp_flows]
