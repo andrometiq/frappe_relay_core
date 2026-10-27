@@ -266,6 +266,8 @@ class MessageDisplayApiTests(unittest.TestCase):
         self.f.get_list.return_value = [row]
         result = self.api.message_snapshots(row.relay_contact, [row.name])
         self.assertEqual(result['items'][0]['provider_context']['mailbox_addresses'], ['support@example.invalid'])
+        # Refreshed rows replace loaded rows, so they keep the contact and business of the message.
+        self.assertLessEqual({'relay_contact', 'business_doctype', 'business_name'}, set(self.f.get_list.call_args.kwargs['fields']))
         channel.check_permission.assert_called_with('read')
         doc = Mock(channel=row.channel, relay_contact=row.relay_contact)
         doc.get.side_effect = row.get

@@ -6,13 +6,15 @@ import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import WorkspaceHeading from './WorkspaceHeading.vue'
+import TicketDiscussion from './TicketDiscussion.vue'
+import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
 import { relativeTime } from './relativeTime'
 import { closeRoute, openRoute } from '../useViewRoute'
 const capabilities = inject('relayCapabilities', ref({}))
 const aiEnabled = computed(() => Boolean(capabilities.value?.ai))
-const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' })
+const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' })
 const page = ref({ items: [] }), selected = ref(null), owner = ref(''), error = ref(''), feedback = ref('')
 const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
@@ -39,6 +41,7 @@ async function detail(name) {
       aiEnabled.value ? refreshWindow('ai_history', history.value, name, request) : { items: [] }, refreshWindow('deliveries', deliveries.value, name, request),
     ])
     if (request !== detailGeneration || selected.value?.name !== name) return
+    if (owner.value === (selected.value.assigned_to || '')) owner.value = ticket.assigned_to || ''
     selected.value = ticket; transcript.value = messages; history.value = ai; deliveries.value = sent
   } catch (e) {
     if (request === detailGeneration) { close(); error.value = e.message }
@@ -55,8 +58,10 @@ async function load(cursor = {}) {
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) listBusy.value = false }
 }
-function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' }; load() }
+function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' }; load() }
 function status(value) { filters.value.status = value; load() }
+function mine(value) { filters.value.mine = filters.value.mine === value ? '' : value; load() }
+const priorityTheme = value => ({ Urgent: 'red', High: 'amber' })[value] || 'gray'
 function dismiss() {
   ++detailGeneration; selected.value = null; detailBusy.value = false
   history.value = { items: [] }; transcript.value = { items: [] }; deliveries.value = { items: [] }; feedback.value = ''
@@ -112,6 +117,9 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
       <div class="automation-chips" role="group" aria-label="Ticket status">
         <button v-for="value in ['', 'Open', 'In progress', 'Resolved', 'Closed']" :key="value" type="button" class="automation-chip" :aria-pressed="filters.status === value" :disabled="busy" @click="status(value)">{{ value || 'All tickets' }}</button>
       </div>
+      <div class="automation-chips" role="group" aria-label="My tickets">
+        <button v-for="option in [{ value: 'assigned', label: 'Assigned to me' }, { value: 'tagged', label: 'Tagged me' }]" :key="option.value" type="button" class="automation-chip" :aria-pressed="filters.mine === option.value" :disabled="busy" @click="mine(option.value)">{{ option.label }}</button>
+      </div>
       <FormControl v-model="filters.business_name" label="Business" placeholder="Business record" />
       <FormControl v-model="filters.assigned_to" label="Assignee" placeholder="User email" />
       <FormControl v-model="filters.category" label="Category" placeholder="Category" type="select" :options="['', 'Query', 'Payment evidence', 'Support', 'Other']" />
@@ -122,14 +130,14 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
       <div class="space-y-3">
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
         <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
-          <div class="automation-card-heading"><strong>{{ recordTitle(row, 'Ticket') }}</strong><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></div>
+          <div class="automation-card-heading"><strong>{{ recordTitle(row, 'Ticket') }}</strong><span class="flex gap-1"><Badge v-if="['High', 'Urgent'].includes(row.priority)" :label="row.priority" :theme="priorityTheme(row.priority)" /><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></span></div>
           <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? linkedTitle(row.business_doctype, row.business_name) : 'Conversation'" /><span>{{ row.category }} · {{ linkedTitle('User', row.assigned_to, 'Unassigned') }} · {{ relativeTime(row.creation) }}</span></div>
         </button>
         <WorkspaceState v-if="!busy && !error && !page.items.length" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button label="Clear filters" @click="reset" /></WorkspaceState>
         <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
+        <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><div class="flex flex-wrap gap-2"><Badge :label="selected.status" theme="blue" /><Badge v-if="selected.priority" :label="selected.priority + ' priority'" :theme="priorityTheme(selected.priority)" /><span v-if="selected.assigned_to" class="text-sm">Assigned to {{ linkedTitle('User', selected.assigned_to) }}</span></div><p class="whitespace-pre-wrap">{{ selected.brief }}</p>
         <div v-if="aiEnabled && selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
@@ -196,7 +204,8 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           </ol>
           <Button v-if="transcript.next" label="More messages" :disabled="busy" @click="more('transcript')" />
         </section>
-        <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><FormControl v-model="owner" label="Assign to user" placeholder="User email" /><Button type="submit" label="Assign" :disabled="busy" /></form>
+        <TicketDiscussion v-if="selected.messages" :ticket="selected" @changed="load()" />
+        <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><RemoteLinkField v-model="owner" :field="{ label: 'Assign to', method: 'collaboration.colleagues', params: { contact: selected.messages?.[0]?.contact }, placeholder: 'Search colleagues…', readOnly: busy || !selected.messages?.length, initialOptions: selected.assigned_to ? [{ value: selected.assigned_to, label: linkedTitle('User', selected.assigned_to) }] : [] }" /><Button type="submit" label="Assign" :disabled="busy" /></form>
         <div class="flex flex-wrap gap-3"><Button label="Start work" :disabled="busy || selected.status === 'In progress'" @click="update('update_status', { status: 'In progress' })" /><Button label="Close ticket" :disabled="busy || selected.status === 'Closed'" @click="update('update_status', { status: 'Closed' })" /><Button v-if="selected.can_resume" label="Resume AI" :disabled="busy" @click="update('resume_ai')" /><Button v-if="selected.can_release" label="Close and release" :disabled="busy" @click="update('close_and_release')" /></div>
       </article>
     </div>

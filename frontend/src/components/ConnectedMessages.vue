@@ -11,6 +11,7 @@ import MessageSearch from "./messages/MessageSearch.vue";
 import ConversationCases from "./messages/ConversationCases.vue";
 import ConversationTopics from "./messages/ConversationTopics.vue";
 import InternalNotes from "./messages/InternalNotes.vue";
+import CreateTicketDialog from "./messages/CreateTicketDialog.vue";
 import ContactDetails from "./ContactDetails.vue";
 import ContactInfoPage from "./messages/ContactInfoPage.vue";
 import { objectValue } from './messageContent';
@@ -43,6 +44,7 @@ const activeBusiness = computed(() => ({
   businessName: businessName.value || source.value?.business_name || "",
 }));
 const notesOpen = ref(false), contextOpen = ref(false), noteMessages = ref([]), noteContact = ref('');
+const ticketOpen = ref(false), ticketMessage = ref(null), ticketQuoted = ref(false), ticketCreated = ref(null);
 const noteBusiness = computed(() => noteMessages.value[0]?.business_name
   ? { businessDoctype: noteMessages.value[0].business_doctype, businessName: noteMessages.value[0].business_name }
   : activeBusiness.value);
@@ -178,6 +180,12 @@ function openContact(contact) {
   openRoute('#/messages?contact=' + encodeURIComponent(contact), !!active.value);
   return state.open(contact);
 }
+function openTicket(message) {
+  ticketQuoted.value = !!message;
+  ticketMessage.value = message || contactRows.value.at(-1) || null;
+  ticketCreated.value = null;
+  ticketOpen.value = !!ticketMessage.value;
+}
 function closeNotes() { casesOpen.value = false; topicsOpen.value = false; notesOpen.value = false; noteMessages.value = []; noteContact.value = ''; }
 function openNote(message) {
   noteContact.value = message ? message.relay_contact : conversationContact.value;
@@ -284,7 +292,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :organize-request="organizeRequest" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
-            <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Tickets and cases" :disabled="busy" @click="casesOpen = true" />
+            <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Create ticket" :disabled="busy || !contactRows.length" @click="openTicket()" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
         </div>
@@ -319,10 +327,12 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
       <ErrorMessage class="px-4" :message="error || contactsError" />
       <p v-if="connectionError" role="status" class="relay-connection-state">{{ connectionError }}</p>
       <p v-if="notice" role="status" class="feedback-panel">{{ notice }}</p>
+      <p v-if="ticketCreated" role="status" class="feedback-panel">Ticket created. <a class="v1-link" :href="ticketCreated.href">Open ticket</a></p>
+      <CreateTicketDialog v-if="ticketMessage" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :quoted="ticketQuoted" :contact-name="title" @created="ticketCreated = $event" />
 
       <MessageThread :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :emoji="emoji"
-        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote"
+        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="run(() => history(true))" @reply="reply"
         @quote="openQuote" @reconcile="state.checkPending" @send="send" />

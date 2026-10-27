@@ -9,6 +9,8 @@
     "category",
     "status",
     "assigned_to",
+    "priority",
+    "watchers",
     "messages",
     "source_action_key",
     "business_doctype",
@@ -73,6 +75,19 @@
       "label": "Assigned To",
       "fieldtype": "Link",
       "options": "User"
+    },
+    {
+      "fieldname": "priority",
+      "label": "Priority",
+      "fieldtype": "Select",
+      "options": "Low\nMedium\nHigh\nUrgent",
+      "default": "Medium"
+    },
+    {
+      "fieldname": "watchers",
+      "label": "Tagged Users",
+      "fieldtype": "Table",
+      "options": "Relay Ticket Watcher"
     },
     {
       "fieldname": "business_doctype",
@@ -218,5 +233,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-27 12:00:00.000000"
 }
