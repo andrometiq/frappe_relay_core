@@ -3,11 +3,13 @@ from functools import wraps
 
 import frappe
 
-OFF_MESSAGE = 'AI features are turned off'
+from relay_core import features
+
+OFF_MESSAGE = features.OFF_MESSAGES['ai']
 
 
 def is_enabled() -> bool:
-    return bool(frappe.db.get_single_value('Relay Settings', 'enable_ai_features'))
+    return features.is_enabled('ai')
 
 
 def require():

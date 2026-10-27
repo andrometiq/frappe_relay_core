@@ -10,6 +10,8 @@
     "hub_token",
     "callback_secret",
     "enable_ai_features",
+    "enable_chat_folders",
+    "enable_teams",
     "ai_handoff_owner",
     "transcription_provider",
     "send_whatsapp_read_receipts",
@@ -46,6 +48,20 @@
       "label": "Enable AI features",
       "default": "0",
       "description": "Show AI skills, summaries, translation and AI replies in Relay."
+    },
+    {
+      "fieldname": "enable_chat_folders",
+      "fieldtype": "Check",
+      "label": "Enable chat folders",
+      "default": "0",
+      "description": "Show personal chat folders in the Relay inbox."
+    },
+    {
+      "fieldname": "enable_teams",
+      "fieldtype": "Check",
+      "label": "Enable teams",
+      "default": "0",
+      "description": "Show team management, team assignment and team labels in Relay. Team membership still controls who sees a chat."
     },
     {
       "fieldname": "ai_handoff_owner",
@@ -113,5 +129,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-27 18:00:00.000000"
+  "modified": "2026-10-27 21:00:00.000000"
 }

@@ -1,5 +1,6 @@
 """Team membership and assignment enforce the same boundary in Desk and APIs."""
 import frappe
+from relay_core import features
 from relay_core.permissions import require_access, readable_contact, sees_all_teams, ALL_TEAMS_ROLES
 
 
@@ -35,7 +36,7 @@ def validate_assignment(doc):
         team = frappe.get_doc('Relay Team', doc.team); team.check_permission('read')
     if doc.assigned_to:
         validate_agent(doc.assigned_to)
-        if doc.team and not any(row.user == doc.assigned_to for row in team.members):
+        if doc.team and features.is_enabled('teams') and not any(row.user == doc.assigned_to for row in team.members):
             frappe.throw('The assigned agent must belong to the selected team')
 
 
@@ -120,10 +121,15 @@ def assign(contact, team=None, assigned_to=None):
     readable_contact(contact)
     name=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},'name')
     doc=frappe.get_doc('Relay Conversation Assignment',name) if name else frappe.new_doc('Relay Conversation Assignment')
-    doc.relay_contact=contact;doc.team=team or None;doc.assigned_to=assigned_to or None;doc.save()
+    if (doc.assigned_to or None)!=(assigned_to or None):
+        doc.assigned_by=frappe.session.user if assigned_to else None
+    doc.relay_contact=contact;doc.assigned_to=assigned_to or None
+    # While teams are off the team stays as set in Desk, so team visibility does not change.
+    if features.is_enabled('teams'):doc.team=team or None
+    doc.save()
     from relay_core.queue_counts import invalidate
     invalidate()
-    return {'contact':contact,'team':doc.team,'assigned_to':doc.assigned_to}
+    return {'contact':contact,'team':doc.team,'assigned_to':doc.assigned_to,'assigned_by':doc.assigned_by}
 
 
 def readable_filter_team(name):

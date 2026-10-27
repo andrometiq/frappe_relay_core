@@ -91,12 +91,17 @@ class AiFeatureSwitchTests(unittest.TestCase):
         with patch.object(settings, 'require_access'), patch.object(frappe, 'db', database), \
              patch.object(frappe, 'get_roles', return_value=['Relay Communication Manager']):
             with self.assertRaises(frappe.PermissionError):
-                settings.save_ai_features(1)
+                settings.save_feature('ai', 1)
         database.set_single_value.assert_not_called()
         with patch.object(settings, 'require_access'), patch.object(frappe, 'db', database), \
              patch.object(frappe, 'get_roles', return_value=['System Manager']):
-            settings.save_ai_features(1)
-        database.set_single_value.assert_called_once_with('Relay Settings', 'enable_ai_features', 1)
+            settings.save_feature('ai', 1)
+            settings.save_feature('folders', 0)
+            settings.save_feature('teams', 1)
+            with self.assertRaises(frappe.ValidationError):
+                settings.save_feature('billing', 1)
+        self.assertEqual([call.args for call in database.set_single_value.call_args_list],
+                         [('Relay Settings', 'enable_ai_features', 1), ('Relay Settings', 'enable_chat_folders', 0), ('Relay Settings', 'enable_teams', 1)])
 
 
 if __name__ == '__main__':

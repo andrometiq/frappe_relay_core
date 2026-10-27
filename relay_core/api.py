@@ -1,7 +1,7 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
-from relay_core import ai_features
+from relay_core import ai_features, features
 from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
                                     can_configure, sees_all_teams)
 
@@ -213,7 +213,9 @@ def capabilities():
     manage=can_manage()
     from relay_core.hub_channels import site_numbers
     enabled_names=[item.name for item in channels]
-    return {'manage':manage, 'teams':manage, 'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
+    teams=features.is_enabled('teams')
+    return {'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
+            'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
             'ai':ai_features.is_enabled(),
             'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),

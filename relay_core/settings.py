@@ -1,7 +1,7 @@
 """Site-owned connection settings. Password values never enter read responses."""
 import re
 import frappe
-from relay_core import ai_features
+from relay_core import features
 from relay_core.permissions import require_access, can_configure
 from relay_core.hub import HubClient
 
@@ -27,18 +27,22 @@ def connection():
             'token_configured':bool(value('relay_hub_token')),
             'callback_configured':bool(value('relay_callback_secret')),
             'can_configure':can_configure(),
-            'ai_enabled':ai_features.is_enabled(), 'can_switch_ai':'System Manager' in frappe.get_roles()}
+            'ai_enabled':features.is_enabled('ai'), 'folders_enabled':features.is_enabled('folders'),
+            'teams_enabled':features.is_enabled('teams'), 'can_switch_ai':'System Manager' in frappe.get_roles()}
 
 
 @frappe.whitelist(methods=['POST'])
-def save_ai_features(enabled):
+def save_feature(feature, enabled):
+    """Turn one Relay Settings switch on or off: ai, folders or teams."""
     require_access()
     if 'System Manager' not in frappe.get_roles():
-        frappe.throw('Only a System Manager can turn AI features on or off', frappe.PermissionError)
-    if str(enabled) not in ('0', '1'):
-        frappe.throw('Enabled must be 0 or 1')
-    frappe.db.set_single_value('Relay Settings', 'enable_ai_features', int(enabled))
-    return {'enabled': ai_features.is_enabled()}
+        frappe.throw('Only a System Manager can turn Relay features on or off', frappe.PermissionError)
+    if feature not in features.FIELDS or str(enabled) not in ('0', '1'):
+        frappe.throw('Choose a known feature and 0 or 1')
+    frappe.db.set_single_value('Relay Settings', features.FIELDS[feature], int(enabled))
+    from relay_core.queue_counts import invalidate
+    invalidate()
+    return {'enabled': features.is_enabled(feature)}
 
 @frappe.whitelist(methods=['POST'])
 def save_connection(url,account,token='',callback_secret=''):

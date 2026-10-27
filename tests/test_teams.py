@@ -63,6 +63,31 @@ class TeamTests(unittest.TestCase):
         doc.has_permission = lambda permission: True
         self.assertIs(self.teams.readable_filter_team('Sales-001'), doc)
 
+    def test_assign_keeps_the_desk_team_while_teams_are_off_and_records_who_chose_the_agent(self):
+        doc = types.SimpleNamespace(team='Sales', assigned_to=None, assigned_by=None, relay_contact='CON-1', save=Mock())
+        self.f.get_doc = Mock(return_value=doc); self.teams.readable_contact = Mock()
+        self.teams.features = Mock(); self.teams.features.is_enabled.return_value = False
+        with patch('relay_core.queue_counts.invalidate'):
+            result = self.teams.assign('CON-1', team='', assigned_to='agent@example.com')
+            self.assertEqual(result, {'contact': 'CON-1', 'team': 'Sales', 'assigned_to': 'agent@example.com', 'assigned_by': 'manager@example.com'})
+            self.teams.features.is_enabled.return_value = True
+            self.f.session.user = 'other@example.com'
+            self.teams.assign('CON-1', team='Support', assigned_to='agent@example.com')
+            self.assertEqual((doc.team, doc.assigned_by), ('Support', 'manager@example.com'), 'The same agent keeps who chose them')
+            self.teams.assign('CON-1', team='Support', assigned_to='')
+            self.assertEqual((doc.assigned_to, doc.assigned_by), (None, None))
+        self.teams.features.is_enabled.assert_called_with('teams')
+
+    def test_an_agent_outside_the_team_is_refused_only_while_teams_are_on(self):
+        team = types.SimpleNamespace(members=[types.SimpleNamespace(user='viewer@example.com')], check_permission=Mock())
+        self.f.get_doc = Mock(return_value=team); self.teams.readable_contact = Mock()
+        doc = types.SimpleNamespace(relay_contact='CON-1', team='Sales', assigned_to='agent@example.com')
+        self.teams.features = Mock(); self.teams.features.is_enabled.return_value = False
+        self.teams.validate_assignment(doc)
+        self.teams.features.is_enabled.return_value = True
+        with self.assertRaisesRegex(PermissionError, 'belong to the selected team'):
+            self.teams.validate_assignment(doc)
+
 
 class HealthEndpointTests(unittest.TestCase):
     def test_activity_and_health_need_system_manager(self):
