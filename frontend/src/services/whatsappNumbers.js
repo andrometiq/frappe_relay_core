@@ -14,6 +14,19 @@ export function numberName(capabilities, channel) {
   return whatsappNumbers(capabilities).find(row => row.name === channel)?.label || ''
 }
 
+// Thread tags by message name: a message names its number ("to Sales line", "via Sales line") when the
+// number differs from the previous message in the same direction. A copy sent to several channels has no tag.
+export function messageNumberTags(rows, capabilities) {
+  const tags = {}, last = {}
+  if (!hasManyNumbers(capabilities)) return tags
+  for (const message of rows) {
+    const name = message.sends ? '' : numberName(capabilities, message.channel)
+    if (name && last[message.direction] !== message.channel) tags[message.name] = (message.direction === 'Outgoing' ? 'via ' : 'to ') + name
+    last[message.direction] = message.channel
+  }
+  return tags
+}
+
 // Number filter rows: All numbers, then each number with its conversation count from queue_counts.numbers.
 export function numberFilterOptions(numbers, counts) {
   return [
@@ -28,7 +41,7 @@ const hours = seconds => Math.max(1, Math.ceil(seconds / 3600))
 // Closed and new numbers stay selectable; they can take an approved template only.
 export function sendNumberChoice(item, defaultChannel) {
   const open = !!item.window?.open
-  const left = open && Number.isFinite(item.window.remaining_seconds) ? `${hours(item.window.remaining_seconds)} h left` : ''
+  const left = hoursLeft(item)
   const wrote = item.channel === defaultChannel && item.has_chat
   const status = !item.has_chat ? 'No chat yet · template only'
     : !open ? 'Window closed · template only'
@@ -43,9 +56,14 @@ export function effectiveNumber(items, picked, defaultChannel) {
   return names.includes(defaultChannel) ? defaultChannel : names[0] || ''
 }
 
+// "13 h left" while the chosen number's reply window is open.
+export function hoursLeft(item) {
+  const seconds = item?.window?.remaining_seconds
+  return item?.window?.open && Number.isFinite(seconds) ? `${hours(seconds)} h left` : ''
+}
+
 // The window hint of the chosen number, as the one-number composer shows it.
 export function windowHint(item) {
-  const seconds = item?.window?.remaining_seconds
-  if (!item?.window?.open || !Number.isFinite(seconds)) return ''
-  return `24 h window open · ${hours(seconds)} h left`
+  const left = hoursLeft(item)
+  return left && `24 h window open · ${left}`
 }

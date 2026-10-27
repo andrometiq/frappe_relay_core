@@ -15,29 +15,40 @@ const props = defineProps({
 })
 const model = defineModel({ type: String, default: '' })
 const isMobile = useMobileLayout()
-const open = ref(false), root = ref(null), list = ref(null)
+const open = ref(false), root = ref(null), list = ref(null), position = ref({})
 
-function toggle() { if (!props.disabled) open.value = !open.value }
+// The desktop popover is fixed to the trigger, so a scrolling composer or list never clips it.
+function place() {
+  const box = root.value?.getBoundingClientRect()
+  if (!box || isMobile.value) return
+  position.value = props.placement === 'above'
+    ? { right: `${Math.max(8, innerWidth - box.right)}px`, bottom: `${innerHeight - box.top + 6}px`, width: `${Math.min(380, innerWidth - 16)}px` }
+    : { left: `${box.left}px`, top: `${box.bottom + 4}px`, width: `${Math.max(260, box.width)}px` }
+}
+function toggle() { if (!props.disabled) { place(); open.value = !open.value } }
 function choose(value) { model.value = value; open.value = false }
 function outside(event) { if (!root.value?.contains(event.target) && !list.value?.contains(event.target)) open.value = false }
 watch(open, async value => {
   document.removeEventListener('pointerdown', outside)
+  removeEventListener('resize', close)
   if (!value) return
   document.addEventListener('pointerdown', outside)
+  addEventListener('resize', close)
   await nextTick()
   list.value?.querySelector('[aria-selected=true]')?.focus()
 })
 watch(() => props.disabled, value => { if (value) open.value = false })
-onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
+function close() { open.value = false }
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); removeEventListener('resize', close) })
 </script>
 
 <template>
   <div ref="root" class="number-menu" @keydown.esc="open = false">
     <slot :open="open" :toggle="toggle" />
-    <Teleport to=".v1-shell" :disabled="!isMobile" defer>
+    <Teleport to=".v1-shell" defer>
       <Transition name="relay-fade"><button v-if="open && isMobile" type="button" class="mobile-sheet-backdrop" :aria-label="'Close ' + title" @click="open = false" /></Transition>
       <Transition :name="isMobile ? 'relay-sheet' : ''">
-        <div v-if="open" ref="list" :class="isMobile ? 'mobile-sheet number-sheet' : ['number-pop', 'is-' + placement]"
+        <div v-if="open" ref="list" :class="isMobile ? 'mobile-sheet number-sheet' : 'number-pop'" :style="isMobile ? undefined : position"
           :role="isMobile ? 'dialog' : undefined" :aria-modal="isMobile || undefined" :aria-label="title" @keydown.esc="open = false">
           <span v-if="isMobile" class="mobile-sheet-handle" aria-hidden="true" />
           <h3 class="number-menu-title">{{ title }}</h3>

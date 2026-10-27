@@ -998,16 +998,13 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .inbox-chip-soon{margin-left:-2px;font-size:10px;color:var(--relay-ink-3)}
 
 /* WhatsApp numbers: filter, number tags and pickers show only on a site with two or more numbers */
-.number-menu{position:relative}
 .v1-shell.relay-shell .contact-directory>.number-filter{margin:10px 16px 0}
 .number-select{display:flex;align-items:center;gap:8px;width:100%;height:30px;min-height:30px;padding:0 10px;border:1px solid var(--relay-stroke);border-bottom-color:var(--relay-stroke-strong);border-radius:6px;background:var(--relay-layer-strong);color:var(--relay-ink-2);font-size:12.5px;text-align:left}
 .number-select strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .number-select-lead{flex:none;color:var(--relay-ink-3)}
 .number-caret{flex:none;margin-left:auto;color:var(--relay-ink-3)}
 .number-wa{flex:none;color:#25a35a}
-.number-pop{position:absolute;z-index:40;left:0;right:0;min-width:260px;padding:6px;border:1px solid var(--relay-stroke-strong);border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);animation:relay-pop var(--relay-fast) var(--relay-ease)}
-.number-pop.is-below{top:calc(100% + 4px)}
-.number-pop.is-above{bottom:calc(100% + 6px);left:auto;width:380px}
+.number-pop{position:fixed;z-index:80;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--relay-stroke-strong);border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);animation:relay-pop var(--relay-fast) var(--relay-ease)}
 .number-pop hr{margin:4px 6px;border:0;border-top:1px solid var(--relay-stroke)}
 .number-menu-title{padding:6px 10px 4px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
 .number-option{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:8px 10px;border-radius:6px;color:var(--relay-ink);font-size:13px;text-align:left}
@@ -1020,6 +1017,18 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .number-option-count{flex:none;color:var(--relay-ink-3);font-size:11.5px;font-variant-numeric:tabular-nums}
 .number-tick{flex:none;color:var(--relay-accent-text)}
 .number-tag{display:inline-flex;align-items:center;flex:none;max-width:120px;height:18px;padding:0 6px;overflow:hidden;border-radius:4px;background:color-mix(in srgb,#25a35a 13%,transparent);color:color-mix(in srgb,#25a35a 80%,var(--relay-ink));font-size:10.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.v1-shell.relay-shell .conversation-meta>.conversation-number{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:color-mix(in srgb,#25a35a 12%,transparent);color:color-mix(in srgb,#25a35a 80%,var(--relay-ink));font-size:12px;font-weight:600;white-space:nowrap}
+.v1-shell.relay-shell .conversation-number small{font-size:12px;font-weight:500;opacity:.85}
+.message-number-line{display:flex;margin:6px 4px -1px}
+.message-number-line.is-outgoing{justify-content:flex-end}
+.compact-composer>.composer-channel:has(.send-number){max-width:360px}
+.send-number-button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-width:0;height:30px;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:6px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12.5px}
+.send-number-button:hover:not(:disabled){background:var(--relay-hover)}
+.send-number-button:disabled{opacity:.55;cursor:not-allowed}
+.send-number-lead{flex:none;color:var(--relay-ink-3)}
+.send-number-pill{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.send-number-pill strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.send-number-address{white-space:nowrap}
 .v1-shell.relay-shell .contact-directory>.v1-queues{display:flex;flex-wrap:nowrap;gap:0;margin:10px 16px 10px;padding:3px;border:1px solid var(--relay-stroke);border-radius:7px;background:var(--relay-hover)}
 .v1-shell.relay-shell .contact-directory>.v1-queues>button{flex:1 1 auto;justify-content:center;height:26px;min-height:26px;padding:0 6px;border-radius:5px;color:var(--relay-ink-2);font-size:12.5px;white-space:nowrap}
 .v1-shell.relay-shell .contact-directory>.v1-queues>button:hover{background:transparent;color:var(--relay-ink)}
@@ -1061,7 +1070,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-meta:empty{display:none}
 .v1-shell.relay-shell .conversation-meta>span{display:inline-flex;align-items:center;gap:6px;min-height:0;padding:0;border:0;background:none;color:var(--relay-ink-3);font-size:12px;font-weight:400}
 .v1-shell.relay-shell .conversation-meta span+span::before{content:none}
-.v1-shell.relay-shell .conversation-meta>.conversation-record,.v1-shell.relay-shell .conversation-meta>span:first-child:not(.conversation-channel){height:24px;padding:0 9px;border-radius:6px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-weight:600}
+.v1-shell.relay-shell .conversation-meta>.conversation-record,.v1-shell.relay-shell .conversation-meta>span:first-child:not(.conversation-channel,.conversation-number){height:24px;padding:0 9px;border-radius:6px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-weight:600}
 .conversation-record small{font-weight:500;opacity:.8}
 .v1-shell.relay-shell .conversation-meta>:is(.conversation-record,.conversation-linked){flex:none}
 .v1-shell.relay-shell .conversation-meta>.conversation-channel{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis}

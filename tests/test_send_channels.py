@@ -37,6 +37,39 @@ class Patched(unittest.TestCase):
         return stack
 
 
+class SendNumbersTests(Patched):
+    def numbers(self, site):
+        with self.patched(site), patch.object(messaging, 'require_access'), patch(
+                'relay_core.service_window.status', side_effect=lambda contact, channel: {'open': channel == 'Support', 'remaining_seconds': 60}):
+            return messaging.send_numbers('C1')
+
+    def test_numbers_show_chats_windows_and_the_newest_incoming_number(self):
+        site = fake_site([message('M1', 'Shop', creation=1), message('M2', 'Support', creation=2),
+                          message('M3', 'Shop', 'Outgoing', creation=3)])
+        result = self.numbers(site)
+        self.assertEqual(result['default'], 'Support')
+        self.assertEqual([(row['channel'], row['label'], row['address'], row['has_chat'], row['window']['open']) for row in result['items']],
+                         [('Shop', 'Shop', '+91 1', True, False), ('Support', 'Support', '+91 2', True, True)])
+
+    def test_a_number_without_a_chat_is_template_only_and_other_sites_are_hidden(self):
+        site = fake_site([message('M1', 'Shop', creation=1)], channels=(SHOP, SUPPORT, OTHER))
+        result = self.numbers(site)
+        self.assertEqual(result['default'], 'Shop')
+        self.assertEqual([(row['channel'], row['has_chat'], row['window']['open']) for row in result['items']],
+                         [('Shop', True, False), ('Support', False, False)])
+
+    def test_without_incoming_messages_the_site_default_or_none_is_used(self):
+        site = fake_site([message('M1', 'Shop', 'Outgoing', creation=1)], channels=(SHOP, dict(SUPPORT, is_default=1)))
+        self.assertEqual(self.numbers(site)['default'], 'Support')
+        self.assertIsNone(self.numbers(fake_site())['default'])
+
+    def test_a_contact_the_user_cannot_read_is_denied(self):
+        with self.patched(fake_site()), patch.object(messaging, 'require_access'):
+            messaging.readable_contact.side_effect = PermissionError
+            with self.assertRaises(PermissionError):
+                messaging.send_numbers('C1')
+
+
 class ReplyChannelTests(Patched):
     def test_customer_who_wrote_to_a_then_b_gets_the_reply_via_b(self):
         site = fake_site([message('M1', 'Shop', creation=1), message('M2', 'Support', creation=2),

@@ -12,6 +12,7 @@ import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL, reactionLabels } from "../messageContent";
 import { channelCan, multipleChannels } from "../../services/enabledChannels";
+import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
 import { groupSends } from "../../services/sendGroups";
 const props = defineProps({
@@ -43,6 +44,7 @@ const emit = defineEmits([
 const capabilities = inject("relayCapabilities", ref({}));
 const showChannel = computed(() => multipleChannels(capabilities.value));
 const threadRows = computed(() => groupSends(props.rows || []));
+const numberTags = computed(() => messageNumberTags(threadRows.value, capabilities.value));
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
@@ -274,6 +276,9 @@ function actions(message) {
       </div>
       <div v-if="message.name === unread" class="message-date-divider message-unread-divider" role="separator">
         <span>Unread messages</span>
+      </div>
+      <div v-if="numberTags[message.name]" class="message-number-line" :class="{ 'is-outgoing': message.direction === 'Outgoing' }">
+        <span class="number-tag">{{ numberTags[message.name] }}</span>
       </div>
       <article
         class="conversation-bubble"

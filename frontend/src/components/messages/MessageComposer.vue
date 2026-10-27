@@ -8,6 +8,8 @@ import { Button, FormControl, Dropdown } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 import { useMobileLayout } from "../../composables/useMobileLayout";
 import { useSendChannel } from "../../composables/useSendChannel";
+import { sendNumbersKey } from "../../composables/useSendNumbers";
+import SendNumber from "./SendNumber.vue";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
@@ -93,8 +95,11 @@ async function attachFile(event) {
 const props = defineProps({ recipient: String });
 const emit = defineEmits(["template", "note"]);
 const { options: sendOptions } = useSendChannel();
+// On a site with several WhatsApp numbers the "Send via" number picker replaces the channel menu.
+const numbers = inject(sendNumbersKey, null);
+const manyNumbers = computed(() => !!numbers?.active.value);
 const plusOptions = computed(() => [
-  ...sendOptions.value,
+  ...(manyNumbers.value ? [] : sendOptions.value),
   ...(can("templates") ? [{ label: "Template", icon: "file-text", disabled: busy.value, onClick: () => emit("template") }] : []),
   { label: "Internal note", icon: "edit-3", disabled: busy.value, onClick: () => emit("note") },
   { label: "Saved replies", icon: "zap", disabled: busy.value, onClick: () => { showReplies.value = true; } },
@@ -111,6 +116,13 @@ async function checkWindow() {
     return;
   }
   if (!source.value) return;
+  if (manyNumbers.value) {
+    const chosenWindow = numbers.chosen.value?.window || { open: false };
+    windowState.value = chosenWindow;
+    windowError.value = "";
+    if (chosenWindow.open && Number.isFinite(chosenWindow.remaining_seconds)) expiryTimer = setTimeout(() => { windowState.value = { ...windowState.value, open: false }; }, Math.min(chosenWindow.remaining_seconds * 1000, 2147483647));
+    return;
+  }
   try {
     const result = await coreApi("messaging.reply_window", {
       message: source.value.name,
@@ -138,6 +150,7 @@ watch(
   { immediate: true },
 );
 useRealtimeRefresh([], ['messages'], checkWindow);
+watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
 const windowHint = computed(() => {
   const seconds = windowState.value.remaining_seconds;
   if (!windowState.value.open || !Number.isFinite(seconds)) return "";
@@ -208,6 +221,7 @@ function keydown(event) {
       <button v-if="can('templates')" type="button" aria-pressed="false" :disabled="busy" @click="emit('template')">Template</button>
     </div>
     <div class="composer-extras">
+      <div v-if="isMobile && manyNumbers" class="composer-via-row"><SendNumber /></div>
       <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
       <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
       <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
@@ -220,7 +234,7 @@ function keydown(event) {
       </div>
       <div v-else-if="sourceContext.message_thread_id" class="text-xs text-ink-gray-5">Topic {{ sourceContext.message_thread_id }}</div>
       <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-      <details v-if="expanded && sourceContext.provider === 'WhatsApp'" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+      <details v-if="expanded && sourceContext.provider === 'WhatsApp' && !manyNumbers" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
       <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
       <span v-if="kind !== 'text'" class="composer-selection">{{attachTypes[kind]?.[0] || kind}}
         <Button icon="x" aria-label="Cancel attachment" title="Cancel attachment" :disabled="busy" @click="kind='text';attachment=null" />
@@ -255,7 +269,7 @@ function keydown(event) {
     </div>
     <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
       :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
-    <span v-if="!isMobile" class="composer-channel"><slot name="channel" /></span>
+    <span v-if="!isMobile" class="composer-channel"><SendNumber v-if="manyNumbers" /><slot v-else name="channel" /></span>
     <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" title="Send · Enter" type="submit" variant="solid" :disabled="!canSend" />
   </form>
 </template>

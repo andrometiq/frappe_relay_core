@@ -22,6 +22,7 @@ import EmailComposer from "./messages/EmailComposer.vue";
 import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
 import { useMessages } from "../composables/useMessages";
+import { sendNumbersKey, useSendNumbers } from "../composables/useSendNumbers";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { coreApi } from "../services/coreApi";
 import { messagesKey } from "../composables/messagesContext";
@@ -49,6 +50,10 @@ const conversationContact = computed(() => source.value?.relay_contact || select
 const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
 
 provide(messagesKey, state);
+const numbers = useSendNumbers(state, capabilities);
+provide(sendNumbersKey, numbers);
+// On a site with several WhatsApp numbers the header names the number the customer wrote to.
+const wroteTo = computed(() => numbers.active.value ? numbers.wroteTo.value : null);
 const {
   businessType, businessName, businessContext, openBusiness,
   newer, restored, loadNewer, selected, rows, more, source, emoji,
@@ -56,7 +61,7 @@ const {
   focusMessage, openQuote, send, run,
 } = state;
 
-const startOpen = ref(false), startContact = ref(""), startContactLabel = ref(""), summaryOpen = ref(false), searchOpen = ref(false);
+const startOpen = ref(false), startContact = ref(""), startChannel = ref(""), startContactLabel = ref(""), summaryOpen = ref(false), searchOpen = ref(false);
 const linkedContacts = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const activeBusinessContact = ref("");
 let contactRequest = 0;
@@ -155,6 +160,7 @@ function showAllContacts() {
 }
 function openStart(contact = "") {
   startContact.value = businessName.value ? contact : selected.value;
+  startChannel.value = !businessName.value && numbers.active.value ? numbers.current.value : "";
   startContactLabel.value = linkedContacts.value.find(item => item.value === contact)?.label || "";
   startOpen.value = true;
 }
@@ -241,7 +247,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
 
 <template>
   <section class="connected-inbox" :class="{ 'has-conversation': active }" aria-label="Business inbox">
-    <StartConversation v-if="startOpen" :key="businessName + ':' + startContact" :contact="startContact" :contact-label="startContactLabel"
+    <StartConversation v-if="startOpen" :key="businessName + ':' + startContact" :contact="startContact" :contact-label="startContactLabel" :channel="startChannel"
       :contacts="linkedContacts"
       :business-doctype="businessType" :business-name="businessName" @close="startOpen = false" @sent="started" />
 
@@ -261,7 +267,8 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
           <h2><button v-if="isMobile && (frappeContact || conversationContact)" type="button" class="conversation-title-button" aria-label="Open contact info" @click="openInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
-          <p v-if="isMobile && channelLine" class="conversation-channel-line">{{ channelLine }}</p>
+          <p v-if="isMobile && wroteTo" class="conversation-channel-line"><span class="number-tag">{{ wroteTo.label }}</span>{{ wroteTo.address }}</p>
+          <p v-else-if="isMobile && channelLine" class="conversation-channel-line">{{ channelLine }}</p>
           <div class="conversation-meta">
             <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
@@ -270,7 +277,8 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
               <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
               <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextOpen" @click="contextOpen = !contextOpen">{{ otherLinks }}</button>
             </template>
-            <span v-if="!isMobile && channelLine" class="conversation-channel">· {{ channelLine }}</span>
+            <span v-if="!isMobile && wroteTo" class="conversation-number"><FeatherIcon name="message-circle" :size="13" />Wrote to {{ wroteTo.label }}<small v-if="wroteTo.address">· {{ wroteTo.address }}</small></span>
+            <span v-else-if="!isMobile && channelLine" class="conversation-channel">· {{ channelLine }}</span>
           </div>
         </div>
         <div class="conversation-heading-actions">
