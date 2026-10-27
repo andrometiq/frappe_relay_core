@@ -15,11 +15,8 @@ def examples_of(doc):
     return values
 
 def hashes(doc,policy):
-    providers=[]
-    for name in (policy.provider,policy.get('fallback_provider')):
-        if name:
-            row=frappe.get_doc('Relay AI Provider',name)
-            providers.append([name,str(row.modified),row.enabled,row.model])
+    model=frappe.get_doc('AI Model',policy.ai_model) if policy.get('ai_model') else None
+    providers=[[model.name,str(model.modified),model.enabled,model.model_id]] if model else []
     allowed=replies(policy,frappe.get_doc('Relay Channel',policy.channel)) if policy.allow_reply else {}
     contract={key:policy.get(key) for key in ('instructions','allow_ticket','allow_reply','allow_report','business_doctype','channel','execution_user')}
     return digest([doc.instructions,examples_of(doc),doc.policy,doc.source_message]),digest([contract,allowed,providers])
