@@ -156,6 +156,9 @@ def project(name, business_overrides=None):
             continue
         endpoint_key = hashlib.sha256((channel + ':' + row['from']).encode()).hexdigest()
         contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
+        if not contact and not context.get('group_id'):
+            from relay_core.contact_lifecycle import sibling_contact
+            contact = sibling_contact(channel, row['from'])
         if not contact:
             decisions[row['id']] = 'triage_unverified'
             ensure_episode(event=event, channel=channel, row=row)
