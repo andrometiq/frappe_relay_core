@@ -1,6 +1,7 @@
+import sys
 import types
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from test_ai_skills import Doc, module
 from test_document_sends import stub_framework
 
@@ -62,6 +63,19 @@ class DocumentActionTests(unittest.TestCase):
         result = self.actions.send('Customer', 'CUST-A', 'Collection Follow-Up')
         self.assertEqual(result['results'][0], {'contact': 'PERSON-A', 'status': 'Skipped', 'error': 'Contact PERSON-A has no WhatsApp number'})
         self.assertEqual(result['results'][1]['status'], 'Submitted')
+
+    def test_disabled_action_can_be_saved_before_its_template_is_approved(self):
+        approved = Mock(side_effect=ValueError('Choose an approved template'))
+        events = types.SimpleNamespace(approved=approved, mapping=Mock(return_value=[]))
+        self.f.get_meta.return_value = Doc(get_field=lambda key: None)
+        self.sends.validate = Mock()
+        with patch.dict(sys.modules, {'relay_core.business_events': events,
+                                      'relay_core.business_references': types.SimpleNamespace(RELAY_DOCTYPES=())}):
+            self.action.enabled = 0
+            self.actions.validate_action(self.action)
+            self.action.enabled = 1
+            with self.assertRaisesRegex(ValueError, 'approved template'):
+                self.actions.validate_action(self.action)
 
     def test_buttons_follow_roles(self):
         self.f.has_permission = Mock(return_value=True)

@@ -49,7 +49,8 @@ def validate_action(action):
     rule = rule_view(action)
     mapping(rule)
     button_fields(action)
-    approved(rule)
+    if action.enabled:
+        approved(rule)
     document_sends.validate(action, action.document_type)
 
 
