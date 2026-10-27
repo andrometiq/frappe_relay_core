@@ -57,6 +57,18 @@ class Mapping(Case):
         value = conversation(normalized_value='IN.1109766564966551', identifier_type='BSUID')
         self.assertEqual(legacy_database.legacy_endpoint(value), ('IN.1109766564966551', False))
 
+    def test_shared_phone_prefers_relay_then_customer_contact_then_oldest(self):
+        def contact(name, creation, relay=None, customer=0):
+            return frappe._dict(name=name, creation=creation, phone='+91 90000 00001', mobile_no=None, contact_phone=None,
+                                relay=relay, customer=customer)
+        oldest, customer = contact('Old', '2026-01-01'), contact('Shop', '2026-02-01', customer=1)
+        with patch.object(legacy_database.frappe.db, 'sql', return_value=[oldest, customer]):
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Shop'})
+        with patch.object(legacy_database.frappe.db, 'sql', return_value=[oldest, customer, contact('Chat', '2026-03-01', relay='RELAY-CON-1')]):
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Chat'})
+        with patch.object(legacy_database.frappe.db, 'sql', return_value=[contact('New', '2026-02-01'), oldest]):
+            self.assertEqual(legacy_database.contacts_by_phone(), {'919000000001': 'Old'})
+
     def test_channel_matches_by_number_only_when_unique(self):
         source = frappe._dict(phone_number_id='979157361944731', display_name='421 224 2924')
         channels = [frappe._dict(name='A', hub_channel='979157361944731', address=None), frappe._dict(name='B', hub_channel='x', address='+91 99999')]
