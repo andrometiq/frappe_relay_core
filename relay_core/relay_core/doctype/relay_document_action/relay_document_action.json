@@ -1,0 +1,209 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Document Action",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:title",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "title_field": "title",
+  "field_order": [
+    "title",
+    "enabled",
+    "document_type",
+    "label",
+    "show_button",
+    "column_break_main",
+    "business_field",
+    "business_doctype",
+    "message_section",
+    "channel",
+    "template",
+    "parameter_mapping",
+    "button_mapping",
+    "recipients_section",
+    "recipients",
+    "contact_field",
+    "attachment_type",
+    "print_format",
+    "report_name",
+    "report_filters",
+    "file_name",
+    "access_section",
+    "roles"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Action Name",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "description": "Other apps call the action by this name."
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1"
+    },
+    {
+      "fieldname": "document_type",
+      "label": "Document Type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "label",
+      "label": "Button Label",
+      "fieldtype": "Data",
+      "default": "Send on WhatsApp",
+      "reqd": 1
+    },
+    {
+      "fieldname": "show_button",
+      "label": "Show Button on Form",
+      "fieldtype": "Check",
+      "default": "1"
+    },
+    {
+      "fieldname": "column_break_main",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "business_field",
+      "label": "Business Field",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "description": "Field of the document that links to the business record, such as customer. Use name when the document is the business record."
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1
+    },
+    {
+      "fieldname": "message_section",
+      "label": "Message",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "channel",
+      "label": "WhatsApp Channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "reqd": 1
+    },
+    {
+      "fieldname": "template",
+      "label": "Template",
+      "fieldtype": "Link",
+      "options": "Relay WhatsApp Template",
+      "reqd": 1
+    },
+    {
+      "fieldname": "parameter_mapping",
+      "label": "Template Variables",
+      "fieldtype": "JSON",
+      "default": "[]",
+      "description": "Document fields for {{1}}, {{2}} and so on, such as [\"customer_name\"]."
+    },
+    {
+      "fieldname": "button_mapping",
+      "label": "URL Button Variables",
+      "fieldtype": "JSON",
+      "default": "[]",
+      "description": "Document fields for the dynamic part of each URL button, such as [\"payment_link\"]."
+    },
+    {
+      "fieldname": "recipients_section",
+      "label": "Recipients and PDF",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "recipients",
+      "label": "Recipients",
+      "fieldtype": "Select",
+      "options": "Primary contact\nAll business contacts\nDocument contact field",
+      "default": "Primary contact",
+      "reqd": 1
+    },
+    {
+      "fieldname": "contact_field",
+      "label": "Contact Field",
+      "fieldtype": "Data",
+      "depends_on": "eval:doc.recipients=='Document contact field'"
+    },
+    {
+      "fieldname": "attachment_type",
+      "label": "Attach PDF",
+      "fieldtype": "Select",
+      "options": "\nPrint Format\nReport"
+    },
+    {
+      "fieldname": "print_format",
+      "label": "Print Format",
+      "fieldtype": "Link",
+      "options": "Print Format",
+      "depends_on": "eval:doc.attachment_type=='Print Format'"
+    },
+    {
+      "fieldname": "report_name",
+      "label": "Report",
+      "fieldtype": "Link",
+      "options": "Report",
+      "depends_on": "eval:doc.attachment_type=='Report'"
+    },
+    {
+      "fieldname": "report_filters",
+      "label": "Report Filters",
+      "fieldtype": "JSON",
+      "depends_on": "eval:doc.attachment_type=='Report'",
+      "description": "JSON object. Use {{doc.field}} for values of the document."
+    },
+    {
+      "fieldname": "file_name",
+      "label": "File Name",
+      "fieldtype": "Data",
+      "depends_on": "attachment_type",
+      "description": "For example Order_{{doc.name}}.pdf"
+    },
+    {
+      "fieldname": "access_section",
+      "label": "Access",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "roles",
+      "label": "Roles",
+      "fieldtype": "Table MultiSelect",
+      "options": "Relay Document Action Role",
+      "description": "Empty: every Relay user who can read the document."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1
+    }
+  ],
+  "modified": "2026-10-27 12:00:00.000000"
+}

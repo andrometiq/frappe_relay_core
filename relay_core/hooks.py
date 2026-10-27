@@ -70,3 +70,7 @@ has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.per
 permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'
 has_permission['Relay Chat Folder'] = 'relay_core.chat_folders.permission'
 permission_query_conditions['Relay Chat Folder'] = 'relay_core.chat_folders.query'
+
+# Configured Relay Document Actions add a "Send on WhatsApp" button to their desk forms.
+boot_session = "relay_core.document_actions.boot_session"
+app_include_js = ["/assets/relay_core/js/document_actions.js"]

@@ -224,7 +224,7 @@ class MetadataTests(unittest.TestCase):
             'Relay Automation Policy':'channel', 'Relay Email Rule':'channel',
             'Relay Email Preference':'user', 'Relay Contact Type':'business_doctype',
             'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
-            'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title',
+            'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title', 'Relay Document Action':'title',
             'Relay WhatsApp Billing Month':'record_key',
         }
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
