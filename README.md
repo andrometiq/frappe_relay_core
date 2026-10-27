@@ -8,6 +8,7 @@ The installed workspace includes Telegram and email composers, durable send reco
 
 | Task | Documentation |
 | --- | --- |
+| Use Relay day to day | [User guide](docs/user-guide.md) |
 | Browse guides | [Documentation](docs/README.md) |
 | Install on a test site | [Installation](docs/core-installation.md) |
 | Understand identity and automation | [Business communication](docs/communication-expansion.md) |
