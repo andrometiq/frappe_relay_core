@@ -8,7 +8,7 @@ import frappe
 
 SITE = os.environ.get('RELAY_TEST_SITE', 'yrp.site')
 SITES = os.environ.get('SITES_PATH', '/home/sakthi/development/pilot/benches/version_16/sites')
-MODES = ('all', 'mine', 'unread', 'unassigned')
+MODES = ('all', 'unread', 'read')
 PLAIN_ROLES = ['Sales User', 'Purchase User']
 
 
@@ -44,8 +44,8 @@ class Fixtures:
 
 def build(fixtures):
     from relay_core.business_groups import key
-    users = {'team': fixtures.user('team', ['WhatsApp User']), 'restricted': fixtures.user('restricted', ['WhatsApp User']),
-             'multi': fixtures.user('multi', ['WhatsApp Multi-Channel User']), 'claim': fixtures.user('claim', ['WhatsApp User']),
+    users = {'team': fixtures.user('team', ['Relay Communication User']), 'restricted': fixtures.user('restricted', ['Relay Communication User']),
+             'multi': fixtures.user('multi', ['Relay Communication Team User']), 'claim': fixtures.user('claim', ['Relay Communication User']),
              'none': fixtures.user('none', [])}
     rows = frappe.db.sql("""select r.name, group_concat(l.link_name) from `tabRelay Contact` r
         left join `tabDynamic Link` l on l.parent=r.contact and l.parenttype='Contact' and l.link_doctype='Customer'
@@ -76,11 +76,11 @@ def build(fixtures):
     return users, contacts
 
 
-def directory_rows(medium, mode):
+def directory_rows(medium, mode, **filters):
     from relay_core import inbox
     rows, after = [], None
     while True:
-        page = inbox.directory(mode=mode, medium=medium, **({'after': after} if after else {}))
+        page = inbox.directory(mode=mode, medium=medium, **filters, **({'after': after} if after else {}))
         rows += page['items']
         if not page['next']:
             return rows
@@ -113,10 +113,37 @@ def check_user(name, user, contacts):
         assert {row['name'] for mode in MODES for row in listed[mode]} <= names
         if not medium:
             assert all(row['unread'] == inbox.read(row['name'])['unread'] for row in listed['all'][:10])
-        counts = queue_counts.get_counts(medium)
-        assert {mode: counts[mode] for mode in MODES} == {mode: len(listed[mode]) for mode in MODES}, f'{name}: counts differ from rows'
-        print(f'PASS {name} {medium or "all channels"}: ' + ' '.join(f'{mode}={len(listed[mode])}' for mode in MODES))
+        check_counts(name, medium, listed, queue_counts.read(medium))
     return names
+
+
+def check_counts(name, medium, listed, counts):
+    """Counts equal the rows of each tab, and Unread and Read split All."""
+    assert {mode: counts[mode] for mode in MODES} == {mode: len(listed[mode]) for mode in MODES}, f'{name}: counts differ from rows'
+    unread, read = ({row['name'] for row in listed[mode]} for mode in ('unread', 'read'))
+    assert not unread & read and unread | read == {row['name'] for row in listed['all']}, f'{name}: Unread and Read do not split All'
+    assert all(row['unread'] for row in listed['unread']) and not any(row['unread'] for row in listed['read'])
+    print(f'PASS {name} {medium or "all channels"}: ' + ' '.join(f'{mode}={len(listed[mode])}' for mode in MODES))
+
+
+def check_filters(user):
+    """Channel and business filters narrow rows and counts alike, alone and together."""
+    from relay_core import queue_counts
+    frappe.set_user(user)
+    customer = frappe.db.sql("""select l.link_name from `tabRelay Contact` r join `tabDynamic Link` l on l.parent=r.contact
+        and l.parenttype='Contact' and l.link_doctype='Customer' group by 1 order by count(*) desc, 1 limit 1""")[0][0]
+    whatsapp = frappe.get_list('Relay Channel', filters={'channel': 'WhatsApp'}, pluck='name', limit_page_length=0)
+    cases = {'customer type': {'business_type': 'Customer'}, 'one customer': {'business_type': 'Customer', 'business_name': customer},
+             'no record': {'business_type': 'none'}, 'channels': {'channels': frappe.as_json(whatsapp[:2])},
+             'channels and customers': {'channels': frappe.as_json(whatsapp[:2]), 'business_type': 'Customer'}}
+    everything = {row['name'] for row in directory_rows(None, 'all')}
+    for label, filters in cases.items():
+        listed = {mode: directory_rows(None, mode, **filters) for mode in MODES}
+        assert {row['name'] for row in listed['all']} <= everything
+        check_counts(f'{user} {label}', None, listed, queue_counts.read(**filters))
+    linked = {row['name'] for row in directory_rows(None, 'all', business_type='Customer')}
+    unlinked = {row['name'] for row in directory_rows(None, 'all', business_type='none')}
+    assert linked and not linked & unlinked, 'A chat with a customer is never in No record'
 
 
 def main():
@@ -135,6 +162,8 @@ def main():
         assert visible['team'] and visible['multi'] and visible['claim'], 'Every scenario must show some conversations'
         assert visible['restricted'] < visible['team'], 'User permissions must narrow the team rows'
         assert visible['multi'] - visible['team'], 'Viewer access must add the shared team without its members'
+        check_filters('Administrator')
+        check_filters(users['team'])
         frappe.set_user(users['none'])
         from relay_core import inbox, queue_counts
         assert denied(inbox.directory) and denied(queue_counts.read)

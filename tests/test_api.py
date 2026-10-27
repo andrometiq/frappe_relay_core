@@ -56,13 +56,27 @@ class ApiTests(unittest.TestCase):
             result=self.api.capabilities()
         self.assertEqual(result,{'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,
-                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers})
+                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
+                                 'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
         listed.assert_called_once_with('WhatsApp')
+
+    def test_inbox_channels_list_the_site_channels_of_every_enabled_medium(self):
+        self.use_role('Relay Communication User')
+        mediums=[]
+        for name in ('WhatsApp','Email'):
+            medium=Mock();medium.name=name;medium.get_features.return_value={};mediums.append(medium)
+        rows={'WhatsApp':[{'name':'WA-1','label':'Sales','address':'+91 1'}],'Email':[{'name':'EM-1','label':'Desk','address':'desk@x'}]}
+        with patch('relay_core.channels.enabled',return_value=mediums),patch('relay_core.hub_channels.site_numbers',side_effect=rows.get):
+            result=self.api.capabilities()
+        self.assertEqual(result['inbox_channels'],[{'name':'WA-1','label':'Sales','address':'+91 1','medium':'WhatsApp'},
+                                                   {'name':'EM-1','label':'Desk','address':'desk@x','medium':'Email'}])
+        self.assertEqual(result['whatsapp_numbers'],rows['WhatsApp'])
 
     def test_capabilities_list_no_numbers_when_whatsapp_is_off(self):
         self.use_role('Relay Communication User')
         with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.hub_channels.site_numbers') as listed:
-            self.assertEqual(self.api.capabilities()['whatsapp_numbers'],[])
+            result=self.api.capabilities()
+        self.assertEqual((result['whatsapp_numbers'],result['inbox_channels']),([],[]))
         listed.assert_not_called()
 
     def test_capabilities_follow_each_role(self):

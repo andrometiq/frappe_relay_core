@@ -27,14 +27,6 @@ export function messageNumberTags(rows, capabilities) {
   return tags
 }
 
-// Number filter rows: All numbers, then each number with its conversation count from queue_counts.numbers.
-export function numberFilterOptions(numbers, counts) {
-  return [
-    { value: '', label: 'All numbers', address: '', count: counts?.all ?? null },
-    ...numbers.map(row => ({ value: row.name, label: row.label, address: row.address, count: counts?.numbers?.[row.name] ?? null })),
-  ]
-}
-
 const hours = seconds => Math.max(1, Math.ceil(seconds / 3600))
 
 // One "Send via" row from messaging.send_numbers: open window, closed window or no chat yet on that number.

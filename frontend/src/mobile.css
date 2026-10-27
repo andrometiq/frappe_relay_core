@@ -67,13 +67,11 @@
   .v1-shell.relay-shell .automation-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
   .v1-shell.relay-shell .automation-chips{gap:6px;padding-block:5px;margin-block:-5px}
   .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
-  .v1-shell.relay-shell .contact-directory>.number-filter{order:1;margin:4px 16px 4px}
-  .number-select{height:40px;min-height:40px;font-size:13px}
   .number-sheet h3{padding:0 8px 2px;color:var(--relay-ink);font-size:16px;font-weight:600;letter-spacing:0;text-transform:none}
   .number-sheet-hint{padding:0 8px 8px;color:var(--relay-ink-3);font-size:12.5px}
   .number-sheet .number-option{min-height:48px;padding:10px 8px;font-size:14px}
   .number-sheet .number-option svg{width:18px;height:18px}
-  .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.number-filter,.v1-queues){order:3}
+  .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
   .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:28px;min-height:28px;min-width:0;padding:0 4px;border-radius:6px;font-size:13px}
   .v1-shell.relay-shell .contact-directory>.v1-queues>:last-child{flex:0 0 auto}
   .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{width:28px;height:28px;min-height:28px;min-width:0;padding:0}

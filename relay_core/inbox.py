@@ -71,35 +71,32 @@ def read(contact):
     return dict(state, unread=unread, unread_more=False, assignment=assignment, can_assign=frappe.has_permission('Relay Conversation Assignment', 'write'))
 
 
+MODES = ('all', 'unread', 'read')
+
+
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None, channel=None):
+def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None, channel=None,
+              channels=None, business_type=None, business_name=None):
     """Filter before pagination and expose only accessible conversation previews.
 
     `since` returns only conversations active at or after that time, so a live client can update the changed rows.
-    `channel` narrows a medium to one Relay Channel, such as one WhatsApp number."""
+    `channels` narrows the list to some Relay Channels, such as WhatsApp numbers; `channel` is the one-channel form.
+    `business_type` and `business_name` keep the chats of one business type or record; `none` keeps chats without one.
+    Read keeps the chats without unread incoming messages for the session user."""
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>140 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
-    if str(starred) not in ('0','1') or mode not in ('all','mine','unread','unassigned'):
+    if str(starred) not in ('0','1') or mode not in MODES:
         frappe.throw('Invalid conversation filter')
     from pypika import Order
     from pypika.functions import Coalesce
+    from relay_core.inbox_filters import business_filter, channel_names as chosen_channels
     contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
-    assignment=frappe.qb.DocType('Relay Conversation Assignment');message=frappe.qb.DocType('Relay Message')
-    filters={}
-    if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Invalid medium')
-    channel_names=frappe.get_list('Relay Channel',filters={'channel':medium},pluck='name',limit_page_length=0) if medium else None
-    if channel:
-        if channel not in (channel_names or []):frappe.throw('Invalid channel')
-        channel_names=[channel]
+    channel_names=chosen_channels(medium, channel, channels)
     activity=Coalesce(contact.last_message_at,contact.creation)
-    search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters=filters,
+    search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters={},
                                ignore_permissions=False,order_by='',limit=31)
-    if medium:
-        channels=frappe.qb.DocType('Relay Channel')
-        endpoints=frappe.qb.DocType('Relay Contact Endpoint')
-        available=[channel] if channel else frappe.qb.from_(channels).select(channels.name).where(channels.channel==medium)
-        search=search.where(contact.name.isin(frappe.qb.from_(endpoints).select(endpoints.relay_contact).where(endpoints.channel.isin(available))))
+    search=filtered_contacts(search, channel_names, business_filter(business_type, business_name), mode)
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
         stamp=anchor.last_message_at or anchor.creation
@@ -117,34 +114,34 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         if folder:states=states.where(saved.folder==folder)
         if str(starred)=='1':states=states.where(saved.starred==1)
         search=search.where(contact.name.isin(states))
-    if mode=='unread':
-        unseen=_unread_query(['relay_contact'])
-        if medium:unseen=unseen.where(message.channel.isin(available))
-        search=search.where(contact.name.isin(unseen))
-    if mode=='mine':
-        mine=frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.assigned_to==frappe.session.user)
-        search=search.where(contact.name.isin(mine))
-    if mode=='unassigned':
-        search=search.where(contact.name.notin(assigned_contacts()))
     if team:
         if not isinstance(team,str) or len(team)>140:frappe.throw('Invalid team')
         from relay_core.teams import readable_filter_team
         readable_filter_team(team)
+        assignment=frappe.qb.DocType('Relay Conversation Assignment')
         search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.team==team)))
-    rows=search.run(as_dict=True);more=len(rows)>30;page=rows[:30]
+    rows=search.run(as_dict=True) if channel_names!=[] else [];more=len(rows)>30;page=rows[:30]
     if before:page.reverse()
     items=directory_items(page,channel_names)
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
 
 
-def assigned_contacts():
-    """Conversations with an agent, or with a team while teams are on. The Unassigned tab shows the rest."""
-    from pypika.functions import Coalesce
-    assignment=frappe.qb.DocType('Relay Conversation Assignment')
-    taken=Coalesce(assignment.assigned_to,'')!=''
-    if features.is_enabled('teams'):taken=taken|(Coalesce(assignment.team,'')!='')
-    return frappe.qb.from_(assignment).select(assignment.relay_contact).where(taken)
+def filtered_contacts(query, channels=None, business=None, mode='all'):
+    """Narrow a Relay Contact query to the chosen channels, business record and read state.
+
+    Unread and Read split the chats on unread incoming messages of the session user on those channels."""
+    contact=frappe.qb.DocType('Relay Contact')
+    if channels:
+        from relay_core.inbox_filters import channel_contacts
+        query=query.where(contact.name.isin(channel_contacts(channels)))
+    if business is not None:
+        query=query.where(business)
+    if mode in ('unread','read'):
+        unseen=_unread_query(['relay_contact'])
+        if channels:unseen=unseen.where(frappe.qb.DocType('Relay Message').channel.isin(channels))
+        query=query.where(contact.name.isin(unseen) if mode=='unread' else contact.name.notin(unseen))
+    return query
 
 
 def activity_time(value):

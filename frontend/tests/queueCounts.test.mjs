@@ -21,10 +21,20 @@ test('counts follow the chosen channel and drop the all-channels choice', () => 
   assert.deepEqual(queueCountParams(undefined), {})
 })
 
-test('a WhatsApp number narrows the counts only together with its medium', () => {
-  assert.deepEqual(queueCountParams('WhatsApp', 'WA-2'), { medium: 'WhatsApp', channel: 'WA-2' })
-  assert.deepEqual(queueCountParams('WhatsApp', ''), { medium: 'WhatsApp' })
-  assert.deepEqual(queueCountParams('all', 'WA-2'), {})
+test('inbox filters narrow the counts with or without a medium', () => {
+  const filters = { channels: '["WA-2"]', business_type: 'Customer', business_name: 'CUST-1' }
+  assert.deepEqual(queueCountParams('WhatsApp', filters), { medium: 'WhatsApp', ...filters })
+  assert.deepEqual(queueCountParams('all', { business_type: 'none' }), { business_type: 'none' })
+  assert.deepEqual(queueCountParams('WhatsApp', {}), { medium: 'WhatsApp' })
+})
+
+test('views with the same filters share one count; other filters get their own', async () => {
+  const reads = []
+  const acquire = sharedQueueCounts(async params => { reads.push(params); return {} }, () => () => {})
+  const one = acquire('WhatsApp', { business_type: 'Customer' }), two = acquire('WhatsApp', { business_type: 'Customer' })
+  acquire('WhatsApp', { business_type: 'Supplier' })
+  assert.equal(one.counts, two.counts)
+  assert.deepEqual(reads, [{ medium: 'WhatsApp', business_type: 'Customer' }, { medium: 'WhatsApp', business_type: 'Supplier' }])
 })
 
 test('views of one channel share a single count read and live refresh', async () => {

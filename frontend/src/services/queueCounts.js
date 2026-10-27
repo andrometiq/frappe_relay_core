@@ -3,7 +3,7 @@ import { ref } from 'vue'
 // Inbox queue counts from queue_counts.read; tabs and the Inbox badge use the same label.
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
-export const EMPTY_COUNTS = Object.freeze({ all: 0, mine: 0, unassigned: 0, unread: 0, unread_messages: 0 })
+export const EMPTY_COUNTS = Object.freeze({ all: 0, unread: 0, read: 0, unread_messages: 0 })
 
 // Exact below 1000, compact above it (1.6K) so a tab never grows wider than its queue name.
 export function countLabel(value) {
@@ -12,10 +12,9 @@ export function countLabel(value) {
   return count < 1000 ? String(count) : compact.format(count)
 }
 
-// A number (Relay Channel) narrows the medium; it counts only with its medium.
-export function queueCountParams(medium, channel) {
-  if (!medium || medium === 'all') return {}
-  return channel ? { medium, channel } : { medium }
+// Inbox filters (channels, business record) narrow the counts the same way they narrow the list.
+export function queueCountParams(medium, filters = {}) {
+  return { ...(medium && medium !== 'all' ? { medium } : {}), ...filters }
 }
 
 // Views of the same channel share one count, one read and one live refresh until the last view releases it.
@@ -38,8 +37,8 @@ export function sharedQueueCounts(read, watchChanges) {
     load()
     return entry
   }
-  return function acquire(medium, channel) {
-    const params = queueCountParams(medium, channel), key = JSON.stringify(params)
+  return function acquire(medium, filters) {
+    const params = queueCountParams(medium, filters), key = JSON.stringify(params)
     const entry = entries.get(key) || create(key, params)
     entry.users++
     let released = false

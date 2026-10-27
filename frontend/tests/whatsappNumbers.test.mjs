@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectiveNumber, hasManyNumbers, hoursLeft, messageNumberTags, numberFilterOptions, numberName, sendNumberChoice, whatsappNumbers, windowHint } from '../src/services/whatsappNumbers.js'
+import { effectiveNumber, hasManyNumbers, hoursLeft, messageNumberTags, numberName, sendNumberChoice, whatsappNumbers, windowHint } from '../src/services/whatsappNumbers.js'
 
 const SALES = { name: 'WA-1', label: 'Sales line', address: '+91 90030 12345' }
 const SUPPORT = { name: 'WA-2', label: 'Support line', address: '+91 90030 67890' }
@@ -17,13 +17,6 @@ test('a tag names only a number of the site', () => {
   assert.equal(numberName(capabilities, 'WA-2'), 'Support line')
   assert.equal(numberName(capabilities, 'TG-1'), '')
   assert.equal(numberName(capabilities, undefined), '')
-})
-
-test('the number filter lists all numbers first with live chat counts', () => {
-  const options = numberFilterOptions([SALES, SUPPORT], { all: 12, numbers: { 'WA-1': 8 } })
-  assert.deepEqual(options.map(option => [option.value, option.label, option.count]),
-    [['', 'All numbers', 12], ['WA-1', 'Sales line', 8], ['WA-2', 'Support line', null]])
-  assert.equal(numberFilterOptions([SALES], null)[0].count, null)
 })
 
 test('Send via marks where the customer wrote, closed windows and new numbers as template only', () => {

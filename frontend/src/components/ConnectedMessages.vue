@@ -90,7 +90,7 @@ const visibleRows = computed(() => {
   return all.filter(row => row.frappe_contact === activeBusinessContact.value ||
     (row.channel === target.channel && row.sender_endpoint === target.sender_endpoint));
 });
-const isMobile = useMobileLayout(), infoOpen = ref(false), organizeRequest = ref(0);
+const isMobile = useMobileLayout(), infoOpen = ref(false);
 const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
 const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactRecord.value));
 const menuActions = computed(() => [
@@ -291,7 +291,7 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
         </div>
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers"><span class="viewer-stack" aria-hidden="true"><span v-for="person in people.slice(0, 3)" :key="person.name" :class="avatarTone(person.full_name || person.name)">{{ avatarInitials(person.full_name || person.name) }}</span></span>{{ people.length }} viewing</span>
-          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :organize-request="organizeRequest" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
+          <ConversationTools v-if="conversationContact" :key="conversationContact" :contact="conversationContact" :last-message="contactRows.at(-1)?.name" :last-visible="contactVisibleMessages.at(-1)" :visible-messages="contactVisibleMessages" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
             <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Create ticket" :disabled="busy || !contactRows.length" @click="openTicket()" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
@@ -364,9 +364,8 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
     </Transition>
 
     <Transition name="relay-page">
-      <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :relay-contact="conversationContact" :primary="contactRecord?.primary" :channel="channelLine"
-        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())"
-        @assign="infoAction(() => organizeRequest++)" @changed="loadProfile(selected)" />
+      <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine"
+        :can-organize="!!conversationContact && !busy" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" @changed="loadProfile(selected)" />
     </Transition>
   </section>
 </template>

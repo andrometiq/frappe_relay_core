@@ -1,27 +1,16 @@
 <script setup>
-import { computed, inject, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { Avatar, Button, Dropdown, FeatherIcon } from '@relay/ui'
 import ContactDetails from '../ContactDetails.vue'
 import WorkspaceState from '../WorkspaceState.vue'
-import { coreApi } from '../../services/coreApi'
-import { linkedTitle } from '../../services/linkedTitle'
-import { assignmentLabel } from '../../services/assignment'
 
-const props = defineProps({ title: String, contact: String, relayContact: String, primary: Object, channel: String, canOrganize: Boolean })
-const emit = defineEmits(['close', 'cases', 'notes', 'assign', 'changed'])
-const phone = ref(''), assignment = ref(null)
-const capabilities = inject('relayCapabilities', ref({}))
-const assignee = computed(() => assignment.value ? assignmentLabel(assignment.value, { teams: capabilities.value.teams_enabled, title: linkedTitle }) : '')
+const props = defineProps({ title: String, contact: String, primary: Object, channel: String, canOrganize: Boolean })
+const emit = defineEmits(['close', 'cases', 'notes', 'changed'])
+const phone = ref('')
 const menu = computed(() => [
   ...(props.canOrganize ? [{ label: 'Internal notes', icon: 'message-square', onClick: () => emit('notes') }] : []),
   ...(props.contact ? [{ label: 'Edit Contact in Desk', icon: 'external-link', onClick: () => { location.href = '/desk/contact/' + encodeURIComponent(props.contact) } }] : []),
 ])
-watch(() => props.relayContact, async contact => {
-  assignment.value = null
-  if (!contact) return
-  try { const state = await coreApi('inbox.read', { contact }); if (contact === props.relayContact) assignment.value = state.assignment || {} }
-  catch { assignment.value = null }
-}, { immediate: true })
 </script>
 
 <template>
@@ -39,15 +28,13 @@ watch(() => props.relayContact, async contact => {
         <div class="contact-info-actions">
           <a v-if="phone" class="contact-info-action" :href="'tel:' + phone.replace(/[^0-9+]/g, '')"><FeatherIcon name="phone" :size="18" />Call</a>
           <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('cases')"><FeatherIcon name="bookmark" :size="18" />Ticket</button>
-          <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('assign')"><FeatherIcon name="user" :size="18" />Assign</button>
         </div>
       </div>
-      <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" :assignee="assignee" @loaded="phone = $event.phone" @changed="emit('changed')" />
+      <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" @loaded="phone = $event.phone" @changed="emit('changed')" />
       <template v-else>
         <h4 class="info-group-title">Details</h4>
         <dl class="info-card">
           <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
-          <div v-if="assignee" class="info-kv"><dt>Assignment</dt><dd>{{ assignee }}</dd></div>
         </dl>
         <WorkspaceState compact title="No linked Contact" description="This chat has no Frappe Contact yet, so it has no business links." icon="user" />
       </template>
