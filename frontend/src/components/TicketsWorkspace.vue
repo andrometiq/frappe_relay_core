@@ -1,7 +1,7 @@
 <script setup>
 import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
@@ -10,6 +10,8 @@ import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
 import { relativeTime } from './relativeTime'
 import { closeRoute, openRoute } from '../useViewRoute'
+const capabilities = inject('relayCapabilities', ref({}))
+const aiEnabled = computed(() => Boolean(capabilities.value?.ai))
 const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '' })
 const page = ref({ items: [] }), selected = ref(null), owner = ref(''), error = ref(''), feedback = ref('')
 const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
@@ -34,7 +36,7 @@ async function detail(name) {
   try {
     const [ticket, messages, ai, sent] = await Promise.all([
       coreApi('tickets.read', { name }), refreshWindow('transcript', transcript.value, name, request),
-      refreshWindow('ai_history', history.value, name, request), refreshWindow('deliveries', deliveries.value, name, request),
+      aiEnabled.value ? refreshWindow('ai_history', history.value, name, request) : { items: [] }, refreshWindow('deliveries', deliveries.value, name, request),
     ])
     if (request !== detailGeneration || selected.value?.name !== name) return
     selected.value = ticket; transcript.value = messages; history.value = ai; deliveries.value = sent
@@ -128,7 +130,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
         <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><Badge :label="selected.status" theme="blue" class="self-start" /><p>{{ selected.brief }}</p>
-        <div v-if="selected.conversation_key && selected.company" class="space-y-2">
+        <div v-if="aiEnabled && selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
             <Button v-if="selected.can_take_over && !staffTookOver" label="Take over" :loading="saving" :disabled="busy" @click="update('claim')" />
@@ -138,7 +140,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           <p v-else>Take over to stop AI for this conversation and reply yourself.</p>
         </div>
         <p role="status" aria-live="polite">{{ feedback }}</p>
-        <LoadingRows v-if="detailBusy && !history.items.length" label="Loading conversation and AI history…" />
+        <LoadingRows v-if="detailBusy && !transcript.items.length" label="Loading conversation…" />
         <p class="ticket-business-name">{{ linkedTitle(selected.business_doctype, selected.business_name) }}</p><p v-if="selected.handoff_reason">{{ selected.handoff_reason }}</p>
         <div v-if="selected.linked_drafts?.length" class="space-y-2">
           <h3 class="font-semibold">Documents for review</h3>
@@ -149,7 +151,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           <p>Open each draft, check the details and submit when ready.</p>
         </div>
         <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
-        <section aria-label="AI history" class="space-y-3">
+        <section v-if="aiEnabled" aria-label="AI history" class="space-y-3">
           <h3 class="font-semibold">AI history</h3>
           <p v-if="!detailBusy && !history.items.length">No AI activity recorded.</p>
           <ol class="space-y-3">

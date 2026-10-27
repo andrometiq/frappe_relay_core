@@ -55,7 +55,7 @@ class ApiTests(unittest.TestCase):
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
         self.assertEqual(result,{'manage':True,'teams':True,'billing':True,'multi_team':True,'configure':False,
-                                 'skills':True,'business_events':True,
+                                 'ai':True,'skills':True,'business_events':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers})
         listed.assert_called_once_with('WhatsApp')
 
@@ -284,3 +284,11 @@ class MessageDisplayApiTests(unittest.TestCase):
         for value in ('', None, 'line\nbreak', 'x'*141):
             with self.assertRaises(ValueError): self.api.validate_reference(value, 'CH')
         with self.assertRaises(ValueError): self.api.validate_reference('Customer support-001', 'MSG')
+
+
+def setUpModule():
+    """These tests cover AI behavior, so the AI features switch is on."""
+    from unittest import addModuleCleanup, mock
+    switch = mock.patch('relay_core.ai_features.is_enabled', return_value=True)
+    switch.start()
+    addModuleCleanup(switch.stop)

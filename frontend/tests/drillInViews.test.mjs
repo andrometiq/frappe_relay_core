@@ -30,7 +30,7 @@ function tickets(t) {
     if (method === 'tickets.read') return { name: values.name, status: 'Open' }
     return { items: [], next: null }
   }
-  return component(t, 'TicketsWorkspace.vue', { coreApi: api }, ['selected', 'select', 'close', 'error', 'page'])
+  return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }) }, ['selected', 'select', 'close', 'error', 'page'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {

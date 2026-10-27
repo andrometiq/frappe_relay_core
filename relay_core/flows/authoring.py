@@ -2,11 +2,13 @@
 import json
 from pathlib import Path
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.flows.contracts import definition
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def draft(requirement, provider):
     require_access(configure=True)
     if not isinstance(requirement,str) or not 10<=len(requirement.strip())<=6000:

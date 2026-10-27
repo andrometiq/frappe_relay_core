@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core import ai_features
 from relay_core.settings import value as connection_value
 from relay_core import channels, whatsapp
 from relay_core.api import validate_reference
@@ -455,7 +456,7 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
             automation_scope(action, fresh_source)
         if outgoing_run.get():
             run = frappe.get_doc('Relay Automation Run', outgoing_run.get())
-            if not frappe.conf.get('relay_automation_enabled'):
+            if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
                 raise ValueError('Automation is disabled')
             if run.get('skill'):
                 from relay_core.ai.service import delivery_scope
@@ -559,7 +560,7 @@ def automation_scope(action, source):
     if payload.get('automation_run'):
         from relay_core.automation.service import scope
         run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
-        if not frappe.conf.get('relay_automation_enabled'): raise ValueError('Automation is disabled')
+        if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()): raise ValueError('Automation is disabled')
         if run.get('skill'):
             from relay_core.ai.service import delivery_scope, Superseded
             skill = frappe.get_doc('Relay AI Skill', run.skill)

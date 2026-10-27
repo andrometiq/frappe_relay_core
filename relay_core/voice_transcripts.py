@@ -1,6 +1,7 @@
 """Received voice notes keep their transcript on the Relay Message."""
 import json
 import frappe
+from relay_core import ai_features
 from relay_core.automation.providers import ProviderError
 from relay_core.automation.queue import after_message_commit
 from relay_core.automation.service import message_hash
@@ -58,7 +59,7 @@ def save(source, status, transcript='', details=None):
 
 @after_message_commit
 def on_message(doc, method=None):
-    if doc.direction != 'Incoming' or doc.get('legacy_source') or doc.message_type not in AUDIO_KINDS:
+    if doc.direction != 'Incoming' or doc.get('legacy_source') or doc.message_type not in AUDIO_KINDS or not ai_features.is_enabled():
         return
     if frappe.db.get_value('Relay Message', doc.name, 'transcript_status'):
         return
@@ -70,6 +71,7 @@ def on_message(doc, method=None):
                    job_id='relay-voice-transcript:' + doc.name, deduplicate=True, enqueue_after_commit=True)
 
 
+@ai_features.when_enabled
 def process(message):
     actor = frappe.session.user
     frappe.set_user('Administrator')

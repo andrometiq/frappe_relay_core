@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { Button, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import { coreApi } from '../services/coreApi'
@@ -8,6 +8,7 @@ import { businessTypeOptions, isPrimaryLink, linksWith, linksWithout, primaryReq
 
 const props = defineProps({ contact: { type: String, required: true }, detail: { type: Object, required: true } })
 const emit = defineEmits(['changed'])
+const capabilities = inject('relayCapabilities', ref({}))
 const busy = ref(false), error = ref(''), adding = ref(false), removing = ref(null)
 const types = ref([]), doctype = ref(''), record = ref('')
 const links = computed(() => props.detail.links || [])
@@ -70,7 +71,7 @@ async function removeLink(link) {
       </li>
     </ul>
     <p v-else class="info-hint">No linked records you can see yet.{{ detail.can_edit_links ? ' Link one to route this contact’s conversations.' : '' }}</p>
-    <p v-if="links.length > 1" class="info-hint">The primary record shows in the chat header and gives AI its context. Only one record can be primary.</p>
+    <p v-if="links.length > 1" class="info-hint">The primary record shows in the chat header{{ capabilities.ai ? ' and gives AI its context' : '' }}. Only one record can be primary.</p>
   </div>
 </template>
 

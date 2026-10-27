@@ -1,5 +1,6 @@
 """Installed automation configuration; API secrets are write-only."""
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access, can_manage
 
 
@@ -12,6 +13,7 @@ POLICY_FIELDS=('ai_model','channel','execution_user','enabled','mode','allow_tic
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def providers(query='',after=None):
     require_access(configure=True)
     if not isinstance(query,str) or len(query)>80:frappe.throw('Invalid provider search')
@@ -23,12 +25,14 @@ def providers(query='',after=None):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def save_provider(provider,model,enabled=0,api_key='',name=None):
     require_access(configure=True)
     frappe.throw('Configure AI Model and AI Provider Account in frappe_tools; legacy providers are read-only')
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def policies(after=None):
     require_access(configure=True)
     rows=frappe.get_list('Relay Automation Policy',filters={'name':['>',after]} if after else {},fields=['name',*POLICY_FIELDS],order_by='name asc',page_length=31)
@@ -36,6 +40,7 @@ def policies(after=None):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def save_policy(values,name=None):
     require_access(configure=True)
     if isinstance(values,str):values=frappe.parse_json(values)
@@ -46,6 +51,7 @@ def save_policy(values,name=None):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def references(kind, query=''):
     """Bounded, permission-checked choices for the installed policy editor."""
     require_access(configure=True)

@@ -1,6 +1,7 @@
 """Read derived message text without exposing automation decisions or credentials."""
 import json
 import frappe
+from relay_core import ai_features
 from relay_core.api import validate_reference
 from relay_core.permissions import require_access, readable_contact
 from relay_core.automation.service import message_hash
@@ -41,6 +42,7 @@ def transcript(message):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def translation(message):
     require_access(); validate_reference(message,'MSG')
     source=frappe.get_doc('Relay Message',message);source.check_permission('read')

@@ -2,6 +2,7 @@
 import json
 from types import SimpleNamespace
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.ai.tools import contracts, as_user
 
@@ -152,6 +153,7 @@ def validate_skill(doc):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def directory(after=None):
     require_access('Relay AI Skill')
     rows = frappe.get_list('Relay AI Skill', filters={'name': ['>', after]} if after else {},
@@ -160,6 +162,7 @@ def directory(after=None):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def save(values, name=None):
     require_access('Relay AI Skill', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
@@ -171,6 +174,7 @@ def save(values, name=None):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def test_skill(name, message):
     require_access('Relay AI Skill', 'write')
     skill = frappe.get_doc('Relay AI Skill', name); skill.check_permission('read')
@@ -207,6 +211,7 @@ def test_skill(name, message):
 
 
 @frappe.whitelist(methods=['GET'])
+@ai_features.required
 def editor_options(kind, query='', doctype=None, business_doctype=None, action=None, selected=None, skill=None):
     """Bounded, permission-checked captions; identifiers are values, never labels."""
     require_access('Relay AI Skill', 'write')

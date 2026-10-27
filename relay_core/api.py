@@ -1,6 +1,7 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
+from relay_core import ai_features
 from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
                                     can_configure, sees_all_teams)
 
@@ -214,7 +215,8 @@ def capabilities():
     enabled_names=[item.name for item in channels]
     return {'manage':manage, 'teams':manage, 'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
-            'skills':frappe.has_permission('Relay AI Skill', 'write'),
+            'ai':ai_features.is_enabled(),
+            'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
             'enabled_channels':enabled_names,
             'channels':{item.name:item.get_features() for item in channels},
@@ -236,7 +238,7 @@ def conversation_channels(contact):
     channels = frappe.get_list('Relay Channel', filters={'name': ['in', names], 'enabled': 1},
         fields=['name', 'channel'], order_by='channel asc', limit_page_length=100)
     from relay_core.inbox import unread_count
-    return {'items': [{'value': row.name, 'label': row.channel, 'unread': unread_count(contact, row.name), 'translation_enabled': bool(frappe.conf.get('relay_automation_enabled') and frappe.db.exists('Relay Automation Policy', {'channel':row.name,'enabled':1,'allow_translation':1}))} for row in channels]}
+    return {'items': [{'value': row.name, 'label': row.channel, 'unread': unread_count(contact, row.name), 'translation_enabled': bool(frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled() and frappe.db.exists('Relay Automation Policy', {'channel':row.name,'enabled':1,'allow_translation':1}))} for row in channels]}
 
 
 @frappe.whitelist(methods=['GET'])

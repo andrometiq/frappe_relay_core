@@ -33,14 +33,14 @@ const navigation = [
   { name: 'Contacts', label: 'Contacts & Links', icon: 'users' },
   { name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp' },
   { name: 'Business events', label: 'Business events', icon: 'zap', business_events: true, group: 'Manage' },
-  { name: 'Skills', label: 'AI skills', icon: 'bot', skills: true, group: 'Manage' },
+  { name: 'Skills', label: 'AI skills', icon: 'bot', ai: true, skills: true, group: 'Manage' },
   { name: 'Settings', label: 'Settings & Setup', icon: 'settings', configure: true, group: 'System manager' },
   { name: 'Activity', label: 'Activity & Health', icon: 'activity', configure: true, group: 'System manager' },
   { name: 'Teams', label: 'Teams & Access', icon: 'user-check', teams: true, group: 'Manage' },
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
 const rendered = pageCapabilities(document.getElementById('app'))
-const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, skills: false, business_events: false }), ready = ref(Boolean(rendered))
+const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, ai: false, skills: false, business_events: false }), ready = ref(Boolean(rendered))
 const mobile = ref(false), error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))

@@ -36,6 +36,7 @@ async function saveMargin() {
   margin.value = String((await coreApi('billing.save_margin', { percent: margin.value }, true)).margin_percent)
   marginNotice.value = 'Service charge saved.'
 }
+async function saveAi(enabled) { await coreApi('settings.save_ai_features', { enabled: enabled ? 1 : 0 }, true); location.reload() }
 async function verify() { verified.value = false; await coreApi('settings.verify_connection', {}, true); verified.value = true; notice.value = 'Hub credentials and account/site binding verified. Callback delivery is checked separately.' }
 const checklist = computed(() => [
   { label: 'Hub binding', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Verified this session' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · verify connection' : 'Needs setup', href: '#hub-connection' },
@@ -67,6 +68,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
           <div class="flex flex-wrap gap-3"><Button type="submit" label="Save connection" variant="solid" :disabled="busy || !loaded" /><Button label="Verify saved connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
         </template><p v-else>A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
       </form>
+      <div v-if="config.can_switch_ai" class="workflow-card"><FormControl type="checkbox" label="Enable AI features" :model-value="Boolean(config.ai_enabled)" :disabled="busy || !loaded" @update:model-value="value => run(() => saveAi(value))" /></div>
       <form v-if="capabilities.configure && channelEnabled(capabilities, 'WhatsApp')" class="workflow-card" @submit.prevent="run(saveMargin)">
         <h2 class="font-semibold">WhatsApp billing</h2><p class="text-sm">Included in the rate per message on the Billing page.</p>
         <ErrorMessage :message="marginError" />
