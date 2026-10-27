@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "vite build --config vite.site.config.js",
     "build:site": "vite build --config vite.site.config.js",
-    "build": "vite build",
+    "build:preview": "vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

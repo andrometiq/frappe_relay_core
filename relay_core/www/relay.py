@@ -15,7 +15,7 @@ def get_context(context):
     require_access()
     manifest = Path(frappe.get_app_path('relay_core', 'public', 'relay', '.vite', 'manifest.json'))
     if not manifest.is_file():
-        frappe.throw('Build the Relay site frontend with npm run build:site before opening this workspace.')
+        frappe.throw('The Relay workspace is not built. Run the app build (bench build --app relay_core) and reload.')
     assets = json.loads(manifest.read_text())
     entry = assets['site.html']
     styles = entry.get('css', []) or ([assets['style.css']['file']] if 'style.css' in assets else [])

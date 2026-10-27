@@ -27,8 +27,7 @@ modify it. With the existing dependencies:
 ```sh
 node --test frontend/tests/*.test.mjs frontend/tests/*.test.js
 cd frontend
-npm run build
-npm run build:site
+yarn build
 ```
 
 The site build writes only `relay_core/public/relay` within this repository.

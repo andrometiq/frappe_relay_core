@@ -20,18 +20,18 @@ The 2026-10-24 connected checkpoint passes 10/10 WhatsApp, 11/11 Telegram and 13
 
 ## Development
 
-For the installed UI, build from `frontend/` and open `/relay` on the Frappe site:
+The standard app build (`bench build` or `pilot build`) installs the frontend packages and builds the installed UI. To build it by hand, run from the app root, then open `/relay` on the Frappe site:
 
 ```sh
-npm ci
-npm run build:site
+yarn install --frozen-lockfile
+yarn build
 ```
 
 For a standalone preview, run from `frontend/`:
 
 ```sh
-npm run build
-npm run preview -- --port 18082
+yarn build:preview
+yarn preview --port 18082
 ```
 
 Connected screens require same-origin Frappe APIs. The preview does not provide an authenticated site. See the [frontend guide](frontend/README.md) and [testing guide](docs/testing.md).
