@@ -14,6 +14,9 @@ class WhatsAppTests(unittest.TestCase):
         self.api.require_business_assignment=Mock();self.api.connection_value=lambda key:'';self.api.require_access=Mock();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
         self.audit=patch.multiple('relay_core.whatsapp_templates',record_request=Mock(),apply_request=Mock(),overlay=Mock(side_effect=lambda page:page))
         self.audit.start();self.addCleanup(self.audit.stop)
+        self.channels=patch.multiple('relay_core.hub_channels',hub_arguments=Mock(side_effect=lambda channel,args:args),
+            choose=Mock(side_effect=lambda medium,names=None,contact=None,requested=None:requested or (names[0] if names else 'WA')))
+        self.channels.start();self.addCleanup(self.channels.stop)
     def test_multiple_contacts_are_returned(self):
         self.f.get_list.return_value=[{'name':'Contact-A'},{'name':'Contact-B'}]
         result=self.api.business_contacts('Customer','CUST-1')

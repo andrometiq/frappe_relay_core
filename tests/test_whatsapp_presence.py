@@ -25,7 +25,7 @@ class Lease:
 
 def row(name, context=None, provider_id=None):
     context = {'provider': 'WhatsApp', 'message_id': provider_id or 'wamid.' + name} if context is None else context
-    return _dict(name=name, provider_id=provider_id or 'wamid.' + name, provider_context=json.dumps(context))
+    return _dict(name=name, provider_id=provider_id or 'wamid.' + name, provider_context=json.dumps(context), channel='WA')
 
 
 class PresenceTests(unittest.TestCase):
@@ -52,7 +52,7 @@ class PresenceTests(unittest.TestCase):
         self.assertTrue(whatsapp_presence.mark_read('CON-1', ['MSG-2', 'MSG-3']))
         self.assertFalse(whatsapp_presence.mark_read('CON-1', ['MSG-2', 'MSG-3']))
         self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_presence.send', queue='short',
-            job_id='relay-whatsapp-read:MSG-3', deduplicate=True, message_id='wamid.MSG-3', typing=False)
+            job_id='relay-whatsapp-read:MSG-3', deduplicate=True, message_id='wamid.MSG-3', typing=False, channel='WA')
         self.assertEqual(self.cache.keys, {'site|relay-whatsapp-read:CON-1:MSG-3': 5})
         filters = self.message_query()['filters']
         self.assertEqual(filters['name'], ['in', ['MSG-2', 'MSG-3']])
@@ -86,7 +86,7 @@ class PresenceTests(unittest.TestCase):
         self.assertTrue(whatsapp_presence.typing('CON-1', 'CH-WA'))
         self.assertFalse(whatsapp_presence.typing('CON-1', 'CH-WA'))
         self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_presence.send', queue='short',
-            job_id='relay-whatsapp-read:MSG-3:typing', deduplicate=True, message_id='wamid.MSG-3', typing=True)
+            job_id='relay-whatsapp-read:MSG-3:typing', deduplicate=True, message_id='wamid.MSG-3', typing=True, channel='WA')
         self.assertEqual(self.cache.keys, {'site|relay-whatsapp-typing:CON-1': 4})
         filters = self.message_query()['filters']
         self.assertEqual(filters['channel'], ['in', ['CH-WA']])

@@ -193,7 +193,7 @@ class ChannelUITests(unittest.TestCase):
         with patch.dict(sys.modules, {'relay_core.settings': types.SimpleNamespace(value=lambda _: 'local')}):
             self.assertEqual(self.api.channel_options(), {'items':[]})
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'account':'local'})
-        self.assertEqual(self.f.get_list.call_args.kwargs['fields'], ['name','channel','enabled'])
+        self.assertEqual(self.f.get_list.call_args.kwargs['fields'], ['name','channel','enabled','label','address','is_default'])
         self.api.require_access.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.channel_options()
 

@@ -45,7 +45,7 @@ try:
   try:topics.observe(invalid,channel.name)
   except ValueError:pass
   else:raise AssertionError('Forged provenance accepted')
-  topics.action('topics.reopen',{'chat_id':chat,'message_thread_id':thread},{'result':True})
+  topics.action('topics.reopen',{'chat_id':chat,'message_thread_id':thread},{'result':True},channel.name)
   # Future fixture event time intentionally fences older local action timestamp.
   row.reload();assert row.state=='Closed'
   frappe.db.set_value('Relay Contact Endpoint',endpoint.name,'verified',0);frappe.db.commit()

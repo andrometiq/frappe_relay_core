@@ -286,14 +286,19 @@ test('Also send via adds the chosen channels to one text send and resets with th
   } finally {fixture.stop()}
 })
 
-test('a one-channel send keeps the original send arguments',async()=>{
+test('a default send lets the server pick the reply channel and a picked channel is kept',async()=>{
   const calls=[],fixture=setup(async(method,args)=>{calls.push([method,args]);return method==='messaging.send'?{action:'action',status:'Submitted',message:'message'}:{items:[],has_more:false}})
   try {
     const source={...row(1,'2026-10-24'),channel:'live-number',relay_contact:'contact'}
     fixture.state.selected.value='contact';fixture.state.rows.value=[source];fixture.state.source.value=source
     fixture.state.body.value='Order ready'
     await fixture.state.send()
-    assert.deepEqual(Object.keys(calls.find(([method])=>method==='messaging.send')[1]),['message','kind','data','request_key','quote'])
+    const sends=()=>calls.filter(([method])=>method==='messaging.send').map(([,args])=>args)
+    assert.deepEqual(Object.keys(sends()[0]),['message','kind','data','request_key','quote','via'])
+    assert.equal(sends()[0].via,'auto')
+    fixture.state.rows.value=[source];fixture.state.sendVia('live-number');fixture.state.body.value='Picked number'
+    await fixture.state.send()
+    assert.equal(sends()[1].via,undefined)
   } finally {fixture.stop()}
 })
 

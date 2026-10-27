@@ -28,7 +28,7 @@ def newest_incoming(contact, names=None, channel=None):
                'creation': ['>', frappe.utils.add_days(frappe.utils.now_datetime(), -RECEIPT_DAYS)]}
     if names is not None:
         filters['name'] = ['in', names]
-    rows = frappe.get_all('Relay Message', filters=filters, fields=['name', 'provider_id', 'provider_context'],
+    rows = frappe.get_all('Relay Message', filters=filters, fields=['name', 'provider_id', 'provider_context', 'channel'],
                           order_by='creation desc, name desc', limit_page_length=20)
     for row in rows:
         context = context_of(row)
@@ -42,7 +42,7 @@ def queue(message, lease, seconds, typing=False):
     if not frappe.cache.set(frappe.cache.make_key(lease), '1', nx=True, ex=seconds):
         return False
     frappe.enqueue('relay_core.whatsapp_presence.send', queue='short', job_id='relay-whatsapp-read:' + message.name + (':typing' if typing else ''),
-                   deduplicate=True, message_id=message.provider_id, typing=typing)
+                   deduplicate=True, message_id=message.provider_id, typing=typing, channel=message.channel)
     return True
 
 
@@ -73,13 +73,15 @@ def typing(contact, channel):
     return queue(message, 'relay-whatsapp-typing:' + contact, TYPING_LEASE_SECONDS, typing=True)
 
 
-def send(message_id, typing=False):
+def send(message_id, typing=False, channel=None):
+    """Meta takes a read receipt only from the number that received the message."""
     from relay_core import whatsapp
     from relay_core.hub import HubError
+    from relay_core.hub_channels import hub_arguments
     arguments = {'operation': 'messages.read', 'message_id': message_id}
     if typing:
         arguments['typing'] = True
     try:
-        whatsapp.client().execute(arguments)
+        whatsapp.client().execute(hub_arguments(channel, arguments) if channel else arguments)
     except HubError:
         pass  # Ephemeral feedback: an expired or unknown message must not retry or alert.

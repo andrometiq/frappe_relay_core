@@ -33,11 +33,12 @@ def groups(operation, arguments=None):
     integer(arguments.get('chat_id'))
     if arguments['chat_id'] >= 0:
         frappe.throw('Select a Telegram group or supergroup')
-    contact, _ = group_binding(arguments['chat_id'])
+    contact, channel = group_binding(arguments['chat_id'])
     authorize_group(contact)
-    result = client().telegram_groups(operation, **arguments)
+    from relay_core.hub_channels import hub_arguments
+    result = client().telegram_groups(operation, **hub_arguments(channel, arguments))
     from relay_core.telegram_topics import action
-    try:action(operation, arguments, result)
+    try:action(operation, arguments, result, channel)
     except Exception:
         frappe.db.rollback()
         frappe.log_error(title='Relay Telegram topic cache', message='Provider action succeeded but local topic metadata could not be recorded. A later forum event can refresh it.')
@@ -76,20 +77,21 @@ def authorize_group(contact):
 
 
 def group_binding(chat_id):
+    """(Relay Contact, Relay Channel) of a verified Telegram chat; the bot in the group owns the binding."""
     account = connection_value('relay_hub_account')
     if not account:
         frappe.throw('Configure the Relay Hub account first')
-    channels = frappe.get_all('Relay Channel', filters={'account': account, 'channel': 'Telegram', 'enabled': 1}, pluck='name', limit_page_length=2)
-    if len(channels) != 1:
-        frappe.throw('Configure one enabled Telegram channel for this account')
-    key = hashlib.sha256((channels[0] + ':' + str(chat_id)).encode()).hexdigest()
-    contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact')
-    if not contact:
-        frappe.throw('Telegram chat must have a verified contact binding',frappe.PermissionError)
+    channels = frappe.get_all('Relay Channel', filters={'account': account, 'channel': 'Telegram', 'enabled': 1}, pluck='name', limit_page_length=100)
+    keys = {hashlib.sha256((name + ':' + str(chat_id)).encode()).hexdigest(): name for name in channels}
+    rows = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(keys)], 'verified': 1},
+                          fields=['relay_contact', 'endpoint_key'], limit_page_length=2) if keys else []
+    if len(rows) != 1:
+        frappe.throw('Telegram chat must have a verified contact binding on one bot',frappe.PermissionError)
+    contact, channel = rows[0].relay_contact, keys[rows[0].endpoint_key]
     from relay_core.permissions import readable_contact
     readable_contact(contact)
-    frappe.get_doc('Relay Channel', channels[0]).check_permission('read')
-    return contact, channels[0]
+    frappe.get_doc('Relay Channel', channel).check_permission('read')
+    return contact, channel
 
 
 
@@ -106,13 +108,13 @@ def group_chats(after=None, limit=30, query=""):
         frappe.throw('Invalid group search')
     account = connection_value('relay_hub_account')
     channels = frappe.get_list('Relay Channel', filters={'account': account,
-        'channel': 'Telegram', 'enabled': 1}, pluck='name', page_length=2) if account else []
-    if len(channels) != 1:
+        'channel': 'Telegram', 'enabled': 1}, pluck='name', page_length=100) if account else []
+    if not channels:
         return {'items': [], 'next': None, 'configured': False}
     endpoint=frappe.qb.DocType('Relay Contact Endpoint')
     contact=frappe.qb.DocType('Relay Contact')
-    directory=(frappe.qb.from_(endpoint).select(endpoint.name,endpoint.endpoint,endpoint.relay_contact)
-        .where((endpoint.channel==channels[0]) & (endpoint.verified==1) & endpoint.endpoint.like('-%')))
+    directory=(frappe.qb.from_(endpoint).select(endpoint.name,endpoint.endpoint,endpoint.relay_contact,endpoint.channel)
+        .where((endpoint.channel.isin(channels)) & (endpoint.verified==1) & endpoint.endpoint.like('-%')))
     if after:directory=directory.where(endpoint.name>after)
     if query.strip():
         from pypika.functions import Lower
@@ -137,6 +139,6 @@ def group_chats(after=None, limit=30, query=""):
         if chat_id >= 0:
             continue
         items.append({'name': row.name, 'chat_id': chat_id,
-            'label': relay.display_name or row.endpoint, 'contact': row.relay_contact, 'channel': channels[0]})
+            'label': relay.display_name or row.endpoint, 'contact': row.relay_contact, 'channel': row.channel})
     return {'items': items, 'next': rows[int(limit)-1].name if len(rows)>int(limit) else None,
         'configured': True}

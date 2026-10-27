@@ -271,7 +271,7 @@ def channel_options():
     require_access()
     from relay_core.settings import value
     rows = frappe.get_list('Relay Channel', filters={'account': value('relay_hub_account')},
-        fields=['name', 'channel', 'enabled'], order_by='channel asc', page_length=100)
+        fields=['name', 'channel', 'enabled', 'label', 'address', 'is_default'], order_by='channel asc', page_length=100)
     return {'items': rows}
 
 

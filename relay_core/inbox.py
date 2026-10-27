@@ -261,7 +261,8 @@ def typing(contact, active=1, message=None):
         # A shared NX lease coalesces agents and browser tabs for this destination.
         if frappe.cache.set(frappe.cache.make_key(target_key),'1',nx=True,ex=4):
             from relay_core import whatsapp
-            try:whatsapp.client().call_tool('telegram.typing',target)
+            from relay_core.hub_channels import hub_arguments
+            try:whatsapp.client().call_tool('telegram.typing',hub_arguments(channel,target))
             except Exception:pass  # Ephemeral feedback must never block composing or retry.
     if whatsapp_channel and str(active) in ('1','True'):
         from relay_core import whatsapp_presence

@@ -2,6 +2,7 @@
 import json
 import frappe
 from relay_core import messaging
+from relay_core.hub_channels import applying_receipt
 from relay_core.settings import value as connection_value
 
 
@@ -29,6 +30,7 @@ def project_batch(event, rows):
                 continue
             frappe.set_user(action.owner)
             frappe.db.savepoint('relay_status_row')
+            receipt_token = applying_receipt.set(True)
             try:
                 action.check_permission('read')
                 source,channel,context=messaging.action_target(action)
@@ -59,6 +61,7 @@ def project_batch(event, rows):
                 frappe.db.rollback(save_point='relay_status_row')
                 unresolved=True
             finally:
+                applying_receipt.reset(receipt_token)
                 frappe.set_user(original)
     finally:
         frappe.set_user(original)

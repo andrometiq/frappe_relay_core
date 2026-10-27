@@ -125,7 +125,7 @@ class ProjectionChannelTests(unittest.TestCase):
                 patch('relay_core.hub_channels.event_channel', return_value=channel) as resolve, \
                 patch('relay_core.whatsapp_templates.project', return_value=True) as templates:
             projection.project('event')
-        resolve.assert_called_once_with('site-a', 'WhatsApp', 'wa-2')
+        resolve.assert_called_once_with('site-a', 'WhatsApp', 'wa-2', receipts=False)
         return state.call_args.args[1], templates.called
 
     def test_an_unresolved_message_event_waits_in_triage(self):

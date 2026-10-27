@@ -121,16 +121,19 @@ def failure_message(error):
 
 
 @frappe.whitelist(methods=['POST'])
-def execute(operation, arguments=None, contact=None, business_doctype=None, business_name=None, request_key=None):
+def execute(operation, arguments=None, contact=None, business_doctype=None, business_name=None, request_key=None, channel=None):
+    """`channel` picks the number; account and template operations use its WABA, and the site default otherwise."""
     if operation in SEND:
         return send(dict(key=request_key, operation=operation, arguments=arguments, contact=contact,
-                         business_doctype=business_doctype, business_name=business_name))
+                         business_doctype=business_doctype, business_name=business_name,
+                         **({'channel': channel} if channel else {})))
     payload=prepare(operation,arguments,contact,business_doctype,business_name)
     from relay_core import whatsapp_templates
     requested={key:value for key,value in payload.items() if key!='operation'}
     try:
         hub,capabilities=checked_client()
-        result=capabilities if operation=='capabilities' else hub.execute(payload)
+        from relay_core.hub_channels import choose, hub_arguments
+        result=capabilities if operation=='capabilities' else hub.execute(hub_arguments(choose('WhatsApp',requested=channel),payload))
     except (HubError, ValueError) as error:
         message=failure_message(error)
         if operation in MANAGE:
@@ -191,7 +194,7 @@ def send(message):
     """Submit one immutable intent through the Core action journal."""
     from relay_core.conversation_start import business_channels, send_business
     if isinstance(message, str): message = frappe.parse_json(message)
-    fields = {'key', 'operation', 'arguments', 'contact', 'business_doctype', 'business_name'}
+    fields = {'key', 'operation', 'arguments', 'contact', 'business_doctype', 'business_name', 'channel'}
     if not isinstance(message, dict) or set(message) - fields:
         raise ValueError('Invalid message')
     if message.get('operation') not in SEND:
@@ -202,11 +205,14 @@ def send(message):
     scope = {field: message.get(field) for field in ('contact', 'business_doctype', 'business_name')}
     destination = prepare(message['operation'], message.get('arguments'), **scope)['to']
     from relay_core.identity import normalize
-    channels = [row for row in business_channels(**scope) if row['provider'] == 'WhatsApp'
-                and normalize('WhatsApp', frappe.get_doc('Relay Contact Endpoint', row['endpoint']).endpoint) == destination]
-    if len(channels) != 1:
+    endpoints = {row['value']: row['endpoint'] for row in business_channels(**scope) if row['provider'] == 'WhatsApp'
+                 and normalize('WhatsApp', frappe.get_doc('Relay Contact Endpoint', row['endpoint']).endpoint) == destination}
+    if not endpoints:
         raise ValueError('Configure one available WhatsApp channel')
-    return send_business(**scope, channel=channels[0]['value'], endpoint=channels[0]['endpoint'], kind='whatsapp',
+    from relay_core.hub_channels import choose
+    relay = frappe.db.get_value('Relay Contact', {'contact': message.get('contact')}, 'name')
+    channel = choose('WhatsApp', list(endpoints), relay, message.get('channel'))
+    return send_business(**scope, channel=channel, endpoint=endpoints[channel], kind='whatsapp',
                          data={'operation': message['operation'], 'arguments': message.get('arguments') or {}},
                          request_key=key)
 
@@ -219,13 +225,14 @@ def connection():
 
 
 @frappe.whitelist(methods=['GET'])
-def metadata_status():
+def metadata_status(channel=None):
     """Read cached account health; never initiate a provider sync from the UI."""
     from datetime import datetime, timezone, timedelta
+    from relay_core.hub_channels import choose, hub_arguments
     require_access(manage=True)
     try:
         hub, _ = checked_client()
-        result = hub.execute({'operation': 'account.metadata'})
+        result = hub.execute(hub_arguments(choose('WhatsApp', requested=channel), {'operation': 'account.metadata'}))
     except (HubError, ValueError):
         frappe.throw('Could not read WhatsApp synchronization status')
     status = result.get('status')

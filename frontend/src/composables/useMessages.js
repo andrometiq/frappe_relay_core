@@ -128,6 +128,8 @@ export function useMessages() {
       : coreApi("api.messages", { contact: selected.value, ...values });
   }
   const quoting = ref(false);
+  // A source staff chose sends from its own channel; any other source lets the server pick the reply channel.
+  const pinnedSource = ref(null);
   const source = ref(null),
     kind = ref("text"),
     body = ref(""),
@@ -501,6 +503,7 @@ export function useMessages() {
   function selectRecipient(message) {
     clearRecipient();
     source.value = message || null;
+    pinnedSource.value = source.value;
   }
   async function focusMessage(message) {
     await run(async () => {
@@ -597,6 +600,7 @@ export function useMessages() {
     }
     await run(async () => {
       const quote = action === "reaction" || quoting.value;
+      const via = quote || message === pinnedSource.value ? "" : "auto";
       const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
       const intent = JSON.stringify({
         quote,
@@ -624,7 +628,7 @@ export function useMessages() {
       try { result = await call(
         "relay_core.messaging.send",
         { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0,
-          ...(extraChannels.length ? { channels: extraChannels } : {}) },
+          ...(extraChannels.length ? { channels: extraChannels } : {}), ...(via ? { via } : {}) },
         true,
       ); } catch(err) {if(pending)pending.status='Unconfirmed';throw err;}
       sessionStorage.setItem('relay-typed-result-'+result.action,storage);

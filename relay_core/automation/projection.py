@@ -123,7 +123,9 @@ def project(name, business_overrides=None):
         return
     from relay_core.hub_channels import event_channel
     from relay_core.whatsapp_templates import project as project_templates, template_event
-    channel = event_channel(event.account, medium, event.get('hub_channel'))
+    key = event.get('event_key') or ''
+    receipts = key.startswith('statuses:') or key.endswith(':updates')
+    channel = event_channel(event.account, medium, event.get('hub_channel'), receipts=receipts)
     if not channel:
         if medium == 'WhatsApp' and template_event(payload):
             # Template updates belong to the WABA, not to one number.

@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import get_datetime, now_datetime
 from relay_core import messaging, whatsapp
 from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
+from relay_core.hub_channels import hub_arguments
 
 MAX_BYTES=4*1024*1024
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
@@ -21,9 +22,9 @@ class MediaRetry(frappe.ValidationError):
     http_status_code=503
 
 
-def whatsapp_media(source,media_id):
+def whatsapp_media(source,channel,media_id):
     """Download received WhatsApp media and turn Hub rejections into readable reasons."""
-    try:return whatsapp.client().call_tool('whatsapp.attachment',{'media_id':media_id})
+    try:return whatsapp.client().call_tool('whatsapp.attachment',hub_arguments(channel,{'media_id':media_id}))
     except HubError as error:check=error.metadata.get('error',{}).get('check')
     age=now_datetime()-get_datetime(source.sent_at or source.creation)
     if check=='provider_metadata' and age.days>=WHATSAPP_MEDIA_DAYS or check=='ownership':
@@ -111,7 +112,7 @@ def read(message,download=0,index=None):
             file,raw=file_content(local[int(index)],original)
             import mimetypes
             return response(raw,mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
-        result=whatsapp.client().call_tool('email.attachment',{'provider_id':source.provider_id,'index':int(index)})
+        result=whatsapp.client().call_tool('email.attachment',hub_arguments(channel,{'provider_id':source.provider_id,'index':int(index)}))
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
         if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
@@ -126,7 +127,7 @@ def read(message,download=0,index=None):
     if channel.channel=='WhatsApp':
         media=data.get('media') or {};media_id=media.get('id')
         if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
-        result=whatsapp_media(source,media_id)
+        result=whatsapp_media(source,channel,media_id)
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
         if not 1<=len(raw)<=MAX_WHATSAPP_DOWNLOAD_BYTES:frappe.throw('Attachment exceeds the 16 MiB download limit')
@@ -134,7 +135,7 @@ def read(message,download=0,index=None):
     if channel.channel!='Telegram':frappe.throw('Remote attachment download is not available for this channel')
     media=data.get('media') or {};file_id=media.get('file_id')
     if not isinstance(file_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}',file_id):frappe.throw('Attachment reference is missing')
-    result=whatsapp.client().call_tool('telegram.attachment',{'file_id':file_id})
+    result=whatsapp.client().call_tool('telegram.attachment',hub_arguments(channel,{'file_id':file_id}))
     try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
     except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
     if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')

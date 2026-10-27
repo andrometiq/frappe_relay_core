@@ -43,6 +43,11 @@ def verify_recipient(address, channels):
     frappe.throw('Every email recipient must have a verified business contact endpoint', frappe.PermissionError)
 
 
+def bound(contact, channel, address):
+    key = hashlib.sha256((channel + ':' + address).encode()).hexdigest()
+    return frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact') == contact
+
+
 @frappe.whitelist(methods=['GET'])
 def recipient_options(message, query=''):
     """Bounded contact suggestions; exact addresses may resolve other readable contacts."""
@@ -138,12 +143,15 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
 def unanchored_target(to, channel_name=None, business_doctype=None, business_name=None, notification=None, *, snapshot=False):
     require_access()
     addresses=recipients(to,required=True)
-    filters={'channel':'Email','enabled':1,'account':connection_value('relay_hub_account')}
+    from relay_core.hub_channels import applying_receipt
+    filters={'channel':'Email','account':connection_value('relay_hub_account'),**({} if applying_receipt.get() else {'enabled':1})}
     if channel_name:filters['name']=channel_name
-    channels=frappe.get_list('Relay Channel',filters=filters,fields=['name'],page_length=2)
-    if len(channels)!=1:raise ValueError('Configure one enabled email channel for this account')
-    channel=frappe.get_doc('Relay Channel',channels[0].name);channel.check_permission('read')
+    channels=frappe.get_list('Relay Channel',filters=filters,fields=['name'],page_length=100)
+    if not channels:raise ValueError('Configure an enabled email channel for this account')
     contact=verify_recipient(addresses[0],channels)
+    from relay_core.hub_channels import choose
+    reachable=[row.name for row in channels if bound(contact,row.name,addresses[0])]
+    channel=frappe.get_doc('Relay Channel',choose('Email',reachable,contact,channel_name));channel.check_permission('read')
     source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=addresses[0])
     from relay_core.ticket_notifications import recipient_business
     source.business_doctype,source.business_name=recipient_business(contact,channel.name,addresses[0],
@@ -230,7 +238,8 @@ def submit(action):
     except (ValueError,frappe.ValidationError,frappe.PermissionError,frappe.DoesNotExistError):
         return finish(action,{'delivery':{'state':'rejected'}})
     try:
-        receipt=whatsapp.client().call_tool('email.send',dict(arguments,request_key=action.request_key))
+        from relay_core.hub_channels import hub_arguments
+        receipt=whatsapp.client().call_tool('email.send',hub_arguments(action.target_channel,dict(arguments,request_key=action.request_key)))
     except Exception as exc:
         return messaging.record_submission_error(action,exc)
     return finish(action,receipt)
@@ -357,9 +366,10 @@ def project(action,receipt):
 
 
 @frappe.whitelist(methods=['GET'])
-def mailbox_status():
+def mailbox_status(channel=None):
     require_access(manage=True)
-    return whatsapp.client().call_tool('email.mailbox',{})
+    from relay_core.hub_channels import choose, hub_arguments
+    return whatsapp.client().call_tool('email.mailbox',hub_arguments(choose('Email',requested=channel),{}))
 
 
 def history_keys(account,request_key):

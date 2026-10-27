@@ -17,6 +17,7 @@ from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
 from relay_core.automation.service import internal_save, outgoing_run
 from relay_core.hub import HubError
+from relay_core.hub_channels import hub_arguments, is_current
 from relay_core.message_types import contacts, location, normalize, preview, text, telegram_vcard
 from relay_core.message_updates import provider_key
 from relay_core.permissions import require_access, readable_contact
@@ -135,7 +136,7 @@ def readable_source(name):
     source = frappe.get_doc('Relay Message', name); source.check_permission('read')
     readable_contact(source.relay_contact)
     channel = frappe.get_doc('Relay Channel', source.channel); channel.check_permission('read')
-    if not channel.enabled or channel.account != connection_value('relay_hub_account'):
+    if not is_current(channel, connection_value('relay_hub_account')):
         frappe.throw('Conversation channel is disabled or belongs to another account', frappe.PermissionError)
     key = hashlib.sha256((source.channel + ':' + (source.sender_endpoint or '')).encode()).hexdigest()
     if frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact') != source.relay_contact:
@@ -264,11 +265,14 @@ def prepare(source, channel, context, kind, data, quote=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def send(message, kind, data, request_key, quote=1, channels=None):
+def send(message, kind, data, request_key, quote=1, channels=None, via=None):
     """`channels` names more Relay Channels of the same person; all copies share one send_group.
 
-    Extra copies never quote: the quoted message exists only on the source channel.
+    Extra copies never quote: the quoted message exists only on the source channel. `via` picks the
+    sending channel: empty keeps the source's channel, `auto` uses the reply channel at send time,
+    and a channel name is the staff's own pick.
     """
+    message, quote = reply_source(message, kind, request_key, via, quote)
     group = request_hash(request_key)[:32]
     sources = channel_sources(message, kind, channels, request_key)
     if not sources:
@@ -309,6 +313,54 @@ def channel_sources(message, kind, names, request_key):
             raise ValueError('This person has no conversation on the chosen channel')
         sources.append((key, newest))
     return sources
+
+
+SWITCHABLE = ('text', 'location', 'contact')  # Kinds that do not point at one message on the source channel.
+
+
+def reply_source(message, kind, request_key, via, quote):
+    """(source message, quote) on the sending channel; a retry keeps the source of its first try.
+
+    Another channel gets the person's newest message there as its source and never quotes."""
+    if not via:
+        return message, quote
+    source = readable_source(message)[0]
+    first = frappe.db.get_value('Relay Message Action', {'request_key': request_hash(request_key)}, 'source_message')
+    if first:
+        return first, quote if first == message else 0
+    target = reply_channel(source.relay_contact)['channel'] if via == 'auto' else via
+    if target == source.channel:
+        return message, quote
+    if kind not in SWITCHABLE:
+        raise ValueError('Only text, location and contact messages can go from another channel')
+    validate_reference(target, 'CH')
+    newest = frappe.db.get_value('Relay Message', {'relay_contact': source.relay_contact, 'channel': target},
+                                 'name', order_by='creation desc')
+    if not newest:
+        raise ValueError('This person has no conversation on the chosen channel')
+    return newest, 0
+
+
+@frappe.whitelist(methods=['GET'])
+def reply_channel(contact):
+    """Where a reply to this person goes out now, for the composer's "via" label.
+
+    The channel of the person's newest incoming message, else the team or site default of that type."""
+    from relay_core.hub_channels import choose, latest_incoming
+    readable_contact(contact)
+    endpoints = frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': contact, 'verified': 1},
+                               pluck='channel', limit_page_length=50)
+    rows = frappe.get_all('Relay Channel', fields=['name', 'channel'], filters={
+        'name': ['in', endpoints], 'enabled': 1, 'account': connection_value('relay_hub_account')}) if endpoints else []
+    name = latest_incoming(contact, [row.name for row in rows])
+    if not name and rows:
+        medium = rows[0].channel
+        name = choose(medium, [row.name for row in rows if row.channel == medium], contact)
+    if not name:
+        return {'channel': None}
+    doc = frappe.get_doc('Relay Channel', name)
+    doc.check_permission('read')
+    return {'channel': doc.name, 'provider': doc.channel, 'label': doc.label or doc.title, 'address': doc.address}
 
 
 def request_hash(request_key):
@@ -374,7 +426,7 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
         return {'action': action.name, 'status': action.status, 'message': None}
     try:
         # Do not infer destinations from a model or from caller-supplied data.
-        result = whatsapp.client().call_tool(tool, dict(arguments, request_key=key))
+        result = whatsapp.client().call_tool(tool, hub_arguments(channel, dict(arguments, request_key=key)))
     except Exception as exc:
         return record_submission_error(action, exc)
     return finish(action, source, channel, context, content, result)
@@ -419,7 +471,7 @@ def stale_receipt(action, receipt, *, accepted=False):
 
 def delivery_receipt(action, channel):
     tool = 'whatsapp.deliveries' if channel.channel == 'WhatsApp' else 'channels.deliveries'
-    result = whatsapp.client().call_tool(tool, {'request_key': action.request_key})
+    result = whatsapp.client().call_tool(tool, hub_arguments(channel, {'request_key': action.request_key}))
     rows = result.get('deliveries')
     if not isinstance(rows, list): raise ValueError('Invalid delivery lookup')
     if not rows: return None
@@ -578,7 +630,7 @@ def sticker(message):
         data = object_value(original.message_data or {})
     media = data.get('media') or {}; file_id = media.get('file_id') if channel.channel == 'Telegram' else media.get('id')
     if not isinstance(file_id, str) or not file_id: raise ValueError('Sticker file reference is missing')
-    result = whatsapp.client().media(channel.channel, file_id, sticker=True)
+    result = whatsapp.client().media(channel.channel, file_id, sticker=True, channel=hub_arguments(channel, {}).get('channel'))
     mime = result.get('content_type')
     if mime not in ('image/webp', 'video/webm', 'application/x-tgsticker'): raise ValueError('Unsupported sticker media type')
     try: raw = base64.b64decode(result.get('content_base64', ''), validate=True)
@@ -734,7 +786,7 @@ def reconcile(action):
         except DeliverySuppressed:
             return suppress_delivery(doc)
         try:
-            receipt = whatsapp.client().call_tool(tool, dict(arguments, request_key=doc.request_key))
+            receipt = whatsapp.client().call_tool(tool, hub_arguments(channel, dict(arguments, request_key=doc.request_key)))
         except Exception as exc:
             return record_submission_error(doc, exc)
         return finish(doc, source, channel, context, payload['content'], receipt)

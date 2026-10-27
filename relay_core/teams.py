@@ -24,6 +24,10 @@ def validate_team(doc):
             frappe.throw('A user can only appear once in a team')
         seen.add(member.user)
     validate_access(doc.get('access') or [])
+    from relay_core.hub_channels import TEAM_DEFAULTS
+    for medium, field in TEAM_DEFAULTS.items():
+        if doc.get(field) and frappe.db.get_value('Relay Channel', doc.get(field), 'channel') != medium:
+            frappe.throw(f'The default {medium} channel must be a {medium} channel')
 
 
 def validate_access(rows):
