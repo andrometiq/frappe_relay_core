@@ -1,0 +1,128 @@
+"""Undo of one relay-import-whatsapp-core run, in short transactions that can be resumed.
+
+Every change the import made is listed on its Relay Legacy Import markers (source_metadata.created).
+Undo reverses exactly these changes, newest marker first, and keeps whatever live messages use.
+"""
+from collections import Counter
+
+import frappe
+
+from relay_core import legacy
+from relay_core.legacy_database import ACTIVITY, OPT_OUT, refresh_activity, remove_unused_copies
+
+CHUNK = 1000
+
+
+def undo(site_label: str, chunk: int = CHUNK) -> dict:
+    removed = Counter()
+    while remove_messages(site_label, chunk, removed):
+        pass
+    for job in frappe.get_all('Relay Legacy Import', filters={'source_site': site_label},
+                              fields=['name', 'relay_contact', 'source_metadata'], order_by='name desc'):
+        revert(job.relay_contact, legacy.object_value(job.source_metadata).get('created', {}), removed)
+        frappe.db.delete('Relay Legacy Import', job.name)
+        frappe.db.commit()
+    from relay_core.queue_counts import invalidate
+    invalidate()
+    return dict(removed)
+
+
+def remove_messages(site_label: str, chunk: int, removed: Counter) -> int:
+    """Delete one chunk of imported messages, their Files and read receipts in its own transaction."""
+    messages = frappe.db.sql_list("""SELECT name FROM `tabRelay Message` WHERE legacy_source IS NOT NULL
+        AND JSON_UNQUOTE(JSON_EXTRACT(legacy_data, '$.source_site')) = %s LIMIT %s""", (site_label, chunk))
+    if not messages:
+        return 0
+    files = {'attached_to_doctype': 'Relay Message', 'attached_to_name': ['in', messages]}
+    urls = set(frappe.get_all('File', filters=files, pluck='file_url'))
+    frappe.db.delete('File', files)
+    # Users' read receipts of imported messages go with them.
+    frappe.db.delete('Relay Message Read', {'message': ['in', messages]})
+    frappe.db.delete('Relay Message', {'name': ['in', messages]})
+    frappe.db.commit()
+    removed['messages'] += len(messages)
+    removed['media_files'] += remove_unused_copies(urls)
+    return len(messages)
+
+
+def revert(contact: str, created: dict, removed: Counter) -> None:
+    """Reverse what one conversation import changed. Imported messages are already gone."""
+    restore_reactions(created.get('reactions', {}))
+    restore_opt_out(created.get('opt_out', {}), removed)
+    for link in created.get('links', []):
+        frappe.db.delete('Dynamic Link', link)
+        removed['customer_links'] += 1
+    assignment = created.get('assignment')
+    if assignment and not has_live_messages(contact, frappe.db.get_value('Relay Conversation Assignment', assignment, 'creation')):
+        frappe.db.delete('Relay Conversation Assignment', assignment)
+        removed['Relay Conversation Assignment'] += 1
+    if created.get('endpoint'):
+        remove_endpoint(created['endpoint'], removed)
+    if created.get('relay_contact'):
+        remove_contact(created, removed)
+    elif frappe.db.exists('Relay Contact', contact):
+        restore_activity(contact, created.get('activity'))
+
+
+def has_live_messages(contact: str, since=None, **filters) -> bool:
+    """A message, newer than `since` when given, still uses this contact. This import's messages are
+    deleted first, so what is left is live (or from another import)."""
+    filters = dict(filters, relay_contact=contact)
+    if since:
+        filters['creation'] = ['>', since]
+    return bool(frappe.db.exists('Relay Message', filters))
+
+
+def remove_endpoint(name: str, removed: Counter) -> None:
+    endpoint = frappe.db.get_value('Relay Contact Endpoint', name, ['relay_contact', 'channel', 'endpoint'], as_dict=True)
+    if not endpoint:
+        return
+    if has_live_messages(endpoint.relay_contact, channel=endpoint.channel, sender_endpoint=endpoint.endpoint):
+        removed['endpoints_kept_with_new_messages'] += 1
+        return
+    frappe.db.delete('Relay Contact Endpoint', name)
+    removed['Relay Contact Endpoint'] += 1
+
+
+def remove_contact(created: dict, removed: Counter) -> None:
+    """Delete the Relay Contact (and Contact) the import made, unless live messages or other endpoints use it."""
+    contact = created['relay_contact']
+    if has_live_messages(contact) or frappe.db.exists('Relay Contact Endpoint', {'relay_contact': contact}):
+        removed['contacts_kept_with_new_messages'] += 1
+        restore_activity(contact, None)
+        return
+    frappe.db.delete('Relay Contact', contact)
+    removed['Relay Contact'] += 1
+    for doctype in ('Relay Conversation Assignment', 'Relay Conversation State'):
+        frappe.db.delete(doctype, {'relay_contact': contact})
+    person = created.get('contact')
+    if person and not frappe.db.exists('Relay Contact', {'contact': person}):
+        frappe.db.delete('Contact', person)
+        frappe.db.delete('Contact Phone', {'parenttype': 'Contact', 'parent': person})
+        frappe.db.delete('Dynamic Link', {'parenttype': 'Contact', 'parent': person})
+        removed['Contact'] += 1
+
+
+def restore_activity(contact: str, activity: dict | None) -> None:
+    """Put back the directory activity from before the import, then let newer live messages move it."""
+    values = {field: (activity or {}).get(field) for field in ACTIVITY}
+    if values['last_message'] and not frappe.db.exists('Relay Message', values['last_message']):
+        values = dict.fromkeys(ACTIVITY)
+    frappe.db.set_value('Relay Contact', contact, values, update_modified=False)
+    if has_live_messages(contact):
+        refresh_activity(contact)
+
+
+def restore_opt_out(changes: dict, removed: Counter) -> None:
+    """Put back an existing endpoint's opt-out choice, unless it changed again after the import."""
+    for name, change in changes.items():
+        current = frappe.db.get_value('Relay Contact Endpoint', name, OPT_OUT, as_dict=True)
+        if current and all(str(current[field]) == str(change['after'][field]) for field in OPT_OUT):
+            frappe.db.set_value('Relay Contact Endpoint', name, change['before'], update_modified=False)
+            removed['opt_out_restored'] += 1
+
+
+def restore_reactions(saved: dict) -> None:
+    for name, values in saved.items():
+        if frappe.db.exists('Relay Message', name):
+            frappe.db.set_value('Relay Message', name, values, update_modified=False)
