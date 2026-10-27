@@ -8,6 +8,7 @@ source_key, so a re-run skips what is already imported.
 import os
 import re
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
 
 MESSAGE = 'tabWhatsApp Core Message'
+RETRIES = 3
 ACTIVITY = ('last_message_at', 'last_message')
 OPT_OUT = ('marketing_opt_out', 'opt_out_changed_at', 'modified')
 # What a re-run takes from a changed source row; identity, contact and channel never change.
@@ -88,7 +90,6 @@ class Importer:
         for conversation in conversations:
             try:
                 self.import_conversation(conversation)
-                self.commit()
             except Exception as exc:
                 self.rollback()
                 self.failures.append({'conversation': conversation.name, 'error': f'{type(exc).__name__}: {exc}'})
@@ -110,32 +111,60 @@ class Importer:
         self.pending_unresolved, self.copied = [], set()
 
     def import_conversation(self, conversation):
+        """Import one conversation in transactions of at most --batch messages."""
         rows = self.page(conversation.name, ('', ''))
         if not rows:
             self.counts['empty_conversations'] += 1
             return
         channel = self.channels[conversation.channel]
         endpoint, is_phone = legacy_endpoint(conversation)
-        created = {}
-        contact = self.contact_for(channel, endpoint, is_phone, conversation, created)
         manifest = {'source_site': self.site_label, 'endpoint': endpoint, 'source_conversation': conversation.name,
                     'identifier_type': 'Phone' if is_phone else conversation.identifier_type}
-        job = frappe._dict(channel=channel, relay_contact=contact)
-        marker = None if self.dry_run else self.mark(conversation, channel, contact, created)
-        while rows:
-            before = self.counts['created']
-            self.import_rows(rows, job, manifest)
-            if marker:
-                frappe.db.sql('UPDATE `tabRelay Legacy Import` SET imported = imported + %s WHERE name = %s',
-                              (self.counts['created'] - before, marker))
-            # One transaction per --batch messages, so one long conversation never holds a huge one.
-            self.commit()
-            rows = self.page(conversation.name, bundles.order_key(rows[-1]))
+        created = {}
+
+        def first_page():
+            created.clear()
+            contact = self.contact_for(channel, endpoint, is_phone, conversation, created)
+            # The marker comes before the first message, so undo finds what an interrupted run made.
+            marker = None if self.dry_run else self.mark(conversation, channel, contact, created)
+            job = frappe._dict(channel=channel, relay_contact=contact, marker=marker)
+            self.import_page(rows, job, manifest)
+            return job
+
+        job = self.transaction(first_page)
+        while rows := self.page(conversation.name, bundles.order_key(rows[-1])):
+            self.transaction(lambda: self.import_page(rows, job, manifest))
         if not self.dry_run:
-            self.project_reactions(job, created)
-            self.finish_contact(channel, endpoint, contact, created)
-            self.mark(conversation, channel, contact, created)
-            frappe.db.set_value('Relay Legacy Import', marker, 'status', 'Completed', update_modified=False)
+            self.transaction(lambda: self.finish(conversation, endpoint, job, created))
+
+    def transaction(self, work):
+        """Run and commit one unit of work. A deadlock with live traffic (such as an inbound message
+        taking the same naming series) rolls it back and runs it again."""
+        for attempt in range(1, RETRIES + 1):
+            failures = len(self.failures)
+            try:
+                result = work()
+                self.commit()
+                return result
+            except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+                self.rollback()
+                del self.failures[failures:]
+                if attempt == RETRIES:
+                    raise
+                time.sleep(attempt)
+
+    def import_page(self, rows, job, manifest):
+        before = self.counts['created']
+        self.import_rows(rows, job, manifest)
+        if job.marker:
+            frappe.db.sql('UPDATE `tabRelay Legacy Import` SET imported = imported + %s WHERE name = %s',
+                          (self.counts['created'] - before, job.marker))
+
+    def finish(self, conversation, endpoint, job, created):
+        self.project_reactions(job, created)
+        self.finish_contact(job.channel, endpoint, job.relay_contact, created)
+        self.mark(conversation, job.channel, job.relay_contact, created)
+        frappe.db.set_value('Relay Legacy Import', job.marker, 'status', 'Completed', update_modified=False)
 
     def finish_contact(self, channel, endpoint, contact, created):
         """Set the directory activity and opt-out choice from the imported history. On a contact or
