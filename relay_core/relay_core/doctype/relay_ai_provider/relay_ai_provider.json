@@ -10,7 +10,8 @@
     "provider",
     "model",
     "api_key",
-    "enabled"
+    "enabled",
+    "allow_in_test_mode"
   ],
   "fields": [
     {
@@ -36,6 +37,13 @@
       "fieldname": "enabled",
       "label": "Enabled",
       "fieldtype": "Check"
+    },
+    {
+      "fieldname": "allow_in_test_mode",
+      "label": "Allow in test mode",
+      "fieldtype": "Check",
+      "default": "0",
+      "description": "Lets this provider be called while Relay Settings test mode is on. Use only a capped test key."
     }
   ],
   "permissions": [

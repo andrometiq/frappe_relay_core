@@ -108,11 +108,13 @@ def extract(provider, response):
     return ''.join(p['text'] for p in candidate['content']['parts'] if 'text' in p and not p.get('thought'))
 
 
-def complete(provider, model, key, prompt, images=None):
+def complete(provider, model, key, prompt, images=None, *, allow_in_test_mode=False):
     if not isinstance(prompt, str) or len(prompt.encode()) > 48000:
         raise ProviderError('Model context exceeds limit')
+    url, headers, body = request_spec(provider, model, key, prompt, images)
+    from relay_core.test_mode import ensure_allowed
+    ensure_allowed(url, allowed=allow_in_test_mode)
     try:
-        url, headers, body = request_spec(provider, model, key, prompt, images)
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=25) as response:
             raw = response.read(262145)
