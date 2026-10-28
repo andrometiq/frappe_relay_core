@@ -1,12 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { effectScope, nextTick, ref, watch } from 'vue'
+import { effectScope, nextTick, ref } from 'vue'
+import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 
 const text = await readFile(new URL('../src/components/UnlinkedContacts.vue', import.meta.url), 'utf8')
 const script = text.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-const factory = new Function('ref', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi', 'IntersectionObserver',
-  'setTimeout', 'clearTimeout', script + '\nreturn { rows, query, next, busy, error, more, load, linked, selected };')
+const factory = new Function('ref', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi', 'useDebouncedSearch', 'useLoadMore',
+  script + '\nreturn { rows, query, next, busy, error, more, load, linked, selected };')
 
 function setup(api) {
   let mount, cleanup, refresh, intersection, timer
@@ -16,10 +18,12 @@ function setup(api) {
     observe(element) { observed.push(element) }
     disconnect() {}
   }
-  const state = scope.run(() => factory(ref, watch, fn => { mount = fn }, fn => { cleanup = fn },
-    (_dt, _kinds, fn) => { refresh = fn }, api, Observer, fn => { timer = fn; return 1 }, () => { timer = null }))
+  const globals = { IntersectionObserver: globalThis.IntersectionObserver, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout }
+  Object.assign(globalThis, { IntersectionObserver: Observer, setTimeout: fn => { timer = fn; return 1 }, clearTimeout: () => { timer = null } })
+  const state = scope.run(() => factory(ref, fn => { mount = fn }, fn => { cleanup = fn },
+    (_dt, _kinds, fn) => { refresh = fn }, api, useDebouncedSearch, useLoadMore))
   return { state, mount, refresh, observed, intersect: () => intersection([{ isIntersecting: true }]),
-    search: () => timer?.(), stop: () => { cleanup(); scope.stop() } }
+    search: () => timer?.(), stop: () => { cleanup(); scope.stop(); Object.assign(globalThis, globals) } }
 }
 
 const flush = async () => { await nextTick(); await Promise.resolve(); await nextTick() }
