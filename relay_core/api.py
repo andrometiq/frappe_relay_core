@@ -293,15 +293,20 @@ def channel_options():
 
 
 @frappe.whitelist(methods=['GET'])
-def contact_directory(query='', after=None):
+def contact_directory(query='', after=None, business_type=None):
+    """Contacts by name; `business_type` keeps the contacts linked to a record of that type."""
     require_access()
     if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
         frappe.throw('Invalid contact search')
-    filters = {'name': ['>', after]} if after else {}
+    if business_type and business_type not in business_types():
+        frappe.throw('Choose a configured business type')
+    filters = [['Contact', 'name', '>', after]] if after else []
     if query.strip():
-        filters['full_name'] = ['like', '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%']
+        filters.append(['Contact', 'full_name', 'like', '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'])
+    if business_type:
+        filters.append(['Dynamic Link', 'link_doctype', '=', business_type])
     rows = frappe.get_list('Contact', filters=filters, fields=['name', 'full_name', 'mobile_no'],
-        order_by='name asc', page_length=31)
+        order_by='name asc', page_length=31, distinct=True)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 
 
