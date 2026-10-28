@@ -271,7 +271,7 @@ function actions(message) {
         <span class="number-tag">{{ numberTags[message.name] }}</span>
       </div>
       <article v-if="message.note" class="note-bubble" aria-label="Internal note">
-        <header><FeatherIcon name="lock" :size="13" /><strong>{{ message.note.author_name }}</strong>
+        <header><FeatherIcon name="lock" :size="13" /><span>Internal note</span><strong>{{ message.note.author_name }}</strong>
           <time :title="timeOf(message)?.toLocaleString()" :datetime="timeOf(message)?.toISOString()">{{ timeLabel(message) }}</time></header>
         <p>{{ message.note.body }}</p>
         <small>Only your team sees this</small>
@@ -385,10 +385,10 @@ function actions(message) {
 .message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
 @media (hover:none){.message-menu-trigger{display:none}}
 .has-menu-sheet .conversation-bubble:not(.menu-target){opacity:.35}
-.note-bubble{align-self:center;width:min(420px,90%);margin:6px auto;padding:8px 12px;border:1px solid color-mix(in srgb,var(--relay-amber) 45%,transparent);border-radius:8px;background:color-mix(in srgb,var(--relay-amber) 10%,var(--surface-white));color:var(--relay-ink,var(--ink-gray-8));font-size:13px}
-.note-bubble header{display:flex;align-items:center;gap:6px;color:var(--relay-amber);font-size:12px}
-.note-bubble time{margin-left:auto;font-size:11px;color:var(--ink-gray-5)}
+.note-bubble{align-self:center;width:min(420px,90%);margin:6px auto;padding:8px 12px;border:1px solid color-mix(in srgb,var(--relay-note-ink) 45%,transparent);border-radius:8px;background:var(--relay-note-bg);color:var(--relay-ink,var(--ink-gray-8));font-size:13px}
+.note-bubble header{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--relay-note-ink);font-size:12px}
+.note-bubble time{margin-left:auto;font-size:12px;color:var(--relay-note-ink)}
 .note-bubble p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
-.note-bubble small{font-size:11px;color:var(--relay-amber)}
+.note-bubble small{font-size:12px;color:var(--relay-note-ink)}
 .conversation-bubble.menu-target{box-shadow:0 0 0 2px var(--relay-accent,#2f6fdb)}
 </style>

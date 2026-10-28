@@ -231,7 +231,7 @@ function keydown(event) {
     @focusin="expandOn" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="!noting && canSend && send()">
     <div class="composer-tabs" role="group" aria-label="Compose">
       <button type="button" :class="{ active: !noting }" :aria-pressed="!noting" @click="emit('mode', 'reply'); nextTick(() => draftInput?.focus())">Reply</button>
-      <button type="button" :class="{ active: noting }" :aria-pressed="noting" @click="emit('mode', 'note')"><FeatherIcon name="lock" :size="12" />{{ isMobile ? "Note" : "Internal note" }}</button>
+      <button type="button" :class="{ active: noting }" :aria-pressed="noting" @click="emit('mode', 'note')"><FeatherIcon name="lock" :size="12" />Internal note</button>
       <template v-if="isMobile && !noting && !closed">
         <span v-if="windowHint" class="composer-tabs-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
         <button v-if="can('templates')" type="button" class="composer-tab-action" :disabled="busy" :title="busy ? busyReason : 'Send an approved template'" @click="emit('template')"><FeatherIcon name="file-text" :size="13" />Template</button>
@@ -301,10 +301,10 @@ function keydown(event) {
 
 <style scoped>
 .composer-tabs > button { display:inline-flex; align-items:center; gap:5px; }
-.composer-tabs > button:nth-child(2).active { background:var(--surface-amber-1); color:var(--relay-amber); }
-.v1-shell.relay-shell .compact-composer.is-note:not(.email-composer) { grid-template-areas:"tabs" "note"; grid-template-columns:minmax(0,1fr); border-color:color-mix(in srgb, var(--relay-amber) 45%, transparent); border-bottom-color:var(--relay-amber); background:var(--surface-amber-1); }
+.composer-tabs > button:nth-child(2).active { background:var(--relay-note-bg); color:var(--relay-note-ink); }
+.v1-shell.relay-shell .compact-composer.is-note:not(.email-composer) { grid-template-areas:"tabs" "note"; grid-template-columns:minmax(0,1fr); border-color:color-mix(in srgb, var(--relay-note-ink) 45%, transparent); border-bottom-color:var(--relay-note-ink); background:var(--relay-note-bg); }
 .v1-shell.relay-shell .compact-composer.is-closed:not(.email-composer) { grid-template-areas:"tabs" "closed"; grid-template-columns:minmax(0,1fr); }
-.composer-closed { grid-area:closed; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:6px 8px 8px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--relay-amber) 45%, transparent); border-radius:8px; background:var(--surface-amber-1); }
+.composer-closed { grid-area:closed; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:6px 8px 8px; padding:10px 12px; border:1px solid var(--outline-gray-2); border-radius:8px; background:var(--surface-gray-2); color:var(--ink-gray-6); }
 .composer-closed > p { flex:1 1 260px; }
 .composer-closed > p[role=status] { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--relay-ink, var(--ink-gray-8)); }
 .composer-closed-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
