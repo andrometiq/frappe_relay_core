@@ -319,7 +319,11 @@ def current(run, skill, message):
 
 
 def log_failure(run, exc):
-    """Keep the traceback in Error Log and a bounded explanation for staff."""
+    """Preserve failed inference logs, its traceback and a bounded explanation."""
+    try:
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
     frappe.log_error(title='Relay AI run failed', message=traceback.format_exc(),
                      reference_doctype='Relay Automation Run', reference_name=run.name)
     return (' '.join(str(exc).split()) or type(exc).__name__)[:500]
@@ -405,7 +409,6 @@ def process(name, *, deadline=None):
         run.status, run.reason = 'Cancelled', 'Conversation, message or skill changed'
         internal_save(run); frappe.db.commit()
     except Exception as exc:
-        frappe.db.rollback()
         reason = log_failure(run, exc)
         run = lock_run(name)
         if run.status not in ('Pending', 'Deciding'):
@@ -644,7 +647,6 @@ def admit(run):
         run.status, run.reason = 'Cancelled', 'Conversation or message changed'
         internal_save(run); frappe.db.commit(); return
     except Exception as exc:
-        frappe.db.rollback()
         reason = log_failure(run, exc)
         run = lock_run(run.name)
         run.match_result = json.dumps(dict(selected=None, scores=[], method='failed',

@@ -189,10 +189,11 @@ def _ai_context(run_name, step):
         definition = definitions().get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
         # current() verifies the sender endpoint and the Contact link to this business.
-        # Explicit legacy mappings remain additional restrictions, not prerequisites.
+        # A reference's legacy identity mapping restricts only actions on its doctype.
         references = read_contracts(skill, scope['provider'])
         anchors = {row['identity_fields'][scope['provider']] for row in references
-                   if row.get('identity_anchor') == business[0]}
+                   if row.get('identity_anchor') == business[0]
+                   and row['doctype'] in definition['permissions']}
         for field in anchors:
             scoped_document(*business, {field: scope['endpoint']})
         for doctype, permission in definition['permissions'].items():

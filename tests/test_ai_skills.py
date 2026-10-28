@@ -149,6 +149,18 @@ class ScopedToolTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.reader.read(self.contract)
         self.f.get_all.assert_not_called()
 
+    def test_reference_requires_present_matching_identity_before_business_read(self):
+        for phone in (None, '', '15550000002'):
+            with self.subTest(phone=phone):
+                self.anchor.phone = phone
+                self.f.get_list.reset_mock()
+                with self.assertRaises(ValueError):
+                    self.reader.read(self.contract)
+                self.assertEqual(self.reader.evidence, [])
+                self.assertTrue(all(call.args[0] == 'Supplier' for call in self.f.get_list.call_args_list))
+        self.anchor.phone = self.scope['endpoint']
+        self.assertEqual(self.reader.read(self.contract)[0]['amount'], 1250)
+
     def test_missing_scope_or_legacy_contract_never_grants_access(self):
         with self.assertRaises(ValueError):
             self.tools.Reader(self.skill, 'partner', ('Supplier', 'SUP-A')).read(self.contract)
