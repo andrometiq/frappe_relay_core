@@ -185,7 +185,6 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
 
     <FrappeFormSection>
       <div class="frappe-field-grid">
-        <FrappeReadField label="Template name" :value="selectedTemplate.name" />
         <FrappeReadField label="Status" :value="[selectedTemplate.status ? sentenceCase(selectedTemplate.status) : 'Unknown', statusHint(selectedTemplate.status)].filter(Boolean).join(' · ')" />
         <FrappeReadField v-if="['REJECTED', 'PAUSED', 'DISABLED'].includes(selectedTemplate.status)" label="Reason from Meta" :value="rejection(selectedTemplate) || 'Meta has not provided a reason. Review the template in WhatsApp Manager.'" wide />
         <FrappeReadField label="Category" :value="sentenceCase(selectedTemplate.category)" />

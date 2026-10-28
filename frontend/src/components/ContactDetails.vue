@@ -45,7 +45,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
       <header v-if="!compact" class="contact-detail-heading"><Button v-if="dismissible && isMobile" icon="chevron-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div class="contact-detail-name"><h3 :title="recordTitle(detail, 'Contact')">{{ recordTitle(detail, 'Contact') }}</h3><p>{{ detail.phone || 'No phone number' }}</p></div><Button v-if="dismissible && !isMobile" class="contact-detail-close" icon="x" variant="ghost" aria-label="Close" title="Close" @click="emit('close')" /></header>
-      <p v-if="link" class="info-hint">{{ detail.can_edit_links ? 'Link this chat to a customer or supplier. The chat then shows their name.' : 'Not linked to a customer yet. A manager can link it.' }}</p>
+      <p v-if="link" class="info-hint">{{ detail.can_edit_links ? 'Choose the record type, then find the record. The chat then shows its name.' : 'Not linked to a customer yet. A manager can link it.' }}</p>
       <ContactLinks :contact="detail.name" :detail="detail" :start="link" @changed="linksChanged" @cancel="link && emit('close')" />
       <template v-if="!link">
       <h4 class="info-group-title">Details</h4>

@@ -273,21 +273,32 @@ class BackendFindings(unittest.TestCase):
     def test_old_single_business_note_resolves_scope_for_replies(self):
         f=self.fake();f.parse_json.return_value=[]
         note=_dict(relay_contact='contact',messages='[]')
-        with patch.object(collaboration,'frappe',f),patch.object(business_access,'reference',return_value=('Customer','customer')),patch.object(business_access,'readable_business',return_value=('Customer','customer')):
+        with patch.object(collaboration,'frappe',f),patch.object(business_access,'reference',return_value=('Customer','customer')),patch.object(collaboration,'readable_contact'):
             collaboration.authorize(note)
         self.assertEqual((note.business_doctype,note.business_name),('Customer','customer'))
 
-    def test_unlinked_conversation_note_has_no_business(self):
+    def test_business_note_follows_the_conversation_not_the_business_record(self):
+        f=self.fake();f.parse_json.return_value=[]
+        note=_dict(relay_contact='contact',messages='[]',business_doctype='Customer',business_name='private')
+        with patch.object(collaboration,'frappe',f),patch.object(business_access,'allowed',return_value=False):
+            with patch.object(collaboration,'readable_contact') as reader:
+                self.assertIs(collaboration.authorize(note),note)
+                reader.assert_called_once_with('contact')
+            with patch.object(collaboration,'readable_contact',side_effect=PermissionError):
+                with self.assertRaises(PermissionError):collaboration.authorize(note)
+            with patch.object(permissions,'can_read_contact_as',return_value=False):
+                with self.assertRaises(PermissionError):collaboration.authorize(note,'outsider')
+        self.assertEqual((note.business_doctype,note.business_name),('Customer','private'))
+
+    def test_new_business_note_needs_a_link_but_not_business_read(self):
         f=self.fake()
-        with patch.object(collaboration,'frappe',f),patch.object(business_access,'candidates',return_value=[]),patch.object(business_access,'choose_business') as choose:
-            self.assertEqual(collaboration.business_scope('unlinked',[]),(None,None))
-            f.get_doc.return_value=_dict(relay_contact='unlinked',business_doctype=None,business_name=None)
-            with patch.object(business_access,'reference',return_value=None):
-                self.assertEqual(collaboration.business_scope('unlinked',['message']),(None,None))
-            choose.assert_not_called()
-        links=[('Customer','A'),('Supplier','B')]
-        with patch.object(collaboration,'frappe',f),patch.object(business_access,'candidates',return_value=links),patch.object(business_access,'choose_business',side_effect=ValueError('Choose a linked business record')):
-            with self.assertRaises(ValueError):collaboration.business_scope('linked',[])
+        with patch.object(collaboration,'frappe',f),patch.object(business_access,'candidates',return_value=[('Customer','C1')]),\
+                patch.object(business_access,'primary',return_value=('Customer','C1')):
+            self.assertEqual(collaboration.business_scope('linked',[]),('Customer','C1'))
+            f.get_doc.assert_not_called()
+            with patch.object(business_access,'frappe',f),self.assertRaises(ValueError):
+                f.throw.side_effect=ValueError
+                collaboration.business_scope('linked',[],'Customer','other')
 
     def test_conversation_note_uses_conversation_read_rule(self):
         f=self.fake();f.parse_json.return_value=[]

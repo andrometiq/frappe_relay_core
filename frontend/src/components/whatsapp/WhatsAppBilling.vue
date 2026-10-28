@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { Button, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
+import { Button, Dropdown, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useTask } from '../../composables/useTask'
 import {
@@ -15,6 +15,13 @@ const props = defineProps({ account: { type: String, default: '' } })
 const capabilities = inject('relayCapabilities', ref({}))
 const months = monthOptions(), years = yearOptions()
 const view = ref('month'), month = ref(months[0].value), year = ref(years[0]), data = ref(null)
+// One period picker: arrows step through the list, the menu jumps to any entry. Lists run newest first.
+const periods = computed(() => view.value === 'month' ? months : years.map(value => ({ value, label: value })))
+const period = computed({ get: () => view.value === 'month' ? month.value : year.value,
+  set: value => { if (view.value === 'month') month.value = value; else year.value = value } })
+const periodIndex = computed(() => periods.value.findIndex(option => option.value === period.value))
+const periodMenu = computed(() => periods.value.map(option => ({ label: option.label, icon: option.value === period.value ? 'check' : '', onClick: () => { period.value = option.value } })))
+const step = offset => { period.value = periods.value[periodIndex.value + offset].value }
 const { busy, error, notice, run } = useTask()
 
 const dataYear = computed(() => view.value === 'month' ? month.value.slice(0, 4) : year.value)
@@ -53,8 +60,11 @@ onMounted(() => run(load))
       <div class="billing-toggle" role="group" aria-label="Billing period">
         <button v-for="option in [['month', 'Month'], ['year', 'Year']]" :key="option[0]" type="button" :aria-pressed="view === option[0]" @click="view = option[0]">{{ option[1] }}</button>
       </div>
-      <FormControl v-if="view === 'month'" v-model="month" class="billing-period" type="select" aria-label="Month" :options="months" :disabled="busy" />
-      <FormControl v-else v-model="year" class="billing-period" type="select" aria-label="Year" :options="years" :disabled="busy" />
+      <div class="billing-period" role="group" :aria-label="view === 'month' ? 'Month' : 'Year'">
+        <Button variant="ghost" icon="chevron-left" :aria-label="view === 'month' ? 'Previous month' : 'Previous year'" :disabled="busy || periodIndex >= periods.length - 1" @click="step(1)" />
+        <Dropdown :options="periodMenu"><Button variant="outline" :label="periods[periodIndex]?.label" icon-right="chevron-down" :disabled="busy" /></Dropdown>
+        <Button variant="ghost" icon="chevron-right" :aria-label="view === 'month' ? 'Next month' : 'Next year'" :disabled="busy || periodIndex <= 0" @click="step(-1)" />
+      </div>
       <span v-if="updated" class="billing-updated">Updated {{ updated }}</span>
       <Button variant="outline" label="Refresh" icon-left="refresh-cw" :loading="busy" :disabled="!account" @click="run(refresh)" />
     </header>
@@ -155,7 +165,7 @@ onMounted(() => run(load))
 <style scoped>
 .billing { display:flex; flex-direction:column; gap:14px; }
 .billing-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px; }
-.billing-period { width:140px; }
+.billing-period { display:inline-flex; align-items:center; gap:2px; }
 .billing-toggle { display:inline-flex; padding:3px; border:1px solid var(--relay-stroke); border-radius:7px; background:var(--relay-hover); }
 .billing-toggle button { position:relative; height:26px; min-height:26px; padding:0 14px; border-radius:5px; font-size:12.5px; color:var(--relay-ink-2); }
 .billing-toggle button[aria-pressed=true] { background:var(--relay-layer-strong); color:var(--relay-ink); font-weight:600; box-shadow:var(--relay-shadow-1); }

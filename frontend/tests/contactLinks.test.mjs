@@ -52,3 +52,19 @@ test('one link search covers every type, names the type and skips a type that fa
   await assert.rejects(searchLinkChoices(types, async () => { throw Error('Offline') }), /Offline/)
   assert.deepEqual(await searchLinkChoices([], async () => []), [])
 })
+
+test('linking asks for the record type before searching records of that type', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../src/components/ContactLinks.vue', import.meta.url), 'utf8')
+  assert.match(source, /role="radiogroup" aria-label="Record type"/)
+  assert.match(source, /readOnly: busy\.value \|\| !pickedType\.value/)
+  assert.match(source, /searchLinkChoices\(\[pickedType\.value\]/)
+})
+
+test('browsing records shows every record type as a choice and starts on the filtered type', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const directory = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
+  const inbox = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
+  assert.match(directory, /v-if="types\.length > 1" class="business-type-options" role="radiogroup"/)
+  assert.match(inbox, /:selected-doctype="businessType \|\| filters\.businessType"/)
+})

@@ -15,7 +15,7 @@ class ContactApiTests(unittest.TestCase):
         self.enterContext(patch.object(contacts, 'frappe', self.fake))
         self.enterContext(patch.object(contact_lifecycle, 'frappe', self.fake))
         self.enterContext(patch.object(contact_lifecycle, 'bindings', return_value=iter(())))
-        self.enterContext(patch.object(contacts, 'can_link_unlinked', return_value=False))
+        self.enterContext(patch.object(contacts, 'can_manage_links', return_value=False))
         self.fake.db.get_value.return_value = None
         self.access = self.enterContext(patch.object(contacts, 'require_access'))
         self.conversation = self.enterContext(patch.object(contacts, 'readable_contact'))

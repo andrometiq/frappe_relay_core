@@ -40,3 +40,9 @@ test('message info has no internal reference or coverage jargon', async () => {
   assert.doesNotMatch(info, /Message reference|coverage requirement|assigned operators/)
   for (const label of ['Sent', 'Delivered', 'Read']) assert.match(info, new RegExp(`label: '${label}'`))
 })
+
+test('message info shows the provider time of each receipt', async () => {
+  const info = await read('messages/MessageInfoDialog.vue')
+  assert.match(info, /times = props\.coverage\?\.receipt_times \|\| \{\}/)
+  for (const status of ['Sent', 'Delivered', 'Read']) assert.match(info, new RegExp(`when\\(times\\.${status}\\)`))
+})

@@ -8,9 +8,9 @@ test('the chat header has no assignment control', async () => {
   assert.doesNotMatch(await read('components/messages/ConversationTools.vue'), /Assign|assignment|teams\.assign/)
 })
 
-test('the More menu lists only notes, topics and search', () => {
+test('the More menu lists notes, topics, search and, on phones, the ticket action', () => {
   const menu = connected.split('const menuActions = computed')[1].split('const channelLine')[0]
-  assert.deepEqual([...menu.matchAll(/label:'([^']+)'/g)].map(match => match[1]), ['Internal notes', 'Topics', 'Search conversation'])
+  assert.deepEqual([...menu.matchAll(/label:'([^']+)'/g)].map(match => match[1]), ['Internal notes', 'Topics', 'Search conversation', 'Create ticket from this chat'])
 })
 
 test('the More menu is one dropdown that closes itself on choice', async () => {
@@ -35,9 +35,9 @@ test('the header second line names the person, then phone, email and channel', (
   assert.match(connected, /whoLine = computed\(\(\) => \[\.\.\.who\.value, channelCaption\.value\]/)
 })
 
-test('a switched-off channel shows a plain banner instead of the composer', () => {
-  assert.match(connected, /<p v-if="channelOff && !numbers\.active\.value" class="chat-channel-off"[^>]*>[^\n]*channelOffText\(provider\)/)
-  assert.match(connected, /<EmailComposer v-else-if=/)
+test('a switched-off channel shows a plain banner in place of replies', () => {
+  assert.match(connected, /const replyOff = computed\(\(\) => channelOff\.value && !numbers\.active\.value \? channelOffText\(provider\.value\) : ''\)/)
+  assert.match(connected, /<EmailComposer v-if="!replyOff && /)
   assert.match(connected, /plainChatError\(loadFailed \? '' : error\)/)
 })
 

@@ -58,13 +58,28 @@ class DeliveryReceiptTests(unittest.TestCase):
     def apply(self, state, timestamp):
         return self.module.apply_updates(self.receipt(state, timestamp), 'channel', 'event')
 
+    def times(self):
+        return json.loads(self.doc.message_updates)['delivery']['times']
+
     def test_read_never_regresses_on_late_or_newer_delivery(self):
         self.apply('read', 20)
         self.apply('delivered', 10)
         self.apply('sent', 30)
         self.apply('failed', 40)
         self.assertEqual(self.doc.status, 'Read')
-        self.assertEqual(self.frappe.db.bulk_update.call_count, 1)
+        self.assertEqual(self.times(), {'Read': 20, 'Delivered': 10, 'Sent': 30}, 'A late receipt still records its time')
+        self.assertEqual(self.frappe.db.bulk_update.call_count, 3)
+
+    def test_each_receipt_status_keeps_its_first_provider_time(self):
+        self.apply('sent', 10)
+        self.apply('delivered', 12)
+        self.apply('delivered', 15)
+        self.apply('read', 20)
+        self.assertEqual(self.times(), {'Sent': 10, 'Delivered': 12, 'Read': 20})
+        statuses=[self.receipt(state,stamp)['entry'][0]['changes'][0]['value']['statuses'][0] for state,stamp in [('read',9),('sent',5),('delivered',7)]]
+        self.doc.update(status='Pending', message_updates=None)
+        self.module.apply_updates({'entry':[{'changes':[{'value':{'statuses':statuses}}]}]},'channel','event')
+        self.assertEqual((self.doc.status, self.times()), ('Read', {'Sent': 5, 'Delivered': 7, 'Read': 9}), 'One batch keeps every time')
 
     def test_delayed_stronger_receipt_is_not_lost(self):
         self.apply('sent', 30)
@@ -134,6 +149,30 @@ class DeliveryReceiptTests(unittest.TestCase):
         self.query.run.return_value=[self.doc]
         self.apply('sent',30)
         self.assertEqual(self.doc.status,'Read')
+
+    def test_pending_receipts_keep_every_status_time(self):
+        self.query.run.return_value=[]
+        for state,stamp in [('sent',10),('delivered',12),('read',20)]:
+            self.apply(state,stamp)
+        self.batch.apply_pending(self.doc)
+        self.assertEqual((self.doc.status,self.times()),('Read',{'Sent':10,'Delivered':12,'Read':20}))
+
+    def test_group_receipts_keep_each_status_earliest_time(self):
+        self.doc.provider_context={'group_id':'15551234567'}
+        lookups={'Relay Contact Endpoint':'contact','Relay Message':'message'}
+        self.frappe.db.get_value.side_effect=lambda doctype,*args,**kwargs:lookups[doctype]
+        self.frappe.get_doc=lambda *args:self.doc
+        record=types.SimpleNamespace(record=Mock(return_value=True))
+        def apply(state,stamp):
+            payload=self.receipt(state,stamp)
+            payload['entry'][0]['changes'][0]['value']['statuses'][0].update(recipient_participant_id='1555000'+str(stamp),recipient_type='group')
+            with patch.dict(sys.modules,{'relay_core.delivery_receipts':record}):
+                self.module.apply_updates(payload,'channel','event')
+        apply('read',20)
+        apply('sent',10)
+        apply('delivered',12)
+        apply('read',15)
+        self.assertEqual((self.doc.status,self.times()),('Read',{'Sent':10,'Delivered':12,'Read':15}))
 
     def test_failed_receipt_keeps_meta_error_on_message(self):
         payload=self.receipt('failed',30)

@@ -12,15 +12,16 @@ const when = value => { const date = new Date(String(value || '').replace(' ', '
 const outgoing = computed(() => props.info?.direction === 'Outgoing')
 const person = computed(() => props.contactName || 'Customer')
 const failed = computed(() => ['Failed', 'Rejected'].includes(props.info?.status))
+// Provider receipt times come with the read coverage; an old receipt has none and shows only its state.
 const rows = computed(() => {
-  const info = props.info, sent = when(info.sent_at || info.creation)
+  const info = props.info, times = props.coverage?.receipt_times || {}, sent = when(info.sent_at || info.creation)
   if (!outgoing.value) return [{ label: 'Received', value: sent, who: 'From ' + person.value }]
   if (!props.receipts) return [{ label: 'Sent', value: sent, who: 'To ' + person.value }, { label: 'Status', value: channelStatus(info) }]
-  const delivered = ['Delivered', 'Read'].includes(info.status)
+  const delivered = ['Delivered', 'Read'].includes(info.status), read = info.status === 'Read'
   return [
-    { label: 'Sent', value: sent, who: 'To ' + person.value },
-    { label: 'Delivered', value: failed.value ? 'Not delivered' : delivered ? 'Delivered' : 'Not yet', who: delivered ? person.value : '' },
-    { label: 'Read', value: info.status === 'Read' ? 'Read' : 'Not yet', who: info.status === 'Read' ? person.value : '' },
+    { label: 'Sent', value: when(times.Sent) || sent, who: 'To ' + person.value },
+    { label: 'Delivered', value: failed.value ? 'Not delivered' : delivered ? when(times.Delivered) || 'Delivered' : 'Not yet', who: delivered ? person.value : '' },
+    { label: 'Read', value: read ? when(times.Read) || 'Read' : 'Not yet', who: read ? person.value : '' },
   ]
 })
 const seen = computed(() => props.coverage?.read_by || [])
