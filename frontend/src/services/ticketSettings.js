@@ -2,10 +2,17 @@ export const COLOURS = ['gray', 'blue', 'green', 'amber', 'red']
 
 export const emptySettings = () => ({ can_manage: false, status_types: [], statuses: [], types: [] })
 
+// Keep saved colour identifiers valid; amber is blue for active work and grey otherwise.
+export function ticketColour(row) {
+  if (row?.colour !== 'amber') return row?.colour || 'gray'
+  const neutral = ['closed', 'pending', 'unassigned'].includes((row.label || '').trim().toLowerCase())
+  return row.state === 'Open' && !neutral ? 'blue' : 'gray'
+}
+
 // Label and badge colour of a ticket's status.
 export function statusLook(settings, ticket) {
   const status = settings.statuses.find(row => row.name === ticket.ticket_status)
-  return { label: status?.label || ticket.ticket_status || 'No status', theme: status?.colour || 'gray' }
+  return { label: status?.label || ticket.ticket_status || 'No status', theme: ticketColour(status) }
 }
 
 export function isClosed(settings, ticket) {
@@ -47,15 +54,19 @@ export function chartRows(rows, field, label) {
 }
 
 // Keep every count represented; Others filters out the eight visible assignees.
-export function assigneeChartRows(rows, label) {
+export function assigneeChartRows(rows, label, expanded = false) {
   const sorted = [...rows].sort((a, b) => b.tickets - a.tickets)
-  const visible = sorted.slice(0, 8)
-  const labels = visible.map(row => label(row.assigned_to))
+  const visible = expanded ? sorted : sorted.slice(0, 8)
+  const labels = new Map()
+  for (const row of sorted) {
+    const name = label(row.assigned_to)
+    labels.set(name, (labels.get(name) || 0) + 1)
+  }
   const result = chartRows(visible, 'assigned_to', user => {
     const name = label(user)
-    return user && labels.filter(value => value === name).length > 1 ? `${name} (${user})` : name
+    return user && labels.get(name) > 1 ? `${name} (${user})` : name
   }).map(row => ({ ...row, filters: { assigned_to: row.key } }))
-  if (sorted.length > 8) result.push({ key: 'others', label: 'Others',
+  if (!expanded && sorted.length > 8) result.push({ key: 'others', label: 'Others',
     tickets: sorted.slice(8).reduce((sum, row) => sum + row.tickets, 0),
     filters: { exclude_assignees: JSON.stringify(visible.map(row => row.assigned_to || '')) } })
   const largest = Math.max(1, ...result.map(row => row.tickets))

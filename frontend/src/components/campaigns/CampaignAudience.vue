@@ -71,7 +71,7 @@ onMounted(load);
     <div v-if="preview?.sample.length" class="audience-rows" role="table" aria-label="Matched contacts">
       <div v-for="row in preview.sample" :key="row.contact + row.number" role="row">
         <span>{{ readableName(row.name, 'Contact') }}</span><span>+{{ row.number }}</span>
-        <Badge v-if="row.opted_out" label="Opted out" theme="orange" /><span v-else />
+        <Badge v-if="row.opted_out" label="Opted out" theme="gray" /><span v-else />
         <Button label="Remove" variant="outline" size="xs" @click="remove(row.contact)" />
       </div>
       <small v-if="preview.count > preview.sample.length">and {{ (preview.count - preview.sample.length).toLocaleString() }} more</small>

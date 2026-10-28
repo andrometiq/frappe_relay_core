@@ -102,7 +102,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0 flow-editor" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? draft.title || 'Flow' : 'New flow' }}</h2>
-            <div class="flow-badges"><Badge v-if="draft.name" :label="draft.enabled ? 'Enabled' : 'Disabled'" :theme="draft.enabled ? 'green' : 'gray'" /><Badge v-if="draft.name && hasUnpublished(draft)" label="Unpublished changes" theme="orange" /><Badge v-if="draft.legacy_key" label="Imported" theme="blue" /></div>
+            <div class="flow-badges"><Badge v-if="draft.name" :label="draft.enabled ? 'Enabled' : 'Disabled'" :theme="draft.enabled ? 'green' : 'gray'" /><Badge v-if="draft.name && hasUnpublished(draft)" label="Unpublished changes" theme="gray" /><Badge v-if="draft.legacy_key" label="Imported" theme="blue" /></div>
             <Button icon="x" aria-label="Close flow editor" title="Close flow editor" :disabled="!canEdit || busy" @click="draft = null" /></div>
           <p v-if="draft.missing_actions?.length" class="flow-warning" role="alert">Register these business actions before you enable the flow: {{ draft.missing_actions.join(', ') }}</p>
           <fieldset class="automation-section"><legend>Details</legend>
@@ -170,11 +170,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 .flow-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
 .flow-list { display:flex; flex-direction:column; gap:8px; }
 .flow-badges { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
-.flow-warning { color:var(--ink-amber-3, #9a6700); background:var(--surface-amber-1, #fff8e6); border-radius:8px; padding:8px 12px; font-size:13px; }
+.flow-warning { color:var(--relay-warning-ink); background:var(--relay-warning-bg); border-radius:8px; padding:8px 12px; font-size:13px; }
 .flow-steps { display:flex; flex-direction:column; gap:12px; margin:0; padding:0; list-style:none; counter-reset:none; }
 .flow-step { display:grid; gap:10px; padding:12px; border:1px solid var(--outline-gray-2); border-left:3px solid var(--outline-gray-3); border-radius:8px; background:var(--surface-white); min-width:0; }
 .flow-step[data-kind=input] { border-left-color:#4377b9; }
-.flow-step[data-kind=condition] { border-left-color:#b9852f; }
+.flow-step[data-kind=condition] { border-left-color:var(--relay-accent); }
 .flow-step[data-kind=action] { border-left-color:#7a5bc2; }
 .flow-step[data-kind=end],.flow-step[data-kind=handoff] { border-left-color:#2f8f5b; }
 .flow-step-heading { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }

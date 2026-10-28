@@ -51,7 +51,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
       <h4 class="info-group-title">Details</h4>
       <dl class="info-card">
         <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
-        <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Add country code" theme="amber" /></dd></div>
+        <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Add country code" theme="orange" /></dd></div>
       </dl>
       <details v-if="capabilities.manage" class="info-section">
         <summary class="info-group-title"><span>Advanced</span><FeatherIcon name="chevron-down" :size="14" /></summary>
