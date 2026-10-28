@@ -1,17 +1,19 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Avatar, Button, ErrorMessage, TextInput } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { recordTitle } from '../services/recordTitle'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
+import { useDebouncedSearch } from '../composables/useDebouncedSearch'
+import { useLoadMore } from '../composables/useLoadMore'
 import ContactDetails from './ContactDetails.vue'
 import IncomingWorkspace from './IncomingWorkspace.vue'
 import LoadingRows from './LoadingRows.vue'
 import WorkspaceState from './WorkspaceState.vue'
 
 const rows = ref([]), query = ref(''), next = ref(null), busy = ref(false), error = ref('')
-const selected = ref(''), more = ref(null)
-let generation = 0, searchTimer, observer
+const selected = ref('')
+let generation = 0
 async function load(cursor = {}) {
   const ticket = ++generation
   busy.value = true; error.value = ''
@@ -24,21 +26,10 @@ async function load(cursor = {}) {
   } catch (e) { if (ticket === generation) error.value = e.message }
   finally { if (ticket === generation) busy.value = false }
 }
-watch(query, () => {
-  ++generation; clearTimeout(searchTimer)
-  rows.value = []; next.value = null; busy.value = true
-  searchTimer = setTimeout(() => load(), 300)
-})
-watch([more, busy], () => {
-  observer?.disconnect()
-  if (!more.value || busy.value || error.value) return
-  observer = new IntersectionObserver(entries => {
-    if (entries.some(entry => entry.isIntersecting) && next.value && !busy.value) load(next.value)
-  }, { rootMargin: '200px 0px' })
-  observer.observe(more.value)
-}, { flush: 'post' })
+useDebouncedSearch(query, () => load(), () => { ++generation; rows.value = []; next.value = null; busy.value = true })
+const more = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(next.value) })
 onMounted(() => load())
-onBeforeUnmount(() => { ++generation; clearTimeout(searchTimer); observer?.disconnect() })
+onBeforeUnmount(() => { ++generation })
 useRealtimeRefresh(['Contact', 'Relay Message'], ['contacts', 'incoming'], () => load())
 function linked() { selected.value = ''; load() }
 </script>
