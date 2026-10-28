@@ -1,3 +1,4 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { resetRecipient } from '../src/services/recipientContext.js'
 import test from 'node:test'
 import { injectCapabilities } from './channelCapabilities.js'
@@ -31,8 +32,8 @@ const row=(number,time)=>({name:`RELAY-MSG-${String(number).padStart(10,'0')}`,c
 test('manager triage starts, loads pending messages and watches the selected contact',async()=>{
   const text=await readFile(new URL('../src/components/IncomingWorkspace.vue',import.meta.url),'utf8')
   const script=text.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm,'')
-  const make=new Function('useRealtimeRefresh','onMounted','ref','watch','coreApi','useEnabledChannels',
-    '"use strict";\n'+script+'\nreturn {rows,contact,business,businesses,error};')
+  const make=new Function('useLoadMore','useRealtimeRefresh','onMounted','ref','watch','coreApi','useEnabledChannels',
+    '"use strict";\n'+script+'\nreturn {rows,contact,business,businesses,error};').bind(null, useLoadMore)
   const pending={event:'event',contact:'contact',ambiguous:true,medium:'WhatsApp'},businesses=[{doctype:'Customer',name:'customer'}]
   let mount
   const api=async(method,args)=>{

@@ -1,3 +1,4 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -11,9 +12,9 @@ import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilte
 test('read mutations refresh the unread queue without waiting for a socket, but failed reads do not', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-  const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
+  const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
     'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
-    script + '\nreturn { mode, rows, loading };')
+    script + '\nreturn { mode, rows, loading };').bind(null, useLoadMore)
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window
   let unread = 2, fail = false, loads = 0, mount, off, refreshed
   globalThis.window = { frappe: { csrf_token: 'local-fixture' } }

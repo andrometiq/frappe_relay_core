@@ -1,4 +1,6 @@
 <script setup>
+import ChoiceField from './fields/ChoiceField.vue'
+import { useLoadMore } from '../composables/useLoadMore'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
 import FrappeFormSection from "./frappe/FrappeFormSection.vue";
@@ -108,6 +110,8 @@ async function readRoute() {
 }
 onMounted(() => { readRoute(); window.addEventListener("popstate", readRoute); });
 onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
+const moreSentinel = useLoadMore({ loading: busy, hasMore: () => campaign.value?.next, error: error, load: () => workspace.page(filter.value, campaign.value.next) })
+const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.next?.value, error, load: () => workspace.refresh(workspace.next.value) })
 </script>
 
 <template>
@@ -118,9 +122,9 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
       <FrappeFormSection description="Send one WhatsApp message to Relay contacts or to every mobile number in a sheet.">
         <div class="frappe-field-grid">
           <label class="campaign-field"><span>Title</span><TextInput v-model="title" placeholder="Winter launch Oct 2026" /></label>
-          <RelaySelect v-if="manyNumbers" :model-value="number" label="WhatsApp number" :options="numberOptions" @update:model-value="chooseNumber" />
+          <ChoiceField v-if="manyNumbers" :model-value="number" :field="{ label: 'WhatsApp number', options: numberOptions }" @update:model-value="chooseNumber" />
           <RelaySelect v-model="type" label="Message type" :options="types" />
-          <RelaySelect v-if="type === 'template'" v-model="template" label="Approved template" :options="templateOptions" :disabled="manyNumbers && !number" />
+          <ChoiceField v-if="type === 'template'" v-model="template" :field="{ label: 'Approved template', options: templateOptions, readOnly: manyNumbers && !number }" />
         </div>
         <div v-if="type !== 'template'" class="campaign-actions">
           <FormControl v-model="text" type="textarea" :rows="4" :label="type === 'text' ? 'Message' : 'Caption (optional)'"
@@ -197,7 +201,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
             <small v-if="row.reason && recipientLabel(row) === row.status">{{ row.reason }}</small>
           </div>
         </div>
-        <Button v-if="campaign.next" label="Load more rows" :loading="busy" @click="workspace.page(filter, campaign.next)" />
+        <div v-if="campaign.next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </FrappeFormSection>
       <template #sidebar>
         <div class="frappe-field-grid">
@@ -219,6 +223,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", readRoute));
       <template #cell-status="{ item }"><Badge :label="item.status" :theme="statusTheme(item.status)" /></template>
       <template #cell-template_name="{ item }">{{ messageLabel(item) }}</template>
       <template #cell-progress="{ item }">{{ item.sent_count || 0 }} / {{ item.replied_count || 0 }}</template>
+      <template #footer><div v-if="workspace.next?.value" ref="campaignSentinel" class="h-px" aria-hidden="true" /></template>
     </FrappeListView>
   </div>
 </template>

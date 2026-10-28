@@ -1,5 +1,5 @@
 <script setup>
-import RelaySelect from "../RelaySelect.vue";
+import ChoiceField from '../fields/ChoiceField.vue';
 import { inject, ref, watch } from "vue";
 import { Button, FormControl, Badge } from "@relay/ui";
 import MessageContent from "../MessageContent.vue";
@@ -7,7 +7,7 @@ import { objectValue } from "../messageContent";
 import { telegramKey } from "../../composables/telegramContext";
 const {
   knownTopics, topicCursor, loadTopics,
-  busy,
+  busy, error,
   notice,
   info,
   text,
@@ -27,14 +27,15 @@ async function removeTopic() {
 async function general(action) {
   await run(async () => {await operation('topics.general.'+action, action==='edit'?{name:generalName.value}:{});notice.value="General topic updated";});
 }
+watch(() => group.value?.name, () => { if (info.value?.is_forum) run(() => loadTopics()) }, {immediate: true});
 </script>
 <template>
   <div class="space-y-3">
     <p v-if="!info?.is_forum" class="text-sm text-ink-gray-5">
       Topics require a Telegram forum group.
     </p>
-    <div class="flex flex-wrap gap-2"><Button label="Load known topics" :disabled="busy || !info?.is_forum" @click="run(() => loadTopics())" /><Button v-if="topicCursor" label="Next known topics" :disabled="busy" @click="run(() => loadTopics(true))" /></div>
-    <RelaySelect label="Known topic" :model-value="topic" :options="knownTopics.map(row=>({value:row.thread_id,label:row.title+' · '+row.state}))" :disabled="busy" @update:model-value="value=>{topic=value;topicName=knownTopics.find(row=>row.thread_id===value)?.title||'';}" />
+
+    <ChoiceField :model-value="topic" :field="{ label: 'Known topic', options: knownTopics.map(row=>({value:row.thread_id,label:row.title+' · '+row.state})), loading: busy, error, hasMore: !!topicCursor, loadMore: () => run(() => loadTopics(true)) }" @update:model-value="value=>{topic=value;topicName=knownTopics.find(row=>row.thread_id===value)?.title||'';}" />
     <p class="text-xs text-ink-gray-5">Topics appear after Relay observes them or creates them. Use a topic ID below if it has not been observed yet.</p>
     <FormControl label="Topic name" v-model="topicName" /><Button
       label="Create topic"

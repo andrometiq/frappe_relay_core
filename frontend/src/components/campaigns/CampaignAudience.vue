@@ -1,4 +1,6 @@
 <script setup>
+import ChoiceField from '../fields/ChoiceField.vue'
+import { recordTitle } from '../../services/recordTitle'
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { Badge, Button, ErrorMessage, TextInput } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
@@ -21,7 +23,7 @@ const ready = computed(() => preview.value?.count > 0 && !missing.value.length);
 const filtered = computed(() => Object.keys(cleanAudience(audience.value)).some((key) => key !== "include" && key !== "exclude"));
 // Names of contacts seen in the list or the search, for the added and removed chips.
 watch(() => [preview.value?.sample, found.value], (lists) => { for (const row of lists.flat()) if (row) known[row.contact] = row; });
-const label = (contact) => known[contact] ? `${known[contact].name} · +${known[contact].number}` : contact;
+const label = (contact) => known[contact] ? `${known[contact].name} · +${known[contact].number}` : recordTitle(contact, 'Contact');
 
 function chooseType(value) { audience.value = { ...audience.value, doctype: value, segments: {} }; }
 function setSegment(field, value) { audience.value = { ...audience.value, segments: { ...audience.value.segments, [field]: value } }; }
@@ -51,8 +53,8 @@ onMounted(load);
   <div class="audience">
     <ErrorMessage v-if="error" :message="error" />
     <div class="audience-filters">
-      <RelaySelect v-model="audience.tag" label="Tag" :options="tagOptions" />
-      <RelaySelect :model-value="audience.doctype" label="Linked to" :options="typeOptions" @update:model-value="chooseType" />
+      <ChoiceField v-model="audience.tag" :field="{ label: 'Tag', options: tagOptions, readOnly: false }" />
+      <ChoiceField :model-value="audience.doctype" :field="{ label: 'Linked to', options: typeOptions, readOnly: false }" @update:model-value="chooseType" />
       <RelaySelect v-for="segment in segments" :key="segment.field" :model-value="audience.segments[segment.field] || ''"
         :label="segment.label" :options="[{ value: '', label: 'Any' }, ...segment.options]" @update:model-value="setSegment(segment.field, $event)" />
       <label class="audience-field"><span>Number contains</span><TextInput v-model="audience.number" inputmode="numeric" placeholder="9198" /></label>
@@ -86,7 +88,7 @@ onMounted(load);
     <div v-if="campaign.fields.length" class="audience-values">
       <strong>Message values</strong>
       <div v-for="field in campaign.fields" :key="field.key" class="audience-value">
-        <RelaySelect :model-value="mapping.fields[field.key] || ''" :label="field.label" :options="valueOptions(field, options?.sources || [])"
+        <ChoiceField :model-value="mapping.fields[field.key] || ''" :field="{ label: field.label, options: valueOptions(field, options?.sources || []) }"
           @update:model-value="setSource(field.key, $event)" />
         <div v-if="!mapping.fields[field.key]" class="audience-fixed">
           <input v-if="field.component === 'media'" type="file" :aria-label="`${field.label} file`" @change="chooseMedia" />

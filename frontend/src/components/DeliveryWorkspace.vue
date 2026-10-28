@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../composables/useLoadMore'
 import { ref, onMounted } from "vue";
 import { Button, Badge, ErrorMessage, FormControl } from "@relay/ui";
 import RelaySelect from "./RelaySelect.vue";
@@ -26,9 +27,9 @@ async function load(next = false) {
     { channel: channel.value, after },
     true,
   );
-  rows.value = page.deliveries || [];
+  rows.value = [...(next ? rows.value : []), ...(page.deliveries || [])];
   cursor.value = after;
-  more.value = page.more ?? rows.value.length === 50;
+  more.value = page.more ?? page.deliveries?.length === 50;
 }
 async function cancel(id) {
   await coreApi(
@@ -50,6 +51,7 @@ async function resolve() {
 }
 onMounted(() => run(async () => { await load(); await metadataStatus(); }));
 useRealtimeRefresh([], ["messages"], () => run(() => load()));
+const moreSentinel = useLoadMore({ loading: busy, hasMore: more, error: error, load: () => run(() => load(true)) })
 </script>
 <template>
   <section class="page-body space-y-5">
@@ -154,11 +156,6 @@ useRealtimeRefresh([], ["messages"], () => run(() => load()));
         />
       </div>
     </form>
-    <Button
-      v-if="more"
-      label="Next deliveries"
-      :disabled="busy"
-      @click="run(() => load(true))"
-    />
+    <div v-if="more" ref="moreSentinel" class="h-px" aria-hidden="true" />
   </section>
 </template>

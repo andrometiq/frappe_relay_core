@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore';
 import { inject, ref, watch, nextTick, computed } from "vue";
 import { Button, FormControl } from "@relay/ui";
 import MessageContent from "../MessageContent.vue";
@@ -6,7 +7,7 @@ import { objectValue } from "../messageContent";
 import { telegramKey } from "../../composables/telegramContext";
 const {
   pendingSend, pendingCursor, pendingPage, restorePending, checkGroupSend, retryGroupSend, atBottom, newMessages, latest,
-  busy,
+  busy, error,
   info,
   text,
   topic,
@@ -37,6 +38,8 @@ watch(history,async (rows,previous)=>{
 });
 watch(atBottom,async value=>{if(value){await nextTick();if(viewport.value)viewport.value.scrollTop=viewport.value.scrollHeight;}});
 function scrolled(){const node=viewport.value;if(node)atBottom.value=node.scrollHeight-node.scrollTop-node.clientHeight<60;}
+const earlier = useLoadMore({ root: viewport, margin: '32px 0px', loading: busy, hasMore, error, load: () => run(() => loadHistory(true)) });
+const morePending = useLoadMore({ loading: busy, hasMore: pendingCursor, error, load: () => run(() => restorePending(true)) });
 </script>
 <template>
   <form class="space-y-3" @submit.prevent="submit">
@@ -45,11 +48,6 @@ function scrolled(){const node=viewport.value;if(node)atBottom.value=node.scroll
         label="Refresh messages"
         :disabled="busy"
         @click="run(() => loadHistory())"
-      /><Button
-        v-if="hasMore"
-        label="Earlier messages"
-        :disabled="busy"
-        @click="run(() => loadHistory(true))"
       />
     </div>
     <div
@@ -57,6 +55,7 @@ function scrolled(){const node=viewport.value;if(node)atBottom.value=node.scroll
       aria-label="Group conversation"
       ref="viewport" @scroll="scrolled"
     >
+      <div v-if="hasMore" ref="earlier" class="h-px" aria-hidden="true" />
       <article
         v-for="message in history"
         :key="message.name"
@@ -99,7 +98,7 @@ function scrolled(){const node=viewport.value;if(node)atBottom.value=node.scroll
       </div>
     </div>
     <Button v-if="pendingPage" label="Latest pending sends" :disabled="busy" @click="run(()=>restorePending())" />
-    <Button v-if="pendingCursor" label="Earlier pending sends" :disabled="busy" @click="run(()=>restorePending(true))" />
+    <div v-if="pendingCursor" ref="morePending" class="h-px" aria-hidden="true" />
     <FormControl
       v-if="info?.is_forum"
       label="Topic ID (optional)"

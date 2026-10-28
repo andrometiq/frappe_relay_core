@@ -60,17 +60,19 @@ export function useTelegramGroups() {
       ...(after ? { after } : {}),
       limit: 30,
     });
-    rows.value = page.items;
+    rows.value = after ? [...rows.value, ...page.items] : page.items;
     cursor.value = page.next;
     configured.value = page.configured;
-    selected.value = "";
-    info.value = null;
+    if (!after) { selected.value = ""; info.value = null; }
   }
-  async function searchGroups(query, signal) {
-    const page = await coreApi('telegram.group_chats', {query, limit:30}, false, {signal});
-    if (signal?.aborted) return [];
+  let groupSearchSequence = 0;
+  async function searchGroups(query, signal, after) {
+    const request = ++groupSearchSequence;
+    const page = await coreApi('telegram.group_chats', {query, limit:30, after}, false, {signal});
+    if (signal?.aborted || request !== groupSearchSequence) return [];
     const current = group.value;
-    rows.value = current && !page.items.some(row=>row.name===current.name) ? [...page.items,current] : page.items;
+    rows.value = after ? [...rows.value, ...page.items] : current && !page.items.some(row=>row.name===current.name) ? [...page.items,current] : page.items;
+    cursor.value = page.next;
     return page.items.map(row=>({value:row.name,label:row.label,description:String(row.chat_id)}));
   }
   async function operation(operation, args = {}) {
@@ -156,7 +158,7 @@ export function useTelegramGroups() {
   }
   async function loadTopics(more = false) {
     const page = await coreApi("telegram_topics.directory", {channel:group.value.channel,chat_id:group.value.chat_id,...(more ? {after:topicCursor.value} : {})});
-    knownTopics.value = page.items;topicCursor.value = page.next;
+    knownTopics.value = more ? [...knownTopics.value, ...page.items] : page.items;topicCursor.value = page.next;
   }
   async function topicAction(action) {
     const args = { message_thread_id: positive(topic.value, "topic ID") };
@@ -170,7 +172,9 @@ export function useTelegramGroups() {
     const before=older?pendingCursor.value:refresh?pendingPage.value:null;
     const result=await coreApi('telegram_delivery.pending',{endpoint:identity,...(before?{before}:{})});
     if(identity!==selected.value || sequence!==pendingSequence)return;
-    pendingSends.value[identity]=result.items;
+    const existing = pendingSends.value[identity] || [];
+    pendingSends.value[identity] = older ? [...existing, ...result.items]
+      : refresh && before ? existing.map(row => result.items.find(fresh => fresh.action === row.action) || row) : result.items;
     pendingPage.value=before;
     pendingCursor.value=result.next;
   }

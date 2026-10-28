@@ -1,10 +1,11 @@
 <script setup>
-import { recordTitle } from '../services/recordTitle'
+import { useLoadMore } from '../composables/useLoadMore'
 import { linkedTitle } from '../services/linkedTitle'
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { onMounted, ref, watch } from "vue";
-import { Button, ErrorMessage, FormControl } from "@relay/ui";
-import RelaySelect from "./RelaySelect.vue";
+import { Button, ErrorMessage } from "@relay/ui";
+import ChoiceField from './fields/ChoiceField.vue'
+import RemoteLinkField from './fields/RemoteLinkField.vue'
 import { coreApi } from "../services/coreApi";
 import { useEnabledChannels } from '../composables/useEnabledChannels'
 const channelEnabled = useEnabledChannels();
@@ -14,8 +15,6 @@ const rows = ref([]),
   busy = ref(false),
   error = ref(""),
   selected = ref(null),
-  query = ref(""),
-  contacts = ref([]),
   contact = ref(""),
   notice = ref("");
 watch(contact, async value => {
@@ -38,23 +37,12 @@ async function run(fn) {
 }
 async function load(after) {
   const result = await coreApi("enrollment.pending", { after });
-  rows.value = result.items.filter(row => channelEnabled(row.medium));
+  rows.value = [...(after ? rows.value : []), ...result.items.filter(row => channelEnabled(row.medium))];
   next.value = result.next;
 }
-async function search() {
-  const result = await coreApi("api.contacts", {
-    query: query.value,
-    limit: 30,
-  });
-  contacts.value = result.items;
-  if(selected.value?.contact && !contacts.value.some(row=>row.name===selected.value.contact))
-    contacts.value.unshift({name:selected.value.contact,display_name:selected.value.endpoint});
-}
-async function choose(row) {
+function choose(row) {
   selected.value = row;
   contact.value = row.contact || "";
-  query.value = "";
-  await run(search);
 }
 async function bind() {
   await run(async () => {
@@ -76,6 +64,7 @@ async function bind() {
 }
 onMounted(() => run(() => load()));
 useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return run(()=>load())});
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => run(() => load(next.value)) })
 </script>
 <template>
   <section class="incoming-workspace">
@@ -111,12 +100,7 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
         <p v-if="!rows.length && !busy" class="incoming-empty">
           No conversations need triage.
         </p>
-        <Button
-          v-if="next"
-          label="Next incoming events"
-          :disabled="busy"
-          @click="run(() => load(next))"
-        />
+        <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </div>
       <form v-if="selected" @submit.prevent="bind">
         <ErrorMessage :message="error" />
@@ -125,24 +109,8 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
           Choose the business contact that owns this
           {{ selected.medium }} conversation.
         </p>
-        <div class="flex gap-2 items-end">
-          <FormControl label="Search contacts" v-model="query" /><Button
-            label="Search"
-            :disabled="busy"
-            @click="run(search)"
-          />
-        </div>
-        <RelaySelect
-          label="Business contact"
-          v-model="contact"
-          :options="
-            contacts.map((row) => ({
-              value: row.name,
-              label: recordTitle(row, 'Contact'),
-            }))
-          "
-        />
-        <RelaySelect label="Business record" v-model="business" :options="businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:linkedTitle(row.doctype, row.name)}))" />
+        <RemoteLinkField v-model="contact" :field="{ label: 'Business contact', method: 'api.contacts', doctype: 'Relay Contact', readOnly: busy }" />
+        <ChoiceField v-model="business" :field="{ label: 'Business record', readOnly: busy, options: businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:linkedTitle(row.doctype, row.name)})) }" />
         <p class="text-xs text-ink-gray-5">
           Missing a contact? Create it and its business link in
           <a href="/desk/relay-contact" target="_blank" rel="noopener"
