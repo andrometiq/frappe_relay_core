@@ -1,5 +1,3 @@
-export const TICKET_PRIORITIES = ['Low', 'Medium', 'High', 'Urgent']
-
 // A ticket subject is the message text on one line, cut to the 140-character limit.
 export function ticketSubject(message, fallback = '') {
   const text = String(message?.content || '').replace(/\s+/g, ' ').trim()
@@ -8,9 +6,8 @@ export function ticketSubject(message, fallback = '') {
 
 export function ticketPayload(form, messages) {
   return {
-    subject: form.subject.trim(), brief: form.brief.trim(), priority: form.priority,
-    ...(form.category ? { category: form.category } : {}), ...(form.ticketType ? { ticket_type: form.ticketType } : {}),
-    assigned_to: form.assignedTo || '', tagged: [...form.tagged], messages,
+    subject: form.subject.trim(), brief: form.brief.trim(), ...(form.ticketType ? { ticket_type: form.ticketType } : {}),
+    assigned_to: form.assignedTo || '', messages,
   }
 }
 

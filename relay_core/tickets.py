@@ -8,6 +8,8 @@ from relay_core.permissions import require_access, readable_contact, sees_all_te
 from relay_core.api import validate_reference
 
 _episode_transition = ContextVar('relay_episode_transition', default=None)
+LIST_FIELDS = ['name', 'subject', 'ticket_status', 'ticket_type', 'assigned_to', 'owner', 'creation',
+               'business_doctype', 'business_name']
 
 
 def _save_episode(doc, *, new=False):
@@ -26,7 +28,6 @@ def _ownership(doc, *, disabled=True):
     from frappe.utils import now_datetime
     doc.ai_disabled = int(disabled)
     doc.generation = int(doc.get('generation') or 0) + 1
-    doc.pending_run = None
     doc.ownership_actor = frappe.session.user
     doc.ownership_at = now_datetime()
 
@@ -60,7 +61,7 @@ def resume_ai(name):
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
     doc.check_permission('write')
-    if not doc.get('active_scope_key') or doc.status in ('Closed', 'Resolved'):
+    if not doc.get('active_scope_key') or ticket_settings.is_closed(doc):
         frappe.throw('Only an active episode can resume AI')
     _ownership(doc, disabled=False)
     token = _episode_transition.set(doc)
@@ -74,19 +75,23 @@ def resume_ai(name):
 
 @frappe.whitelist(methods=['POST'])
 def close_and_release(name):
+    """Move the ticket to the first Closed status; an active AI episode is released too."""
     require_access()
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
     doc.check_permission('write')
-    if doc.get('active_scope_key'):
+    doc.ticket_status = ticket_settings.status_of('Closed')
+    if not doc.get('active_scope_key'):
+        doc.save()
+    else:
         _ownership(doc)
-        doc.status, doc.active_scope_key = 'Closed', None
+        doc.active_scope_key = None
         token = _episode_transition.set(doc)
         try:
             doc.save()
         finally:
             _episode_transition.reset(token)
-    return {'name': doc.name, 'status': doc.status, 'ai_disabled': bool(doc.ai_disabled),
+    return {'name': doc.name, 'ticket_status': doc.ticket_status, 'ai_disabled': bool(doc.ai_disabled),
             'generation': doc.generation}
 
 
@@ -227,8 +232,8 @@ def _ensure_triage(event, channel, row):
     try:
         frappe.set_user('Administrator')
         doc = frappe.get_doc(dict(doctype='Relay Ticket', subject='Incoming conversation needs triage',
-            brief='Resolve the authenticated sender and business before continuing.', category=ticket_settings.preferred('category', 'Support'),
-            status='Open', assigned_to=owner, company=channel.company,
+            brief='Resolve the authenticated sender and business before continuing.',
+            assigned_to=owner, company=channel.company,
             conversation_key=conversation_key(channel.name, row['from'], row.get('provider_context') or {}),
             source_action_key=action, source_hub_event=event.name, source_provider_message_key=key))
         _ownership(doc)
@@ -245,7 +250,7 @@ def _ensure_triage(event, channel, row):
     return doc
 
 
-def ensure_episode(message=None, *, owner=None, skill=None, run=None, subject='Conversation needs attention',
+def ensure_episode(message=None, *, owner=None, run=None, subject='Conversation needs attention',
                    reason='', event=None, channel=None, row=None):
     """Internal, atomic admission shared by automation paths; caller owns commit.
 
@@ -295,21 +300,16 @@ def ensure_episode(message=None, *, owner=None, skill=None, run=None, subject='C
                     ticket.active_scope_key = active_key
             if any(ticket.get(key) != value for key, value in scope.items()):
                 raise ValueError('Episode scope no longer matches the message')
-            if not linked and ticket.status in ('Closed', 'Resolved'):
-                ticket.status = 'Open'
+            if not linked and ticket_settings.is_closed(ticket):
+                ticket.ticket_status = ticket_settings.status_of('Open')
         else:
             if not episode_owner_allowed(owner, message):
                 raise ValueError('Configure an accessible episode owner or fallback owner')
             ticket = frappe.get_doc(dict(doctype='Relay Ticket', **scope, subject=subject,
-                brief=reason[:500], category=ticket_settings.preferred('category', 'Support'), status='Open', assigned_to=owner,
+                brief=reason[:500], assigned_to=owner,
                 source_action_key=episode_key, active_scope_key=active_key,
                 source_provider_message_key=message.get('provider_message_key'),
-                source_run=run.name if run else None, messages=[{'message': message.name}]))
-        if skill and not ticket.get('ai_disabled'):
-            ticket.skill = skill.name
-            ticket.skill_version = run.get('skill_version') if run else str(skill.modified)
-        if reason:
-            ticket.handoff_reason = reason[:500]
+                messages=[{'message': message.name}]))
         _save_episode(ticket, new=not existing)
         if message.get('ticket') != ticket.name:
             # Advance modified so an older loaded message cannot erase this link.
@@ -333,16 +333,13 @@ def validate_ticket(doc, check_assignment=True):
     if doc.brief and (not isinstance(doc.brief, str) or len(doc.brief) > 4000):
         frappe.throw('Ticket brief must contain at most 4000 characters')
     ticket_settings.apply(doc)
-    from relay_core import ticket_tags
-    ticket_tags.validate(doc)
     previous = doc.get_doc_before_save()
     if any(record and any(record.get(key) for key in
             ('company', 'conversation_key', 'active_scope_key', 'source_hub_event'))
             for record in (doc, previous)):
         protected = ('company', 'conversation_key', 'source_hub_event', 'source_provider_message_key',
                      'source_action_key', 'business_doctype', 'business_name', 'active_scope_key',
-                     'source_run', 'skill', 'skill_version', 'ai_disabled', 'generation', 'pending_run',
-                     'ownership_actor', 'ownership_at')
+                     'ai_disabled', 'generation', 'ownership_actor', 'ownership_at')
         if _episode_transition.get() is not doc and (not previous or any(
                 doc.get(key) != previous.get(key) for key in protected)):
             frappe.throw('Episode scope can only be changed by an internal transition', frappe.PermissionError)
@@ -392,8 +389,8 @@ def validate_ticket(doc, check_assignment=True):
             finally:
                 frappe.set_user(actor)
 
-    if (previous and doc.get('conversation_key') and doc.status != previous.status
-            and doc.status in ('In progress', 'Closed', 'Resolved') and _episode_transition.get() is not doc):
+    if (previous and doc.get('conversation_key') and doc.ticket_status != previous.ticket_status
+            and _episode_transition.get() is not doc):
         doc.check_permission('write')
         current = frappe.get_doc('Relay Ticket', doc.name, for_update=True)
         if int(current.generation or 0) != int(previous.generation or 0):
@@ -402,7 +399,7 @@ def validate_ticket(doc, check_assignment=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(subject, messages, brief='', category='Query', priority='Medium', assigned_to='', tagged=None, ticket_type=None, ticket_status=None):
+def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket_status=None):
     from relay_core import ticket_tags
     require_access()
     if isinstance(messages, str):
@@ -411,19 +408,17 @@ def create(subject, messages, brief='', category='Query', priority='Medium', ass
         frappe.throw('Messages must be a list of 1–50 references')
     if assigned_to and not isinstance(assigned_to, str):
         frappe.throw('Invalid ticket assignee')
-    users = ticket_tags.user_list(tagged)
     for name in messages:
         validate_reference(name, 'MSG')
     business_doctype, business_name = ticket_tags.message_business(messages)
     doc = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
-                          'category': category, 'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
-                          'status': 'Open', 'priority': priority or 'Medium',
-                          'assigned_to': assigned_to or None, 'watchers': [{'user': user} for user in users],
+                          'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
+                          'assigned_to': assigned_to or None,
                           'business_doctype': business_doctype, 'business_name': business_name,
                           'messages': [{'message': name} for name in messages]})
     # insert runs the controller validation and Frappe create permissions.
     doc.insert()
-    return {'name': doc.name, 'status': doc.status}
+    return {'name': doc.name, 'ticket_status': doc.ticket_status}
 
 
 @frappe.whitelist(methods=['POST'])
@@ -432,18 +427,14 @@ def update_status(name, status):
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
     doc.check_permission('write')
-    if frappe.db.exists(ticket_settings.DOCTYPES['status'], status):
-        doc.ticket_status = status
-    else:
-        doc.status = status  # A plain state moves the ticket to that state's default status.
+    doc.ticket_status = status
     doc.save()
-    return {'name': doc.name, 'status': doc.status, 'ticket_status': doc.ticket_status}
+    return {'name': doc.name, 'ticket_status': doc.ticket_status}
 
 
 @frappe.whitelist(methods=['GET'])
 def read(name):
     require_access()
-    from relay_core import ticket_tags
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name)
     doc.check_permission('read')
@@ -472,21 +463,19 @@ def read(name):
             drafts.append(dict(doctype=target.doctype, name=target.name, docstatus=int(target.docstatus)))
         except (frappe.PermissionError, frappe.DoesNotExistError):
             continue
+    contact = links[0]['contact'] if links else None
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief, 'linked_drafts': drafts,
-            'category': doc.category, 'ticket_type': doc.get('ticket_type'), 'status': doc.status,
-            'ticket_status': doc.get('ticket_status'), 'messages': links, 'creation': doc.creation,
-            'assigned_to': doc.get('assigned_to'), 'priority': doc.get('priority') or 'Medium',
-            'tagged': [{'user': user, 'full_name': frappe.utils.get_fullname(user)} for user in ticket_tags.tagged(doc)],
+            'ticket_type': doc.get('ticket_type'), 'ticket_status': doc.get('ticket_status'),
+            'messages': links, 'creation': doc.creation, 'owner': doc.owner, 'assigned_to': doc.get('assigned_to'),
+            'contact': contact, 'contact_person': frappe.db.get_value('Relay Contact', contact, 'contact') if contact else None,
+            'contact_title': frappe.db.get_value('Relay Contact', contact, 'display_name') if contact else None,
             'can_edit': bool(doc.has_permission('write')),
             'business_doctype': doc.get('business_doctype'), 'business_name': doc.get('business_name'),
-            'handoff_reason': doc.get('handoff_reason'), 'source_run': doc.get('source_run'),
             'company': doc.get('company'), 'conversation_key': doc.get('conversation_key'),
-            'skill': doc.get('skill'), 'skill_version': doc.get('skill_version'),
             'ai_disabled': bool(doc.get('ai_disabled')), 'generation': doc.get('generation') or 0,
             'ownership_actor': doc.get('ownership_actor'), 'ownership_at': doc.get('ownership_at'),
             'can_resume': bool(doc.get('active_scope_key') and doc.get('ai_disabled')
-                and doc.status not in ('Closed', 'Resolved') and doc.has_permission('write')),
-            'can_release': bool(doc.get('active_scope_key') and doc.has_permission('write')),
+                and not ticket_settings.is_closed(doc) and doc.has_permission('write')),
             'can_take_over': bool(not _legacy_ticket(doc) and doc.has_permission('write')),
             'can_assign': frappe.has_permission('Relay Conversation Assignment', 'write')}
 
@@ -769,35 +758,35 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None, mine=None, ticket_status=None, ticket_type=None):
+def directory(query='', ticket_status=None, mine=None, after=None):
+    """Newest tickets first, 30 per page; `after` continues below the given ticket."""
     require_access()
-    if not isinstance(query,str) or len(query)>80 or before and after: frappe.throw('Invalid ticket search')
-    if mine not in (None, '', 'assigned', 'tagged'): frappe.throw('Invalid ticket filter')
-    filters={}
-    if mine == 'assigned': assigned_to = frappe.session.user
-    for key, value in dict(business_doctype=business_doctype, business_name=business_name, assigned_to=assigned_to, category=category, ticket_status=ticket_status, ticket_type=ticket_type).items():
-        if value:
-            if not isinstance(value, str) or len(value) > 140: frappe.throw('Invalid ticket filter')
-            filters[key] = value
-    if status:
-        if status not in ('Open','In progress','Resolved','Closed'): frappe.throw('Invalid ticket status')
-        filters['status']=status
-    if before or after:
-        cursor=before or after;validate_reference(cursor,'TKT')
-        created=frappe.db.get_value('Relay Ticket',cursor,'creation')
-        if not created:frappe.throw('Invalid ticket cursor')
-        filters['creation']=['<' if before else '>',created]
-    if query:filters['subject']=['like','%'+query.replace('%','\\%').replace('_','\\_')+'%']
-    if mine == 'tagged':
-        filters=[[key, *value] if isinstance(value, list) else [key, '=', value] for key, value in filters.items()]
-        filters.append(['Relay Ticket Watcher', 'user', '=', frappe.session.user])
-    rows=frappe.get_list('Relay Ticket',filters=filters,fields=['name'],order_by='creation desc' if before else 'creation asc',page_length=31)
-    more=len(rows)>30;page=rows[:30]
-    if before:page.reverse()
-    items=[]
-    for row in page:
-        try:ticket=read(row.name)
-        except frappe.PermissionError:continue
-        items.append(dict(ticket,id=ticket['name']))
-    return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
-        'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+    if not isinstance(query, str) or len(query) > 80:
+        frappe.throw('Invalid ticket search')
+    filters = {}
+    if query:
+        filters['subject'] = ['like', '%' + query.replace('%', '\\%').replace('_', '\\_') + '%']
+    if ticket_status:
+        if not isinstance(ticket_status, str) or len(ticket_status) > 140:
+            frappe.throw('Invalid ticket filter')
+        filters['ticket_status'] = ticket_status
+    if frappe.utils.cint(mine):
+        filters['assigned_to'] = frappe.session.user
+    if after:
+        validate_reference(after, 'TKT')
+        created = frappe.db.get_value('Relay Ticket', after, 'creation')
+        if not created:
+            frappe.throw('Invalid ticket cursor')
+        filters['creation'] = ['<', created]
+    rows = frappe.get_list('Relay Ticket', filters=filters, fields=LIST_FIELDS, order_by='creation desc', page_length=31)
+    return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None}
+
+
+@frappe.whitelist(methods=['GET'])
+def dashboard():
+    """Ticket counts by status, assignee and type, limited to the tickets the user can read."""
+    require_access()
+    def grouped(field):
+        return frappe.get_list('Relay Ticket', fields=[field, {'COUNT': 'name', 'as': 'tickets'}],
+                               group_by=field, order_by='tickets desc', limit_page_length=0)
+    return {'statuses': grouped('ticket_status'), 'assignees': grouped('assigned_to'), 'types': grouped('ticket_type')}

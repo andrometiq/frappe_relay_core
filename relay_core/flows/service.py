@@ -35,8 +35,6 @@ def validate_flow(doc):
     # Imported flows may name actions their business app has not registered yet; only an enabled flow needs them.
     if doc.enabled and missing_actions(validated):
         frappe.throw('Choose an installed, replay-safe business action')
-    if doc.enabled:
-        require_ticket_categories(validated)
     check_actor(doc)
     if not frappe.db.exists('Relay Contact Type',{'business_doctype':doc.business_doctype,'enabled':1}):
         frappe.throw('Choose a configured business type')
@@ -354,13 +352,6 @@ def send(run,event,source,channel,text,key):
         finally:
             outgoing_flow.reset(token)
         if result.get('status')!='Submitted':raise RuntimeError('Delivery not confirmed')
-
-
-def require_ticket_categories(nodes):
-    """Each ticket step names a category that is enabled in Ticket settings."""
-    from relay_core.ticket_settings import require_enabled
-    for category in sorted({node['category'] for node in nodes if node['kind']=='ticket' and node.get('category')}):
-        require_enabled('category', category)
 
 
 def flow_ticket(source, text):

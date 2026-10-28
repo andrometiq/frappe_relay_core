@@ -137,16 +137,6 @@ class FlowTicketCategories(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'Ticket category is too long'):
                 definition(self.nodes(bad))
 
-    def test_an_enabled_flow_checks_each_named_category_in_ticket_settings(self):
-        with patch('relay_core.ticket_settings.require_enabled') as require:
-            service.require_ticket_categories(self.nodes('Billing', '', 'Billing', 'Returns'))
-        self.assertEqual([call.args for call in require.call_args_list], [('category', 'Billing'), ('category', 'Returns')])
-
-    def test_a_turned_off_or_unknown_category_stops_the_save(self):
-        with patch('relay_core.ticket_settings.require_enabled', side_effect=frappe.ValidationError('The ticket category "Query" is turned off')):
-            with self.assertRaisesRegex(frappe.ValidationError, 'turned off'):
-                service.require_ticket_categories(self.nodes('Query'))
-
 
 class FlowSwitch(unittest.TestCase):
     def test_a_switch_the_site_does_not_have_yet_is_off(self):

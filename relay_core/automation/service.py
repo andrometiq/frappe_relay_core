@@ -144,7 +144,7 @@ def enqueue(message):
     return create_run(doc)
 
 
-def episode(run, message, skill=None, *, hold=False):
+def episode(run, message, *, hold=False):
     """Create the assigned episode before either flows or event tools execute."""
     from relay_core.tickets import ensure_episode, triage_owner, hold_episode
     actor = frappe.session.user
@@ -152,7 +152,7 @@ def episode(run, message, skill=None, *, hold=False):
         frappe.set_user('Administrator')
         channel = frappe.get_doc('Relay Channel', message.channel)
         owner = triage_owner(channel, message)
-        ticket = ensure_episode(message, owner=owner, skill=skill, run=run)
+        ticket = ensure_episode(message, owner=owner, run=run)
         return hold_episode(ticket.name) if hold else ticket
     finally:
         frappe.set_user(actor)

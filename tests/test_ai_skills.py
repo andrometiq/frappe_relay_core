@@ -347,7 +347,7 @@ class HandoffTests(unittest.TestCase):
     def test_retries_hold_only_the_shared_episode(self):
         for _ in range(2): self.service.handoff(self.run, self.skill, 'Permission denied')
         self.assertEqual(self.ensure.call_count, 2)
-        self.ensure.assert_called_with(self.message, owner='fallback', skill=self.skill, run=self.run,
+        self.ensure.assert_called_with(self.message, owner='fallback', run=self.run,
             subject='Conversation needs a person', reason='Permission denied')
         self.assertEqual(self.run.ticket, 'TKT-1')
         self.assertEqual(self.run.status, 'Handoff')

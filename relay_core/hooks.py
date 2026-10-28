@@ -10,7 +10,7 @@ after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
 
 # Off until explicitly configured on an isolated/validated site.
-doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
+doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
 # Every job returns at once while no Relay Hub is configured.
 scheduler_events = {
     "cron": {
@@ -70,6 +70,8 @@ has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.per
 permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'
 has_permission['Relay Chat Folder'] = 'relay_core.chat_folders.permission'
 permission_query_conditions['Relay Chat Folder'] = 'relay_core.chat_folders.query'
+has_permission['Relay Chat'] = 'relay_core.relay_chats.permission'
+permission_query_conditions['Relay Chat'] = 'relay_core.relay_chats.query'
 
 # Configured Relay Document Actions add a "Send on WhatsApp" button to their desk forms.
 boot_session = ["relay_core.document_actions.boot_session", "relay_core.whatsapp_redirects.boot_session"]

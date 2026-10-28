@@ -48,7 +48,7 @@ Today Relay shows WhatsApp only. The Email and Telegram chips in the Inbox show 
 | Conversation | All messages between one contact and your business number. It shows as one row in the Inbox. |
 | Team | A named group of staff, such as "Sales North". A conversation assigned to a team is visible to every member. |
 | Folder | A personal label to sort your own Inbox, such as "Follow up". Only you see your folders. |
-| Ticket | A to-do item made from a chat, with a subject, priority, owner, tagged colleagues and comments. |
+| Ticket | A to-do item made from a chat, with a subject, type, status, owner and comments. |
 | Template | A message that Meta approved in advance. Only a template can start a chat or reach a customer after the 24-hour reply window closes. |
 | 24-hour reply window | WhatsApp lets you send free text and media only within 24 hours after the customer's last message. After that, you must send a template. |
 | Campaign | One message sent to many numbers at once, now or at a set time. |
@@ -181,21 +181,24 @@ Who: every Relay role.
 
 | Item | What it does |
 | --- | --- |
-| Status chips | All tickets, Open, In progress, Resolved, Closed. |
-| Assigned to me, Tagged me | Your own tickets. |
-| Business, Assignee, Category, Apply | Filter by business record, user email or category (Query, Payment evidence, Support, Other). |
-| Ticket card | Opens the ticket on the right. |
+| Dashboard | Open and closed ticket counts, tickets per person and tickets per type. |
+| Tickets | One list of tickets, newest first. |
+| All, status tabs | Show all tickets, or only the tickets in one status. |
+| Assigned to me | Show only your tickets. |
+| Ticket settings | Managers add, rename, colour, sort and delete statuses and types. Each status is of type Open or Closed. A status or type that tickets use cannot be deleted. |
+| Ticket row | Opens the ticket in a dialog. |
 
-Ticket page:
+Ticket dialog:
 
 | Item | What it does |
 | --- | --- |
-| Open conversation | Jumps to the linked chat. |
-| Tagged colleagues, Save tags | Add or remove up to 20 colleagues. Newly tagged people get a notification. |
+| Status | Changes the status. |
+| Contact, Open chat | The contact the ticket came from, and a link to the chat. |
+| Linked records | The business records linked to that contact. |
+| Created | Who made the ticket, and when. |
+| Assigned to | Managers change the owner. The new owner gets a notification. |
 | Comments, Add comment | Internal discussion. Pick colleagues in the mention box to notify them. |
-| Assign to, Assign | Managers change the owner. The new owner gets a notification. |
-| Start work | Sets the status to In progress. |
-| Close ticket | Sets the status to Closed. |
+| Close ticket | Sets the first status of type Closed. |
 
 You cannot make a ticket from the Tickets page. You make it from a chat (see recipe 5.7).
 
@@ -516,17 +519,17 @@ If nothing arrives, open Desk > Error Log and search "Relay business event faile
 
 Only you see your folders. A chat can be in one of your folders at a time. Deleting a folder keeps its chats in your Inbox.
 
-### 5.8 Raise and tag a ticket (all staff)
+### 5.8 Raise a ticket (all staff)
 
 ![Create ticket dialog](images/guide/ticket.png)
 
 1. Open the chat. Click "Ticket" in the header, or point at a message and click "Create ticket".
 2. Check the Subject. Write what must happen in Description.
-3. Pick Priority: Low, Medium, High or Urgent.
-4. In "Assign to", search a colleague. In "Tag colleagues (@)", add up to 20 people.
+3. Pick a Type, if your site has types.
+4. In "Assign to", search a colleague.
 5. Click "Create ticket". A note says "Ticket created" with "Open ticket".
 
-What happens: the ticket links to the chat and the business record. The assignee and tagged people get a notification in the bell and a card on screen. Only colleagues who can read this chat show in the search. On the ticket page, use comments with mentions to discuss, "Start work" and "Close ticket" to move it on.
+What happens: the ticket links to the chat and the business record, and starts in the first status of type Open. The assignee gets a notification in the bell and a card on screen. Only colleagues who can read this chat show in the search. In the ticket dialog, use comments with mentions to discuss, change the status, and "Close ticket" when done.
 
 ### 5.9 Opt-outs (System Manager sets keywords, nothing to do for staff)
 
