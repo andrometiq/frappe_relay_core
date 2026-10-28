@@ -18,6 +18,7 @@ from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
 from relay_core.automation.service import internal_save, outgoing_run
 from relay_core.hub import HubError
+from relay_core.test_mode import TestModeBlocked
 from relay_core.hub_channels import hub_arguments, is_current
 from relay_core.message_types import contacts, location, normalize, preview, text, telegram_vcard
 from relay_core.message_updates import provider_key
@@ -597,7 +598,8 @@ def record_submission_error(action, exc):
     action.reload()
     if action.status == 'Submitted' or object_value(action.result or {}).get('_relay_status_id'):
         return {'action':action.name,'status':action.status,'message':action.outbound_message}
-    action.status = 'Rejected' if isinstance(exc, HubError) and exc.metadata.get('error', {}).get('outcome_unknown') is False else 'Uncertain'
+    known_unsent = isinstance(exc, TestModeBlocked) or isinstance(exc, HubError) and exc.metadata.get('error', {}).get('outcome_unknown') is False
+    action.status = 'Rejected' if known_unsent else 'Uncertain'
     action.result = json.dumps(getattr(exc, 'metadata', {}) or {})
     internal_save(action); frappe.db.commit()
     return {'action':action.name,'status':action.status,'message':None,'error':action_error(action)}
