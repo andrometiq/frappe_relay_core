@@ -10,7 +10,7 @@ const search = computed(() => {
  const {method, params, kind} = props.field
  return async (query, signal) => {
   const rows = await coreApi(method, {...params, kind, query}, false, {signal})
-  return (Array.isArray(rows) ? rows : rows.items || []).map(row => ({value:row.value || row.name, label:recordTitle(row), description:recordTitle(row.description, '')}))
+  return (Array.isArray(rows) ? rows : rows.items || []).map(row => ({value:row.value || row.name, label:recordTitle(row), description:recordTitle(row.description, ''), icon:row.icon}))
  }
 })
 const linkedType = computed(() => props.field.doctype || (props.field.method === 'api.business_records' ? props.field.params?.doctype : {

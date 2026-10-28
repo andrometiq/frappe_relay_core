@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { channelValues, newChannelStep, STEP_TYPES } from '../src/services/channelAutomation.js'
+import { channelValues, channelLabel, displayedSteps, newChannelStep, STEP_TYPES } from '../src/services/channelAutomation.js'
 import { moveStep } from '../src/services/flowEditor.js'
 import { navAllowed, railGroups } from '../src/services/navigation.js'
 
@@ -30,4 +30,21 @@ test('screen preserves dirty edits on socket refresh and previews only saved set
   assert.match(screen, /busy \|\| dirty \|\| !text.trim\(\)/)
   assert.doesNotMatch(screen, /setInterval|setTimeout/)
   for (const action of ['Add step', 'Move step', 'Remove step', 'Test message']) assert.ok(screen.includes(action))
+})
+
+
+test('default cards show the runtime defaults without silently saving them', () => {
+  const draft = { steps: [], defaults: [{ step: 'Flow', enabled: 1, on_reply: 'Stop' }, { step: 'AI skill', enabled: 1, on_reply: 'Stop' }] }
+  const shown = displayedSteps(draft)
+  assert.deepEqual(shown.map(row => row.step), ['Flow', 'AI skill'])
+  shown[0].enabled = 0
+  assert.equal(draft.defaults[0].enabled, 1)
+  assert.deepEqual(channelValues(draft).steps, [])
+  draft.steps = shown
+  assert.equal(channelValues(draft).steps[0].enabled, 0)
+})
+
+test('selected channels retain the same distinct labels as their search results', () => {
+  assert.equal(channelLabel({ name: 'wa', title: 'yrp', channel: 'WhatsApp', address: '+91 98000 00001' }), 'WhatsApp · yrp · +91 98000 00001')
+  assert.equal(channelLabel({ name: 'mail', title: 'yrp', channel: 'Email', address: 'help@example.invalid' }), 'Email · yrp · help@example.invalid')
 })

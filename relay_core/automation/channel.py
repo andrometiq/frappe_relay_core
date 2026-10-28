@@ -87,9 +87,8 @@ def validate(doc):
         if not enabled(doc) or not row['enabled']:
             continue
         if row['step'] == 'AI skill':
-            if not row['ai_skill']:
-                frappe.throw('Choose an AI skill')
-            validate_skill(row['ai_skill'], doc.name)
+            if row['ai_skill']:
+                validate_skill(row['ai_skill'], doc.name)
         elif row['step'] == 'Assign':
             validate_assignment(row['team'], row['user'])
         elif row['step'] == 'Ticket' and row['ticket_rule'] not in ('Create if not resolved', 'Always', 'Never'):
@@ -98,13 +97,13 @@ def validate(doc):
             if not isinstance(row['message'], str) or not 1 <= len(row['message'].strip()) <= 2000:
                 frappe.throw('Out of hours reply needs 1–2000 characters')
             try:
-                ZoneInfo(doc.get('timezone') or '')
+                ZoneInfo(doc.get('timezone') or 'UTC')
                 start, end = clock(doc.get('open_time')), clock(doc.get('close_time'))
                 days = working_days(doc.get('working_days'))
                 if start == end or not days or set(days) - set(DAYS):
                     raise ValueError()
             except (ValueError, TypeError, ZoneInfoNotFoundError):
-                frappe.throw('Choose a timezone, different opening and closing times, and working days')
+                frappe.throw('Choose a valid timezone, different opening and closing times, and working days')
 
 
 @frappe.whitelist(methods=['GET'])
@@ -118,7 +117,7 @@ def read(channel):
         if values[key] is not None and values[key] != '':
             values[key] = clock(values[key]).isoformat()
     return dict(name=doc.name, title=doc.title, channel=doc.channel, modified=str(doc.modified),
-                **values, steps=steps(doc), defaults=DEFAULT_STEPS)
+                **values, address=doc.get('address'), timezone_default='UTC', steps=steps(doc), defaults=DEFAULT_STEPS)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -162,8 +161,14 @@ def references(kind, query=''):
         frappe.throw('Invalid automation reference')
     doctype, label, filters = choices[kind]
     pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-    rows = frappe.get_list(doctype, filters=filters, or_filters=[['name', 'like', pattern], [label, 'like', pattern]],
-                           fields=['name', label], order_by='name asc', page_length=30)
+    fields = ['name', label] + (['channel', 'address'] if kind == 'channel' else [])
+    rows = frappe.get_list(doctype, filters=filters, or_filters=[[field, 'like', pattern] for field in fields],
+                           fields=fields, order_by='name asc', page_length=30)
+    if kind == 'channel':
+        icons = {'WhatsApp': 'message-circle', 'Email': 'mail', 'Telegram': 'send'}
+        return [dict(value=row.name, label=' · '.join(filter(None, [row.channel, row.get(label) or row.name,
+                                                                  row.get('address')])),
+                     icon=icons.get(row.channel, 'message-square')) for row in rows]
     return [dict(value=row.name, label=row.get(label) or row.name) for row in rows]
 
 
@@ -173,7 +178,7 @@ def decision(row, *, flow=False, ai=False, outside=False, claimed=False, resolve
         return False, 'Step disabled'
     kind = row['step']
     if claimed and kind in ('Flow', 'AI skill', 'Out of hours reply'):
-        return False, 'An earlier step owns the response'
+        return False, 'An earlier step already handles the reply'
     if kind == 'Flow':
         return flow, 'Flow trigger matched' if flow else 'No flow trigger matched'
     if kind == 'AI skill':
@@ -183,7 +188,7 @@ def decision(row, *, flow=False, ai=False, outside=False, claimed=False, resolve
     if kind == 'Ticket':
         rule = row.get('ticket_rule')
         ok = rule != 'Never' and (rule == 'Always' or not resolved)
-        return ok, 'Reuse the admission ticket' if ok else 'Ticket rule skipped'
+        return ok, 'Update the conversation ticket' if ok else 'Ticket rule skipped'
     return True, 'Assign the conversation'
 
 
@@ -387,7 +392,7 @@ def dry_run(channel, text, contact=None):
     from relay_core.ai.service import pending_search
     confirmation = contact and ai_available(message, {}) and pending_search(message, message.get('ticket'), lock=False)
     if confirmation and not steps(config):
-        return dict(trace=trace + [dict(step='AI skill', runs=True, reason='Pending search confirmation; execution rechecks the saved scope')])
+        return dict(trace=trace + [dict(step='AI skill', runs=True, reason='Continue the search the customer confirmed; access is checked again')])
     claimed = False
     rows = steps(config) or DEFAULT_STEPS
     for index, row in enumerate(rows):
@@ -395,7 +400,7 @@ def dry_run(channel, text, contact=None):
         allowed, why = evaluate(row, message, config, claimed=claimed,
                                 resolved=ticket_resolved(message.get('ticket')), preview=not contact)
         if kind == 'AI skill' and confirmation and allowed:
-            why = 'Pending search confirmation; execution rechecks the saved scope'
+            why = 'Continue the search the customer confirmed; access is checked again'
         if kind == 'AI skill' and not contact and allowed:
             why = 'Requires a verified contact and matching business before execution'
         trace.append(dict(index=index, step=kind, runs=allowed, reason=why))

@@ -135,6 +135,40 @@ class ChannelApiTests(unittest.TestCase):
         self.enterContext(patch.object(channel, 'frappe', self.fake))
         self.access = self.enterContext(patch.object(channel, 'require_access'))
 
+    def test_channel_picker_labels_and_search_include_provider_and_address(self):
+        self.fake.get_list.return_value = [
+            _dict(name='wa', title='yrp', channel='WhatsApp', address='+91 98000 00001'),
+            _dict(name='mail', title='yrp', channel='Email', address='help@example.invalid')]
+        rows = channel.references('channel', '98000')
+        self.assertEqual(rows[0], dict(value='wa', label='WhatsApp · yrp · +91 98000 00001', icon='message-circle'))
+        self.assertEqual(rows[1]['label'], 'Email · yrp · help@example.invalid')
+        self.assertEqual(self.fake.get_list.call_args.kwargs['or_filters'], [
+            [field, 'like', '%98000%'] for field in ('name', 'title', 'channel', 'address')])
+
+    def test_customizing_defaults_keeps_automatic_skill_matching(self):
+        self.doc.automation_steps = channel.DEFAULT_STEPS
+        with patch.object(channel, 'validate_skill') as validate_skill:
+            channel.validate(self.doc)
+        validate_skill.assert_not_called()
+
+    def test_hours_use_utc_by_default_and_only_enabled_hours_steps_require_times(self):
+        self.doc.automation_steps = [row('Out of hours reply', message='We are closed.')]
+        self.doc.update(timezone='', open_time='09:00', close_time='17:00', working_days='Monday')
+        channel.validate(self.doc)
+        self.assertFalse(channel.outside_hours(self.doc, datetime(2026, 10, 26, 10, tzinfo=timezone.utc)))
+        self.doc.open_time = None
+        with self.assertRaisesRegex(ValueError, 'opening and closing times'):
+            channel.validate(self.doc)
+        self.doc.automation_steps = [row('Flow')]
+        channel.validate(self.doc)
+
+    def test_read_exposes_effective_defaults_without_saving_them(self):
+        result = channel.read('channel')
+        self.assertEqual(result['steps'], [])
+        self.assertEqual([row['step'] for row in result['defaults']], ['Flow', 'AI skill'])
+        self.assertEqual(result['timezone_default'], 'UTC')
+        self.doc.save.assert_not_called()
+
     def test_save_is_allowlisted_and_checks_revision(self):
         for values, revision in [({'company': 'other'}, 'revision'), ({'automation_enabled': 1, 'steps': []}, 'stale'),
                                  ({'automation_enabled': 1, 'steps': [row('Flow', injected='bad')]}, 'revision')]:
