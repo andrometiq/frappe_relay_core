@@ -14,7 +14,7 @@ const props = defineProps({ ticket: Object, settings: Object, busy: Boolean, aiE
 const emit = defineEmits(['update', 'close'])
 const records = ref([])
 const open = computed({ get: () => true, set: value => { if (!value) emit('close') } })
-const title = computed(() => [props.ticket.name, recordTitle(props.ticket, '')].filter(Boolean).join(' · '))
+const title = computed(() => recordTitle(props.ticket, 'Ticket'))
 const statusOptions = computed(() => pickerOptions(props.settings.statuses))
 const look = computed(() => statusLook(props.settings, props.ticket))
 const closed = computed(() => isClosed(props.settings, props.ticket))
@@ -38,12 +38,20 @@ watch(() => props.ticket.contact_person, async person => {
   <Dialog v-model="open" :options="{ title, size: 'lg' }">
     <div class="ticket-dialog" :aria-busy="busy">
       <ErrorMessage v-if="error" :message="error" />
-      <dl class="ticket-dialog__fields">
+      <p class="ticket-dialog__id">{{ ticket.name }}</p>
+      <dl class="ticket-dialog__fields ticket-dialog__editable" aria-label="Ticket status and assignment">
         <dt>Status</dt>
         <dd>
           <FormControl v-if="ticket.can_edit" type="select" :model-value="ticket.ticket_status" aria-label="Status" :options="statusOptions" :disabled="busy" @update:model-value="status => status !== ticket.ticket_status && emit('update', 'update_status', { status })" />
           <Badge v-else :label="look.label" :theme="look.theme" />
         </dd>
+        <dt>Assigned to</dt>
+        <dd>
+          <ChoiceField v-if="ticket.can_assign && ticket.contact" :model-value="''" :field="ownerField" @update:model-value="user => user && emit('update', 'assign', { user })" />
+          <span v-else :class="{ 'ticket-unassigned': !ticket.assigned_to }">{{ linkedTitle('User', ticket.assigned_to, 'Unassigned') }}</span>
+        </dd>
+      </dl>
+      <dl class="ticket-dialog__fields" aria-label="Ticket details">
         <dt>Type</dt>
         <dd>{{ ticket.ticket_type || 'No type' }}</dd>
         <dt>Contact</dt>
@@ -58,11 +66,6 @@ watch(() => props.ticket.contact_person, async person => {
         </dd>
         <dt>Created</dt>
         <dd>{{ linkedTitle('User', ticket.owner, ticket.owner || 'Unknown') }} · {{ dateTime(ticket.creation) }}</dd>
-        <dt>Assigned to</dt>
-        <dd>
-          <ChoiceField v-if="ticket.can_assign && ticket.contact" :model-value="''" :field="ownerField" @update:model-value="user => user && emit('update', 'assign', { user })" />
-          <span v-else :class="{ 'ticket-unassigned': !ticket.assigned_to }">{{ linkedTitle('User', ticket.assigned_to, 'Unassigned') }}</span>
-        </dd>
       </dl>
       <p v-if="ticket.brief" class="ticket-dialog__brief">{{ ticket.brief }}</p>
       <section v-if="aiEnabled && ticket.conversation_key && ticket.company" class="ticket-dialog__ai" aria-label="AI">
@@ -86,15 +89,17 @@ watch(() => props.ticket.contact_person, async person => {
 </template>
 
 <style scoped>
-.ticket-dialog { display: flex; flex-direction: column; gap: 16px; overflow-wrap: anywhere; }
-.ticket-dialog__fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 10px 12px; font-size: 13px; }
-.ticket-dialog__fields dt { color: var(--ink-gray-5); font-size: 12.5px; }
+.ticket-dialog { display: flex; flex-direction: column; gap: 24px; overflow-wrap: anywhere; }
+.ticket-dialog__id { font-size: 12px; color: var(--ink-gray-6); }
+.ticket-dialog__editable { padding: 16px; border-radius: 8px; background: var(--surface-gray-1); }
+.ticket-dialog__fields { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 16px; font-size: 13px; }
+.ticket-dialog__fields dt { color: var(--ink-gray-5); font-size: 12px; }
 .ticket-dialog__fields dd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; color: var(--ink-gray-8); }
 .ticket-dialog__fields dd > :deep(*) { max-width: 100%; }
 .ticket-dialog__record { display: block; flex-basis: 100%; }
-.ticket-dialog__brief { white-space: pre-wrap; font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--surface-gray-1); color: var(--ink-gray-8); }
+.ticket-dialog__brief { white-space: pre-wrap; font-size: 13px; padding: 16px; border-radius: 8px; background: var(--surface-gray-1); color: var(--ink-gray-8); }
 .ticket-dialog__ai { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
-.ticket-unassigned { color: var(--relay-amber, #b86e00); }
+.ticket-unassigned { color: var(--ink-gray-6); }
 @media (max-width: 640px) {
   .ticket-dialog__fields { grid-template-columns: 1fr; gap: 4px; }
   .ticket-dialog__fields dd { margin-bottom: 8px; }

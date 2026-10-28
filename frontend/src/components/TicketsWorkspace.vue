@@ -27,6 +27,11 @@ const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
 const statusTabs = computed(() => pickerOptions(settings.value.statuses, 'All'))
 const look = ticket => statusLook(settings.value, ticket)
+const hasFilters = computed(() => Object.entries(filters.value).some(([key, value]) => ['assigned_to', 'ticket_type'].includes(key) || Boolean(value)))
+function resetFilters() {
+  filters.value = emptyTicketFilters()
+  openRoute('#/tickets?view=tickets', true)
+}
 let generation = 0, detailGeneration = 0
 async function detail(name) {
   const request = ++detailGeneration; detailBusy.value = true
@@ -121,7 +126,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         </div>
         <div v-if="filters.assigned_to !== undefined || filters.ticket_type !== undefined || filters.exclude_assignees" class="ticket-toolbar">
           <span>{{ filters.exclude_assignees ? 'Other assignees' : filters.assigned_to !== undefined ? 'Assigned to: ' + linkedTitle('User', filters.assigned_to, 'Unassigned') : 'Type: ' + (filters.ticket_type || 'No type') }}</span>
-          <Button label="Clear filter" variant="ghost" @click="filters = emptyTicketFilters(); openRoute('#/tickets?view=tickets', true)" />
+          <Button label="Clear filter" variant="ghost" @click="resetFilters" />
         </div>
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
         <ul v-if="page.items.length" class="ticket-list">
@@ -138,7 +143,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
             </button>
           </li>
         </ul>
-        <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No tickets here" description="Pick another status, or turn off Assigned to me." icon="bookmark" />
+        <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No tickets here" :description="hasFilters ? 'Try clearing the search and filters.' : 'Tickets will appear here when they are created.'" icon="bookmark"><Button v-if="hasFilters" label="Clear all filters" variant="outline" @click="resetFilters" /></WorkspaceState>
         <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </template>
     </template>
@@ -158,19 +163,23 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
 .ticket-toolbar__search { flex: 1 1 220px; min-width: 0; max-width: 360px; }
 .ticket-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-white); font-size: 13px; color: var(--ink-gray-7); white-space: nowrap; }
 .ticket-chip[aria-pressed=true] { border-color: var(--outline-blue-1, var(--relay-accent)); background: var(--surface-blue-1, var(--relay-accent-soft)); color: var(--ink-blue-3); font-weight: 600; }
-.ticket-list { display: flex; flex-direction: column; gap: 8px; }
-.ticket-row { display: flex; width: 100%; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid var(--outline-gray-2); border-radius: 10px; background: var(--surface-white); text-align: left; }
+.ticket-list { display: flex; flex-direction: column; border: 1px solid var(--outline-gray-2); border-radius: 8px; overflow: hidden; }
+.ticket-list li + li { border-top: 1px solid var(--outline-gray-2); }
+.ticket-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 36%); width: 100%; align-items: center; gap: 16px; padding: 16px; border: 0; border-radius: 0; background: var(--surface-white); text-align: left; }
 .ticket-row:hover { background: var(--surface-gray-2); }
 .ticket-row__main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
 .ticket-row__main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--ink-gray-9); }
 .ticket-row__main small { font-size: 12.5px; color: var(--ink-gray-6); overflow-wrap: anywhere; }
-.ticket-row__side { display: flex; flex: none; align-items: center; gap: 12px; font-size: 13px; color: var(--ink-gray-7); }
-.ticket-unassigned { color: var(--relay-amber, #b86e00); }
+.ticket-row__side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 1fr); align-items: center; gap: 16px; font-size: 13px; color: var(--ink-gray-7); }
+.ticket-row__side > span:first-child { overflow-wrap: anywhere; }
+.ticket-row__side :deep(.relay-badge) { justify-self: start; white-space: normal; }
+.ticket-row:focus-visible { outline: 2px solid var(--relay-accent); outline-offset: -2px; }
+.ticket-unassigned { color: var(--ink-gray-6); }
 .ticket-empty { min-height: min(50vh, 360px); }
 @media (max-width: 768px) {
   .ticket-page-head__settings :deep(.relay-button__label) { display: none; }
   .ticket-toolbar__search { flex-basis: 100%; max-width: none; }
-  .ticket-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .ticket-row__side { justify-content: space-between; }
+  .ticket-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 8px; }
+  .ticket-row__side { grid-template-columns: minmax(0, 1fr) minmax(96px, 1fr); }
 }
 </style>

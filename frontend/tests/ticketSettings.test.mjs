@@ -125,3 +125,25 @@ test('empty assignee and type filters survive navigation and differ from all tic
   assert.equal(ticketFiltersFromRoute('#/tickets').assigned_to, undefined)
   assert.equal(ticketFiltersFromRoute(ticketFilterRoute({ ticket_type: 'Orders & returns' })).ticket_type, 'Orders & returns')
 })
+
+
+test('legacy amber colours render without rewriting saved settings', () => {
+  assert.deepEqual(statusLook(settings, { ticket_status: 'Open' }), { label: 'Open', theme: 'blue' })
+  const legacy = { statuses: [{ name: 'Archived', label: 'Archived', colour: 'amber', state: 'Closed' }] }
+  assert.equal(statusLook(legacy, { ticket_status: 'Archived' }).theme, 'gray')
+  assert.equal(settings.statuses[0].colour, 'amber')
+  const pending = { statuses: [{ name: 'Pending', label: 'Pending', colour: 'amber', state: 'Open' }] }
+  assert.equal(statusLook(pending, { ticket_status: 'Pending' }).theme, 'gray')
+})
+
+test('expanding assignees preserves totals, filters and duplicate names across the cutoff', () => {
+  const counts = Array.from({ length: 10 }, (_, index) => ({ assigned_to: `user${index}`, tickets: 10 - index }))
+  const label = user => ['user0', 'user9'].includes(user) ? 'Same name' : user
+  assert.equal(assigneeChartRows(counts, label)[0].label, 'Same name (user0)')
+  const rows = assigneeChartRows(counts, label, true)
+  assert.equal(rows.length, 10)
+  assert.equal(rows[9].label, 'Same name (user9)')
+  assert.equal(rows.reduce((sum, row) => sum + row.tickets, 0), 55)
+  assert.deepEqual(rows[9].filters, { assigned_to: 'user9' })
+  assert.ok(rows.every(row => row.width > 0 && row.width <= 100))
+})

@@ -178,8 +178,8 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
 .directory-rows .directory-row > .directory-contact .directory-contact-copy { display:flex; flex-direction:column; gap:4px; }
 .directory-rows .directory-row > .directory-contact .directory-contact-top strong { font-size:14px; font-weight:600; color:var(--relay-ink); }
 .directory-rows .directory-row > .directory-contact .directory-contact-bottom small { margin-top:0; font-size:13px; color:var(--relay-ink-3); }
-.directory-unlinked { color:var(--ink-amber-3, #b45309); font-weight:600; }
-.directory-star { flex:none; color:var(--ink-amber-3, #b45309); fill:currentColor; }
+.directory-unlinked { color:var(--ink-gray-6); }
+.directory-star { flex:none; color:var(--ink-gray-6); fill:currentColor; }
 .directory-link { position:absolute; bottom:14px; right:14px; height:20px; min-height:0; padding:0 8px; border:1px solid var(--relay-accent); border-radius:10px; color:var(--relay-accent-text); font-size:11.5px; font-weight:600; }
 .directory-link:hover { background:var(--relay-accent-soft); }
 .directory-row-menu { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:var(--relay-layer-strong); color:var(--relay-ink-2); box-shadow:var(--relay-shadow-1); opacity:0; pointer-events:none; }

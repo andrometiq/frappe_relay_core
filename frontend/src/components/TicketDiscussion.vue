@@ -51,7 +51,7 @@ useRealtimeRefresh([], ['tickets'], () => run(load))
 </script>
 
 <template>
-  <section aria-label="Comments" class="ticket-discussion space-y-3">
+  <section aria-label="Comments" class="ticket-discussion">
     <h3 class="font-semibold">Comments</h3>
     <p v-if="!comments.length" class="ticket-muted">No comments yet.</p>
     <article v-for="row in comments" :key="row.name" class="ticket-comment">
@@ -69,12 +69,12 @@ useRealtimeRefresh([], ['tickets'], () => run(load))
 </template>
 
 <style scoped>
-.ticket-discussion { border-top:1px solid var(--outline-gray-2); padding-top:0.75rem; }
+.ticket-discussion { display:flex; flex-direction:column; gap:16px; border-top:1px solid var(--outline-gray-2); padding-top:24px; }
 .ticket-muted { color:var(--ink-gray-6); font-size:13px; }
 .ticket-comment { border-top:1px solid var(--outline-gray-2); padding-top:0.5rem; }
-.ticket-comment-author { display:flex; gap:8px; align-items:baseline; font-size:12px; }
-.ticket-comment-author time { color:var(--ink-gray-5); font-size:11px; }
+.ticket-comment-author { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; font-size:12px; }
+.ticket-comment-author time { color:var(--ink-gray-5); font-size:12px; }
 .ticket-comment p { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; margin-top:4px; }
-.ticket-comment-form { display:flex; flex-direction:column; gap:8px; }
-.ticket-comment-form textarea { border:1px solid var(--outline-gray-2); background:var(--surface-gray-1); color:var(--ink-gray-8); border-radius:7px; padding:9px; resize:vertical; font-size:13px; }
+.ticket-comment-form { display:flex; flex-direction:column; gap:16px; }
+.ticket-comment-form textarea { border:1px solid var(--outline-gray-2); background:var(--surface-gray-1); color:var(--ink-gray-8); border-radius:8px; padding:16px; resize:vertical; font-size:13px; }
 </style>

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { Button, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useTicketSettings } from '../composables/useTicketSettings'
-import { COLOURS, movedNames, removalHint } from '../services/ticketSettings'
+import { COLOURS, movedNames, removalHint, ticketColour } from '../services/ticketSettings'
 
 const { settings, apply } = useTicketSettings()
 const busy = ref(false), error = ref(''), drafts = ref({}), adding = ref({ status: '', type: '' })
@@ -29,7 +29,7 @@ const add = kind => {
   const label = adding.value[kind].trim()
   if (!label) return
   adding.value[kind] = ''
-  run(() => coreApi('ticket_settings.save', { kind, label, ...(kind === 'status' ? { state: 'Open' } : {}) }, true))
+  run(() => coreApi('ticket_settings.save', { kind, label, ...(kind === 'status' ? { state: 'Open', colour: 'blue' } : {}) }, true))
 }
 const remove = (kind, row) => run(() => coreApi('ticket_settings.remove', { kind, name: row.name }, true))
 function move(kind, rows, index, step) {
@@ -46,7 +46,7 @@ function move(kind, rows, index, step) {
       <ul>
         <li v-for="(row, index) in section.rows" :key="row.name">
           <div class="ticket-settings__swatches" role="radiogroup" :aria-label="'Colour of ' + row.label">
-            <button v-for="colour in COLOURS" :key="colour" type="button" role="radio" :class="['ticket-swatch', 'ticket-swatch--' + colour]" :aria-checked="row.colour === colour" :aria-label="colour" :title="colour" :disabled="busy" @click="row.colour !== colour && save(section.kind, row, { colour })" />
+            <button v-for="colour in COLOURS" :key="colour" type="button" role="radio" :class="['ticket-swatch', 'ticket-swatch--' + ticketColour({ ...row, colour })]" :aria-checked="row.colour === colour" :aria-label="colour === 'amber' ? 'Legacy colour (blue for Open, grey otherwise)' : colour" :title="colour === 'amber' ? 'Legacy colour (blue for Open, grey otherwise)' : colour" :disabled="busy" @click="row.colour !== colour && save(section.kind, row, { colour })" />
           </div>
           <FormControl class="ticket-settings__name" :model-value="drafts[section.kind + row.name] ?? row.label" :aria-label="'Name of ' + row.label" maxlength="60" :disabled="busy" @update:model-value="value => drafts[section.kind + row.name] = value" @blur="rename(section.kind, row)" @keydown.enter.prevent="rename(section.kind, row)" />
           <FormControl v-if="section.kind === 'status'" class="ticket-settings__state" type="select" :model-value="row.state" label="Type" :options="typeOptions" :disabled="busy" @update:model-value="state => save('status', row, { state })" />
@@ -77,7 +77,6 @@ function move(kind, rows, index, step) {
 .ticket-swatch--gray { background: var(--ink-gray-4); }
 .ticket-swatch--blue { background: var(--ink-blue-3); }
 .ticket-swatch--green { background: var(--ink-green-2); }
-.ticket-swatch--amber { background: #d69e2e; }
 .ticket-swatch--red { background: var(--ink-red-3); }
 .ticket-settings__name { flex: 1 1 140px; min-width: 120px; }
 .ticket-settings__state { flex: 0 0 120px; }

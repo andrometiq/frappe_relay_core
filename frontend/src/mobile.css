@@ -7,9 +7,6 @@
   .v1-shell.relay-shell>.app-nav,.v1-shell.relay-shell>.relay-nav-backdrop{display:none!important}
   .v1-shell.relay-shell .workspace{position:relative;flex:1;min-height:0;border:0;border-radius:0;box-shadow:none;overflow:hidden}
 
-  /* Phone layers from the mobile mockup */
-  :root,[data-theme="light"]{--relay-mica:rgba(243,245,250,.86);--relay-layer:rgba(255,255,255,.7);--relay-layer-strong:rgba(255,255,255,.92);--relay-hover:rgba(0,0,0,.04);--relay-bubble-in:rgba(255,255,255,.95);--relay-chat:rgba(246,247,250,.6)}
-  [data-theme="dark"]{--relay-mica:rgba(32,33,38,.9);--relay-layer:rgba(255,255,255,.05);--relay-layer-strong:rgba(48,49,55,.95);--relay-hover:rgba(255,255,255,.06);--relay-bubble-in:rgba(56,57,64,.95);--relay-chat:rgba(20,21,25,.4)}
   body{font-size:14px}
   .v1-shell.relay-shell .workspace-title,.v1-shell.relay-shell .v1-header>.relay-brand,.relay-titlebar-search,.inbox-list-head{display:none}
 

@@ -4,7 +4,7 @@ import frappe
 STATUS_TYPES = ('Open', 'Closed')
 DOCTYPES = {'status': 'Relay Ticket Status', 'type': 'Relay Ticket Type'}
 TICKET_FIELDS = {'status': 'ticket_status', 'type': 'ticket_type'}
-DEFAULT_STATUSES = (('Open', 'amber', 10), ('Closed', 'gray', 20))
+DEFAULT_STATUSES = (('Open', 'blue', 10), ('Closed', 'gray', 20))
 
 
 def _kind(kind):
