@@ -138,25 +138,36 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         'Use only amounts and currency clearly present in the message or image observation. If unclear, '
         'propose no draft and hand off with a short reason for the ticket. Never invent accounts, exchange rates '
         'or required fields. Use declared SEARCH for missing configuration. Propose replies with EXECUTE '
-        'in the written order; when proposing actions, leave the final reply empty. '
+        'in the written order. Leave reply empty ONLY when actions are proposed, a search is declared, '
+        'or handoff is true. Otherwise provide a non-empty reply to the sender. '
         'Return JSON with reply, handoff, reason, search.\nReferences:\n' + json.dumps(references) +
         '\nAllowed actions:\n' + json.dumps(action_schemas) +
         '\nAuthorized search:\n' + json.dumps(search) + '\nSkill:\n' + skill.instructions +
         '\nOwner reply style:\n' + str(skill.get('reply_style') or '')[:2000])
     options['max_tokens'] = min(options['max_tokens'], 1200)
-    check_continuation(run_id)
-    outcome = engine.run_route(account, model.model_id,
-        (system, llm.redact_secrets(text, secrets), RESPONSE), options,
-        dict(extraction=None, target_doctype=business[0], phase=None,
-             reference_doctype='Relay Automation Run' if run_id else None, reference_name=run_id, run_id=run_id))
-    if time.monotonic() >= deadline or reader.failed or not outcome.get('ok'):
-        raise ValueError('Decision or authorization failed')
-    value = outcome['result']['data']
-    if not isinstance(value, dict) or set(value) not in ({'reply', 'handoff', 'reason'}, {'reply', 'handoff', 'reason', 'search'}):
-        raise ValueError('Invalid skill decision')
-    if type(value['handoff']) is not bool or not isinstance(value['reply'], str) or len(value['reply']) > 2000 or not isinstance(value['reason'], str) or len(value['reason']) > 500:
-        raise ValueError('Invalid skill decision')
-    if not value['reply'].strip() and not value['handoff'] and value.get('search') is None and not proposed and not actions:
+    for attempt in range(2):
+        check_continuation(run_id)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('Event turn deadline exceeded')
+        options['timeout'] = min(options['timeout'], remaining)
+        correction = ('\nYour previous answer was empty with no actions, search or handoff. '
+                      'Provide a non-empty reply, propose the allowed actions, declare a needed search, '
+                      'or explicitly hand off with a reason.') if attempt else ''
+        outcome = engine.run_route(account, model.model_id,
+            (system + correction, llm.redact_secrets(text, secrets), RESPONSE), options,
+            dict(extraction=None, target_doctype=business[0], phase=None,
+                 reference_doctype='Relay Automation Run' if run_id else None, reference_name=run_id, run_id=run_id))
+        if time.monotonic() >= deadline or reader.failed or not outcome.get('ok'):
+            raise ValueError('Decision or authorization failed')
+        value = outcome['result']['data']
+        if not isinstance(value, dict) or set(value) not in ({'reply', 'handoff', 'reason'}, {'reply', 'handoff', 'reason', 'search'}):
+            raise ValueError('Invalid skill decision')
+        if type(value['handoff']) is not bool or not isinstance(value['reply'], str) or len(value['reply']) > 2000 or not isinstance(value['reason'], str) or len(value['reason']) > 500:
+            raise ValueError('Invalid skill decision')
+        if value['reply'].strip() or value['handoff'] or value.get('search') is not None or proposed or actions:
+            break
+    else:
         raise ValueError('Empty skill decision')
     if reader.ledger_results and not value['handoff']:
         from relay_core.ai.ledger import reply
