@@ -226,8 +226,8 @@ def latest_messages(contacts, channels=None):
     return {row.relay_contact:row for row in union.run(as_dict=True)}
 
 
-def directory_preview(message):
-    """Use the thread's plain text, with legacy content decoded for text rendering."""
+def directory_preview(message, limit=200):
+    """Use the thread's plain text, with legacy content decoded for text rendering, up to `limit` characters."""
     from relay_core.message_display import business_choice_label
     label = business_choice_label(message)
     if label:
@@ -236,14 +236,14 @@ def directory_preview(message):
     from relay_core.message_types import preview
     data = object_value(message.get('message_data') or {})
     if data.get('kind') and message.get('transcript'):
-        return (preview(data) + ': ' + message['transcript'])[:200]
+        return (preview(data) + ': ' + message['transcript'])[:limit]
     if data.get('kind'):
-        return preview(data)[:200]
+        return preview(data)[:limit]
     # Older messages have only sanitized HTML content. Decode after stripping tags;
     # API consumers must render this plain-text preview as text, never as HTML.
     from html import unescape
     from frappe.utils import strip_html
-    return unescape(strip_html(message.get('content') or ''))[:200]
+    return unescape(strip_html(message.get('content') or ''))[:limit]
 
 
 @frappe.whitelist(methods=['GET'])
