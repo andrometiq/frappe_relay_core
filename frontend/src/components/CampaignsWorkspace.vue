@@ -2,7 +2,7 @@
 import ChoiceField from './fields/ChoiceField.vue'
 import { useLoadMore } from '../composables/useLoadMore'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
+import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, TextInput, toast } from "@relay/ui";
 import FrappeFormSection from "./frappe/FrappeFormSection.vue";
 import FrappeFormView from "./frappe/FrappeFormView.vue";
 import FrappeListView from "./frappe/FrappeListView.vue";
@@ -13,9 +13,9 @@ import { useCampaigns } from "../composables/useCampaigns";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
-import { COUNTERS, campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
-  statusTheme, windowNotice } from "../services/campaignProgress";
-import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
+import { campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
+  shownCounters, statusTheme, windowNotice } from "../services/campaignProgress";
+import { inputTime, recipientLabel, sampleSheet, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
 const workspace = useCampaigns();
@@ -41,18 +41,43 @@ const media = (kind) => channelFeature(capabilities.value, "WhatsApp", "media." 
 const types = computed(() => messageTypes(["photo", "video", "document"].filter(media)));
 const columnsUsed = computed(() => placeholders(text.value));
 const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
-const labels = { start: "Start sending", unschedule: "Unschedule", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
-const actionLabel = (action) => action === "start" && campaign.value.status === "Scheduled" ? "Send now" : labels[action];
-// Draft recipients come from contacts or from a sheet; a campaign starts now or at a site time.
-const recipientMode = ref("contacts"), sendMode = ref("now"), startAt = ref("");
-const modeOptions = [{ value: "contacts", label: "Relay contacts" }, { value: "file", label: "Upload a file" }];
-const fileHint = computed(() => campaign.value?.message
-  ? "Columns: mobile number, one column per {{column}} in the message, and the media link if each row sends its own file."
-  : "Columns: mobile number, then the template values in order, and the image link if the template has one.");
+const noApprovedTemplates = computed(() => type.value === "template" && !busy.value && !templates.value.length && (!manyNumbers.value || number.value));
+const createMissing = computed(() => [
+  title.value.trim().length < 3 && "a title of at least 3 characters",
+  manyNumbers.value && !number.value && "a WhatsApp number",
+  type.value === "template" && !template.value && (noApprovedTemplates.value ? "an approved template (none yet)" : "an approved template"),
+  type.value === "text" && !text.value.trim() && "the message text",
+].filter(Boolean));
+const labels = { start: "Send now", unschedule: "Unschedule", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
+const actionLabel = (action) => action === "cancel" && campaign.value.status === "Draft" ? "Discard draft" : labels[action];
+// A Draft starts from "Start sending" under When to send, so the header keeps only the other actions.
+const headerActions = computed(() => campaignActions(campaign.value?.status).filter((action) => !(action === "start" && campaign.value.status === "Draft")));
+// Draft recipients come from contacts or from a sheet; nothing is picked until the user chooses one.
+const recipientMode = ref(""), sendMode = ref("now"), startAt = ref("");
+const modeOptions = [{ value: "contacts", label: "Relay contacts" }, { value: "file", label: "Upload sheet" }];
+const fileHint = "Accepted: .xlsx, .csv or .tsv. The first row holds the column names; one row per person.";
+const sampleUrl = computed(() => "data:text/csv;charset=utf-8," + encodeURIComponent(sampleSheet(campaign.value?.fields)));
+const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
+// Starting or cancelling asks once; the dialog names the people and the message.
+const confirming = ref("");
+const confirmText = computed(() => ({
+  start: `Send ${messageName.value} to ${(counts.value.total || 0).toLocaleString()} people now? You can pause sending, but sent messages cannot be taken back.`,
+  cancel: campaign.value?.status === "Draft" ? "Discard this draft? Nothing is sent. It stays in the list as Cancelled." : "Stop this campaign? Messages not sent yet are not sent.",
+}[confirming.value]));
+async function confirmAction() {
+  const action = confirming.value;
+  confirming.value = "";
+  await workspace.control(action);
+  if (!error.value) toast(action === "start" ? "Sending started" : "Campaign cancelled");
+}
+function request(action) { if (["start", "cancel"].includes(action)) confirming.value = action; else workspace.control(action); }
 function showCampaign(fresh) { campaign.value = fresh; }
-function schedule() { workspace.control("schedule", { scheduled_at: siteTime(startAt.value) }); }
+async function schedule() {
+  await workspace.control("schedule", { scheduled_at: siteTime(startAt.value) });
+  if (!error.value) toast("Campaign scheduled");
+}
 watch(() => campaign.value?.name, () => {
-  recipientMode.value = campaign.value?.source_file ? "file" : "contacts";
+  recipientMode.value = campaign.value?.source_file ? "file" : campaign.value?.audience ? "contacts" : "";
   sendMode.value = "now"; startAt.value = inputTime(campaign.value?.scheduled_at);
 });
 
@@ -117,52 +142,72 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
 <template>
   <div class="campaign-workspace">
     <div v-if="error" class="v1-template-feedback"><ErrorMessage :message="error" /></div>
+    <Dialog :model-value="Boolean(confirming)" :options="{ title: confirming === 'start' ? 'Start sending?' : confirming === 'cancel' && campaign?.status === 'Draft' ? 'Discard draft?' : 'Cancel campaign?', size: 'sm' }" @update:model-value="value => { if (!value) confirming = '' }">
+      <p class="campaign-confirm">{{ confirmText }}</p>
+      <template #actions>
+        <Button variant="outline" label="Keep editing" autofocus @click="confirming = ''" />
+        <Button variant="solid" :theme="confirming === 'cancel' ? 'red' : 'blue'" :label="confirming === 'start' ? 'Start sending' : confirming === 'cancel' && campaign?.status === 'Draft' ? 'Discard draft' : 'Cancel campaign'" :loading="busy" @click="confirmAction" />
+      </template>
+    </Dialog>
+
 
     <FrappeFormView v-if="creating" title="New campaign" :breadcrumbs="['Campaigns', 'New']" @back="back">
       <FrappeFormSection description="Send one WhatsApp message to Relay contacts or to every mobile number in a sheet.">
         <div class="frappe-field-grid">
-          <label class="campaign-field"><span>Title</span><TextInput v-model="title" placeholder="Winter launch Oct 2026" /></label>
+          <label class="campaign-field"><span>Title</span><TextInput v-model="title" maxlength="100" placeholder="Winter launch Oct 2026" /><small class="campaign-hint">3 to 100 characters. Do not use / \ % # ? &lt; &gt;</small></label>
           <ChoiceField v-if="manyNumbers" :model-value="number" :field="{ label: 'WhatsApp number', options: numberOptions }" @update:model-value="chooseNumber" />
           <RelaySelect v-model="type" label="Message type" :options="types" />
           <ChoiceField v-if="type === 'template'" v-model="template" :field="{ label: 'Approved template', options: templateOptions, readOnly: manyNumbers && !number }" />
+        </div>
+        <div v-if="noApprovedTemplates" class="campaign-note campaign-empty" role="status">
+          <FeatherIcon name="file-text" :size="20" />
+          <div><strong>No approved template yet</strong><p>A campaign needs a template that Meta has approved. Create one in Templates; approval usually takes under a day.</p></div>
+          <a class="relay-button relay-button--outline" href="#/whatsapp">Go to Templates</a>
         </div>
         <div v-if="type !== 'template'" class="campaign-actions">
           <FormControl v-model="text" type="textarea" :rows="4" :label="type === 'text' ? 'Message' : 'Caption (optional)'"
             :placeholder="'Hi {{Name}}, your order is ready'" />
           <p class="campaign-hint">Write <code v-text="'{{column}}'" /> to fill a value from the sheet column with that name.
             <template v-if="columnsUsed.length">Columns used: {{ columnsUsed.join(", ") }}.</template></p>
-          <p class="campaign-issue">WhatsApp delivers text and media only to numbers that messaged you in the last 24 hours. Use a template to reach everyone.</p>
+          <p class="campaign-note">Text and media reach only people who wrote to you in the last 24 hours. Use an approved template to reach everyone.</p>
         </div>
-        <div class="campaign-actions"><Button label="Create campaign" variant="solid" :loading="busy" :disabled="!ready" @click="create" /></div>
+        <div class="campaign-actions">
+          <Button label="Create campaign" variant="solid" :loading="busy" :disabled="!ready" @click="create" />
+          <p v-if="createMissing.length" class="campaign-hint" role="status">To create the campaign, add {{ createMissing.join(", ") }}.</p>
+          <p v-else class="campaign-hint">Next you choose who gets it: Relay contacts or an uploaded sheet.</p>
+        </div>
       </FrappeFormSection>
     </FrappeFormView>
 
     <FrappeFormView v-else-if="campaign" :title="campaign.title" :breadcrumbs="['Campaigns', campaign.title]"
       :status="campaign.status" :status-theme="statusTheme(campaign.status)" @back="back">
       <template #actions>
-        <Button v-for="action in campaignActions(campaign.status)" :key="action"
-          :label="actionLabel(action)" :variant="action === 'start' || action === 'resume' ? 'solid' : 'subtle'" :theme="action === 'cancel' ? 'red' : 'gray'"
-          :loading="busy" :disabled="action === 'start' && !(counts.total > 0)" @click="workspace.control(action)" />
+        <Button v-for="action in headerActions" :key="action"
+          :label="actionLabel(action)" :variant="action === 'start' || action === 'resume' ? 'solid' : 'outline'" :theme="action === 'cancel' ? 'red' : 'gray'"
+          :loading="busy" :disabled="action === 'start' && !(counts.total > 0)" @click="request(action)" />
       </template>
-      <FrappeFormSection title="Progress">
+      <FrappeFormSection :title="campaign.status === 'Draft' ? 'Summary' : 'Progress'">
         <div class="campaign-counters">
-          <div v-for="[key, label] in COUNTERS" :key="key"><span>{{ label }}</span><strong>{{ (counts[key] || 0).toLocaleString() }}</strong>
+          <div v-for="[key, label] in shownCounters(campaign.status, counts)" :key="key"><span>{{ label }}</span><strong>{{ (counts[key] || 0).toLocaleString() }}</strong>
             <small v-if="key !== 'total' && key !== 'skipped' && counts.total">{{ percent(counts[key], counts.total) }}%</small></div>
         </div>
         <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaign.last_error }}</p>
-        <p v-if="replyWindow" :class="replyWindow.closed ? 'campaign-issue' : 'campaign-hint'" role="status">{{ windowNotice(replyWindow) }}</p>
+        <p v-if="replyWindow" :class="replyWindow.open ? 'campaign-note' : 'campaign-issue'" role="status">{{ windowNotice(replyWindow) }}</p>
         <p v-if="scheduleNotice(campaign)" class="campaign-hint" role="status">{{ scheduleNotice(campaign) }}</p>
       </FrappeFormSection>
-      <FrappeFormSection v-if="campaign.status === 'Draft'" title="Recipients"
-        description="Pick Relay contacts by filter, or upload a sheet. Adding recipients again replaces the rows not sent yet.">
-        <div class="campaign-modes" role="radiogroup" aria-label="Recipients from">
-          <Button v-for="mode in modeOptions" :key="mode.value" :label="mode.label" role="radio" :aria-checked="recipientMode === mode.value"
-            :variant="recipientMode === mode.value ? 'solid' : 'subtle'" @click="recipientMode = mode.value" />
+      <FrappeFormSection v-if="campaign.status === 'Draft'" title="Who gets it"
+        description="Choose Relay contacts or upload a sheet. Choosing again replaces the people not messaged yet.">
+        <div class="campaign-tabs" role="tablist" aria-label="Choose people from">
+          <button v-for="mode in modeOptions" :key="mode.value" type="button" role="tab" :aria-selected="recipientMode === mode.value" @click="recipientMode = mode.value">{{ mode.label }}</button>
         </div>
-        <CampaignAudience v-if="recipientMode === 'contacts'" :key="campaign.name" :campaign="campaign" :upload-media="workspace.uploadMedia" @imported="showCampaign" />
+        <p v-if="!recipientMode" class="campaign-hint">No people chosen yet. Pick where they come from.</p>
+        <CampaignAudience v-else-if="recipientMode === 'contacts'" :key="campaign.name" :campaign="campaign" :upload-media="workspace.uploadMedia" @imported="showCampaign" />
         <template v-else>
-        <p class="campaign-hint" v-text="fileHint" />
-        <input type="file" accept=".xlsx,.csv" aria-label="Recipients file" :disabled="busy" @change="chooseFile" />
+        <label class="campaign-drop" :class="{ 'is-busy': busy }">
+          <FeatherIcon name="upload" :size="20" /><strong>Choose a sheet</strong><small v-text="fileHint" />
+          <input type="file" accept=".xlsx,.csv,.tsv" aria-label="Recipients sheet" :disabled="busy" @change="chooseFile" />
+        </label>
+        <a class="v1-link campaign-sample" :href="sampleUrl" :download="`${campaign.title || 'campaign'} sample.csv`"><FeatherIcon name="download" :size="14" /> Download sample sheet</a>
         <div v-if="sheet && mapping" class="campaign-mapping">
           <RelaySelect v-model="mapping.phone" label="Phone number column" :options="sheet.columns" />
           <div v-for="field in sheet.fields" :key="field.key" class="campaign-map-row">
@@ -188,7 +233,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <label class="campaign-field"><span>Start time ({{ campaign.time_zone }})</span><TextInput v-model="startAt" type="datetime-local" /></label>
           <Button label="Schedule" variant="solid" :loading="busy" :disabled="!startAt" @click="schedule" />
         </div>
-        <div v-else class="campaign-schedule"><Button label="Start sending" variant="solid" :loading="busy" @click="workspace.control('start')" /></div>
+        <div v-else class="campaign-schedule"><Button :label="`Start sending to ${(counts.total || 0).toLocaleString()} people`" variant="solid" :loading="busy" @click="request('start')" /></div>
       </FrappeFormSection>
       <FrappeFormSection v-if="campaign.issues?.length" title="Rows not sent">
         <div class="campaign-issues"><div v-for="row in campaign.issues" :key="row.reason"><span>{{ row.reason }}</span><strong>{{ row.count }}</strong></div></div>
@@ -197,7 +242,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         <RelaySelect v-model="filter" label="Show" :options="[{ value: '', label: 'All rows' }, 'Pending', 'Skipped', 'Sent', 'Delivered', 'Read', 'Failed']" @update:model-value="workspace.page($event)" />
         <div class="campaign-rows" role="table" aria-label="Campaign recipients">
           <div v-for="row in campaign.recipients" :key="row.sheet_row" role="row">
-            <span>Row {{ row.sheet_row }}</span><span>+{{ row.destination }}</span><Badge :label="recipientLabel(row)" />
+            <span>Row {{ row.sheet_row }}</span><span>{{ /^\d+$/.test(row.destination) ? '+' : '' }}{{ row.destination }}</span><Badge :label="recipientLabel(row)" />
             <small v-if="row.reason && recipientLabel(row) === row.status">{{ row.reason }}</small>
           </div>
         </div>
@@ -239,6 +284,21 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
 .campaign-issues { display: grid; gap: 8px; }
 .campaign-issues > div { flex-direction: row; justify-content: space-between; }
 .campaign-issue { margin-top: 10px; color: var(--ink-red-4); font-size: 13px; }
+.campaign-note { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--outline-gray-2); border-radius: 8px; background: var(--surface-gray-1); color: var(--ink-gray-7); font-size: 13px; }
+.campaign-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.campaign-empty > div { flex: 1 1 240px; }
+.campaign-empty p { margin-top: 2px; color: var(--ink-gray-6); }
+.campaign-empty .relay-button { text-decoration: none; }
+.campaign-tabs { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); }
+.campaign-tabs button { min-width: 140px; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); }
+.campaign-tabs button[aria-selected=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+.campaign-drop { position: relative; display: grid; justify-items: center; gap: 4px; margin-top: 12px; padding: 20px; border: 1.5px dashed var(--outline-gray-3); border-radius: 10px; text-align: center; color: var(--ink-gray-7); cursor: pointer; }
+.campaign-drop:hover, .campaign-drop:focus-within { border-color: var(--relay-accent, #0f6cbd); background: var(--surface-gray-1); }
+.campaign-drop.is-busy { opacity: .6; cursor: progress; }
+.campaign-drop small { color: var(--ink-gray-5); font-size: 12px; }
+.campaign-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.campaign-sample { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 13px; }
+.campaign-confirm { font-size: 14px; line-height: 1.5; color: var(--ink-gray-8); }
 .campaign-hint { margin-top: 10px; color: var(--ink-gray-5); font-size: 13px; }
 .campaign-media { display: grid; gap: 6px; }
 .campaign-modes { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px; color: var(--ink-gray-8); }

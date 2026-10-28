@@ -174,8 +174,8 @@ def uploaded_file(file_url):
 
 
 def source_path(file_url):
-    if not isinstance(file_url, str) or not file_url.lower().endswith(('.xlsx', '.csv')):
-        frappe.throw('Upload a .xlsx or .csv file')
+    if not isinstance(file_url, str) or not file_url.lower().endswith(('.xlsx', '.csv', '.tsv')):
+        frappe.throw('Upload a .xlsx, .csv or .tsv file')
     return uploaded_file(file_url).get_full_path()
 
 
@@ -334,7 +334,8 @@ def add_rows(doc, rows, seen):
         if not problem and destination in seen:
             problem = 'Duplicate number'
         seen.add(destination)
-        chunk.append((number, destination, values, problem))
+        shown = destination or str(row.get(mapping['phone']) or '').strip()[:40]
+        chunk.append((number, shown, values, problem))
         if len(chunk) == CHUNK:
             insert_chunk(doc, chunk)
             chunk = []

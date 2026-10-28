@@ -7,6 +7,21 @@ export function navAllowed(item, capabilities) {
   return gates.every(gate => !item[gate] || Boolean(capabilities?.[gate])) && channelEnabled(capabilities, item.channel)
 }
 
+// Desktop rail groups. Each group opens its first allowed page; a group with more pages shows them as tabs.
+const RAIL = [
+  { name: 'Chats', icon: 'message-square', pages: ['Messages'] },
+  { name: 'Tickets', icon: 'ticket', pages: ['Tickets'] },
+  { name: 'Contacts', icon: 'users', pages: ['Contacts'] },
+  { name: 'WhatsApp', icon: 'message-circle', pages: ['WhatsApp'] },
+  { name: 'Automation', icon: 'zap', pages: ['Business events', 'Flows', 'Skills'] },
+  { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams', 'Activity'], bottom: true },
+]
+
+export function railGroups(pages) {
+  return RAIL.map(group => ({ ...group, pages: group.pages.map(name => pages.find(page => page.name === name)).filter(Boolean) }))
+    .filter(group => group.pages.length)
+}
+
 // WhatsApp section tabs, shared by the sidebar, the phone More sheet and the section's own tab bar.
 const WHATSAPP_SECTIONS = [
   { name: 'templates', label: 'Templates', icon: 'layout', feature: 'templates' },

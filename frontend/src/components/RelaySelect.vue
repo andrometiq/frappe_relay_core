@@ -4,6 +4,7 @@ const props = defineProps({
   label: String,
   options: { type: Array, default: () => [] },
   disabled: Boolean,
+  hideLabel: Boolean,
 });
 const model = defineModel({ default: "" });
 const id = useId();
@@ -15,7 +16,7 @@ const rows = computed(() =>
 </script>
 <template>
   <div class="space-y-1.5">
-    <label :for="id" class="block text-xs text-ink-gray-5">{{ label }}</label
+    <label :for="id" :class="hideLabel ? 'sr-only' : 'block text-xs text-ink-gray-5'">{{ label }}</label
     ><select
       :id="id"
       v-model="model"

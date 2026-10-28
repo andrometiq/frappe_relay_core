@@ -8,7 +8,8 @@ const props = defineProps({
   variant: { type: String, default: 'subtle' }, theme: { type: String, default: 'gray' },
   size: { type: String, default: 'sm' }, loading: Boolean, disabled: Boolean, type: { type: String, default: 'button' },
 })
-const variants = { solid: 'relay-button--solid', subtle: 'relay-button--subtle', ghost: 'relay-button--ghost' }
+// outline is the base bordered look: a secondary action that still reads as a button.
+const variants = { solid: 'relay-button--solid', subtle: 'relay-button--subtle', ghost: 'relay-button--ghost', outline: 'relay-button--outline' }
 const themes = { gray: 'relay-button--gray', red: 'relay-button--red', blue: 'relay-button--blue', green: 'relay-button--green' }
 const sizes = { xs: 'relay-button--xs', sm: 'relay-button--sm', lg: 'relay-button--lg' }
 const classes = computed(() => [

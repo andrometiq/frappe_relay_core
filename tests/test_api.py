@@ -173,7 +173,7 @@ class ContactDetailsTests(unittest.TestCase):
         self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
         endpoint=types.SimpleNamespace(name='binding', channel='wa', verified=0)
         self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
-        with patch('relay_core.business_access.primary_record', return_value=None):
+        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_link_unlinked', return_value=False):
             result=self.api.contact_details('fixture-contact')
         self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}])
         self.assertIsNone(result['primary'])
@@ -185,7 +185,7 @@ class ContactDetailsTests(unittest.TestCase):
         self.assertEqual((result['can_edit_links'], result['can_set_primary']), (True, True))
         person.has_permission.assert_called_once_with('write')
         person.has_permission.return_value=False
-        with patch('relay_core.business_access.primary_record', return_value=None):
+        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_link_unlinked', return_value=False):
             result=self.api.contact_details('fixture-contact')
         self.assertEqual((result['can_edit_links'], result['can_set_primary']), (False, False), 'Read-only users get no link controls')
 
@@ -317,6 +317,12 @@ class MessageDisplayApiTests(unittest.TestCase):
         for value in ('', None, 'line\nbreak', 'x'*141):
             with self.assertRaises(ValueError): self.api.validate_reference(value, 'CH')
         with self.assertRaises(ValueError): self.api.validate_reference('Customer support-001', 'MSG')
+
+    def test_ticket_names_start_at_five_digits_and_grow(self):
+        for value in ('TKT-00001', 'TKT-99999', 'TKT-100000'):
+            self.api.validate_reference(value, 'TKT')
+        for value in ('RELAY-TKT-0000000001', 'TKT-1', 'TKT-0001', 'TKT-00001\n', None):
+            with self.assertRaises(ValueError): self.api.validate_reference(value, 'TKT')
 
 
 def setUpModule():

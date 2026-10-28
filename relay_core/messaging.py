@@ -708,7 +708,8 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
         readable_contact(contact)
     if before:
         validate_reference(before, 'MA')
-    from pypika import Order
+    from pypika import CustomFunction, Order
+    extract = CustomFunction('JSON_EXTRACT', ['document', 'path'])
     action = frappe.qb.DocType('Relay Message Action')
     message = frappe.qb.DocType('Relay Message')
     query = (frappe.qb.from_(action).left_join(message).on(action.source_message == message.name)
@@ -716,12 +717,11 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
                 action.preview, action.creation, action.target_channel)
         .where((action.owner == frappe.session.user)
                & action.status.isin(['Dispatching', 'Queued', 'Uncertain', 'Rejected'])
-               & (action.operation != 'reaction')))
+               & (action.operation != 'reaction')
+               & extract(action.result, '$.dismissed').isnull()))
     if contact:
         query = query.where((message.relay_contact == contact) | (action.start_contact == contact))
     if business:
-        from pypika import CustomFunction
-        extract = CustomFunction('JSON_EXTRACT', ['document', 'path'])
         unquote = CustomFunction('JSON_UNQUOTE', ['value'])
         snapshot = ((unquote(extract(action.payload, '$.business[0]')) == business_doctype)
                     & (unquote(extract(action.payload, '$.business[1]')) == business_name))
@@ -920,10 +920,16 @@ def retry(action):
         frappe.throw('Only the original sender can retry a confirmed rejected action',frappe.PermissionError)
     # One immutable retry identity per rejected action. If it too is rejected,
     # that child is a separate reviewed action with its own retry identity.
-    key=retry_key(doc.name)
     payload=object_value(doc.payload)
     if automatic_delivery(payload):
         frappe.throw('Automated messages cannot be retried from the inbox',frappe.PermissionError)
+    result=resend(doc,retry_key(doc.name),payload)
+    # The retry stands for this message in the chat from now on, also when it is rejected again.
+    hide_pending(doc.name)
+    return result
+
+
+def resend(doc,key,payload):
     if payload.get('group'):
         from relay_core.telegram import send as group_send
         return group_send(**payload['group'],request_key=key)
@@ -949,6 +955,23 @@ def retry(action):
     elif kind in ('photo','video','audio','voice','document'):data={'attachment':content.get('attachment'),'caption':content.get('caption','')}
     else:raise ValueError('This older action cannot be retried from the inbox')
     return send(doc.source_message,kind,data,key,quote=bool(payload.get('arguments',{}).get('reply_to')))
+
+
+@frappe.whitelist(methods=['POST'])
+def dismiss(action):
+    """Delete a rejected send from the sender's chat. Message activity keeps the record."""
+    require_access()
+    doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
+    if doc.owner!=frappe.session.user or doc.status!='Rejected':
+        frappe.throw('Only the original sender can delete a message that was not sent',frappe.PermissionError)
+    hide_pending(doc.name)
+    return {'action':doc.name,'dismissed':1}
+
+
+def hide_pending(action):
+    doc=frappe.get_doc('Relay Message Action',action,for_update=True)
+    doc.result=json.dumps(dict(object_value(doc.result or {}),dismissed=1))
+    internal_save(doc)
 
 
 @frappe.whitelist(methods=['GET'])

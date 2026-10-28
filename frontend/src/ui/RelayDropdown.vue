@@ -4,7 +4,7 @@ import PrimePopover from 'primevue/popover'
 import RelayIcon from './RelayIcon.vue'
 defineProps({ options: { type: Array, default: () => [] }, placement: { type: String, default: 'bottom' } })
 const popover = ref()
-const toggle = event => popover.value?.toggle(event)
+const toggle = (event, target) => popover.value?.toggle(event, target)
 defineExpose({ toggle })
 const choose = option => { if (option.disabled) return; option.onClick?.(); popover.value?.hide() }
 const pt = { root: { class: 'relay-menu' }, content: { class: 'relay-menu__content' } }

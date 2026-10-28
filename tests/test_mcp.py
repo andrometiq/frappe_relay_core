@@ -92,12 +92,12 @@ class MCPTests(unittest.TestCase):
 
     def test_ticket_mcp_uses_service_permission_boundary(self):
         import relay_core
-        service=types.SimpleNamespace(create=Mock(return_value={'name':'RELAY-TKT-0000000001'}),read=Mock(side_effect=PermissionError),update_status=Mock(),assign=Mock())
+        service=types.SimpleNamespace(create=Mock(return_value={'name':'TKT-00001'}),read=Mock(side_effect=PermissionError),update_status=Mock(),assign=Mock())
         with patch.object(relay_core,'tickets',service,create=True), patch.dict(sys.modules,**{'relay_core.ticket_notifications':types.SimpleNamespace(subscribe=Mock())}):
             self.api.dispatch('tools/call',{'name':'relay.tickets.create','arguments':{'subject':'Query','messages':['RELAY-MSG-0000000001']}})
             service.create.assert_called_once_with(subject='Query',messages=['RELAY-MSG-0000000001'])
             with self.assertRaises(PermissionError):
-                self.api.dispatch('tools/call',{'name':'relay.tickets.read','arguments':{'name':'RELAY-TKT-0000000001'}})
+                self.api.dispatch('tools/call',{'name':'relay.tickets.read','arguments':{'name':'TKT-00001'}})
 
     def test_number_sends_and_campaigns_use_the_checked_services(self):
         import relay_core

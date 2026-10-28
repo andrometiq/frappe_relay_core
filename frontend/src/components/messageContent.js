@@ -38,6 +38,12 @@ export function reactionLabels(value) {
   return [...new Set(labels)]
 }
 
+// The emoji this site reacted with; the server stores it under "bot".
+export function ownReaction(value) {
+  const own = objectValue(value).bot
+  return Array.isArray(own) ? own[0]?.emoji || '' : ''
+}
+
 export function attachmentDownloadURL(message) {
   if (message._pending || !message.name || !['photo','image','video','audio','voice','document','animation'].includes(messageData(message).kind)) return null;
   return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';

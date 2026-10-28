@@ -11,6 +11,7 @@ def is_enabled(feature: str) -> bool:
         return bool(frappe.db.get_single_value('Relay Settings', FIELDS[feature]))
     except frappe.ValidationError:
         # Code runs before the migrate that adds a new switch; a switch the site does not have yet is off.
+        frappe.clear_last_message()  # The missing-field text must not reach the response.
         return False
 
 

@@ -36,7 +36,7 @@ export function useCampaigns() {
   });
   const create = (values) => run(async () => { campaign.value = await coreApi("bulk_campaigns.create", values, true); return campaign.value; });
   const upload = (file) => run(async () => {
-    const file_url = await uploadFile(file, "The file could not be uploaded. Use a .xlsx or .csv file.");
+    const file_url = await uploadFile(file, "The file could not be uploaded. Use a .xlsx, .csv or .tsv file.");
     sheet.value = await coreApi("bulk_campaigns.inspect", { name: campaign.value.name, file_url }, true);
   });
   // Relay sends this file to Hub once when the campaign starts; rows carry the Hub media ID.

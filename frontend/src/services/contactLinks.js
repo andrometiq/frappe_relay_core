@@ -36,3 +36,21 @@ export function linkedLabel(profile) {
   if (others < 1) return ''
   return `${profile?.primary ? '+' : ''}${others} linked`
 }
+
+// One search over every linkable type: each match is a choice whose value carries its type, and the type shows under its name.
+// A type that fails is skipped; only when every type fails is the first error raised.
+const SEPARATOR = '\u0000'
+
+export async function searchLinkChoices(types, search) {
+  const results = await Promise.allSettled(types.map(type => search(type.value)))
+  if (results.length && results.every(result => result.status === 'rejected')) throw results[0].reason
+  const limit = types.length > 1 ? 10 : 30
+  return results.flatMap((result, index) => result.status === 'fulfilled'
+    ? result.value.slice(0, limit).map(row => ({ value: types[index].value + SEPARATOR + row.name, label: row.label || row.name, description: types[index].label }))
+    : [])
+}
+
+export function linkFromChoice(value) {
+  const [doctype, ...name] = String(value || '').split(SEPARATOR)
+  return { doctype, name: name.join(SEPARATOR) }
+}

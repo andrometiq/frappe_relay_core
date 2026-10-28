@@ -17,3 +17,7 @@ test('initials use the first two words', () => {
   assert.equal(avatarInitials('  '), '')
   assert.equal(avatarTone(''), avatarTone(undefined))
 })
+
+test('initials keep whole emoji', () => {
+  assert.equal(avatarInitials('😀 Smile'), '😀S')
+})

@@ -114,6 +114,7 @@ export function useConversationPresence(props, onState) {
       const self=document.getElementById('app')?.dataset.user;
       activeViewers=users.filter(user=>user!==self);
       people.value=activeViewers.map(name=>people.value.find(user=>user.name===name)||{name,full_name:name,typing:false});
+      if(people.value.some(user=>user.full_name===user.name))refreshPresence();
     }):null;
   },{immediate:true});
   useRealtimeRefresh([],['presence'],refreshPresence);

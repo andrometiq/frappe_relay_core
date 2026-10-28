@@ -36,15 +36,19 @@ def references(contact, values):
 
 
 def business_scope(contact, messages, doctype=None, name=None):
-    from relay_core.business_access import choose_business, reference
+    """The note's business. A contact without business links keeps notes on the conversation itself."""
+    from relay_core.business_access import candidates, choose_business, reference
     targets = {reference(frappe.get_doc('Relay Message', value)) for value in messages}
     if targets:
-        if len(targets) != 1 or None in targets:
+        if len(targets) != 1:
             frappe.throw('Choose messages from one business', frappe.PermissionError)
         target = targets.pop()
         if (doctype or name) and target != (doctype, name):
             frappe.throw('Messages belong to another business', frappe.PermissionError)
-        doctype, name = target
+        if target:
+            doctype, name = target
+    if not (doctype or name) and not candidates(contact):
+        return None, None
     return choose_business(contact, doctype, name)
 
 
@@ -55,9 +59,13 @@ def authorize(doc, user=None):
         targets = {reference(frappe.get_doc('Relay Message', name)) for name in names}
         if len(targets) == 1 and None not in targets:
             doc.business_doctype, doc.business_name = targets.pop()
-    target = readable_business(doc, user)
-    if target and not doc.get('business_name'):
-        doc.business_doctype, doc.business_name = target
+    if not doc.get('business_name') and not reference(doc):
+        # A conversation note follows the conversation's own read rule, like its unlinked messages.
+        conversation_reader(doc.relay_contact, user)
+    else:
+        target = readable_business(doc, user)
+        if target and not doc.get('business_name'):
+            doc.business_doctype, doc.business_name = target
     for name in names:
         message = frappe.get_doc('Relay Message', name)
         if message.relay_contact != doc.relay_contact or not message.has_permission('read', user=user):
@@ -65,6 +73,14 @@ def authorize(doc, user=None):
         if not frappe.get_doc('Relay Channel', message.channel).has_permission('read', user=user):
             frappe.throw('Comment channel is not accessible', frappe.PermissionError)
     return doc
+
+
+def conversation_reader(contact, user=None):
+    from relay_core.permissions import can_read_contact_as
+    if user is None:
+        readable_contact(contact)
+    elif not can_read_contact_as(contact, user):
+        frappe.throw('Conversation is not accessible', frappe.PermissionError)
 
 
 def editable(doc):

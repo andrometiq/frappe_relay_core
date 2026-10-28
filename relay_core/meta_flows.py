@@ -6,6 +6,7 @@ from relay_core.hub import HubError
 from relay_core.hub_channels import choose, hub_arguments
 
 OPERATIONS={'list','get','json','assets','create','update','upload','publish','deprecate','delete'}
+READS={'list','get','json','assets'}
 
 @frappe.whitelist(methods=['GET'])
 def workspace():
@@ -24,6 +25,8 @@ def execute(operation, arguments=None):
         if not capabilities.get('flows'):frappe.throw('WhatsApp Flows are not enabled for this account')
         return hub.execute(hub_arguments(choose('WhatsApp'),dict(arguments,operation='flows.'+operation)))
     except (HubError,ValueError):
+        # A failed read changed nothing; only a failed change leaves its outcome unknown.
+        if operation in READS:frappe.throw('WhatsApp forms could not be loaded right now. Try again in a minute.')
         frappe.throw('Flow operation could not be confirmed. Refresh its status before retrying a change.')
 
 

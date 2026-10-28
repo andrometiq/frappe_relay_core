@@ -69,10 +69,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 <template>
   <section class="incoming-workspace">
     <header>
-      <h2>Remaining triage</h2>
+      <h2>New senders</h2>
       <div>
         <p>
-          Review ambiguous senders and conversations that still need triage.
+          Messages from numbers Relay could not match to one contact. Choose who sent each one.
         </p>
       </div>
       <Button label="Refresh" :disabled="busy" @click="run(() => load())" />
@@ -94,11 +94,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             </div>
             <p class="incoming-preview">{{ row.preview }}</p>
             <small>{{ row.received_at }}</small
-            ><Button :label="row.ambiguous ? 'Choose business' : 'Link sender'" :disabled="busy" @click="choose(row)"
+            ><Button :label="row.ambiguous ? 'Choose customer' : 'Link sender'" :disabled="busy" @click="choose(row)"
           /></template>
         </article>
         <p v-if="!rows.length && !busy" class="incoming-empty">
-          No conversations need triage.
+          No new senders to review.
         </p>
         <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </div>
@@ -106,11 +106,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
         <ErrorMessage :message="error" />
         <h3>Link {{ selected.endpoint }}</h3>
         <p>
-          Choose the business contact that owns this
-          {{ selected.medium }} conversation.
+          Choose the contact who sent this {{ selected.medium }} message.
         </p>
-        <RemoteLinkField v-model="contact" :field="{ label: 'Business contact', method: 'api.contacts', doctype: 'Relay Contact', readOnly: busy }" />
-        <ChoiceField v-model="business" :field="{ label: 'Business record', readOnly: busy, options: businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:linkedTitle(row.doctype, row.name)})) }" />
+        <RemoteLinkField v-model="contact" :field="{ label: 'Contact', method: 'api.contacts', doctype: 'Relay Contact', readOnly: busy }" />
+        <ChoiceField v-model="business" :field="{ label: 'Customer or supplier', readOnly: busy, options: businesses.map(row => ({value:JSON.stringify({business_doctype:row.doctype,business_name:row.name}),label:linkedTitle(row.doctype, row.name)})) }" />
         <p class="text-xs text-ink-gray-5">
           Missing a contact? Create it and its business link in
           <a href="/desk/relay-contact" target="_blank" rel="noopener"
@@ -118,7 +117,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
           >, then search again.
         </p>
         <Button
-          label="Link sender and load history"
+          label="Link sender"
           type="submit"
           variant="solid"
           :disabled="busy || !contact || !business"

@@ -121,3 +121,47 @@ class EmailDeliveryEvidenceTests(unittest.TestCase):
         with patch.object(frappe, 'get_doc', return_value=message):
             with self.assertRaisesRegex(ValueError, 'message mismatch'):
                 channel_statuses.apply_email_evidence(action, row)
+
+
+class UnsentMessageTests(unittest.TestCase):
+    def action(self, **values):
+        return _dict(dict(name='action', owner='sender', status='Rejected', operation='text',
+            payload=json.dumps({'content': {'text': 'Hello'}}), result=json.dumps({'provider': 'Hub'}),
+            check_permission=Mock()), **values)
+
+    def test_only_the_sender_deletes_only_a_rejected_send(self):
+        for values in ({'owner': 'other'}, {'status': 'Uncertain'}, {'status': 'Submitted'}):
+            with self.subTest(**values), patch.object(messaging, 'require_access'), \
+                    patch.object(frappe, 'get_doc', return_value=self.action(**values)), \
+                    patch.object(frappe, 'session', _dict(user='sender')), \
+                    patch.object(frappe, 'throw', side_effect=frappe.PermissionError), \
+                    patch.object(messaging, 'internal_save') as save:
+                with self.assertRaises(frappe.PermissionError):
+                    messaging.dismiss('action')
+                save.assert_not_called()
+
+    def test_delete_keeps_the_provider_result_and_marks_it_dismissed(self):
+        action = self.action()
+        with patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=action), \
+                patch.object(frappe, 'session', _dict(user='sender')), patch.object(messaging, 'internal_save') as save:
+            self.assertEqual(messaging.dismiss('action'), {'action': 'action', 'dismissed': 1})
+        save.assert_called_once_with(action)
+        self.assertEqual(json.loads(action.result), {'provider': 'Hub', 'dismissed': 1})
+
+    def test_retry_replaces_the_rejected_send_in_the_chat(self):
+        with patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=self.action()), \
+                patch.object(frappe, 'session', _dict(user='sender')), \
+                patch.object(messaging, 'resend', return_value={'status': 'Submitted'}) as resend, \
+                patch.object(messaging, 'hide_pending') as hide:
+            self.assertEqual(messaging.retry('action'), {'status': 'Submitted'})
+        self.assertEqual(resend.call_args.args[1], messaging.retry_key('action'))
+        hide.assert_called_once_with('action')
+
+    def test_failed_retry_keeps_the_rejected_send(self):
+        with patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=self.action()), \
+                patch.object(frappe, 'session', _dict(user='sender')), \
+                patch.object(messaging, 'resend', side_effect=ValueError('Window closed')), \
+                patch.object(messaging, 'hide_pending') as hide:
+            with self.assertRaises(ValueError):
+                messaging.retry('action')
+        hide.assert_not_called()

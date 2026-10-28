@@ -19,7 +19,16 @@ export function useMessages() {
   const ingestionCursor = ref('RELAY-MSG-0000000000');
   const attachment = ref(null);
   const pendingMessages=ref([]), pendingCursor=ref(null);
-  const displayRows=computed(()=>[...rows.value,...pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))]);
+  const rowTime=row=>Date.parse(String(row.sent_at||row.creation||'').replace(' ','T'));
+  // A pending or failed send sits at its own time among the loaded messages; one without a time goes last.
+  const displayRows=computed(()=>{
+    const merged=[...rows.value];
+    for(const row of pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))){
+      const time=rowTime(row), index=Number.isNaN(time)?-1:merged.findIndex(item=>rowTime(item)>time);
+      if(index<0)merged.push(row);else merged.splice(index,0,row);
+    }
+    return merged;
+  });
   function beginEmail(message, values, key) {
     const name='pending:email:'+key;
     let pending=pendingMessages.value.find(row=>row.name===name);
@@ -144,6 +153,8 @@ export function useMessages() {
     busy = ref(false),
     error = ref(""),
     notice = ref("");
+  // Sends in flight and their request keys. Realtime refreshes wait for them like for `busy`.
+  const sending = ref(0), sendingKeys = new Set();
   const newer = ref(false),
     last = ref(null),
     restored = ref(""),
@@ -228,7 +239,7 @@ export function useMessages() {
   const connectionError = ref('');
   let refreshing = false;
   async function refreshVisible() {
-    if (refreshing || busy.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
+    if (refreshing || busy.value || sending.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
     const generation = requestSequence, identity = conversationIdentity();
     refreshing = true;
     restoredRefreshPending = false;
@@ -258,15 +269,17 @@ export function useMessages() {
         const updated = new Map(snapshots.items.map(row=>[row.name,row]));
         const checked = new Set(JSON.parse(names));
         if(source.value && checked.has(source.value.name) && !updated.has(source.value.name))source.value=null;
-        rows.value = rows.value.filter(row=>!checked.has(row.name)||updated.has(row.name)).map(row=>updated.get(row.name)||row);
+        // An unchanged message keeps its object, so the thread does not redraw its bubble.
+        const changed = row => updated.has(row.name) && JSON.stringify(updated.get(row.name)) !== JSON.stringify(row);
+        rows.value = rows.value.filter(row=>!checked.has(row.name)||updated.has(row.name)).map(row=>changed(row)?updated.get(row.name):row);
       }
       connectionError.value = '';
       if (page.items.length) {
         if(viewPosition.value && !viewPosition.value.atBottom) { newArrivals.value=page.items.length; return; }
         const known = new Set(rows.value.map(row => row.name));
         const combined = [...rows.value, ...page.items.filter(row => !known.has(row.name))].sort((a,b)=>String(a.sent_at||a.creation).localeCompare(String(b.sent_at||b.creation))||a.name.localeCompare(b.name));
-        rows.value = combined.slice(-150);
-        if (combined.length > 150) more.value = true;
+        rows.value = combined.slice(-300);
+        if (combined.length > 300) more.value = true;
         before.value = rows.value[0]?.name;
         last.value = rows.value.at(-1)?.name || last.value;
         updateChannels();
@@ -283,8 +296,9 @@ export function useMessages() {
     }
   }
   useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
+    if(kinds.has('reconnect'))pagingError.value='';
     if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearRecipient();}
-    if(busy.value){actionRefreshPending=true;return;}
+    if(busy.value||sending.value){actionRefreshPending=true;return;}
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) {
       windows.clear();
       try { await restorePending(); } catch(e) { if([401,403].includes(e.status)){pendingMessages.value=[];rows.value=[];clearRecipient();} }
@@ -295,14 +309,14 @@ export function useMessages() {
   });
   let actionRefreshPending = false;
   async function refreshActionState() {
-    if (busy.value) { actionRefreshPending = true; return; }
+    if (busy.value || sending.value) { actionRefreshPending = true; return; }
     actionRefreshPending = false;
     await restorePending();
     await refreshPendingStatuses();
     await refreshVisible();
     await refreshMetadata();
   }
-  watch(busy, value => {
+  watch(() => busy.value || sending.value > 0, value => {
     if (!value && actionRefreshPending) refreshActionState().catch(()=>{});
   });
   onBeforeUnmount(() => { flushPosition(); ++requestSequence; });
@@ -392,12 +406,12 @@ export function useMessages() {
       ? [
           ...page.items.filter((row) => !seen.has(row.name)),
           ...rows.value,
-        ].slice(0, 150)
+        ].slice(0, 300)
       : page.items;
     if(!older)ingestionCursor.value=page.ingestion_cursor||'RELAY-MSG-0000000000';
     before.value = page.first;
     last.value = older ? rows.value.at(-1)?.name : page.last;
-    newer.value = older && (rows.value.length >= 150 || newer.value);
+    newer.value = older && (rows.value.length >= 300 || newer.value);
     more.value = page.has_more;
     updateChannels();
     if (!older && !source.value && !businessName.value) source.value = defaultSendSource(rows.value, capabilities.value);
@@ -432,20 +446,33 @@ export function useMessages() {
     channel.value = preferredChannels.get(contact)||"";
     channels.value = [];
     clearRecipient();
-    return run(async () => {
+    return run(loading(async () => {
       const saved=coreApi('inbox.view_state',{contact});
       saved.catch(()=>{});
       const [metadata]=await Promise.all([coreApi('api.conversation_channels',{contact}),restorePending()]);
       channels.value=metadata.items;
       await restoreSavedView(true,saved);
-    });
+    }));
+  }
+  // A conversation that failed to open stays open with a retry; only a missing or forbidden one leaves.
+  const loadFailed = ref(null);
+  function loading(work) {
+    loadFailed.value = null;
+    return async () => {
+      try { await work(); }
+      catch (e) { loadFailed.value = { status: e.status || 0, message: e.message }; throw e; }
+    };
+  }
+  function retryOpen() {
+    if (selected.value) return open(selected.value);
+    if (businessName.value) return openBusiness(businessType.value, businessName.value, false);
   }
   function businessRoute(doctype, name, replace = false) {
     const params = new URLSearchParams({ business_doctype: doctype, business_name: name });
     openRoute("#/messages?" + params.toString(), replace);
   }
   function clearSelection(updateRoute = true) {
-    clearRecipient();saveWindow();++requestSequence;
+    clearRecipient();saveWindow();++requestSequence;loadFailed.value=null;
     selected.value="";businessName.value="";businessType.value="";businessContext.value=null;
     rows.value=[];source.value=null;quoting.value=false;
     if(updateRoute && location.hash.split('?')[0]==='#/messages')closeRoute("#/messages");
@@ -477,24 +504,37 @@ export function useMessages() {
     channels.value = [];
     clearRecipient();
     if(updateRoute)businessRoute(doctype,name,switching);
-    return run(async()=>{
+    return run(loading(async()=>{
       businessContext.value=await coreApi('business_inbox.context',{doctype,name});
       if(!restoreWindow())await restoreSavedView();
       await restorePending();
-    });
+    }));
   }
+  // Paging has its own flag: it must not disable the chat or wait for a send.
+  // A failed page shows its own retry and does not block the chat.
+  const paging = ref(false), pagingError = ref("");
+  async function page(work) {
+    if (paging.value) return;
+    paging.value = true;
+    pagingError.value = "";
+    try { await work(); } catch (e) { pagingError.value = e.message || "Could not load messages"; } finally { paging.value = false; }
+  }
+  const loadOlder = () => page(() => history(true));
   async function loadNewer() {
-    await run(async () => {
+    await page(async () => {
+      const generation = requestSequence, identity = conversationIdentity();
       const page = await historyRequest({
         after: last.value,
         limit: 50,
         ...(channel.value ? { channel: channel.value } : {}),
       });
+      // A page for a chat the user has left must not land in the open chat.
+      if (generation !== requestSequence || identity !== conversationIdentity()) return;
       const seen = new Set(rows.value.map((row) => row.name));
       rows.value = [
         ...rows.value,
         ...page.items.filter((row) => !seen.has(row.name)),
-      ].slice(-150);
+      ].slice(-300);
       last.value = page.last || last.value;
       newer.value = page.has_more;
       before.value = rows.value[0]?.name;
@@ -577,6 +617,7 @@ export function useMessages() {
         };
       }
       if (action === "text") data = { text: body.value };
+      if (action === "text" && !data.text.trim()) return;
       if (action === "sticker") {
         const media = messageData(message).media || {};
         data = { file_id: media.file_id || media.id || "" };
@@ -606,69 +647,107 @@ export function useMessages() {
           ],
         };
     }
-    await run(async () => {
-      const quote = action === "reaction" || quoting.value;
-      // A picked number sends from its newest loaded message of this person, else the server finds that message.
-      // Media stays on the message it was uploaded to; the server moves the attachment to the picked number.
-      const media = ["photo", "video", "audio", "voice", "document"].includes(action);
-      const picked = !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
-      if (picked) message = picked;
-      const via = quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
-      const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
-      const intent = JSON.stringify({
-        quote,
-        ...(via && via !== "auto" ? { via } : {}),
-        message: message.name,
-        kind: action,
-        data,
-        ...(extraChannels.length ? { channels: extraChannels } : {}),
-      });
-      const digest = sha256Hex(intent);
-      const storage = "relay-typed-action-" + digest;
-      let key = sessionStorage.getItem(storage);
-      if (!key) {
-        key = randomUUID();
-        sessionStorage.setItem(storage, key);
-      }
-      let pending;
-      if(action!=='reaction') {
-        pending=pendingMessages.value.find(row=>row.name==='pending:'+key);
-        if(!pending) {pending={name:'pending:'+key,contact:selected.value,scope:selected.value||businessType.value+':'+businessName.value,channel:message.channel,provider_context:message.provider_context,
-          direction:'Outgoing',status:'Sending',content:data.text||data.caption||attachment.value?.filename||action,
-          creation:new Date().toISOString(),_pending:true};pendingMessages.value.push(pending);pending=pendingMessages.value.at(-1);}
-        else pending.status='Sending';
-      }
-      let result;
-      try { result = await call(
-        "relay_core.messaging.send",
-        { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0,
-          ...(extraChannels.length ? { channels: extraChannels } : {}), ...(via ? { via } : {}) },
-        true,
-      ); } catch(err) {if(pending)pending.status='Unconfirmed';throw err;}
-      sessionStorage.setItem('relay-typed-result-'+result.action,storage);
-      retireAction(result);
-      if(pending) {pending.error=result.error||null;pending.action=result.action;pending.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[result.status]||result.status;}
-      notice.value = result.error || (
-        result.status === "Submitted"
-          ? ""
-          : result.status === "Queued" ? "" : result.status === "Rejected" ? "Message was not sent. Review Message activity for retry options." : "Delivery not confirmed. Review the action before retrying.");
-      if (['Submitted','Queued'].includes(result.status)) {
-        if(result.status==='Submitted')sessionStorage.removeItem(storage);
-        if (action !== 'reaction' && windowKey() === submitted.scope) {
-          if (quoting.value === submitted.quoting && source.value === submitted.source) quoting.value = false;
-          if (body.value === submitted.body) body.value = "";
-          if (attachment.value === submitted.attachment) attachment.value = null;
-        }
-      }
-      restored.value = "";
-      await history();
-      if(result.status==='Submitted')pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
-      // Unfinished copies on other channels join the same bubble as failed or pending marks.
-      if((result.sends||[]).slice(1).some(copy=>!['Submitted','Queued'].includes(copy.status))) {
-        notice.value=notice.value||"Some channels did not get this message. Review Message activity for retry options.";
-        await restorePending();
-      }
+    error.value = "";
+    notice.value = "";
+    const quote = action === "reaction" || quoting.value;
+    // A picked number sends from its newest loaded message of this person, else the server finds that message.
+    // Media stays on the message it was uploaded to; the server moves the attachment to the picked number.
+    const media = ["photo", "video", "audio", "voice", "document"].includes(action);
+    const picked = !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
+    if (picked) message = picked;
+    const via = quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
+    const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
+    const intent = JSON.stringify({
+      quote,
+      ...(via && via !== "auto" ? { via } : {}),
+      message: message.name,
+      kind: action,
+      data,
+      ...(extraChannels.length ? { channels: extraChannels } : {}),
     });
+    const storage = "relay-typed-action-" + sha256Hex(intent);
+    let key = sessionStorage.getItem(storage);
+    if (!key) {
+      key = randomUUID();
+      sessionStorage.setItem(storage, key);
+    }
+    // A second Send of the same content while it is still on its way is the same send.
+    if (sendingKeys.has(key)) return;
+    sendingKeys.add(key);
+    const request = { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0,
+      ...(extraChannels.length ? { channels: extraChannels } : {}), ...(via ? { via } : {}) };
+    let pending;
+    if(action!=='reaction') {
+      pending=pendingMessages.value.find(row=>row.name==='pending:'+key);
+      if(!pending) {pending={name:'pending:'+key,contact:selected.value,scope:selected.value||businessType.value+':'+businessName.value,channel:message.channel,provider_context:message.provider_context,
+        direction:'Outgoing',status:'Sending',content:data.text||data.caption||attachment.value?.filename||action,
+        creation:new Date().toISOString(),_pending:true,storage};pendingMessages.value.push(pending);pending=pendingMessages.value.at(-1);}
+      else pending.status='Sending';
+      pending.request=request;
+      quoting.value = false;
+      body.value = "";
+      attachment.value = null;
+    }
+    await queueSend(() => deliver(request, storage, pending, submitted))
+      .finally(() => sendingKeys.delete(key));
+  }
+  // Sends go out one at a time in the order they were made; the composer does not wait for them.
+  let sendQueue = Promise.resolve();
+  function queueSend(work) {
+    sending.value++;
+    const next = sendQueue.then(work).catch(e => { error.value = e.message; }).finally(() => { sending.value--; });
+    sendQueue = next;
+    return next;
+  }
+  // Puts the unsent draft back unless the user started a new one.
+  function restoreDraft(submitted) {
+    if (windowKey() !== submitted.scope || body.value || attachment.value) return;
+    body.value = submitted.body;
+    attachment.value = submitted.attachment;
+    if (source.value === submitted.source) quoting.value = submitted.quoting;
+  }
+  async function deliver(request, storage, pending, submitted) {
+    let result;
+    try { result = await call("relay_core.messaging.send", request, true); }
+    catch(err) {if(pending){pending.status='Unconfirmed';restoreDraft(submitted);}throw err;}
+    sessionStorage.setItem('relay-typed-result-'+result.action,storage);
+    retireAction(result);
+    if(pending) {pending.error=result.error||null;pending.action=result.action;pending.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[result.status]||result.status;}
+    notice.value = result.error || (
+      result.status === "Submitted"
+        ? ""
+        : result.status === "Queued" ? "" : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
+    if(result.status==='Submitted')sessionStorage.removeItem(storage);
+    restored.value = "";
+    await history();
+    if(result.status==='Submitted')pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
+    // Unfinished copies on other channels join the same bubble as failed or pending marks.
+    if((result.sends||[]).slice(1).some(copy=>!['Submitted','Queued'].includes(copy.status))) {
+      notice.value=notice.value||"Some channels did not get this message. Review Message activity for retry options.";
+      await restorePending();
+    }
+  }
+  // A message that was not sent: Retry resends it with its own request key, Delete hides it for good.
+  function retryPending(message) {
+    if (message.action) return queueSend(async () => {
+      const result = await coreApi('messaging.retry', { action: message.action }, true);
+      retireAction(result);
+      pendingMessages.value = pendingMessages.value.filter(row => row !== message);
+      await history();
+      await restorePending();
+    });
+    if (!message.request || sendingKeys.has(message.request.request_key)) return;
+    message.status = 'Sending';
+    sendingKeys.add(message.request.request_key);
+    return queueSend(() => deliver(message.request, message.storage, message, { scope: null }))
+      .finally(() => sendingKeys.delete(message.request.request_key));
+  }
+  async function deletePending(message) {
+    if (message.action) {
+      try { await coreApi('messaging.dismiss', { action: message.action }, true); }
+      catch (e) { error.value = e.message; return; }
+    } else if (message.storage) sessionStorage.removeItem(message.storage);
+    pendingMessages.value = pendingMessages.value.filter(row => row !== message);
   }
   async function uploadAttachment(file) {
     attachment.value = null;
@@ -710,7 +789,7 @@ export function useMessages() {
     else if(contact && contact!==selected.value){
       await open(contact);
       // A missing or forbidden conversation link falls back to the list.
-      if(error.value&&selected.value===contact){clearSelection(false);window.history.replaceState(null,"","#/messages");}
+      if([403,404].includes(loadFailed.value?.status)&&selected.value===contact){clearSelection(false);window.history.replaceState(null,"","#/messages");}
     }
   }
   onMounted(async()=>{window.addEventListener('hashchange',openFromLink);window.addEventListener('popstate',openFromLink);await openFromLink()});
@@ -719,7 +798,7 @@ export function useMessages() {
 
   return {
     beginEmail, finishEmail, checkPending, pendingCursor, loadPending:()=>run(()=>restorePending(true)), displayRows, viewPosition, rememberPosition, newArrivals, latest,
-    clearSelection, clearRecipient,
+    clearSelection, clearRecipient, loadFailed, retryOpen,
     businessType,
     businessName,
     businessContext,
@@ -731,6 +810,9 @@ export function useMessages() {
     restored,
     firstUnread,
     loadNewer,
+    loadOlder,
+    paging,
+    pagingError,
     contacts,
     starred,
     directoryMode,
@@ -776,6 +858,9 @@ export function useMessages() {
     focusMessage,
     openQuote,
     send,
+    sending,
+    retryPending,
+    deletePending,
     run,
   };
 }
