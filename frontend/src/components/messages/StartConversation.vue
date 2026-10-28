@@ -8,6 +8,7 @@ import { useStoredDraft } from '../../composables/useStoredDraft';
 import { useEnabledChannels } from "../../composables/useEnabledChannels";
 import { channelCan } from "../../services/enabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
+import { readableName } from "../../services/recordTitle";
 import {
   templateParameterDescriptors,
   buildTemplateComponents,
@@ -56,7 +57,7 @@ let contactGeneration = 0, contactTimer, contactController;
 function initialContacts() {
   const rows = Array.isArray(props.contacts) ? props.contacts : [];
   if (rows.length || !props.contact) return rows;
-  return [{ value: props.contact, label: props.contactLabel || props.contact, description: "", has_phone: true }];
+  return [{ value: props.contact, label: props.contactLabel || readableName(props.contact, "Contact"), description: "", has_phone: true }];
 }
 function resetContacts() {
   contactOptions.value = initialContacts();
@@ -252,7 +253,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <p v-else-if="!contactOptions.length">No linked contacts match this search.</p>
           </div>
         </div>
-        <RemoteLinkField v-else v-model="contact" :field="{label:'Contact',method:'inbox.directory',params:{},placeholder:'Search contacts…',inlineResults:true,initialOptions:contact?[{value:contact,label:contactLabel||contact}]:[],readOnly:busy||!!pending}" />
+        <RemoteLinkField v-else v-model="contact" :field="{label:'Contact',method:'inbox.directory',params:{},placeholder:'Search contacts…',inlineResults:true,initialOptions:contact?[{value:contact,label:contactLabel||readableName(contact,'Contact')}]:[],readOnly:busy||!!pending}" />
         <RelaySelect
           v-if="endpoints.length"
           label="Send through"
