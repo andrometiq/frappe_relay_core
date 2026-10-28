@@ -21,6 +21,7 @@ import {
 } from "../../services/templateList";
 import TemplateEditor from "./TemplateEditor.vue";
 import TemplatePreview from "./TemplatePreview.vue";
+import { templateRendering, templateParameterDescriptors } from "../../services/templateParameters";
 import { templateForm, templatePreview } from "../../services/templateAuthoring";
 import { closeRoute, openRoute } from "../../useViewRoute";
 
@@ -39,6 +40,12 @@ const {
   deleteTemplate,
 } = workspace;
 
+const neverSynced = computed(() => !syncStatus.value?.synced_at && !syncStatus.value?.syncing);
+const emptyDescription = computed(() => {
+  if (templates.value.length) return 'Try another name, status, category or language.';
+  if (neverSynced.value) return 'Templates have not been synced from Meta yet. Select Sync now to load them.';
+  return 'No templates exist yet. Create an approved message to start conversations with your customers.';
+});
 const query = ref("");
 const status = ref("ALL");
 const category = ref("ALL");
@@ -48,6 +55,10 @@ const selectedPreview = computed(() => {
   try { return selectedTemplate.value ? templatePreview(templateForm(selectedTemplate.value)) : null; }
   catch { return null; } // Templates without a standard body keep the field view only.
 });
+const renderedBody = (row) => templateBody(row) ? templateRendering(row, templateParameterDescriptors(row), {}).body : "";
+const shortBody = (row) => { const body = renderedBody(row).replace(/\s+/g, " "); return body.length > 80 ? body.slice(0, 79) + "…" : body; };
+const statusHint = (status) => ({ PENDING: "Waiting for Meta to approve. This usually takes under a day.", REJECTED: "Meta did not approve this template.",
+  APPROVED: "Approved by Meta. Ready to send.", PAUSED: "Meta paused this template because of low quality.", DISABLED: "Meta turned this template off." })[String(status || "").toUpperCase()] || "";
 const rejection = (row) => row.rejected_reason || row.rejection_reason || "";
 const columns = [
   { key: "name", label: "Template name", width: "minmax(210px,1.2fr)" },
@@ -168,26 +179,25 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     @back="openList"
   >
     <template #actions>
-      <Button v-if="access.manage" label="Edit" :disabled="!supported" @click="editTemplate" />
-      <Button v-if="access.manage && !confirmingDelete" icon="trash" variant="ghost" theme="red" aria-label="Delete template" :disabled="!supported" @click="confirmingDelete = true" />
+      <Button v-if="access.manage" variant="outline" icon-left="edit-3" label="Edit" :disabled="!supported" @click="editTemplate" />
+      <Button v-if="access.manage && !confirmingDelete" variant="outline" theme="red" icon-left="trash" label="Delete" :disabled="!supported" @click="confirmingDelete = true" />
     </template>
 
     <FrappeFormSection>
       <div class="frappe-field-grid">
         <FrappeReadField label="Template name" :value="selectedTemplate.name" />
-        <FrappeReadField label="Status" :value="selectedTemplate.status ? sentenceCase(selectedTemplate.status) : 'Unknown'" />
+        <FrappeReadField label="Status" :value="[selectedTemplate.status ? sentenceCase(selectedTemplate.status) : 'Unknown', statusHint(selectedTemplate.status)].filter(Boolean).join(' · ')" />
         <FrappeReadField v-if="['REJECTED', 'PAUSED', 'DISABLED'].includes(selectedTemplate.status)" label="Reason from Meta" :value="rejection(selectedTemplate) || 'Meta has not provided a reason. Review the template in WhatsApp Manager.'" wide />
         <FrappeReadField label="Category" :value="sentenceCase(selectedTemplate.category)" />
         <FrappeReadField label="Language" :value="languageLabel(selectedTemplate.language)" />
-        <FrappeReadField label="Parameter format" :value="String(selectedTemplate.parameter_format || '').toUpperCase() === 'NAMED' ? 'Named' : 'Numbered'" />
-        <FrappeReadField label="Meta template ID" :value="selectedTemplate.id" />
+        <FrappeReadField label="Variables look like" :value="String(selectedTemplate.parameter_format || '').toUpperCase() === 'NAMED' ? '{{customer_name}}' : '{{1}}'" />
       </div>
     </FrappeFormSection>
     <FrappeFormSection title="Message content">
       <div class="frappe-field-grid">
         <FrappeReadField label="Header" :value="templateHeader(selectedTemplate) || 'No header'" />
         <FrappeReadField label="Footer" :value="templateFooter(selectedTemplate) || 'No footer'" />
-        <FrappeReadField label="Message body" :value="templateBody(selectedTemplate) || 'No message body'" wide multiline />
+        <FrappeReadField label="Message body" :value="renderedBody(selectedTemplate) || 'No message body'" wide multiline />
       </div>
     </FrappeFormSection>
     <FrappeFormSection v-if="templateButtons(selectedTemplate).length" title="Buttons" collapsible>
@@ -198,6 +208,10 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
       </div>
     </FrappeFormSection>
 
+    <FrappeFormSection title="More details" collapsible collapsed>
+      <div class="frappe-field-grid"><FrappeReadField label="Meta template ID" :value="selectedTemplate.id" /></div>
+    </FrappeFormSection>
+
     <template #sidebar>
       <TemplatePreview v-if="selectedPreview" :preview="selectedPreview" />
       <section v-if="confirmingDelete" class="template-danger-zone" role="alert">
@@ -205,7 +219,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
         <p>This removes <strong>{{ selectedTemplate.name }}</strong> from Meta.</p>
         <div class="flex gap-2">
           <Button label="Delete" variant="solid" theme="red" :loading="busy" @click="removeTemplate" />
-          <Button label="Cancel" @click="confirmingDelete = false" />
+          <Button variant="outline" label="Cancel" @click="confirmingDelete = false" />
         </div>
       </section>
     </template>
@@ -214,31 +228,32 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
   <FrappeListView
     v-else
     title="Message templates"
-    :description="templateSyncLabel(syncStatus)"
+    :description="neverSynced ? 'Not synced yet. Select Sync now to load your templates from Meta.' : templateSyncLabel(syncStatus)"
     label="Message templates"
     :columns="columns"
     :items="filteredTemplates"
     :busy="busy"
     empty-title="No templates found"
-    :empty-description="templates.length ? 'Try another name, status, category or language.' : 'Create an approved message to start conversations with your customers.'"
+    :empty-description="emptyDescription"
     @open="openTemplate"
   >
     <template #actions>
-      <Button icon="refresh-cw" variant="ghost" aria-label="Refresh templates" :loading="busy" @click="refresh" />
+      <Button variant="outline" v-if="neverSynced" label="Sync now" icon-left="refresh-cw" :loading="busy" @click="refresh" />
+      <Button v-else variant="outline" icon-left="refresh-cw" label="Sync with Meta" :loading="busy" @click="refresh" />
       <Button v-if="access.manage" label="New template" icon-left="plus" variant="solid" :disabled="!supported" @click="createTemplate" />
     </template>
     <template #filters>
       <TextInput v-model="query" type="search" placeholder="Search templates" aria-label="Search templates"><template #prefix><FeatherIcon name="search" /></template></TextInput>
-      <RelaySelect v-model="status" label="Status" :options="statuses" />
-      <RelaySelect v-model="category" label="Category" :options="[{ value: 'ALL', label: 'All categories' }, ...['UTILITY', 'MARKETING', 'AUTHENTICATION'].map(value => ({ value, label: sentenceCase(value) }))]" />
-      <RelaySelect v-model="language" label="Language" :options="[{ value: 'ALL', label: 'All languages' }, ...new Set(templates.map(row => row.language).filter(Boolean))]" />
+      <RelaySelect v-model="status" label="Status" hide-label :options="statuses" />
+      <RelaySelect v-model="category" label="Category" hide-label :options="[{ value: 'ALL', label: 'All categories' }, ...['UTILITY', 'MARKETING', 'AUTHENTICATION'].map(value => ({ value, label: sentenceCase(value) }))]" />
+      <RelaySelect v-model="language" label="Language" hide-label :options="[{ value: 'ALL', label: 'All languages' }, ...[...new Set(templates.map(row => row.language).filter(Boolean))].map(value => ({ value, label: languageLabel(value) }))]" />
     </template>
     <template #cell-name="{ item }"><strong>{{ recordTitle(item, 'Template') }}</strong></template>
-    <template #cell-status="{ item }"><Badge :label="item.status ? sentenceCase(item.status) : 'Unknown'" :theme="templateStatusTheme(item.status)" /></template>
+    <template #cell-status="{ item }"><Badge :label="item.status ? sentenceCase(item.status) : 'Unknown'" :theme="templateStatusTheme(item.status)" :title="statusHint(item.status)" /></template>
     <template #cell-category="{ item }">{{ item.category ? sentenceCase(item.category) : "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>
-    <template #cell-message="{ item }"><span><span v-if="item.status === 'REJECTED'" class="template-row-reason">Rejected{{ rejection(item) ? ': ' + rejection(item) : '' }}</span>{{ templateBody(item) || "No message body" }}</span></template>
-    <template #empty-action><Button v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button v-else label="Refresh templates" @click="refresh" /></template>
+    <template #cell-message="{ item }"><span><span v-if="item.status === 'REJECTED'" class="template-row-reason">Rejected{{ rejection(item) ? ': ' + rejection(item) : '' }}</span>{{ shortBody(item) || "No message body" }}</span></template>
+    <template #empty-action><Button variant="outline" v-if="query || status !== 'ALL' || category !== 'ALL' || language !== 'ALL'" label="Clear filters" @click="query = ''; status = 'ALL'; category = 'ALL'; language = 'ALL'" /><Button v-else-if="neverSynced" label="Sync now" variant="solid" :loading="busy" @click="refresh" /><Button v-else-if="access.manage" label="Create template" variant="solid" :disabled="!supported" @click="createTemplate" /><Button variant="outline" v-else label="Refresh templates" @click="refresh" /></template>
     <template #footer><span>{{ filteredTemplates.length }} of {{ templates.length }} templates</span></template>
   </FrappeListView>
 </template>

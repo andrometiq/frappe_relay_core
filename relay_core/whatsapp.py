@@ -64,6 +64,9 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
     if 'request_key' in arguments:frappe.throw('Request keys are managed by the message submission endpoint')
     payload={**arguments,'operation':operation}
+    if operation=='templates.send':
+        from relay_core.template_media import check_header
+        check_header(arguments.get('components') or [])
     if operation in {'messages.media','messages.send','messages.react','messages.location','messages.contacts','templates.send'}:
         if not isinstance(contact,str) or not contact:frappe.throw('Select one contact')
         if not isinstance(business_doctype,str) or not isinstance(business_name,str) or not business_doctype or not business_name:frappe.throw('Select a business record')

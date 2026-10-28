@@ -1,7 +1,7 @@
 <script setup>
 import { useLoadMore } from '../../composables/useLoadMore'
 import { onMounted, ref } from 'vue'
-import { Badge, Button, ErrorMessage } from '@relay/ui'
+import { Badge, Button } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { sentenceCase } from '../../services/textCase'
 import FrappeListView from '../frappe/FrappeListView.vue'
@@ -26,11 +26,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error, load: (
 </script>
 <template>
   <div class="whatsapp-forms">
-    <div v-if="error" class="v1-template-feedback"><ErrorMessage :message="error" /></div>
-    <FrappeListView title="Forms" description="WhatsApp forms of this account. Send a published form from a private conversation."
-      label="Forms" :columns="columns" :items="items" :busy="busy" empty-title="No forms yet"
-      empty-description="Forms created for this WhatsApp account show here.">
-      <template #actions><Button label="Refresh" icon-left="refresh-cw" :loading="busy" @click="load()" /></template>
+    <FrappeListView title="Forms" description="WhatsApp forms collect answers inside a chat. Send a published form from a private conversation."
+      label="Forms" :columns="columns" :items="items" :busy="busy" :empty-title="error ? 'Forms could not be loaded' : 'No forms yet'"
+      :empty-description="error || 'Forms are created in Meta Business Manager. Published forms show here.'">
+      <template #actions><Button variant="outline" label="Refresh" icon-left="refresh-cw" :loading="busy" @click="load()" /></template>
+      <template #empty-action><Button variant="outline" :label="error ? 'Try again' : 'Refresh'" :loading="busy" @click="load()" /></template>
       <template #cell-title="{ item }"><strong>{{ item.name }}</strong></template>
       <template #cell-status="{ item }"><Badge :label="sentenceCase(item.status)" :theme="item.status === 'PUBLISHED' ? 'green' : 'gray'" /></template>
       <template #cell-categories="{ item }">{{ (item.categories || []).map(sentenceCase).join(', ') || '—' }}</template>

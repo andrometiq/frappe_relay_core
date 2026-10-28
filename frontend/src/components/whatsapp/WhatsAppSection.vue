@@ -44,10 +44,10 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
     <div v-if="tab === 'account'" class="v1-content space-y-5">
       <ErrorMessage :message="error" />
       <div class="workflow-card">
-        <h2 class="font-semibold">Account and sending number</h2><p>Account: {{ account || 'Not configured' }}</p>
-        <WhatsAppIdentity v-if="configured" /><p v-else>Enable this account’s WhatsApp channel to read its identity.</p>
+        <h2 class="font-semibold">Your WhatsApp number</h2><p v-if="account">Account: {{ account }}</p>
+        <WhatsAppIdentity v-if="configured" /><p v-else>WhatsApp is not connected yet. Ask your administrator to set it up.</p>
       </div>
-      <div class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Hub connection and setup</a><a class="v1-link" href="/desk/relay-channel">Configure channel</a></div>
+      <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Connection settings</a><a class="v1-link" href="/desk/relay-channel">Channel setup in Desk</a></div>
     </div>
     <component :is="views[tab]" v-else v-bind="tab === 'billing' ? { account } : {}" />
   </section>

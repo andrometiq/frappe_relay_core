@@ -177,24 +177,35 @@ def definitions_key(account, waba=None):
 
 
 def remember(account, rows, waba=None):
-    """Cache listed template rows so sends render and the Templates tab lists without another Hub list."""
+    """Cache listed template rows per WABA so sends render and the Templates tab lists without another Hub list.
+
+    Two WABAs can have a template with the same name and language, so the WABA is part of the key."""
     for row in rows:
         if row.get('name') and row.get('language'):
             frappe.cache.hset(definitions_key(account, waba), row['name'] + '|' + row['language'], row)
 
 
+def template_channel(account, channel=None):
+    """The named channel, or the site default WhatsApp channel when none is named; its WABA keys the cache."""
+    rows = frappe.get_all('Relay Channel', fields=['name', 'waba_id'], order_by='is_default desc, creation asc',
+                          filters={'name': channel} if channel else {'account': account, 'channel': 'WhatsApp', 'enabled': 1},
+                          limit_page_length=1)
+    return rows[0] if rows else frappe._dict(name=channel, waba_id='')
+
+
 def definition(name, language, channel=None):
-    """Template content of the channel's WABA (the default number's without one) from the sync cache,
-    or from one Hub list scan on a miss."""
+    """Template content of the channel's WABA (the default channel's without one) from the sync cache,
+    or from one Hub list scan of that channel on a miss."""
     account = connection_value('relay_hub_account')
-    waba = frappe.db.get_value('Relay Channel', channel, 'waba_id') if channel else None
+    target = template_channel(account, channel)
+    waba = target.waba_id or None
     key = f'{name}|{language}'
     found = frappe.cache.hget(definitions_key(account, waba), key)
     if found is None:
         from relay_core.hub import HubError
         from relay_core.whatsapp import checked_client
         try:
-            rows, _ = listed(checked_client()[0], channel)
+            rows, _ = listed(checked_client()[0], target.name)
         except (HubError, ValueError):
             return None
         remember(account, rows, waba)
@@ -261,21 +272,25 @@ def sync_status():
 def directory(channel=None):
     """The local template copy in the Hub list shape, without a Hub call; a stale copy queues one background sync.
 
-    `channel` limits the list to the templates of that number's WABA."""
+    `channel` limits the list to the templates of that number's WABA. Each row takes its content from its own WABA."""
     from relay_core.permissions import require_access
     require_access()
     account = connection_value('relay_hub_account') or ''
-    waba = frappe.db.get_value('Relay Channel', channel, 'waba_id') if channel else None
+    waba = template_channel(account, channel).waba_id if channel else None
     rows = frappe.get_all('Relay WhatsApp Template', filters={'account':account, 'status':['!=', 'DELETED'],
                                                              **({'waba_id': waba} if waba else {})},
-        fields=['template_id', 'template_name', 'language', 'category', 'status', 'quality', 'reason'],
+        fields=['template_id', 'template_name', 'language', 'category', 'status', 'quality', 'reason', 'waba_id'],
         order_by='template_name asc, language asc', limit_page_length=SYNC_PAGES * 50)
-    definitions = {key.decode() if isinstance(key, bytes) else key: value
-                   for key, value in (frappe.cache.hgetall(definitions_key(account, waba)) or {}).items()}
-    data = [local_row(row, definitions.get(f'{row.template_name}|{row.language}')) for row in rows]
+    definitions = {row_waba: cached_definitions(account, row_waba) for row_waba in {row.get('waba_id') or '' for row in rows}}
+    data = [local_row(row, definitions[row.get('waba_id') or ''].get(f'{row.template_name}|{row.language}')) for row in rows]
     synced = frappe.cache.get_value(SYNCED + account) or {'synced_at': None, 'templates': 0}
     missing = any(not row.get('components') for row in data)
     return {'data': data, 'sync': dict(synced, syncing=request_sync(account, synced, missing))}
+
+
+def cached_definitions(account, waba):
+    return {key.decode() if isinstance(key, bytes) else key: value
+            for key, value in (frappe.cache.hgetall(definitions_key(account, waba)) or {}).items()}
 
 
 def local_row(row, listed=None):
