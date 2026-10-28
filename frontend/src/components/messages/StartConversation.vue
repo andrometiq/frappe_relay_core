@@ -113,7 +113,9 @@ async function destinations() {
     const result = await coreApi(
       props.businessName ? "conversation_start.business_options" : "conversation_start.options",
       { contact: contact.value,
-        business_doctype:props.businessDoctype,business_name:props.businessName },
+        business_doctype:props.businessDoctype,business_name:props.businessName,
+        ...(props.businessName && props.channel ? { channel: props.channel } : {}) },
+      !!props.businessName,
     );
     if (current !== generation) return;
     endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));

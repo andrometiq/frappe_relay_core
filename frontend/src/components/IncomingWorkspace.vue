@@ -80,10 +80,10 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
 <template>
   <section class="incoming-workspace">
     <header>
+      <h2>Remaining triage</h2>
       <div>
         <p>
-          Link incoming messages to the right business contact so your team can
-          handle them.
+          Review ambiguous senders and conversations that still need triage.
         </p>
       </div>
       <Button label="Refresh" :disabled="busy" @click="run(() => load())" />
@@ -109,7 +109,7 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
           /></template>
         </article>
         <p v-if="!rows.length && !busy" class="incoming-empty">
-          No unlinked or ambiguous incoming messages.
+          No conversations need triage.
         </p>
         <Button
           v-if="next"
@@ -163,7 +163,6 @@ useRealtimeRefresh([],['incoming'],()=>{if(!busy.value&&!selected.value)return r
 .incoming-workspace {
   padding: 24px;
   overflow: auto;
-  height: 100%;
 }
 .incoming-workspace header {
   display: flex;

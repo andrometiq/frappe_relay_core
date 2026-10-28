@@ -1,5 +1,6 @@
 """Keep Relay endpoints in step with the Frappe Contact that owns them."""
 import hashlib
+from contextlib import nullcontext
 
 import frappe
 from relay_core.identity import bindings, contact_identities, normalize
@@ -20,6 +21,9 @@ def on_update(person, method=None):
     if relay:
         from relay_core.business_access import drop_stale_primary
         drop_stale_primary(relay)
+        associate_unlinked_messages(relay)
+        from relay_core.realtime import contact_changed
+        contact_changed(relay, 'contacts')
     if not previous or not relay:
         return
     before, after = contact_identities(previous), contact_identities(person)
@@ -46,13 +50,59 @@ def on_update(person, method=None):
             enroll(relay, channel, provider, value)
 
 
-def enroll(relay, channel, provider, value):
-    """Shared values stay with their existing binding; nothing is reassigned."""
-    with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
-        if any(bindings(channel, provider, value)):
-            return
-        set_verified(frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': channel,
-                                     'relay_contact': relay, 'endpoint': value}), 1)
+def enroll(relay, channel, provider, value, *, locked=False):
+    """Shared or revoked values stay with their existing binding; nothing is reassigned."""
+    with nullcontext() if locked else frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
+        existing = list(bindings(channel, provider, value))
+        if existing:
+            if len(existing) == 1 and existing[0].relay_contact == relay and existing[0].verified:
+                return existing[0]
+            return None
+        endpoint = frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': channel,
+                                   'relay_contact': relay, 'endpoint': value})
+        set_verified(endpoint, 1)
+        return endpoint
+
+
+def whatsapp_contact(channel, number, profile_name=None):
+    """Enroll an authenticated private number, without overriding revoked or ambiguous bindings."""
+    from relay_core.identity import contacts_by_phone, phone_number
+    from relay_core.contacts import ensure_relay, new_person
+    if not number.isdigit() or phone_number('+' + number) != number:
+        return None
+    # Serialize first messages across channels before finding/creating the Frappe Contact.
+    with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
+        with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, number), timeout=30):
+            existing = list(bindings(channel, 'WhatsApp', number))
+            if existing:
+                return existing[0].relay_contact if len(existing) == 1 and existing[0].verified else None
+            provider, account = frappe.db.get_value('Relay Channel', channel, ['channel', 'account'])
+            siblings = frappe.get_all('Relay Channel', pluck='name', filters={'channel': provider, 'account': account})
+            keys = [endpoint_key(name, number) for name in siblings]
+            owners = set(frappe.get_all('Relay Contact Endpoint', pluck='relay_contact',
+                filters={'endpoint_key': ['in', keys], 'verified': 1}))
+            if owners:  # Siblings must resolve through sibling_contact; ambiguous identities stay in triage.
+                return None
+            matches = contacts_by_phone(number).get(number, [])
+            if len(matches) == 1:
+                person = frappe.get_doc('Contact', matches[0])
+            else:
+                label = ''.join(c for c in (profile_name or '') if ord(c) >= 32).strip()[:140] or number
+                person = new_person(label, number, ignore_permissions=True)
+            relay = ensure_relay(person)
+            return relay if enroll(relay, channel, 'WhatsApp', number, locked=True) else None
+
+
+def associate_unlinked_messages(relay):
+    """A sole business link owns live history; imported and already owned history stays intact."""
+    from relay_core.business_access import candidates
+    frappe.db.get_value('Relay Contact', relay, 'name', for_update=True)
+    links = candidates(relay)
+    if len(links) != 1:
+        return
+    frappe.db.sql("""UPDATE `tabRelay Message` SET business_doctype=%s, business_name=%s
+        WHERE relay_contact=%s AND COALESCE(business_doctype, '')='' AND COALESCE(business_name, '')=''
+        AND COALESCE(legacy_source, '')='' AND COALESCE(legacy_triage, 0)=0""", (*links[0], relay))
 
 
 def sibling_contact(channel: str, endpoint: str) -> str | None:
