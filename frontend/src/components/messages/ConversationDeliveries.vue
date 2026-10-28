@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
 import { ref, watch } from "vue";
 import { Button, ErrorMessage, Dialog } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
@@ -48,7 +49,7 @@ async function load(older = false, preserveDepth = false) {
     }
     if (current !== generation) return;
     rows.value = older
-      ? [...rows.value, ...result.items].slice(-100)
+      ? [...rows.value, ...result.items]
       : result.items;
     before.value = result.before;
   } catch (e) {
@@ -84,6 +85,7 @@ watch(
   },
   { immediate: true },
 );
+const moreSentinel = useLoadMore({ loading: busy, hasMore: before, error: error, load: () => load(true) })
 </script>
 <template>
   <Dialog
@@ -155,11 +157,6 @@ watch(
             />
           </div>
         </article>
-        <Button
-          v-if="before"
-          label="Earlier activity"
-          :disabled="busy"
-          @click="load(true)"
-        /></div></template
+        <div v-if="before" ref="moreSentinel" class="h-px" aria-hidden="true" /></div></template
   ></Dialog>
 </template>

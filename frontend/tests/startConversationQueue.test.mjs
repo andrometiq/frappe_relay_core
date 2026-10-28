@@ -115,3 +115,28 @@ test('a business start preselects the WhatsApp number picked in Send via and lis
  await state.loadTemplates()
  assert.equal(calls.at(-1).args.channel,'WA-1')
 })
+
+test('approved templates load on showing template mode, append pages and ignore a stale number', async () => {
+ const calls = [], scope = effectScope()
+ let release
+ const state = scope.run(() => make(ref,computed,watch,()=>{},()=>{},()=>({businessName:'local-customer',businessDoctype:'Customer'}),()=>()=>{},async(method,args)=>{
+   calls.push({method,args})
+   if (args.channel === 'old') return new Promise(resolve => release = resolve)
+   return {data:[{id:args.arguments.after ? 'two' : 'one',name:'Order update',status:'APPROVED'},{id:'draft',status:'PENDING'}],paging:{has_more:!args.arguments.after,cursors:{after:'page-2'}}}
+ },sha256Hex,()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem(){},removeItem(){}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName))
+ state.endpoints.value = [{value:'old',channel:'old',provider:'WhatsApp'}, {value:'new',channel:'new',provider:'WhatsApp'}]
+ state.endpoint.value = 'old'
+ assert.equal(calls.length,0)
+ state.kind.value = 'template'
+ assert.equal(calls[0].args.channel,'old')
+ state.endpoint.value = 'new'
+ await state.loadTemplates()
+ assert.deepEqual(state.templates.value.map(row=>row.id),['one'])
+ release({data:[{id:'stale',status:'APPROVED'}]}); await new Promise(resolve=>setImmediate(resolve))
+ assert.deepEqual(state.templates.value.map(row=>row.id),['one'])
+ await state.loadTemplates(true)
+ assert.deepEqual(state.templates.value.map(row=>row.id),['one','two'])
+ assert.equal(calls.at(-1).args.arguments.after,'page-2')
+ assert.ok(calls.every(call=>call.method==='whatsapp.execute' && call.args.operation==='templates.list'))
+ scope.stop()
+})

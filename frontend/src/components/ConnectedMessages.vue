@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../composables/useLoadMore'
 import { inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
 import { Avatar, avatarInitials, avatarTone, Button, Dropdown, ErrorMessage, FeatherIcon } from "@relay/ui";
 import { recordTitle } from '../services/recordTitle';
@@ -252,6 +253,7 @@ function readContactRoute() {
 watch([busy, selected], readContactRoute, { flush: 'post' });
 onMounted(() => { readContactRoute(); readInfoRoute(); window.addEventListener('hashchange', readContactRoute); window.addEventListener('popstate', readContactRoute); window.addEventListener('hashchange', readInfoRoute); window.addEventListener('popstate', readInfoRoute); });
 onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange', readContactRoute); window.removeEventListener('popstate', readContactRoute); window.removeEventListener('hashchange', readInfoRoute); window.removeEventListener('popstate', readInfoRoute); });
+const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCursor.value, error: () => state.error.value, load: () => state.loadPending() })
 </script>
 
 <template>
@@ -332,13 +334,13 @@ onBeforeUnmount(() => { ++contactRequest; window.removeEventListener('hashchange
       <CreateTicketDialog v-if="ticketMessage" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :quoted="ticketQuoted" :contact-name="title" @created="ticketCreated = $event" />
 
       <MessageThread :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
-        :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :emoji="emoji"
+        :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :error="state.error.value" :emoji="emoji"
         :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="run(() => history(true))" @reply="reply"
         @quote="openQuote" @reconcile="state.checkPending" @send="send" />
 
-      <Button v-if="state.pendingCursor.value" label="More queued attempts" :disabled="busy" @click="state.loadPending" />
+      <div v-if="state.pendingCursor.value" ref="moreSentinel" class="h-px" aria-hidden="true" />
       <Button v-if="newer || state.newArrivals.value" class="jump-latest" icon-left="arrow-down"
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />

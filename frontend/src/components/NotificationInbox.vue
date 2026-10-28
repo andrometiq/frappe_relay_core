@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../composables/useLoadMore'
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
@@ -16,7 +17,7 @@ async function load(before) {
     const data = await coreApi("collaboration.notifications", { before });
     if (disposed) return;
     rows.value = before
-      ? [...rows.value, ...data.items].slice(-120)
+      ? [...rows.value, ...data.items]
       : data.items;
     next.value = data.next;
     error.value = "";
@@ -40,6 +41,7 @@ async function visit(row) {
 onMounted(() => load());
 onBeforeUnmount(() => { disposed = true; });
 useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(next.value) })
 </script>
 <template>
   <div class="notification-inbox" @keydown.esc="open = false">
@@ -85,12 +87,7 @@ useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
         <p v-if="!rows.length && !busy" class="notification-empty">
           You’re up to date.
         </p>
-        <Button
-          v-if="next"
-          label="Earlier notifications"
-          :disabled="busy"
-          @click="load(next)"
-        />
+        <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </div>
     </aside>
   </div>

@@ -1,6 +1,7 @@
 <script setup>
+import ChoiceField from './fields/ChoiceField.vue'
 import { computed, inject, ref } from 'vue'
-import { Button, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
+import { Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import { coreApi } from '../services/coreApi'
 import { linkedTitle } from '../services/linkedTitle'
@@ -46,7 +47,7 @@ async function removeLink(link) {
       <button v-if="detail.can_edit_links && !adding" type="button" class="info-group-action" :disabled="busy" @click="startAdding">+ Link</button></div>
     <ErrorMessage :message="error" />
     <form v-if="adding" class="contact-link-form info-card" aria-label="Link a business record" @submit.prevent="addLink">
-      <FormControl v-model="doctype" type="select" label="Business type" :options="types" :disabled="busy" @update:model-value="record = ''" />
+      <ChoiceField v-model="doctype" :field="{ label: 'Business type', options: types, readOnly: busy }" @update:model-value="record = ''" />
       <RemoteLinkField :key="doctype" v-model="record" :field="{ label: 'Record', method: 'api.business_records', params: { doctype }, placeholder: 'Search records…', readOnly: busy || !doctype }" />
       <div class="contact-link-form-actions"><Button label="Cancel" variant="ghost" :disabled="busy" @click="stopAdding" /><Button type="submit" label="Link record" variant="solid" :loading="busy" :disabled="!record" /></div>
     </form>

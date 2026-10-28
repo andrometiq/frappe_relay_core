@@ -10,7 +10,7 @@ test('captions prefer business and person titles while preserving identifiers', 
   assert.equal(recordTitle({ name: 'RELAY-TKT-0000000001', subject: 'Missing delivery' }), 'Missing delivery')
 })
 test('generated identifiers stay out of fallback captions without stripping meaningful numbers', () => {
-  for (const value of ['RELAY-CH-0000000026', '1792867625249477656', 'a'.repeat(32), '']) assert.equal(readableName(value, 'Channel'), 'Channel')
+  for (const value of ['RELAY-CH-0000000026', '1792867625249477656', 'a'.repeat(32), 'ac48d129ef', '']) assert.equal(readableName(value, 'Channel'), 'Channel')
   assert.equal(recordTitle({ title: 'Warehouse 26' }), 'Warehouse 26')
   assert.equal(recordTitle({ name: 'order_update' }), 'order_update')
 })

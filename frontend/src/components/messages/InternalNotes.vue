@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
 import { businessScope } from "../../services/businessScope.js";
 import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
@@ -46,7 +47,7 @@ async function load(older = false) {
   });
   if (current !== generation || request!==loadGeneration) return;
   rows.value = older
-    ? [...result.items, ...rows.value].slice(0, 120)
+    ? [...result.items, ...rows.value]
     : result.items;
   olderLoaded.value=older;updatesAvailable.value=false;
   more.value = result.more;
@@ -125,6 +126,8 @@ function cancel() {
   reply.value = null;
   body.value = "";
 }
+const notesViewport = ref(null)
+const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesViewport, preserveScroll: true, error: error, load: () => run(() => load(true)) })
 </script>
 <template>
   <aside class="internal-notes" aria-label="Internal notes">
@@ -136,14 +139,9 @@ function cancel() {
       <Button icon="x" label="Close internal notes" @click="emit('close')" />
     </header>
     <ErrorMessage :message="error" />
-    <div class="notes-list">
+    <div ref="notesViewport" class="notes-list">
       <Button v-if="updatesAvailable" label="New note updates" :disabled="busy" @click="run(()=>load())" />
-      <Button
-        v-if="more"
-        label="Earlier notes"
-        :disabled="busy"
-        @click="run(() => load(true))"
-      />
+      <div v-if="more" ref="moreSentinel" class="h-px" aria-hidden="true" />
       <article v-for="row in rows" :key="row.name">
         <div class="note-author">
           <strong>{{ row.author_name }}</strong

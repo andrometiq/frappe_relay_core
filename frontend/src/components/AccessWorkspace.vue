@@ -1,4 +1,6 @@
 <script setup>
+import { useDebouncedSearch } from '../composables/useDebouncedSearch'
+import { useLoadMore } from '../composables/useLoadMore'
 import { linkedTitle } from '../services/linkedTitle'
 import { inject, onMounted, onBeforeUnmount, ref } from 'vue'
 import { Avatar, Badge, Button, ErrorMessage, FeatherIcon, FormControl, TextInput } from '@relay/ui'
@@ -14,10 +16,14 @@ const capabilities = inject('relayCapabilities')
 const tab = ref(new URLSearchParams(location.hash.split('?')[1]).has('group') ? 'groups' : 'teams')
 const { busy, error, notice, run } = useTask()
 const rows = ref([]), query = ref(''), next = ref(null), editing = ref(null), member = ref('')
+let searchGeneration = 0
 async function load(after) {
+  const current = ++searchGeneration
   const page = await coreApi('teams.directory', { query: query.value, after })
+  if (current !== searchGeneration) return
   rows.value = after ? [...rows.value, ...page.items] : page.items; next.value = page.next
 }
+const searchTeams = useDebouncedSearch(query, async () => { const current = query.value; busy.value = true; error.value = ''; try { await load() } catch(e) { if (current === query.value) error.value = e.message } finally { if (current === query.value) busy.value = false } }, () => { ++searchGeneration; rows.value = []; next.value = null })
 async function edit(row) { editing.value = await coreApi('teams.read', { name: row.name }); member.value = '' }
 async function save() {
   editing.value = await coreApi('teams.save', { name: editing.value.name || undefined, title: editing.value.title, members: editing.value.members }, true)
@@ -29,6 +35,7 @@ onMounted(() => window.addEventListener('hashchange', readRoute))
 onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
 onMounted(() => { if (capabilities.value.manage) run(() => load()) })
 useRealtimeRefresh(['Relay Team'], ['teams'], () => { if (capabilities.value.manage) return run(() => load()) })
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => run(() => load(next.value)) })
 </script>
 <template>
   <section class="v1-screen">
@@ -45,9 +52,9 @@ useRealtimeRefresh(['Relay Team'], ['teams'], () => { if (capabilities.value.man
     <div v-else class="v1-content space-y-4">
       <WorkspaceHeading description="Organize the people who handle your customer conversations."><Button v-if="capabilities.manage" label="New team" icon-left="plus" variant="solid" :disabled="busy" @click="editing = { title: '', members: [] }; error = ''; notice = ''" /></WorkspaceHeading>
       <template v-if="capabilities.manage">
-        <form class="workspace-search" role="search" @submit.prevent="run(() => load())"><TextInput v-model="query" aria-label="Search teams" placeholder="Search teams"><template #prefix><FeatherIcon name="search" /></template></TextInput><Button type="submit" label="Search" :disabled="busy" /></form>
+        <form class="workspace-search" role="search" @submit.prevent="searchTeams"><TextInput v-model="query" aria-label="Search teams" placeholder="Search teams"><template #prefix><FeatherIcon name="search" /></template></TextInput></form>
         <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p><LoadingRows v-if="busy && !rows.length" label="Loading teams…" :count="3" />
-        <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !editing }"><div class="workspace-records"><button v-for="row in rows" :key="row.name" class="workspace-person-row" :aria-pressed="editing?.name === row.name" :disabled="busy" @click="run(() => edit(row))"><Avatar :label="row.title" /><span><strong>{{ row.title }}</strong><small>Communication team</small></span><FeatherIcon name="chevron-right" /></button><WorkspaceState v-if="!rows.length && !busy && !error" compact :title="query ? 'No teams found' : 'Build your first team'" description="Bring agents together to share conversation assignments." icon="users"><Button v-if="query" label="Clear search" @click="query = ''; run(() => load())" /><Button v-else label="Create team" @click="editing = { title: '', members: [] }" /></WorkspaceState><Button v-if="next" label="More teams" :disabled="busy" @click="run(() => load(next))" /></div>
+        <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !editing }"><div class="workspace-records"><button v-for="row in rows" :key="row.name" class="workspace-person-row" :aria-pressed="editing?.name === row.name" :disabled="busy" @click="run(() => edit(row))"><Avatar :label="row.title" /><span><strong>{{ row.title }}</strong><small>Communication team</small></span><FeatherIcon name="chevron-right" /></button><WorkspaceState v-if="!rows.length && !busy && !error" compact :title="query ? 'No teams found' : 'Build your first team'" description="Bring agents together to share conversation assignments." icon="users"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else label="Create team" @click="editing = { title: '', members: [] }" /></WorkspaceState><div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" /></div>
           <form v-if="editing" class="workflow-card team-editor" @submit.prevent="run(save)"><h3 class="font-semibold">{{ editing.name ? 'Edit team' : 'New team' }}</h3><FormControl v-model="editing.title" label="Team name" :disabled="busy" /><Badge :label="`${editing.members.length} ${editing.members.length === 1 ? 'member' : 'members'}`" /><ul class="team-members"><li v-for="user in editing.members" :key="user" class="flex items-center justify-between gap-2"><span class="break-all">{{ linkedTitle('User', user, 'Team member') }}</span><Button label="Remove" :aria-label="'Remove ' + linkedTitle('User', user, 'Team member')" :disabled="busy" @click="editing.members = editing.members.filter(value => value !== user)" /></li></ul><p v-if="!editing.members.length">Add at least one member.</p><RemoteLinkField v-model="member" :field="{ label: 'Add member', method: 'teams.agents', readOnly: busy }" /><Button label="Add member" :disabled="busy || !member" @click="addMember" /><Button type="submit" label="Save team" variant="solid" :disabled="busy || !editing.title.trim() || !editing.members.length" /><ErrorMessage :message="error" /></form>
         </div>
       </template>

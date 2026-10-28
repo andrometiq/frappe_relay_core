@@ -1,11 +1,12 @@
 <script setup>
+import { useLoadMore } from '../composables/useLoadMore'
+import ChoiceField from './fields/ChoiceField.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Avatar, Badge, Button, ErrorMessage, FeatherIcon, TextInput } from "@relay/ui";
 import LoadingRows from "./LoadingRows.vue";
 import WorkspaceState from "./WorkspaceState.vue";
 import { relativeTime } from "./relativeTime";
 import VirtualScroller from "primevue/virtualscroller";
-import RelaySelect from "./RelaySelect.vue";
 import { coreApi } from "../services/coreApi";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { closeRoute, openRoute } from "../useViewRoute";
@@ -26,7 +27,7 @@ const busy = ref(false);
 const error = ref("");
 let groupTimer;
 let recordTimer;
-let generation = 0;
+let generation = 0, recordGeneration = 0, searchGroupsPending = false, searchRecordsPending = false;
 let initialized = false;
 
 const visibleUnread = computed(() => records.value.reduce((total, row) => total + Number(row.unread || 0), 0));
@@ -55,12 +56,14 @@ async function loadGroups(append = false) {
 
 async function loadRecords(append = false) {
   if (!selected.value) return;
+  const request = ++recordGeneration;
   const result = await coreApi("business_groups.records", {
     doctype: doctype.value,
     group: selected.value.value,
     query: recordQuery.value,
     start: append ? recordNext.value || 0 : 0,
   });
+  if (request !== recordGeneration) return;
   const known = new Set(records.value.map((row) => row.name));
   records.value = append ? [...records.value, ...result.items.filter((row) => !known.has(row.name))] : result.items || [];
   recordNext.value = result.next;
@@ -74,6 +77,7 @@ function choose(group) {
   show(group);
 }
 function show(group) {
+  ++recordGeneration;
   selected.value = group;
   recordQuery.value = "";
   records.value = [];
@@ -81,6 +85,7 @@ function show(group) {
   guarded(() => loadRecords());
 }
 function reset() {
+  ++recordGeneration;
   selected.value = null;
   records.value = [];
   owner.value = "";
@@ -103,19 +108,18 @@ async function claim(release = false) {
     owner.value = result.assigned_to || "";
   });
 }
-function groupScrolled(event) {
-  const node = event.currentTarget;
-  if (groupNext.value && !busy.value && node.scrollHeight - node.scrollTop - node.clientHeight < 160) guarded(() => loadGroups(true));
-}
-function recordScrolled(event) {
-  const node = event.currentTarget;
-  if (recordNext.value !== null && !busy.value && node.scrollHeight - node.scrollTop - node.clientHeight < 160) guarded(() => loadRecords(true));
-}
 function openRecord(record) {
   location.hash = `#/messages?business_doctype=${encodeURIComponent(doctype.value)}&business_name=${encodeURIComponent(record.name)}`;
 }
-watch(groupQuery, () => { clearTimeout(groupTimer); groupTimer = setTimeout(() => guarded(() => loadGroups()), 300); });
-watch(recordQuery, () => { clearTimeout(recordTimer); recordTimer = setTimeout(() => guarded(() => loadRecords()), 300); });
+watch(groupQuery, () => { clearTimeout(groupTimer); ++generation; groupNext.value = null; groupTimer = setTimeout(() => { searchGroupsPending = true; flushSearches(); }, 300); });
+watch(recordQuery, () => { clearTimeout(recordTimer); ++recordGeneration; recordNext.value = null; recordTimer = setTimeout(() => { searchRecordsPending = true; flushSearches(); }, 300); });
+function flushSearches() {
+  if (busy.value || (!searchGroupsPending && !searchRecordsPending)) return;
+  const groupsChanged = searchGroupsPending, recordsChanged = searchRecordsPending;
+  searchGroupsPending = searchRecordsPending = false;
+  guarded(async () => { if (groupsChanged) await loadGroups(); if (recordsChanged) await loadRecords(); });
+}
+watch(busy, value => { if (!value) flushSearches(); });
 watch(doctype, () => {
   if (!initialized) return;
   guarded(async () => { clearSelection(); groupQuery.value = ""; await loadGroups(); });
@@ -137,7 +141,9 @@ onMounted(() => guarded(async () => {
   initialized = true;
   window.addEventListener("popstate", readRoute);
 }));
-onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(recordTimer); window.removeEventListener("popstate", readRoute); });
+onBeforeUnmount(() => { ++generation; ++recordGeneration; searchGroupsPending = searchRecordsPending = false; clearTimeout(groupTimer); clearTimeout(recordTimer); window.removeEventListener("popstate", readRoute); });
+const groupSentinel = useLoadMore({ loading: busy, hasMore: groupNext, error, load: () => guarded(() => loadGroups(true)) })
+const recordSentinel = useLoadMore({ loading: busy, hasMore: () => recordNext.value !== null, error, load: () => guarded(() => loadRecords(true)) })
 </script>
 
 <template>
@@ -145,12 +151,12 @@ onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(rec
     <aside class="team-groups">
       <header><div><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
       <div class="team-filters">
-        <RelaySelect v-if="types.length > 1" label="Business type" v-model="doctype" :options="types" :disabled="busy" />
+        <ChoiceField v-if="types.length > 1" :field="{ label: 'Business type', options: types, readOnly: busy }" v-model="doctype" />
         <TextInput v-model="groupQuery" type="search" placeholder="Search business groups" aria-label="Search business groups"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>
       </div>
       <ErrorMessage :message="error" />
-      <VirtualScroller :items="groups" :item-size="58" class="team-group-list" @scroll.passive="groupScrolled">
-        <template #item="{ item }"><button type="button" :class="{ active: selected?.value === item.value }" @click="choose(item)"><Avatar :label="item.label || 'Unassigned'" /><span><strong>{{ item.label }}</strong><small>{{ groupingField || "All accessible records" }}</small></span><FeatherIcon name="chevron-right" class="h-4 w-4" /></button></template>
+      <VirtualScroller :items="groups" :item-size="58" class="team-group-list">
+        <template #item="{ item }"><button type="button" class="relative" :class="{ active: selected?.value === item.value }" @click="choose(item)"><Avatar :label="item.label || 'Unassigned'" /><span><strong>{{ item.label }}</strong><small>{{ groupingField || "All accessible records" }}</small></span><FeatherIcon name="chevron-right" class="h-4 w-4" /><span v-if="item === groups.at(-1)" ref="groupSentinel" class="absolute bottom-0 left-0 w-full h-px" aria-hidden="true" /></button></template>
       </VirtualScroller>
       <WorkspaceState v-if="!groups.length && !busy && !error" compact title="No business groups found" description="Configure a grouping field to organize business responsibility." icon="users"><a class="relay-button" href="#/settings">Open setup</a></WorkspaceState>
       <LoadingRows v-if="busy && !groups.length" label="Loading business groups…" />
@@ -159,8 +165,8 @@ onBeforeUnmount(() => { ++generation; clearTimeout(groupTimer); clearTimeout(rec
     <main v-if="selected" class="team-records">
       <header class="team-heading"><Button class="mobile-only" icon="chevron-left" aria-label="Back to business groups" @click="clearSelection" /><Avatar :label="selected.label" /><div><h2>{{ selected.label }}</h2><p>{{ records.length }} loaded · {{ visibleUnread }} unread in this view</p></div><Badge :label="owner ? `Handled by ${owner}` : 'Unclaimed'" :theme="owner ? 'blue' : 'gray'" /><Button v-if="!owner" label="Take group" variant="solid" :disabled="busy" @click="claim()" /><Button v-else-if="owner === user" label="Release" :disabled="busy" @click="claim(true)" /></header>
       <div class="team-record-search"><TextInput v-model="recordQuery" type="search" placeholder="Search records, contacts, or mobile numbers" aria-label="Search team business records"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
-      <VirtualScroller :items="records" :item-size="76" class="team-record-list" @scroll.passive="recordScrolled">
-        <template #item="{ item }"><button type="button" @click="openRecord(item)"><Avatar :label="item.label" /><span class="team-record-copy"><span><strong>{{ item.label }}</strong><time v-if="item.last_activity" :title="item.last_activity">{{ relativeTime(item.last_activity) }}</time></span><small>{{ item.summary || item.last_message || item.description || "No WhatsApp activity yet" }}</small></span><Badge v-if="item.unread" :label="String(item.unread)" theme="blue" /><FeatherIcon name="chevron-right" class="h-4 w-4 text-ink-gray-4" /></button></template>
+      <VirtualScroller :items="records" :item-size="76" class="team-record-list">
+        <template #item="{ item }"><button type="button" class="relative" @click="openRecord(item)"><Avatar :label="item.label" /><span class="team-record-copy"><span><strong>{{ item.label }}</strong><time v-if="item.last_activity" :title="item.last_activity">{{ relativeTime(item.last_activity) }}</time></span><small>{{ item.summary || item.last_message || item.description || "No WhatsApp activity yet" }}</small></span><Badge v-if="item.unread" :label="String(item.unread)" theme="blue" /><FeatherIcon name="chevron-right" class="h-4 w-4 text-ink-gray-4" /><span v-if="item === records.at(-1)" ref="recordSentinel" class="absolute bottom-0 left-0 w-full h-px" aria-hidden="true" /></button></template>
       </VirtualScroller>
       <p v-if="!records.length && !busy" class="team-empty">No accessible business records match this group.</p>
     </main>

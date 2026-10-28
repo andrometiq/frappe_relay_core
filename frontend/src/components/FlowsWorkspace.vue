@@ -1,4 +1,6 @@
 <script setup>
+import { useDebouncedSearch } from '../composables/useDebouncedSearch'
+import { useLoadMore } from '../composables/useLoadMore'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
@@ -21,7 +23,7 @@ const stepOptions = computed(() => (draft.value?.nodes || []).map(step => ({ val
 const variables = computed(() => [...new Set((draft.value?.nodes || []).filter(step => ['input', 'action'].includes(step.kind) && step.variable).map(step => step.variable).concat('last_input'))])
 const reference = kind => ({ label: { channel: 'WhatsApp channel', execution_user: 'Run as user', business_doctype: 'Business type' }[kind],
   method: 'flows.service.references', kind, required: true, readOnly: busy.value,
-  initialOptions: draft.value?.[kind] ? [{ value: draft.value[kind], label: kind === 'channel' ? linkedTitle('Relay Channel', draft.value[kind], draft.value[kind]) : draft.value[kind] }] : [] })
+  initialOptions: draft.value?.[kind] ? [{ value: draft.value[kind], label: kind === 'business_doctype' ? draft.value[kind] : linkedTitle(kind === 'channel' ? 'Relay Channel' : 'User', draft.value[kind]) }] : [] })
 let generation = 0
 
 async function run(work) {
@@ -73,10 +75,11 @@ async function openLegacy() {
   const row = page.items.find(item => String(item.legacy_key || '').endsWith(':' + legacy))
   if (row) await open(row)
 }
-watch(query, () => load())
+useDebouncedSearch(query, () => load(), () => { ++generation; rows.value = []; next.value = null })
 onMounted(async () => { if (!capabilities.value.flows) return; await load(); coreApi('flows.actions.catalog').then(rows => { catalog.value = rows }).catch(() => {}); openLegacy().catch(() => {}) })
 onBeforeUnmount(() => { ++generation })
 useRealtimeRefresh(['Relay Flow'], ['flows'], () => load())
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(true) })
 </script>
 <template>
   <section class="v1-screen flow-workspace"><div class="v1-content space-y-4">
@@ -93,7 +96,7 @@ useRealtimeRefresh(['Relay Flow'], ['flows'], () => load())
             <span>{{ triggerSummary(row) }} · {{ linkedTitle('Relay Channel', row.channel, 'WhatsApp') }}<template v-if="row.legacy_key"> · Imported</template><template v-if="!row.published_version"> · Not published</template></span>
           </button>
           <WorkspaceState v-if="!visible.length && !busy && !error" :title="rows.length ? 'No matching flows' : 'No flows yet'" :description="rows.length ? 'Change the filter or search.' : 'Create a flow, or import WhatsApp Core flows with relay-import-whatsapp-flows. New flows start disabled.'" icon="git-branch"><Button label="New flow" variant="solid" icon-left="plus" @click="edit(newFlow())" /></WorkspaceState>
-          <Button v-if="next" label="Load more" :disabled="busy" @click="load(true)" />
+          <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0 flow-editor" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? draft.title || 'Flow' : 'New flow' }}</h2>

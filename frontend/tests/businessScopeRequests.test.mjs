@@ -1,3 +1,4 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -22,7 +23,7 @@ for (const [component, action, setup, method] of components) {
       return { ok: true, status: 200, json: async () => ({message: {items:[],field_values:{quantity:30},definition:{fields:{properties:{}},stages:[]}}}) }
     }
     const props = {contact:'shared-contact',businessDoctype:business,businessName:`Sim ${business}`,messages:[]}
-    const args = {ref,computed,watch:()=>{},onMounted:()=>{},onBeforeUnmount:()=>{},defineProps:()=>props,defineEmits:()=>()=>{},
+    const args = { useLoadMore,ref,computed,watch:()=>{},onMounted:()=>{},onBeforeUnmount:()=>{},defineProps:()=>props,defineEmits:()=>()=>{},
       useRealtimeRefresh:()=>{},businessScope,coreApi,randomUUID:()=> 'local-request',stableSubmission:(_kind,_data,send)=>send('local-request')}
     try {
       const run = new Function(...Object.keys(args), script + `\nreturn async()=>{${setup} await ${action}();return error.value}`)(...Object.values(args))

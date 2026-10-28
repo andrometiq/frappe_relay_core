@@ -1,9 +1,12 @@
 <script setup>
+import { useLoadMore } from '../composables/useLoadMore'
+import ChoiceField from './fields/ChoiceField.vue'
+import { useDebouncedSearch } from '../composables/useDebouncedSearch'
 import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
-import { coreApi } from '../services/coreApi'
+import { coreApi, frappeRequest } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import TicketDiscussion from './TicketDiscussion.vue'
@@ -14,6 +17,7 @@ import { relativeTime } from './relativeTime'
 import { closeRoute, openRoute } from '../useViewRoute'
 const capabilities = inject('relayCapabilities', ref({}))
 const aiEnabled = computed(() => Boolean(capabilities.value?.ai))
+const businessTypes = ref([])
 const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' })
 const page = ref({ items: [] }), selected = ref(null), owner = ref(''), error = ref(''), feedback = ref('')
 const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
@@ -54,13 +58,20 @@ async function load(cursor = {}) {
       coreApi('tickets.directory', { ...filters.value, ...cursor }),
       selected.value ? detail(selected.value.name) : Promise.resolve(),
     ])
-    if (request === generation) page.value = result
+    if (request === generation) page.value = { ...result, items: cursor.after ? [...page.value.items, ...result.items] : result.items }
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) listBusy.value = false }
 }
-function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' }; load() }
-function status(value) { filters.value.status = value; load() }
-function mine(value) { filters.value.mine = filters.value.mine === value ? '' : value; load() }
+function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' } }
+function status(value) { filters.value.status = value }
+function mine(value) { filters.value.mine = filters.value.mine === value ? '' : value }
+async function searchAssignees(query, signal) {
+  const rows = await frappeRequest('frappe.desk.search.search_link', {doctype:'User', txt:query, filters:JSON.stringify({enabled:1}), page_length:30}, false, {signal})
+  return rows.map(row => ({value:row.value, label:recordTitle(row, 'User')}))
+}
+const assigneeField = computed(() => ({label:'Assignee', search:searchAssignees,
+  initialOptions: filters.value.assigned_to ? [{value:filters.value.assigned_to, label:linkedTitle('User', filters.value.assigned_to)}] : [],
+}))
 const priorityTheme = value => ({ Urgent: 'red', High: 'amber' })[value] || 'gray'
 function dismiss() {
   ++detailGeneration; selected.value = null; detailBusy.value = false
@@ -106,24 +117,31 @@ async function update(method, values = {}) {
   } catch (e) { error.value = e.message }
   finally { saving.value = false }
 }
+const searchTickets = useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
+onMounted(async () => { try { businessTypes.value = await coreApi('api.business_types') } catch (e) { error.value = e.message } })
 onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute) })
 onBeforeUnmount(() => window.removeEventListener('popstate', readRoute))
 useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
+const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.next, error, load: () => load(page.value.next) })
+const historySentinel = useLoadMore({ loading: busy, hasMore: () => history.value.next, error, load: () => more('ai_history') })
+const deliverySentinel = useLoadMore({ loading: busy, hasMore: () => deliveries.value.next, error, load: () => more('deliveries') })
+const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcript.value.next, error, load: () => more('transcript') })
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
     <WorkspaceHeading description="Review handoffs, assign an owner and follow each conversation." />
-    <form class="automation-filter-bar" @submit.prevent="load()">
+    <form class="automation-filter-bar" @submit.prevent="searchTickets">
       <div class="automation-chips" role="group" aria-label="Ticket status">
         <button v-for="value in ['', 'Open', 'In progress', 'Resolved', 'Closed']" :key="value" type="button" class="automation-chip" :aria-pressed="filters.status === value" :disabled="busy" @click="status(value)">{{ value || 'All tickets' }}</button>
       </div>
       <div class="automation-chips" role="group" aria-label="My tickets">
         <button v-for="option in [{ value: 'assigned', label: 'Assigned to me' }, { value: 'tagged', label: 'Tagged me' }]" :key="option.value" type="button" class="automation-chip" :aria-pressed="filters.mine === option.value" :disabled="busy" @click="mine(option.value)">{{ option.label }}</button>
       </div>
-      <FormControl v-model="filters.business_name" label="Business" placeholder="Business record" />
-      <FormControl v-model="filters.assigned_to" label="Assignee" placeholder="User email" />
+      <ChoiceField :model-value="filters.business_doctype" :field="{ label: 'Business type', options: businessTypes }" @update:model-value="value => { filters.business_doctype = value; filters.business_name = '' }" />
+      <RemoteLinkField v-if="filters.business_doctype" :key="filters.business_doctype" v-model="filters.business_name" :field="{ label: 'Business record', method: 'api.business_records', params: { doctype: filters.business_doctype }, doctype: filters.business_doctype }" />
+      <ChoiceField v-model="filters.assigned_to" :field="assigneeField" />
       <FormControl v-model="filters.category" label="Category" placeholder="Category" type="select" :options="['', 'Query', 'Payment evidence', 'Support', 'Other']" />
-      <Button type="submit" label="Apply" :loading="busy" />
+
     </form>
     <ErrorMessage :message="error" />
     <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
@@ -134,7 +152,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
           <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? linkedTitle(row.business_doctype, row.business_name) : 'Conversation'" /><span>{{ row.category }} · {{ linkedTitle('User', row.assigned_to, 'Unassigned') }} · {{ relativeTime(row.creation) }}</span></div>
         </button>
         <WorkspaceState v-if="!busy && !error && !page.items.length" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button label="Clear filters" @click="reset" /></WorkspaceState>
-        <div class="flex gap-3"><Button v-if="page.previous" label="Previous" :disabled="busy" @click="load(page.previous)" /><Button v-if="page.next" label="Next" :disabled="busy" @click="load(page.next)" /></div>
+        <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
         <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><div class="flex flex-wrap gap-2"><Badge :label="selected.status" theme="blue" /><Badge v-if="selected.priority" :label="selected.priority + ' priority'" :theme="priorityTheme(selected.priority)" /><span v-if="selected.assigned_to" class="text-sm">Assigned to {{ linkedTitle('User', selected.assigned_to) }}</span></div><p class="whitespace-pre-wrap">{{ selected.brief }}</p>
@@ -180,7 +198,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
               <p v-for="delivery in run.deliveries" :key="delivery.name">Reply delivery · {{ delivery.status }}<span v-if="['Dispatching', 'Queued', 'Uncertain'].includes(delivery.status)">. Delivery is outstanding; a message already accepted by the provider may still arrive after takeover.</span></p>
             </li>
           </ol>
-          <Button v-if="history.next" label="Older AI history" :disabled="busy" @click="more('ai_history')" />
+          <div v-if="history.next" ref="historySentinel" class="h-px" aria-hidden="true" />
         </section>
         <section aria-label="Episode deliveries" class="space-y-3">
           <h3 class="font-semibold">Deliveries and notices</h3>
@@ -190,7 +208,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
             <span v-if="['Dispatching', 'Queued', 'Uncertain'].includes(delivery.status)">. Delivery is outstanding; an accepted message may still arrive after takeover.</span>
             <span v-if="delivery.status === 'Suppressed'">. Automatic delivery stopped; staff review required.</span>
           </p>
-          <Button v-if="deliveries.next" label="Older deliveries" :disabled="busy" @click="more('deliveries')" />
+          <div v-if="deliveries.next" ref="deliverySentinel" class="h-px" aria-hidden="true" />
         </section>
         <section aria-label="Episode transcript" class="space-y-3">
           <h3 class="font-semibold">Conversation</h3>
@@ -202,7 +220,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
               <a class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.name)">Open message</a>
             </li>
           </ol>
-          <Button v-if="transcript.next" label="More messages" :disabled="busy" @click="more('transcript')" />
+          <div v-if="transcript.next" ref="transcriptSentinel" class="h-px" aria-hidden="true" />
         </section>
         <TicketDiscussion v-if="selected.messages" :ticket="selected" @changed="load()" />
         <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><RemoteLinkField v-model="owner" :field="{ label: 'Assign to', method: 'collaboration.colleagues', params: { contact: selected.messages?.[0]?.contact }, placeholder: 'Search colleagues…', readOnly: busy || !selected.messages?.length, initialOptions: selected.assigned_to ? [{ value: selected.assigned_to, label: linkedTitle('User', selected.assigned_to) }] : [] }" /><Button type="submit" label="Assign" :disabled="busy" /></form>
