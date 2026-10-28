@@ -35,12 +35,23 @@ def whatsapp_media(source,channel,media_id):
     frappe.throw('WhatsApp did not return this media. Try again.',MediaRetry)
 
 
+def template_media(data):
+    """The image, video or document a template header sent, as its send parameter."""
+    for component in (data.get('template') or {}).get('components') or []:
+        if str(component.get('type')).lower()!='header':continue
+        for parameter in component.get('parameters') or []:
+            kind=parameter.get('type')
+            if kind in ('image','video','document') and isinstance(parameter.get(kind),dict):return parameter[kind]
+    return None
+
+
 def file_content(name,source):
+    """A private file kept on the source message. The caller has checked the source, so File's
+    owner-only sharing rule does not apply."""
     if not isinstance(name,str) or not 1<=len(name)<=140:frappe.throw('Invalid attachment reference')
     file=frappe.get_doc('File',name)
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
-    file.check_permission('read')
     raw=file.get_content()
     if isinstance(raw,str):raw=raw.encode()
     if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
@@ -87,12 +98,11 @@ def archived_attachment(message,download=0):
     file=frappe.get_doc('File',data['attachment'])
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
-    file.check_permission('read')
     if str(file.file_url).startswith(('/private/files/', '/files/')) and not os.path.isfile(file.get_full_path()):
         frappe.throw('This historical attachment was not copied to this site', frappe.DoesNotExistError)
     from relay_core.legacy_media import source_file, CHUNK
     def chunks():
-        with source_file(file) as stream:
+        with source_file(file, source_checked=True) as stream:
             while chunk := stream.read(CHUNK):
                 yield chunk
     import mimetypes
@@ -120,8 +130,9 @@ def read(message,download=0,index=None):
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
         if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
         return response(raw,result.get('content_type','application/octet-stream'),result.get('filename'),download)
-    template_document=bool((data.get('template') or {}).get('document'))
-    if source.message_type not in MEDIA_KINDS and not template_document:frappe.throw('This message has no supported attachment')
+    header=template_media(data)
+    if source.message_type not in MEDIA_KINDS and not header and not (data.get('template') or {}).get('document'):
+        frappe.throw('This message has no supported attachment')
     if data.get('attachment'):
         original,original_channel,_=messaging.readable_source(data.get('attachment_source'))
         if original.relay_contact!=source.relay_contact or original_channel.name!=channel.name:frappe.throw('Attachment is not accessible',frappe.PermissionError)
@@ -129,7 +140,7 @@ def read(message,download=0,index=None):
         import mimetypes
         return response(raw,mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
     if channel.channel=='WhatsApp':
-        media=data.get('media') or {};media_id=media.get('id')
+        media=data.get('media') or header or {};media_id=media.get('id')
         if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
         result=whatsapp_media(source,channel,media_id)
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)

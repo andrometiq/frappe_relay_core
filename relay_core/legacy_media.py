@@ -25,9 +25,11 @@ def copy_stream(source, target):
 
 
 @contextmanager
-def source_file(file):
-    """Only registered Files are eligible; never fetch arbitrary payload URLs."""
-    file.check_permission('read')
+def source_file(file, *, source_checked=False):
+    """Only registered Files are eligible; never fetch arbitrary payload URLs.
+    source_checked: the caller proved the File is kept on a message the user can read."""
+    if not source_checked:
+        file.check_permission('read')
     if file.get('custom_is_s3_uploaded') and file.get('custom_s3_key'):
         from frappe_s3_integration.s3_core import getS3Connection
         connection = getS3Connection()

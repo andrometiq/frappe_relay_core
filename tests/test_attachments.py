@@ -35,6 +35,18 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         self.assertEqual(result.headers['X-Content-Type-Options'], 'nosniff')
         self.assertEqual(result.headers['Cache-Control'], 'private, no-store')
 
+    def test_template_header_media_sent_by_id_downloads(self):
+        self.source.message_type = 'text'
+        self.source.message_data = json.dumps({'kind': 'text', 'text': 'Offer', 'template': {'name': 'offer', 'components': [
+            {'type': 'header', 'parameters': [{'type': 'image', 'image': {'id': '456'}}]}]}})
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'png').decode(), 'content_type': 'image/png'}
+        result = attachments.read(self.source.name, download=1)
+        self.hub.call_tool.assert_called_once_with('whatsapp.attachment', {'media_id': '456'})
+        self.assertEqual((result.status_code, result.data), (200, b'png'))
+        self.source.message_data = json.dumps({'kind': 'text', 'text': 'Offer', 'template': {'name': 'offer', 'components': [
+            {'type': 'body', 'parameters': [{'type': 'text', 'text': 'Ravi'}]}]}})
+        with self.assertRaises(ValueError): attachments.read(self.source.name)
+
     def test_invalid_empty_and_oversized_media_are_rejected(self):
         for encoded in ('invalid!', '', base64.b64encode(b'x' * (MAX_WHATSAPP_DOWNLOAD_BYTES + 1)).decode()):
             self.hub.call_tool.return_value = {'content_base64': encoded}
@@ -58,3 +70,24 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         self.assertEqual(self.rejected('capacity', '2026-10-21 10:00:00'), ('Media downloads are busy. Try again shortly.', attachments.MediaRetry))
         self.assertEqual(attachments.MediaGone.http_status_code, 410)
         self.assertEqual(attachments.MediaRetry.http_status_code, 503)
+
+
+class KeptFileTests(unittest.TestCase):
+    """A kept copy is read through its permission-checked source message, not through File sharing rules."""
+    def setUp(self):
+        self.source = SimpleNamespace(name='RELAY-MSG-0000000002')
+        self.file = SimpleNamespace(is_private=1, attached_to_doctype='Relay Message', attached_to_name=self.source.name,
+            file_name='Order.pdf', get_content=lambda: b'pdf', check_permission=Mock(side_effect=PermissionError('Only the uploader')))
+        def reject(message, *args): raise ValueError(message, *args)
+        fixture = patch.object(attachments, 'frappe', SimpleNamespace(get_doc=lambda doctype, name: self.file, throw=reject, PermissionError=PermissionError))
+        fixture.start(); self.addCleanup(fixture.stop)
+
+    def test_file_bound_to_the_readable_source_is_served_to_any_reader(self):
+        self.assertEqual(attachments.file_content('FILE-1', self.source), (self.file, b'pdf'))
+
+    def test_file_of_another_message_is_denied(self):
+        self.file.attached_to_name = 'RELAY-MSG-0000000003'
+        with self.assertRaises(ValueError): attachments.file_content('FILE-1', self.source)
+        self.file.attached_to_name, self.file.is_private = self.source.name, 0
+        with self.assertRaises(ValueError): attachments.file_content('FILE-1', self.source)
+

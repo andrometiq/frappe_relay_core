@@ -160,9 +160,12 @@ def apply_updates(payload, channel, event):
         values = {}
         if update['kind'] == 'delivery':
             if doc.direction != 'Outgoing': continue
-            if not advances(doc.status,update['status'],int(previous.get('timestamp',0)),update['timestamp']):
+            from relay_core.whatsapp_receipts import with_time
+            times=with_time(previous.get('times'),update['status'],update['timestamp'])
+            if advances(doc.status,update['status'],int(previous.get('timestamp',0)),update['timestamp']):
+                values={'status':update['status']}
+            elif times==previous.get('times',{}):
                 continue
-            values={'status':update['status']}
         elif update['kind'] == 'edit':
             values = {'message_data': json.dumps(update['data'], ensure_ascii=False), 'content': preview(update['data']),
                       'message_type': update['data']['kind'], 'edited_at': frappe.utils.now_datetime(),
@@ -178,6 +181,9 @@ def apply_updates(payload, channel, event):
         if key not in history and len(history) >= 201:
             history.pop(next(iter(history)))
         history[key] = {'event_id': update['event_id'], 'timestamp': update['timestamp'], 'sequence': update.get('sequence', 0)}
+        if update['kind'] == 'delivery':
+            # A receipt that does not advance the status records only its time.
+            history[key] = dict(history[key] if 'status' in values else previous, times=times)
         values['message_updates'] = json.dumps(history)
         # Delivery receipts do not edit message content. Keep their provenance
         # in message_updates without invalidating an editor's modified token.

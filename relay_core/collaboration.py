@@ -36,8 +36,9 @@ def references(contact, values):
 
 
 def business_scope(contact, messages, doctype=None, name=None):
-    """The note's business. A contact without business links keeps notes on the conversation itself."""
-    from relay_core.business_access import candidates, choose_business, reference
+    """The note's business. A contact without business links keeps notes on the conversation itself.
+    The business only scopes the note: a conversation reader may note on it without reading the business record."""
+    from relay_core.business_access import candidates, linked_business, reference
     targets = {reference(frappe.get_doc('Relay Message', value)) for value in messages}
     if targets:
         if len(targets) != 1:
@@ -49,22 +50,21 @@ def business_scope(contact, messages, doctype=None, name=None):
             doctype, name = target
     if not (doctype or name) and not candidates(contact):
         return None, None
-    return choose_business(contact, doctype, name)
+    return linked_business(contact, doctype, name)
 
 
 def authorize(doc, user=None):
-    from relay_core.business_access import readable_business, reference
+    """A note follows its conversation's read rule, like the conversation's messages."""
+    from relay_core.business_access import reference
     names = frappe.parse_json(doc.messages) or []
     if not doc.get('business_name') and names:
         targets = {reference(frappe.get_doc('Relay Message', name)) for name in names}
         if len(targets) == 1 and None not in targets:
             doc.business_doctype, doc.business_name = targets.pop()
-    if not doc.get('business_name') and not reference(doc):
-        # A conversation note follows the conversation's own read rule, like its unlinked messages.
-        conversation_reader(doc.relay_contact, user)
-    else:
-        target = readable_business(doc, user)
-        if target and not doc.get('business_name'):
+    conversation_reader(doc.relay_contact, user)
+    if not doc.get('business_name'):
+        target = reference(doc)
+        if target:
             doc.business_doctype, doc.business_name = target
     for name in names:
         message = frappe.get_doc('Relay Message', name)
