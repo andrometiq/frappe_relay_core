@@ -4,6 +4,8 @@ import json
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
+from relay_core.conversation_state import fresh_write
+from relay_core.message_reads import insert_reads
 
 
 def check_type(doctype):
@@ -84,11 +86,13 @@ def save_view(doctype,name,message,offset=0,at_bottom=0):
     if not -2000<=offset<=2000 or str(at_bottom) not in ('0','1'):
         frappe.throw('Invalid viewport position')
     key=state_key(doctype,name)
-    with frappe.cache.lock('relay-business-inbox-'+key,timeout=10,blocking_timeout=3):
+    def write():
         state=_state(doctype,name,create=True,lock=True)
         state.chat_view=json.dumps({'name':message,'offset':offset,'atBottom':str(at_bottom)=='1'})
         state.last_seen=frappe.utils.now_datetime()
         state.save(ignore_permissions=True);frappe.db.commit()
+    with frappe.cache.lock('relay-business-inbox-'+key,timeout=10,blocking_timeout=3):
+        fresh_write(write)
     return {'saved':True}
 
 
@@ -97,22 +101,17 @@ def mark_visible(doctype,name,messages,last_read=None):
     check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
     names,rows=_assert_messages(doctype,name,messages)
     if last_read is not None and last_read not in names:frappe.throw('Read cursor must be visible')
-    user=frappe.session.user;key=state_key(doctype,name);created=False
+    key=state_key(doctype,name)
+    def write():
+        state=_state(doctype,name,create=True,lock=True)
+        if last_read and (not state.last_read or last_read>state.last_read):state.last_read=last_read
+        state.last_seen=frappe.utils.now_datetime();state.save(ignore_permissions=True)
+        if insert_reads([(rows[message]['relay_contact'],message) for message in names]):changed(doctype,name)
+        frappe.db.commit()
+        return state.last_read
     with frappe.cache.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):
-        previous=getattr(frappe.flags,'relay_read_write',False);frappe.flags.relay_read_write=True
-        try:
-            state=_state(doctype,name,create=True,lock=True)
-            if last_read and (not state.last_read or last_read>state.last_read):state.last_read=last_read
-            state.last_seen=frappe.utils.now_datetime();state.save(ignore_permissions=True)
-            for message in names:
-                read_key=hashlib.sha256((user+':'+message).encode()).hexdigest()
-                if frappe.db.exists('Relay Message Read',{'read_key':read_key}):continue
-                frappe.get_doc({'doctype':'Relay Message Read','user':user,'relay_contact':rows[message]['relay_contact'],
-                    'message':message,'read_key':read_key}).insert(ignore_permissions=True);created=True
-            if created:changed(doctype,name)
-            frappe.db.commit()
-        finally:frappe.flags.relay_read_write=previous
-    return {'marked':names,'last_read':state.last_read}
+        cursor=fresh_write(write)
+    return {'marked':names,'last_read':cursor}
 
 
 @frappe.whitelist(methods=['GET'])

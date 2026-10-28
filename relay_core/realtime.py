@@ -15,6 +15,7 @@ RESOURCES = {
     'Relay Case': 'cases', 'Relay Flow': 'flows', 'Relay Flow Run': 'flows',
     'Relay Automation Run': 'tickets', 'Relay Flow Action': 'tickets',
     'Relay Message Action': 'tickets',
+    'Relay Ticket Status': 'tickets', 'Relay Ticket Category': 'tickets', 'Relay Ticket Type': 'tickets',
 }
 
 def changed(doc, method=None):

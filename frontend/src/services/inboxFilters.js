@@ -1,9 +1,9 @@
-// Inbox tab and filters: some channels and one business type or record. Each user keeps them in this browser.
+// Inbox tab (All, Unread or Not linked) and filters: some channels and one customer type or record. Each user keeps them in this browser.
 export const NO_RECORD = 'none'
 export const TABS = Object.freeze([
   ['all', 'All', 'All chats you can see'],
   ['unread', 'Unread', 'Chats with messages you have not read'],
-  ['read', 'Read', 'Chats with no unread messages for you'],
+  ['unlinked', 'Not linked', 'Chats not linked to a customer or supplier'],
 ])
 export const EMPTY_FILTERS = Object.freeze({ tab: 'all', channels: [], businessType: '', businessName: '', businessLabel: '' })
 
