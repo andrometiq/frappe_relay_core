@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
 import { onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
@@ -21,6 +22,7 @@ async function load(more = false) {
   finally { busy.value = false }
 }
 onMounted(load)
+const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error, load: () => load(true) })
 </script>
 <template>
   <div class="whatsapp-forms">
@@ -32,7 +34,7 @@ onMounted(load)
       <template #cell-title="{ item }"><strong>{{ item.name }}</strong></template>
       <template #cell-status="{ item }"><Badge :label="sentenceCase(item.status)" :theme="item.status === 'PUBLISHED' ? 'green' : 'gray'" /></template>
       <template #cell-categories="{ item }">{{ (item.categories || []).map(sentenceCase).join(', ') || '—' }}</template>
-      <template v-if="after" #footer><Button label="Load more forms" :loading="busy" @click="load(true)" /></template>
+      <template v-if="after" #footer><div v-if="after" ref="moreSentinel" class="h-px" aria-hidden="true" /></template>
     </FrappeListView>
   </div>
 </template>

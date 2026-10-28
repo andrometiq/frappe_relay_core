@@ -23,9 +23,9 @@ export function useCampaigns() {
     busy.value = true; error.value = "";
     try { return await fn(); } catch (e) { error.value = e.message; } finally { busy.value = false; }
   }
-  const refresh = () => run(async () => {
-    const page = await coreApi("campaigns.directory");
-    items.value = page.items; next.value = page.next;
+  const refresh = (after) => run(async () => {
+    const page = await coreApi("campaigns.directory", { after });
+    items.value = after ? [...items.value, ...page.items] : page.items; next.value = page.next;
   });
   const open = (name) => run(async () => { campaign.value = await coreApi("bulk_campaigns.read", { name }); sheet.value = null; filter.value = ""; });
   // `channel` lists the templates of that WhatsApp number's account.
@@ -75,7 +75,7 @@ export function useCampaigns() {
       reread.schedule("progress");
     } else if (event.kind === "reconnect" && campaign.value) open(campaign.value.name);
   });
-  useRealtimeRefresh(["Relay Campaign"], ["campaigns"], refresh);
+  useRealtimeRefresh(["Relay Campaign"], ["campaigns"], () => refresh());
   onMounted(refresh);
   onBeforeUnmount(() => { off(); leave?.(); reread.dispose(); });
   return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, uploadMedia, importRows, control, page };

@@ -1,4 +1,5 @@
 <script setup>
+import ChoiceField from './fields/ChoiceField.vue'
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, ref, watch } from 'vue'
 import { Button, ErrorMessage, FormControl } from '@relay/ui'
@@ -31,7 +32,7 @@ async function save(row) {
   <section class="space-y-3" aria-label="Channel preferences">
     <h4 class="font-medium">Business channel preferences</h4>
     <p class="text-sm">Record the person’s consent for each business separately. Lower priorities are tried first; equal priorities require review.</p>
-    <FormControl v-model="business" type="select" label="Business" :disabled="busy" :options="[{value:'',label:'Choose a business'}, ...links.map((link, index) => ({value:String(index),label:linkedTitle(link.doctype, link.name)}))]" />
+    <ChoiceField v-model="business" :field="{ label: 'Business', options: [{value:'',label:'Choose a business'}, ...links.map((link, index) => ({value:String(index),label:linkedTitle(link.doctype, link.name)}))], readOnly: busy }" />
     <div v-for="row in rows" :key="row.endpoint" class="border-t pt-3 space-y-2">
       <p class="break-words">{{ endpoints.find(item => item.name === row.endpoint)?.provider }} · {{ endpoints.find(item => item.name === row.endpoint)?.endpoint }}</p>
       <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="row.consent" label="Consent" type="select" :options="['Denied','Granted']" :disabled="busy || !editable" /><FormControl v-model="row.priority" label="Priority (1–100)" type="number" min="1" max="100" :disabled="busy || !editable" /></div>

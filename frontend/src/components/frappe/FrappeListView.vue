@@ -14,7 +14,7 @@ const props = defineProps({
   emptyTitle: { type: String, default: "No records found" },
   emptyDescription: String,
 });
-const emit = defineEmits(["open", "near-end"]);
+const emit = defineEmits(["open"]);
 const grid = {
   get value() {
     return {
@@ -24,11 +24,6 @@ const grid = {
     };
   },
 };
-function onScroll(event) {
-  const element = event.currentTarget;
-  if (element.scrollHeight - element.scrollTop - element.clientHeight < 260)
-    emit("near-end");
-}
 </script>
 
 <template>
@@ -38,7 +33,7 @@ function onScroll(event) {
       <div class="frappe-list-actions"><slot name="actions" /></div>
     </header>
     <div v-if="$slots.filters" class="frappe-list-filters"><slot name="filters" /></div>
-    <div class="frappe-list-scroll" @scroll.passive="onScroll">
+    <div class="frappe-list-scroll">
       <div class="frappe-list-table" role="table" :aria-label="label">
         <div class="frappe-list-row frappe-list-row-head" role="row" :style="grid.value">
           <span v-for="column in columns" :key="column.key" role="columnheader">{{ column.label }}</span>
@@ -52,7 +47,7 @@ function onScroll(event) {
       <LoadingRows v-if="busy && !items.length" label="Loading records…" :count="6" />
       <div v-if="loadingMore" class="frappe-list-loading" role="status">Loading more…</div>
       <WorkspaceState v-else-if="!items.length && !busy" :title="emptyTitle" :description="emptyDescription" icon="file-text"><slot name="empty-action" /></WorkspaceState>
+      <footer v-if="$slots.footer" class="frappe-list-footer"><slot name="footer" /></footer>
     </div>
-    <footer v-if="$slots.footer" class="frappe-list-footer"><slot name="footer" /></footer>
   </section>
 </template>

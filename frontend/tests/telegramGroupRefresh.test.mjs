@@ -20,9 +20,9 @@ const refresh = subscriptions.find(s=>!s.types.length && s.kinds.includes('messa
 await refresh();
 assert.equal(state.pendingSend.value.length,50);
 await state.restorePending(true);
-assert.equal(state.pendingSend.value.length,1);
+assert.equal(state.pendingSend.value.length,51);
 await refresh();
-assert.equal(state.pendingSend.value.length,1,'Realtime preserves the selected pending page');
+assert.equal(state.pendingSend.value.length,51,'Realtime preserves the selected pending page');
 assert.equal(calls.at(-1).args.before,'RELAY-MA-0000000050');
 await state.restorePending();
 assert.equal(state.pendingSend.value.length,50,'Latest replaces rather than appends');

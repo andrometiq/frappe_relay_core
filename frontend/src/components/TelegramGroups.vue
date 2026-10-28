@@ -41,18 +41,13 @@ const {
     <div class="flex flex-wrap items-end gap-3">
       <ChoiceField
         class="min-w-0 flex-1"
-        :field="{label:'Telegram group',search:searchGroups,readOnly:busy}"
+        :field="{label:'Telegram group',search:searchGroups,readOnly:busy,hasMore:!!cursor,loadMore:(query,signal)=>searchGroups(query,signal,cursor)}"
         :model-value="selected"
         @update:modelValue="choose"
       /><Button
         label="Refresh groups"
         :loading="busy"
         @click="run(() => directory())"
-      /><Button
-        v-if="cursor"
-        label="Next groups"
-        :disabled="busy"
-        @click="run(() => directory(cursor))"
       />
     </div>
     <div v-if="!rows.length && !busy" class="rounded border p-6 space-y-2">

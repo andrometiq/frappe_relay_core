@@ -1,3 +1,5 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
+import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -14,7 +16,7 @@ async function component(t, file, values, bindings) {
   const source = await readFile(new URL('../src/components/' + file, import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import[\s\S]*?from .*\n/gm, '')
   const mounted = [], scope = effectScope()
-  const globals = { computed, ref, watch, openRoute, closeRoute, onMounted: callback => mounted.push(callback), onBeforeUnmount() {},
+  const globals = { useLoadMore, useDebouncedSearch, computed, ref, watch, openRoute, closeRoute, onMounted: callback => mounted.push(callback), onBeforeUnmount() {},
     useRealtimeRefresh() {}, ...values }
   const make = new Function(...Object.keys(globals), `${script}\nreturn { ${bindings.join(', ')} };`)
   const state = scope.run(() => make(...Object.values(globals)))

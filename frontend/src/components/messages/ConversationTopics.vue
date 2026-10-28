@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
 import { businessScope } from "../../services/businessScope.js";
 import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { Button, Dialog, FormControl, ErrorMessage } from "@relay/ui";
@@ -114,6 +115,7 @@ watch(
   },
   { immediate: true },
 );
+const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error: error, load: () => load(true) })
 </script>
 <template>
   <Dialog
@@ -254,12 +256,7 @@ watch(
               />
             </div>
           </article>
-          <Button
-            v-if="after"
-            label="More topics"
-            :loading="busy"
-            @click="load(true)"
-          />
+          <div v-if="after" ref="moreSentinel" class="h-px" aria-hidden="true" />
         </template>
       </div> </template
   ></Dialog>

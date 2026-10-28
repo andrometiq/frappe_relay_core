@@ -1,3 +1,4 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -9,9 +10,9 @@ import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilte
 
 const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
+const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
   'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
-  script + '\nreturn { mode, filters, activeFilters };')
+  script + '\nreturn { mode, filters, activeFilters };').bind(null, useLoadMore)
 const capabilities = { enabled_channels: ['WhatsApp'], inbox_channels: [
   { name: 'WA-1', label: 'Sales line', address: '+91 1', medium: 'WhatsApp' }, { name: 'WA-2', label: 'Support line', address: '+91 2', medium: 'WhatsApp' }] }
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)) }

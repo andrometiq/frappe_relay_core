@@ -1,4 +1,6 @@
 <script setup>
+import ChoiceField from '../fields/ChoiceField.vue'
+import { useLoadMore } from '../../composables/useLoadMore'
 import { businessScope } from "../../services/businessScope.js";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
@@ -218,6 +220,7 @@ async function save() {
   });
 }
 onMounted(() => (props.initialCase ? open(props.initialCase) : load()));
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error: error, load: () => load(true) })
 </script>
 <template>
   <Dialog v-model="shown" :options="{ title: 'Conversation cases', size: 'lg' }"
@@ -256,13 +259,9 @@ onMounted(() => (props.initialCase ? open(props.initialCase) : load()));
           </div>
           <form class="space-y-4" @submit.prevent="save">
             <template v-if="record.isNew"
-              ><RelaySelect
+              ><ChoiceField
                 v-model="newType"
-                label="Case type"
-                :options="
-                  typeRows.map((t) => ({ value: t.name, label: t.title }))
-                "
-                :disabled="busy"
+                :field="{ label: 'Case type', options: typeRows.map((t) => ({ value: t.name, label: t.title })), readOnly: busy }"
                 @update:model-value="chooseType"
               /><FormControl
                 v-model="newTitle"
@@ -358,11 +357,6 @@ onMounted(() => (props.initialCase ? open(props.initialCase) : load()));
             ><span class="text-xs text-ink-gray-5"
               >{{ row.priority }} · {{ row.stage.replaceAll("_", " ") }}</span
             ></button
-          ><Button
-            v-if="next"
-            label="More cases"
-            :loading="busy"
-            @click="load(true)"
-        /></template></div></template
+          ><div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" /></template></div></template
   ></Dialog>
 </template>

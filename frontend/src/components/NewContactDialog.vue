@@ -1,4 +1,5 @@
 <script setup>
+import ChoiceField from './fields/ChoiceField.vue'
 import { computed, ref, watch } from 'vue'
 import { Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
@@ -41,8 +42,8 @@ watch(open, value => { if (value) prepare() })
     <form id="relay-new-contact" class="new-contact-form" @submit.prevent="ready && create()">
       <FormControl v-model="name" label="Name" required maxlength="140" autocomplete="name" :disabled="busy" />
       <FormControl v-model="phone" label="WhatsApp number" type="tel" required inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210" :disabled="busy" />
-      <FormControl v-if="channels.length > 1" v-model="channel" type="select" label="WhatsApp channel" :options="channelOptions" :disabled="busy" />
-      <FormControl v-model="doctype" type="select" label="Link to (optional)" :options="types" :disabled="busy" @update:model-value="record = ''" />
+      <ChoiceField v-if="channels.length > 1" v-model="channel" :field="{ label: 'WhatsApp channel', options: channelOptions, readOnly: busy }" />
+      <ChoiceField v-model="doctype" :field="{ label: 'Link to (optional)', options: types, readOnly: busy }" @update:model-value="record = ''" />
       <RemoteLinkField v-if="doctype" :key="doctype" v-model="record" :field="{ label: 'Record', method: 'api.business_records', params: { doctype }, placeholder: 'Search records…', readOnly: busy }" />
       <p class="new-contact-hint">Use the country code. The number becomes a verified WhatsApp identity for this contact.</p>
       <ErrorMessage :message="error" />
