@@ -600,6 +600,7 @@
 .workspace-search>.relay-input-shell { min-width:0; flex:1; }
 .contacts-filters { align-items:flex-end; flex-wrap:wrap; }
 .contacts-filters>.space-y-1\.5 { flex:0 1 200px; min-width:160px; }
+@media (max-width:640px) { .contacts-filters>.relay-input-shell, .contacts-filters>.space-y-1\.5 { flex:1 1 100%; } }
 .workspace-records { overflow:hidden; border:1px solid var(--outline-gray-2); border-radius:10px; background:var(--surface-white); }
 .workspace-records>.relay-button { margin:12px; }
 .workspace-person-row { display:flex; align-items:center; gap:12px; width:100%; padding:14px 16px; border-bottom:1px solid var(--outline-gray-2); text-align:left; }

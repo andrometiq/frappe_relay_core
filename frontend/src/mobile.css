@@ -140,6 +140,13 @@
   .contact-info-action:active{transform:scale(.95)}
   .contact-info-page .info-group-title:first-child,.contact-info-page .contact-links>.info-group-title:first-child{margin-top:14px}
 
+  /* Contacts: the list and the open contact are separate pages */
+  .v1-screen:has(.v1-detail-grid>.contact-details) :is(.v1-tabs,.workspace-heading,.workspace-search){display:none}
+  .v1-detail-grid:has(>.contact-details)>:first-child{display:none}
+  .v1-detail-grid:has(>.contact-details){display:flex;flex:1;min-height:0;margin:0}
+  .v1-content:has(.v1-detail-grid>.contact-details){padding:0}
+  .v1-shell.relay-shell .v1-detail-grid>.contact-details{flex:1;min-height:0;overflow:auto;padding:calc(8px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));border:0;border-radius:0;box-shadow:none}
+
   /* Tickets: the list and the open ticket are separate pages */
   .v1-screen:has(.ticket-detail) :is(.workspace-heading,.automation-filter-bar){display:none}
   .v1-detail-grid:has(>.ticket-detail)>:first-child{display:none}
