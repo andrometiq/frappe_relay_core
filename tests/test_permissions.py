@@ -284,3 +284,26 @@ class MetadataTests(unittest.TestCase):
                         self.assertFalse(permission.get('create'))
 
 
+
+
+class CompanylessSiteTests(unittest.TestCase):
+    """A site without ERPNext has no Company DocType; its records keep an empty company."""
+
+    def frappe_without_company(self):
+        def has_permission(doctype, *args, **kwargs):
+            raise AssertionError('Company must not be looked up on a site without it')
+        fake = types.SimpleNamespace(session=types.SimpleNamespace(user='agent@example.com'), has_permission=has_permission,
+                                     db=types.SimpleNamespace(exists=lambda doctype, name: False))
+        return patch.dict(sys.modules, {'frappe': fake})
+
+    def test_empty_company_is_allowed_and_a_named_company_is_not(self):
+        from relay_core.permissions import company_allowed
+        with self.frappe_without_company():
+            self.assertTrue(company_allowed(None))
+            self.assertTrue(company_allowed(''))
+            self.assertFalse(company_allowed('Other Company'))
+
+    def test_company_condition_keeps_only_records_without_company(self):
+        from relay_core.permissions import company_condition
+        with self.frappe_without_company():
+            self.assertEqual(company_condition('Relay Ticket'), "COALESCE(`tabRelay Ticket`.company,'')=''")
