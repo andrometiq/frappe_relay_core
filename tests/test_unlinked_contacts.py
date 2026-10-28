@@ -356,6 +356,31 @@ class StartDestinationTests(BoundaryTests):
             self.start.start_contact('Relay')
 
 
+    def business_access(self, links, marked=None):
+        return self.module('relay_core.business_access', candidates=Mock(return_value=links),
+            primary=Mock(return_value=marked), choose_business=Mock(return_value=('Customer', 'C1')))
+
+    def test_contact_without_records_starts_an_unlinked_chat(self):
+        access = self.business_access([])
+        self.assertEqual(self.start.start_business('Relay'), (None, None))
+        access.choose_business.assert_not_called()
+
+    def test_contact_with_records_still_needs_one_record(self):
+        access = self.business_access([('Customer', 'C1'), ('Customer', 'C2')])
+        self.assertEqual(self.start.start_business('Relay'), ('Customer', 'C1'))
+        access.choose_business.assert_called_once_with('Relay', None, None)
+
+    def test_records_lists_readable_choices_only_without_a_primary(self):
+        self.start.readable_contact = Mock()
+        docs = {'C1': Row(meta=Row(title_field='customer_name'), customer_name='Shop One', has_permission=lambda p: True),
+                'C2': Row(meta=Row(title_field=None), has_permission=lambda p: False)}
+        self.frappe.get_doc.side_effect = lambda dt, name: docs[name]
+        self.business_access([('Customer', 'C1'), ('Customer', 'C2')])
+        self.assertEqual(self.start.records('Relay'), [{'doctype': 'Customer', 'name': 'C1', 'title': 'Shop One'}])
+        self.business_access([('Customer', 'C1')], marked=('Customer', 'C1'))
+        self.assertEqual(self.start.records('Relay'), [])
+
+
 class ContactQueueTests(BoundaryTests):
     def setUp(self):
         super().setUp()

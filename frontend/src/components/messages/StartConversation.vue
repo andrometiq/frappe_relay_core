@@ -37,6 +37,11 @@ const shown = ref(true),
   subject = ref(""),
   kind = ref(props.channel ? "template" : "text");
 const contactQuery = ref(""), contactOptions = ref([]), contactsBusy = ref(false), contactsError = ref("");
+// A contact with several records and no primary picks the record the new chat belongs to.
+const records = ref([]), record = ref("");
+const chosenRecord = computed(() => records.value.find(row => row.value === record.value));
+const businessDoctype = computed(() => props.businessDoctype || chosenRecord.value?.doctype);
+const businessName = computed(() => props.businessName || chosenRecord.value?.name);
 const templates = ref([]),
   templateId = ref(""),
   parameters = ref({}),
@@ -116,18 +121,27 @@ async function destinations() {
     const result = await coreApi(
       props.businessName ? "conversation_start.business_options" : "conversation_start.options",
       { contact: contact.value,
-        business_doctype:props.businessDoctype,business_name:props.businessName,
+        business_doctype:businessDoctype.value,business_name:businessName.value,
         ...(props.businessName && props.channel ? { channel: props.channel } : {}) },
       !!props.businessName,
     );
     if (current !== generation) return;
     endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
     endpoint.value = (endpoints.value.find(row => props.businessName && row.channel === props.channel) || endpoints.value[0])?.value || "";
+    if (!endpoints.value.length && !props.businessName && !record.value) await loadRecords(current);
   } catch (e) {
     if (current === generation) error.value = e.message;
   }
 }
+async function loadRecords(current) {
+  const rows = await coreApi("conversation_start.records", { contact: contact.value });
+  if (current !== generation) return;
+  records.value = rows.map(row => ({ value: row.doctype + "\n" + row.name, label: row.title + " · " + row.doctype, doctype: row.doctype, name: row.name }));
+}
+watch(record, () => { if (record.value && contact.value) destinations(); });
 watch(contact, () => {
+  records.value = [];
+  record.value = '';
   endpoint.value = '';
   pending.value = null;
   renewRequestKey.value = false;
@@ -178,7 +192,7 @@ function sendPayload() {
         components:buildTemplateComponents(descriptors.value, parameters.value)};
   return {
     contact:contact.value,
-    business_doctype:props.businessDoctype, business_name:props.businessName,
+    business_doctype:businessDoctype.value, business_name:businessName.value,
     endpoint:endpoint.value, kind:kind.value, data,
     ...(props.channel && !props.businessName ? { channel: props.channel } : {}),
   };
@@ -227,7 +241,7 @@ async function send() {
       clearDraft();
       notice.value = result.status === "Queued" ? "Queued for sending" : destination.value?.provider === "Email" ? "SMTP accepted" : destination.value?.provider === "Telegram" ? "Bot accepted" : "Sent";
       emit("sent", { contact: contact.value,
-      business_doctype:props.businessDoctype,business_name:props.businessName, message: result.message, status: result.status });
+      business_doctype:businessDoctype.value,business_name:businessName.value, message: result.message, status: result.status });
       shown.value = false;
     } else {
       pending.value = {...result, storage};
@@ -247,7 +261,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
   <Dialog v-model="shown" :options="{ title: 'New conversation', size: 'lg' }"
     ><template #body-content
       ><div class="space-y-4">
-        <div v-if="businessName" class="start-contact-picker">
+        <div v-if="props.businessName" class="start-contact-picker">
           <label>Business contact</label>
           <TextInput v-model="contactQuery" type="search" placeholder="Search linked contacts…"
             aria-label="Search linked contacts" :disabled="busy || !!pending">
@@ -268,9 +282,11 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           </div>
         </div>
         <RemoteLinkField v-else v-model="contact" :field="{label:'Contact',method:'inbox.directory',params:{},placeholder:'Search contacts…',inlineResults:true,initialOptions:contact?[{value:contact,label:contactLabel||readableName(contact,'Contact')}]:[],readOnly:busy||!!pending}" />
+        <ChoiceField v-if="records.length" v-model="record" :field="{ label: 'Business record', options: records, readOnly: busy || !!pending }" />
         <ChoiceField v-if="endpoints.length" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
+        <p v-else-if="contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
-          {{ businessName
+          {{ props.businessName
             ? "No verified channel is available for this contact. Enroll an authenticated identity in Contacts & links."
             : "No eligible channel identity is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
         </p>
