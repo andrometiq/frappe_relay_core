@@ -256,6 +256,7 @@ class MetadataTests(unittest.TestCase):
             'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
             'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title', 'Relay Document Action':'title',
             'Relay WhatsApp Billing Month':'record_key',
+            'Relay Ticket Status':'label', 'Relay Ticket Category':'label', 'Relay Ticket Type':'label',
         }
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
             doc=json.loads(path.read_text())
@@ -275,6 +276,8 @@ class MetadataTests(unittest.TestCase):
                 self.assertEqual(doc['autoname'], 'format:{title}-{###}')
                 self.assertEqual(doc['title_field'], 'title')
                 self.assertTrue(doc.get('modified'))
+            elif doc['name']=='Relay Ticket':
+                self.assertEqual(doc['autoname'],'TKT-.#####')
             elif not doc.get('issingle'):
                 self.assertTrue(doc['autoname'].endswith('.##########'))
             if doc['name'] in ('Relay Channel', 'Relay Settings'):

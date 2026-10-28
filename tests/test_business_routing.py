@@ -314,6 +314,7 @@ class RoutingBoundaryTests(unittest.TestCase):
         fake = SimpleNamespace(db=db, get_doc=get_doc, get_all=Mock(return_value=['channel']))
         with patch.object(projection, 'frappe', fake), patch('relay_core.hub_channels.frappe', fake), \
                 patch.object(projection, 'apply_updates', return_value='Ignored'), patch('relay_core.bulk_updates.link_reply'), \
+             patch('relay_core.ai_features.is_enabled', return_value=True), \
              patch('relay_core.tickets.source_episode', return_value=('provider-key', 'source-action')), \
              patch.object(whatsapp_templates, 'project', return_value=False), \
              patch.object(routing, 'resolve', side_effect=[(('Supplier', 'supplier'), 'sender_choice'),
@@ -474,6 +475,8 @@ class TriageEpisodeTests(unittest.TestCase):
         self.enterContext(patch.object(tickets, 'frappe', self.fake))
         self.enterContext(patch('frappe.utils.now_datetime', return_value='Sim time'))
         self.enterContext(patch('relay_core.permissions.require_administrator'))
+        self.enterContext(patch('relay_core.ticket_settings.apply'))  # Configured statuses are covered in test_ticket_settings.
+        self.enterContext(patch('relay_core.ticket_settings.preferred', side_effect=lambda kind, label: label))
         from contextlib import nullcontext
         self.enterContext(patch('relay_core.ai.tools.as_user', side_effect=lambda user:nullcontext()))
 

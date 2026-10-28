@@ -1,0 +1,90 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Ticket Status",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:label",
+  "naming_rule": "By fieldname",
+  "allow_rename": 1,
+  "field_order": [
+    "label",
+    "state",
+    "is_default",
+    "colour",
+    "enabled",
+    "sort_order"
+  ],
+  "fields": [
+    {
+      "fieldname": "label",
+      "label": "Name",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "state",
+      "label": "Counts as",
+      "fieldtype": "Select",
+      "options": "Open\nIn progress\nResolved\nClosed",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "The built-in state this status behaves as. Ticket rules use the state, not the name."
+    },
+    {
+      "fieldname": "is_default",
+      "label": "Default for its state",
+      "fieldtype": "Check",
+      "default": "0"
+    },
+    {
+      "fieldname": "colour",
+      "label": "Colour",
+      "fieldtype": "Select",
+      "options": "gray\nblue\ngreen\namber\nred",
+      "default": "gray",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "sort_order",
+      "label": "Sort order",
+      "fieldtype": "Int",
+      "default": "0"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication User",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Team User",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "sort_field": "sort_order",
+  "sort_order": "ASC",
+  "modified": "2026-10-28 15:00:00.000000"
+}
