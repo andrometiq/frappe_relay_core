@@ -70,6 +70,7 @@ def after_migrate():
     frappe.db.add_index('Relay Message', ['relay_contact', 'name'], 'relay_contact_history')
     frappe.db.add_index('Relay Message', ['relay_contact', 'channel', 'name'], 'relay_channel_history')
     frappe.db.add_index('Relay Message', ['conversation_key', 'name'], 'relay_conversation_history')
+    frappe.db.add_index('Relay Message', ['sender_endpoint', 'name'], 'relay_endpoint_history')
     frappe.db.add_index('Relay Flow Event', ['status','name'], 'relay_flow_pending')
     frappe.db.add_index('Relay Flow Event', ['conversation_key','status','name'], 'relay_flow_order')
     frappe.db.add_index('Relay Flow Run', ['conversation_key','status','name'], 'relay_flow_active')
