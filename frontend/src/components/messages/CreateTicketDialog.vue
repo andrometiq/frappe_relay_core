@@ -48,7 +48,8 @@ watch(settings, () => { if (open.value) reconcile() })
 <template>
   <Dialog v-model="open" :options="{ title: 'Create ticket', size: 'md' }" :disable-outside-click-to-close="busy">
     <form id="relay-create-ticket" class="create-ticket-form" @submit.prevent="ready && create()">
-      <blockquote v-if="quoted && message" class="create-ticket-quote">{{ ticketSubject(message, 'Attachment or message without text') }}</blockquote>
+      <p v-if="message" class="create-ticket-hint">{{ quoted ? "Linked to this message" : "Linked to the last message in this chat" }}</p>
+      <blockquote v-if="message" class="create-ticket-quote">{{ ticketSubject(message, 'Attachment or message without text') }}</blockquote>
       <FormControl v-model="form.subject" label="Subject" required maxlength="140" :disabled="busy" />
       <FormControl v-model="form.brief" type="textarea" label="Description" maxlength="4000" rows="3" placeholder="What needs to happen?" :disabled="busy" />
       <div class="create-ticket-row">

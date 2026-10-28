@@ -4,9 +4,13 @@ import Icons from 'unplugin-icons/vite'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 // Libraries change less often than Relay code; their own hashed chunk stays cached across Relay deploys.
-// Lottie stays in its lazy sticker chunk.
+// Socket.IO gets its own chunk because Relay loads it after the first paint. Lottie stays in its lazy sticker chunk.
 // Fonts stay separate files: the browser fetches each unicode-range face only when the page needs it.
-const vendorChunk = id => id.includes('/node_modules/') && !id.includes('/node_modules/lottie-web/') ? 'vendor' : undefined
+const realtimeLibraries = /\/node_modules\/(socket\.io-client|socket\.io-parser|engine\.io-client|engine\.io-parser|@socket\.io)\//
+function vendorChunk(id) {
+  if (!id.includes('/node_modules/') || id.includes('/node_modules/lottie-web/')) return undefined
+  return realtimeLibraries.test(id) ? 'realtime' : 'vendor'
+}
 export default defineConfig({
   base: './', plugins: [vue(), Icons({ compiler: 'vue3', customCollections: { lucide: Object.fromEntries(Object.entries(JSON.parse(readFileSync(new URL('./vendor/lucide.json', import.meta.url), 'utf8')).icons).map(([name, icon]) => [name, '<svg viewBox="0 0 24 24">' + icon.body + '</svg>'])) } })], cacheDir: '.vite',
   resolve: {

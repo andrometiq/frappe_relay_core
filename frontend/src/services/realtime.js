@@ -1,7 +1,6 @@
 import { ref } from 'vue'
-import { io } from 'socket.io-client'
 export const realtimeStatus = ref('Connecting')
-let socket
+let socket, starting
 const rooms = new Map()
 const listeners = new Set()
 const viewers = new Map()
@@ -16,10 +15,15 @@ export function socketOrigin(location,socketPort) {
   if(socketPort&&location.port)url.port=socketPort
   return url.origin
 }
+// Socket.IO loads in its own chunk, so it does not delay the first paint. Rooms and viewers wait in the maps until it connects.
 export function startRealtime() {
-  if(socket) return socket
+  if(starting) return starting
   const root=document.getElementById('app')
-  if(!root?.dataset.site) {realtimeStatus.value='Updates unavailable';return null}
+  if(!root?.dataset.site) {realtimeStatus.value='Updates unavailable';return Promise.resolve(null)}
+  starting=import('socket.io-client').then(({io})=>connect(io,root))
+  return starting
+}
+function connect(io,root) {
   socket=io(socketOrigin(location,root.dataset.socketPort)+'/'+root.dataset.site,{withCredentials:true,transports:['websocket'],reconnection:true,reconnectionDelay:1000,reconnectionDelayMax:10000})
   socket.on('connect',()=>{realtimeStatus.value='Live';for(const key of rooms.keys())emitRoom(key,true);for(const key of viewers.keys())socket.emit('doc_open',...JSON.parse(key));for(const fn of listeners)fn({kind:'reconnect'})})
   socket.on('disconnect',()=>{realtimeStatus.value='Reconnecting';for(const callbacks of viewers.values())for(const fn of callbacks)fn([])})

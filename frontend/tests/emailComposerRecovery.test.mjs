@@ -10,7 +10,7 @@ const source = (await readFile(new URL('../src/components/messages/EmailComposer
   .split('<script setup>')[1].split('</script>')[0].replace(/^import .*\n/gm, '')
 const make = new Function('computed', 'reactive', 'ref', 'watch', 'inject', 'onMounted', 'onBeforeUnmount', 'messagesKey',
   'coreApi', 'randomUUID', 'addressList', 'channelStatus', 'compositionScope', 'emailComposition', 'useStoredDraft', 'useRealtimeRefresh',
-  source + '\nreturn {draft,send,recover,check,locked,error};')
+  'defineProps', 'defineEmits', source + '\nreturn {draft,send,recover,check,locked,error};')
 function fixture(t, respond) {
   const previous = Object.fromEntries(['fetch', 'window', 'document', 'sessionStorage'].map(key => [key, globalThis[key]]))
   const storage = new Map(), calls = [], scopes = [], bubbles = new Map()
@@ -34,7 +34,7 @@ function fixture(t, respond) {
         if (!bubbles.has(key)) bubbles.set(key, {})
         return bubbles.get(key)
       }, finishEmail:async () => {}}), fn => mounted = fn, () => {}, Symbol(), coreApi, () => 'request-' + ++uuid,
-      addressList, channelStatus, compositionScope, emailComposition, useStoredDraft, () => {}))
+      addressList, channelStatus, compositionScope, emailComposition, useStoredDraft, () => {}, () => ({mode:'reply'}), () => () => {}))
     return {...state, mounted, unmount:() => scope.stop()}
   }
   t.after(() => { scopes.forEach(scope => scope.stop()); Object.assign(globalThis, previous) })

@@ -22,7 +22,13 @@ export function canLinkRow(row, manage) {
   return row.kind !== 'business' && Boolean(row.unlinked) && Boolean(manage)
 }
 
-// Row menu actions. A business row stands for its newest chat, so it offers only the read state.
+// Read state request of a row. A business row names its record, so every chat of the row changes.
+export function readStateRequest(row, read) {
+  const target = row.kind === 'business' ? { business_doctype: row.doctype, business_name: row.record } : { contact: row.name }
+  return { ...target, read: read ? 1 : 0 }
+}
+
+// Row menu actions. Star and folders belong to one chat, so a business row offers only the read state.
 export function rowActionKeys(row, { folders = false, manage = false } = {}) {
   const chat = row.kind !== 'business'
   return [row.unread ? 'read' : 'unread', ...(chat ? ['star'] : []), ...(chat && folders ? ['move'] : []),

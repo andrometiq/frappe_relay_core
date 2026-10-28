@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Button, ErrorMessage, FormControl } from '@relay/ui'
+import { Button, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
 import { messagesKey } from '../../composables/messagesContext'
 import { coreApi } from '../../services/coreApi'
 import { randomUUID } from '../../services/crypto'
@@ -8,6 +8,10 @@ import { addressList, compositionScope, emailComposition, channelStatus } from '
 import { useStoredDraft } from '../../composables/useStoredDraft'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 const { source, busy, beginEmail, finishEmail } = inject(messagesKey)
+// `mode` is "reply" or "note"; note mode shows only the note slot, so a note never goes out as email.
+const props = defineProps({ mode: { type: String, default: 'reply' } })
+const emit = defineEmits(['mode'])
+const noting = computed(() => props.mode === 'note')
 let active = true
 onBeforeUnmount(() => { active = false })
 const anchor = source.value
@@ -109,7 +113,13 @@ onMounted(async () => {
 useRealtimeRefresh([],['message_actions'],check)
 </script>
 <template>
-  <form class="message-composer email-composer compact-composer" :class="{'is-expanded': expanded}" aria-label="Email composer" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="send">
+  <form class="message-composer email-composer compact-composer" :class="{'is-expanded': expanded && !noting, 'is-note': noting}" aria-label="Email composer" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="!noting && send()">
+    <div class="composer-tabs" role="group" aria-label="Compose">
+      <button type="button" :class="{ active: !noting }" :aria-pressed="!noting" @click="emit('mode', 'reply')">Reply</button>
+      <button type="button" :class="{ active: noting }" :aria-pressed="noting" @click="emit('mode', 'note')"><FeatherIcon name="lock" :size="12" />Internal note</button>
+    </div>
+    <slot v-if="noting" name="note" />
+    <template v-else>
     <div v-if="expanded && $slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
     <div v-if="expanded" class="flex flex-wrap gap-2" role="group" aria-label="Email action"><Button v-for="[value,label] in [['reply','Reply'],['reply-all','Reply all'],['forward','Forward']]" :key="value" :label="label" :variant="draft.mode===value?'solid':'ghost'" :disabled="disabled" @click="modeChanged(value)" /></div>
     <div v-if="expanded" class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" aria-label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" size="xs" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
@@ -124,10 +134,13 @@ useRealtimeRefresh([],['message_actions'],check)
     <Button v-if="locked && draft.request.status!=='Rejected'" label="Check status" :loading="sending" @click="check" />
     <Button v-if="locked && draft.request.status!=='Rejected' && !draft.request.action" label="Recover saved attempt" :disabled="sending" @click="recover" />
     <Button v-if="draft.request?.status==='Rejected'" label="Edit rejected draft" :disabled="sending" @click="draft.request=null" />
+    </template>
   </form>
 </template>
 
 <style scoped>
+.email-composer > .composer-tabs > button { display:inline-flex; align-items:center; gap:5px; }
+.email-composer.is-note { background:var(--surface-amber-1); }
 .message-composer.email-composer { display:flex; flex-direction:column; gap:6px; flex-shrink:0; max-height:40%; overflow-y:auto; min-width:0; }
 .email-input-row { display:flex; align-items:center; gap:8px; min-width:0; }
 .email-input-row > .email-body { flex:1; min-width:0; }

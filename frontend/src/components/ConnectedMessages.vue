@@ -1,6 +1,6 @@
 <script setup>
 import { useLoadMore } from '../composables/useLoadMore'
-import { inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
+import { defineAsyncComponent, inject, provide, computed, ref, watch, onBeforeUnmount, onMounted } from "vue";
 import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon } from "@relay/ui";
 import { recordTitle } from '../services/recordTitle';
 import { linkedTitle } from '../services/linkedTitle';
@@ -8,22 +8,11 @@ import { phoneCaption } from '../services/phoneNumber';
 import WorkspaceState from "./WorkspaceState.vue";
 import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
-import ConversationDeliveries from "./messages/ConversationDeliveries.vue";
-import MessageSearch from "./messages/MessageSearch.vue";
-import ConversationCases from "./messages/ConversationCases.vue";
-import ConversationTopics from "./messages/ConversationTopics.vue";
-import InternalNotes from "./messages/InternalNotes.vue";
-import CreateTicketDialog from "./messages/CreateTicketDialog.vue";
 import ContactDetails from "./ContactDetails.vue";
-import ContactInfoPage from "./messages/ContactInfoPage.vue";
 import ChatPanel from "./messages/ChatPanel.vue";
 import { channelOffText, plainChatError } from "../services/chatErrors";
 import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
-import StartConversation from "./messages/StartConversation.vue";
-import BusinessMessageSearch from "./messages/BusinessMessageSearch.vue";
-import ConversationSummary from "./messages/ConversationSummary.vue";
-import EmailComposer from "./messages/EmailComposer.vue";
 import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
 import { useMessages } from "../composables/useMessages";
@@ -39,6 +28,20 @@ import { useMobileLayout } from "../composables/useMobileLayout";
 import { contactInfoRoute, isContactInfoRoute } from "../services/mobileNav";
 import { linkedLabel, recordIcon } from "../services/contactLinks";
 
+// Panels and dialogs that open on demand load in their own chunks, so the inbox paints sooner.
+const StartConversation = defineAsyncComponent(() => import('./messages/StartConversation.vue'))
+const ConversationCases = defineAsyncComponent(() => import('./messages/ConversationCases.vue'))
+const ConversationTopics = defineAsyncComponent(() => import('./messages/ConversationTopics.vue'))
+const ConversationDeliveries = defineAsyncComponent(() => import('./messages/ConversationDeliveries.vue'))
+const CreateTicketDialog = defineAsyncComponent(() => import('./messages/CreateTicketDialog.vue'))
+const InternalNotes = defineAsyncComponent(() => import('./messages/InternalNotes.vue'))
+const MessageSearch = defineAsyncComponent(() => import('./messages/MessageSearch.vue'))
+const BusinessMessageSearch = defineAsyncComponent(() => import('./messages/BusinessMessageSearch.vue'))
+const ConversationSummary = defineAsyncComponent(() => import('./messages/ConversationSummary.vue'))
+const ContactInfoPage = defineAsyncComponent(() => import('./messages/ContactInfoPage.vue'))
+const EmailComposer = defineAsyncComponent(() => import('./messages/EmailComposer.vue'))
+const NoteComposer = defineAsyncComponent(() => import('./messages/NoteComposer.vue'))
+
 const state = useMessages();
 const channelEnabled = useEnabledChannels();
 const capabilities = inject("relayCapabilities", ref({}));
@@ -48,11 +51,13 @@ const activeBusiness = computed(() => ({
   businessDoctype: businessType.value || source.value?.business_doctype || "",
   businessName: businessName.value || source.value?.business_name || "",
 }));
-const noteMessages = ref([]), noteContact = ref('');
+// The composer is in "reply" or "note" mode; a note can link one message or answer another note.
+const composeMode = ref('reply'), noteMessages = ref([]), noteReply = ref(null);
+const noteContact = computed(() => noteMessages.value[0]?.relay_contact || conversationContact.value);
 const ticketOpen = ref(false), ticketMessage = ref(null), ticketQuoted = ref(false);
 // One side panel at a time: "notes", "search" or "contact".
 const panel = ref('');
-const notesOpen = computed(() => panel.value === 'notes' && !!noteContact.value);
+const notesOpen = computed(() => panel.value === 'notes' && !!conversationContact.value);
 const searchOpen = computed(() => panel.value === 'search');
 const noteBusiness = computed(() => noteMessages.value[0]?.business_name
   ? { businessDoctype: noteMessages.value[0].business_doctype, businessName: noteMessages.value[0].business_name }
@@ -72,7 +77,7 @@ const {
   focusMessage, openQuote, send, run,
 } = state;
 
-const startOpen = ref(false), startTemplate = ref(false), startContact = ref(""), startChannel = ref(""), startContactLabel = ref(""), summaryOpen = ref(false);
+const startOpen = ref(false), startTemplate = ref(false), startBusiness = ref(false), startContact = ref(""), startChannel = ref(""), startContactLabel = ref(""), summaryOpen = ref(false);
 const linkedContacts = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const activeBusinessContact = ref("");
 let contactRequest = 0;
@@ -108,8 +113,9 @@ const isMobile = useMobileLayout(), infoOpen = ref(false), linking = ref(false);
 const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
 const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactRecord.value));
 const menuActions = computed(() => [
-  ...(conversationContact.value ? [{label:'Internal notes',icon:'message-square',onClick:() => openNote()}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
+  ...(conversationContact.value ? [{label:'Internal notes',icon:'message-square',onClick:openNotes}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
   {label:'Search conversation',icon:'search',onClick:() => togglePanel('search')},
+  ...(isMobile.value && contactRows.value.length ? [{label:'Create ticket from this chat',icon:'ticket',onClick:() => openTicket()}] : []),
 ]);
 function togglePanel(name) { panel.value = panel.value === name ? '' : name; }
 const provider = computed(() => objectValue(source.value?.provider_context).provider || "");
@@ -203,17 +209,23 @@ function showAllContacts() {
   activeBusinessContact.value = "";
   contactRoute("");
 }
-function openStart(contact = "", template = false) {
+// The inbox "+" starts empty; chat buttons start with the chat's contact and, in a business chat, its record.
+function openStart({ contact = "", template = false, business = false } = {}) {
   startTemplate.value = template;
-  startContact.value = businessName.value ? contact : selected.value;
-  startChannel.value = numbers.active.value && startContact.value === numbers.contact.value ? numbers.current.value : "";
-  startContactLabel.value = businessName.value ? linkedContacts.value.find(item => item.value === contact)?.label || ""
-    : startContact.value ? recordTitle(contactRecord.value, "") || title.value : "";
+  startBusiness.value = business;
+  startContact.value = contact;
+  startChannel.value = numbers.active.value && contact && contact === numbers.contact.value ? numbers.current.value : "";
+  startContactLabel.value = business ? linkedContacts.value.find(item => item.value === contact)?.label || ""
+    : contact ? recordTitle(contactRecord.value, "") || title.value : "";
   startOpen.value = true;
+}
+function startInChat(template = false) {
+  if (!businessName.value) return openStart({ contact: selected.value, template });
+  openStart({ contact: (template ? source.value?.frappe_contact : activeBusinessContact.value) || "", template, business: true });
 }
 async function started(result) {
   startOpen.value = false;
-  if (!businessName.value && result?.contact && result.contact !== selected.value) {
+  if (!startBusiness.value && result?.contact && result.contact !== selected.value) {
     await openContact(result.contact);
   } else {
     await run(() => history());
@@ -231,11 +243,18 @@ function openTicket(message) {
   ticketOpen.value = !!ticketMessage.value;
 }
 function closeTicket() { ticketOpen.value = false; ticketMessage.value = null; ticketQuoted.value = false; }
-function closeNotes() { casesOpen.value = false; topicsOpen.value = false; if (panel.value === 'notes') panel.value = ''; noteMessages.value = []; noteContact.value = ''; }
-function openNote(message) {
-  noteContact.value = message ? message.relay_contact : conversationContact.value;
+function closeNotes() { casesOpen.value = false; topicsOpen.value = false; if (panel.value === 'notes') panel.value = ''; setComposeMode('reply'); }
+function openNotes() { if (conversationContact.value) panel.value = 'notes'; }
+function setComposeMode(mode) {
+  composeMode.value = mode;
+  if (mode === 'reply') { noteMessages.value = []; noteReply.value = null; }
+}
+function startNote(message = null, reply = null) {
+  setComposeMode('note');
   noteMessages.value = message ? [message] : [];
-  if (noteContact.value) panel.value = 'notes';
+  noteReply.value = reply;
+  // The phone notes panel covers the chat, so it closes to show the note composer.
+  if (isMobile.value && panel.value === 'notes') panel.value = '';
 }
 const toast = ref(null);
 let toastTimer;
@@ -245,10 +264,11 @@ function showToast(text, href = '') {
   toastTimer = setTimeout(() => { toast.value = null; }, href ? 5000 : 2500);
 }
 onBeforeUnmount(() => clearTimeout(toastTimer));
-// A switched-off channel cannot send, so the chat says so in place of the composer.
+// A switched-off channel cannot send, so the composer shows a banner in place of replies; notes still work.
 const channels = ref(null);
 coreApi('api.channel_options').then(result => { channels.value = result.items; }, () => {});
 const channelOff = computed(() => !!source.value && !!channels.value && !channels.value.some(row => row.name === source.value.channel && row.enabled));
+const replyOff = computed(() => channelOff.value && !numbers.active.value ? channelOffText(provider.value) : '');
 watch(source, value => {
   if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
 });
@@ -290,7 +310,7 @@ function readContactRoute() {
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
   if (!businessName.value) {
     if (params.get('contact') === selected.value && params.get('notes') === '1' && !error.value) {
-      openNote();
+      openNotes();
       params.delete('notes');
       window.history.replaceState(null, '', '#/messages?' + params.toString());
     }
@@ -319,9 +339,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 
 <template>
   <section class="connected-inbox" :class="{ 'has-conversation': active }" aria-label="Business inbox">
-    <StartConversation v-if="startOpen" :key="businessName + ':' + startContact + startTemplate" :template="startTemplate" :contact="startContact" :contact-label="startContactLabel" :channel="startChannel"
-      :contacts="linkedContacts"
-      :business-doctype="businessType" :business-name="businessName" @close="startOpen = false" @sent="started" />
+    <StartConversation v-if="startOpen" :key="businessName + ':' + startContact + startTemplate + startBusiness" :template="startTemplate" :contact="startContact" :contact-label="startContactLabel" :channel="startChannel"
+      :contacts="startBusiness ? linkedContacts : []"
+      :business-doctype="startBusiness ? businessType : ''" :business-name="startBusiness ? businessName : ''" @close="startOpen = false" @sent="started" />
 
     <aside class="contact-directory">
       <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
@@ -355,7 +375,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><Avatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
-            <Button class="conversation-ticket" icon="bookmark" label="Ticket" title="Create ticket" :disabled="busy || !contactRows.length" @click="openTicket()" />
+            <Button class="conversation-ticket" icon="ticket" label="Create ticket from this chat" :title="contactRows.length ? 'Create a ticket linked to the last message' : 'No messages in this chat yet'" :disabled="busy || !contactRows.length" @click="openTicket()" />
             <Button icon="info" aria-label="Contact info" title="Contact info" :aria-pressed="isMobile ? infoOpen : contextShown" @click="toggleInfo" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
@@ -395,11 +415,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </WorkspaceState>
       <MessageThread v-else :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :paging="paging" :paging-error="pagingError" :error="state.error.value" :emoji="emoji"
-        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="openNote" @ticket="openTicket"
+        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="startNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="loadOlder" @retry-page="pagingError = ''" @reply="replyTo"
         @quote="openQuote" @reconcile="state.checkPending" @retry="state.retryPending" @discard="state.deletePending" @send="send" @toast="showToast" />
-      <InternalNotes v-bind="noteBusiness" v-if="notesOpen" :key="noteContact" :contact="noteContact" :messages="noteMessages" @close="closeNotes" @open="focusMessage" @clear-messages="noteMessages = []" @added="showToast('Note added')" />
+      <InternalNotes v-if="notesOpen" :key="conversationContact" :contact="conversationContact" @close="panel = ''" @open="focusMessage" @reply="startNote(null, $event)" @add="startNote()" />
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
         @close="panel = ''" @open="panel = ''; focusMessage($event)" />
@@ -420,18 +440,21 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <p v-if="channelOff && !numbers.active.value" class="chat-channel-off" role="status"><FeatherIcon name="alert-circle" :size="16" />{{ channelOffText(provider) }}</p>
-      <EmailComposer v-else-if="source && channelCan(capabilities, objectValue(source.provider_context).provider, 'email_threading')" :key="source.name">
+      <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" @mode="setComposeMode">
         <template #channel><SendChannel /></template>
+        <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
+          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
         <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && channelEnabled(objectValue(source.provider_context).provider)" :key="source.channel + source.sender_endpoint" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :note-open="notesOpen" @note="openNote()" @reply="closeNotes()" @template="openStart(source?.frappe_contact || '', true)">
+      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" @mode="setComposeMode" @template="startInChat(true)">
         <template #channel><SendChannel /></template>
+        <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
+          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
         <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
       <div v-else-if="active && !loadFailed" class="business-compose-start">
         <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
-          :disabled="busy || contactsBusy" @click="openStart(activeBusinessContact)" />
+          :disabled="busy || contactsBusy" @click="startInChat()" />
       </div>
 
       <ConversationSummary v-if="summaryOpen && businessName && capabilities.ai" :business-doctype="businessType" :business-name="businessName"
@@ -444,7 +467,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 
     <Transition name="relay-page">
       <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine" :link="linking"
-        :can-organize="!!conversationContact" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(() => openNote())" @changed="loadProfile(selected)" />
+        :can-organize="!!conversationContact" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(openNotes)" @changed="loadProfile(selected)" />
     </Transition>
   </section>
 </template>
@@ -454,7 +477,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 .conversation-body > :deep(.message-thread), .conversation-body > .conversation-load-failed { flex:1; min-width:0; }
 .chat-toast { position:absolute; left:50%; bottom:16px; z-index:8; transform:translateX(-50%); padding:8px 14px; border-radius:999px; background:var(--ink-gray-9, #1f2328); color:var(--surface-white, #fff); font-size:13px; white-space:nowrap; box-shadow:0 4px 16px #0003; animation:relay-fade-up 160ms ease-out; }
 .chat-toast a { color:inherit; font-weight:600; text-decoration:underline; }
-.chat-channel-off { display:flex; align-items:center; gap:8px; flex:none; margin:0; padding:14px 16px; border-top:1px solid var(--relay-stroke, var(--outline-gray-2)); background:var(--surface-amber-1, #fff7e6); color:var(--ink-amber-3, #8a5a00); font-size:13px; }
 .contact-panel-summary { display:flex; flex-direction:column; align-items:center; gap:2px; padding:16px; text-align:center; overflow-wrap:anywhere; }
 .contact-panel-summary strong { margin-top:6px; font-size:15px; }
 .contact-panel-summary span { color:var(--ink-gray-5); font-size:12px; }
