@@ -236,6 +236,8 @@ def action_permission(doc, user=None, permission_type=None):
     payload = json.loads(doc.payload or '{}') if isinstance(doc.payload, str) else doc.payload or {}
     business = payload.get('business') or [payload.get('start', {}).get(key) for key in ('business_doctype', 'business_name')]
     if not all(business):
+        if not any(business) and payload.get('start') and doc.get('start_contact'):
+            return unlinked_start(doc.start_contact, user)
         # Only pre-snapshot, source-anchored actions can inherit ownership.
         if any(business) or not doc.get('source_message'):
             return False
@@ -271,7 +273,19 @@ def action_query(user=None):
     legacy = (f"COALESCE({fields[0]}, '')='' AND COALESCE({fields[1]}, '')='' "
               f"AND {table}.source_message IN (SELECT name FROM `tabRelay Message` "
               f"WHERE COALESCE(legacy_triage,0)=0 AND name IN ({sources}))")
-    return f'{table}.owner={frappe.db.escape(user)} AND ({scope} OR ({legacy}))'
+    contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
+                                   user=user, order_by='').get_sql()
+    unlinked = (f"COALESCE({fields[0]}, '')='' AND COALESCE({fields[1]}, '')='' "
+                f"AND JSON_EXTRACT({table}.payload, '$.start') IS NOT NULL AND {table}.start_contact IN ({contacts})")
+    return f'{table}.owner={frappe.db.escape(user)} AND ({scope} OR ({legacy}) OR ({unlinked}))'
+
+
+def unlinked_start(contact, user):
+    """A chat started with a contact that has no records belongs to whoever can read the contact."""
+    try:
+        return frappe.get_doc('Relay Contact', contact).has_permission('read', user=user) and not candidates(contact)
+    except frappe.DoesNotExistError:
+        return False
 
 
 def explicit_condition(doctype, user=None, *, allow_empty=False):
