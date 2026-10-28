@@ -7,7 +7,7 @@ import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import LoadingRows from './LoadingRows.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
-import IncomingWorkspace from './IncomingWorkspace.vue'
+import UnlinkedContacts from './UnlinkedContacts.vue'
 import ContactDetails from './ContactDetails.vue'
 import NewContactDialog from './NewContactDialog.vue'
 import { routeTab } from '../useViewRoute'
@@ -31,8 +31,8 @@ useRealtimeRefresh(['Contact'], ['contacts', 'incoming'], () => load())
 </script>
 <template>
   <section class="v1-screen">
-    <nav class="v1-tabs" aria-label="Contact views"><Button label="Contacts" :variant="tab === 'contacts' ? 'solid' : 'ghost'" @click="tab = 'contacts'" /><Button v-if="capabilities.manage" label="Unlinked / ambiguous senders" :variant="tab === 'unlinked' ? 'solid' : 'ghost'" @click="tab = 'unlinked'" /></nav>
-    <IncomingWorkspace v-if="tab === 'unlinked' && capabilities.manage" />
+    <nav class="v1-tabs" aria-label="Contact views"><Button label="Contacts" :variant="tab === 'contacts' ? 'solid' : 'ghost'" @click="tab = 'contacts'" /><Button v-if="capabilities.manage" label="Unlinked contacts" :variant="tab === 'unlinked' ? 'solid' : 'ghost'" @click="tab = 'unlinked'" /></nav>
+    <UnlinkedContacts v-if="tab === 'unlinked' && capabilities.manage" />
     <div v-else class="v1-content">
       <WorkspaceHeading description="Customer details, channel identities and connected business records."><Button v-if="capabilities.manage" label="New contact" icon="plus" variant="solid" @click="creating = true" /><a class="relay-button" href="/desk/contact/new">New Contact in Desk</a></WorkspaceHeading>
       <form class="workspace-search" role="search" @submit.prevent="load()"><TextInput v-model="query" aria-label="Search Frappe Contacts" placeholder="Search contacts by name" type="search"><template #prefix><FeatherIcon name="search" /></template></TextInput><Button type="submit" label="Search" :loading="busy" /></form>

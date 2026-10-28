@@ -83,11 +83,14 @@ class DirectoryQueryTests(unittest.TestCase):
         latest = {'C-1': _dict(name='M-9', channel='WA-1', content='Hello', business_doctype='Customer', business_name='CU-1'),
                   'C-2': _dict(name='M-8', channel='Hidden', content='Secret')}
         with patch('relay_core.api.business_types', return_value=['Customer']), \
+                patch('relay_core.contacts.linked_contacts', return_value={'C-1'}), \
                 patch.object(inbox, 'latest_messages', return_value=latest), \
                 patch.object(inbox, 'unread_counts', return_value={'C-1': 4}) as unread:
             items = inbox.directory_items(rows)
         unread.assert_called_once_with({'C-1': 'M-3', 'C-2': ''}, None)
         first, second = items
+        self.assertFalse(first['unlinked'])
+        self.assertTrue(second['unlinked'])
         self.assertEqual((first['provider'], first['latest_preview'], first['unread'], first['starred'], first['folder']),
                          ('WhatsApp', 'Hello', 4, 1, 'Follow up'))
         self.assertEqual(first['business'], {'doctype': 'Customer', 'name': 'CU-1'})
