@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { TICKET_PRIORITIES, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
+import { TICKET_PRIORITIES, distinctPeople, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
 
 test('ticket subject uses the message text on one line within the subject limit', () => {
   assert.equal(ticketSubject({ content: '  Parcel\n arrived   damaged ' }), 'Parcel arrived damaged')
@@ -25,9 +25,9 @@ test('mentions add one @name to the comment text', () => {
 })
 
 test('live ticket notices link to the ticket and ignore other events', () => {
-  assert.equal(ticketRoute('RELAY-TKT-0000000001'), '#/tickets?ticket=RELAY-TKT-0000000001')
-  assert.deepEqual(ticketNotice({ ticket: 'RELAY-TKT-0000000001', subject: 'Damaged parcel', action: 'Asha assigned you a ticket' }),
-    { id: 'RELAY-TKT-0000000001:Asha assigned you a ticket', title: 'Asha assigned you a ticket', text: 'Damaged parcel', href: '#/tickets?ticket=RELAY-TKT-0000000001' })
+  assert.equal(ticketRoute('TKT-00001'), '#/tickets?ticket=TKT-00001')
+  assert.deepEqual(ticketNotice({ ticket: 'TKT-00001', subject: 'Damaged parcel', action: 'Asha assigned you a ticket' }),
+    { id: 'TKT-00001:Asha assigned you a ticket', title: 'Asha assigned you a ticket', text: 'Damaged parcel', href: '#/tickets?ticket=TKT-00001' })
   assert.equal(ticketNotice({ kind: 'tickets' }), null)
 })
 
@@ -37,7 +37,12 @@ test('chat header and message menu open the create ticket dialog', async () => {
   assert.match(inbox, /title="Create ticket"[^>]*@click="openTicket\(\)"/)
   assert.match(inbox, /@ticket="openTicket"/)
   assert.match(thread, /label: "Create ticket",\s*icon: "bookmark",\s*onClick: \(\) => emit\("ticket", message\)/)
-  const tickets = await readFile(new URL('../src/components/TicketsWorkspace.vue', import.meta.url), 'utf8')
-  assert.match(tickets, /value: 'assigned', label: 'Assigned to me'/)
+  const tickets = await readFile(new URL('../src/components/tickets/TicketFilters.vue', import.meta.url), 'utf8')
+  assert.match(tickets, /value: 'assigned', label: 'Mine'/)
   assert.match(tickets, /value: 'tagged', label: 'Tagged me'/)
+})
+
+test('people with the same name show their login so a picker never lists one name twice', () => {
+  const rows = distinctPeople([{ value: 'a@x.invalid', label: 'MRP' }, { value: 'b@x.invalid', label: 'MRP' }, { value: 'c@x.invalid', label: 'Asha' }])
+  assert.deepEqual(rows.map(row => row.description), ['a@x.invalid', 'b@x.invalid', undefined])
 })

@@ -16,7 +16,8 @@ class TicketTests(unittest.TestCase):
         self.api = types.ModuleType('relay_core.api')
         def reference(value, prefix):
             import re
-            if not isinstance(value, str) or not re.fullmatch('RELAY-'+prefix+'-[0-9]{10}', value):
+            pattern = 'TKT-[0-9]{5,}' if prefix == 'TKT' else 'RELAY-'+prefix+'-[0-9]{10}'
+            if not isinstance(value, str) or not re.fullmatch(pattern, value):
                 throw('Invalid reference')
         self.api.validate_reference = reference
         self.module = importlib.util.module_from_spec(spec)
@@ -24,6 +25,7 @@ class TicketTests(unittest.TestCase):
             spec.loader.exec_module(self.module)
         self.module.require_access = Mock()
         self.module.readable_contact = Mock()
+        self.module.ticket_settings = Mock()
         self.message = types.SimpleNamespace(name='RELAY-MSG-0000000001',relay_contact='RELAY-CON-0000000001',channel='RELAY-CH-0000000001',check_permission=Mock())
         self.contact = types.SimpleNamespace(check_permission=Mock())
         self.f.get_doc.side_effect = lambda doctype, name: self.message if doctype == 'Relay Message' else self.contact
@@ -49,10 +51,10 @@ class TicketTests(unittest.TestCase):
         self.doc.messages *= 26
         with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
 
-    def test_invalid_status_or_category_rejected(self):
-        self.doc.status='anything'
-        with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
-        self.doc.status='Open';self.doc.category='anything'
+    def test_status_category_and_type_are_checked_by_ticket_settings(self):
+        self.module.validate_ticket(self.doc)
+        self.module.ticket_settings.apply.assert_called_once_with(self.doc)
+        self.module.ticket_settings.apply.side_effect=ValueError
         with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
 
     def test_api_rejects_unbounded_or_malformed_create_before_insert(self):
@@ -61,7 +63,7 @@ class TicketTests(unittest.TestCase):
         self.f.get_doc.assert_not_called()
 
     def test_read_rechecks_access_instead_of_exposing_stale_links(self):
-        self.doc.name='RELAY-TKT-0000000001';self.doc.check_permission=Mock()
+        self.doc.name='TKT-00001';self.doc.check_permission=Mock()
         self.f.get_doc.side_effect=lambda doctype,name: self.doc if doctype=='Relay Ticket' else self.message if doctype=='Relay Message' else self.contact
         self.doc.creation = '2026-10-24 09:00:00'
         result=self.module.read(self.doc.name)
@@ -78,6 +80,15 @@ class TicketTests(unittest.TestCase):
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(business_doctype='Supplier',
             business_name='SUP-A', assigned_to='agent', category='Support', status='Open'))
 
+    def test_directory_pages_by_creation_so_six_digit_names_sort_after_five_digit_names(self):
+        self.f.get_list = Mock(return_value=[])
+        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='2026-10-28 10:00:00'))
+        self.module.directory(after='TKT-99999')
+        kwargs = self.f.get_list.call_args.kwargs
+        self.assertEqual(kwargs['filters']['creation'], ['>', '2026-10-28 10:00:00'])
+        self.assertEqual(kwargs['order_by'], 'creation asc')
+        with self.assertRaises(ValueError): self.module.directory(before='RELAY-TKT-0000000001')
+
     def test_directory_filters_assigned_to_me_and_tagged_me(self):
         self.f.get_list = Mock(return_value=[])
         self.f.session = types.SimpleNamespace(user='agent@example.invalid')
@@ -89,7 +100,7 @@ class TicketTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.module.directory(mine='everyone')
 
     def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
-        self.doc.name = 'RELAY-TKT-0000000001'
+        self.doc.name = 'TKT-00001'
         self.doc.check_permission = Mock()
         self.doc.creation = '2026-10-25'
         self.doc.company, self.doc.business_doctype, self.doc.business_name = 'Sim Company', 'Supplier', 'Sim Supplier'
@@ -171,7 +182,7 @@ class EpisodeTests(unittest.TestCase):
 
     def get_doc(self, doctype, name=None, **kwargs):
         if isinstance(doctype, dict):
-            self.ticket = Record(doctype, name='RELAY-TKT-0000000001')
+            self.ticket = Record(doctype, name='TKT-00001')
             self.ticket.insert = Mock(return_value=self.ticket)
             self.ticket.save = Mock(return_value=self.ticket)
             return self.ticket
@@ -274,7 +285,7 @@ class EpisodeTests(unittest.TestCase):
 class TranscriptTests(unittest.TestCase):
     def setUp(self):
         TicketTests.setUp(self)
-        self.ticket = Record(name='RELAY-TKT-0000000001', check_permission=Mock(),
+        self.ticket = Record(name='TKT-00001', check_permission=Mock(),
             company='Sim Company', conversation_key='Sim Conversation', business_doctype='Customer', business_name='Sim Customer')
         self.rows = [Record(name=f'RELAY-MSG-{i:010d}', ticket=self.ticket.name,
             conversation_key=self.ticket.conversation_key, business_doctype='Customer', business_name='Sim Customer',
@@ -367,7 +378,9 @@ class CompanyPermissionTests(unittest.TestCase):
         from relay_core import permissions
         self.module = permissions
         self.f = types.SimpleNamespace(session=Record(user='Sim Agent'), has_permission=Mock(return_value=True),
-            qb=types.SimpleNamespace(get_query=Mock()), get_doc=Mock())
+            qb=types.SimpleNamespace(get_query=Mock()), get_doc=Mock(), db=types.SimpleNamespace(exists=Mock(return_value=True)),
+            permissions=types.SimpleNamespace(has_permission=Mock(
+                side_effect=lambda doctype, ptype, doc, user=None, print_logs=True: doc.has_permission(ptype, user=user))))
         self.f.qb.get_query.return_value.run.return_value = [('Sim Company',)]
         self.f.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM allowed_companies'
         self.f.get_doc.return_value.has_permission.return_value = True
@@ -466,7 +479,7 @@ class EpisodeScopeTests(unittest.TestCase):
 class OwnershipTests(unittest.TestCase):
     def setUp(self):
         TicketTests.setUp(self)
-        self.doc = Record(name='RELAY-TKT-0000000001', ai_disabled=0, generation=4,
+        self.doc = Record(name='TKT-00001', ai_disabled=0, generation=4,
             active_scope_key='Sim Scope', pending_run='Sim Run', status='Open',
             check_permission=Mock(), save=Mock())
         self.f.session = Record(user='Sim Staff')
@@ -566,13 +579,46 @@ class OwnershipTests(unittest.TestCase):
         self.module.manual_takeover(Record(name='Source', channel='Legacy Channel', business_name='Supplier'))
         self.module._episode_scope.assert_not_called()
 
+    def staff_reply_without_episode(self, owner_allowed):
+        self.module._episode_scope = Mock(return_value=(dict(conversation_key='Sim Conversation'), 'Sim Business Scope'))
+        self.module._lock_episode_routing = Mock()
+        self.module.hold_episode = Mock()
+        self.module.episode_owner_allowed = Mock(return_value=owner_allowed)
+        self.module.ensure_episode = Mock(return_value=Record(name='TKT-00009'))
+        self.f.set_user = Mock()
+        self.f.logger = Mock()
+        self.f.db.get_value.side_effect = lambda dt, *a, **kw: 'Sim Company' if dt == 'Relay Channel' else None
+        source = Record(name='Sim Source', channel='Sim Channel', business_name='Sim Supplier', check_permission=Mock())
+        self.module.manual_takeover(source)
+        return source
+
+    def test_staff_reply_with_ai_off_touches_no_episode(self):
+        self.module._episode_scope = Mock()
+        with patch.object(self.module.ai_features, 'is_enabled', return_value=False):
+            self.module.manual_takeover(Record(name='Sim Source', channel='Sim Channel', business_name='Sim Supplier'))
+        self.module._episode_scope.assert_not_called()
+        self.f.db.get_value.assert_not_called()
+
+    def test_staff_reply_is_sent_when_its_sender_cannot_own_a_new_episode(self):
+        source = self.staff_reply_without_episode(owner_allowed=False)
+        self.module.ensure_episode.assert_not_called()
+        self.module.hold_episode.assert_not_called()
+        self.assertIsNone(source.ticket)
+
+    def test_staff_reply_opens_and_holds_an_episode_for_an_allowed_sender(self):
+        source = self.staff_reply_without_episode(owner_allowed=True)
+        self.module.episode_owner_allowed.assert_called_once_with('Sim Staff', source)
+        self.module.ensure_episode.assert_called_once_with(source, owner='Sim Staff')
+        self.module.hold_episode.assert_called_once_with('TKT-00009', claim=True)
+        self.assertEqual(source.ticket, 'TKT-00009')
+
 
 class TicketHistoryTests(unittest.TestCase):
     def setUp(self):
         import json
         self.json = json
         TicketTests.setUp(self)
-        self.ticket = Record(name='RELAY-TKT-0000000001', company='Sim Company',
+        self.ticket = Record(name='TKT-00001', company='Sim Company',
             conversation_key='Sim Conversation', business_doctype='Supplier', business_name='Sim Supplier',
             generation=2, ai_disabled=0, check_permission=Mock())
         self.source = Record(ticket=self.ticket.name, company='Sim Company', conversation_key='Sim Conversation',

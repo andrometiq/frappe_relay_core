@@ -3,14 +3,18 @@ import { useLoadMore } from '../composables/useLoadMore'
 import ChoiceField from './fields/ChoiceField.vue'
 import { useDebouncedSearch } from '../composables/useDebouncedSearch'
 import { recordTitle } from '../services/recordTitle'
+import { referenceName } from '../services/automationEditor'
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Badge, Button, ErrorMessage, FormControl } from '@relay/ui'
-import { coreApi, frappeRequest } from '../services/coreApi'
+import { Badge, Button, ErrorMessage, toast } from '@relay/ui'
+import TicketSettings from './TicketSettings.vue'
+import TicketFilters from './tickets/TicketFilters.vue'
+import { useTicketSettings } from '../composables/useTicketSettings'
+import { emptyTicketFilters, pickerOptions, statusLook } from '../services/ticketSettings'
+import { distinctPeople } from '../services/ticketForm'
+import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import WorkspaceHeading from './WorkspaceHeading.vue'
 import TicketDiscussion from './TicketDiscussion.vue'
-import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
 import { relativeTime } from './relativeTime'
@@ -18,8 +22,10 @@ import { closeRoute, openRoute } from '../useViewRoute'
 const capabilities = inject('relayCapabilities', ref({}))
 const aiEnabled = computed(() => Boolean(capabilities.value?.ai))
 const businessTypes = ref([])
-const filters = ref({ business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' })
-const page = ref({ items: [] }), selected = ref(null), owner = ref(''), error = ref(''), feedback = ref('')
+const { settings, load: loadSettings } = useTicketSettings()
+const tab = ref('tickets')
+const filters = ref(emptyTicketFilters())
+const page = ref({ items: [] }), selected = ref(null), changingOwner = ref(false), error = ref('')
 const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
@@ -45,7 +51,6 @@ async function detail(name) {
       aiEnabled.value ? refreshWindow('ai_history', history.value, name, request) : { items: [] }, refreshWindow('deliveries', deliveries.value, name, request),
     ])
     if (request !== detailGeneration || selected.value?.name !== name) return
-    if (owner.value === (selected.value.assigned_to || '')) owner.value = ticket.assigned_to || ''
     selected.value = ticket; transcript.value = messages; history.value = ai; deliveries.value = sent
   } catch (e) {
     if (request === detailGeneration) { close(); error.value = e.message }
@@ -62,27 +67,32 @@ async function load(cursor = {}) {
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) listBusy.value = false }
 }
-function reset() { filters.value = { business_doctype: '', business_name: '', assigned_to: '', status: '', category: '', mine: '' } }
-function status(value) { filters.value.status = value }
-function mine(value) { filters.value.mine = filters.value.mine === value ? '' : value }
-async function searchAssignees(query, signal) {
-  const rows = await frappeRequest('frappe.desk.search.search_link', {doctype:'User', txt:query, filters:JSON.stringify({enabled:1}), page_length:30}, false, {signal})
-  return rows.map(row => ({value:row.value, label:recordTitle(row, 'User')}))
-}
-const assigneeField = computed(() => ({label:'Assignee', search:searchAssignees,
-  initialOptions: filters.value.assigned_to ? [{value:filters.value.assigned_to, label:linkedTitle('User', filters.value.assigned_to)}] : [],
-}))
+const statusOptions = computed(() => pickerOptions(settings.value.statuses, '', 'All'))
+const categoryOptions = computed(() => pickerOptions(settings.value.categories, '', 'Any'))
+const typeOptions = computed(() => pickerOptions(settings.value.types, '', 'Any'))
+function reset() { filters.value = emptyTicketFilters() }
+const detailStatusOptions = computed(() => pickerOptions(settings.value.statuses, selected.value?.ticket_status || '')
+  .map(option => ({ ...option, theme: statusLook(settings.value, { ticket_status: option.value }).theme })))
+const ownerField = computed(() => ({ label: 'New owner', placeholder: 'Search colleagues…', readOnly: busy.value,
+  search: async (query, signal) => distinctPeople(await coreApi('collaboration.colleagues', { contact: selected.value.messages[0].contact, query }, false, { signal })) }))
+const facts = computed(() => [
+  ['Customer', selected.value.business_name ? linkedTitle(selected.value.business_doctype, selected.value.business_name) : ''],
+  ['Category', [selected.value.category, selected.value.ticket_type].filter(Boolean).join(' · ')],
+  ['Created', selected.value.creation ? relativeTime(selected.value.creation) : ''],
+].filter(([, value]) => value))
+const shownText = (text, ...others) => text && !others.includes(text) ? text : ''
+const look = ticket => statusLook(settings.value, ticket)
 const priorityTheme = value => ({ Urgent: 'red', High: 'amber' })[value] || 'gray'
 function dismiss() {
   ++detailGeneration; selected.value = null; detailBusy.value = false
-  history.value = { items: [] }; transcript.value = { items: [] }; deliveries.value = { items: [] }; feedback.value = ''
+  history.value = { items: [] }; transcript.value = { items: [] }; deliveries.value = { items: [] }; changingOwner.value = false
 }
 function select(row) {
   openRoute('#/tickets?ticket=' + encodeURIComponent(row.name), !!selected.value)
   show(row)
 }
 function show(row) {
-  dismiss(); selected.value = row; owner.value = row.assigned_to || ''; error.value = ''
+  dismiss(); selected.value = row; error.value = ''
   detail(row.name)
 }
 function close() { closeRoute('#/tickets'); dismiss() }
@@ -104,24 +114,31 @@ async function more(method) {
     if (request === detailGeneration) { close(); error.value = e.message }
   } finally { if (request === detailGeneration) detailBusy.value = false }
 }
+const updated = {
+  claim: () => 'You took over. AI is stopped for this conversation.',
+  update_status: values => 'Status changed to ' + (detailStatusOptions.value.find(option => option.value === values.status)?.label || values.status),
+  assign: values => values.user ? 'Assigned to ' + linkedTitle('User', values.user) : 'Owner removed',
+}
 async function update(method, values = {}) {
   const name = selected.value.name
-  saving.value = true; error.value = ''; feedback.value = ''
+  saving.value = true; error.value = ''
   try {
     const result = await coreApi('tickets.' + method, { name, ...values }, true)
     if (selected.value?.name === name) {
       if (method === 'claim') selected.value = { ...selected.value, ...result }
+      changingOwner.value = false
       await load()
-      if (selected.value?.name === name) feedback.value = method === 'claim' ? 'You took over. AI is stopped for this conversation.' : 'Ticket updated.'
     }
+    toast(updated[method]?.(values) || 'Saved')
   } catch (e) { error.value = e.message }
   finally { saving.value = false }
 }
-const searchTickets = useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
+useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
+onMounted(() => { loadSettings().catch(e => { error.value = e.message }) })
 onMounted(async () => { try { businessTypes.value = await coreApi('api.business_types') } catch (e) { error.value = e.message } })
 onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute) })
 onBeforeUnmount(() => window.removeEventListener('popstate', readRoute))
-useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => load())
+useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
 const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.next, error, load: () => load(page.value.next) })
 const historySentinel = useLoadMore({ loading: busy, hasMore: () => history.value.next, error, load: () => more('ai_history') })
 const deliverySentinel = useLoadMore({ loading: busy, hasMore: () => deliveries.value.next, error, load: () => more('deliveries') })
@@ -129,45 +146,62 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
-    <WorkspaceHeading description="Review handoffs, assign an owner and follow each conversation." />
-    <form class="automation-filter-bar" @submit.prevent="searchTickets">
-      <div class="automation-chips" role="group" aria-label="Ticket status">
-        <button v-for="value in ['', 'Open', 'In progress', 'Resolved', 'Closed']" :key="value" type="button" class="automation-chip" :aria-pressed="filters.status === value" :disabled="busy" @click="status(value)">{{ value || 'All tickets' }}</button>
-      </div>
-      <div class="automation-chips" role="group" aria-label="My tickets">
-        <button v-for="option in [{ value: 'assigned', label: 'Assigned to me' }, { value: 'tagged', label: 'Tagged me' }]" :key="option.value" type="button" class="automation-chip" :aria-pressed="filters.mine === option.value" :disabled="busy" @click="mine(option.value)">{{ option.label }}</button>
-      </div>
-      <ChoiceField :model-value="filters.business_doctype" :field="{ label: 'Business type', options: businessTypes }" @update:model-value="value => { filters.business_doctype = value; filters.business_name = '' }" />
-      <RemoteLinkField v-if="filters.business_doctype" :key="filters.business_doctype" v-model="filters.business_name" :field="{ label: 'Business record', method: 'api.business_records', params: { doctype: filters.business_doctype }, doctype: filters.business_doctype }" />
-      <ChoiceField v-model="filters.assigned_to" :field="assigneeField" />
-      <FormControl v-model="filters.category" label="Category" placeholder="Category" type="select" :options="['', 'Query', 'Payment evidence', 'Support', 'Other']" />
-
-    </form>
+    <template v-if="tab === 'settings' && settings.can_manage">
+      <div class="ticket-page-head"><Button variant="outline" icon-left="chevron-left" label="Back to tickets" @click="tab = 'tickets'" /><h2>Categories and statuses</h2></div>
+      <TicketSettings />
+    </template>
+    <template v-else>
+    <div class="ticket-page-head">
+      <TicketFilters v-model="filters" class="ticket-page-head__filters" :status-options="statusOptions" :category-options="categoryOptions" :type-options="typeOptions" :business-types="businessTypes" :busy="busy">
+        <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Categories and statuses" aria-label="Categories and statuses" title="Categories and statuses" class="ticket-page-head__settings" @click="tab = 'settings'" />
+      </TicketFilters>
+    </div>
     <ErrorMessage :message="error" />
     <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
       <div class="space-y-3">
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
-        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
-          <div class="automation-card-heading"><strong>{{ recordTitle(row, 'Ticket') }}</strong><span class="flex gap-1"><Badge v-if="['High', 'Urgent'].includes(row.priority)" :label="row.priority" :theme="priorityTheme(row.priority)" /><Badge :label="row.status" :theme="row.status === 'Open' ? 'amber' : row.status === 'In progress' ? 'blue' : 'gray'" /></span></div>
-          <div class="flex flex-wrap items-center gap-2"><Badge class="ticket-business-badge" :label="row.business_name ? linkedTitle(row.business_doctype, row.business_name) : 'Conversation'" /><span>{{ row.category }} · {{ linkedTitle('User', row.assigned_to, 'Unassigned') }} · {{ relativeTime(row.creation) }}</span></div>
+        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" :title="recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
+          <div class="automation-card-heading"><strong>{{ row.business_name ? linkedTitle(row.business_doctype, row.business_name) : recordTitle(row, 'Ticket') }}</strong><span class="flex gap-1"><Badge v-if="['High', 'Urgent'].includes(row.priority)" :label="row.priority" :theme="priorityTheme(row.priority)" /><Badge :label="look(row).label" :theme="look(row).theme" /></span></div>
+          <span v-if="row.business_name" class="ticket-card__subject">{{ recordTitle(row, 'Ticket') }}</span>
+          <span class="ticket-card__meta">{{ row.category }} · <span :class="{ 'ticket-unassigned': !row.assigned_to }">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</span> · {{ relativeTime(row.creation) }}</span>
         </button>
-        <WorkspaceState v-if="!busy && !error && !page.items.length" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button label="Clear filters" @click="reset" /></WorkspaceState>
+        <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button variant="outline" label="Clear filters" @click="reset" /></WorkspaceState>
         <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <div class="automation-card-heading"><Button class="mobile-only ticket-back" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2 class="font-semibold">{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" label="Dismiss" @click="close" /></div><div class="flex flex-wrap gap-2"><Badge :label="selected.status" theme="blue" /><Badge v-if="selected.priority" :label="selected.priority + ' priority'" :theme="priorityTheme(selected.priority)" /><span v-if="selected.assigned_to" class="text-sm">Assigned to {{ linkedTitle('User', selected.assigned_to) }}</span></div><p class="whitespace-pre-wrap">{{ selected.brief }}</p>
+        <header class="ticket-detail__head"><Button class="mobile-only" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2>{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" icon="x" variant="ghost" aria-label="Close" title="Close" @click="close" /></header>
+        <div class="ticket-detail__fields">
+          <span class="ticket-detail__label">Status</span>
+          <div v-if="selected.can_edit" class="ticket-status-switch" role="radiogroup" aria-label="Status">
+            <button v-for="option in detailStatusOptions" :key="option.value" type="button" role="radio" :class="'ticket-status--' + option.theme" :aria-checked="selected.ticket_status === option.value" :disabled="busy" @click="option.value !== selected.ticket_status && update('update_status', { status: option.value })"><span aria-hidden="true" />{{ option.label }}</button>
+          </div>
+          <span v-else><Badge :label="look(selected).label" :theme="look(selected).theme" /></span>
+          <span class="ticket-detail__label">Owner</span>
+          <div class="ticket-owner">
+            <strong :class="{ 'ticket-unassigned': !selected.assigned_to }">{{ linkedTitle('User', selected.assigned_to, 'Unassigned') }}</strong>
+            <Button v-if="selected.can_assign && selected.messages?.length && !changingOwner" variant="outline" size="xs" :label="selected.assigned_to ? 'Change owner' : 'Assign'" :disabled="busy" @click="changingOwner = true" />
+            <div v-if="changingOwner" class="ticket-owner__picker">
+              <ChoiceField :model-value="''" :field="ownerField" @update:model-value="user => user && update('assign', { user })" />
+              <div class="flex gap-2"><Button v-if="selected.assigned_to" variant="outline" label="Remove owner" :disabled="busy" @click="update('assign', { user: '' })" /><Button variant="outline" label="Cancel" @click="changingOwner = false" /></div>
+            </div>
+          </div>
+          <template v-if="selected.priority"><span class="ticket-detail__label">Priority</span><span><Badge :label="selected.priority" :theme="priorityTheme(selected.priority)" /></span></template>
+          <template v-for="[label, value] in facts" :key="label"><span class="ticket-detail__label">{{ label }}</span><span>{{ value }}</span></template>
+        </div>
+        <p v-if="shownText(selected.brief, recordTitle(selected, 'Ticket'))" class="whitespace-pre-wrap">{{ selected.brief }}</p>
+        <p v-if="shownText(selected.handoff_reason, selected.brief, recordTitle(selected, 'Ticket'))">{{ selected.handoff_reason }}</p>
         <div v-if="aiEnabled && selected.conversation_key && selected.company" class="space-y-2">
           <div class="flex flex-wrap items-center gap-3">
             <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
-            <Button v-if="selected.can_take_over && !staffTookOver" label="Take over" :loading="saving" :disabled="busy" @click="update('claim')" />
+            <Button v-if="selected.can_take_over && !staffTookOver" variant="outline" label="Take over" :loading="saving" :disabled="busy" @click="update('claim')" />
+            <Button v-if="selected.can_resume" variant="outline" label="Resume AI" :disabled="busy" @click="update('resume_ai')" />
+            <Button v-if="selected.can_release" variant="outline" label="Close and release" :disabled="busy" @click="update('close_and_release')" />
           </div>
           <p v-if="staffTookOver">{{ linkedTitle('User', selected.ownership_actor, 'Staff') }} · {{ relativeTime(selected.ownership_at) }}</p>
           <p v-else-if="selected.ai_disabled">AI is stopped. Take over to handle this conversation.</p>
           <p v-else>Take over to stop AI for this conversation and reply yourself.</p>
         </div>
-        <p role="status" aria-live="polite">{{ feedback }}</p>
         <LoadingRows v-if="detailBusy && !transcript.items.length" label="Loading conversation…" />
-        <p class="ticket-business-name">{{ linkedTitle(selected.business_doctype, selected.business_name) }}</p><p v-if="selected.handoff_reason">{{ selected.handoff_reason }}</p>
         <div v-if="selected.linked_drafts?.length" class="space-y-2">
           <h3 class="font-semibold">Documents for review</h3>
           <a v-for="draft in selected.linked_drafts" :key="draft.doctype + ':' + draft.name" class="v1-link block"
@@ -185,7 +219,7 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
               <div class="flex flex-wrap items-center gap-2"><strong>{{ recordTitle(run.event, 'Triage · no matched event') }}</strong><Badge :label="run.status" /></div>
               <p>{{ relativeTime(run.creation) }}<span v-if="run.event_version"> · Event version {{ run.event_version }}</span></p>
               <div v-if="run.search">
-                <p><strong>Search announcement:</strong> {{ run.search.purpose }} · {{ run.search.reference }}</p>
+                <p><strong>Search announcement:</strong> {{ run.search.purpose }} · {{ referenceName(run.search.reference) }}</p>
                 <p>{{ run.search.confirmed ? 'Search confirmed' : 'Confirmation not recorded' }}</p>
               </div>
               <p>{{ run.read_count }} {{ run.read_count === 1 ? 'read' : 'reads' }} completed. Raw results are kept private.</p>
@@ -200,9 +234,8 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
           </ol>
           <div v-if="history.next" ref="historySentinel" class="h-px" aria-hidden="true" />
         </section>
-        <section aria-label="Episode deliveries" class="space-y-3">
-          <h3 class="font-semibold">Deliveries and notices</h3>
-          <p v-if="!detailBusy && !deliveries.items.length">No deliveries recorded.</p>
+        <section v-if="deliveries.items.length" aria-label="Messages sent about this ticket" class="space-y-3">
+          <h3 class="font-semibold">Messages sent about this ticket</h3>
           <p v-for="delivery in deliveries.items" :key="delivery.name">
             {{ delivery.kind }} · {{ delivery.status }}
             <span v-if="['Dispatching', 'Queued', 'Uncertain'].includes(delivery.status)">. Delivery is outstanding; an accepted message may still arrive after takeover.</span>
@@ -212,7 +245,7 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
         </section>
         <section aria-label="Episode transcript" class="space-y-3">
           <h3 class="font-semibold">Conversation</h3>
-          <p v-if="!detailBusy && !transcript.items.length">No episode messages available.</p>
+          <p v-if="!detailBusy && !transcript.items.length">No messages in this conversation yet.</p>
           <ol class="space-y-3">
             <li v-for="message in transcript.items" :key="message.name" class="ticket-history-entry">
               <p>{{ message.direction }} · {{ message.status }} · {{ relativeTime(message.sent_at || message.creation) }}</p>
@@ -223,14 +256,42 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
           <div v-if="transcript.next" ref="transcriptSentinel" class="h-px" aria-hidden="true" />
         </section>
         <TicketDiscussion v-if="selected.messages" :ticket="selected" @changed="load()" />
-        <form v-if="selected.can_assign" class="space-y-3" @submit.prevent="update('assign', { user: owner })"><RemoteLinkField v-model="owner" :field="{ label: 'Assign to', method: 'collaboration.colleagues', params: { contact: selected.messages?.[0]?.contact }, placeholder: 'Search colleagues…', readOnly: busy || !selected.messages?.length, initialOptions: selected.assigned_to ? [{ value: selected.assigned_to, label: linkedTitle('User', selected.assigned_to) }] : [] }" /><Button type="submit" label="Assign" :disabled="busy" /></form>
-        <div class="flex flex-wrap gap-3"><Button label="Start work" :disabled="busy || selected.status === 'In progress'" @click="update('update_status', { status: 'In progress' })" /><Button label="Close ticket" :disabled="busy || selected.status === 'Closed'" @click="update('update_status', { status: 'Closed' })" /><Button v-if="selected.can_resume" label="Resume AI" :disabled="busy" @click="update('resume_ai')" /><Button v-if="selected.can_release" label="Close and release" :disabled="busy" @click="update('close_and_release')" /></div>
       </article>
     </div>
+    </template>
   </div></section>
 </template>
 
 <style scoped>
+.ticket-page-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.ticket-page-head h2 { align-self: center; font-size: 15px; font-weight: 600; }
+.ticket-page-head__filters { flex: 1 1 auto; min-width: 0; }
+.ticket-page-head__settings { flex: none; margin-left: auto; }
+.ticket-empty { grid-column: 1 / -1; min-height: min(60vh, 440px); }
+.ticket-card__subject { display: block; font-size: 13px; color: var(--ink-gray-8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-card__meta { display: block; font-size: 12.5px; color: var(--ink-gray-6); }
+.ticket-unassigned { color: var(--relay-amber, #b86e00); }
 .ticket-detail { min-width: 0; overflow-wrap: anywhere; }
+.ticket-detail__head { display: flex; align-items: center; gap: 8px; }
+.ticket-detail__head h2 { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+.ticket-detail__fields { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 10px 12px; font-size: 13px; }
+.ticket-detail__label { color: var(--ink-gray-5); font-size: 12.5px; }
+.ticket-status-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); justify-self: start; max-width: 100%; }
+.ticket-status-switch button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); white-space: nowrap; }
+.ticket-status-switch button > span { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--ink-gray-4); }
+.ticket-status-switch button[aria-checked=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+.ticket-status--blue > span { background: var(--relay-accent, #0f6cbd) !important; }
+.ticket-status--green > span { background: var(--relay-green, #107c10) !important; }
+.ticket-status--amber > span { background: var(--relay-amber, #b86e00) !important; }
+.ticket-status--red > span { background: var(--relay-red, #c42b1c) !important; }
+.ticket-owner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ticket-owner__picker { display: grid; gap: 8px; flex-basis: 100%; }
 .ticket-history-entry { border-top: 1px solid var(--outline-gray-2); padding-top: 0.75rem; }
+@media (max-width: 768px) {
+  .ticket-page-head__settings :deep(.relay-button__label) { display: none; }
+  .ticket-detail__fields { grid-template-columns: 1fr; gap: 4px; }
+  .ticket-detail__fields > :not(.ticket-detail__label) { margin-bottom: 8px; }
+  .ticket-status-switch { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  :global(.v1-screen:has(.ticket-detail) .ticket-page-head) { display: none; }
+}
 </style>

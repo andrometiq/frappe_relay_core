@@ -65,7 +65,7 @@ class SiblingContactTests(unittest.TestCase):
 
 
 class ProjectionBindingTests(unittest.TestCase):
-    def project(self, message):
+    def project(self, message, ai=True):
         payload = {'entry': [{'changes': [{'value': {'messages': [message]}}]}]}
         event = _dict(name='event', account='site-a', projection_status='Pending', payload=json.dumps(payload))
         fake = Mock()
@@ -77,10 +77,15 @@ class ProjectionBindingTests(unittest.TestCase):
                 patch('relay_core.whatsapp_templates.project', return_value=False), \
                 patch('relay_core.call_records.ingest', return_value=False), patch('relay_core.bulk_updates.link_reply'), \
                 patch('relay_core.realtime.changed'), patch('relay_core.tickets.ensure_episode') as triage, \
+                patch('relay_core.ai_features.is_enabled', return_value=ai), \
                 patch.object(contact_lifecycle, 'sibling_contact', return_value=None) as sibling, \
                 patch.object(contact_lifecycle, 'whatsapp_contact', return_value=None):
             projection.project('event')
         return sibling, triage
+
+    def test_ai_off_opens_no_triage_ticket(self):
+        _, triage = self.project({'id': 'm1', 'from': NUMBER, 'group_id': 'g1', 'type': 'text', 'text': {'body': 'Hi'}}, ai=False)
+        triage.assert_not_called()
 
     def test_a_private_sender_without_endpoint_is_matched_across_numbers_first(self):
         sibling, triage = self.project({'id': 'm1', 'from': NUMBER, 'type': 'text', 'text': {'body': 'Hi'}})

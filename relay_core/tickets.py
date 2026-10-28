@@ -3,7 +3,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
-from relay_core import ai_features
+from relay_core import ai_features, ticket_settings
 from relay_core.permissions import require_access, readable_contact, sees_all_teams
 from relay_core.api import validate_reference
 
@@ -101,8 +101,10 @@ def check_episode(run):
 
 
 def manual_takeover(source):
-    """Join the current episode hold to the caller's manual-message journal write."""
-    if not source.get('business_name'):
+    """Join the current episode hold to the caller's manual-message journal write.
+
+    With AI off a staff message touches no episode. A staff message never fails because it cannot open one."""
+    if not ai_features.is_enabled() or not source.get('business_name'):
         return
     if not frappe.db.get_value('Relay Channel', source.channel, 'company'):
         return  # Legacy channels cannot admit AI episodes.
@@ -112,6 +114,9 @@ def manual_takeover(source):
     if not name and source.get('name') and not source.get('ticket'):
         source.check_permission('read')
         actor = frappe.session.user
+        if not episode_owner_allowed(actor, source):
+            frappe.logger('relay_core').info('Staff message sent without an AI episode: %s cannot own one', actor)
+            return
         try:
             frappe.set_user('Administrator')
             name = ensure_episode(source, owner=actor).name
@@ -222,7 +227,7 @@ def _ensure_triage(event, channel, row):
     try:
         frappe.set_user('Administrator')
         doc = frappe.get_doc(dict(doctype='Relay Ticket', subject='Incoming conversation needs triage',
-            brief='Resolve the authenticated sender and business before continuing.', category='Support',
+            brief='Resolve the authenticated sender and business before continuing.', category=ticket_settings.preferred('category', 'Support'),
             status='Open', assigned_to=owner, company=channel.company,
             conversation_key=conversation_key(channel.name, row['from'], row.get('provider_context') or {}),
             source_action_key=action, source_hub_event=event.name, source_provider_message_key=key))
@@ -296,7 +301,7 @@ def ensure_episode(message=None, *, owner=None, skill=None, run=None, subject='C
             if not episode_owner_allowed(owner, message):
                 raise ValueError('Configure an accessible episode owner or fallback owner')
             ticket = frappe.get_doc(dict(doctype='Relay Ticket', **scope, subject=subject,
-                brief=reason[:500], category='Support', status='Open', assigned_to=owner,
+                brief=reason[:500], category=ticket_settings.preferred('category', 'Support'), status='Open', assigned_to=owner,
                 source_action_key=episode_key, active_scope_key=active_key,
                 source_provider_message_key=message.get('provider_message_key'),
                 source_run=run.name if run else None, messages=[{'message': message.name}]))
@@ -327,10 +332,7 @@ def validate_ticket(doc, check_assignment=True):
         frappe.throw('Ticket subject must contain 1–140 characters')
     if doc.brief and (not isinstance(doc.brief, str) or len(doc.brief) > 4000):
         frappe.throw('Ticket brief must contain at most 4000 characters')
-    if doc.category not in ('Query', 'Payment evidence', 'Support', 'Other'):
-        frappe.throw('Invalid ticket category')
-    if doc.status not in ('Open', 'In progress', 'Resolved', 'Closed'):
-        frappe.throw('Invalid ticket status')
+    ticket_settings.apply(doc)
     from relay_core import ticket_tags
     ticket_tags.validate(doc)
     previous = doc.get_doc_before_save()
@@ -400,7 +402,7 @@ def validate_ticket(doc, check_assignment=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(subject, messages, brief='', category='Query', priority='Medium', assigned_to='', tagged=None):
+def create(subject, messages, brief='', category='Query', priority='Medium', assigned_to='', tagged=None, ticket_type=None, ticket_status=None):
     from relay_core import ticket_tags
     require_access()
     if isinstance(messages, str):
@@ -414,7 +416,8 @@ def create(subject, messages, brief='', category='Query', priority='Medium', ass
         validate_reference(name, 'MSG')
     business_doctype, business_name = ticket_tags.message_business(messages)
     doc = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
-                          'category': category, 'status': 'Open', 'priority': priority or 'Medium',
+                          'category': category, 'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
+                          'status': 'Open', 'priority': priority or 'Medium',
                           'assigned_to': assigned_to or None, 'watchers': [{'user': user} for user in users],
                           'business_doctype': business_doctype, 'business_name': business_name,
                           'messages': [{'message': name} for name in messages]})
@@ -429,9 +432,12 @@ def update_status(name, status):
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
     doc.check_permission('write')
-    doc.status = status
+    if frappe.db.exists(ticket_settings.DOCTYPES['status'], status):
+        doc.ticket_status = status
+    else:
+        doc.status = status  # A plain state moves the ticket to that state's default status.
     doc.save()
-    return {'name': doc.name, 'status': doc.status}
+    return {'name': doc.name, 'status': doc.status, 'ticket_status': doc.ticket_status}
 
 
 @frappe.whitelist(methods=['GET'])
@@ -467,7 +473,8 @@ def read(name):
         except (frappe.PermissionError, frappe.DoesNotExistError):
             continue
     return {'name': doc.name, 'subject': doc.subject, 'brief': doc.brief, 'linked_drafts': drafts,
-            'category': doc.category, 'status': doc.status, 'messages': links, 'creation': doc.creation,
+            'category': doc.category, 'ticket_type': doc.get('ticket_type'), 'status': doc.status,
+            'ticket_status': doc.get('ticket_status'), 'messages': links, 'creation': doc.creation,
             'assigned_to': doc.get('assigned_to'), 'priority': doc.get('priority') or 'Medium',
             'tagged': [{'user': user, 'full_name': frappe.utils.get_fullname(user)} for user in ticket_tags.tagged(doc)],
             'can_edit': bool(doc.has_permission('write')),
@@ -762,13 +769,13 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None, mine=None):
+def directory(query='', before=None, after=None, status=None, business_doctype=None, business_name=None, assigned_to=None, category=None, mine=None, ticket_status=None, ticket_type=None):
     require_access()
     if not isinstance(query,str) or len(query)>80 or before and after: frappe.throw('Invalid ticket search')
     if mine not in (None, '', 'assigned', 'tagged'): frappe.throw('Invalid ticket filter')
     filters={}
     if mine == 'assigned': assigned_to = frappe.session.user
-    for key, value in dict(business_doctype=business_doctype, business_name=business_name, assigned_to=assigned_to, category=category).items():
+    for key, value in dict(business_doctype=business_doctype, business_name=business_name, assigned_to=assigned_to, category=category, ticket_status=ticket_status, ticket_type=ticket_type).items():
         if value:
             if not isinstance(value, str) or len(value) > 140: frappe.throw('Invalid ticket filter')
             filters[key] = value
@@ -776,12 +783,15 @@ def directory(query='', before=None, after=None, status=None, business_doctype=N
         if status not in ('Open','In progress','Resolved','Closed'): frappe.throw('Invalid ticket status')
         filters['status']=status
     if before or after:
-        validate_reference(before or after,'TKT');filters['name']=['<' if before else '>',before or after]
+        cursor=before or after;validate_reference(cursor,'TKT')
+        created=frappe.db.get_value('Relay Ticket',cursor,'creation')
+        if not created:frappe.throw('Invalid ticket cursor')
+        filters['creation']=['<' if before else '>',created]
     if query:filters['subject']=['like','%'+query.replace('%','\\%').replace('_','\\_')+'%']
     if mine == 'tagged':
         filters=[[key, *value] if isinstance(value, list) else [key, '=', value] for key, value in filters.items()]
         filters.append(['Relay Ticket Watcher', 'user', '=', frappe.session.user])
-    rows=frappe.get_list('Relay Ticket',filters=filters,fields=['name'],order_by='name desc' if before else 'name asc',page_length=31)
+    rows=frappe.get_list('Relay Ticket',filters=filters,fields=['name'],order_by='creation desc' if before else 'creation asc',page_length=31)
     more=len(rows)>30;page=rows[:30]
     if before:page.reverse()
     items=[]

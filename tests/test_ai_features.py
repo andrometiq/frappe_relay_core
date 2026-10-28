@@ -86,6 +86,17 @@ class AiFeatureSwitchTests(unittest.TestCase):
         with patch.object(frappe, 'db', database):
             self.assertFalse(ai_features.is_enabled())
 
+    def test_hub_address_is_shown_to_managers_only(self):
+        hub = {'relay_hub_url': 'https://hub.example/mcp', 'relay_hub_account': 'sim-account'}
+        with patch.object(settings, 'require_access'), patch.object(settings, 'value', side_effect=hub.get), \
+             patch.object(settings.features, 'is_enabled', return_value=True), patch.object(frappe, 'get_roles', return_value=[]):
+            for configure, manage, shown in ((False, False, False), (False, True, True), (True, False, True)):
+                with self.subTest(configure=configure, manage=manage), patch.object(settings, 'can_configure', return_value=configure), \
+                     patch.object(settings, 'can_manage', return_value=manage):
+                    result = settings.connection()
+                    self.assertEqual((result['url'], result['account']), (hub['relay_hub_url'], hub['relay_hub_account']) if shown else ('', ''))
+                    self.assertTrue(result['ai_enabled'] and result['flows_enabled'])
+
     def test_only_a_system_manager_can_switch_ai(self):
         database = settings_db(0)
         with patch.object(settings, 'require_access'), patch.object(frappe, 'db', database), \

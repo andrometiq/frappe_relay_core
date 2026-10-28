@@ -149,6 +149,9 @@ def project(name, business_overrides=None):
     unresolved = update_status == 'Uncategorized'
     decisions = json.loads(event.get('routing_decisions') or '{}')
     from relay_core.tickets import ensure_episode, source_episode, triage_owner
+    from relay_core import ai_features
+    # Only a user or the AI bot opens tickets: with AI off, triage records the decision without a ticket.
+    triage_tickets = ai_features.is_enabled()
     if medium == 'WhatsApp' and incoming:
         from relay_core.bulk_updates import link_reply
         for row in incoming:
@@ -170,7 +173,8 @@ def project(name, business_overrides=None):
             contact = whatsapp_contact(channel, row['from'], row.get('profile_name'))
         if not contact:
             decisions[row['id']] = 'triage_unverified'
-            ensure_episode(event=event, channel=channel, row=row)
+            if triage_tickets:
+                ensure_episode(event=event, channel=channel, row=row)
             unresolved = True; continue
         from relay_core.business_routing import resolve
         previous_rule = decisions.get(row['id'], '')
@@ -181,7 +185,8 @@ def project(name, business_overrides=None):
         decisions[row['id']] = rule
         context['business_rule'] = rule
         if not business and not (private_whatsapp and rule == 'triage_no_business'):
-            ensure_episode(event=event, channel=channel, row=row)
+            if triage_tickets:
+                ensure_episode(event=event, channel=channel, row=row)
             unresolved = True
             continue
         kind = row.get('type', 'unknown')
@@ -199,7 +204,7 @@ def project(name, business_overrides=None):
         from relay_core.timeline import provider_time
         _, source_action = source_episode(channel, row)
         ticket = frappe.db.get_value('Relay Ticket', {'source_action_key': source_action}, 'name')
-        if was_triage and not ticket and not recover_unlinked:
+        if triage_tickets and was_triage and not ticket and not recover_unlinked:
             intent = ensure_episode(event=event, channel=channel, row=row)
             if not intent:
                 decisions[row['id']] = 'triage_owner_unavailable'
