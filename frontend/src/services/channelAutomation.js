@@ -14,3 +14,11 @@ export function channelValues(draft) {
     steps: draft.steps.map(row => ({ ...newChannelStep(row.step), ...row, enabled: Number(Boolean(row.enabled)) })),
   }
 }
+
+export function displayedSteps(draft) {
+  return draft.steps.length ? draft.steps : draft.defaults.map(row => ({ ...newChannelStep(row.step), ...row }))
+}
+
+export function channelLabel(channel) {
+  return [channel.channel, channel.title || channel.name, channel.address].filter(Boolean).join(' · ')
+}

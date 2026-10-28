@@ -1,4 +1,5 @@
 <script setup>
+import { FeatherIcon } from '@relay/ui'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { recordTitle } from '../../services/recordTitle'
 import { computed, ref, watch, onBeforeUnmount, useId, nextTick } from 'vue'
@@ -98,7 +99,7 @@ onBeforeUnmount(() => { cancel(); open.value = false })
       <p v-if="loading || field.loading" role="status">Searching…</p>
       <p v-if="error" role="alert">{{error}}</p>
       <ul :id="id+'-options'" role="listbox" :aria-multiselectable="multiple || undefined">
-        <li v-for="(option,index) in options" :id="id+'-'+index" :key="option.value" role="option" :aria-selected="selected.includes(option.value)" :class="{active:index===active}" @mousedown.prevent="choose(option)">{{option.label}}<small v-if="option.description && option.description!==option.label" class="block text-xs text-ink-gray-5">{{option.description}}</small><span v-if="selected.includes(option.value)"> ✓</span></li>
+        <li v-for="(option,index) in options" :id="id+'-'+index" :key="option.value" role="option" :aria-selected="selected.includes(option.value)" :class="{active:index===active}" @mousedown.prevent="choose(option)"><FeatherIcon v-if="option.icon" :name="option.icon" :size="16" aria-hidden="true" class="choice-icon" />{{option.label}}<small v-if="option.description && option.description!==option.label" class="block text-xs text-ink-gray-5">{{option.description}}</small><span v-if="selected.includes(option.value)"> ✓</span></li>
       </ul>
       <p v-if="!loading&&!field.loading&&!error&&!options.length">No results found.</p>
       <div v-if="field.hasMore" ref="moreSentinel" class="h-px" aria-hidden="true" />
@@ -118,6 +119,7 @@ onBeforeUnmount(() => { cancel(); open.value = false })
 .choice-selected{display:flex;flex-wrap:wrap;gap:5px}
 .choice-chip{display:flex;gap:6px;align-items:center;max-width:100%;overflow-wrap:anywhere;@apply bg-surface-gray-2 text-ink-gray-8 rounded px-2 py-0.5 text-sm}
 .choice-chip button{@apply rounded text-ink-gray-5 hover:bg-surface-gray-3 hover:text-ink-gray-9 px-1 disabled:opacity-50}
+.choice-icon{display:inline-block;vertical-align:middle;margin-right:6px}
 .choice-hint{@apply text-xs text-ink-gray-5}
 .choice-results [role=alert]{@apply text-ink-red-2}
 @keyframes choice-appear{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
