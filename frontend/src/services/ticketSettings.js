@@ -45,3 +45,32 @@ export function chartRows(rows, field, label) {
   const largest = Math.max(1, ...rows.map(row => row.tickets))
   return rows.map(row => ({ key: row[field] || '', label: label(row[field]), tickets: row.tickets, width: Math.round(row.tickets / largest * 100) }))
 }
+
+// Keep every count represented; Others filters out the eight visible assignees.
+export function assigneeChartRows(rows, label) {
+  const sorted = [...rows].sort((a, b) => b.tickets - a.tickets)
+  const visible = sorted.slice(0, 8)
+  const labels = visible.map(row => label(row.assigned_to))
+  const result = chartRows(visible, 'assigned_to', user => {
+    const name = label(user)
+    return user && labels.filter(value => value === name).length > 1 ? `${name} (${user})` : name
+  }).map(row => ({ ...row, filters: { assigned_to: row.key } }))
+  if (sorted.length > 8) result.push({ key: 'others', label: 'Others',
+    tickets: sorted.slice(8).reduce((sum, row) => sum + row.tickets, 0),
+    filters: { exclude_assignees: JSON.stringify(visible.map(row => row.assigned_to || '')) } })
+  const largest = Math.max(1, ...result.map(row => row.tickets))
+  return result.map(row => ({ ...row, width: Math.round(row.tickets / largest * 100) }))
+}
+
+export function ticketFilterRoute(filters) {
+  return '#/tickets?' + new URLSearchParams({ view: 'tickets', ...filters }).toString()
+}
+
+export function ticketFiltersFromRoute(hash) {
+  const params = new URLSearchParams(hash.split('?')[1] || '')
+  const filters = emptyTicketFilters()
+  for (const field of ['assigned_to', 'ticket_type', 'exclude_assignees']) {
+    if (params.has(field)) filters[field] = params.get(field)
+  }
+  return filters
+}

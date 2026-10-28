@@ -8,7 +8,7 @@ import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
 import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
 import { inputTime, siteTime } from '../src/services/campaignAudience.js'
-import { emptySettings, emptyTicketFilters, pickerOptions, statusLook } from '../src/services/ticketSettings.js'
+import { emptySettings, emptyTicketFilters, pickerOptions, statusLook, ticketFilterRoute, ticketFiltersFromRoute } from '../src/services/ticketSettings.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -27,16 +27,17 @@ async function component(t, file, values, bindings) {
   return state
 }
 
-function tickets(t, calls = []) {
+function tickets(t, calls = [], failure = null) {
   const api = async (method, values) => {
     calls.push([method, values])
+    if (method === 'tickets.close_and_release' && failure) throw Error(failure)
     if (method === 'tickets.directory') return { items: [{ name: 'T-1' }, { name: 'T-2' }] }
     if (values.name === 'T-MISSING') throw Error('Ticket not found')
     if (method === 'tickets.read') return { name: values.name, status: 'Open' }
     return { items: [], next: null }
   }
-  return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters,
-    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter'])
+  return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters, ticketFiltersFromRoute, toast: () => {},
+    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {
@@ -74,7 +75,37 @@ test('a ticket link opens its detail and a missing ticket falls back to the list
   const state = await tickets(t)
   assert.equal(state.selected.value, null)
   assert.equal(state.error.value, 'Ticket not found')
-  assert.equal(page.location.hash, '#/tickets')
+  assert.equal(page.location.hash, '#/tickets?view=tickets')
+})
+
+test('dashboard links select the Tickets tab with assignee, Others or type filters', async t => {
+  for (const filters of [{ assigned_to: 'a@example.invalid' }, { assigned_to: '' },
+    { exclude_assignees: JSON.stringify(['a@example.invalid', 'b@example.invalid']) }, { ticket_type: 'Delivery' }]) {
+    const page = browser(t, '#/tickets')
+    const calls = [], state = await tickets(t, calls)
+    openRoute(ticketFilterRoute(filters))
+    state.readRoute()
+    assert.equal(state.view.value, 'tickets')
+    await state.load()
+    assert.deepEqual(calls.filter(([method]) => method === 'tickets.directory').at(-1)[1], { ...emptyTicketFilters(), ...filters })
+    page.history.back()
+    assert.equal(state.view.value, 'dashboard')
+  }
+})
+
+test('failed saves remain in the open ticket dialog across list refreshes and clear on close', async t => {
+  browser(t, '#/tickets')
+  const state = await tickets(t, [], 'Choose an enabled owner')
+  state.select(state.page.value.items[0])
+  await settle()
+  await state.update('close_and_release')
+  assert.equal(state.selected.value.name, 'T-1')
+  assert.equal(state.saveError.value, 'Choose an enabled owner')
+  assert.equal(state.error.value, '')
+  await state.load()
+  assert.equal(state.saveError.value, 'Choose an enabled owner')
+  state.close()
+  assert.equal(state.saveError.value, '')
 })
 
 function campaigns(t, capabilities = {}, calls = []) {

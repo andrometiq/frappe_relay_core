@@ -4,7 +4,7 @@ import { ErrorMessage } from '@relay/ui'
 import LoadingRows from '../LoadingRows.vue'
 import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
-import { chartRows, ticketTotals } from '../../services/ticketSettings'
+import { assigneeChartRows, chartRows, ticketFilterRoute, ticketTotals } from '../../services/ticketSettings'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 
 const props = defineProps({ settings: Object })
@@ -20,8 +20,8 @@ async function load() {
 }
 const totals = computed(() => ticketTotals(props.settings, counts.value?.statuses || []))
 const charts = computed(() => counts.value ? [
-  { title: 'Tickets per person', rows: chartRows(counts.value.assignees, 'assigned_to', user => user ? linkedTitle('User', user, user) : 'Unassigned') },
-  { title: 'Tickets per type', rows: chartRows(counts.value.types, 'ticket_type', type => type || 'No type') },
+  { title: 'Tickets per person', rows: assigneeChartRows(counts.value.assignees, user => user ? linkedTitle('User', user, user) : 'Unassigned') },
+  { title: 'Tickets per type', rows: chartRows(counts.value.types, 'ticket_type', type => type || 'No type').map(row => ({ ...row, filters: { ticket_type: row.key } })) },
 ] : [])
 onMounted(load)
 useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
@@ -41,9 +41,11 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
         <p v-if="!chart.rows.length" class="ticket-chart__empty">No tickets yet.</p>
         <ul>
           <li v-for="row in chart.rows" :key="row.key" :title="row.label + ': ' + row.tickets">
+            <a class="ticket-chart__link" :href="ticketFilterRoute(row.filters)" :aria-label="`Show ${row.tickets} tickets: ${row.label}`">
             <span class="ticket-chart__label">{{ row.label }}</span>
             <span class="ticket-chart__track"><span class="ticket-chart__bar" :style="{ width: row.width + '%' }" /></span>
             <span class="ticket-chart__value">{{ row.tickets }}</span>
+            </a>
           </li>
         </ul>
       </section>
@@ -61,8 +63,10 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
 .ticket-chart { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ticket-chart h3 { font-size: 14px; font-weight: 600; }
 .ticket-chart ul { display: flex; flex-direction: column; gap: 8px; }
-.ticket-chart li { display: grid; grid-template-columns: minmax(80px, 160px) minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 13px; }
-.ticket-chart__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-gray-8); }
+.ticket-chart li a.ticket-chart__link { display: grid; grid-template-columns: minmax(80px, 160px) minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 13px; min-height: 36px; border-radius: 4px; }
+.ticket-chart li a:hover { background: var(--surface-gray-2); }
+.ticket-chart li a:focus-visible { outline: 2px solid var(--outline-blue-2); outline-offset: 2px; }
+.ticket-chart__label { overflow-wrap: anywhere; color: var(--ink-gray-8); }
 .ticket-chart__track { height: 10px; border-radius: 4px; background: var(--surface-gray-2); overflow: hidden; }
 .ticket-chart__bar { display: block; height: 100%; min-width: 4px; border-radius: 4px; background: var(--relay-accent, #0f6cbd); }
 .ticket-chart__value { min-width: 32px; text-align: right; color: var(--ink-gray-7); font-variant-numeric: tabular-nums; }
