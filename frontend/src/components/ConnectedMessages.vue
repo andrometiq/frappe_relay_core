@@ -108,6 +108,9 @@ const channelLine = computed(() => {
 });
 function readInfoRoute() { infoOpen.value = location.hash.split("?")[0] === "#/messages" && isContactInfoRoute(location.hash); }
 function openInfo() { openRoute(contactInfoRoute(location.hash)); infoOpen.value = true; }
+// Phones open the contact info page; wide screens open contact details under the heading.
+function toggleInfo() { if (isMobile.value) openInfo(); else contextOpen.value = !contextOpen.value; }
+const unlinked = computed(() => !businessName.value && contactRecord.value && !Number(contactRecord.value.link_count));
 function closeInfo() {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   params.delete("info");
@@ -277,7 +280,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <Button class="mobile-only conversation-back" icon="chevron-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
-          <h2><button v-if="isMobile && (frappeContact || conversationContact)" type="button" class="conversation-title-button" aria-label="Open contact info" @click="openInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
+          <h2><button v-if="frappeContact || conversationContact" type="button" class="conversation-title-button" aria-label="Open contact info" @click="toggleInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
           <p v-if="isMobile && wroteTo" class="conversation-channel-line"><span class="number-tag">{{ wroteTo.label }}</span>{{ wroteTo.address }}</p>
           <p v-else-if="isMobile && channelLine" class="conversation-channel-line">{{ channelLine }}</p>
           <div class="conversation-meta">
@@ -287,6 +290,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
             <template v-if="!isMobile">
               <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
               <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextOpen" @click="contextOpen = !contextOpen">{{ otherLinks }}</button>
+              <button v-if="unlinked" type="button" class="conversation-linked" :aria-expanded="contextOpen" @click="contextOpen = !contextOpen">Unlinked · Link record</button>
             </template>
             <span v-if="!isMobile && wroteTo" class="conversation-number"><FeatherIcon name="message-circle" :size="13" />Wrote to {{ wroteTo.label }}<small v-if="wroteTo.address">· {{ wroteTo.address }}</small></span>
             <span v-else-if="!isMobile && channelLine" class="conversation-channel">· {{ channelLine }}</span>
@@ -301,9 +305,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         </div>
       </header>
 
-      <div v-if="isMobile && (primary || otherLinks)" class="mobile-record-bar">
+      <div v-if="isMobile && (primary || otherLinks || unlinked)" class="mobile-record-bar">
         <span v-if="primary" class="mobile-record-chip"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="14" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
         <button v-if="otherLinks" type="button" class="mobile-linked-chip" @click="openInfo">{{ otherLinks }}</button>
+        <button v-if="unlinked" type="button" class="mobile-linked-chip" @click="openInfo">Unlinked · Link record</button>
       </div>
 
       <nav v-if="businessName" class="business-contact-strip" aria-label="Business contacts">

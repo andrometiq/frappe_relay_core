@@ -1070,6 +1070,8 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-meta>:is(.conversation-record,.conversation-linked){flex:none}
 .v1-shell.relay-shell .conversation-meta>.conversation-channel{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .conversation-linked{display:inline-flex;align-items:center;flex:none;height:24px;padding:0 9px;border:1px solid var(--relay-stroke-strong);border-radius:12px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:600}
+.conversation-title-button{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.conversation-title-button:hover{text-decoration:underline}
 .v1-shell.relay-shell .conversation-heading-actions{display:flex;flex:none;align-items:center;gap:6px;width:auto;margin-left:auto}
 .conversation-viewers{display:inline-flex;align-items:center;gap:4px;margin-right:4px;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
 .viewer-stack{display:flex}
