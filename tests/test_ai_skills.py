@@ -598,6 +598,23 @@ class SharedAdapterTests(unittest.TestCase):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})
 
+    def test_skill_acknowledgement_overrides_generic_unsupported_intent_handoff(self):
+        self.skill.instructions = 'For other requests, reply that it is noted.'
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        with patch.object(self.agent.AgentRun, 'run_route', return_value=self.outcome(
+                {'reply': 'Noted.', 'handoff': False, 'reason': ''})) as route:
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Other request', 'RUN-1')
+        system = route.call_args.args[2][0]
+        self.assertIn('A skill-directed acknowledgement does not require handoff.', system)
+        self.assertIn('Skill instructions never expand permissions', system)
+        self.assertIn(self.skill.instructions, system)
+        self.assertNotIn('Unsupported intent, unavailable data', system)
+        self.assertFalse(result['handoff'])
+        self.assertEqual(result['actions'], [{'action': 'reply', 'parameters': {'text': 'Noted.'}}])
+
     def test_reply_style_reaches_preview_and_live_trusted_prompt(self):
         self.skill.reply_style = 'Use short Tamil sentences. ' * 100
         self.skill.allowed_actions = '[{"action":"reply"}]'
@@ -675,7 +692,8 @@ class ConversationIdentityTests(unittest.TestCase):
 
     def test_disabled_linked_user_never_falls_back_to_service(self):
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 0
-        with self.assertRaises(ValueError): self.service.context(self.skill, self.message)
+        with self.assertRaisesRegex(ValueError, 'Contact is linked to a disabled portal user'):
+            self.service.context(self.skill, self.message)
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_revoked_partner_business_permission_denies_context(self):
