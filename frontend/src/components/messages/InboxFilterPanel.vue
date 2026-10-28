@@ -56,18 +56,17 @@ function place() {
 function outside(event) {
   if (!panel.value?.contains(event.target) && !props.anchor?.contains(event.target)) open.value = false
 }
-function close() { open.value = false }
 watch(open, async value => {
   document.removeEventListener('pointerdown', outside)
-  removeEventListener('resize', close)
+  removeEventListener('resize', place)
   if (!value) return
   place(); loadTypes()
   document.addEventListener('pointerdown', outside)
-  addEventListener('resize', close)
+  addEventListener('resize', place)
   await nextTick()
   panel.value?.querySelector('input,button')?.focus()
 })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); removeEventListener('resize', close) })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); removeEventListener('resize', place) })
 </script>
 
 <template>
