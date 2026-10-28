@@ -9,7 +9,7 @@ import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilte
 
 const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
+const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
   'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
   script + '\nreturn { mode, filters, activeFilters };')
 const capabilities = { enabled_channels: ['WhatsApp'], inbox_channels: [
@@ -28,7 +28,7 @@ test('saved filters and tab drive the list and counts, and every change is saved
   t.after(() => { scope.stop(); Object.assign(globalThis, original) })
   let mount, counted
   const state = scope.run(() => {
-    return make(() => ({}), () => () => {}, () => ref(capabilities), fn => mount = fn, computed, ref, watch, coreApi, () => {}, mediumOptions,
+    return make(() => ({}), () => () => {}, () => ref(capabilities), fn => mount = fn, () => {}, computed, ref, watch, coreApi, () => {}, mediumOptions,
       (medium, params) => { counted = params; return { counts: ref({}) } }, defaultMedium, () => ref(false), mergeChangedRows, newestActivity, onlyChangedRows,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
       () => false, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters)
