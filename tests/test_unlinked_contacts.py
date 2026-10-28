@@ -462,9 +462,10 @@ class ContactQueueTests(BoundaryTests):
             ('legacy', 'R', None, None, 'old-message', 0), ('owned', 'R', 'Supplier', 'S1', '', 0),
             ('triage', 'R', None, None, '', 1), ('other-person', 'Other', None, None, '', 0)]
         self.db.executemany('INSERT INTO `tabRelay Message` VALUES (?,?,?,?,?,?)', fixtures)
-        with patch.object(self.access, 'candidates', return_value=[('Customer', 'C1')]):
+        with patch.object(self.access, 'candidates', return_value=[('Customer', 'C1')]), patch('relay_core.relay_chats.merge') as merge:
             self.lifecycle.associate_unlinked_messages('R')
             self.lifecycle.associate_unlinked_messages('R')
+        merge.assert_called_with('R', ('Customer', 'C1'))
         rows = {row[0]: tuple(row) for row in self.db.execute('SELECT * FROM `tabRelay Message`')}
         for row in fixtures:
             expected = (*row[:2], 'Customer', 'C1', *row[4:]) if row[0] in ('live', 'live-empty') else row

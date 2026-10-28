@@ -103,6 +103,8 @@ def associate_unlinked_messages(relay):
     frappe.db.sql("""UPDATE `tabRelay Message` SET business_doctype=%s, business_name=%s
         WHERE relay_contact=%s AND COALESCE(business_doctype, '')='' AND COALESCE(business_name, '')=''
         AND COALESCE(legacy_source, '')='' AND COALESCE(legacy_triage, 0)=0""", (*links[0], relay))
+    from relay_core.relay_chats import merge
+    merge(relay, links[0])
 
 
 def sibling_contact(channel: str, endpoint: str) -> str | None:

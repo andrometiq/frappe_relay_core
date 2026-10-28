@@ -31,8 +31,7 @@ MAX_LINKS = 50
 
 
 def candidates(contact):
-    """Enabled business links whose records exist. A Contact with more than MAX_LINKS links of any type has none;
-    inbox_records mirrors these rules in batched SQL."""
+    """Enabled business links whose records exist. A Contact with more than MAX_LINKS links of any type has none."""
     person=frappe.db.get_value('Relay Contact',contact,'contact')
     if not person:return []
     enabled=set(frappe.get_all('Relay Contact Type',filters={'enabled':1},pluck='business_doctype'))

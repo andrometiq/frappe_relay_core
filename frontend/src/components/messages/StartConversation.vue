@@ -4,6 +4,7 @@ import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } fro
 import ChoiceField from "../fields/ChoiceField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import TemplateMediaField from "./TemplateMediaField.vue";
+import ContactEndpoints from "./ContactEndpoints.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
 import { useEnabledChannels } from "../../composables/useEnabledChannels";
@@ -308,7 +309,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
               :class="{ selected: contact === row.value }" @click="chooseContact(row)">
               <span class="contact-chip-avatar" aria-hidden="true">{{ row.label.slice(0, 1).toUpperCase() }}</span>
               <span class="start-contact-copy"><strong>{{ row.label }}</strong>
-                <small>{{ row.description || "Review verified channels" }}</small></span>
+                <small v-if="row.phone || row.email"><ContactEndpoints :phone="row.phone" :email="row.email" :size="11" /></small>
+                <small v-else>{{ row.description || "Review verified channels" }}</small></span>
               <FeatherIcon v-if="contact === row.value" name="check" class="h-4 w-4" />
             </button>
             <p v-if="contactsBusy" role="status">Searching contacts…</p>

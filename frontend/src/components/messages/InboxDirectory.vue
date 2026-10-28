@@ -109,7 +109,7 @@ async function refreshChanged() {
     rows.value = mergeChangedRows(rows.value, page.items)
   } catch { if (ticket === generation) return load() }
 }
-useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'],
+useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'chats', 'permissions', 'contacts'],
   ({ kinds } = {}) => mode.value !== 'business' && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
 </script>
 <template>
@@ -119,7 +119,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
     <Button variant="solid" icon="plus" aria-label="New chat" title="New chat" @click="emit('start')" />
   </header>
   <form v-if="mode !== 'business'" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
-    <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search name or number" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
+    <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search customer, name or number" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
   </form>
   <div v-if="mode !== 'business' && manyMediums" class="inbox-channel-chips" role="group" aria-label="Channel">
     <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" @click="medium = chip.value">

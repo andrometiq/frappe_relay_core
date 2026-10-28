@@ -2,7 +2,7 @@
 export const NO_RECORD = 'none'
 export const TABS = Object.freeze([
   ['all', 'All', 'All chats you can see'],
-  ['unread', 'Unread', 'Chats with messages you have not read'],
+  ['unread', 'Unread', 'Chats with messages no one has read yet'],
   ['unlinked', 'Not linked', 'Chats not linked to a customer or supplier'],
 ])
 export const EMPTY_FILTERS = Object.freeze({ tab: 'all', channels: [], businessType: '', businessName: '', businessLabel: '' })

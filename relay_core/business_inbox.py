@@ -107,6 +107,8 @@ def mark_visible(doctype,name,messages,last_read=None):
         if last_read and (not state.last_read or last_read>state.last_read):state.last_read=last_read
         state.last_seen=frappe.utils.now_datetime();state.save(ignore_permissions=True)
         if insert_reads([(rows[message]['relay_contact'],message) for message in names]):changed(doctype,name)
+        from relay_core.relay_chats import mark_read
+        mark_read((doctype,name),max(names))
         frappe.db.commit()
         return state.last_read
     with frappe.cache.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):
@@ -307,10 +309,12 @@ def contacts(doctype, name, query=''):
     check_type(doctype)
     frappe.get_doc(doctype,name).check_permission('read')
     rows=_linked_contacts(doctype,name,query,31)
+    from relay_core.contacts import contact_emails
+    emails=contact_emails([row.name for row in rows[:30] if not row.email_id])
     result=[]
     for row in rows[:30]:
         phone=(row.mobile_no or row.phone or '').strip()
-        result.append({'value':row.name,'label':row.full_name or row.name,
-                       'description':' · '.join(value for value in (phone,row.email_id) if value),
-                       'has_phone':bool(phone)})
+        email=row.email_id or emails.get(row.name,'')
+        result.append({'value':row.name,'label':row.full_name or row.name,'phone':phone,'email':email,
+                       'description':' · '.join(value for value in (phone,email) if value),'has_phone':bool(phone)})
     return {'items':result,'has_more':len(rows)>30}

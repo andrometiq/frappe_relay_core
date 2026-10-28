@@ -134,6 +134,9 @@ def set_primary(contact, doctype=None, name=None):
     doc = frappe.get_doc('Relay Contact', relay)
     doc.primary_doctype, doc.primary_name = target
     doc.save(ignore_permissions=True)
+    if target[0]:
+        from relay_core.relay_chats import merge
+        merge(relay, target)
     return summary(person.name)
 
 
@@ -152,6 +155,16 @@ def can_manage_links(contact):
     """Relay managers edit the business links of a Relay conversation's Contact without general Contact write access.
     Links to records they cannot read stay as they are."""
     return can_manage() and bool(frappe.db.get_value('Relay Contact', {'contact': contact}, 'name'))
+
+
+def contact_emails(people):
+    """A verified email address of each Frappe Contact's chat, for Contacts that have no email_id."""
+    if not people:
+        return {}
+    return dict(frappe.db.sql("""SELECT r.contact, MIN(e.endpoint) FROM `tabRelay Contact` r
+        JOIN `tabRelay Contact Endpoint` e ON e.relay_contact=r.name AND e.verified=1
+        JOIN `tabRelay Channel` c ON c.name=e.channel AND c.channel='Email'
+        WHERE r.contact IN %(people)s GROUP BY r.contact""", {'people': people}))
 
 
 def linked_contacts(names):

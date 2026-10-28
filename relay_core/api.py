@@ -314,12 +314,15 @@ def contact_directory(query='', after=None, business_type=None):
 @frappe.whitelist(methods=['GET'])
 def contact_profile(contact):
     require_access()
-    doc, _ = readable_contact(contact)
+    doc, person = readable_contact(contact)
     from relay_core.business_access import candidates, primary_record
+    from relay_core.contacts import contact_emails
     links = candidates(doc.name)
     readable = [link for link in links if frappe.has_permission(link[0], 'read', doc=link[1])]
+    email = person.email_id or contact_emails([person.name]).get(person.name, '')
     return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
-            'primary': primary_record(doc.name, links), 'link_count': len(readable)}
+            'primary': primary_record(doc.name, links), 'link_count': len(readable),
+            'phone': (person.mobile_no or person.phone or '').strip(), 'email': email}
 
 
 @frappe.whitelist(methods=['GET'])
