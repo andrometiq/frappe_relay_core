@@ -11,7 +11,7 @@ import {whatsappCapabilities} from './channelCapabilities.js'
 const inject=()=>ref({...whatsappCapabilities,channels:{...whatsappCapabilities.channels,Email:{email_threading:true}}})
 import {templateParameterDescriptors,buildTemplateComponents} from '../src/services/templateParameters.js'
 const source=(await readFile(new URL('../src/components/messages/StartConversation.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm,'')
-const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan','readableName',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations};')
+const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan','readableName',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations,records,record};')
 for(const status of ['Queued','Submitted','Uncertain'])test(`conversation start ${status}`,async()=>{
  const events=[],calls=[],storage=new Map()
  const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName)
@@ -138,5 +138,30 @@ test('approved templates load on showing template mode, append pages and ignore 
  assert.deepEqual(state.templates.value.map(row=>row.id),['one','two'])
  assert.equal(calls.at(-1).args.arguments.after,'page-2')
  assert.ok(calls.every(call=>call.method==='whatsapp.execute' && call.args.operation==='templates.list'))
+ scope.stop()
+})
+
+test('a contact with several records picks one before its numbers show, and the send carries it', async () => {
+ const calls=[]
+ const api=async(method,args)=>{
+   calls.push({method,args})
+   if(method==='conversation_start.records')return [{doctype:'Customer',name:'C1',title:'Shop One'},{doctype:'Customer',name:'C2',title:'Shop Two'}]
+   if(method==='conversation_start.options')return args.business_name?[{value:'endpoint',label:'WhatsApp · 91',provider:'WhatsApp',window:{open:true}}]:[]
+   return {status:'Submitted',action:'action',message:'message'}
+ }
+ const scope=effectScope()
+ const state=scope.run(()=>make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=>()=>{},api,()=> 'digest',()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName))
+ await state.destinations()
+ assert.equal(state.endpoints.value.length,0)
+ assert.deepEqual(state.records.value.map(row=>row.label),['Shop One · Customer','Shop Two · Customer'])
+ state.record.value=state.records.value[1].value
+ await new Promise(resolve=>setTimeout(resolve,0))
+ assert.equal(state.endpoint.value,'endpoint')
+ state.body.value='Hello'
+ await state.send()
+ const sent=calls.at(-1)
+ assert.equal(sent.method,'conversation_start.send')
+ assert.equal(sent.args.business_doctype,'Customer')
+ assert.equal(sent.args.business_name,'C2')
  scope.stop()
 })
