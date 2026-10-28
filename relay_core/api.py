@@ -274,7 +274,8 @@ def contact_details(contact):
             if channel.has_permission('read'):
                 row.provider = channel.channel
                 endpoints.append(row)
-    can_edit_links = bool(person.has_permission('write'))
+    from relay_core.contacts import can_link_unlinked
+    can_edit_links = bool(person.has_permission('write') or can_link_unlinked(person.name))
     return {'name': person.name, 'label': person.full_name or person.name,
             'phone': person.mobile_no or person.phone or '', 'relay_contact': relay,
             'links': links, 'primary': primary, 'endpoints': endpoints,

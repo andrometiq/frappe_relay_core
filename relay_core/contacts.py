@@ -3,7 +3,7 @@ links; Relay Contact keeps only which link is primary."""
 import hashlib
 
 import frappe
-from relay_core.permissions import readable_contact, require_access
+from relay_core.permissions import can_manage, readable_contact, require_access
 
 
 def business_links(links):
@@ -53,19 +53,29 @@ def create(name, phone, channel, links=None):
     with frappe.cache.lock('relay-enroll:' + key, timeout=30):
         if any(bindings(channel.name, 'WhatsApp', number)):
             frappe.throw('This number already belongs to a contact', frappe.DuplicateEntryError)
-        person = frappe.get_doc({'doctype': 'Contact', 'first_name': name,
-            'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}],
-            'links': [{'link_doctype': doctype, 'link_name': record} for doctype, record in links]}).insert()
-        relay = frappe.get_doc({'doctype': 'Relay Contact', 'contact': person.name,
-                                'display_name': name}).insert(ignore_permissions=True)
-        previous = getattr(frappe.flags, 'relay_endpoint_enrollment', False)
-        frappe.flags.relay_endpoint_enrollment = True
-        try:
-            endpoint = frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': channel.name,
-                'relay_contact': relay.name, 'endpoint': number, 'verified': 1}).insert(ignore_permissions=True)
-        finally:
-            frappe.flags.relay_endpoint_enrollment = previous
-    return {'contact': person.name, 'relay_contact': relay.name, 'endpoint': endpoint.name}
+        person = new_person(name, number, links)
+        relay = ensure_relay(person)
+        from relay_core.contact_lifecycle import enroll
+        endpoint = enroll(relay, channel.name, 'WhatsApp', number, locked=True)
+    return {'contact': person.name, 'relay_contact': relay, 'endpoint': endpoint.name}
+
+
+def new_person(name, number, links=(), *, ignore_permissions=False):
+    return frappe.get_doc({'doctype': 'Contact', 'first_name': name,
+        'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}],
+        'links': [{'link_doctype': doctype, 'link_name': record} for doctype, record in links]
+    }).insert(ignore_permissions=ignore_permissions)
+
+
+def ensure_relay(person):
+    """One Relay conversation per Frappe Contact, including concurrent channel enrollment."""
+    with frappe.cache.lock('relay-person:' + person.name, timeout=30):
+        name = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
+        if name:
+            return name
+        return frappe.get_doc({'doctype': 'Relay Contact', 'contact': person.name,
+            'display_name': person.get('full_name') or person.get('first_name') or person.name
+        }).insert(ignore_permissions=True).name
 
 
 @frappe.whitelist(methods=['POST'])
@@ -73,13 +83,18 @@ def set_links(contact, links):
     """Replace the business links the user can read; other links stay as they are."""
     require_access()
     person = frappe.get_doc('Contact', contact)
-    person.check_permission('write')
+    manager_unlinked = can_link_unlinked(person.name)
+    if not manager_unlinked:
+        person.check_permission('write')
     wanted = business_links(links)
     configured = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     kept = [row for row in person.links if row.link_doctype not in configured or not readable(row)]
     person.set('links', [{'link_doctype': row.link_doctype, 'link_name': row.link_name} for row in kept]
                + [{'link_doctype': doctype, 'link_name': name} for doctype, name in wanted])
-    person.save()
+    if manager_unlinked:
+        person.save(ignore_permissions=True)
+    else:
+        person.save()
     return summary(person.name)
 
 
@@ -121,3 +136,53 @@ def summary(contact):
              if row.link_doctype in configured and readable(row)]
     return {'contact': contact, 'relay_contact': relay, 'links': links,
             'primary': primary_record(relay) if relay else None}
+
+
+def can_link_unlinked(contact):
+    """Managers may identify unlinked senders even without general Contact write access."""
+    if not can_manage():
+        return False
+    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
+    return bool(relay and not linked_contacts([relay]))
+
+
+def linked_contacts(names):
+    """Business membership for a page, independent of the viewer's business permissions."""
+    if not names:
+        return set()
+    rows = frappe.db.sql("""SELECT DISTINCT r.name FROM `tabRelay Contact` r
+        JOIN `tabDynamic Link` l ON l.parent=r.contact AND l.parenttype='Contact' AND l.parentfield='links'
+        JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1
+        WHERE r.name IN %(names)s""", {'names': names})
+    return {row[0] for row in rows}
+
+
+@frappe.whitelist(methods=['GET'])
+def unlinked(query='', after=None, before=None):
+    """Manager contact queue, newest activity first, with stable keyset pagination."""
+    require_access(manage=True)
+    if not isinstance(query, str) or len(query) > 80:
+        frappe.throw('Search must be at most 80 characters')
+    values = {'query': '%' + query.strip() + '%'}
+    cursor = ''
+    if after:
+        from relay_core.api import validate_reference
+        validate_reference(after, 'CON')
+        values.update(after=after, before=frappe.utils.get_datetime(before))
+        cursor = 'AND (COALESCE(r.last_message_at,r.creation),r.name) < (%(before)s,%(after)s)'
+    rows = frappe.db.sql("""SELECT r.name, r.contact, r.display_name, r.last_message_at, r.creation,
+            COALESCE(NULLIF(c.mobile_no,''),c.phone) phone
+        FROM `tabRelay Contact` r LEFT JOIN `tabContact` c ON c.name=r.contact
+        WHERE NOT EXISTS (SELECT 1 FROM `tabDynamic Link` l
+            JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1
+            WHERE l.parent=r.contact AND l.parenttype='Contact' AND l.parentfield='links')
+        AND (r.display_name LIKE %(query)s OR c.full_name LIKE %(query)s OR c.mobile_no LIKE %(query)s
+            OR c.phone LIKE %(query)s OR EXISTS (SELECT 1 FROM `tabContact Phone` p
+                WHERE p.parent=c.name AND p.parenttype='Contact' AND p.phone LIKE %(query)s)
+            OR EXISTS (SELECT 1 FROM `tabRelay Contact Endpoint` e
+                WHERE e.relay_contact=r.name AND e.endpoint LIKE %(query)s)) """ + cursor + """
+        ORDER BY COALESCE(r.last_message_at,r.creation) DESC, r.name DESC LIMIT 31""", values, as_dict=True)
+    from relay_core.inbox import directory_items
+    items = directory_items(rows[:30])
+    return {'items': items, 'next': {'after': rows[29].name,
+        'before': str(rows[29].last_message_at or rows[29].creation)} if len(rows) > 30 else None}

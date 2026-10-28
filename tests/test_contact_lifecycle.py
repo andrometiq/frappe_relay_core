@@ -73,6 +73,8 @@ class ContactUpdateTests(unittest.TestCase):
         self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))
         self.bindings = self.enterContext(patch.object(lifecycle, 'bindings', return_value=iter(())))
         self.drop_primary = self.enterContext(patch.object(business_access, 'drop_stale_primary'))
+        self.enterContext(patch.object(lifecycle, 'associate_unlinked_messages'))
+        self.enterContext(patch('relay_core.realtime.contact_changed'))
 
     def test_link_edits_are_never_blocked_and_clear_a_removed_primary(self):
         self.assertEqual(self.update(person(), person()), [])

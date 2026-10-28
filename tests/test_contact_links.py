@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from frappe import _dict
-from relay_core import business_access as access, business_types, contacts
+from relay_core import business_access as access, business_types, contacts, contact_lifecycle
 from test_contact_primary import fake_frappe
 
 
@@ -13,6 +13,10 @@ class ContactApiTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe(flags=SimpleNamespace(), parse_json=Mock(side_effect=json.loads))
         self.enterContext(patch.object(contacts, 'frappe', self.fake))
+        self.enterContext(patch.object(contact_lifecycle, 'frappe', self.fake))
+        self.enterContext(patch.object(contact_lifecycle, 'bindings', return_value=iter(())))
+        self.enterContext(patch.object(contacts, 'can_link_unlinked', return_value=False))
+        self.fake.db.get_value.return_value = None
         self.access = self.enterContext(patch.object(contacts, 'require_access'))
         self.conversation = self.enterContext(patch.object(contacts, 'readable_contact'))
         self.records = {}
@@ -23,7 +27,9 @@ class ContactApiTests(unittest.TestCase):
             if isinstance(value, dict):
                 doc = Mock()
                 doc.name = value['doctype'] + '-new'
+                doc.get.side_effect = value.get
                 doc.insert.side_effect = lambda **kwargs: self.inserted.append((value, kwargs)) or doc
+                doc.save.side_effect = lambda **kwargs: self.inserted.append((dict(value, verified=doc.verified), kwargs)) or doc
                 return doc
             return self.records.setdefault((value, name), Mock())
         self.fake.get_doc.side_effect = get_doc
@@ -43,11 +49,11 @@ class ContactApiTests(unittest.TestCase):
         person, relay, endpoint = (row[0] for row in self.inserted)
         self.assertEqual(person['phone_nos'], [{'phone': '+919876543210', 'is_primary_mobile_no': 1}])
         self.assertEqual(person['links'], [{'link_doctype': 'Customer', 'link_name': 'C1'}])
-        self.assertEqual(self.inserted[0][1], {}, 'Contact creation keeps Frappe permission checks')
+        self.assertEqual(self.inserted[0][1], {'ignore_permissions': False}, 'Contact creation keeps Frappe permission checks')
         self.assertEqual((relay['contact'], relay['display_name']), ('Contact-new', 'Ravi'))
         self.assertEqual((endpoint['endpoint'], endpoint['verified']), ('919876543210', 1))
         self.records[('Customer', 'C1')].check_permission.assert_called_once_with('read')
-        self.assertFalse(self.fake.flags.relay_endpoint_enrollment)
+        self.assertFalse(self.fake.flags.relay_contact_sync)
 
     def test_create_denies_users_unreadable_records_and_known_numbers(self):
         self.access.side_effect = PermissionError
