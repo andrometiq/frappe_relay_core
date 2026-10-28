@@ -1,6 +1,7 @@
 """Message business ownership is distinct from contact membership."""
 import json
 import frappe
+import frappe.permissions
 
 
 def scoped_document(doctype, name, filters, fields=()):
@@ -26,12 +27,17 @@ def scoped_document(doctype, name, filters, fields=()):
     return doc
 
 
+MAX_LINKS = 50
+
+
 def candidates(contact):
+    """Enabled business links whose records exist. A Contact with more than MAX_LINKS links of any type has none;
+    inbox_records mirrors these rules in batched SQL."""
     person=frappe.db.get_value('Relay Contact',contact,'contact')
     if not person:return []
     enabled=set(frappe.get_all('Relay Contact Type',filters={'enabled':1},pluck='business_doctype'))
-    rows=frappe.get_all('Dynamic Link',filters={'parent':person,'parenttype':'Contact','parentfield':'links'},fields=['link_doctype','link_name'],limit_page_length=51)
-    if len(rows)>50:return []
+    rows=frappe.get_all('Dynamic Link',filters={'parent':person,'parenttype':'Contact','parentfield':'links'},fields=['link_doctype','link_name'],limit_page_length=MAX_LINKS+1)
+    if len(rows)>MAX_LINKS:return []
     return sorted({(r.link_doctype,r.link_name) for r in rows if r.link_doctype in enabled and frappe.db.exists(r.link_doctype, r.link_name)})
 
 
@@ -84,7 +90,8 @@ def allowed(doc,user=None):
     # A ticket has no contact: its stored business alone decides.
     if (doc.get('doctype') != 'Relay Ticket' and not doc.get('ticket_notification')
             and target not in candidates(doc.relay_contact)):return False
-    try:return frappe.get_doc(*target).has_permission('read',user=user)
+    # A probe: the denial text must not reach the response, as message reads fall back to the contact.
+    try:return frappe.permissions.has_permission(target[0],'read',frappe.get_doc(*target),user=user,print_logs=False)
     except frappe.DoesNotExistError:return False
 
 
