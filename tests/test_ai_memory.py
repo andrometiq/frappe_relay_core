@@ -21,6 +21,10 @@ def message(number, address, day, text, direction='Incoming', **values):
     return _dict(row, **values)
 
 
+def sent(row):
+    return (row.sent_at or row.creation).date()
+
+
 def matches(value, condition):
     if isinstance(condition, list):
         operator, other = condition
@@ -53,7 +57,7 @@ class FakeMemory(memory.Memory):
 
     def messages(self, since=None, until=None, after='', limit=memory.BATCH, newest_first=False):
         rows = sorted((row for row in self.inbox if row.sender_endpoint == self.address and row.name > after
-                       and (not since or row.creation.date() >= since) and (not until or row.creation.date() < until)),
+                       and (not since or sent(row) >= since) and (not until or sent(row) < until)),
                       key=lambda row: row.name, reverse=newest_first)
         return rows[:limit]
 
@@ -73,6 +77,8 @@ class MemoryTests(unittest.TestCase):
         self.model = self.enterContext(patch.object(memory, 'complete_json', side_effect=fake_model))
         self.enterContext(patch.object(memory, 'medium_of', return_value='WhatsApp'))
         self.name = self.enterContext(patch.object(memory, 'display_name', return_value=None))
+        self.user = self.enterContext(patch.object(memory, 'user_name', side_effect=lambda user: user))
+        self.enterContext(patch.object(memory, 'team_label', return_value='Essdee team'))
 
     def build(self, address):
         FakeMemory(self.store, self.inbox, address).build('Summary Model', datetime.date(2026, 1, 1))
@@ -185,6 +191,75 @@ class MemoryTests(unittest.TestCase):
                  self.assertRaises(ValueError):
                 memory.summarize('Summary Model', '', ['2026-10-28 10:00 | WhatsApp | A | Hi | - | -'], RECORD)
 
+    def test_an_overlong_line_is_cut_in_the_middle_of_its_text_and_keeps_the_file_id(self):
+        long = '2026-10-28 10:00 | WhatsApp | Atal | Need ' + 'blue shirts ' * 40 + 'SINV-0042 | FILE-9 | sent'
+        with patch.object(memory, 'complete_json', return_value={'lines': [long, '2026-10-28 11:00 | WhatsApp | A | Hi | - | -']}):
+            lines = memory.summarize('Summary Model', '', ['event'], RECORD).splitlines()
+        self.assertEqual(len(lines[0]), memory.MAX_LINE_LENGTH)
+        self.assertTrue(memory.LINE.fullmatch(lines[0]))
+        self.assertTrue(lines[0].startswith('2026-10-28 10:00 | WhatsApp | Atal | Need blue'))
+        self.assertTrue(lines[0].endswith('SINV-0042 | FILE-9 | sent'))
+        self.assertIn('…', lines[0])
+        self.assertEqual(lines[1], '2026-10-28 11:00 | WhatsApp | A | Hi | - | -')
+
+    def test_a_provider_error_marks_the_row_failed_and_keeps_its_summary_and_cursor(self):
+        class DeadlineReached(TimeoutError):
+            pass
+        self.inbox.append(message(1, 'A', TODAY, 'Order 10 boxes'))
+        self.build('A')
+        before = dict(self.store[0])
+        self.inbox.append(message(2, 'A', TODAY, 'Send the invoice'))
+        self.model.side_effect = DeadlineReached('Deadline reached')
+        with self.assertRaises(DeadlineReached):
+            self.build('A')
+        row = self.store[0]
+        self.assertEqual((row.status, row.error), ('Failed', 'Deadline reached'))
+        self.assertEqual((row.summary, row.last_message, row.message_count),
+                         (before['summary'], before['last_message'], before['message_count']))
+        self.model.side_effect = fake_model
+        self.build('A')
+        self.assertEqual((self.store[0].status, self.store[0].message_count), ('Ready', 2), 'The next run retries')
+
+    def test_each_call_folds_a_bounded_chunk_of_messages(self):
+        rows = [message(number, 'A', TODAY, f'Request {number}') for number in range(1, 131)]
+        self.model.side_effect = None
+        self.model.return_value = {'lines': ['2026-10-28 10:00 | WhatsApp | A | Requests 1 to 130 | - | -']}
+        target = FakeMemory(self.store, self.inbox, 'A')
+        target.fold_rows(target.row('Day', TODAY), (TODAY, TODAY), rows, 'Summary Model')
+        sizes = [len(json.loads(call.args[1])['new_events']) for call in self.model.call_args_list]
+        self.assertEqual(sizes, [60, 60, 10])
+
+    def test_messages_are_placed_by_their_sent_time_not_their_creation(self):
+        yesterday = datetime.date(2026, 10, 27)
+        imported = message(1, 'A', yesterday, 'Imported order', creation=datetime.datetime(2026, 10, 28, 9))
+        self.inbox += [imported, message(2, 'A', TODAY, 'Today', sent_at=None)]
+        self.build('A')
+        self.assertIn('Imported order', self.summary('A', 'Day', yesterday))
+        self.assertIn('Today', self.summary('A', 'Day', TODAY))
+        self.assertNotIn('Imported', self.summary('A', 'Day', TODAY))
+
+    def test_system_senders_get_the_team_label_and_users_their_full_name(self):
+        line = memory.event_line(message(1, 'A', TODAY, 'Sent', direction='Outgoing', owner='Administrator'), 'WhatsApp')
+        self.assertIn('| Essdee team |', line)
+        self.user.side_effect = {'old@example.com': 'Old Staff'}.get
+        line = memory.event_line(message(2, 'A', TODAY, 'Sent', direction='Outgoing', owner='Administrator',
+                                         legacy_author='old@example.com'), 'WhatsApp')
+        self.assertIn('| Old Staff |', line)
+
+    def test_secrets_are_redacted_before_the_model_reads_them(self):
+        cases = {'My password: hunter2 please': 'My password: [redacted] please',
+                 'Your OTP is 123456.': 'Your OTP is [redacted].', '4821 is your OTP': '[redacted] is your OTP',
+                 'api_key=sk-abc123 token: xyz': 'api_key=[redacted] token: [redacted]',
+                 'password Abc@123 reset': 'password [redacted] reset',
+                 'Authorization Bearer abcdefgh12345': 'Authorization Bearer [redacted]',
+                 'Forgot my password, ship 12 boxes to 641001': 'Forgot my password, ship 12 boxes to 641001'}
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(memory.redact(text), expected)
+        line = memory.event_line(message(1, 'A', TODAY, 'Login OTP 998877 for SO-1'), 'WhatsApp')
+        self.assertIn('Login OTP [redacted] for SO-1', line)
+        self.assertNotIn('998877', line)
+
     def test_the_loader_returns_levels_from_year_to_day_then_recent_messages(self):
         self.inbox += [message(1, 'A', datetime.date(2026, 9, 30), 'Old request'),
                        message(2, 'A', datetime.date(2026, 10, 27), 'Yesterday'), message(3, 'A', TODAY, 'Today one'),
@@ -237,8 +312,11 @@ class SchedulingTests(unittest.TestCase):
                       direction='Outgoing', last='RELAY-MSG-0000000003')]
         query = fake.qb.from_.return_value.select.return_value.where.return_value.where.return_value.groupby.return_value
         query.run.return_value = rows
-        with patch.object(memory, 'frappe', fake):
+        with patch.object(memory, 'frappe', fake), \
+             patch.object(memory, 'timeline_time', return_value=Table('tabRelay Message').relay_timeline_time):
             self.assertEqual(memory.targets(TODAY), {('Customer', 'C1', 'A'): 'RELAY-MSG-0000000002'})
+        where = fake.qb.from_.return_value.select.return_value.where.call_args.args[0]
+        self.assertIn('relay_timeline_time', str(where), 'Targets select by sent time, not creation')
 
     def test_backfill_accepts_only_a_month_before_the_nightly_window(self):
         fake = MagicMock()
@@ -253,6 +331,18 @@ class SchedulingTests(unittest.TestCase):
         targets.assert_called_once_with(datetime.date(2026, 8, 1), datetime.date(2026, 9, 1))
         fake.only_for.assert_called_with('System Manager')
         self.assertEqual(fake.enqueue.call_args.kwargs['month'], '2026-08')
+
+    def test_backfill_can_be_limited_to_one_record_or_address(self):
+        fake = MagicMock()
+        fake.db.get_single_value.return_value = 'Summary Model'
+        found = {(*RECORD, 'A'): 'M-1', (*RECORD, 'B'): 'M-2', ('Customer', 'C2', 'A'): 'M-3'}
+        with patch.object(memory, 'frappe', fake), patch.object(memory, 'targets', return_value=found), \
+             patch.object(memory, 'window_start', return_value=datetime.date(2026, 10, 1)):
+            self.assertEqual(memory.backfill('2026-08', *RECORD), 2)
+            self.assertEqual(memory.backfill('2026-08', *RECORD, address='B'), 1)
+            self.assertEqual(fake.enqueue.call_args.kwargs['address'], 'B')
+            self.assertEqual(memory.backfill('2026-08', address='A'), 2)
+            self.assertEqual(memory.backfill('2026-08'), 3)
 
     def test_weeks_start_on_monday_and_stop_at_the_month_end(self):
         self.assertEqual(memory.period('Week', datetime.date(2026, 10, 1)), (datetime.date(2026, 10, 1), datetime.date(2026, 10, 4)))
