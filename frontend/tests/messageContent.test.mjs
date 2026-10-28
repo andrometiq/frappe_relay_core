@@ -52,3 +52,17 @@ test('template document link needs a kept PDF copy', async () => {
   message.message_data = JSON.stringify({ kind: 'text', attachment: 'FILE-1', template: { name: 'order' } })
   assert.equal(templateDocumentURL(message), '/api/method/relay_core.attachments.read?message=RELAY-MSG-0000000001&download=1')
 })
+
+test('every message with a file offers a download, template headers included', async () => {
+  const { attachmentDownloadURL } = await import('../src/components/messageContent.js')
+  const core = '/api/method/relay_core.attachments.read?message=RELAY-MSG-0000000001&download=1'
+  const message = data => ({ name: 'RELAY-MSG-0000000001', message_data: JSON.stringify(data) })
+  const header = parameter => ({ kind: 'text', text: 'Hi', template: { name: 'offer', components: [{ type: 'header', parameters: [parameter] }, { type: 'body', parameters: [{ type: 'text', text: 'Ravi' }] }] } })
+  assert.equal(attachmentDownloadURL(message({ kind: 'document', media: { id: '1' } })), core)
+  assert.equal(attachmentDownloadURL(message({ ...header({ type: 'document', document: { id: '9', filename: 'Order_ORD-1.pdf' } }), attachment: 'FILE-1' })), core)
+  assert.equal(attachmentDownloadURL(message(header({ type: 'image', image: { id: '456' } }))), core)
+  assert.equal(attachmentDownloadURL(message(header({ type: 'document', document: { link: 'https://cdn.example.com/bill.pdf', filename: 'bill.pdf' } }))), 'https://cdn.example.com/bill.pdf')
+  assert.equal(attachmentDownloadURL(message(header({ type: 'image', image: { link: 'javascript:alert(1)' } }))), null)
+  assert.equal(attachmentDownloadURL(message({ kind: 'text', text: 'Hi', template: { name: 'plain' } })), null)
+  assert.equal(attachmentDownloadURL({ ...message({ kind: 'document' }), _pending: true }), null)
+})

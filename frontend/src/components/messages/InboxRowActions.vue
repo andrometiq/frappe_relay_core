@@ -3,16 +3,15 @@ import { computed, inject, ref } from 'vue'
 import { Dialog, Dropdown, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useChatFolders } from '../../composables/useChatFolders'
-import { canLinkRow, rowActionKeys } from '../../services/inboxRows'
+import { canLinkRow, readStateRequest, rowActionKeys } from '../../services/inboxRows'
 import ContactDetails from '../ContactDetails.vue'
 import MoveToFolderDialog from './MoveToFolderDialog.vue'
 
-/** The chat list row menu: read state, star, folder and link. A business row acts on its newest chat. */
+/** The chat list row menu: read state, star, folder and link. A business row changes the read state of all its chats. */
 const emit = defineEmits(['changed', 'error'])
 const capabilities = inject('relayCapabilities')
 const { move } = useChatFolders()
 const menu = ref(), row = ref(null), moving = ref(false), linking = ref(false)
-const isChat = item => item.kind !== 'business'
 const canLink = item => canLinkRow(item, capabilities.value.manage)
 const options = computed(() => {
   const item = row.value
@@ -34,7 +33,7 @@ async function run(action, message) {
 }
 function markRead(item, read) {
   return run(async () => {
-    const result = await coreApi('message_reads.mark_chat', { contact: isChat(item) ? item.name : item.contact, read: read ? 1 : 0 }, true)
+    const result = await coreApi('message_reads.mark_chat', readStateRequest(item, read), true)
     emit('changed', item, { unread: result.unread })
   }, read ? 'Marked as read' : 'Marked as unread')
 }
@@ -63,7 +62,7 @@ defineExpose({ open, link, canLink })
 <template>
   <Dropdown ref="menu" :options="options" />
   <MoveToFolderDialog v-if="capabilities.folders" v-model="moving" :contact="row?.name" :current="row?.folder" @moved="toast('Moved to folder')" />
-  <Dialog v-model="linking" :options="{ title: 'Link to customer or supplier', size: 'md' }">
+  <Dialog v-model="linking" :options="{ title: 'Link to a business record', size: 'md' }">
     <ContactDetails v-if="linking && row" :contact="row.contact" compact link @changed="linked" @close="linking = false" />
   </Dialog>
 </template>

@@ -11,7 +11,7 @@ const props = defineProps({ contact: { type: String, required: true }, detail: {
 const emit = defineEmits(['changed', 'cancel'])
 const capabilities = inject('relayCapabilities', ref({}))
 const busy = ref(false), error = ref(''), adding = ref(false), removing = ref(null)
-const types = ref([]), choice = ref(''), linkForm = ref(null)
+const types = ref([]), recordType = ref(''), choice = ref(''), linkForm = ref(null)
 const links = computed(() => props.detail.links || [])
 const keyOf = link => link.doctype + '\u0000' + link.name
 const desk = link => '/desk/' + link.doctype.toLowerCase().replaceAll(' ', '-') + '/' + encodeURIComponent(link.name)
@@ -27,14 +27,18 @@ const saveLinks = next => save('contacts.set_links', { contact: props.contact, l
 const setPrimary = (link, on) => save('contacts.set_primary', primaryRequest(props.contact, link, on))
 
 const choiceLabels = new Map()
+// The record type comes first; the search then looks only in that type.
+const pickedType = computed(() => types.value.find(type => type.value === recordType.value))
 const recordField = computed(() => ({
-  label: 'Customer or supplier', placeholder: 'Find customer or supplier', readOnly: busy.value,
+  label: pickedType.value?.label || 'Record', placeholder: pickedType.value ? 'Find ' + pickedType.value.label.toLowerCase() : 'Choose a record type first',
+  readOnly: busy.value || !pickedType.value,
   search: async (query, signal) => {
-    const rows = await searchLinkChoices(types.value, doctype => coreApi('api.business_records', { doctype, query }, false, { signal }))
+    const rows = await searchLinkChoices([pickedType.value], doctype => coreApi('api.business_records', { doctype, query }, false, { signal }))
     for (const row of rows) choiceLabels.set(row.value, row.label)
     return rows
   },
 }))
+function pickType(value) { recordType.value = value; choice.value = '' }
 
 async function startAdding() {
   adding.value = true; removing.value = null; error.value = ''
@@ -42,10 +46,11 @@ async function startAdding() {
     try { types.value = businessTypeOptions(await coreApi('business_types.list_types')) }
     catch (e) { error.value = e.message; return }
   }
+  if (types.value.length === 1) recordType.value = types.value[0].value
   await nextTick()
-  linkForm.value?.querySelector('input')?.focus()
+  linkForm.value?.querySelector(recordType.value ? 'input' : 'button')?.focus()
 }
-function stopAdding() { adding.value = false; choice.value = '' }
+function stopAdding() { adding.value = false; choice.value = ''; recordType.value = '' }
 function cancelAdding() { stopAdding(); emit('cancel') }
 onMounted(() => { if (props.start && props.detail.can_edit_links) startAdding() })
 async function addLink() {
@@ -64,8 +69,12 @@ async function removeLink(link) {
     <div class="info-group-title"><span>Linked to · {{ links.length }}</span>
       <button v-if="detail.can_edit_links && !adding" type="button" class="info-group-action" :disabled="busy" @click="startAdding">+ Link customer</button></div>
     <ErrorMessage :message="error" />
-    <form v-if="adding" ref="linkForm" class="contact-link-form info-card" aria-label="Link to a customer or supplier" @submit.prevent="addLink">
-      <ChoiceField v-model="choice" :field="recordField" />
+    <form v-if="adding" ref="linkForm" class="contact-link-form info-card" aria-label="Link to a business record" @submit.prevent="addLink">
+      <div v-if="types.length > 1" class="contact-link-types" role="radiogroup" aria-label="Record type">
+        <span class="contact-link-step">Record type</span>
+        <div class="contact-link-type-options"><button v-for="type in types" :key="type.value" type="button" role="radio" :aria-checked="recordType === type.value" :disabled="busy" @click="pickType(type.value)">{{ type.label }}</button></div>
+      </div>
+      <ChoiceField :key="recordType" v-model="choice" :field="recordField" />
       <div class="contact-link-form-actions"><Button label="Cancel" variant="ghost" :disabled="busy" @click="cancelAdding" /><Button type="submit" label="Link" variant="solid" :loading="busy" :disabled="!choice" /></div>
     </form>
     <ul v-if="links.length" class="info-card">
@@ -96,6 +105,11 @@ async function removeLink(link) {
 <style scoped>
 .contact-links { display:flex; flex-direction:column; min-width:0; }
 .contact-link-form { display:flex; flex-direction:column; gap:10px; padding:12px; }
+.contact-link-types { display:flex; flex-direction:column; gap:6px; }
+.contact-link-step { color:var(--relay-ink-3); font-size:12px; }
+.contact-link-type-options { display:flex; flex-wrap:wrap; gap:6px; }
+.contact-link-type-options button { min-height:30px; padding:0 12px; border:1px solid var(--relay-stroke); border-radius:15px; color:var(--relay-ink-2); font-size:13px; }
+.contact-link-type-options button[aria-checked="true"] { border-color:var(--relay-accent); background:var(--relay-accent-soft); color:var(--relay-accent-text); font-weight:600; }
 .contact-link-form-actions { display:flex; justify-content:flex-end; gap:8px; }
 .info-switch-label { flex:none; color:var(--relay-ink-3); font-size:11.5px; }
 </style>

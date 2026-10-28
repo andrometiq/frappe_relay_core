@@ -23,7 +23,7 @@ test('production client uses WebSocket, rejoins rooms and catches up once after 
  const queue=realtimeRefreshQueue(async({kinds})=>batches.push([...kinds]),()=>true,10)
  const off=rt.onRealtime(e=>queue.schedule(e.kind)),leave=rt.subscribeRoom('Relay Message')
  const stopViewers=rt.watchDocumentViewers('Relay Contact','fixture-contact',users=>viewers.push(users))
- const client=rt.startRealtime()
+ const client=await rt.startRealtime()
  try{
   if(!client.connected)await once(client,'connect')
   await wait(80)

@@ -44,9 +44,25 @@ export function ownReaction(value) {
   return Array.isArray(own) ? own[0]?.emoji || '' : ''
 }
 
+// The image, video or document a template header sent, as its send parameter.
+export function templateHeaderMedia(data) {
+  for (const component of data?.template?.components || []) {
+    if (String(component?.type).toLowerCase() !== 'header') continue
+    for (const parameter of component.parameters || []) {
+      const media = parameter?.[parameter?.type]
+      if (['image', 'video', 'document'].includes(parameter?.type) && media && typeof media === 'object') return media
+    }
+  }
+  return null
+}
+
+// Core serves received media, kept copies and template headers sent by media ID; a header sent by link downloads from it.
 export function attachmentDownloadURL(message) {
-  if (message._pending || !message.name || !['photo','image','video','audio','voice','document','animation'].includes(messageData(message).kind)) return null;
-  return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
+  if (message._pending || !message.name) return null;
+  const data = messageData(message), header = templateHeaderMedia(data);
+  if (['photo','image','video','audio','voice','document','animation'].includes(data.kind) || data.attachment || header?.id)
+    return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
+  return typeof header?.link === 'string' && /^https:\/\//i.test(header.link) ? header.link : null;
 }
 
 // The PDF sent as a template's document header, kept on the message by Core.

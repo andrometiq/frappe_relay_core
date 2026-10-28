@@ -114,7 +114,7 @@ const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, 
 
 <template>
   <div class="directory-heading">
-    <div class="directory-identity"><span class="directory-self-avatar" aria-hidden="true"><FeatherIcon name="message-circle" class="h-4 w-4" /></span><h2>Chats</h2></div>
+    <div class="directory-identity"><h2 class="business-browse-title">Browse records</h2></div>
     <button type="button" class="directory-heading-action" aria-label="Filter business chats" title="Filter business chats"
       :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><FeatherIcon name="filter" class="h-4 w-4" /></button>
   </div>
@@ -122,8 +122,11 @@ const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, 
   <div class="business-directory-controls">
     <div class="business-search-row"><TextInput type="search" maxlength="80" v-model="query" placeholder="Search or start a business chat"
       aria-label="Search businesses" :disabled="!doctype"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
+    <div v-if="types.length > 1" class="business-type-options" role="radiogroup" aria-label="Record type">
+      <button v-for="type in types" :key="type" type="button" role="radio" :aria-checked="doctype === type" :disabled="busy || loading"
+        @click="doctype = type; loadInitialGroup()">{{ type }}</button>
+    </div>
     <div v-if="filtersOpen" class="business-directory-filters">
-      <ChoiceField v-if="types.length > 1" :field="{ label: 'Business type', options: types, readOnly: busy || loading }" v-model="doctype" @update:model-value="loadInitialGroup" />
       <RemoteLinkField v-if="groupField" :key="doctype + ':' + groupField" v-model="group"
         :field="{ label: 'Business team', method: 'business_groups.directory', params: { doctype, include_all: 1 }, placeholder: 'Search teams…', readOnly: busy || loading }"
         @update:model-value="loadRecords(true)" />
@@ -156,3 +159,10 @@ const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, 
     </p>
   </div>
 </template>
+
+<style scoped>
+.business-browse-title { font-size:14px; font-weight:600; }
+.business-type-options { display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 8px; }
+.business-type-options button { min-height:28px; padding:0 11px; border:1px solid var(--relay-stroke); border-radius:14px; color:var(--relay-ink-2); font-size:12.5px; }
+.business-type-options button[aria-checked="true"] { border-color:var(--relay-accent); background:var(--relay-accent-soft); color:var(--relay-accent-text); font-weight:600; }
+</style>

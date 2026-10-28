@@ -7,7 +7,7 @@ import { businessScope } from '../src/services/businessScope.js'
 import { coreApi } from '../src/services/coreApi.js'
 
 const components = [
-  ['InternalNotes', 'submit', 'body.value = "Quantity 30, total 1500";', 'collaboration.add'],
+  ['NoteComposer', 'submit', 'body.value = "Quantity 30, total 1500";', 'collaboration.add'],
   ['ConversationCases', 'save', 'record.value = {isNew:true,definition:{fields:{properties:{}},stages:[]}}; newType.value="Orders";newTitle.value="Order follow-up"; values.value={quantity:30};', 'cases.create_manual'],
   ['ConversationTopics', 'save', 'edit();draft.value.title="Order follow-up";', 'topics.save'],
 ]
@@ -24,7 +24,7 @@ for (const [component, action, setup, method] of components) {
     }
     const props = {contact:'shared-contact',businessDoctype:business,businessName:`Sim ${business}`,messages:[]}
     const args = { useLoadMore,ref,computed,watch:()=>{},onMounted:()=>{},onBeforeUnmount:()=>{},defineProps:()=>props,defineEmits:()=>()=>{},
-      useRealtimeRefresh:()=>{},businessScope,coreApi,randomUUID:()=> 'local-request',stableSubmission:(_kind,_data,send)=>send('local-request')}
+      useRealtimeRefresh:()=>{},useStoredDraft:()=>()=>{},useMobileLayout:()=>ref(false),nextTick:()=>{},businessScope,coreApi,randomUUID:()=> 'local-request',stableSubmission:(_kind,_data,send)=>send('local-request')}
     try {
       const run = new Function(...Object.keys(args), script + `\nreturn async()=>{${setup} await ${action}();return error.value}`)(...Object.values(args))
       assert.equal(await run(), '')

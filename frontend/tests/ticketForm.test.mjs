@@ -34,7 +34,8 @@ test('live ticket notices link to the ticket and ignore other events', () => {
 test('chat header and message menu open the create ticket dialog', async () => {
   const inbox = await readFile(new URL('../src/components/ConnectedMessages.vue', import.meta.url), 'utf8')
   const thread = await readFile(new URL('../src/components/messages/MessageThread.vue', import.meta.url), 'utf8')
-  assert.match(inbox, /title="Create ticket"[^>]*@click="openTicket\(\)"/)
+  assert.match(inbox, /label="Create ticket from this chat" :title="contactRows\.length \? '[^']+' : 'No messages in this chat yet'"[^>]*@click="openTicket\(\)"/)
+  assert.match(inbox, /isMobile\.value && contactRows\.value\.length \? \[\{label:'Create ticket from this chat'/)
   assert.match(inbox, /@ticket="openTicket"/)
   assert.match(thread, /label: "Create ticket",\s*icon: "bookmark",\s*onClick: \(\) => emit\("ticket", message\)/)
   const tickets = await readFile(new URL('../src/components/tickets/TicketFilters.vue', import.meta.url), 'utf8')

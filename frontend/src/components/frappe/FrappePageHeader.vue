@@ -18,7 +18,7 @@ defineEmits(["back"]);
       <div>
         <p v-if="breadcrumbs.length" class="frappe-breadcrumbs">
           <template v-for="(crumb, index) in breadcrumbs" :key="`${crumb}-${index}`">
-            <button v-if="index < breadcrumbs.length - 1" type="button" @click="$emit('back')">{{ crumb }}</button>
+            <button v-if="index < breadcrumbs.length - 1 || crumb !== title" type="button" @click="$emit('back')">{{ crumb }}</button>
             <span v-else>{{ crumb }}</span>
             <i v-if="index < breadcrumbs.length - 1">/</i>
           </template>
