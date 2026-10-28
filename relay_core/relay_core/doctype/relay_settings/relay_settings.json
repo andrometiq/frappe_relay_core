@@ -5,6 +5,7 @@
   "issingle": 1,
   "track_changes": 1,
   "field_order": [
+    "test_mode",
     "hub_url",
     "hub_account",
     "hub_token",
@@ -15,6 +16,9 @@
     "enable_flows",
     "ai_handoff_owner",
     "transcription_provider",
+    "memory_model",
+    "event_memory_model",
+    "max_ai_file_size_mb",
     "send_whatsapp_read_receipts",
     "send_whatsapp_typing",
     "whatsapp_margin_percent",
@@ -23,6 +27,12 @@
     "opt_in_keywords"
   ],
   "fields": [
+    {
+      "fieldname": "test_mode",
+      "label": "Test mode",
+      "fieldtype": "Check",
+      "description": "Nothing is sent outside this server. Only local simulator addresses are allowed."
+    },
     {
       "fieldname": "hub_url",
       "label": "Hub MCP URL",
@@ -88,6 +98,31 @@
       "depends_on": "enable_ai_features"
     },
     {
+      "fieldname": "memory_model",
+      "label": "AI memory model",
+      "fieldtype": "Link",
+      "options": "AI Model",
+      "description": "Summarizes each record's conversations every night into day, week, month and year memory for the AI. Empty turns the memory job off.",
+      "depends_on": "enable_ai_features"
+    },
+    {
+      "fieldname": "event_memory_model",
+      "label": "Event memory model",
+      "fieldtype": "Link",
+      "options": "AI Model",
+      "description": "Builds the memory of each Relay AI Event from its description, files and links. Choose a model with vision support to read images. Empty uses the AI memory model.",
+      "depends_on": "enable_ai_features"
+    },
+    {
+      "fieldname": "max_ai_file_size_mb",
+      "label": "Max AI file size (MB)",
+      "fieldtype": "Int",
+      "default": "4",
+      "non_negative": 1,
+      "description": "The AI skips larger event attachments and pages.",
+      "depends_on": "enable_ai_features"
+    },
+    {
       "fieldname": "send_whatsapp_read_receipts",
       "label": "Send WhatsApp read receipts",
       "fieldtype": "Check",
@@ -137,5 +172,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-27 23:30:00.000000"
+  "modified": "2026-10-28 12:00:00.000000"
 }

@@ -19,6 +19,7 @@ scheduler_events = {
             "recover_messages", "recover_learning", "recover_summaries", "recover_campaigns",
             "recover_translations", "recover_voice_transcripts", "recover_business_events")],
         "*/10 * * * *": ["relay_core.scheduled_jobs.sync_whatsapp_templates"],
+        "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels"],
 }
@@ -79,3 +80,6 @@ app_include_js = ["/assets/relay_core/js/document_actions.js", "/assets/relay_co
 
 # Old /whatsapp links open /relay once WhatsApp Core is switched off or removed.
 page_renderer = ["relay_core.whatsapp_redirects.WhatsAppRedirectPage"]
+
+# A Relay AI Event rebuilds its memory when one of its attachments is added, changed or removed.
+doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for event in ('on_update', 'after_delete')}

@@ -403,6 +403,26 @@ class SkillDeliveryTests(unittest.TestCase):
         self.assertEqual(self.run.status, 'Completed')
         self.assertIsNone(self.automation.outgoing_run.get())
 
+    def test_run_records_ai_context_and_rechecks_events_before_delivery(self):
+        used = {'memory': {'rows': ['MEM-1'], 'sha256': 'abc'}, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
+        self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
+        check = Mock()
+        with patch.dict(sys.modules, {'relay_core.ai.event_memory': types.SimpleNamespace(check_context=check)}):
+            self.service.process('RUN-1')
+        self.assertEqual(json.loads(self.run.ai_context), used)
+        self.assertNotIn('context', json.loads(self.run.decision))
+        check.assert_called_with(self.run.ai_context, ('Supplier', 'SUP-A'), 'Sim Company')
+        self.send.assert_called_once()
+
+    def test_changed_event_blocks_delivery_and_hands_off(self):
+        used = {'memory': None, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
+        self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
+        check = Mock(side_effect=ValueError('An event used by this reply changed or is no longer available'))
+        with patch.dict(sys.modules, {'relay_core.ai.event_memory': types.SimpleNamespace(check_context=check)}):
+            self.service.process('RUN-1')
+        self.send.assert_not_called()
+        self.handoff.assert_called_once()
+
     def test_recovery_reuses_persisted_decision_and_stable_key(self):
         self.run.decision = json.dumps(self.service.decide.return_value)
         self.service.process('RUN-1')
@@ -632,7 +652,10 @@ class ConversationIdentityTests(unittest.TestCase):
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 1
         access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')])
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
-        self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f})
+        no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
+            lines=[], events=[], prompt={}, used=None))
+        self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
+                                              'relay_core.ai.event_memory': no_reference})
         self.patch.start(); self.addCleanup(self.patch.stop)
 
     def test_message_and_field_denial_block_context_as_the_linked_user(self):

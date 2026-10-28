@@ -1,0 +1,130 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Event Build",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIEB-.##########",
+  "naming_rule": "Expression (old style)",
+  "in_create": 1,
+  "read_only": 1,
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "description": "One memory build of a Relay AI Event: the sources it read and whether the memory was published.",
+  "field_order": [
+    "event",
+    "status",
+    "published",
+    "revision",
+    "model",
+    "triggered_by",
+    "column_break_times",
+    "started_at",
+    "finished_at",
+    "error",
+    "sources_section",
+    "sources",
+    "memory"
+  ],
+  "fields": [
+    {
+      "fieldname": "event",
+      "label": "Event",
+      "fieldtype": "Link",
+      "options": "Relay AI Event",
+      "reqd": 1,
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Building\nReady\nPartial\nFailed\nSuperseded",
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "published",
+      "label": "Published",
+      "fieldtype": "Check",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "revision",
+      "label": "Revision",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "model",
+      "label": "AI Model",
+      "fieldtype": "Link",
+      "options": "AI Model",
+      "read_only": 1
+    },
+    {
+      "fieldname": "triggered_by",
+      "label": "Triggered by",
+      "fieldtype": "Link",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_break_times",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "started_at",
+      "label": "Started at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "finished_at",
+      "label": "Finished at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "error",
+      "label": "Problems",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sources_section",
+      "label": "Sources",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "sources",
+      "label": "Sources",
+      "fieldtype": "JSON",
+      "read_only": 1,
+      "description": "Every source with its id, file or URL, final URL, size, SHA-256 and the reason when it was skipped."
+    },
+    {
+      "fieldname": "memory",
+      "label": "Memory",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1
+    }
+  ],
+  "modified": "2026-10-28 12:00:00.000000"
+}

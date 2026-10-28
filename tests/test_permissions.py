@@ -69,7 +69,8 @@ class RoleMatrixTests(unittest.TestCase):
 
     def test_machine_records_are_system_manager_only(self):
         for doctype in ('Relay Automation Run', 'Relay Business Event Delivery', 'Relay Internal Comment', 'Relay Case',
-                        'Relay Conversation Summary', 'Relay Message Translation', 'Relay Flow Run', 'Relay Call'):
+                        'Relay Conversation Summary', 'Relay Message Translation', 'Relay Flow Run', 'Relay Call',
+                        'Relay Memory'):
             self.assertEqual(set(PERMS[doctype]), {'System Manager'}, doctype)
 
     def test_hub_service_only_creates_hub_events(self):
@@ -272,7 +273,7 @@ class MetadataTests(unittest.TestCase):
                 field = field_names[doc['name']]
                 self.assertEqual(doc['autoname'], 'field:' + field)
                 self.assertTrue(next(row for row in doc['fields'] if row['fieldname'] == field)['reqd'])
-            elif doc['name'] in {'Relay Channel', 'Relay AI Skill', 'Relay Business Event Rule', 'Relay Canned Reply', 'Relay Team', 'Relay Case Type', 'Relay Learned Procedure'}:
+            elif doc['name'] in {'Relay Channel', 'Relay AI Skill', 'Relay AI Event', 'Relay Business Event Rule', 'Relay Canned Reply', 'Relay Team', 'Relay Case Type', 'Relay Learned Procedure'}:
                 self.assertEqual(doc['autoname'], 'format:{title}-{###}')
                 self.assertEqual(doc['title_field'], 'title')
                 self.assertTrue(doc.get('modified'))
