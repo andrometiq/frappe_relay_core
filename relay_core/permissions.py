@@ -166,10 +166,18 @@ def can_read_contact_as(name,user):
     return bool(frappe.get_doc('Relay Contact', name).has_permission('read', user=user))
 
 
+def has_companies():
+    """Sites without a Company DocType (no ERPNext) are one company: records keep an empty company."""
+    import frappe
+    return bool(frappe.db.exists('DocType', 'Company'))
+
+
 def company_allowed(company, user=None):
     """Company keys are snapshots, but still require current query/document access."""
     import frappe
     user = user or frappe.session.user
+    if not has_companies():
+        return not company
     if not company or not frappe.has_permission('Company', 'read', user=user):
         return False
     query = frappe.qb.get_query('Company', filters={'name': company}, fields=['name'],
@@ -184,7 +192,7 @@ def company_condition(doctype, user=None):
         return '1=1'
     table = '`tab' + doctype + '`'
     legacy = f"COALESCE({table}.company,'')=''"
-    if not frappe.has_permission('Company', 'read', user=user):
+    if not has_companies() or not frappe.has_permission('Company', 'read', user=user):
         return legacy
     companies = frappe.qb.get_query('Company', fields=['name'], ignore_permissions=False,
                                     user=user, order_by='').get_sql()
