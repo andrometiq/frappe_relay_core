@@ -48,7 +48,7 @@ async function removeLink(link) {
     <ErrorMessage :message="error" />
     <form v-if="adding" class="contact-link-form info-card" aria-label="Link a business record" @submit.prevent="addLink">
       <ChoiceField v-model="doctype" :field="{ label: 'Business type', options: types, readOnly: busy }" @update:model-value="record = ''" />
-      <RemoteLinkField :key="doctype" v-model="record" :field="{ label: 'Record', method: 'api.business_records', params: { doctype }, placeholder: 'Search records…', readOnly: busy || !doctype }" />
+      <RemoteLinkField :key="doctype" v-model="record" :field="{ label: 'Record', method: 'api.business_records', params: { doctype }, placeholder: 'Search records…', inlineResults: true, readOnly: busy || !doctype }" />
       <div class="contact-link-form-actions"><Button label="Cancel" variant="ghost" :disabled="busy" @click="stopAdding" /><Button type="submit" label="Link record" variant="solid" :loading="busy" :disabled="!record" /></div>
     </form>
     <ul v-if="links.length" class="info-card">
