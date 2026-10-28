@@ -11,8 +11,11 @@ export function languageLabel(code) {
     return `${name}${native && native !== name ? ' · ' + native : ''} (${code})`
   } catch { return code }
 }
+// Languages this business writes in most come first; every other language follows by name.
+const COMMON = ['en', 'en_US', 'en_GB', 'hi', 'ta', 'te', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa']
 export function templateLanguages(current = '') {
+  const rank = value => COMMON.includes(value) ? COMMON.indexOf(value) : COMMON.length
   return [...new Set([...codes, ...(current ? [current] : [])])]
     .map(value => ({ value, label: languageLabel(value) }))
-    .sort((a, b) => a.label.localeCompare(b.label, 'en'))
+    .sort((a, b) => rank(a.value) - rank(b.value) || a.label.localeCompare(b.label, 'en'))
 }

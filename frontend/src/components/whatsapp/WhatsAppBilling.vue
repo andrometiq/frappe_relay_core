@@ -56,7 +56,7 @@ onMounted(() => run(load))
       <FormControl v-if="view === 'month'" v-model="month" class="billing-period" type="select" aria-label="Month" :options="months" :disabled="busy" />
       <FormControl v-else v-model="year" class="billing-period" type="select" aria-label="Year" :options="years" :disabled="busy" />
       <span v-if="updated" class="billing-updated">Updated {{ updated }}</span>
-      <Button label="Refresh" icon-left="refresh-cw" :loading="busy" :disabled="!account" @click="run(refresh)" />
+      <Button variant="outline" label="Refresh" icon-left="refresh-cw" :loading="busy" :disabled="!account" @click="run(refresh)" />
     </header>
     <ErrorMessage :message="error" /><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
     <p v-if="!account" class="billing-empty">Set the Hub account in Settings to see WhatsApp billing.</p>

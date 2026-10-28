@@ -176,6 +176,12 @@ test('preview fills examples, media header and button icons', () => {
 	form.header_type = 'IMAGE'
 	form.footer_text = 'Essdee'
 	form.buttons = [{ type: 'URL', text: 'Track' }, { type: 'QUICK_REPLY', text: 'Thanks' }]
-	assert.deepEqual(templatePreview(form), { header: '', media: 'image', body: 'Hi Asha, order SO-12 is ready.', footer: 'Essdee',
+	assert.deepEqual(templatePreview(form), { header: '', media: 'image', mediaUrl: '', body: 'Hi Asha, order SO-12 is ready.', footer: 'Essdee',
 		buttons: [{ key: undefined, text: 'Track', icon: 'external-link' }, { key: undefined, text: 'Thanks', icon: 'corner-up-left' }] })
+})
+
+test('a too long template name gets a length message', () => {
+  const issues = templateIssues({ template_name: 'a'.repeat(513), language_code: 'en', category: 'UTILITY', body_text: 'Hi' }, { submit: false })
+  assert.ok(issues.includes('Template name must be at most 512 characters.'))
+  assert.ok(!issues.some(text => text.includes('lowercase')))
 })

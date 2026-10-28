@@ -15,7 +15,9 @@ export function templateBody(template) {
 export function templateHeader(template) {
   const header = templateComponent(template, "HEADER");
   if (!header) return "";
-  return text(header.text) || text(header.format);
+  const format = text(header.format).toUpperCase();
+  if (header.text) return text(header.text);
+  return format ? `${format[0]}${format.slice(1).toLowerCase()} header` : "";
 }
 
 export function templateFooter(template) {
