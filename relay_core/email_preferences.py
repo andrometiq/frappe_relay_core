@@ -122,6 +122,8 @@ def skill_claims(message):
     from relay_core.automation.contracts import event_key
     if frappe.db.get_value('Relay Automation Run', {'event_key': event_key(message.name)}, 'name', for_update=True):
         return True
+    if frappe.db.get_value('Relay Channel', message.channel, 'automation_enabled') == 0:
+        return True
     return bool(frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled() and candidates(message))
 
 

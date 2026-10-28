@@ -55,6 +55,10 @@ def save_policy(values,name=None):
 def references(kind, query=''):
     """Bounded, permission-checked choices for the installed policy editor."""
     require_access(configure=True)
+    return reference_options(kind, query)
+
+
+def reference_options(kind, query=''):
     choices = {
         'policy': ('Relay Automation Policy', ['name','channel'], {}),
         'source_message': ('Relay Message', ['name'], {'direction':'Incoming'}),

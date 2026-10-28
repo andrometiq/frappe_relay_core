@@ -31,7 +31,9 @@
     "match_result",
     "search_plan",
     "ownership_generation",
-    "ai_context"
+    "ai_context",
+    "pipeline_state",
+    "flow_run"
   ],
   "fields": [
     {
@@ -189,6 +191,19 @@
       "fieldtype": "JSON",
       "read_only": 1,
       "description": "The record memory rows and the event memory revisions that the reply prompt used."
+    },
+    {
+      "fieldname": "pipeline_state",
+      "fieldtype": "JSON",
+      "label": "Channel pipeline state",
+      "read_only": 1
+    },
+    {
+      "fieldname": "flow_run",
+      "fieldtype": "Link",
+      "label": "Parent flow run",
+      "options": "Relay Flow Run",
+      "read_only": 1
     }
   ],
   "permissions": [

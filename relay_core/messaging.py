@@ -156,7 +156,33 @@ def require_binding(source):
         frappe.throw('Conversation binding is missing or revoked', frappe.PermissionError)
 
 
+def prepare_choices(source, channel, context, data):
+    from relay_core.flows.contracts import choice_options
+    if channel.channel != 'WhatsApp' or context.get('provider') != 'WhatsApp':
+        raise ValueError('Interactive choices require WhatsApp')
+    if set(data) - {'body', 'choices', 'button'}:
+        raise ValueError('Invalid interactive choices')
+    body = text(data.get('body'), 1024, required=True)
+    choices = choice_options(data.get('choices'))
+    if len(choices) > 10:
+        raise ValueError('Interactive choices support at most 10 options')
+    buttons = len(choices) <= 3
+    if any(len(row['label']) > (20 if buttons else 24) for row in choices):
+        raise ValueError('Interactive choice labels are too long')
+    if buttons:
+        action = {'buttons': [{'type': 'reply', 'reply': {'id': row['value'], 'title': row['label']}} for row in choices]}
+    else:
+        action = {'button': text(data.get('button') or 'Choose', 20, required=True),
+                  'sections': [{'rows': [{'id': row['value'], 'title': row['label']} for row in choices]}]}
+    interactive = {'type': 'button' if buttons else 'list', 'body': {'text': body}, 'action': action}
+    arguments = {'operation': 'messages.interactive', 'to': source.sender_endpoint, 'interactive': interactive,
+                 'reply_to': text(context.get('message_id') or source.provider_id or '', 300)}
+    return 'whatsapp.execute', arguments, {'kind': 'text', 'text': body, 'choices': choices}
+
+
 def _prepare(source, channel, context, kind, data):
+    if kind=='choices':
+        return prepare_choices(source, channel, context, data)
     if kind=='flow':
         if channel.channel!='WhatsApp' or context.get('provider')!='WhatsApp' or context.get('group_id'):raise ValueError('Forms require a private WhatsApp conversation')
         if set(data)-{'id','body','cta','screen','token','initial_data'}:raise ValueError('Invalid form arguments')
@@ -465,17 +491,9 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
             raise ValueError('Conversation changed before sending')
         delivery_fence(action, fresh_source, fresh_context)
         if outgoing_flow.get():
-            automation_scope(action, fresh_source)
+            automation_scope(action, fresh_source, recovery=False)
         if outgoing_run.get():
-            run = frappe.get_doc('Relay Automation Run', outgoing_run.get())
-            if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
-                raise ValueError('Automation is disabled')
-            if run.get('skill'):
-                from relay_core.ai.service import delivery_scope
-                delivery_scope(run, frappe.get_doc('Relay AI Skill', run.skill), fresh_source)
-            else:
-                from relay_core.automation.service import scope
-                scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+            automation_scope(action, fresh_source, recovery=False)
     except DeliverySuppressed:
         return suppress_delivery(action)
     except (ValueError, frappe.ValidationError, frappe.PermissionError, frappe.DoesNotExistError):
@@ -556,7 +574,7 @@ def admission_scope(action):
     return source, channel, context
 
 
-def automation_scope(action, source):
+def automation_scope(action, source, *, recovery=True):
     payload = object_value(action.payload)
     if payload.get('flow_run'):
         from relay_core.flows.service import scope as flow_scope
@@ -572,6 +590,10 @@ def automation_scope(action, source):
     if payload.get('automation_run'):
         from relay_core.automation.service import scope
         run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
+        if run.get('stage') == 'Channel':
+            from relay_core.automation.channel import delivery_scope as channel_scope
+            channel_scope(run, source)
+            return
         if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()): raise ValueError('Automation is disabled')
         if run.get('skill'):
             from relay_core.ai.service import delivery_scope, Superseded
@@ -581,6 +603,8 @@ def automation_scope(action, source):
             except Superseded:
                 raise
             except Exception:
+                if not recovery:
+                    raise
                 from relay_core.ai.handoff import handoff
                 handoff(run, skill, 'Reply recovery authorization failed; review required')
                 frappe.db.commit()
