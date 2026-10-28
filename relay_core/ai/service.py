@@ -57,6 +57,9 @@ def decide(skill, message, run_id=None, *, deadline=None):
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': 'Sender requested a person', 'user': user, 'reads': []}
     history = conversation_history(skill, message, user, business, scope)
+    from relay_core.ai.event_memory import ReplyContext
+    # The authenticated sender's own memory of this record, plus events published to its business type.
+    reference = ReplyContext(business, scope['company'], message.sender_endpoint or message.relay_contact)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image
@@ -70,8 +73,9 @@ def decide(skill, message, run_id=None, *, deadline=None):
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text}, default=str)
-        if len(prompt) <= MAX_PROMPT_LENGTH:
+        prompt = json.dumps({'history': history, 'incoming': text, **reference.prompt}, default=str)
+        overflow = len(prompt) - MAX_PROMPT_LENGTH
+        if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
             if run_id:
                 run = frappe.get_doc('Relay Automation Run', run_id)
@@ -79,10 +83,15 @@ def decide(skill, message, run_id=None, *, deadline=None):
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
             decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope))
-        if not history:
+            return dict(decision, scope=fingerprint(scope), context=reference.used)
+        if reference.lines:
+            reference.trim_memory(overflow)
+        elif history:
+            history.pop(0)
+        elif reference.events:
+            reference.events.pop()
+        else:
             raise ValueError('Incoming message exceeds the skill prompt budget')
-        history.pop(0)
 
 
 def check_continuation(run_id):
@@ -310,6 +319,7 @@ def process(name, *, deadline=None):
                 run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
                 internal_save(run); frappe.db.commit()
                 decision = decide(skill, message, run.name, deadline=deadline)
+                used = decision.pop('context', None)
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -318,6 +328,7 @@ def process(name, *, deadline=None):
                 current(run, skill, message)
                 declare_search(run, skill, message, decision)
                 run.decision = json.dumps(decision)
+                run.ai_context = json.dumps(used) if used else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
@@ -387,6 +398,9 @@ def delivery_scope(run, skill, message, decision=None):
     user, business, scope = current(run, skill, message)
     if decision.get('user') != user or decision.get('scope') != fingerprint(scope):
         raise ValueError('Conversation scope changed')
+    if run.get('ai_context'):
+        from relay_core.ai.event_memory import check_context
+        check_context(run.ai_context, business, scope['company'])
     recheck(skill, user, business, decision.get('reads', []), scope,
         authorize=lambda contract, arguments: authorize_search(run.name, skill, contract, arguments))
 
