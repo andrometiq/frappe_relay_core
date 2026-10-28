@@ -88,7 +88,7 @@ onBeforeUnmount(() => { cancel(); open.value = false })
 </script>
 <template>
   <div class="remote-choice" @focusout="event => {if(!inside(event, event.relatedTarget))close()}">
-    <label :for="id">{{field.label}}<span v-if="field.required"> *</span></label>
+    <label v-if="field.label" :for="id">{{field.label}}<span v-if="field.required"> *</span></label>
     <div v-if="selected.length" class="choice-selected">
       <span v-for="value in selected" :key="value" class="choice-chip">{{display(value)}}<button type="button" :aria-label="'Remove '+display(value)" :disabled="field.readOnly" @click="remove(value)">×</button></span>
     </div>

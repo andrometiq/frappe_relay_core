@@ -9,9 +9,7 @@
   "field_order": [
     "label",
     "state",
-    "is_default",
     "colour",
-    "enabled",
     "sort_order"
   ],
   "fields": [
@@ -25,18 +23,13 @@
     },
     {
       "fieldname": "state",
-      "label": "Counts as",
+      "label": "Type",
       "fieldtype": "Select",
-      "options": "Open\nIn progress\nResolved\nClosed",
+      "options": "Open\nClosed",
       "reqd": 1,
       "in_list_view": 1,
-      "description": "The built-in state this status behaves as. Ticket rules use the state, not the name."
-    },
-    {
-      "fieldname": "is_default",
-      "label": "Default for its state",
-      "fieldtype": "Check",
-      "default": "0"
+      "description": "Open tickets need work. Closed tickets are done.",
+      "default": "Open"
     },
     {
       "fieldname": "colour",
@@ -44,13 +37,6 @@
       "fieldtype": "Select",
       "options": "gray\nblue\ngreen\namber\nred",
       "default": "gray",
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "enabled",
-      "label": "Enabled",
-      "fieldtype": "Check",
-      "default": "1",
       "in_list_view": 1
     },
     {
@@ -86,5 +72,5 @@
   ],
   "sort_field": "sort_order",
   "sort_order": "ASC",
-  "modified": "2026-10-28 15:00:00.000000"
+  "modified": "2026-10-28 18:00:00.000000"
 }

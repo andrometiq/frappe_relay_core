@@ -570,7 +570,7 @@ def admit(run):
             run.execution_user = context(skill, message)[0]
             run.scope_fingerprint = scopes[skill.name]
             run.stage, run.attempts, run.status = 'Event', 0, 'Pending'
-            episode(run, message, skill=skill)
+            episode(run, message)
             if skill.execution_policy == 'Ticket only':
                 run.status = 'Shadow' if skill.mode == 'Shadow' else 'Completed'
                 run.reason = 'Event recorded for staff review'

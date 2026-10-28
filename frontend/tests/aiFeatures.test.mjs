@@ -21,9 +21,9 @@ test('conversation summary and ticket AI controls follow the AI flag', async () 
   const messages = await read('components/ConnectedMessages.vue')
   assert.match(messages, /<ConversationSummary v-if="[^"]*capabilities\.ai"/)
   const tickets = await read('components/TicketsWorkspace.vue')
-  assert.match(tickets, /aiEnabled\.value \? refreshWindow\('ai_history'/)
-  assert.match(tickets, /<section v-if="aiEnabled" aria-label="AI history"/)
-  assert.match(tickets, /<div v-if="aiEnabled && selected\.conversation_key/)
+  assert.match(tickets, /<TicketDialog [^>]*:ai-enabled="aiEnabled"/)
+  const dialog = await read('components/tickets/TicketDialog.vue')
+  assert.match(dialog, /<section v-if="aiEnabled && ticket\.conversation_key/)
 })
 
 test('only a System Manager sees the AI switch in Settings', async () => {

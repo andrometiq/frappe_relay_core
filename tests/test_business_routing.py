@@ -476,7 +476,6 @@ class TriageEpisodeTests(unittest.TestCase):
         self.enterContext(patch('frappe.utils.now_datetime', return_value='Sim time'))
         self.enterContext(patch('relay_core.permissions.require_administrator'))
         self.enterContext(patch('relay_core.ticket_settings.apply'))  # Configured statuses are covered in test_ticket_settings.
-        self.enterContext(patch('relay_core.ticket_settings.preferred', side_effect=lambda kind, label: label))
         from contextlib import nullcontext
         self.enterContext(patch('relay_core.ai.tools.as_user', side_effect=lambda user:nullcontext()))
 
@@ -532,7 +531,7 @@ class TriageEpisodeTests(unittest.TestCase):
         self.assertNotEqual(self.tickets.source_episode('other-channel', self.row), first)
 
     def test_empty_evidence_requires_a_complete_source_and_company(self):
-        doc = _dict(subject='Triage', brief='', category='Support', status='Open', messages=[],
+        doc = _dict(subject='Triage', brief='', ticket_status='Open', messages=[],
                     get_doc_before_save=lambda:None)
         self.fake.throw = Mock(side_effect=ValueError('Invalid ticket'))
         self.fake.session = _dict(user='Administrator')

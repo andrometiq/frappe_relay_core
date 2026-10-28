@@ -14,7 +14,7 @@ def handoff(run, skill, reason):
         owner = next((user for user in (skill.get('handoff_owner'), fallback) if eligible(user, message)), None)
         if not owner:
             raise ValueError('Configure an accessible handoff owner or fallback owner')
-        ticket = ensure_episode(message, owner=owner, skill=skill, run=run,
+        ticket = ensure_episode(message, owner=owner, run=run,
                                 subject='Conversation needs a person', reason=reason)
         hold_episode(ticket.name)
         run.ticket, run.status, run.reason = ticket.name, 'Handoff', reason[:500]

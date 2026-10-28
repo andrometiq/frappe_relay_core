@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { TICKET_PRIORITIES, distinctPeople, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
+import { distinctPeople, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
 
 test('ticket subject uses the message text on one line within the subject limit', () => {
   assert.equal(ticketSubject({ content: '  Parcel\n arrived   damaged ' }), 'Parcel arrived damaged')
@@ -10,12 +10,12 @@ test('ticket subject uses the message text on one line within the subject limit'
   assert.equal(ticketSubject(null, 'Follow up'), 'Follow up')
 })
 
-test('ticket payload trims text and sends assignee, tags and quoted message', () => {
-  const form = { subject: ' Damaged ', brief: ' Call back ', priority: 'High', assignedTo: 'a@example.invalid', tagged: ['b@example.invalid'] }
-  assert.deepEqual(ticketPayload(form, ['RELAY-MSG-0000000001']), { subject: 'Damaged', brief: 'Call back', priority: 'High',
-    assigned_to: 'a@example.invalid', tagged: ['b@example.invalid'], messages: ['RELAY-MSG-0000000001'] })
+test('ticket payload trims text and sends assignee, type and quoted message', () => {
+  const form = { subject: ' Damaged ', brief: ' Call back ', ticketType: '', assignedTo: 'a@example.invalid' }
+  assert.deepEqual(ticketPayload(form, ['RELAY-MSG-0000000001']), { subject: 'Damaged', brief: 'Call back',
+    assigned_to: 'a@example.invalid', messages: ['RELAY-MSG-0000000001'] })
   assert.equal(ticketPayload({ ...form, assignedTo: '' }, []).assigned_to, '')
-  assert.deepEqual(TICKET_PRIORITIES, ['Low', 'Medium', 'High', 'Urgent'])
+  assert.equal(ticketPayload({ ...form, ticketType: 'Payment' }, []).ticket_type, 'Payment')
 })
 
 test('mentions add one @name to the comment text', () => {
@@ -38,9 +38,6 @@ test('chat header and message menu open the create ticket dialog', async () => {
   assert.match(inbox, /isMobile\.value && contactRows\.value\.length \? \[\{label:'Create ticket from this chat'/)
   assert.match(inbox, /@ticket="openTicket"/)
   assert.match(thread, /label: "Create ticket",\s*icon: "bookmark",\s*onClick: \(\) => emit\("ticket", message\)/)
-  const tickets = await readFile(new URL('../src/components/tickets/TicketFilters.vue', import.meta.url), 'utf8')
-  assert.match(tickets, /value: 'assigned', label: 'Mine'/)
-  assert.match(tickets, /value: 'tagged', label: 'Tagged me'/)
 })
 
 test('people with the same name show their login so a picker never lists one name twice', () => {

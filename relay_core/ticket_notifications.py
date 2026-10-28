@@ -110,7 +110,7 @@ def destinations(query='', after=None):
 
 def on_update(doc, method=None):
     previous = doc.get_doc_before_save()
-    if not previous or (previous.status == doc.status and previous.get('assigned_to') == doc.get('assigned_to')):
+    if not previous or (previous.get('ticket_status') == doc.get('ticket_status') and previous.get('assigned_to') == doc.get('assigned_to')):
         return
     # Ticket changes are transactionally journaled. Recovery submits with the same
     # provider request key after crashes, including a crash after provider acceptance.
@@ -118,7 +118,7 @@ def on_update(doc, method=None):
                                    fields=['name'], limit_page_length=101)
     if len(subscriptions)>100:
         frappe.throw('Ticket notification subscriber limit exceeded')
-    body = f'{doc.name}: {doc.subject}\nStatus: {doc.status}\nAssigned to: {doc.get("assigned_to") or "Unassigned"}'
+    body = f'{doc.name}: {doc.subject}\nStatus: {doc.get("ticket_status")}\nAssigned to: {doc.get("assigned_to") or "Unassigned"}'
     body += '\n'+frappe.utils.get_url('/relay#/tickets?ticket='+doc.name)
     old = getattr(frappe.flags, 'relay_automation_internal', False)
     frappe.flags.relay_automation_internal = True

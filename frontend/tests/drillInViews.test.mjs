@@ -27,15 +27,16 @@ async function component(t, file, values, bindings) {
   return state
 }
 
-function tickets(t) {
+function tickets(t, calls = []) {
   const api = async (method, values) => {
+    calls.push([method, values])
     if (method === 'tickets.directory') return { items: [{ name: 'T-1' }, { name: 'T-2' }] }
     if (values.name === 'T-MISSING') throw Error('Ticket not found')
     if (method === 'tickets.read') return { name: values.name, status: 'Open' }
     return { items: [], next: null }
   }
   return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters,
-    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page'])
+    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {
@@ -46,6 +47,15 @@ test('a ticket opened from the list adds one entry, switching replaces it and Ba
   assert.deepEqual(page.entries(), ['#/tickets', '#/tickets?ticket=T-2'])
   page.history.back()
   assert.equal(state.selected.value, null)
+})
+
+test('status tabs and Assigned to me filter the ticket list', async t => {
+  browser(t, '#/tickets')
+  const calls = []
+  const state = await tickets(t, calls)
+  state.setFilter({ ticket_status: 'Closed', mine: 1 })
+  await new Promise(resolve => setTimeout(resolve, 350))
+  assert.deepEqual(calls.filter(([method]) => method === 'tickets.directory').at(-1)[1], { query: '', ticket_status: 'Closed', mine: 1 })
 })
 
 test('Dismiss returns to the ticket list entry', async t => {

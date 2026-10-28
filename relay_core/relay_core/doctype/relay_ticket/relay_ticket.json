@@ -6,26 +6,17 @@
   "field_order": [
     "subject",
     "brief",
-    "category",
     "ticket_type",
-    "status",
     "ticket_status",
     "assigned_to",
-    "priority",
-    "watchers",
     "messages",
     "source_action_key",
     "business_doctype",
     "business_name",
-    "handoff_reason",
-    "source_run",
     "conversation_key",
     "company",
-    "skill",
-    "skill_version",
     "ai_disabled",
     "generation",
-    "pending_run",
     "active_scope_key",
     "source_hub_event",
     "source_provider_message_key",
@@ -45,29 +36,14 @@
       "fieldtype": "Small Text"
     },
     {
-      "fieldname": "category",
-      "label": "Category",
-      "fieldtype": "Link",
-      "options": "Relay Ticket Category",
-      "reqd": 1
-    },
-    {
       "fieldname": "ticket_type",
       "label": "Type",
       "fieldtype": "Link",
       "options": "Relay Ticket Type"
     },
     {
-      "fieldname": "status",
-      "label": "State",
-      "fieldtype": "Select",
-      "options": "Open\nIn progress\nResolved\nClosed",
-      "default": "Open",
-      "reqd": 1
-    },
-    {
       "fieldname": "ticket_status",
-      "label": "Ticket status",
+      "label": "Status",
       "fieldtype": "Link",
       "options": "Relay Ticket Status"
     },
@@ -90,19 +66,6 @@
       "options": "User"
     },
     {
-      "fieldname": "priority",
-      "label": "Priority",
-      "fieldtype": "Select",
-      "options": "Low\nMedium\nHigh\nUrgent",
-      "default": "Medium"
-    },
-    {
-      "fieldname": "watchers",
-      "label": "Tagged Users",
-      "fieldtype": "Table",
-      "options": "Relay Ticket Watcher"
-    },
-    {
       "fieldname": "business_doctype",
       "label": "Business Doctype",
       "fieldtype": "Link",
@@ -112,19 +75,6 @@
       "fieldname": "business_name",
       "label": "Business Name",
       "fieldtype": "Data"
-    },
-    {
-      "fieldname": "handoff_reason",
-      "label": "Handoff Reason",
-      "fieldtype": "Small Text",
-      "read_only": 1
-    },
-    {
-      "fieldname": "source_run",
-      "label": "Source Run",
-      "fieldtype": "Link",
-      "options": "Relay Automation Run",
-      "read_only": 1
     },
     {
       "fieldname": "conversation_key",
@@ -141,19 +91,6 @@
       "read_only": 1
     },
     {
-      "fieldname": "skill",
-      "fieldtype": "Link",
-      "label": "Skill",
-      "options": "Relay AI Skill",
-      "read_only": 1
-    },
-    {
-      "fieldname": "skill_version",
-      "fieldtype": "Data",
-      "label": "Skill version",
-      "read_only": 1
-    },
-    {
       "fieldname": "ai_disabled",
       "fieldtype": "Check",
       "label": "Ai disabled",
@@ -165,13 +102,6 @@
       "fieldtype": "Int",
       "label": "Generation",
       "default": "0",
-      "read_only": 1
-    },
-    {
-      "fieldname": "pending_run",
-      "fieldtype": "Link",
-      "label": "Pending run",
-      "options": "Relay Automation Run",
       "read_only": 1
     },
     {
@@ -246,5 +176,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-28 15:00:00.000000"
+  "modified": "2026-10-28 18:00:00.000000"
 }

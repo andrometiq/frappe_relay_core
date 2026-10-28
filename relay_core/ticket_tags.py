@@ -1,15 +1,13 @@
-"""Ticket priority, tagged users and comments. Assignees and tagged users get Frappe notifications."""
+"""Ticket comments and notifications. Assignees and mentioned users get Frappe notifications."""
 import html
 import frappe
 from relay_core.permissions import require_access
 from relay_core.api import validate_reference
 
-PRIORITIES = ('Low', 'Medium', 'High', 'Urgent')
-MAX_TAGGED = 20
 MAX_MENTIONS = 10
 
 
-def user_list(values, limit=MAX_TAGGED):
+def user_list(values, limit=MAX_MENTIONS):
     values = frappe.parse_json(values) if isinstance(values, str) else values or []
     if (not isinstance(values, list) or len(values) > limit
             or any(not isinstance(user, str) or not user or len(user) > 140 for user in values)
@@ -26,22 +24,6 @@ def can_follow(ticket, user):
     return frappe.has_permission('Relay Contact', 'read', user=user) and bool(permission(ticket, user))
 
 
-def tagged(doc):
-    return [row.user for row in doc.get('watchers') or []]
-
-
-def validate(doc):
-    if (doc.get('priority') or 'Medium') not in PRIORITIES:
-        frappe.throw('Invalid ticket priority')
-    users = tagged(doc)
-    user_list(users)
-    previous = doc.get_doc_before_save()
-    before = set(tagged(previous)) if previous else set()
-    for user in users:
-        if user not in before and not can_follow(doc, user):
-            frappe.throw('A tagged colleague cannot access this conversation', frappe.PermissionError)
-
-
 def message_business(names):
     """The one business all messages are explicitly filed under, when the caller can read it."""
     targets = {tuple(frappe.db.get_value('Relay Message', name, ['business_doctype', 'business_name']) or ())
@@ -55,7 +37,7 @@ def message_business(names):
 
 
 def on_update(doc):
-    """Notify a new assignee and newly tagged users. Internal episode transitions stay silent."""
+    """Notify a new assignee. Internal episode transitions stay silent."""
     from relay_core.tickets import _episode_transition
     if _episode_transition.get() is doc:
         return
@@ -64,11 +46,6 @@ def on_update(doc):
     actor = frappe.utils.get_fullname(frappe.session.user)
     if assignee and assignee != (previous.get('assigned_to') if previous else None):
         notify(doc, [assignee], 'Assignment', f'{actor} assigned you a ticket')
-    if doc.flags.relay_quiet_tags:
-        return
-    before = set(tagged(previous)) if previous else set()
-    added = [user for user in tagged(doc) if user not in before and user != assignee]
-    notify(doc, added, 'Mention', f'{actor} tagged you on a ticket')
 
 
 def notify(doc, users, kind, action):
@@ -95,16 +72,6 @@ def locked_ticket(name):
     return doc
 
 
-@frappe.whitelist(methods=['POST'])
-def set_tagged(name, users):
-    users = user_list(users)
-    doc = locked_ticket(name)
-    doc.set('watchers', [{'user': user} for user in users])
-    doc.save()
-    from relay_core.tickets import read
-    return read(name)
-
-
 @frappe.whitelist(methods=['GET'])
 def comments(name):
     from relay_core.tickets import read
@@ -119,23 +86,17 @@ def comments(name):
 
 @frappe.whitelist(methods=['POST'])
 def add_comment(name, body, mentions=None):
-    """Mentioned users must read the ticket; they join the tagged list and get a notification."""
+    """Mentioned users must read the ticket; they get a notification."""
     if not isinstance(body, str) or not 1 <= len(body.strip()) <= 4000:
         frappe.throw('Comment must contain 1–4000 characters')
-    users = user_list(mentions, MAX_MENTIONS)
+    users = user_list(mentions)
     doc = locked_ticket(name)
     if any(not can_follow(doc, user) for user in users):
         frappe.throw('A mentioned colleague cannot access this conversation', frappe.PermissionError)
     frappe.get_doc({'doctype': 'Comment', 'comment_type': 'Comment', 'reference_doctype': 'Relay Ticket',
         'reference_name': doc.name, 'content': html.escape(body.strip()), 'comment_email': frappe.session.user,
         'comment_by': frappe.utils.get_fullname(frappe.session.user)}).insert(ignore_permissions=True)
-    new = [user for user in users if user not in tagged(doc)]
-    if new:
-        doc.extend('watchers', [{'user': user} for user in new])
-        doc.flags.relay_quiet_tags = True
-        doc.save()
-    else:
-        from relay_core.realtime import changed
-        changed(doc)
+    from relay_core.realtime import changed
+    changed(doc)
     notify(doc, users, 'Mention', f'{frappe.utils.get_fullname(frappe.session.user)} mentioned you on a ticket')
     return comments(name)

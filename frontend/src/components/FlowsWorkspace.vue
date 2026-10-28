@@ -7,8 +7,6 @@ import { coreApi } from '../services/coreApi'
 import { linkedTitle } from '../services/linkedTitle'
 import { CONTENT_TYPES, INPUT_TYPES, OPERATORS, STEP_KINDS, choicesText, flowValues, hasUnpublished, moveStep, newFlow, newStep, nextLabel, parseChoices, removeStep, renameStep, stepLabel, triggerSummary } from '../services/flowEditor'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { useTicketSettings } from '../composables/useTicketSettings'
-import { pickerOptions } from '../services/ticketSettings'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
@@ -78,8 +76,7 @@ async function openLegacy() {
   if (row) await open(row)
 }
 useDebouncedSearch(query, () => load(), () => { ++generation; rows.value = []; next.value = null })
-const { settings: ticketSettings, load: loadTicketSettings } = useTicketSettings()
-onMounted(async () => { if (!capabilities.value.flows) return; loadTicketSettings().catch(() => {}); await load(); coreApi('flows.actions.catalog').then(rows => { catalog.value = rows }).catch(() => {}); openLegacy().catch(() => {}) })
+onMounted(async () => { if (!capabilities.value.flows) return; await load(); coreApi('flows.actions.catalog').then(rows => { catalog.value = rows }).catch(() => {}); openLegacy().catch(() => {}) })
 onBeforeUnmount(() => { ++generation })
 useRealtimeRefresh(['Relay Flow'], ['flows'], () => load())
 const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(true) })
@@ -139,7 +136,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                   <FormControl v-model="step._arguments" type="textarea" rows="3" label="Arguments (JSON; {&quot;var&quot;: &quot;answer&quot;} uses an answer)" class="flow-code" :disabled="busy" />
                 </template>
                 <FormControl v-if="step.kind === 'wait'" v-model="step.seconds" type="number" min="1" max="86400" label="Seconds" :disabled="busy" />
-                <FormControl v-if="step.kind === 'ticket'" v-model="step.category" type="select" label="Ticket category" :options="pickerOptions(ticketSettings.categories, step.category, 'Default category')" :disabled="busy" />
                 <div v-if="step.kind === 'topic'" class="grid gap-3 sm:grid-cols-3"><FormControl v-model="step.title" label="Topic title" :disabled="busy" /><FormControl v-model="step.category" label="Category" :disabled="busy" /><FormControl v-model="step.status" type="select" label="Status" :options="['Open', 'Waiting', 'Resolved', 'Archived']" :disabled="busy" /></div>
                 <div class="flow-step-footer">
                   <FormControl v-if="!['end', 'handoff', 'condition'].includes(step.kind)" v-model="step.next" type="select" label="Then go to" :options="[{ value: '', label: 'The following step' }, ...stepOptions.filter(option => option.value !== step.id)]" :disabled="busy" />
