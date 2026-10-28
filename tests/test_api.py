@@ -216,9 +216,13 @@ class ChannelUITests(unittest.TestCase):
         self.assertEqual(len(result['items']), 30)
         self.assertEqual(result['next'], '29')
         query = self.f.get_list.call_args.kwargs
-        self.assertEqual(query['filters']['full_name'], ['like', '%a\\%\\_%'])
-        self.assertEqual(query['filters']['name'], ['>', 'before'])
+        self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before'], ['Contact', 'full_name', 'like', '%a\\%\\_%']])
         self.assertEqual(query['page_length'], 31)
+        self.api.business_types = Mock(return_value=['Customer'])
+        self.api.contact_directory('', None, 'Customer')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], [['Dynamic Link', 'link_doctype', '=', 'Customer']])
+        self.assertTrue(self.f.get_list.call_args.kwargs['distinct'])
+        with self.assertRaises(ValueError): self.api.contact_directory('', None, 'User')
         self.api.require_access.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_directory()
         for value in ({}, 'a' * 81):
