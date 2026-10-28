@@ -5,6 +5,7 @@ import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
+import ChatPanel from "./ChatPanel.vue";
 import { coreApi } from "../../services/coreApi";
 import { stableSubmission } from "../../services/submission";
 const props = defineProps({
@@ -13,7 +14,7 @@ const props = defineProps({
   businessName: String,
   messages: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["close", "open", "clear-messages"]);
+const emit = defineEmits(["close", "open", "clear-messages", "added"]);
 const rows = ref([]),
   body = ref(""),
   error = ref(""),
@@ -107,6 +108,7 @@ async function submit() {
       );
     }
     if (ticket !== generation) return;
+    if (!editing.value) emit("added");
     body.value = "";
     editing.value = null;
     reply.value = null;
@@ -130,14 +132,7 @@ const notesViewport = ref(null)
 const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesViewport, preserveScroll: true, error: error, load: () => run(() => load(true)) })
 </script>
 <template>
-  <aside class="internal-notes" aria-label="Internal notes">
-    <header>
-      <div>
-        <h2>Internal notes</h2>
-        <p>Visible to colleagues with conversation access.</p>
-      </div>
-      <Button icon="x" label="Close internal notes" @click="emit('close')" />
-    </header>
+  <ChatPanel class="internal-notes" title="Internal notes" subtitle="Only your team sees these notes." @close="emit('close')">
     <ErrorMessage :message="error" />
     <div ref="notesViewport" class="notes-list">
       <Button v-if="updatesAvailable" label="New note updates" :disabled="busy" @click="run(()=>load())" />
@@ -224,7 +219,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesView
       </div>
       <div v-if="reply || editing" class="note-selected">
         {{ editing ? "Editing note" : "Replying to " + reply.author_name
-        }}<Button icon="x" label="Cancel note reply or edit" @click="cancel" />
+        }}<Button icon="x" aria-label="Cancel note reply or edit" title="Cancel note reply or edit" @click="cancel" />
       </div>
       <details v-if="!editing">
         <summary class="text-xs cursor-pointer">
@@ -248,38 +243,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesView
         :disabled="busy || !body.trim()"
       />
     </form>
-  </aside>
+  </ChatPanel>
 </template>
 <style scoped>
-.internal-notes {
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: 360px;
-  max-width: 100%;
-  z-index: 20;
-  @apply bg-surface-white text-ink-gray-8;
-  @apply border-l border-outline-gray-2;
-  box-shadow: -10px 0 35px #0000000a;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.internal-notes header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px;
-  @apply border-b border-outline-gray-2;
-}
-.internal-notes h2 {
-  font-size: 15px;
-  font-weight: 600;
-}
-.internal-notes header p {
-  font-size: 11px;
-  @apply text-ink-gray-5;
-  margin-top: 4px;
-}
 .notes-list {
   padding: 16px;
   flex: 1;

@@ -132,3 +132,4 @@ class FlowSwitch(unittest.TestCase):
         site.db.get_single_value.side_effect = frappe.ValidationError('missing field')
         with patch.object(features, 'frappe', site):
             self.assertFalse(features.is_enabled('flows'))
+        site.clear_last_message.assert_called_once_with()

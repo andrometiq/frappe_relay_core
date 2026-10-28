@@ -29,7 +29,7 @@ onBeforeUnmount(close)
 </script>
 <template>
  <div v-if="readers.length" class="message-readers" @pointerdown.stop>
-  <button ref="trigger" type="button" class="reader-summary" aria-label="Open team read details" :aria-expanded="open" @click.stop="toggle">
+  <button ref="trigger" type="button" class="reader-summary" aria-label="Open team read details" :title="'Seen by ' + readers.map(name).join(', ')" :aria-expanded="open" @click.stop="toggle">
    <span class="read-coverage" :class="{complete:coverage?.complete}">Seen by<template v-if="readers.length > 2"> {{readers.length}}</template></span>
    <span class="reader-stack" aria-hidden="true"><span v-for="reader in readers.slice(0,2)" :key="reader.user" class="reader-avatar" :class="avatarTone(name(reader))"><img v-if="avatar(reader)" :src="avatar(reader)" alt="" /><em v-else>{{initials(reader)}}</em></span></span>
   </button>

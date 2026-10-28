@@ -23,7 +23,7 @@ const search = computed(() => {
   const values = params.value, method = props.method
   return async (query, signal) => (await coreApi(method, {...values, query}, false, {signal})).items.map(caption)
 })
-const field = computed(() => ({label: props.label, readOnly: props.disabled, inlineResults: true, initialOptions: captions.value,
+const field = computed(() => ({label: props.label, readOnly: props.disabled, initialOptions: captions.value,
   search: search.value,
 }))
 </script>

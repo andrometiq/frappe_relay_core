@@ -70,7 +70,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
     <aside v-if="open" aria-label="Notifications" class="notification-panel">
       <header>
         <h2>Notifications</h2>
-        <Button icon="x" label="Close notifications" @click="open = false" />
+        <Button icon="x" aria-label="Close notifications" title="Close notifications" @click="open = false" />
       </header>
       <ErrorMessage :message="error" />
       <div class="notification-rows"><p v-if="busy" role="status">Loading notifications…</p>

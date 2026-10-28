@@ -54,6 +54,12 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(sql, 'e.channel=%(channel)s AND e.verified=1 AND (`tabRelay Contact`.contact IN '
                               '(SELECT name FROM `tabContact`)) AND (1=1)')
 
+    def test_contacts_added_by_hand_without_a_filter_pick_only_those_contacts(self):
+        sql, values = campaign_audience.where('WA', campaign_audience.checked({'include': ['C1'], 'exclude': ['C2']}))
+        self.assertEqual(values, {'channel': 'WA', 'include': ('C1',), 'exclude': ('C2',)})
+        self.assertIn('AND (`tabRelay Contact`.name IN %(include)s) AND', sql)
+        self.assertNotIn('1=1', sql)
+
     def test_filters_outside_the_offered_choices_are_refused(self):
         for audience in ({'doctype': 'Item'}, {'segments': {'territory': 'South'}},
                          {'doctype': 'Customer', 'segments': {'credit_limit': '1'}}, {'number': '+91 98'},

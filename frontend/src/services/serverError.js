@@ -1,3 +1,6 @@
+const ENTITIES = { '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&amp;': '&' }
+const plain = text => text.replace(/<[^>]*>/g, '').replace(/&(?:lt|gt|quot|#39|amp);/g, entity => ENTITIES[entity])
+
 // Render validation messages as text; never expose traceback/exception payloads.
 export function serverError(body, fallback) {
   let messages = body?._server_messages
@@ -5,11 +8,11 @@ export function serverError(body, fallback) {
   if (Array.isArray(messages)) {
     const text = messages.map(item => {
       try { if (typeof item === 'string') item = JSON.parse(item) } catch { return '' }
-      return typeof item?.message === 'string' ? item.message.replace(/<[^>]*>/g, '') : ''
+      return typeof item?.message === 'string' ? plain(item.message) : ''
     }).filter(Boolean).join('\n')
     if (text) return text
   }
-  return typeof body?.message === 'string' ? body.message.replace(/<[^>]*>/g, '') : fallback
+  return typeof body?.message === 'string' ? plain(body.message) : fallback
 }
 
 // A provider that answered with a web page (for example a 404) stored the whole page as the error; show a short reason.

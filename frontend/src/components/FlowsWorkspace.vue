@@ -101,7 +101,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
         <form v-if="draft" ref="editor" class="workflow-card min-w-0 flow-editor" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? draft.title || 'Flow' : 'New flow' }}</h2>
             <div class="flow-badges"><Badge v-if="draft.name" :label="draft.enabled ? 'Enabled' : 'Disabled'" :theme="draft.enabled ? 'green' : 'gray'" /><Badge v-if="draft.name && hasUnpublished(draft)" label="Unpublished changes" theme="orange" /><Badge v-if="draft.legacy_key" label="Imported" theme="blue" /></div>
-            <Button label="Close" :disabled="busy" @click="draft = null" /></div>
+            <Button icon="x" aria-label="Close flow editor" title="Close flow editor" :disabled="busy" @click="draft = null" /></div>
           <p v-if="draft.missing_actions?.length" class="flow-warning" role="alert">Register these business actions before you enable the flow: {{ draft.missing_actions.join(', ') }}</p>
           <fieldset class="automation-section"><legend>Details</legend>
             <FormControl v-model="draft.title" label="Title" required maxlength="140" :disabled="busy" />

@@ -59,7 +59,7 @@ export async function frappeRequest(
 }
 export async function coreApi(method, values = {}, write = false, options = {}) {
   const result = await frappeRequest("relay_core." + method, values, write, options);
-  if (write && (method === 'message_reads.mark' || method === 'business_inbox.mark_visible' ||
+  if (write && (['message_reads.mark', 'message_reads.mark_chat', 'business_inbox.mark_visible'].includes(method) ||
     (['inbox.update', 'business_inbox.read'].includes(method) && values.last_read))) invalidateReads();
   return result;
 }

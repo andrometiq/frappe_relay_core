@@ -1,12 +1,14 @@
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { coreApi } from "../services/coreApi";
-import { cleanAudience, emptyAudience } from "../services/campaignAudience";
+import { cleanAudience, emptyAudience, hasAudienceChoice } from "../services/campaignAudience";
 
 const WAIT_MS = 300;
 
 // Contact filters of a Draft campaign with a live count; the last request wins.
-export function useCampaignAudience(campaign) {
+// Nothing is counted until a filter, an added contact or `everyone` picks people.
+export function useCampaignAudience(campaign, everyone) {
   const options = ref(null), audience = ref(emptyAudience()), mapping = ref({ fields: {}, fixed: {} });
+  const chosen = computed(() => hasAudienceChoice(audience.value, everyone.value));
   const preview = ref(null), found = ref([]), error = ref(""), busy = ref(false), counting = ref(false);
   let countTimer = null, searchTimer = null, asked = 0;
 
@@ -23,6 +25,7 @@ export function useCampaignAudience(campaign) {
 
   async function count() {
     const ticket = ++asked;
+    if (!chosen.value) { preview.value = null; counting.value = false; return; }
     counting.value = true;
     try {
       const result = await coreApi("campaign_audience.preview", { name: campaign.value.name, audience: cleanAudience(audience.value) }, true);
@@ -49,7 +52,7 @@ export function useCampaignAudience(campaign) {
     } catch (e) { error.value = e.message; } finally { busy.value = false; }
   }
 
-  watch(audience, () => { clearTimeout(countTimer); countTimer = setTimeout(count, WAIT_MS); }, { deep: true });
+  watch([audience, chosen], () => { clearTimeout(countTimer); countTimer = setTimeout(count, WAIT_MS); }, { deep: true });
   onBeforeUnmount(() => { clearTimeout(countTimer); clearTimeout(searchTimer); });
-  return { options, audience, mapping, preview, found, error, busy, counting, load, search, importContacts };
+  return { options, audience, chosen, mapping, preview, found, error, busy, counting, load, search, importContacts };
 }

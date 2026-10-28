@@ -30,6 +30,12 @@ export function dropContact(audience, contact, list) {
   return { ...audience, [list]: audience[list].filter((name) => name !== contact) };
 }
 
+// Nothing is picked until the user sets a filter, adds a contact or chooses everyone on the number.
+export function hasAudienceChoice(audience, everyone) {
+  const chosen = cleanAudience(audience);
+  return everyone || Object.keys(chosen).some((key) => key !== "exclude");
+}
+
 export function audienceSummary(preview) {
   if (!preview) return "";
   const count = preview.count.toLocaleString();
@@ -63,4 +69,12 @@ export function siteTime(value) {
 export function scheduleNotice(campaign) {
   if (campaign?.status !== "Scheduled" || !campaign.scheduled_at) return "";
   return `Starts on ${inputTime(campaign.scheduled_at).replace("T", " at ")} (${campaign.time_zone || "site time"}).`;
+}
+
+// A CSV the user can fill in: the mobile number column, then one column per value the message needs.
+export function sampleSheet(fields) {
+  const columns = ["mobile number", ...(fields || []).map((field) => field.media ? "image url" : field.name || field.label)];
+  const example = ["919876543210", ...(fields || []).map((field) => field.media ? "https://example.com/photo.jpg" : "Example")];
+  const cell = (value) => /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  return [columns, example].map((row) => row.map(cell).join(",")).join("\n") + "\n";
 }

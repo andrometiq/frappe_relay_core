@@ -1,5 +1,5 @@
 // Phone tab bar: these pages get a tab when the user may see them; every other allowed page goes to More.
-const TAB_PAGES = ['Messages', 'Tickets', 'WhatsApp']
+const TAB_PAGES = ['Messages', 'Tickets', 'Contacts']
 
 export function splitMobileNav(items) {
   const tabs = TAB_PAGES.map(name => items.find(item => item.name === name)).filter(Boolean)

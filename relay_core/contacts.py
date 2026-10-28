@@ -23,9 +23,18 @@ def business_links(links):
     return list(dict.fromkeys(result))
 
 
+HIDDEN_CHARACTERS = {*range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2066, 0x206A)}
+
+
 def display_name(value):
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 140 or any(ord(c) < 32 for c in value):
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 140:
         frappe.throw('Enter a name of at most 140 characters')
+    if any(c in '<>' for c in value):
+        frappe.throw('Name cannot contain < or >')
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        frappe.throw('Name cannot contain tabs or line breaks')
+    if any(ord(c) in HIDDEN_CHARACTERS for c in value):
+        frappe.throw('Name cannot contain hidden or direction-control characters')
     return value.strip()
 
 

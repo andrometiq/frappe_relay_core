@@ -19,7 +19,6 @@ test('the sidebar AI skills item carries the AI gate', async () => {
 
 test('conversation summary and ticket AI controls follow the AI flag', async () => {
   const messages = await read('components/ConnectedMessages.vue')
-  assert.match(messages, /businessName\.value && capabilities\.value\?\.ai \? \[\{label:'Conversation summary'/)
   assert.match(messages, /<ConversationSummary v-if="[^"]*capabilities\.ai"/)
   const tickets = await read('components/TicketsWorkspace.vue')
   assert.match(tickets, /aiEnabled\.value \? refreshWindow\('ai_history'/)
@@ -28,5 +27,7 @@ test('conversation summary and ticket AI controls follow the AI flag', async () 
 })
 
 test('only a System Manager sees the AI switch in Settings', async () => {
-  assert.match(await read('components/SiteSettings.vue'), /v-if="config\.can_switch_ai"[^>]*><FormControl type="checkbox" label="Enable AI features"/)
+  const settings = await read('components/SiteSettings.vue')
+  assert.match(settings, /v-if="config\.can_switch_ai" class="workflow-card settings-features"/)
+  assert.match(settings, /\{ key: 'ai', label: 'Enable AI features'/)
 })

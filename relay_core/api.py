@@ -11,7 +11,8 @@ def validate_reference(value, prefix):
         if not isinstance(value, str) or not value.strip() or len(value) > 140 or any(ord(c) < 32 for c in value):
             frappe.throw('Invalid Relay channel reference')
         return
-    if not isinstance(value, str) or not re.fullmatch(r'RELAY-' + prefix + r'-[0-9]{10}', value):
+    pattern = r'TKT-[0-9]{5,12}' if prefix == 'TKT' else r'RELAY-' + prefix + r'-[0-9]{10}'
+    if not isinstance(value, str) or not re.fullmatch(pattern, value):
         frappe.throw('Invalid Relay record reference')
 
 

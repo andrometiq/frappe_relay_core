@@ -1,11 +1,27 @@
 <script setup>
 import { useLoadMore } from '../../composables/useLoadMore'
 import { recordTitle } from '../../services/recordTitle'
-import { computed, ref, watch, onBeforeUnmount, useId } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, useId, nextTick } from 'vue'
 const props = defineProps({field:Object, modelValue:[String,Object,Array], multiple:Boolean})
 const emit = defineEmits(['update:modelValue'])
 const id = useId(), query = ref(''), options = ref([]), open = ref(false), loading = ref(false), error = ref(''), active = ref(-1)
 const labels = new Map()
+// Results float above every container, so a dialog or card never clips them.
+const input = ref(null), results = ref(null), place = ref({})
+function position() {
+  const box = input.value?.getBoundingClientRect()
+  if (!box) return
+  const below = innerHeight - box.bottom, up = below < 220 && box.top > below
+  place.value = {left: box.left + 'px', width: box.width + 'px', maxHeight: Math.min(260, (up ? box.top : below) - 12) + 'px',
+    ...(up ? {bottom: innerHeight - box.top + 4 + 'px'} : {top: box.bottom + 4 + 'px'})}
+}
+watch(open, value => {
+  if (typeof window === 'undefined') return
+  const method = value ? 'addEventListener' : 'removeEventListener'
+  window[method]('scroll', position, true); window[method]('resize', position)
+  if (value) nextTick(position)
+})
+const inside = (event, target) => event.currentTarget.contains(target) || results.value?.contains(target)
 let timer, controller, generation = 0, composing = false
 const normalize = item => typeof item === 'string' ? {value:item,label:recordTitle(item)} : {...item,label:recordTitle(item)}
 const selected = computed(() => (props.multiple ? props.modelValue || [] : [props.modelValue]).filter(Boolean).map(v => typeof v === 'object' ? v.value : v))
@@ -68,16 +84,17 @@ async function loadMore() {
   finally { if (current === generation) loading.value = false }
 }
 const moreSentinel = useLoadMore({ loading: () => loading.value || props.field.loading, hasMore: () => open.value && props.field.hasMore, error: () => error.value || props.field.error, load: loadMore })
-onBeforeUnmount(cancel)
+onBeforeUnmount(() => { cancel(); open.value = false })
 </script>
 <template>
-  <div class="remote-choice" :class="{'inline-results':field.inlineResults}" @focusout="event => {if(!event.currentTarget.contains(event.relatedTarget))close()}">
+  <div class="remote-choice" @focusout="event => {if(!inside(event, event.relatedTarget))close()}">
     <label :for="id">{{field.label}}<span v-if="field.required"> *</span></label>
     <div v-if="selected.length" class="choice-selected">
       <span v-for="value in selected" :key="value" class="choice-chip">{{display(value)}}<button type="button" :aria-label="'Remove '+display(value)" :disabled="field.readOnly" @click="remove(value)">×</button></span>
     </div>
-    <input :id="id" v-model="query" role="combobox" autocomplete="off" :maxlength="field.maxLength || 80" :aria-expanded="open" :aria-controls="id+'-options'" :aria-activedescendant="open&&active>=0?id+'-'+active:undefined" :disabled="field.readOnly" :placeholder="field.placeholder || 'Type to search…'" @focus="focus" @input="schedule" @compositionstart="compositionStart" @compositionend="compositionEnd" @keydown="keydown" />
-    <div v-if="open" class="choice-results">
+    <input ref="input" :id="id" v-model="query" role="combobox" autocomplete="off" :maxlength="field.maxLength || 80" :aria-expanded="open" :aria-controls="id+'-options'" :aria-activedescendant="open&&active>=0?id+'-'+active:undefined" :disabled="field.readOnly" :placeholder="field.placeholder || 'Type to search…'" @focus="focus" @input="schedule" @compositionstart="compositionStart" @compositionend="compositionEnd" @keydown="keydown" />
+    <Teleport to="body">
+    <div v-if="open" ref="results" class="choice-results" :style="place" @mousedown.prevent>
       <p v-if="loading || field.loading" role="status">Searching…</p>
       <p v-if="error" role="alert">{{error}}</p>
       <ul :id="id+'-options'" role="listbox" :aria-multiselectable="multiple || undefined">
@@ -87,14 +104,14 @@ onBeforeUnmount(cancel)
       <div v-if="field.hasMore" ref="moreSentinel" class="h-px" aria-hidden="true" />
       <p v-if="!field.loadMore && options.length===30" class="choice-hint">Showing 30 matches. Refine your search.</p>
     </div>
+    </Teleport>
   </div>
 </template>
 <style scoped>
 .remote-choice{position:relative;min-width:0;display:grid;gap:6px;@apply text-base text-ink-gray-8}
 .remote-choice>label{@apply text-xs text-ink-gray-5}
-.remote-choice>input{width:100%;min-width:0;height:32px;border:1px solid var(--outline-gray-2);border-radius:6px;background:var(--surface-gray-1);padding:6px 9px;color:var(--ink-gray-8);font:inherit;outline:0}.remote-choice>input:focus{border-color:var(--outline-blue-2);background:var(--surface-white);box-shadow:0 0 0 2px color-mix(in srgb,var(--outline-blue-2) 18%,transparent)}
-.choice-results{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:260px;overflow:auto;@apply bg-surface-modal border border-outline-gray-modals rounded-lg shadow-lg p-1 text-ink-gray-8;animation:choice-appear 120ms ease-out}
-.inline-results .choice-results{position:static;margin-top:4px;box-shadow:none}
+.remote-choice>input{width:100%;min-width:0;height:32px;border:1px solid var(--relay-stroke,var(--outline-gray-2));border-bottom-color:var(--relay-stroke-strong,var(--outline-gray-2));border-radius:6px;background:var(--relay-layer,var(--surface-white));padding:6px 9px;color:var(--ink-gray-8);font:inherit;outline:0}.remote-choice>input:focus{border-color:var(--outline-blue-2);background:var(--surface-white);box-shadow:0 0 0 2px color-mix(in srgb,var(--outline-blue-2) 18%,transparent)}
+.choice-results{position:fixed;z-index:1200;max-height:260px;overflow:auto;@apply bg-surface-modal border border-outline-gray-modals rounded-lg shadow-lg p-1 text-ink-gray-8;animation:choice-appear 120ms ease-out}
 .choice-results li,.choice-results p{@apply px-2 py-1.5;overflow-wrap:anywhere}
 .choice-results li{@apply cursor-pointer rounded}
 .choice-results li:hover,.choice-results li.active{@apply bg-surface-gray-3}

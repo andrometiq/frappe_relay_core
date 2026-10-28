@@ -149,7 +149,7 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
     }
   }
   await touchTargets('.relay-menu button', () => page.locator(`[data-message="${secondMessage.name}"]`).getByRole('button', { name: 'Message actions', exact: true }).click())
-  await page.getByRole('menuitem', { name: 'Discuss internally', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Add internal note', exact: true }).click()
   await page.getByRole('textbox', { name: 'Internal note', exact: true }).fill('Local note for Bala only')
   await page.getByRole('button', { name: 'Add internal note', exact: true }).click()
   await page.getByText('Local note for Bala only', { exact: true }).waitFor()
@@ -183,7 +183,7 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
   }
   for (const width of [320, 390, 640, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
-    for (const [route, text] of [['messages','Inbox'], ['contacts','Contacts & Links'], ['whatsapp','WhatsApp'], ['teams','Teams & Access'], ['settings','Settings & Setup'], ['activity','Activity & Health']]) {
+    for (const [route, text] of [['messages','Chats'], ['contacts','Contacts'], ['whatsapp','WhatsApp'], ['teams','Teams & access'], ['settings','Settings'], ['activity','Activity & health']]) {
       await page.goto(origin + '/#/' + route)
       await page.getByRole('heading', { name: text, exact: true }).first().waitFor()
       await page.waitForTimeout(160)
@@ -192,8 +192,8 @@ export default async function v1Acceptance(browser, origin = 'http://127.0.0.1:1
     }
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole('button', { name: 'Open navigation', exact: true }).click()
-  await page.getByRole('button', { name: 'Settings & Setup', exact: true }).click()
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('heading', { name: 'Setup checklist' }).waitFor()
   await page.goto(origin + '/#/whatsapp')
   await page.getByText('order_update', { exact: true }).waitFor()

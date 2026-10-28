@@ -1,16 +1,20 @@
 <script setup>
 import ChoiceField from '../fields/ChoiceField.vue'
-import { recordTitle } from '../../services/recordTitle'
+import { readableName, recordTitle } from '../../services/recordTitle'
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { Badge, Button, ErrorMessage, TextInput } from "@relay/ui";
+import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
 import { useCampaignAudience } from "../../composables/useCampaignAudience";
-import { audienceSummary, cleanAudience, dropContact, missingValues, pickContact, valueOptions } from "../../services/campaignAudience";
+import { audienceSummary, dropContact, emptyAudience, hasAudienceChoice, missingValues, pickContact, valueOptions } from "../../services/campaignAudience";
 
 const props = defineProps({ campaign: Object, uploadMedia: Function });
 const emit = defineEmits(["imported"]);
 const campaign = computed(() => props.campaign);
-const { options, audience, mapping, preview, found, error, busy, counting, load, search, importContacts } = useCampaignAudience(campaign);
+// A saved audience without filters or added contacts was "everyone on this number".
+const everyone = ref(Boolean(props.campaign.audience) && !hasAudienceChoice(props.campaign.audience, false));
+const { options, audience, chosen, mapping, preview, found, error, busy, counting, load, search, importContacts } = useCampaignAudience(campaign, everyone);
+// Everyone means no filters; contacts removed by hand stay removed.
+watch(everyone, (value) => { if (value) audience.value = { ...emptyAudience(), exclude: audience.value.exclude }; });
 const query = ref(""), mediaFile = ref("");
 const known = reactive({});
 
@@ -20,7 +24,6 @@ const segments = computed(() => options.value?.types.find((row) => row.doctype =
 const missing = computed(() => missingValues(props.campaign.fields, mapping.value));
 const ready = computed(() => preview.value?.count > 0 && !missing.value.length);
 
-const filtered = computed(() => Object.keys(cleanAudience(audience.value)).some((key) => key !== "include" && key !== "exclude"));
 // Names of contacts seen in the list or the search, for the added and removed chips.
 watch(() => [preview.value?.sample, found.value], (lists) => { for (const row of lists.flat()) if (row) known[row.contact] = row; });
 const label = (contact) => known[contact] ? `${known[contact].name} · +${known[contact].number}` : recordTitle(contact, 'Contact');
@@ -52,32 +55,33 @@ onMounted(load);
 <template>
   <div class="audience">
     <ErrorMessage v-if="error" :message="error" />
-    <div class="audience-filters">
-      <ChoiceField v-model="audience.tag" :field="{ label: 'Tag', options: tagOptions, readOnly: false }" />
-      <ChoiceField :model-value="audience.doctype" :field="{ label: 'Linked to', options: typeOptions, readOnly: false }" @update:model-value="chooseType" />
+    <FormControl v-model="everyone" type="checkbox" label="Everyone with a WhatsApp number here" />
+    <p v-if="!everyone" class="audience-hint">Or narrow it down with filters, or add people by name below.</p>
+    <div v-if="!everyone" class="audience-filters">
+      <ChoiceField v-model="audience.tag" :field="{ label: 'Tag', placeholder: 'Any tag', options: tagOptions, readOnly: false }" />
+      <ChoiceField :model-value="audience.doctype" :field="{ label: 'Linked to', placeholder: 'Any record type', options: typeOptions, readOnly: false }" @update:model-value="chooseType" />
       <RelaySelect v-for="segment in segments" :key="segment.field" :model-value="audience.segments[segment.field] || ''"
         :label="segment.label" :options="[{ value: '', label: 'Any' }, ...segment.options]" @update:model-value="setSegment(segment.field, $event)" />
       <label class="audience-field"><span>Number contains</span><TextInput v-model="audience.number" inputmode="numeric" placeholder="9198" /></label>
-      <label class="audience-field"><span>Last message from</span><TextInput v-model="audience.last_message_from" type="date" /></label>
-      <label class="audience-field"><span>Last message to</span><TextInput v-model="audience.last_message_to" type="date" /></label>
+      <label class="audience-field"><span>Last message on or after</span><TextInput v-model="audience.last_message_from" type="date" /></label>
+      <label class="audience-field"><span>Last message on or before</span><TextInput v-model="audience.last_message_to" type="date" /></label>
     </div>
-    <p class="audience-count" role="status">{{ counting && !preview ? "Counting…" : audienceSummary(preview) }}
-      <small v-if="!filtered">No filter: every contact on this number.</small></p>
+    <p class="audience-count" role="status">{{ !chosen ? "No people chosen yet." : counting && !preview ? "Counting…" : audienceSummary(preview) }}</p>
 
     <div v-if="preview?.sample.length" class="audience-rows" role="table" aria-label="Matched contacts">
       <div v-for="row in preview.sample" :key="row.contact + row.number" role="row">
-        <span>{{ row.name }}</span><span>+{{ row.number }}</span>
+        <span>{{ readableName(row.name, 'Contact') }}</span><span>+{{ row.number }}</span>
         <Badge v-if="row.opted_out" label="Opted out" theme="orange" /><span v-else />
-        <Button label="Remove" variant="ghost" @click="remove(row.contact)" />
+        <Button label="Remove" variant="outline" size="xs" @click="remove(row.contact)" />
       </div>
       <small v-if="preview.count > preview.sample.length">and {{ (preview.count - preview.sample.length).toLocaleString() }} more</small>
     </div>
 
-    <div class="audience-manual">
+    <div v-if="!everyone" class="audience-manual">
       <label class="audience-field"><span>Add a contact</span>
         <TextInput v-model="query" placeholder="Name or number" @update:model-value="search" /></label>
       <div v-for="row in found" :key="'found' + row.contact + row.number" class="audience-found">
-        <span>{{ row.name }} · +{{ row.number }}</span><Button label="Add" variant="subtle" @click="add(row.contact)" />
+        <span>{{ row.name }} · +{{ row.number }}</span><Button label="Add" variant="outline" @click="add(row.contact)" />
       </div>
       <div v-if="audience.include.length" class="audience-chips"><span>Added</span>
         <Button v-for="contact in audience.include" :key="'in' + contact" :label="label(contact)" icon-right="x" variant="subtle" @click="undo(contact, 'include')" /></div>
@@ -98,7 +102,7 @@ onMounted(load);
       </div>
     </div>
     <p v-if="missing.length" class="audience-issue">Still needed: {{ missing.join(", ") }}</p>
-    <div><Button :label="preview?.count ? `Add ${preview.count.toLocaleString()} numbers` : 'Add numbers'" variant="solid" :loading="busy" :disabled="!ready" @click="submit" /></div>
+    <div><Button :label="preview?.count ? `Use these ${preview.count.toLocaleString()} people` : 'Use these people'" variant="solid" :loading="busy" :disabled="!chosen || !ready" @click="submit" /></div>
   </div>
 </template>
 
@@ -106,6 +110,7 @@ onMounted(load);
 .audience { display: grid; gap: 14px; margin-top: 12px; }
 .audience-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
 .audience-field { display: grid; gap: 6px; font-size: 12px; color: var(--ink-gray-5); }
+.audience-hint { font-size: 12.5px; color: var(--ink-gray-5); }
 .audience-count { font-size: 14px; color: var(--ink-gray-8); display: grid; gap: 2px; }
 .audience-count small, .audience-rows small, .audience-fixed small { font-size: 12px; color: var(--ink-gray-5); }
 .audience-rows > div { display: grid; grid-template-columns: minmax(0, 1fr) 140px 90px auto; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--outline-gray-1); font-size: 13px; color: var(--ink-gray-8); }
