@@ -164,14 +164,20 @@ def _linked_contacts(doctype, name, query='', limit=31):
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query):
         frappe.throw('Invalid contact search')
     filters=[['Dynamic Link','link_doctype','=',doctype],['Dynamic Link','link_name','=',name]]
+    # Relay roles decide who sees a chat, so a Contact behind a readable Relay Contact counts
+    # even when Contact permissions alone hide it; this matches the record's message timeline.
+    linked=frappe.get_all('Contact',filters=filters,pluck='name',distinct=True)
+    chats=frappe.get_list('Relay Contact',filters={'contact':['in',linked]},pluck='contact',limit_page_length=0) if linked else []
+    visible=set(frappe.get_list('Contact',filters=filters,pluck='name',distinct=True,limit_page_length=0))|set(chats)
+    if not visible:return []
     options={}
     if query.strip():
         pattern='%'+query.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         options['or_filters']=[['Contact',field,'like',pattern]
             for field in ('name','full_name','mobile_no','phone','email_id')]
-    return frappe.get_list('Contact',filters=filters,
+    return frappe.get_all('Contact',filters={'name':['in',sorted(visible)]},
         fields=['name','full_name','mobile_no','phone','email_id'],order_by='name asc',
-        page_length=limit,distinct=True,**options)
+        page_length=limit,**options)
 
 
 @frappe.whitelist(methods=['GET'])
