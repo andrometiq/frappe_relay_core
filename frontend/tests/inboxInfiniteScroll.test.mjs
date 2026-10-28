@@ -1,3 +1,4 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -10,12 +11,12 @@ import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilte
 test('the chat list loads the next page when its end scrolls into view, and stops at the last page', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-  const make = new Function('defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
+  const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
     'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
-    script + '\nreturn { rows, next, loading, more };')
+    script + '\nreturn { rows, next, loading, more };').bind(null, useLoadMore)
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window, originalObserver = globalThis.IntersectionObserver
   const requests = [], observers = []
-  let mount, unmount
+  let mount
   globalThis.window = { frappe: { csrf_token: 'local-fixture' } }
   globalThis.IntersectionObserver = class { constructor(callback) { this.callback = callback; this.live = true; observers.push(this) } observe() {} disconnect() { this.live = false } }
   globalThis.fetch = async url => {
@@ -32,7 +33,7 @@ test('the chat list loads the next page when its end scrolls into view, and stop
   const scope = effectScope()
   let state
   try {
-    state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, fn => unmount = fn, computed, ref, watch, coreApi,
+    state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, () => {}, computed, ref, watch, coreApi,
       () => {}, mediumOptions, () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, newestActivity, onlyChangedRows,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
       () => false, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters))
@@ -45,7 +46,7 @@ test('the chat list loads the next page when its end scrolls into view, and stop
     assert.equal(state.next.value, null)
     await visible()
     assert.equal(requests.length, 2, 'The last page must not load again')
-    unmount()
+    scope.stop()
     assert.ok(observers.every(observer => !observer.live))
   } finally {
     scope.stop()

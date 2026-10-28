@@ -1,13 +1,15 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
+import { recordTitle } from '../../services/recordTitle'
 import { computed, ref, watch, onBeforeUnmount, useId } from 'vue'
 const props = defineProps({field:Object, modelValue:[String,Object,Array], multiple:Boolean})
 const emit = defineEmits(['update:modelValue'])
 const id = useId(), query = ref(''), options = ref([]), open = ref(false), loading = ref(false), error = ref(''), active = ref(-1)
 const labels = new Map()
 let timer, controller, generation = 0, composing = false
-const normalize = item => typeof item === 'string' ? {value:item,label:item} : item
+const normalize = item => typeof item === 'string' ? {value:item,label:recordTitle(item)} : {...item,label:recordTitle(item)}
 const selected = computed(() => (props.multiple ? props.modelValue || [] : [props.modelValue]).filter(Boolean).map(v => typeof v === 'object' ? v.value : v))
-const display = value => labels.get(value) || value
+const display = value => recordTitle(labels.get(value) || (props.field.options || []).map(normalize).find(row => row.value === value)?.label || value, 'Saved selection')
 function cancel() {clearTimeout(timer); controller?.abort(); ++generation; loading.value=false}
 function close() {open.value=false;cancel();options.value=[];active.value=-1}
 async function search() {
@@ -19,10 +21,10 @@ async function search() {
   try {
     const result = props.field.search
       ? await props.field.search(query.value, controller.signal)
-      : (props.field.options || []).map(normalize).filter(o => o.label.toLowerCase().includes(query.value.toLowerCase())).slice(0,30)
+      : (props.field.options || []).map(normalize).filter(o => o.label.toLowerCase().includes(query.value.toLowerCase())).slice(0, props.field.loadMore ? undefined : 30)
     if (current !== generation || !open.value) return
-    options.value=(Array.isArray(result) ? result : result.items || []).slice(0,30).map(normalize)
-    for (const row of options.value) labels.set(row.value,row.label)
+    options.value=(Array.isArray(result) ? result : result.items || []).slice(0, props.field.loadMore ? undefined : 30).map(normalize)
+    for (const row of options.value) labels.set(row.value,recordTitle(row))
     // Only selected labels survive searches: memory does not grow with the directory.
     const keep = new Set([...selected.value,...options.value.map(o=>o.value)])
     for (const key of labels.keys()) if (!keep.has(key)) labels.delete(key)
@@ -34,7 +36,7 @@ function schedule(event) {if(composing || event?.isComposing)return;open.value=t
 function focus() {if(props.field.readOnly)return;open.value=true;search()}
 function choose(row) {
   if(props.field.readOnly)return
-  labels.set(row.value,row.label)
+  labels.set(row.value,recordTitle(row))
   emit('update:modelValue',props.multiple ? [...new Set([...selected.value,row.value])] : row.value)
   query.value='';close()
 }
@@ -52,6 +54,20 @@ watch(()=>props.field.readOnly,value=>{if(value)close()})
 watch(()=>props.field.initialOptions,rows=>{
   for(const row of rows||[]){const option=normalize(row);labels.set(option.value,option.label)}
 },{immediate:true,deep:true})
+watch(() => props.field.options, () => { if (open.value && !props.field.search) search() })
+async function loadMore() {
+  const current = generation
+  loading.value = true
+  try {
+    const rows = await props.field.loadMore(query.value, controller?.signal)
+    if (current !== generation || !open.value || !props.field.search || !Array.isArray(rows)) return
+    const known = new Set(options.value.map(row => row.value))
+    options.value = [...options.value, ...rows.map(normalize).filter(row => !known.has(row.value))]
+    for (const row of options.value) labels.set(row.value, row.label)
+  } catch(e) { if (current === generation && e.name !== 'AbortError') error.value = e.message }
+  finally { if (current === generation) loading.value = false }
+}
+const moreSentinel = useLoadMore({ loading: () => loading.value || props.field.loading, hasMore: () => open.value && props.field.hasMore, error: () => error.value || props.field.error, load: loadMore })
 onBeforeUnmount(cancel)
 </script>
 <template>
@@ -62,13 +78,14 @@ onBeforeUnmount(cancel)
     </div>
     <input :id="id" v-model="query" role="combobox" autocomplete="off" :maxlength="field.maxLength || 80" :aria-expanded="open" :aria-controls="id+'-options'" :aria-activedescendant="open&&active>=0?id+'-'+active:undefined" :disabled="field.readOnly" :placeholder="field.placeholder || 'Type to search…'" @focus="focus" @input="schedule" @compositionstart="compositionStart" @compositionend="compositionEnd" @keydown="keydown" />
     <div v-if="open" class="choice-results">
-      <p v-if="loading" role="status">Searching…</p>
+      <p v-if="loading || field.loading" role="status">Searching…</p>
       <p v-if="error" role="alert">{{error}}</p>
       <ul :id="id+'-options'" role="listbox" :aria-multiselectable="multiple || undefined">
         <li v-for="(option,index) in options" :id="id+'-'+index" :key="option.value" role="option" :aria-selected="selected.includes(option.value)" :class="{active:index===active}" @mousedown.prevent="choose(option)">{{option.label}}<small v-if="option.description && option.description!==option.label" class="block text-xs text-ink-gray-5">{{option.description}}</small><span v-if="selected.includes(option.value)"> ✓</span></li>
       </ul>
-      <p v-if="!loading&&!error&&!options.length">No results found.</p>
-      <p v-if="options.length===30" class="choice-hint">Showing 30 matches. Refine your search.</p>
+      <p v-if="!loading&&!field.loading&&!error&&!options.length">No results found.</p>
+      <div v-if="field.hasMore" ref="moreSentinel" class="h-px" aria-hidden="true" />
+      <p v-if="!field.loadMore && options.length===30" class="choice-hint">Showing 30 matches. Refine your search.</p>
     </div>
   </div>
 </template>

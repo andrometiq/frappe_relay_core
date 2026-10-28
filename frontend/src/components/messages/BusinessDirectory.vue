@@ -1,9 +1,10 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
+import ChoiceField from '../fields/ChoiceField.vue'
 import { linkedTitle } from '../../services/linkedTitle'
 import { recordTitle } from '../../services/recordTitle'
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import { TextInput, ErrorMessage, FeatherIcon } from "@relay/ui";
-import RelaySelect from "../RelaySelect.vue";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { coreApi } from "../../services/coreApi";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
@@ -63,7 +64,6 @@ async function loadInitialGroup() {
 function scrolled(event) {
   const node = event.currentTarget;
   if (node.scrollLeft) node.scrollLeft = 0;
-  if (node.scrollHeight - node.scrollTop - node.clientHeight < 180) loadRecords(false);
 }
 
 function timeLabel(value) {
@@ -91,7 +91,7 @@ async function claim(release = false) {
 }
 
 watch(query, () => {
-  clearTimeout(timer); ++sequence;
+  clearTimeout(timer); ++sequence; next.value = null; records.value = [];
   timer = setTimeout(() => loadRecords(true), 300);
 });
 watch(() => props.selectedDoctype, async value => {
@@ -109,6 +109,7 @@ onMounted(async () => {
 });
 useRealtimeRefresh(["Relay Message", "Contact", "Relay Conversation Summary"], ["messages", "incoming", "contacts", "reports"], () => loadRecords(true));
 onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
+const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, error, load: () => loadRecords(false) })
 </script>
 
 <template>
@@ -122,8 +123,7 @@ onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
     <div class="business-search-row"><TextInput type="search" v-model="query" placeholder="Search or start a business chat"
       aria-label="Search businesses" :disabled="!doctype"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
     <div v-if="filtersOpen" class="business-directory-filters">
-      <RelaySelect v-if="types.length > 1" label="Business type" v-model="doctype" :options="types"
-        :disabled="busy || loading" @update:model-value="loadInitialGroup" />
+      <ChoiceField v-if="types.length > 1" :field="{ label: 'Business type', options: types, readOnly: busy || loading }" v-model="doctype" @update:model-value="loadInitialGroup" />
       <RemoteLinkField v-if="groupField" :key="doctype + ':' + groupField" v-model="group"
         :field="{ label: 'Business team', method: 'business_groups.directory', params: { doctype, include_all: 1 }, placeholder: 'Search teams…', readOnly: busy || loading }"
         @update:model-value="loadRecords(true)" />
@@ -137,14 +137,14 @@ onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
   <VirtualScroller :items="records" :item-size="72" class="directory-rows" aria-label="Businesses"
     :pt="{ content: { class: 'directory-virtual-content' } }" @scroll.passive="scrolled">
     <template #item="{ item: record }">
-      <button :key="record.name" class="directory-contact" :class="{ selected: selected === record.name }"
+      <button :key="record.name" class="directory-contact relative" :class="{ selected: selected === record.name }"
         @click="emit('select', doctype, record)">
         <span class="business-avatar" aria-hidden="true">{{ recordTitle(record, 'Business').slice(0, 1).toUpperCase() }}</span>
         <span class="directory-contact-copy">
           <span class="directory-contact-top"><strong>{{ recordTitle(record, 'Business') }}</strong><time v-if="record.last_activity">{{ timeLabel(record.last_activity) }}</time></span>
           <span class="directory-contact-bottom"><small>{{ record.last_message || record.summary || record.description || "No WhatsApp messages yet" }}</small><span v-if="record.unread" class="directory-unread">{{ record.unread > 99 ? "99+" : record.unread }}</span></span>
         </span>
-      </button>
+      <span v-if="record === records.at(-1) && next !== null" ref="moreSentinel" class="absolute bottom-0 left-0 w-full h-px" aria-hidden="true" /></button>
     </template>
   </VirtualScroller>
   <div class="directory-loading-slot">

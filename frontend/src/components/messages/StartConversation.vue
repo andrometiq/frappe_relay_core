@@ -2,6 +2,7 @@
 import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from "vue";
 import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
+import ChoiceField from "../fields/ChoiceField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
@@ -51,6 +52,8 @@ const template = computed(() =>
 const descriptors = computed(() =>
   templateParameterDescriptors(template.value),
 );
+const templatesBusy = ref(false), templatesError = ref("");
+let templatesGeneration = 0;
 let generation = 0;
 let contactGeneration = 0, contactTimer, contactController;
 
@@ -131,32 +134,41 @@ watch(contact, () => {
   if (contact.value) destinations();
 }, {flush:'sync'});
 watch(templateId, () => (parameters.value = {}), {flush:'sync'});
-watch(sendChannel, (now, before) => { if (before) { templates.value = []; templateId.value = ""; cursor.value = ""; } });
+
+watch(sendChannel, (_now, before) => { if (before) { templateId.value = ''; parameters.value = {}; } }, {flush: 'sync'});
 const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
   () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
   saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
   () => ({body:'',subject:'',kind:can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
-async function loadTemplates(next = false) {
-  await run(async () => {
-    const result = await coreApi(
-      "whatsapp.execute",
-      {
-        operation: "templates.list",
-        arguments: { ...(next && cursor.value ? { after: cursor.value } : {}) },
-        ...(props.channel && sendChannel.value ? { channel: sendChannel.value } : {}),
-      },
-      true,
-    );
-    templates.value = (result.data || []).filter(
-      (row) => row.status === "APPROVED",
-    );
-    cursor.value = result.paging?.has_more
-      ? result.paging?.cursors?.after || ""
-      : "";
-    templateId.value = templates.value[0]?.id || "";
-  });
+let templateRequest;
+function loadTemplates(next = false) {
+  if (templatesBusy.value) return templateRequest;
+  templateRequest = fetchTemplates(next);
+  return templateRequest;
 }
+async function fetchTemplates(next) {
+  const current = ++templatesGeneration, channel = sendChannel.value;
+  templatesBusy.value = true; templatesError.value = "";
+  try {
+    const result = await coreApi("whatsapp.execute", {
+      operation: "templates.list", arguments: next && cursor.value ? {after: cursor.value} : {},
+      ...(channel ? {channel} : {}),
+    }, true);
+    if (current !== templatesGeneration) return;
+    templates.value = [...(next ? templates.value : []), ...(result.data || []).filter(row => row.status === "APPROVED")];
+    cursor.value = result.paging?.has_more ? result.paging?.cursors?.after || "" : "";
+    if (!templateId.value) templateId.value = templates.value[0]?.id || "";
+  } catch (e) { if (current === templatesGeneration) templatesError.value = e.message; }
+  finally { if (current === templatesGeneration) templatesBusy.value = false; }
+}
+watch(() => kind.value === 'template' && destination.value?.provider === 'WhatsApp' ? sendChannel.value || 'default' : '', scope => {
+  ++templatesGeneration; templatesBusy.value = false; templatesError.value = "";
+  templates.value = []; cursor.value = "";
+  if (scope) loadTemplates();
+}, {immediate: true, flush: 'sync'});
+onBeforeUnmount(() => { ++templatesGeneration; });
+
 function sendPayload() {
   const data = kind.value === "email" ? {subject:subject.value, body:body.value}
     : kind.value === "text" ? {text:body.value}
@@ -254,13 +266,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           </div>
         </div>
         <RemoteLinkField v-else v-model="contact" :field="{label:'Contact',method:'inbox.directory',params:{},placeholder:'Search contacts…',inlineResults:true,initialOptions:contact?[{value:contact,label:contactLabel||readableName(contact,'Contact')}]:[],readOnly:busy||!!pending}" />
-        <RelaySelect
-          v-if="endpoints.length"
-          label="Send through"
-          v-model="endpoint"
-          :disabled="busy || !!pending"
-          :options="endpoints"
-        />
+        <ChoiceField v-if="endpoints.length" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
           {{ businessName
             ? "No verified channel is available for this contact. Enroll an authenticated identity in Contacts & links."
@@ -297,23 +303,12 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             :disabled="busy || !!pending"
           />
           <template v-else
-            ><Button
-              label="Load approved templates"
-              @click="loadTemplates(false)"
-              :disabled="busy || !!pending" /><Button
-              v-if="cursor"
-              label="Next templates"
-              @click="loadTemplates(true)"
-              :disabled="busy || !!pending" /><RelaySelect
-              label="Template"
-              v-model="templateId"
-              :options="
-                templates.map((row) => ({
-                  value: row.id,
-                  label: row.name + ' · ' + row.language,
-                }))
-              "
-              :disabled="busy || !!pending" /><FormControl
+            >
+            <p v-if="templatesBusy" role="status">Loading approved templates…</p>
+            <ErrorMessage :message="templatesError" />
+            <Button v-if="templatesError" label="Retry templates" @click="loadTemplates()" />
+            <ChoiceField v-model="templateId" :field="{ label: 'Template', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
+              /><FormControl
               v-for="field in descriptors"
               :key="field.key"
               :label="field.label"

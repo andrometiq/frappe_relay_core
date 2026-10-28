@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore';
 import { readableName } from '../../services/recordTitle'
 import { channelStatus } from '../../services/channelComposition';
 import { useMessageInfo } from "../../composables/useMessageInfo";
@@ -26,6 +27,7 @@ const props = defineProps({
   anchor: String,
   position: Object,
   newer: Boolean,
+  error: String,
   unread: String,
 });
 const emit = defineEmits([
@@ -180,13 +182,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', trackVisible);
 });
 function requestPage(direction) {if(!props.busy)emit(direction);}
-async function fillViewport() {
-  await nextTick();
-  const node=viewport.value;
-  if(node && props.more && !props.busy && props.rows?.length && node.scrollHeight<=node.clientHeight+32)
-    requestPage('older');
-}
-watch(()=>[props.more,props.busy,props.rows?.length],fillViewport);
+const earlier = useLoadMore({ root: viewport, margin: '1500px 0px', loading: () => props.busy, error: () => props.error, hasMore: () => props.more && props.rows?.length, load: () => requestPage('older') });
+const later = useLoadMore({ root: viewport, margin: '60px 0px', loading: () => props.busy, error: () => props.error, hasMore: () => props.newer, load: () => requestPage('newer') });
 watch(
   () => props.rows,
   async (_rows, previous) => {
@@ -199,16 +196,7 @@ watch(
 function scrolled() {
   trackVisible();
   scroll.scrolled();
-  const node = viewport.value;
-  if (
-    node &&
-    node.scrollTop < 32 &&
-    node.scrollHeight > node.clientHeight &&
-    props.more &&
-    !props.busy
-  )
-    requestPage("older");
-  else if(node && props.newer && !props.busy && node.scrollHeight-node.scrollTop-node.clientHeight<60) requestPage('newer');
+
 }
 function actions(message) {
   const items = [
@@ -267,6 +255,7 @@ function actions(message) {
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
     </div>
+    <div v-if="more" ref="earlier" class="h-px" aria-hidden="true" />
     <div ref="content" class="message-thread-content">
     <template v-for="(message, index) in threadRows" :key="message.name">
       <div
@@ -385,6 +374,7 @@ function actions(message) {
       </article>
     </template>
     </div>
+    <div v-if="newer" ref="later" class="h-px" aria-hidden="true" />
   </div>
   <Dialog v-model="infoOpen" :options="{ title: 'Message info', size: 'lg' }"
     ><template #body-content

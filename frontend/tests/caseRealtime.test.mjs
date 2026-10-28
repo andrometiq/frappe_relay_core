@@ -1,9 +1,10 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {ref,computed,watch,nextTick} from 'vue'
 const source=(await readFile(new URL('../src/components/messages/ConversationCases.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm,'')
-const make=new Function('ref','computed','watch','onMounted','defineProps','defineEmits','coreApi','randomUUID','useRealtimeRefresh',source+'\nreturn {open,record,values,updatesAvailable,rows};')
+const make=new Function('useLoadMore','ref','computed','watch','onMounted','defineProps','defineEmits','coreApi','randomUUID','useRealtimeRefresh',source+'\nreturn {open,record,values,updatesAvailable,rows};').bind(null, useLoadMore)
 test('case events refresh list but preserve open edits until explicit reload',async()=>{
  let changed;const calls=[]
  const state=make(ref,computed,watch,()=>{},()=>({contact:'contact'}),()=>()=>{},async(method)=>{

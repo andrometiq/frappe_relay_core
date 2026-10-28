@@ -1,10 +1,12 @@
+import { recordTitle } from '../src/services/recordTitle.js'
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {computed,ref,watch} from 'vue'
 const source=(await readFile(new URL('../src/components/fields/ChoiceField.vue',import.meta.url),'utf8'))
  .split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm,'')
-const make=new Function('computed','ref','watch','onBeforeUnmount','useId','defineProps','defineEmits',source+'\nreturn {focus,schedule,keydown,compositionStart,compositionEnd,query,close};')
+const make=new Function('recordTitle','useLoadMore','computed','ref','watch','onBeforeUnmount','useId','defineProps','defineEmits',source+'\nreturn {focus,schedule,keydown,compositionStart,compositionEnd,query,close,loadMore,options};').bind(null, recordTitle, useLoadMore)
 for(const multiple of [false,true])test(`IME completion and Enter selection (${multiple?'multiple':'single'})`,async()=>{
  const queries=[],events=[]
  const props={multiple,modelValue:multiple?['existing']:'',field:{search:async q=>{queries.push(q);return [{value:'new',label:'தமிழ்'}]}}}
@@ -22,5 +24,14 @@ for(const multiple of [false,true])test(`IME completion and Enter selection (${m
  field.keydown(key({repeat:true}));assert.equal(events.length,0)
  field.keydown(key())
  assert.deepEqual(events,[['update:modelValue',multiple?['existing','new']:'new']])
+ field.close()
+})
+
+test('remote picker appends pages without duplicate values or losing captions', async () => {
+ const props = {modelValue:'', field:{search:async () => [{value:'one',label:'Asha'}], loadMore:async () => [{value:'one',label:'Asha'},{value:'two',label:'Ravi'}]}}
+ const field = make(computed,ref,watch,()=>{},()=> 'paging',()=>props,()=>()=>{})
+ await field.focus(); await new Promise(resolve => setTimeout(resolve, 0))
+ await field.loadMore()
+ assert.deepEqual(field.options.value.map(row => row.label), ['Asha','Ravi'])
  field.close()
 })

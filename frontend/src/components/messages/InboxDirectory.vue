@@ -1,4 +1,5 @@
 <script setup>
+import { useLoadMore } from '../../composables/useLoadMore'
 import { recordTitle } from '../../services/recordTitle'
 import { linkedTitle } from '../../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -67,16 +68,7 @@ watch(query, (_value, _previous, onCleanup) => {
 })
 watch([mode, medium, () => JSON.stringify(params.value), folder], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
-// Load the next page when the end of the list scrolls into view; re-observing after each page catches a short list.
-const more = ref(null)
-let moreObserver
-watch([more, loading], () => {
-  moreObserver?.disconnect()
-  if (!more.value || loading.value) return
-  moreObserver = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting) && next.value && !loading.value) load(next.value) }, { rootMargin: '200px 0px' })
-  moreObserver.observe(more.value)
-}, { flush: 'post' })
-onBeforeUnmount(() => moreObserver?.disconnect())
+const more = useLoadMore({ loading, hasMore: next, error, load: () => load(next.value) })
 const { folders, changes, moved, move } = useChatFolders()
 // A move changes only that row; a folder view or a deleted folder reloads the page.
 watch(moved, value => {

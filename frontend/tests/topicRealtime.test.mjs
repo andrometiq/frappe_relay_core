@@ -1,9 +1,10 @@
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {ref,computed,watch,nextTick,reactive} from 'vue'
 const source=(await readFile(new URL('../src/components/messages/ConversationTopics.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm,'')
-const make=new Function('ref','computed','watch','onBeforeUnmount','defineProps','defineEmits','coreApi','randomUUID','useRealtimeRefresh',source+'\nreturn {rows,draft,edit,load,updatesAvailable};')
+const make=new Function('useLoadMore','ref','computed','watch','onBeforeUnmount','defineProps','defineEmits','coreApi','randomUUID','useRealtimeRefresh',source+'\nreturn {rows,draft,edit,load,updatesAvailable};').bind(null, useLoadMore)
 test('topic refresh preserves draft and rejects old-contact page responses',async()=>{
  const props=reactive({contact:'first',messages:[]}),requests=[];let refresh
  const state=make(ref,computed,watch,()=>{},()=>props,()=>()=>{},(method,args)=>new Promise(resolve=>requests.push({args,resolve})),()=> 'key',(rooms,kinds,fn)=>refresh=fn)

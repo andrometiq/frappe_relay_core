@@ -1,4 +1,6 @@
 <script setup>
+import ChoiceField from './fields/ChoiceField.vue'
+import { useLoadMore } from '../composables/useLoadMore'
 import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue'
@@ -19,6 +21,7 @@ const configurationLinks = [
   { label: 'Fallback handoff owner', onClick: () => { location.href = '/desk/relay-settings' } },
 ]
 const skill = computed(() => props.kind === 'skills')
+const pickerMethod = computed(() => skill.value ? 'ai.configuration.editor_options' : 'business_event_options.search')
 const allowed = computed(() => Boolean(skill.value ? capabilities.value.skills : capabilities.value.business_events))
 const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
 const channels = ref([]), editor = ref(null)
@@ -29,7 +32,7 @@ const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
 const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
 const channelEnabled = useEnabledChannels()
 const variant = provider => channelEnabled(provider) && (!!draft.value?.use_preferences || channelProvider.value === provider)
-const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), parameters = ref('')
+const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), parameterFields = ref([])
 // Display fixture captions without rewriting the stored title on unrelated saves.
 const titleCaption = computed({ get: () => recordTitle(draft.value?.title, ''), set: value => { draft.value.title = value } })
 const busy = ref(false), error = ref(''), notice = ref(''), message = ref(''), preview = ref(null)
@@ -38,6 +41,7 @@ const snapshot = () => JSON.stringify([draft.value, tools.value, actions.value])
 const dirty = computed(() => snapshot() !== saved.value)
 const enabledFilter = ref('all'), templateBody = ref(''), previewError = ref('')
 const visibleRows = computed(() => rows.value.filter(row => enabledFilter.value === 'all' || Boolean(row.enabled) === (enabledFilter.value === 'enabled')))
+const parameters = computed({ get: () => parameterFields.value.join('\n'), set: value => { parameterFields.value = value ? value.split('\n') : [] } })
 const livePreview = computed(() => messagePreview(templateBody.value, parameters.value))
 const template = computed(() => draft.value && templateField(draft.value, busy.value, linkedTitle('Relay WhatsApp Template', draft.value.template, 'Saved template')))
 let generation = 0, previewGeneration = 0, previewTimer
@@ -99,11 +103,13 @@ function addReference() {
   tools.value.push({name: `reference_${number}`, method: 'get_list', doctype: '', fields: [], scope_field: '', identity_anchor: draft.value.business_doctype, identity_fields: {}, company_field: ''})
 }
 function chooseReferenceType(tool, value) { tool.doctype = value; tool.fields = []; tool.scope_field = ''; tool.company_field = '' }
-function chooseBusiness(value) { draft.value.business_doctype = value; tools.value.forEach(tool => { tool.identity_anchor = value; tool.identity_fields = {}; tool.scope_field = '' }) }
+function chooseBusiness(value) { draft.value.business_doctype = value; draft.value.recipient_field = ''; tools.value.forEach(tool => { tool.identity_anchor = value; tool.identity_fields = {}; tool.scope_field = '' }) }
+function chooseSource(value) { draft.value.source_doctype = value; draft.value.recipient_field = ''; draft.value.contact_field = ''; draft.value.print_format = ''; draft.value.report_name = ''; parameters.value = '' }
 function chooseActionType(row, value) { row.doctype = value; row.fields = [] }
 watch(() => props.kind, () => { draft.value = null; rows.value = []; next.value = null; load() })
 onMounted(load)
 useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', 'business_events'], () => load())
+const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(true) })
 </script>
 <template>
   <section class="v1-screen" :class="{ 'event-workspace': skill }"><div class="v1-content space-y-4">
@@ -123,12 +129,12 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             <span v-else>{{ eventDescription(row) }}</span>
           </button>
           <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="(rows.length ? 'No matching ' : 'No ') + (skill ? 'events' : 'event rules') + (rows.length ? '' : ' yet')" :description="rows.length ? 'Change the filter to see other configurations.' : 'Create one when you need it. It starts disabled until you enable it.'" :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New event' : 'New event rule'" variant="solid" icon-left="plus" @click="edit(newConfiguration(skill))" /></WorkspaceState>
-          <Button v-if="next" label="Load more" :disabled="busy" @click="load(true)" />
+          <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'event' : 'event rule' }}</h2><Button label="Dismiss" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="titleCaption" label="Title" required :disabled="busy" />
-          <div class="grid gap-3 sm:grid-cols-2"><EventPicker v-if="skill" :model-value="draft.business_doctype" label="Business type" kind="doctype" :disabled="busy" @update:model-value="chooseBusiness" /><FormControl v-else v-model="draft.business_doctype" label="Business type" required :disabled="busy" /><FormControl v-model="draft.channel" label="Channel" type="select" :options="channelOptions" :required="Boolean(draft.enabled) && !draft.use_preferences" :disabled="busy || !!draft.use_preferences" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
+          <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" :kind="skill ? 'doctype' : 'business_doctype'" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Owner instructions</legend>
               <FormControl v-model="draft.target" label="Target" type="textarea" rows="2" maxlength="2000" :required="Boolean(draft.enabled)" :disabled="busy" />
@@ -179,21 +185,24 @@ useRealtimeRefresh(['Relay AI Skill', 'Relay Business Event Rule'], ['skills', '
             </fieldset>
           </template>
           <template v-else>
-            <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.source_doctype" label="Source DocType" placeholder="Delivery Note" required :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><FormControl v-model="draft.recipient_field" label="Recipient business field" placeholder="customer" required :disabled="busy" /><RemoteLinkField v-if="variant('WhatsApp')" v-model="draft.template" :field="template" /></div>
+            <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.source_doctype" @update:model-value="chooseSource" label="Source DocType" kind="doctype" :method="pickerMethod" :disabled="busy" /><FormControl v-model="draft.event" label="Event" type="select" :options="[{ label: 'On submit', value: 'on_submit' }, { label: 'When created', value: 'after_insert' }, { label: 'On cancel', value: 'on_cancel' }]" :disabled="busy" /><EventPicker v-model="draft.recipient_field" label="Recipient business field" kind="recipient_field" :method="pickerMethod" :doctype="draft.source_doctype" :business-doctype="draft.business_doctype" :disabled="busy || !draft.source_doctype || !draft.business_doctype" /><RemoteLinkField v-if="variant('WhatsApp')" v-model="draft.template" :field="template" /></div>
             <FormControl v-model="draft.use_preferences" type="checkbox" label="Use this business/person’s consent and channel priorities" :disabled="busy" />
-            <FormControl v-model="draft.contact" label="Explicit Contact (required when several people are linked)" :disabled="busy" />
+            <RemoteLinkField v-model="draft.contact" :field="{ label: 'Explicit Contact (required when several people are linked)', method: 'api.contact_directory', doctype: 'Contact', readOnly: busy }" />
             <FormControl v-if="variant('Telegram')" v-model="draft.telegram_body" label="Telegram template" type="textarea" rows="4" :disabled="busy" />
             <template v-if="variant('Email')"><FormControl v-model="draft.email_subject" label="Email subject template" :disabled="busy" /><FormControl v-model="draft.email_body" label="Email body template" type="textarea" rows="5" :disabled="busy" /><FormControl v-model="draft.email_signature" label="Email signature" type="textarea" :disabled="busy" maxlength="2000" /></template>
-            <FormControl v-model="parameters" label="Template parameters in order (one source field per line)" type="textarea" rows="4" :disabled="busy" /><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. Choose a Contact when several people belong to the business. <template v-if="variant('Telegram') || variant('Email')">Telegram and email use {field} placeholders from this list; email content is escaped.</template> Consent is required. An uncertain send never switches channels.</p>
+            <fieldset class="automation-section"><legend>Template parameters in order</legend>
+              <div v-for="(value, index) in parameterFields" :key="index" class="flex items-end gap-2"><EventPicker class="flex-1" :model-value="value" :label="'Parameter ' + (index + 1)" kind="field" :method="pickerMethod" :doctype="draft.source_doctype" :disabled="busy || !draft.source_doctype" @update:model-value="parameterFields[index] = $event" /><Button label="Remove parameter" :disabled="busy" @click="parameterFields.splice(index, 1)" /></div>
+              <Button label="Add parameter" :disabled="busy || !draft.source_doctype || parameterFields.length >= 20" @click="parameterFields.push('')" />
+            </fieldset><p class="text-sm">Use name, total_qty, or other source fields. items_summary includes each item’s quantity and UOM. Choose a Contact when several people belong to the business. <template v-if="variant('Telegram') || variant('Email')">Telegram and email use {field} placeholders from this list; email content is escaped.</template> Consent is required. An uncertain send never switches channels.</p>
             <fieldset class="automation-section"><legend>Condition, recipients and PDF</legend>
               <FormControl v-model="draft.condition" label="Condition (optional)" placeholder="doc.commitment_level_label" :disabled="busy" />
-              <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.recipients" label="Recipients" type="select" :options="[{ label: 'The only linked contact', value: '' }, 'Primary contact', 'All business contacts', 'Document contact field']" :disabled="busy" /><FormControl v-if="draft.recipients === 'Document contact field'" v-model="draft.contact_field" label="Contact field" placeholder="contact_person" :disabled="busy" />
-              <FormControl v-model="draft.attachment_type" label="Attach PDF" type="select" :options="[{ label: 'No PDF', value: '' }, 'Print Format', 'Report']" :disabled="busy" /><FormControl v-if="draft.attachment_type === 'Print Format'" v-model="draft.print_format" label="Print format" :disabled="busy" /><FormControl v-if="draft.attachment_type === 'Report'" v-model="draft.report_name" label="Report" :disabled="busy" /><FormControl v-if="draft.attachment_type" v-model="draft.file_name" label="File name" placeholder="Order_{{doc.name}}.pdf" :disabled="busy" /></div>
+              <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.recipients" label="Recipients" type="select" :options="[{ label: 'The only linked contact', value: '' }, 'Primary contact', 'All business contacts', 'Document contact field']" :disabled="busy" /><EventPicker v-if="draft.recipients === 'Document contact field'" v-model="draft.contact_field" label="Contact field" kind="contact_field" :method="pickerMethod" :doctype="draft.source_doctype" :disabled="busy || !draft.source_doctype" />
+              <FormControl v-model="draft.attachment_type" label="Attach PDF" type="select" :options="[{ label: 'No PDF', value: '' }, 'Print Format', 'Report']" :disabled="busy" /><EventPicker v-if="draft.attachment_type === 'Print Format'" v-model="draft.print_format" label="Print format" kind="print_format" :method="pickerMethod" :doctype="draft.source_doctype" :disabled="busy || !draft.source_doctype" /><EventPicker v-if="draft.attachment_type === 'Report'" v-model="draft.report_name" label="Report" kind="report" :method="pickerMethod" :doctype="draft.source_doctype" :disabled="busy || !draft.source_doctype" /><FormControl v-if="draft.attachment_type" v-model="draft.file_name" label="File name" placeholder="Order_{{doc.name}}.pdf" :disabled="busy" /></div>
               <FormControl v-if="draft.attachment_type === 'Report'" v-model="draft.report_filters" label="Report filters (JSON)" type="textarea" rows="3" placeholder='{"customer": "{{doc.customer}}"}' :disabled="busy" />
               <p class="text-sm">The PDF goes in the template's document header, or as a document message after the template when the template has no document header. Recipient choices and PDFs need a fixed WhatsApp channel.</p>
             </fieldset>
           </template>
-          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-if="skill" v-model="draft.run_as_user" label="Run-as user" kind="user" :disabled="busy" /><FormControl v-else v-model="draft.run_as_user" label="User email" :required="Boolean(draft.enabled)" :disabled="busy" /><p v-if="skill" class="text-sm">The linked sender user takes precedence. Otherwise this user’s permissions apply; denial never falls back.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
+          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-model="draft.run_as_user" label="Run-as user" kind="user" :method="pickerMethod" :disabled="busy" /><p v-if="skill" class="text-sm">The linked sender user takes precedence. Otherwise this user’s permissions apply; denial never falls back.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
           <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ variant('WhatsApp') ? livePreview : '' }}</p><p v-if="variant('Telegram')" class="whitespace-pre-wrap">Telegram: {{ variantPreview(draft.telegram_body, parameters) }}</p><p v-if="variant('Email')" class="whitespace-pre-wrap">Email: {{ variantPreview(draft.email_subject, parameters) }}
 {{ variantPreview(draft.email_body, parameters) }}
 {{ draft.email_signature }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>
