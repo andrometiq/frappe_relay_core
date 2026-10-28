@@ -23,7 +23,7 @@ COUNT_KEYS = ('all', 'unread', 'read', 'unread_messages')
 def read(medium=None, channel=None, channels=None, business_type=None, business_name=None, rows='contact'):
     """Conversation counts per inbox tab and the unread message total, under the inbox list's filters.
 
-    `rows='business'` counts the rows of inbox.directory with the same option: business records and uncovered chats."""
+    `rows='business'` counts the Relay Chat rows of inbox.directory with the same option."""
     require_access()
     if rows not in ('contact', 'business'):
         frappe.throw('Invalid conversation rows')
@@ -35,9 +35,7 @@ def read(medium=None, channel=None, channels=None, business_type=None, business_
     key = f'relay-queue-counts:{generation}:{frappe.session.user}:{hashlib.sha256(scope.encode()).hexdigest()}'
     counts = frappe.cache.get_value(key)
     if counts is None:
-        counts = get_counts(names, business)
-        if rows == 'business':
-            counts = dict(counts, **business_counts(names, business, business_type, business_name))
+        counts = business_counts(names, business_type, business_name) if rows == 'business' else get_counts(names, business)
         frappe.cache.set_value(key, counts, expires_in_sec=CACHE_SECONDS)
     return counts
 
@@ -63,15 +61,12 @@ def get_counts(channels=None, business=None):
     return {'all': total, 'unread': int(conversations), 'read': total - int(conversations), 'unread_messages': int(messages)}
 
 
-def business_counts(channels=None, business=None, business_type=None, business_name=None):
-    """All, Unread, Read and Unlinked rows when each readable business record is one row."""
+def business_counts(channels=None, business_type=None, business_name=None):
+    """All, Unread, Read and Unlinked Relay Chat rows and their unread messages."""
     if channels is not None and not channels:
-        return {'all': 0, 'unread': 0, 'read': 0, 'unlinked': 0}
+        return {'all': 0, 'unread': 0, 'read': 0, 'unlinked': 0, 'unread_messages': 0}
     from relay_core import inbox_records
-    from relay_core.inbox import filtered_contacts
-    query = frappe.qb.get_query('Relay Contact', fields=['name', 'contact', 'display_name', 'last_message_at', 'creation'],
-                                ignore_permissions=False, order_by='')
-    return inbox_records.counts(filtered_contacts(query, channels, business), channels, business_type, business_name)
+    return inbox_records.counts(channels, business_type, business_name)
 
 
 def visible_contacts(channels=None, business=None):

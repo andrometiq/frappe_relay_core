@@ -31,8 +31,11 @@ test('only one side panel is open at a time and the info button toggles contact 
 })
 
 test('the header second line names the person, then phone, email and channel', () => {
-  assert.match(connected, /const who = computed\(\(\) => \[personName\.value, phone\.value, email\.value\]/)
-  assert.match(connected, /whoLine = computed\(\(\) => \[\.\.\.who\.value, channelCaption\.value\]/)
+  assert.match(connected, /whoLine = computed\(\(\) => \[whoName\.value, phone\.value, email\.value, channelCaption\.value\]/)
+  assert.match(connected, /contactRecord\.value\?\.phone/, 'The saved mobile shows in an email chat too')
+  assert.match(connected, /contactRecord\.value\?\.email/, 'The saved email shows in a WhatsApp chat too')
+  assert.equal((connected.match(/<ContactEndpoints :phone="phone" :email="email" \/>/g) || []).length, 3, 'Phone and wide headers and the info panel mark each address')
+  assert.match(connected, /<ContactEndpoints :phone="contact\.phone" :email="contact\.email"/, 'Business contacts show mobile and email')
 })
 
 test('a switched-off channel shows a plain banner in place of replies', () => {

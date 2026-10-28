@@ -127,12 +127,30 @@ class MarkTests(unittest.TestCase):
         fresh_write = Mock(side_effect=write_error)
         with patch.object(message_reads, 'frappe', site), patch.object(message_reads, 'require_access'), \
                 patch.object(message_reads, 'readable_contact'), patch.object(state, 'fresh_write', fresh_write), \
-                patch('relay_core.whatsapp_presence.mark_read') as self.receipts:
+                patch('relay_core.whatsapp_presence.mark_read') as self.receipts, \
+                patch('relay_core.business_access.primary', return_value=('Customer', 'C9')):
             return message_reads.mark('C1', json.dumps(['RELAY-MSG-0000000001', 'RELAY-MSG-0000000002']))
 
     def test_saved_reads_are_acknowledged_and_get_receipts(self):
         self.assertEqual(self.mark(), {'marked': ['RELAY-MSG-0000000001', 'RELAY-MSG-0000000002']})
         self.receipts.assert_called_once_with('C1', ['RELAY-MSG-0000000001', 'RELAY-MSG-0000000002'])
+
+    def test_reads_lower_the_shared_unread_count_of_the_chat_each_message_belongs_to(self):
+        def message(doctype, name):
+            business = ('Supplier', 'S1') if name.endswith('2') else ('', '')
+            values = {'relay_contact': 'C1', 'business_doctype': business[0], 'business_name': business[1]}
+            return Mock(relay_contact='C1', get=values.get)
+        site = fake_site()
+        site.parse_json.side_effect = json.loads
+        site.get_doc.side_effect = message
+        with patch.object(message_reads, 'frappe', site), patch.object(message_reads, 'require_access'), \
+                patch.object(message_reads, 'readable_contact'), patch('relay_core.whatsapp_presence.mark_read'), \
+                patch.object(state, 'fresh_write', side_effect=lambda work: work()), \
+                patch.object(message_reads, 'record_contact_reads') as record, \
+                patch('relay_core.business_access.primary', return_value=('Customer', 'C9')):
+            message_reads.mark('C1', json.dumps(['RELAY-MSG-0000000001', 'RELAY-MSG-0000000002']))
+        record.assert_called_once_with('C1', ['RELAY-MSG-0000000001', 'RELAY-MSG-0000000002'],
+                                       {('Customer', 'C9'): 'RELAY-MSG-0000000001', ('Supplier', 'S1'): 'RELAY-MSG-0000000002'})
 
     def test_unsaved_reads_are_not_acknowledged_and_get_no_receipts(self):
         with self.assertRaises(state.StateWriteFailed):

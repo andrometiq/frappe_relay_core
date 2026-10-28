@@ -1,11 +1,21 @@
-"""Inbox rows by business record: plain name search, readable records only, and the opaque cursor."""
+"""Inbox rows by business record from Relay Chat: one permission-checked list query, plain search and a stable cursor."""
+import datetime
 import unittest
 from unittest.mock import MagicMock, patch
 
+import frappe.utils
 from frappe import _dict
 from frappe.query_builder.utils import get_query_builder
 from relay_core import inbox_records
 from test_contact_primary import fake_frappe
+
+CHAT = 'Relay Chat'
+AT = datetime.datetime(2026, 10, 28, 10, 0)
+
+
+def chat(name, doctype='Customer', record='C1', at=AT, **values):
+    return _dict(name=name, business_doctype=doctype, business_name=record, title=values.pop('title', record), last_contact='R1',
+                 last_message_preview='Hi', last_message_at=at, last_channel='CH-1', unread_count=0, **values)
 
 
 class InboxRecordTests(unittest.TestCase):
@@ -13,8 +23,19 @@ class InboxRecordTests(unittest.TestCase):
         self.fake = fake_frappe()
         self.fake.qb = MagicMock(wraps=get_query_builder('mariadb'))
         self.fake.qb.DocType = get_query_builder('mariadb').DocType
-        self.fake.db.escape = lambda value: "'" + value.replace("'", "''") + "'"
+        self.fake.utils.get_datetime = frappe.utils.get_datetime
+        self.fake.get_list.side_effect = self.get_list
+        self.fake.get_all.return_value = []
+        self.chats = []
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
+
+    def get_list(self, doctype, **kwargs):
+        if doctype == 'Relay Channel':
+            return [('CH-1', 'WhatsApp')]
+        return self.chats
+
+    def chat_call(self):
+        return [call for call in self.fake.get_list.call_args_list if call.args[0] == CHAT][-1]
 
     def test_every_word_must_be_in_the_name_in_any_order(self):
         values = inbox_records.search_values('Atal marketing')
@@ -23,7 +44,6 @@ class InboxRecordTests(unittest.TestCase):
         sql = self.fake.qb.from_('Relay Contact').select('name').where(inbox_records.contact_search('Atal marketing')).get_sql()
         self.assertIn("LIKE '%Atal%' AND", sql)
         self.assertIn("LIKE '%marketing%'", sql)
-        self.assertNotIn('%A%t%a%l%', sql, 'Letters are not matched one by one, so "Patwa Sales" does not match "Atal"')
 
     def test_a_number_or_email_matches_the_chat_endpoints(self):
         self.assertEqual(inbox_records.search_values('+91 98765 43210')['endpoint'], '%919876543210%')
@@ -33,95 +53,68 @@ class InboxRecordTests(unittest.TestCase):
 
     def test_search_text_cannot_act_as_a_wildcard(self):
         self.assertEqual(inbox_records.search_values('50%_off')['word0'], '%50\\%\\_off%')
+        self.assertEqual(inbox_records.search_filters('50%_off')[0], [CHAT, 'title', 'like', '%50\\%\\_off%'])
 
-    def test_only_readable_business_types_are_listed_and_each_keeps_its_permission_query(self):
-        self.fake.qb.get_query = lambda doctype, **kwargs: self.fake.qb.from_(doctype).select('name').where(
-            self.fake.qb.DocType(doctype).owner == 'scope-' + doctype)
-        values = {}
-        with patch('relay_core.api.business_types', return_value=['Supplier']):
-            condition = inbox_records.readable_condition(values, 'l')
-        self.assertRegex(condition, r"l\.link_doctype=%\(qb\d+\)s AND l\.link_name IN \(SELECT")
-        self.assertEqual(sorted(values.values()), ['Supplier', 'scope-Supplier'])
-        self.assertNotIn('Customer', condition, 'A business type the user cannot read gives no rows')
-        with patch('relay_core.api.business_types', return_value=[]):
-            self.assertEqual(inbox_records.readable_condition({}, 'l'), '(0)')
+    def test_a_search_finds_business_records_by_title_or_name(self):
+        self.chats = [chat('RC-1', title='Atal Marketing')]
+        rows = inbox_records.page(query='Atal Marketing')['items']
+        self.assertEqual(self.chat_call().kwargs['or_filters'], [[CHAT, 'title', 'like', '%Atal%Marketing%'],
+                                                                 [CHAT, 'business_name', 'like', '%Atal%Marketing%']])
+        self.assertEqual([(row['kind'], row['doctype'], row['record'], row['title']) for row in rows],
+                         [('business', 'Customer', 'C1', 'Atal Marketing')])
 
-    def test_user_values_are_bound_never_written_into_the_statement(self):
-        attack = "x\\' OR 1=1 -- \\"
-        self.fake.qb.get_query = lambda doctype, **kwargs: self.fake.qb.from_(doctype).select('name')
-        contact = self.fake.qb.DocType('Relay Contact')
-        state = self.fake.qb.DocType('Relay Conversation State')
-        contacts = (self.fake.qb.from_(contact).select(contact.name, contact.contact, contact.display_name, contact.creation)
-                    .where(contact.name.isin(self.fake.qb.from_(state).select(state.relay_contact).where(state.folder == attack)))
-                    .where(contact.display_name.like('%50%')))
-        self.fake.db.has_column.return_value = True
-        self.fake.conf.db_type = 'mariadb'
-        values = inbox_records.search_values(attack)
-        from relay_core import inbox
-        with patch('relay_core.api.business_types', return_value=['Customer']), patch.object(inbox, 'frappe', self.fake):
-            unseen, sql = inbox_records.rows_sql(inbox_records.chats_query(contacts), values,
-                                                 business_type='Customer', business_name=attack)
-        statement = unseen + sql
-        self.assertNotIn('OR 1=1', statement, 'No user value is written into the SQL text')
-        self.assertNotIn('\\', statement)
-        self.assertIn(attack, values.values(), 'The folder and the record name are bound values')
-        self.assertIn('%50%', values.values())
-        self.assertRegex(statement, r"`folder`=%\(qb\d+\)s")
-        self.assertNotRegex(statement.replace('%%', ''), r"%(?!\(\w+\)s)", 'Every other percent sign is escaped')
+    def test_a_number_search_also_finds_chats_whose_last_writer_has_it(self):
+        self.fake.qb.from_ = MagicMock()
+        self.fake.qb.from_.return_value.select.return_value.where.return_value.limit.return_value.run.return_value = [('R7',)]
+        self.assertEqual(inbox_records.search_filters('98765 43210')[-1], [CHAT, 'last_contact', 'in', ['R7']])
 
-    def test_a_record_missing_from_the_permission_list_is_never_titled(self):
-        self.fake.get_meta.return_value.title_field = 'customer_name'
-        self.fake.get_list.return_value = [_dict(name='CUST-1', customer_name='Atal Agencies')]
-        titles = inbox_records.record_titles([('Customer', 'CUST-1'), ('Customer', 'CUST-2')])
-        self.assertEqual(titles, {('Customer', 'CUST-1'): 'Atal Agencies'})
-        self.assertEqual(self.fake.get_list.call_args.kwargs['filters'], {'name': ['in', ['CUST-1', 'CUST-2']]})
+    def test_the_list_is_one_permission_checked_query_newest_first(self):
+        inbox_records.page(mode='unread', channels=['CH-1'], business_type='Customer', business_name='C1', contacts=['R1'])
+        call = self.chat_call()
+        self.assertEqual(sum(1 for row in self.fake.get_list.call_args_list if row.args[0] == CHAT), 1)
+        self.assertEqual(call.kwargs['order_by'], 'last_message_at desc, name desc')
+        self.assertEqual(call.kwargs['limit_page_length'], inbox_records.PAGE + 1)
+        self.assertEqual(call.kwargs['filters'], [[CHAT, 'is_unread', '=', 1], [CHAT, 'business_doctype', '=', 'Customer'],
+                                                  [CHAT, 'business_name', '=', 'C1'], [CHAT, 'last_channel', 'in', ['CH-1']],
+                                                  [CHAT, 'last_contact', 'in', ['R1']]])
+        self.fake.get_all.assert_not_called()
 
-    def test_the_cursor_round_trips_and_rejects_tampering(self):
-        self.fake.utils.get_datetime = lambda value: value
-        row = _dict(search_rank=1, activity='2026-10-28 10:00:00.000001', doctype='Customer', record='CUST-1')
-        self.assertEqual(inbox_records.decode_cursor(inbox_records.encode_cursor(row)),
-                         {'cursor_rank': 1, 'cursor_activity': '2026-10-28 10:00:00.000001', 'cursor_doctype': 'Customer', 'cursor_record': 'CUST-1'})
-        for value in ('RELAY-CON-1', '[9,"x","",""]', '[0,1,"",""]', '{}'):
-            with self.assertRaises(ValueError):
-                inbox_records.decode_cursor(value)
+    def test_tabs_and_record_filters(self):
+        self.assertEqual(inbox_records.scope_filters('read'), [[CHAT, 'is_unread', '=', 0]])
+        self.assertEqual(inbox_records.scope_filters('unlinked'), [[CHAT, 'business_doctype', '=', 'Relay Contact']])
+        self.assertEqual(inbox_records.scope_filters('all', business_type='none'), [[CHAT, 'business_doctype', '=', 'Relay Contact']])
+        self.assertEqual(inbox_records.scope_filters('all'), [])
 
-    def owners(self, totals, links, existing, primary=(None, None)):
-        """The unstamped owner of chat P1, from link counts, enabled links and the records that still exist."""
-        query = MagicMock()
-        for method in ('select', 'where', 'groupby', 'distinct'):
-            getattr(query, method).return_value = query
-        query.run.side_effect = [totals, links]
-        self.fake.qb = MagicMock()
-        self.fake.qb.from_.return_value = query
-        self.fake.get_all.side_effect = lambda doctype, filters, **kwargs: (
-            ['Customer'] if doctype == 'Relay Contact Type' else [name for name in filters['name'][1] if (doctype, name) in existing])
-        owner = inbox_records.unstamped_owners(['P1'])
-        return owner(_dict(contact='P1', primary_doctype=primary[0], primary_name=primary[1]))
+    def test_the_cursor_neither_repeats_nor_skips_rows_that_share_a_time(self):
+        self.chats = [chat(f'RC-{index}', record=f'C{index}', at=AT if index > 28 else AT + datetime.timedelta(minutes=40 - index))
+                      for index in range(31)]
+        result = inbox_records.page()
+        self.assertEqual(len(result['items']), inbox_records.PAGE)
+        at, names = inbox_records.decode_cursor(result['next']['after'])
+        self.assertEqual((at, names), (AT, ['RC-29']))
+        self.chats = []
+        inbox_records.page(after=result['next']['after'])
+        self.assertEqual(self.chat_call().kwargs['filters'], [[CHAT, 'last_message_at', '<=', AT], [CHAT, 'name', 'not in', ['RC-29']]])
+        for tampered in ('[]', '["2026-10-28", []]', '["x", ["a"]]', 'not json', '[1, ["a"]]'):
+            with self.subTest(tampered=tampered), self.assertRaises(ValueError):
+                inbox_records.decode_cursor(tampered)
 
-    def test_more_than_the_link_limit_gives_no_owner_as_in_the_thread(self):
-        self.assertEqual(self.owners([('P1', 50)], [('P1', 'Customer', 'C1')], {('Customer', 'C1')}), ('Customer', 'C1'))
-        self.assertIsNone(self.owners([('P1', 51)], [], set(), primary=('Customer', 'C1')),
-                          'One enabled link plus 50 disabled-type links: the thread has no candidate, so no owner')
-        self.assertEqual(self.fake.qb.from_.return_value.run.call_count, 1, 'Links are not read for a Contact over the limit')
+    def test_a_chat_without_a_record_opens_as_its_contact(self):
+        self.chats = [chat('RC-1', doctype='Relay Contact', record='R9', title='+91 98765')]
+        self.fake.get_all.side_effect = lambda doctype, **kwargs: (
+            [('R9', 'CONTACT-9')] if doctype == 'Relay Contact' else [_dict(relay_contact='R9', starred=1, folder='F1')])
+        with patch('relay_core.contacts.linked_contacts', return_value=set()), patch('relay_core.inbox.state_key', side_effect=str):
+            row = inbox_records.page()['items'][0]
+        self.assertEqual((row['kind'], row['name'], row['contact'], row['display_name']), ('contact', 'R9', 'CONTACT-9', '+91 98765'))
+        self.assertEqual((row['unlinked'], row['starred'], row['folder'], row['provider']), (True, 1, 'F1', 'WhatsApp'))
 
-    def test_a_link_whose_record_is_gone_is_not_a_candidate(self):
-        links = [('P1', 'Customer', 'C1'), ('P1', 'Customer', 'gone')]
-        self.assertEqual(self.owners([('P1', 2)], links, {('Customer', 'C1')}), ('Customer', 'C1'),
-                         'One valid link plus one stale link: the valid one is the only candidate')
-        self.assertEqual(self.owners([('P1', 2)], links, {('Customer', 'C1')}, primary=('Customer', 'gone')), ('Customer', 'C1'),
-                         'A primary whose record is gone does not count')
-        self.assertIsNone(self.owners([('P1', 3)], [*links, ('P1', 'Customer', 'C2')], {('Customer', 'C1'), ('Customer', 'C2')}))
-
-    def test_the_owner_statement_caps_raw_links_and_needs_existing_records(self):
-        self.fake.get_all.return_value = ['Customer']
-        values = {}
-        sql = inbox_records.owner_sql(values)
-        self.assertIn("(SELECT COUNT(*) FROM `tabDynamic Link` x WHERE x.parent=f.contact AND x.parenttype='Contact' "
-                      "AND x.parentfield='links')<=50", sql, 'The cap counts raw links of every type, before filtering')
-        self.assertRegex(sql, r"x\.link_doctype=%\(qb\d+\)s AND x\.link_name IN \(SELECT `name` FROM `tabCustomer`\)")
-        self.assertEqual(list(values.values()), ['Customer'])
-        self.fake.get_all.return_value = []
-        self.assertIn('AND (0))=1', inbox_records.owner_sql({}), 'No enabled type gives no candidate')
+    def test_counts_come_from_one_grouped_statement(self):
+        self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),
+                      _dict(business_doctype='Relay Contact', total=3, unread=1, messages=1)]
+        self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 3, 'unread_messages': 8})
+        call = self.chat_call()
+        self.assertEqual(call.kwargs['group_by'], 'business_doctype')
+        self.assertEqual(call.kwargs['filters'], [[CHAT, 'last_channel', 'in', ['CH-1']]])
 
 
 if __name__ == '__main__':

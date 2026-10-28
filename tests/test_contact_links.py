@@ -101,10 +101,12 @@ class ContactApiTests(unittest.TestCase):
         self.fake.db.get_value.return_value = 'RELAY-CON-0000000001'
         relay = self.fake.get_doc('Relay Contact', 'RELAY-CON-0000000001')
         with patch.object(contacts, 'summary', return_value='summary'), \
-                patch.object(access, 'candidates', return_value=[('Customer', 'C1'), ('Supplier', 'S1')]):
+                patch.object(access, 'candidates', return_value=[('Customer', 'C1'), ('Supplier', 'S1')]), \
+                patch('relay_core.relay_chats.merge') as merge:
             self.assertEqual(contacts.set_primary('P1', 'Supplier', 'S1'), 'summary')
             self.assertEqual((relay.primary_doctype, relay.primary_name), ('Supplier', 'S1'))
             relay.save.assert_called_once_with(ignore_permissions=True)
+            merge.assert_called_once_with('RELAY-CON-0000000001', ('Supplier', 'S1'))
             with self.assertRaises(ValueError):
                 contacts.set_primary('P1', 'Customer', 'C2')
             self.fake.get_doc('Customer', 'C1').check_permission.side_effect = PermissionError
@@ -112,6 +114,7 @@ class ContactApiTests(unittest.TestCase):
                 contacts.set_primary('P1', 'Customer', 'C1')
             contacts.set_primary('P1')
             self.assertEqual((relay.primary_doctype, relay.primary_name), (None, None))
+            merge.assert_called_once()
 
     def test_set_primary_denies_without_contact_write(self):
         self.fake.get_doc('Contact', 'P1').check_permission.side_effect = PermissionError

@@ -181,7 +181,7 @@ class MarkBusinessRowHttpTests(unittest.TestCase):
         self.assertEqual(self.unread(), [0, 0])
         response = self.post(self.reader_key, 0)
         self.assertEqual(response.status_code, 200, response.text[:400])
-        self.assertGreaterEqual(response.json()['message']['unread'], 2)
+        self.assertGreaterEqual(response.json()['message']['unread'], 1, 'The record row is unread for the whole team')
         self.assertEqual(self.unread(), [1, 1])
 
     def test_user_who_cannot_read_the_business_is_denied(self):

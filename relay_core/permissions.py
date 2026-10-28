@@ -91,6 +91,8 @@ def after_migrate():
     frappe.db.add_index('Relay Campaign Recipient', ['campaign','status','name'], 'relay_campaign_pending')
     frappe.db.add_index('Relay Ticket Notification', ['status','next_attempt'], 'relay_ticket_pending')
     frappe.db.add_index('Relay Hub Event', ['projection_status','name'], 'relay_event_projection')
+    from relay_core.relay_chats import install_index as install_chat_index
+    install_chat_index()
     from relay_core.ticket_settings import seed_defaults
     seed_defaults()
 

@@ -235,7 +235,7 @@ function keydown(event) {
       <template v-if="isMobile && !noting && !closed">
         <span v-if="windowHint" class="composer-tabs-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
         <button v-if="can('templates')" type="button" class="composer-tab-action" :disabled="busy" :title="busy ? busyReason : 'Send an approved template'" @click="emit('template')"><FeatherIcon name="file-text" :size="13" />Template</button>
-        <Button icon="zap" variant="ghost" class="composer-tab-icon" aria-label="Saved replies" :title="busy ? busyReason : 'Saved replies'" :disabled="busy" @click="showReplies = true" />
+        <Button v-if="can('saved_replies')" icon="zap" variant="ghost" class="composer-tab-icon" aria-label="Saved replies" :title="busy ? busyReason : 'Saved replies'" :disabled="busy" @click="showReplies = true" />
       </template>
     </div>
     <slot v-if="noting" name="note" />
@@ -287,7 +287,7 @@ function keydown(event) {
         <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" variant="ghost" aria-label="Add attachment" :title="busy ? busyReason : 'Add attachment'" :disabled="busy" /></Dropdown>
         <Dropdown :options="emojiOptions"><Button icon="smile" variant="ghost" aria-label="Insert emoji" :title="busy ? busyReason : 'Insert emoji'" :disabled="busy" /></Dropdown>
         <Button v-if="can('templates')" class="composer-chip" icon-left="file-text" label="Template" variant="ghost" :title="busy ? busyReason : 'Send an approved template'" :disabled="busy" @click="emit('template')" />
-        <Button class="composer-chip" icon-left="zap" label="Saved replies" variant="ghost" :title="busy ? busyReason : 'Insert a saved reply'" :disabled="busy" @click="showReplies=true" />
+        <Button v-if="can('saved_replies')" class="composer-chip" icon-left="zap" label="Saved replies" variant="ghost" :title="busy ? busyReason : 'Insert a saved reply'" :disabled="busy" @click="showReplies=true" />
         <span v-if="windowHint" class="composer-window-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
       </div>
       <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"

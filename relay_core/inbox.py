@@ -80,8 +80,9 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     `business_type` and `business_name` keep the chats of one business type or record; `none` keeps chats without one.
     Read keeps the chats without unread incoming messages for the session user; Unlinked keeps chats without a business record.
     A search matches every word of the name in any order, or a mobile number or email of the chat.
-    `rows='business'` gives one row per readable business record and contact rows only for chats that no readable record
-    covers; its cursor is opaque and it pages forward only."""
+    `rows='business'` gives the Relay Chat rows: one per readable business record and one per chat whose messages name
+    no record. Star, folder and team keep the rows whose last writer is such a chat. Its cursor is opaque and it pages
+    forward only."""
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>140 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
@@ -92,17 +93,18 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     from relay_core.inbox_filters import business_filter, channel_names as chosen_channels
     contact=frappe.qb.DocType('Relay Contact')
     channel_names=chosen_channels(medium, channel, channels)
-    activity=Coalesce(contact.last_message_at,contact.creation)
-    search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters={},
-                               ignore_permissions=False,order_by='',limit=None if rows=='business' else 31)
-    search=filtered_contacts(search, channel_names, business_filter(business_type, business_name),
-                             'unlinked' if mode=='unlinked' else 'all' if rows=='business' else mode)
-    search=chosen_states(search, starred, folder, team)
+    business=business_filter(business_type, business_name)
     if rows=='business':
         if channel_names==[]:return {'items':[],'previous':None,'next':None}
         from relay_core import inbox_records
-        return inbox_records.page(search, query=query, mode=mode, after=after, since=activity_time(since) if since else None,
-                                  channels=channel_names, business_type=business_type, business_name=business_name)
+        return inbox_records.page(query=query, mode=mode, after=after, since=activity_time(since) if since else None,
+                                  channels=channel_names, business_type=business_type, business_name=business_name,
+                                  contacts=chosen_contacts(starred, folder, team))
+    activity=Coalesce(contact.last_message_at,contact.creation)
+    search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters={},
+                               ignore_permissions=False,order_by='',limit=31)
+    search=filtered_contacts(search, channel_names, business, mode)
+    search=chosen_states(search, starred, folder, team)
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
         stamp=anchor.last_message_at or anchor.creation
@@ -119,6 +121,13 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     items=directory_items(page,channel_names)
     return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+def chosen_contacts(starred=0, folder='', team=None):
+    """The visible chats in the user's folder, starred, or of a team; None when no such filter is set."""
+    if not (folder or str(starred)=='1' or team):return None
+    search=frappe.qb.get_query('Relay Contact',fields=['name'],ignore_permissions=False,order_by='')
+    return [row[0] for row in chosen_states(search, starred, folder, team).run()]
 
 
 def chosen_states(search, starred=0, folder='', team=None):

@@ -49,3 +49,9 @@ test('the channel row shows only switched-on channels, with no "soon" placeholde
   const shown = mediumChips({ enabled_channels: ['WhatsApp'] }).filter(chip => chip.enabled).map(chip => chip.value)
   assert.deepEqual(shown, ['WhatsApp'])
 })
+
+test('a shared read change by any user reloads the chat list and its counts', async () => {
+  const counts = await readFile(new URL('../src/composables/useQueueCounts.js', import.meta.url), 'utf8')
+  assert.match(inbox, /useRealtimeRefresh\(\['Relay Message'\], \[[^\]]*'chats'/)
+  assert.match(counts, /watchRealtime\(\['Relay Message'\], \[[^\]]*'chats'/)
+})

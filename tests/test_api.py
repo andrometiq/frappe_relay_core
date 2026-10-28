@@ -230,15 +230,19 @@ class ChannelUITests(unittest.TestCase):
             with self.assertRaises(ValueError): self.api.contact_directory(value)
 
     def test_profile_returns_only_safe_identity_and_rechecks_access(self):
-        self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), None)
+        person = types.SimpleNamespace(name='person', mobile_no='', phone=' +91 98765 43210 ', email_id='')
+        self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), person)
         header = {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'}
         links = [('Customer', 'C1'), ('Supplier', 'S1')]
         self.f.has_permission = Mock(side_effect=lambda doctype, ptype, doc: doctype == 'Customer')
         with patch('relay_core.business_access.primary_record', return_value=header) as primary, \
-                patch('relay_core.business_access.candidates', return_value=links):
+                patch('relay_core.business_access.candidates', return_value=links), \
+                patch('relay_core.contacts.contact_emails', return_value={'person': 'ann@example.invalid'}) as emails:
             self.assertEqual(self.api.contact_profile('relay'), {'name':'relay','display_name':'Local','contact':'person',
-                                                                 'primary': header, 'link_count': 1})
+                                                                 'primary': header, 'link_count': 1,
+                                                                 'phone': '+91 98765 43210', 'email': 'ann@example.invalid'})
         primary.assert_called_once_with('relay', links)
+        emails.assert_called_once_with(['person'])
         self.api.readable_contact.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_profile('relay')
 

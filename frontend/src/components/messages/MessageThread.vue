@@ -15,9 +15,10 @@ import { Button, FeatherIcon } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL, reactionLabels, ownReaction } from "../messageContent";
-import { channelCan, multipleChannels } from "../../services/enabledChannels";
+import { channelCan, multipleChannels, onPickedChannel } from "../../services/enabledChannels";
 import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
+import { dayDividers, quoteIndex, timeOf } from "./threadIndex";
 import { groupSends } from "../../services/sendGroups";
 import { notesInThread } from "../../services/threadNotes";
 const props = defineProps({
@@ -37,6 +38,8 @@ const props = defineProps({
   unread: String,
   notes: { type: Array, default: () => [] },
   replyClosed: Boolean,
+  // The provider of the channel picked to send on; actions that send act only on its messages.
+  provider: String,
 });
 const emit = defineEmits([
   "reconcile",
@@ -60,6 +63,9 @@ const showChannel = computed(() => multipleChannels(capabilities.value));
 const sentRows = computed(() => groupSends(props.rows || []));
 const threadRows = computed(() => notesInThread(sentRows.value, props.notes, { more: props.more, newer: props.newer }));
 const numberTags = computed(() => messageNumberTags(sentRows.value, capabilities.value));
+// Built once per row change: every render, such as a page load or the paging flag, only looks rows up.
+const quoted = computed(() => quoteIndex(props.rows || []));
+const dividers = computed(() => dayDividers(threadRows.value));
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
 // A chat send the server rejected, or one that never reached the server, offers Retry and Delete.
@@ -97,7 +103,7 @@ onBeforeUnmount(pressEnd);
 const reactionChoices = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
 const quickReactions = ["👍", "❤️", "😁", "👏", "😢"];
 function canReact(message) {
-  return !objectValue(message.provider_context).group_id && can(message, "reactions");
+  return !objectValue(message.provider_context).group_id && can(message, "reactions") && onPickedChannel(message, props.provider);
 }
 function deliveryKind(message) {
   const status = String(message.status || "");
@@ -120,44 +126,12 @@ const {info,coverage,coverageError,infoOpen,showInfo,refreshCoverage,close:close
 useRealtimeRefresh([],['reads'],refreshCoverage);
 onBeforeUnmount(closeInfo);
 
-function timeOf(message) {
-  const value = new Date(
-    (message.sent_at || message.creation || "").replace(" ", "T"),
-  );
-  return Number.isNaN(value.getTime()) ? null : value;
-}
 function timeLabel(message) {
   return (
     timeOf(message)?.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     }) || ""
-  );
-}
-function dayLabel(message) {
-  const date = timeOf(message);
-  if (!date) return '';
-  const today = new Date();
-  const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return 'Today';
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return (
-    date.toLocaleDateString([], {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    }) || ""
-  );
-}
-function quoted(message) {
-  const ctx = objectValue(message.provider_context);
-  return props.rows.find(
-    (row) =>
-      row.channel === message.channel &&
-      row.sender_endpoint === message.sender_endpoint &&
-      String(
-        objectValue(row.provider_context).message_id || row.provider_id,
-      ) === String(ctx.reply_to_message_id),
   );
 }
 watch(
@@ -245,7 +219,8 @@ async function copyText(text) {
 }
 // Quick reactions sit on top of the menu; the actions follow, most used first.
 function actions(message) {
-  const items = props.replyClosed ? [] : [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
+  const sends = onPickedChannel(message, props.provider);
+  const items = props.replyClosed || !sends ? [] : [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
   if (message.content) items.push({ label: "Copy text", icon: "copy", onClick: () => copyText(message.content) });
   const download = attachmentDownloadURL(message);
   if (download) items.push({label: 'Download', icon: 'download', onClick: () => {
@@ -258,7 +233,7 @@ function actions(message) {
     link.remove();
   }});
   items.push({ label: "Message info", icon: "info", onClick: () => showInfo(message) });
-  if (messageData(message).kind === "sticker")
+  if (sends && messageData(message).kind === "sticker")
     items.push({ label: "Resend sticker", icon: "repeat", onClick: () => emit("send", message, "sticker") });
   if (props.canComment)
     items.push({ divider: true }, { label: "Add internal note", icon: "message-square", onClick: () => emit("note", message) },
@@ -285,15 +260,9 @@ function actions(message) {
     <p v-if="pagingError" class="message-page-error" role="alert">Could not load more messages. <button type="button" @click="emit('retryPage')">Retry</button></p>
     <div v-if="more" ref="earlier" class="h-px" aria-hidden="true" />
     <div ref="content" class="message-thread-content">
-    <template v-for="(message, index) in threadRows" :key="message.name">
-      <div
-        v-if="
-          dayLabel(message) &&
-          (!index || dayLabel(threadRows[index - 1]) !== dayLabel(message))
-        "
-        class="message-date-divider"
-      >
-        <span>{{ dayLabel(message) }}</span>
+    <template v-for="message in threadRows" :key="message.name">
+      <div v-if="dividers.has(message.name)" class="message-date-divider">
+        <span>{{ dividers.get(message.name) }}</span>
       </div>
       <div v-if="message.name === unread" class="message-date-divider message-unread-divider" role="separator">
         <span>Unread messages</span>

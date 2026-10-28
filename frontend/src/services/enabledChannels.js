@@ -47,6 +47,12 @@ export function defaultSendSource(rows, capabilities) {
   return rows.at(-1) || null
 }
 
+// Reply, reactions and resends go out on the message's own channel, so a thread offers them only on messages of the
+// channel picked to send on. No pick offers them everywhere.
+export function onPickedChannel(message, provider) {
+  return !provider || objectValue(message.provider_context).provider === provider
+}
+
 // Message types the composer offers for the source channel. Groups take media only.
 export function composerKinds(capabilities, context) {
   const can = feature => channelCan(capabilities, context.provider, feature)
