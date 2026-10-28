@@ -2,6 +2,7 @@
 import json
 import time
 import hashlib
+import traceback
 import frappe
 from relay_core.automation.queue import QUEUE
 from relay_core.ai.tools import as_user
@@ -31,6 +32,8 @@ def context(skill, message):
     if message.get('conversation_key') != conversation or not channel.get('company'):
         raise ValueError('Conversation or company scope is missing')
     # A linked but disabled/denied user must never fall back to a broader identity.
+    if person.get('user') and not frappe.db.get_value('User', person.user, 'enabled'):
+        raise ValueError('Contact is linked to a disabled portal user')
     user = person.get('user') or skill.run_as_user
     from relay_core.permissions import company_allowed
     with as_user(user):
@@ -315,6 +318,13 @@ def current(run, skill, message):
     return resolved
 
 
+def log_failure(run, exc):
+    """Keep the traceback in Error Log and a bounded explanation for staff."""
+    frappe.log_error(title='Relay AI run failed', message=traceback.format_exc(),
+                     reference_doctype='Relay Automation Run', reference_name=run.name)
+    return (' '.join(str(exc).split()) or type(exc).__name__)[:500]
+
+
 def process(name, *, deadline=None):
     from relay_core.ai.handoff import handoff
     run = lock_run(name)
@@ -394,17 +404,18 @@ def process(name, *, deadline=None):
         run = lock_run(name)
         run.status, run.reason = 'Cancelled', 'Conversation, message or skill changed'
         internal_save(run); frappe.db.commit()
-    except Exception:
+    except Exception as exc:
         frappe.db.rollback()
+        reason = log_failure(run, exc)
         run = lock_run(name)
         if run.status not in ('Pending', 'Deciding'):
             return
         if skill.mode == 'Shadow':
-            run.status, run.reason = 'Shadow', 'Decision or authorization failed'
+            run.status, run.reason = 'Shadow', reason
             internal_save(run)
         else:
             try:
-                handoff(run, skill, 'Decision, delivery or authorization failed; review required')
+                handoff(run, skill, reason)
             except Exception:
                 # Leave the run recoverable if every configured owner is unavailable.
                 defer_handoff(run.name)
@@ -632,12 +643,13 @@ def admit(run):
         run = lock_run(run.name)
         run.status, run.reason = 'Cancelled', 'Conversation or message changed'
         internal_save(run); frappe.db.commit(); return
-    except Exception:
+    except Exception as exc:
         frappe.db.rollback()
+        reason = log_failure(run, exc)
         run = lock_run(run.name)
         run.match_result = json.dumps(dict(selected=None, scores=[], method='failed',
-                                          reason='Event matching or authorization failed'))
-        triage(run, message, 'Event matching or authorization failed; review required')
+                                          reason=reason))
+        triage(run, message, reason)
         frappe.db.commit(); return
     if run.status == 'Pending' and run.stage == 'Event':
         return process(run.name, deadline=deadline)

@@ -188,12 +188,11 @@ def _ai_context(run_name, step):
             raise ValueError('Action is outside the event')
         definition = definitions().get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
-        # Transport binding alone does not prove business-record identity.
+        # current() verifies the sender endpoint and the Contact link to this business.
+        # Explicit legacy mappings remain additional restrictions, not prerequisites.
         references = read_contracts(skill, scope['provider'])
         anchors = {row['identity_fields'][scope['provider']] for row in references
                    if row.get('identity_anchor') == business[0]}
-        if not anchors:
-            raise ValueError('An identity mapping is required for execution')
         for field in anchors:
             scoped_document(*business, {field: scope['endpoint']})
         for doctype, permission in definition['permissions'].items():
