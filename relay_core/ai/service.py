@@ -9,6 +9,8 @@ from relay_core.ai.tools import as_user
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import action_key
 
+REPLY_TIMEOUT = 60
+
 
 def context(skill, message):
     from relay_core.business_access import reference, candidates
@@ -56,7 +58,7 @@ def context(skill, message):
 def decide(skill, message, run_id=None, *, deadline=None):
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
     from relay_core.ai.tools import fingerprint
-    deadline = deadline or time.monotonic() + 20
+    deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     user, business, scope = context(skill, message)
     text = message.content or ''
     from relay_core.ai.matching import human_request
@@ -326,6 +328,8 @@ def log_failure(run, exc):
         frappe.db.rollback()
     frappe.log_error(title='Relay AI run failed', message=traceback.format_exc(),
                      reference_doctype='Relay Automation Run', reference_name=run.name)
+    if isinstance(exc, TimeoutError):
+        return 'AI model did not answer in time'
     return (' '.join(str(exc).split()) or type(exc).__name__)[:500]
 
 
@@ -574,7 +578,7 @@ def admit(run):
     from relay_core.ai import matching
     from relay_core.ai.tools import fingerprint
     from relay_core.automation.service import episode, triage
-    deadline = time.monotonic() + 40
+    deadline = time.monotonic() + 40  # Matching budget; replies get their own REPLY_TIMEOUT.
     message = frappe.get_doc('Relay Message', run.message)
     try:
         ticket = episode(run, message)
@@ -591,7 +595,7 @@ def admit(run):
             raise Superseded('Incoming message changed or was superseded')
         if continue_search(run, message):
             frappe.db.commit()
-            return process(run.name, deadline=deadline)
+            return process(run.name)
         skills = matching.candidates(message)
         contexts = {skill.name: context(skill, message) for skill in skills}
         scopes = {name: fingerprint(value[2]) for name, value in contexts.items()}
@@ -654,4 +658,4 @@ def admit(run):
         triage(run, message, reason)
         frappe.db.commit(); return
     if run.status == 'Pending' and run.stage == 'Event':
-        return process(run.name, deadline=deadline)
+        return process(run.name)

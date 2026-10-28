@@ -452,18 +452,57 @@ class SkillDeliveryTests(unittest.TestCase):
         self.send.assert_not_called(); self.handoff.assert_not_called()
         self.assertEqual(self.run.status, 'Shadow')
 
-    def test_permission_and_model_failure_share_handoff(self):
-        for failure in (PermissionError, TimeoutError):
-            self.run.status = 'Pending'; self.run.decision = None; self.run.attempts = 0
-            self.service.decide.side_effect = failure
-            self.service.process('RUN-1')
-        self.assertEqual(self.handoff.call_count, 2)
+    def test_permission_and_timeout_have_distinct_run_reasons(self):
+        from frappe_tools.ai.client import DeadlineReached
+        for mode in ('Automatic', 'Shadow'):
+            for failure, reason in (
+                    (PermissionError('Contact is not linked to this record'), 'Contact is not linked to this record'),
+                    (TimeoutError('Read timed out'), 'AI model did not answer in time'),
+                    (DeadlineReached('The AI time budget is used up'), 'AI model did not answer in time'),
+                    (ValueError('AI provider error: Service unavailable'), 'AI provider error: Service unavailable')):
+                with self.subTest(mode=mode, failure=failure):
+                    self.run.update(status='Pending', decision=None, attempts=0)
+                    self.skill.mode = mode
+                    self.handoff.reset_mock()
+                    self.handoff.side_effect = lambda run, skill, why: run.update(status='Handoff', reason=why)
+                    self.service.decide.side_effect = failure
+                    self.service.process('RUN-1')
+                    self.assertEqual(self.run.reason, reason)
+                    self.assertEqual(self.run.status, 'Shadow' if mode == 'Shadow' else 'Handoff')
+                    self.assertIn(str(failure), self.f.log_error.call_args.kwargs['message'])
+                    if mode == 'Shadow':
+                        self.handoff.assert_not_called()
         self.send.assert_not_called()
 
     def test_takeover_prevents_delivery(self):
         self.service.current.side_effect = self.service.Superseded('Conversation changed')
         self.service.process('RUN-1')
         self.send.assert_not_called()
+
+    def test_matching_and_search_continuation_do_not_shorten_reply_budget(self):
+        self.automation.episode = Mock(return_value=Doc(ai_disabled=0))
+        self.automation.triage = Mock()
+        self.automation.lock_contact.return_value = Doc(automation_paused=0, automation_generation=0)
+        self.automation.message_hash.return_value = 'hash'
+        self.automation.latest_message.return_value = True
+        self.f.db.get_value.return_value = 0
+        self.f.QueryDeadlockError = type('QueryDeadlockError', (Exception,), {})
+        for continued in (False, True):
+            with self.subTest(continued=continued):
+                self.run.update(status='Pending', stage='Matching', generation=0, message_hash='hash', attempts=0)
+                with patch('relay_core.tickets.check_episode'), \
+                     patch.object(self.service, 'continue_search', return_value=continued), \
+                     patch.object(self.service, 'context', return_value=('partner', ('Supplier', 'SUP-A'), self.scope)), \
+                     patch.object(self.service, 'conversation_history', return_value=[]), \
+                     patch('relay_core.ai.matching.candidates', return_value=[self.skill]), \
+                     patch('relay_core.ai.matching.select', return_value={'selected': self.skill.name}) as select, \
+                     patch.object(self.service, 'select_skill', side_effect=lambda *args: self.run.update(stage='Event', status='Pending')), \
+                     patch.object(self.service.time, 'monotonic', return_value=100), \
+                     patch.object(self.service, 'process') as process:
+                    self.service.admit(self.run)
+                process.assert_called_once_with(self.run.name)
+                if not continued:
+                    self.assertEqual(select.call_args.args[3], 140)
 
 
     def test_revoked_tool_permission_after_inference_hands_off_without_sending(self):
@@ -525,13 +564,62 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertTrue(result['handoff'])
         args = self.attempt.call_args.args
         self.assertEqual(args[1], 'test-model')
-        self.assertLessEqual(args[3]['timeout'], 20)
-        self.assertGreater(args[3]['timeout'], 0)
+        self.assertLessEqual(args[3]['timeout'], 60)
+        self.assertGreater(args[3]['timeout'], 59)
         self.assertEqual(args[3]['attempts'], 1)
         self.assertIsNone(args[4]['phase'])
         self.assertEqual(args[4]['reference_doctype'], 'Relay Automation Run')
         self.assertEqual(args[4]['reference_name'], 'RUN-1')
         self.assertIsInstance(args[5], float)
+
+    def test_reply_can_finish_after_twenty_seconds_but_respects_explicit_deadline(self):
+        result = self.outcome({'reply': '', 'handoff': True, 'reason': 'Staff assistance required'})
+        with patch.object(self.adapter.time, 'monotonic', return_value=100) as clock:
+            def slow_reply(*args):
+                clock.return_value = 130
+                return result
+            self.attempt.side_effect = slow_reply
+            self.assertTrue(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')['handoff'])
+            self.assertEqual(self.attempt.call_args.args[3]['timeout'], 60)
+            self.assertEqual(self.attempt.call_args.args[5], 160)
+            clock.return_value = 100
+            with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question', deadline=125)
+
+    def test_provider_failure_reason_is_short_redacted_and_distinct_from_timeout(self):
+        cases = (
+            ('Service unavailable\n Please retry', ValueError, 'AI provider error: Service unavailable Please retry'),
+            ('Read timed out (read timeout=20)', TimeoutError, 'AI model did not answer in time'),
+            ('Connection timeout', TimeoutError, 'AI model did not answer in time'),
+            ('The AI time budget is used up', TimeoutError, 'AI model did not answer in time'),
+            ('DeadlineReached', TimeoutError, 'AI model did not answer in time'),
+            ('', ValueError, 'AI provider error: No error details returned'),
+        )
+        for error, exception, reason in cases:
+            with self.subTest(error=error):
+                self.attempt.return_value = {'ok': False, 'error': error, 'retryable': False}
+                with self.assertRaises(exception) as raised:
+                    self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+                self.assertEqual(str(raised.exception), reason)
+        self.attempt.return_value = {'ok': False, 'error': 'local-test-secret ' + 'detail ' * 200}
+        with patch.object(self.agent, 'get_known_secrets', return_value=['local-test-secret']):
+            with self.assertRaises(ValueError) as raised:
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+        self.assertNotIn('local-test-secret', str(raised.exception))
+        self.assertEqual(len(str(raised.exception)), 500)
+
+    def test_failed_authorization_takes_precedence_over_provider_failure(self):
+        reader = types.SimpleNamespace(failed=True)
+        self.attempt.return_value = {'ok': False, 'error': 'Service unavailable'}
+        with patch.object(self.adapter, 'Reader', return_value=reader):
+            with self.assertRaisesRegex(ValueError, '^Business data authorization failed; review required$'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+
+    def test_classifier_keeps_twenty_second_timeout(self):
+        self.attempt.return_value = self.outcome({'human_request': False, 'scores': []})
+        with patch.object(self.adapter.time, 'monotonic', return_value=100):
+            self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 140)
+        self.assertEqual(self.attempt.call_args.args[3]['timeout'], 20)
 
     def test_matching_shared_engine_has_no_tools_and_rejects_tool_calls(self):
         import time
@@ -551,11 +639,10 @@ class SharedAdapterTests(unittest.TestCase):
         self.f.db.sql.assert_not_called()
 
     def test_expired_turn_cannot_start_matching_or_response(self):
-        for call in (lambda: self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 1),
-                     lambda: self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'),
-                                                   'Question', deadline=1)):
-            with self.assertRaisesRegex(ValueError, 'deadline'):
-                call()
+        with self.assertRaisesRegex(ValueError, 'deadline'):
+            self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 1)
+        with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question', deadline=1)
         self.attempt.assert_not_called()
 
     def test_unregistered_tool_forces_handoff_even_if_model_returns_reply(self):
@@ -789,7 +876,9 @@ class ConversationIdentityTests(unittest.TestCase):
         complete = Mock(return_value={'handoff': False, 'reply': 'Scoped reply'})
         adapter = types.SimpleNamespace(complete=complete, MAX_PROMPT_LENGTH=12000)
         with patch.dict(sys.modules, {'relay_core.ai.adapter': adapter}):
-            self.service.decide(self.skill, self.message)
+            with patch.object(self.service.time, 'monotonic', return_value=100):
+                self.service.decide(self.skill, self.message)
+            self.assertEqual(complete.call_args.kwargs['deadline'], 160)
             self.assertEqual(json.loads(complete.call_args.args[3]),
                 {'history': [], 'incoming': self.message.content})
             complete.reset_mock()
