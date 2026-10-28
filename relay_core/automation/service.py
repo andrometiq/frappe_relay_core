@@ -185,6 +185,17 @@ def configuration_failure(message, error):
     triage(run, doc, 'Automation configuration requires review')
 
 
+def staff_owned(contact, *, ticket=None, message=None):
+    """Preview a new message against the active episode, not its historical ticket."""
+    if contact.automation_paused:
+        return True
+    if ticket is not None:
+        return bool(ticket.ai_disabled)
+    from relay_core.tickets import _episode_scope
+    _, key = _episode_scope(message)
+    return bool(frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, 'ai_disabled'))
+
+
 def create_run(doc):
     """The sole admission transaction for automatic inbound handlers and APIs."""
     from relay_core.opt_out import is_keyword
@@ -223,15 +234,16 @@ def create_run(doc):
         triage(run, doc, 'Episode admission requires review')
         return {'name': run.name, 'status': run.status}
     run.ownership_generation = int(ticket.generation or 0)
+    owned = staff_owned(contact, ticket=ticket)
     waiting = flow and channel_automation.owns_reply(doc)
-    if not pipeline and flow and not waiting and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
+    if not pipeline and flow and not waiting and not owned and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
         from relay_core.ai.service import continue_search
         try:
             flow = not continue_search(run, doc)
         except (ValueError, frappe.PermissionError, frappe.ValidationError):
             triage(run, doc, 'Search confirmation or authorization failed; review required')
             return {'name': run.name, 'status': run.status}
-    if contact.automation_paused or ticket.ai_disabled:
+    if owned:
         run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
     elif human_request(doc.content):
         triage(run, doc, 'Sender requested a person')

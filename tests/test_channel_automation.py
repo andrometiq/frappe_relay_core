@@ -180,6 +180,62 @@ class ChannelApiTests(unittest.TestCase):
         self.doc.save.assert_called_once_with(ignore_permissions=True)
         self.assertEqual(self.doc.automation_enabled, 0)
 
+    def test_partial_save_preserves_every_omitted_field(self):
+        self.doc.update(timezone='UTC', open_time='09:00', close_time='17:00', working_days='Monday',
+                        automation_steps=[row('Flow')])
+        channel.save('channel', {'steps': [row('AI skill')]}, 'revision')
+        self.assertEqual(self.doc.automation_enabled, 1)
+        self.assertEqual(self.doc.open_time, '09:00')
+        self.assertEqual(self.doc.automation_steps, [row('AI skill')])
+        channel.save('channel', {'open_time': '10:00'}, 'revision')
+        self.assertEqual(self.doc.open_time, '10:00')
+        self.assertEqual(self.doc.close_time, '17:00')
+        self.assertEqual(self.doc.automation_steps, [row('AI skill')])
+        channel.save('channel', {'automation_enabled': 0}, 'revision')
+        channel.save('channel', {'steps': []}, 'revision')
+        self.assertEqual(self.doc.automation_enabled, 0)
+        self.assertEqual(self.doc.automation_steps, [])
+
+    def test_partial_save_still_rejects_invalid_explicit_values(self):
+        for values in ({'automation_enabled': None}, {'automation_enabled': '1'},
+                       {'automation_enabled': 2}, {'steps': None}, {'steps': [row('Flow') | {'enabled': None}]}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                channel.save('channel', values, 'revision')
+        self.doc.save.assert_not_called()
+
+    def test_preview_checks_active_episode_instead_of_closed_source_ticket(self):
+        message = _dict(name='msg', relay_contact='person', channel='channel', ticket='closed-ticket',
+                        provider_context='{}', direction='Incoming')
+        person = _dict(automation_paused=0)
+        self.fake.get_doc.side_effect = lambda dt, name: {
+            'Relay Channel': self.doc, 'Relay Message': message, 'Relay Contact': person}[dt]
+        self.fake.get_list.return_value = [message.name]
+        self.doc.automation_steps = [row('Flow')]
+        active = {'held': None}
+        def lookup(dt, filters, field):
+            self.assertEqual((dt, filters, field), ('Relay Ticket', {'active_scope_key': 'current-scope'}, 'ai_disabled'))
+            return active['held']
+        self.fake.db.get_value.side_effect = lookup
+        with patch.object(service, 'frappe', self.fake), \
+             patch('relay_core.tickets._episode_scope', return_value=({}, 'current-scope')), \
+             patch('relay_core.permissions.readable_contact'), patch('relay_core.opt_out.is_keyword', return_value=False), \
+             patch.object(channel, 'identity'), patch.object(channel, 'owns_reply', return_value=False), \
+             patch.object(channel, 'ai_available', return_value=False), \
+             patch.object(channel, 'ticket_resolved', return_value=True), \
+             patch.object(channel, 'evaluate', return_value=(True, 'Flow matched')), \
+             patch.object(service, 'staff_owned', wraps=service.staff_owned) as ownership:
+            for held, paused, runs in ((None, 0, True), (0, 0, True), (1, 0, False), (None, 1, False)):
+                with self.subTest(held=held, paused=paused):
+                    active['held'], person.automation_paused = held, paused
+                    result = channel.dry_run('channel', 'Order 1250', contact='person')
+                    self.assertEqual(result['trace'][0]['runs'], runs)
+                    ownership.assert_called_with(person, message=message)
+                    # Admission passes the episode it has resolved; both paths use this check.
+                    self.assertEqual(service.staff_owned(person, ticket=_dict(ai_disabled=held or 0)), not runs)
+        self.doc.save.assert_not_called()
+        self.fake.db.commit.assert_not_called()
+        self.fake.db.set_value.assert_not_called()
+
     def test_non_manager_cannot_save(self):
         self.access.side_effect = PermissionError()
         with self.assertRaises(PermissionError):
