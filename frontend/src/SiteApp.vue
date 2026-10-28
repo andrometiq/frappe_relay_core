@@ -16,6 +16,7 @@ import { useQueueCounts } from './composables/useQueueCounts'
 import { countLabel } from './services/queueCounts'
 import { defaultMedium, pageCapabilities } from './services/enabledChannels'
 import { openLegacyConversation } from './services/legacyLinks'
+import { THEME_LABELS, cycleTheme, theme } from './services/theme'
 
 const location = window.location
 const views = {
@@ -137,7 +138,7 @@ onErrorCaptured(e => {
       </nav>
       <div class="relay-nav-footer">
         <a href="/desk/relay-core" class="nav-item"><FeatherIcon name="grid" class="h-4 w-4" /><span class="relay-nav-label">Frappe Desk</span></a>
-        <div class="relay-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+        <div class="relay-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button :icon="THEME_LABELS[theme][0]" :aria-label="`Theme: ${THEME_LABELS[theme][1]}`" :title="`Theme: ${THEME_LABELS[theme][1]}`" @click="cycleTheme" /><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </div>
     </aside>
     <main class="workspace" :inert="mobile || moreOpen || undefined">
@@ -150,7 +151,7 @@ onErrorCaptured(e => {
     <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :sections="sections" :view="view" :section="section" @navigate="view = $event" @section="openSection">
       <template #footer>
         <a href="/desk/relay-core" class="mobile-sheet-item"><span class="mobile-sheet-icon"><FeatherIcon name="grid" :size="18" /></span><span>Frappe Desk</span></a>
-        <div class="relay-account mobile-sheet-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+        <div class="relay-account mobile-sheet-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button :icon="THEME_LABELS[theme][0]" :aria-label="`Theme: ${THEME_LABELS[theme][1]}`" :title="`Theme: ${THEME_LABELS[theme][1]}`" @click="cycleTheme" /><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
       </template>
     </MobileTabBar>
   </div>
