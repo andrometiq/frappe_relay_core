@@ -69,3 +69,18 @@ test('a loaded flow with editor fields still matches its published steps', () =>
   nodes[0].action = 'y'
   assert.equal(hasUnpublished({ nodes, published_nodes: published }), true)
 })
+
+test('publication compares channel, actor, business and every trigger setting', () => {
+  const settings = { channel: 'channel', execution_user: 'manager', business_doctype: 'Customer', command: '/help', keywords: 'support', template_button: 'start' }
+  const flow = { ...settings, nodes: '[1]', published_nodes: '[1]', published_settings: settings }
+  assert.equal(hasUnpublished(flow), false)
+  for (const key of Object.keys(settings)) assert.equal(hasUnpublished({ ...flow, [key]: 'changed' }), true, key)
+})
+
+test('AI and assignment nodes keep configuration and stopping AI is terminal', () => {
+  assert.equal(newStep('ai_skill', []).on_reply, 'Continue')
+  assert.equal(newStep('assign', []).team, '')
+  const node = { ...newStep('ai_skill', []), ai_skill: 'Support', on_reply: 'Stop', next: 'later' }
+  assert.equal(cleanStep(node).next, undefined)
+  assert.equal(nextLabel([node], 0), 'Flow ends')
+})
