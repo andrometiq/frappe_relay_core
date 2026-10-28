@@ -140,7 +140,8 @@ useRealtimeRefresh([],['message_actions'],check)
 
 <style scoped>
 .email-composer > .composer-tabs > button { display:inline-flex; align-items:center; gap:5px; }
-.email-composer.is-note { background:var(--surface-amber-1); }
+.email-composer.is-note { background:var(--relay-note-bg); border-color:var(--relay-note-ink); }
+.email-composer.is-note > .composer-tabs > button.active { background:var(--relay-note-bg); color:var(--relay-note-ink); }
 .message-composer.email-composer { display:flex; flex-direction:column; gap:6px; flex-shrink:0; max-height:40%; overflow-y:auto; min-width:0; }
 .email-input-row { display:flex; align-items:center; gap:8px; min-width:0; }
 .email-input-row > .email-body { flex:1; min-width:0; }

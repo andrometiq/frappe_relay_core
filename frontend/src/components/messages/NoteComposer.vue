@@ -102,16 +102,16 @@ function resize() {
 
 <style scoped>
 .note-composer { grid-area:note; display:flex; flex-direction:column; gap:6px; padding:6px 8px 8px; }
-.note-context, .note-options { display:flex; align-items:center; gap:8px; padding:0 6px; font-size:12px; color:var(--relay-amber); }
+.note-context, .note-options { display:flex; align-items:center; gap:8px; padding:0 6px; font-size:12px; color:var(--relay-note-ink); }
 .note-context span { flex:1; }
 .note-options { flex-direction:column; align-items:stretch; }
-.note-input { display:flex; align-items:flex-start; gap:8px; padding:9px 12px; border:1px solid color-mix(in srgb, var(--relay-amber) 45%, transparent); border-radius:8px; background:var(--surface-white); color:var(--relay-amber); cursor:text; }
+.note-input { display:flex; align-items:flex-start; gap:8px; padding:9px 12px; border:1px solid color-mix(in srgb, var(--relay-note-ink) 45%, transparent); border-radius:8px; background:var(--surface-white); color:var(--relay-note-ink); cursor:text; }
 .note-input textarea { flex:1; min-width:0; min-height:22px; max-height:130px; padding:0; border:0; outline:0; background:none; color:var(--relay-ink, var(--ink-gray-8)); font:inherit; font-size:13.5px; line-height:1.45; resize:none; }
-.note-input textarea::placeholder { color:var(--relay-amber); opacity:.75; }
+.note-input textarea::placeholder { color:var(--relay-note-ink); opacity:1; }
 .note-error { padding:0 6px; font-size:12px; color:var(--ink-red-3); }
 .note-bar { display:flex; align-items:center; gap:8px; }
-.note-hint { flex:1; text-align:right; font-size:11px; color:var(--relay-amber); }
-.note-add.relay-button { background:var(--relay-amber); border-color:var(--relay-amber); color:var(--surface-white); }
+.note-hint { flex:1; text-align:right; font-size:12px; color:var(--relay-note-ink); }
+.note-add.relay-button, .note-add.relay-button:hover:not(:disabled) { background:var(--relay-note-ink); border-color:var(--relay-note-ink); color:var(--relay-note-on-solid); }
 .note-add.relay-button:disabled { opacity:.55; }
 @media (max-width: 768px) {
   .note-composer { padding:0; }
