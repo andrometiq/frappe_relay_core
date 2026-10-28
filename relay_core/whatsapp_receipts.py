@@ -5,15 +5,35 @@ import frappe
 from relay_core.receipt_order import advances
 
 
+TIMED_STATUSES = ('Sent', 'Delivered', 'Read')
+
+
+def with_time(times, status, timestamp):
+    """Receipt times by status; each status keeps its first provider time."""
+    times = dict(times or {})
+    if status in TIMED_STATUSES and (status not in times or timestamp < times[status]):
+        times[status] = timestamp
+    return times
+
+
+def pending_event(row):
+    """Event id and per-status times of a pending receipt; rows from before times were kept hold only the event id."""
+    if row.event_id.startswith('{'):
+        value = json.loads(row.event_id)
+        return value['event_id'], value['times']
+    return row.event_id, with_time({}, row.status, int(row.provider_timestamp))
+
+
 def collapse(updates):
-    result = {}
+    result, times = {}, {}
     # Timestamp order makes same-batch application independent of transport order.
     for update in sorted(updates, key=lambda row: (row['timestamp'], row['status'])):
         key = (update['destination'], update['target'])
+        times[key] = with_time(times.get(key), update['status'], update['timestamp'])
         previous = result.get(key)
         if previous is None or advances(previous['status'], update['status'], previous['timestamp'], update['timestamp']):
             result[key] = update
-    return list(result.values())
+    return [dict(update, times=times[key]) for key, update in result.items()]
 
 
 def lock_endpoints(channel, destinations):
@@ -46,11 +66,18 @@ def apply_batch(updates, channel):
             unresolved = True
             continue
         previous = pending.get(key)
-        if previous and not advances(previous.status, update['status'], int(previous.provider_timestamp), update['timestamp']):
-            update = dict(update, status=previous.status, timestamp=int(previous.provider_timestamp), event_id=previous.event_id)
+        if previous:
+            event_id, times = pending_event(previous)
+            for status, timestamp in update['times'].items():
+                times = with_time(times, status, timestamp)
+            update = dict(update, times=times)
+            if not advances(previous.status, update['status'], int(previous.provider_timestamp), update['timestamp']):
+                update = dict(update, status=previous.status, timestamp=int(previous.provider_timestamp), event_id=event_id)
         doc = messages.get(key)
         if doc is None:
-            values = {'status': update['status'], 'provider_timestamp': str(update['timestamp']), 'event_id': update['event_id']}
+            # The pending row has no times field; event_id carries them so no schema change is needed.
+            values = {'status': update['status'], 'provider_timestamp': str(update['timestamp']),
+                      'event_id': json.dumps({'event_id': update['event_id'], 'times': update['times']})}
             if previous:
                 retained[key] = values
             else:
@@ -77,11 +104,18 @@ def apply_batch(updates, channel):
 
 
 def receipt_values(doc, update):
+    """Status and provider receipt times; a late receipt that cannot change the status still records its time."""
     history = json.loads(doc.message_updates or '{}') if isinstance(doc.message_updates, str) else doc.message_updates or {}
     previous = history.get('delivery', {})
+    times = previous.get('times', {})
+    for status, timestamp in (update.get('times') or {update['status']: update['timestamp']}).items():
+        times = with_time(times, status, timestamp)
     if not advances(doc.status, update['status'], int(previous.get('timestamp', 0)), update['timestamp']):
-        return None
-    history['delivery'] = {'timestamp': update['timestamp'], 'event_id': update['event_id']}
+        if times == previous.get('times', {}):
+            return None
+        history['delivery'] = dict(previous, times=times)
+        return {'message_updates': json.dumps(history)}
+    history['delivery'] = {'timestamp': update['timestamp'], 'event_id': update['event_id'], 'times': times}
     # A later delivered/read receipt clears an earlier failure reason.
     return {'status': update['status'], 'message_updates': json.dumps(history), 'delivery_error': update.get('error', '')}
 
@@ -91,7 +125,8 @@ def apply_pending(doc):
     row = frappe.db.get_value('Relay Pending Receipt', doc.provider_message_key,
                               ['status', 'provider_timestamp', 'event_id'], as_dict=True)
     if not row: return
-    values = receipt_values(doc, {'status': row.status, 'timestamp': int(row.provider_timestamp), 'event_id': row.event_id})
+    event_id, times = pending_event(row)
+    values = receipt_values(doc, {'status': row.status, 'timestamp': int(row.provider_timestamp), 'event_id': event_id, 'times': times})
     if values:
         frappe.db.set_value('Relay Message', doc.name, values, update_modified=False)
         doc.update(values)

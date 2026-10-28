@@ -640,8 +640,17 @@ class ManagerLinkTests(BoundaryTests):
         self.business.check_permission.assert_called_once_with('read')
         self.person.set.assert_called_once_with('links', [{'link_doctype': 'Customer', 'link_name': 'Local Customer'}])
 
-    def test_manager_exception_never_applies_to_already_linked_contacts(self):
-        self.contacts.linked_contacts.return_value = {'Relay'}
+    def test_manager_removes_a_link_of_a_linked_contact_and_keeps_unreadable_links(self):
+        self.person.links = [Row(link_doctype='Customer', link_name='Old'), Row(link_doctype='Customer', link_name='Private')]
+        self.frappe.get_doc.side_effect = lambda dt, name: self.person if dt == 'Contact' else Row(
+            check_permission=Mock(), has_permission=Mock(return_value=name != 'Private'))
+        self.contacts.set_links('Person', [])
+        self.person.check_permission.assert_not_called()
+        self.person.set.assert_called_once_with('links', [{'link_doctype': 'Customer', 'link_name': 'Private'}])
+        self.person.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_manager_exception_needs_a_relay_conversation(self):
+        self.frappe.db.get_value.return_value = None
         with self.assertRaises(PermissionError):
             self.contacts.set_links('Person', [{'doctype': 'Customer', 'name': 'Local Customer'}])
         self.person.save.assert_not_called()

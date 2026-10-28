@@ -21,7 +21,7 @@ channel=frappe.get_doc({'doctype':'Relay Channel','channel':'WhatsApp','account'
 endpoint=frappe.get_doc({'doctype':'Relay Contact Endpoint','channel':channel.name,'relay_contact':contact.name,'endpoint':'123456789','verified':1}).insert()
 nodes=[{'id':'age','kind':'input','input_type':'number','variable':'age','text':'Enter your age'},
  {'id':'topic','kind':'topic','title':'Age {{age}}','text':'Collected age {{age}}'},
- {'id':'ticket','kind':'ticket','text':'Age {{age}}','category':'Query'},
+ {'id':'ticket','kind':'ticket','text':'Age {{age}}','category':'Support'},
  {'id':'reply','kind':'reply','text':'Saved {{age}}'},
  {'id':'handoff','kind':'handoff','text':'An agent will help next'}]
 flow=flows.save({'title':'Flow '+run,'command':'/support','channel':channel.name,'execution_user':actor,'business_doctype':business_type,'enabled':0,'nodes':nodes})

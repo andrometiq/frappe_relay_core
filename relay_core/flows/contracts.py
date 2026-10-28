@@ -74,9 +74,9 @@ def check_node(node,seen):
     if node['kind']=='topic':
         if not isinstance(node.get('title'),str) or not 1<=len(node['title'].strip())<=140:raise ValueError('Topic title must contain 1–140 characters')
         if node.get('status','Open') not in ('Open','Waiting','Resolved','Archived'):raise ValueError('Unsupported topic status')
-        if not isinstance(node.get('category',''),str) or len(node.get('category',''))>140:raise ValueError('Topic category is too long')
-    if node['kind']=='ticket' and node.get('category','Query') not in ('Query','Payment evidence','Support','Other'):
-        raise ValueError('Unsupported ticket category')
+    # Ticket categories are configurable; saving an enabled flow checks them against Ticket settings.
+    if node['kind'] in ('topic','ticket') and (not isinstance(node.get('category',''),str) or len(node.get('category',''))>140):
+        raise ValueError(node['kind'].title()+' category is too long')
 
 
 def check_input(node):

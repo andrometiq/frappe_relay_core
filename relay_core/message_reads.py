@@ -1,7 +1,10 @@
 """Exact operator read evidence; provider delivery receipts remain separate."""
 import hashlib
+import json
 import frappe
 from relay_core.permissions import require_access, readable_contact, can_read_contact_as
+
+MAX_BUSINESS_CHATS = 100
 
 
 def can_read_message_as(doc,user):
@@ -71,17 +74,41 @@ def insert_reads(rows) -> bool:
 
 
 @frappe.whitelist(methods=['POST'])
-def mark_chat(contact, read=1):
+def mark_chat(contact=None, read=1, business_doctype=None, business_name=None):
     """Mark the session user's chat read, or its newest incoming message unread, from the chat list.
+    A business row names its record instead, and every chat of that row changes.
 
     It changes only this user's read state and sends no read receipt to the customer."""
-    require_access(); readable_contact(contact)
+    require_access()
+    if bool(contact) == bool(business_doctype or business_name):
+        frappe.throw('Choose one chat or one business record')
+    if contact:
+        readable_contact(contact)
+    chats = [contact] if contact else business_chats(business_doctype, business_name)
     if str(read) not in ('0', '1'):
         frappe.throw('Invalid read flag')
     from relay_core.conversation_state import fresh_write
-    fresh_write(lambda: set_chat_read(contact, str(read) == '1'))
+    fresh_write(lambda: [set_chat_read(name, str(read) == '1') for name in chats])
     from relay_core.inbox import unread_count
-    return {'contact': contact, 'unread': unread_count(contact)}
+    if contact:
+        return {'contact': contact, 'unread': unread_count(contact)}
+    return {'business': {'doctype': business_doctype, 'name': business_name}, 'contacts': chats,
+            'unread': sum(unread_count(name) for name in chats)}
+
+
+def business_chats(doctype, name):
+    """The chats of a business row: the user's readable Relay conversations of Contacts linked to the record."""
+    from relay_core.business_inbox import check_type
+    check_type(doctype)
+    if not isinstance(name, str) or not name or len(name) > 140:
+        frappe.throw('Choose a business record')
+    frappe.get_doc(doctype, name).check_permission('read')
+    people = frappe.get_all('Dynamic Link', filters={'link_doctype': doctype, 'link_name': name, 'parenttype': 'Contact',
+                            'parentfield': 'links'}, pluck='parent', limit_page_length=MAX_BUSINESS_CHATS)
+    if not people:
+        return []
+    return frappe.get_list('Relay Contact', filters={'contact': ['in', people]}, pluck='name', order_by='name asc',
+                           limit_page_length=MAX_BUSINESS_CHATS)
 
 
 def set_chat_read(contact, read):
@@ -130,7 +157,19 @@ def coverage(message):
     profile = lambda user: {'user':user,'full_name':profiles.get(user,{}).get('full_name') or user,'user_image':profiles.get(user,{}).get('user_image')}
     return {'read_by':[dict(profile(row.user),read_at=row.creation) for row in visible], 'more':len(readers)>100,
             'expected':len(expected),'read':len(required_seen),'unread_by':[profile(user) for user in expected if user not in required_seen],
-            'complete':bool(expected) and len(required_seen)==len(expected)}
+            'complete':bool(expected) and len(required_seen)==len(expected),'receipt_times':receipt_times(doc)}
+
+
+def receipt_times(doc):
+    """The provider's Sent, Delivered and Read times of a message, in the site's time zone."""
+    from datetime import datetime, timezone
+    from frappe.utils import convert_utc_to_system_timezone
+    history = doc.get('message_updates') or {}
+    if isinstance(history, str):
+        history = json.loads(history)
+    times = (history.get('delivery') or {}).get('times') or {}
+    return {status: convert_utc_to_system_timezone(datetime.fromtimestamp(stamp, timezone.utc)).strftime('%Y-%m-%d %H:%M:%S')
+            for status, stamp in times.items()}
 
 
 @frappe.whitelist(methods=['GET'])

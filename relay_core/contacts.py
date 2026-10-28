@@ -92,15 +92,15 @@ def set_links(contact, links):
     """Replace the business links the user can read; other links stay as they are."""
     require_access()
     person = frappe.get_doc('Contact', contact)
-    manager_unlinked = can_link_unlinked(person.name)
-    if not manager_unlinked:
+    manager = can_manage_links(person.name)
+    if not manager:
         person.check_permission('write')
     wanted = business_links(links)
     configured = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     kept = [row for row in person.links if row.link_doctype not in configured or not readable(row)]
     person.set('links', [{'link_doctype': row.link_doctype, 'link_name': row.link_name} for row in kept]
                + [{'link_doctype': doctype, 'link_name': name} for doctype, name in wanted])
-    if manager_unlinked:
+    if manager:
         person.save(ignore_permissions=True)
     else:
         person.save()
@@ -119,7 +119,8 @@ def set_primary(contact, doctype=None, name=None):
     """Mark one linked record as primary; no record clears the mark."""
     require_access()
     person = frappe.get_doc('Contact', contact)
-    person.check_permission('write')
+    if not can_manage_links(person.name):
+        person.check_permission('write')
     relay = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
     if not relay:
         frappe.throw('This contact has no Relay conversation')
@@ -147,12 +148,10 @@ def summary(contact):
             'primary': primary_record(relay) if relay else None}
 
 
-def can_link_unlinked(contact):
-    """Managers may identify unlinked senders even without general Contact write access."""
-    if not can_manage():
-        return False
-    relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
-    return bool(relay and not linked_contacts([relay]))
+def can_manage_links(contact):
+    """Relay managers edit the business links of a Relay conversation's Contact without general Contact write access.
+    Links to records they cannot read stay as they are."""
+    return can_manage() and bool(frappe.db.get_value('Relay Contact', {'contact': contact}, 'name'))
 
 
 def linked_contacts(names):

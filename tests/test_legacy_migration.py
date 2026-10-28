@@ -197,6 +197,17 @@ class MigrationTests(unittest.TestCase):
             with legacy_media.source_file(file) as source: self.assertEqual(source.read(100), b'stored media')
         self.assertTrue(stream.closed)
         connection.get_file_from_bucket.assert_called_once_with('explicit-key', 'explicit-bucket')
+        file.check_permission.assert_called_once_with('read')
+
+    def test_archived_media_of_a_checked_source_skips_the_file_owner_rule(self):
+        import sys
+        connection = SimpleNamespace(s3_settings=SimpleNamespace(disable_s3_operations=False),
+            get_file_from_bucket=Mock(return_value={'Body': io.BytesIO(b'archived')}))
+        file = frappe._dict(custom_is_s3_uploaded=1, custom_s3_key='key', custom_s3_bucket_name='bucket',
+            check_permission=Mock(side_effect=PermissionError('Only the uploader')))
+        with patch.dict(sys.modules, {'frappe_s3_integration.s3_core': SimpleNamespace(getS3Connection=lambda: connection)}):
+            with self.assertRaises(PermissionError), legacy_media.source_file(file): pass
+            with legacy_media.source_file(file, source_checked=True) as source: self.assertEqual(source.read(100), b'archived')
 
     def test_target_database_failure_is_not_hidden_as_missing_media(self):
         metadata = {'availability': 'available', 'path': 'files/' + 'a'*64}
