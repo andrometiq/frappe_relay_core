@@ -56,6 +56,18 @@ class ActionPermissionTests(unittest.TestCase):
         self.reference.assert_not_called()
 
 
+    def test_unlinked_start_belongs_to_its_sender_while_the_contact_has_no_records(self):
+        self.action.update(payload=json.dumps({'start': {'contact': 'RC1'}}), start_contact='RC1', source_message=None)
+        with patch.object(access, 'candidates', return_value=[]):
+            self.assertTrue(access.action_permission(self.action))
+            self.fake.get_doc.assert_called_with('Relay Contact', 'RC1')
+            self.assertFalse(access.action_permission(self.action, user='other'))
+            self.source.has_permission.return_value = False
+            self.assertFalse(access.action_permission(self.action))
+        self.source.has_permission.return_value = True
+        with patch.object(access, 'candidates', return_value=[('Customer', 'C1')]):
+            self.assertFalse(access.action_permission(self.action), 'A contact linked later needs the record')
+
 class EmailPromptScopeTests(unittest.TestCase):
     def test_prompt_context_must_match_routing_and_its_original_thread(self):
         context = {'provider': 'Email', 'message_id': '<root@example.invalid>', 'email_thread_id': '<root@example.invalid>'}

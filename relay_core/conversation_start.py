@@ -105,9 +105,33 @@ def target(contact, endpoint, business_doctype=None, business_name=None):
     if channel.channel == 'Telegram':
         context.update(chat_id=int(binding.endpoint),chat_type='private')
     source=frappe._dict(name=None,relay_contact=contact,channel=channel.name,sender_endpoint=binding.endpoint)
-    from relay_core.business_access import choose_business
-    source.business_doctype,source.business_name=choose_business(contact,business_doctype,business_name)
+    source.business_doctype,source.business_name=start_business(contact,business_doctype,business_name)
     return source,channel,context
+
+
+def start_business(contact, business_doctype=None, business_name=None):
+    """The record a new chat belongs to. A contact without records starts an unlinked chat, as a reply does."""
+    from relay_core.business_access import candidates, choose_business
+    if not business_doctype and not business_name and not candidates(contact):
+        return None, None
+    return choose_business(contact, business_doctype, business_name)
+
+
+@frappe.whitelist(methods=['GET'])
+def records(contact):
+    """Readable records to choose from when the contact has several and none is marked primary."""
+    start_contact(contact)
+    from relay_core.business_access import candidates, primary
+    links = candidates(contact)
+    if primary(contact, links):
+        return []
+    rows = []
+    for doctype, name in links:
+        doc = frappe.get_doc(doctype, name)
+        if doc.has_permission('read'):
+            title = doc.get(doc.meta.title_field) if doc.meta.title_field else None
+            rows.append({'doctype': doctype, 'name': name, 'title': str(title or name)})
+    return rows
 
 
 @frappe.whitelist(methods=['GET'])
