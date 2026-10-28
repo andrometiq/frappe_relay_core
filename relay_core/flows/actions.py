@@ -17,7 +17,7 @@ def _hook_value(value, key=None):
     # Frappe merges scalar hook leaves into lists; schema arrays remain arrays.
     if isinstance(value, dict):
         return {k:_hook_value(v,k) for k,v in value.items()}
-    if isinstance(value,list) and key not in ('required','enum','contexts'):
+    if isinstance(value,list) and key not in ('required','enum','contexts','channels'):
         return _hook_value(value[-1],key) if value else None
     return value
 

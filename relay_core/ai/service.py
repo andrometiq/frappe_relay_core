@@ -17,6 +17,9 @@ def context(skill, message):
     contact = frappe.get_doc('Relay Contact', message.relay_contact)
     person = frappe.get_doc('Contact', contact.contact)
     channel = frappe.get_doc('Relay Channel', message.channel)
+    from relay_core.automation.channel import enabled
+    if not enabled(channel):
+        raise ValueError('Channel automation is disabled')
     if message.channel != skill.channel or channel.channel not in ('WhatsApp', 'Telegram', 'Email') or not channel.enabled:
         raise ValueError('Skill channel is unavailable')
     if message.direction != 'Incoming' or message.message_type not in ('text', '', None, 'photo', 'image'):
@@ -183,10 +186,10 @@ def declare_search(run, skill, message, decision):
     decision.update(reply=statement, search=plan)
 
 
-def search_request_key(message, user):
+def search_request_key(message, user, run=None):
     from relay_core.automation.provenance import context_of
     prefix = 'email:' if context_of(message).get('provider') == 'Email' else ''
-    return hashlib.sha256((prefix + user + ':' + action_key(message.name, 'search')).encode()).hexdigest()
+    return hashlib.sha256((prefix + user + ':' + reply_key(message.name, 'search', run)).encode()).hexdigest()
 
 
 def check_search(run, skill, record):
@@ -210,7 +213,7 @@ def check_search(run, skill, record):
             or original['scope'] != record['scope'] or message_hash(source) != record['source_hash']
             or search_scope(context(skill, source)[2]) != record['scope']):
         raise ValueError('Declared search source changed')
-    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, origin.execution_user)},
+    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, origin.execution_user, origin)},
         ['status', 'source_message', 'payload'], as_dict=True)
     if (not receipt or receipt.status != 'Submitted' or receipt.source_message != source.name
             or json.loads(receipt.payload).get('automation_run') != origin.name):
@@ -237,20 +240,30 @@ def authorize_search(run_id, skill, contract, arguments):
         raise ValueError('Search differs from the declared plan')
 
 
-def continue_search(run, message):
-    """Only the next exact affirmative may consume a delivered plan, once."""
-    rows = frappe.get_all('Relay Automation Run', filters={'ticket': run.ticket, 'name': ['!=', run.name]},
+def pending_search(message, ticket, *, exclude=None, lock=True):
+    """Read the latest confirmation candidate; only continue_search consumes it."""
+    if not ticket or (message.content or '').strip().casefold().rstrip('.!') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please'):
+        return None
+    filters = {'ticket': ticket}
+    if exclude:
+        filters['name'] = ['!=', exclude]
+    rows = frappe.get_all('Relay Automation Run', filters=filters,
         fields=['name'], order_by='creation desc, name desc', limit_page_length=1)
     if not rows:
-        return False
-    previous = lock_run(rows[0].name)
+        return None
+    previous = lock_run(rows[0].name) if lock else frappe.get_doc('Relay Automation Run', rows[0].name)
     if not previous.get('search_plan') or previous.stage != 'Search' or previous.status != 'Completed':
-        return False
+        return None
     record = json.loads(previous.search_plan)
-    if record.get('consumed_by'):
+    return None if record.get('consumed_by') else (previous, record)
+
+
+def continue_search(run, message):
+    """Only the next exact affirmative may consume a delivered plan, once."""
+    pending = pending_search(message, run.ticket, exclude=run.name)
+    if not pending:
         return False
-    if (message.content or '').strip().casefold().rstrip('.!') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please'):
-        return False
+    previous, record = pending
     skill = frappe.get_doc('Relay AI Skill', previous.skill)
     run.skill, run.skill_version, run.execution_user = skill.name, previous.skill_version, previous.execution_user
     with as_user(run.execution_user):
@@ -277,6 +290,13 @@ def search_delivered(run, skill):
 
 
 def current(run, skill, message):
+    if run.get('flow_run'):
+        from relay_core.flows.service import scope
+        actor = frappe.session.user
+        try:
+            scope(frappe.get_doc('Relay Flow Run', run.flow_run), message)
+        finally:
+            frappe.set_user(actor)
     contact = lock_contact(message.relay_contact)
     from relay_core.tickets import check_episode
     try:
@@ -405,10 +425,17 @@ def delivery_scope(run, skill, message, decision=None):
         authorize=lambda contract, arguments: authorize_search(run.name, skill, contract, arguments))
 
 
+def reply_key(message, slot, run=None):
+    source = message + ':' + run.name if run and run.get('flow_run') else message
+    return action_key(source, slot)
+
+
 def send_reply(message, reply, *, slot='reply'):
     from relay_core.automation.provenance import context_of
     context = context_of(message)
-    key = action_key(message.name, slot)
+    name = outgoing_run.get()
+    run = frappe.get_doc('Relay Automation Run', name) if name else None
+    key = reply_key(message.name, slot, run)
     if context.get('provider') == 'Email':
         from relay_core.email import send
         subject = context.get('subject') or 'Reply'
@@ -455,7 +482,7 @@ def complete_delivery(action):
         # Explicit replies resume the persisted chain after receipt recovery.
         # A delayed receipt cannot reopen an already completed chain.
         if any(action.request_key == hashlib.sha256((prefix + run.execution_user + ':' +
-                action_key(run.message, f'event_reply_{step}')).encode()).hexdigest() for step in range(len(steps))):
+                reply_key(run.message, f'event_reply_{step}', run)).encode()).hexdigest() for step in range(len(steps))):
             if run.status != 'Completed':
                 run.status = 'Pending'
                 internal_save(run)
@@ -463,7 +490,7 @@ def complete_delivery(action):
             frappe.db.commit()
             return
         # Delayed duplicate announcement callbacks must not complete a later reply.
-        if action.request_key == search_request_key(frappe.get_doc('Relay Message', run.message), run.execution_user) and run.stage != 'Search':
+        if action.request_key == search_request_key(frappe.get_doc('Relay Message', run.message), run.execution_user, run) and run.stage != 'Search':
             return
         run.status = 'Completed'
         if run.stage == 'Search':
@@ -512,6 +539,20 @@ def defer_handoff(name):
     run.reason = 'Handoff owner unavailable; automation paused pending recovery'
     internal_save(run); frappe.db.commit()
     frappe.log_error(title='Relay handoff unavailable', message='Configure an enabled owner with conversation access')
+
+
+def select_skill(run, message, name):
+    """Bind a manager-selected skill using the same identity and episode checks as matching."""
+    from relay_core.automation.channel import validate_skill
+    from relay_core.ai.tools import fingerprint
+    skill = validate_skill(name, message.channel, message.get('business_doctype'), check_read=False)
+    user, _, scope = context(skill, message)
+    run.skill, run.skill_version, run.execution_user = skill.name, str(skill.modified), user
+    run.scope_fingerprint = fingerprint(scope)
+    run.stage, run.attempts, run.status = 'Event', 0, 'Pending'
+    if skill.execution_policy == 'Ticket only':
+        run.status = 'Shadow' if skill.mode == 'Shadow' else 'Completed'
+        run.reason = 'Event recorded for staff review'
 
 
 def admit(run):
@@ -580,14 +621,8 @@ def admit(run):
             triage(run, message, result['reason'])
         else:
             skill = next(s for s in fresh if s.name == result['selected'])
-            run.skill, run.skill_version = skill.name, str(skill.modified)
-            run.execution_user = context(skill, message)[0]
-            run.scope_fingerprint = scopes[skill.name]
-            run.stage, run.attempts, run.status = 'Event', 0, 'Pending'
+            select_skill(run, message, skill.name)
             episode(run, message)
-            if skill.execution_policy == 'Ticket only':
-                run.status = 'Shadow' if skill.mode == 'Shadow' else 'Completed'
-                run.reason = 'Event recorded for staff review'
             internal_save(run)
         frappe.db.commit()
     except frappe.QueryDeadlockError:

@@ -202,8 +202,15 @@ def create_run(doc):
     provenance = context_of(doc)
     if not automatic_allowed(provenance) or provenance.get('provider') == 'Email' and automatic_reply_exists(doc):
         return {'status': 'Ignored'}
+    from relay_core.automation import channel as channel_automation
+    channel = frappe.get_doc('Relay Channel', doc.channel)
+    if not channel.enabled or not channel_automation.enabled(channel):
+        return {'status': 'Disabled'}
+    pipeline = channel_automation.steps(channel)
+    if pipeline:
+        channel_automation.identity(doc, channel)
     flow = claims(doc) and not human_request(doc.content)
-    if not flow and not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
+    if not pipeline and not flow and not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return {'status': 'Disabled'}
     contact = lock_contact(doc.relay_contact)
     run = frappe.get_doc({'doctype': 'Relay Automation Run', 'event_key': event_key(doc.name),
@@ -216,7 +223,8 @@ def create_run(doc):
         triage(run, doc, 'Episode admission requires review')
         return {'name': run.name, 'status': run.status}
     run.ownership_generation = int(ticket.generation or 0)
-    if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
+    waiting = flow and channel_automation.owns_reply(doc)
+    if not pipeline and flow and not waiting and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
         from relay_core.ai.service import continue_search
         try:
             flow = not continue_search(run, doc)
@@ -227,10 +235,15 @@ def create_run(doc):
         run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
     elif human_request(doc.content):
         triage(run, doc, 'Sender requested a person')
-    elif flow:
+    elif waiting or flow and not pipeline:
         create_event(doc)
         run.stage, run.status = 'Flow', 'Completed'
     else:
+        if pipeline:
+            run.stage = 'Channel'
+            # Routing is internal coordination; flow/skill execution keeps its own actor.
+            run.execution_user = 'Administrator'
+            run.pipeline_state = json.dumps({'steps': pipeline, 'index': 0})
         frappe.enqueue('relay_core.automation.service.process', name=run.name, queue=QUEUE,
                        timeout=90, enqueue_after_commit=True)
     internal_save(run)
@@ -259,14 +272,17 @@ def complete_with_fallback(policy, prompt, images=None):
 
 
 def _process(name):
-    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
-        return
     run = lock_run(name)
     if run.status not in ('Pending', 'Deciding'):
         return
+    if run.get('stage') == 'Channel':
+        from relay_core.automation.channel import process as process_channel
+        return process_channel(run)
     if run.get('stage') == 'Triage':
         triage(run, frappe.get_doc('Relay Message', run.message), run.reason)
         frappe.db.commit()
+        return
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     if run.get('stage') == 'Matching':
         from relay_core.ai.service import admit
@@ -355,6 +371,10 @@ def recover():
     recover_messages()
     from relay_core.ai.service import recover_deliveries
     recover_deliveries()
+    for name in frappe.get_all('Relay Automation Run', filters={'stage': ['in', ['Channel', 'Triage']], 'status': 'Pending'},
+                               pluck='name', limit_page_length=30, order_by='modified asc'):
+        frappe.enqueue('relay_core.automation.service.process', name=name, queue=QUEUE,
+                       job_id='relay-channel-'+name, deduplicate=True)
     if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     # Core owns delivery recovery; the outbox follows its action without resending.

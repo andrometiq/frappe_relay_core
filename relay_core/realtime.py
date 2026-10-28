@@ -6,6 +6,7 @@ import frappe
 incoming_batch = ContextVar('relay_incoming_batch', default=None)
 
 RESOURCES = {
+    'Relay Channel': 'channel_automation',
     'Relay AI Skill': 'skills', 'Relay Business Event Rule': 'business_events',
     'Relay Business Event Delivery': 'business_events',
     'Relay Message': 'messages', 'Relay Contact': 'contacts',

@@ -200,8 +200,10 @@ class BackendFindings(unittest.TestCase):
     def test_flow_ticket_reuses_shared_episode(self):
         f=self.fake()
         source=_dict(name='message',business_doctype='Customer',business_name='customer')
-        with patch.object(flows,'frappe',f), patch.object(tickets,'ensure_episode',return_value={'name':'ticket'}) as ensure:
-            self.assertEqual(flows.flow_ticket(source,'Needs help'), {'name':'ticket'})
+        with patch.object(flows,'frappe',f), patch.object(tickets,'_save_episode') as save, patch.object(tickets,'ensure_episode',return_value=_dict(name='ticket')) as ensure:
+            ticket = flows.flow_ticket(source,'Needs help')
+            self.assertEqual((ticket.name, ticket.subject, ticket.brief), ('ticket','Needs help','Needs help'))
+            save.assert_called_once_with(ticket)
         ensure.assert_called_once_with(source,owner='manager',subject='Needs help',reason='Needs help')
         f.get_doc.assert_not_called()
 

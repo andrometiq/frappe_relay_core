@@ -8,6 +8,10 @@ class RelayChannel(Document):
             self.title = (self.label or f"{self.channel} {self.account}")[:120]
 
     def validate(self):
+        from relay_core.automation.channel import FIELDS, steps, validate
+        previous = self.get_doc_before_save()
+        if not previous or steps(self) != steps(previous) or any(self.get(key) != previous.get(key) for key in FIELDS):
+            validate(self)
         if self.hub_channel and frappe.db.exists('Relay Channel', {
                 'channel': self.channel, 'hub_channel': self.hub_channel, 'name': ['!=', self.name]}):
             frappe.throw(f'Another {self.channel} channel already has Hub channel {self.hub_channel}',

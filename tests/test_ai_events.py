@@ -1,4 +1,5 @@
 """Event match boundaries and exclusive, durable inbound admission."""
+import json
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -134,7 +135,10 @@ class AdmissionTests(unittest.TestCase):
                          PermissionError=PermissionError, ValidationError=ValueError)
         self.fake.db.get_value.return_value = None
         self.run = _dict(name='run', status='Pending')
-        def doc(values):
+        self.channel = _dict(name='channel', enabled=1, automation_enabled=1, automation_steps=[])
+        def doc(values, name=None):
+            if values == 'Relay Channel':
+                return self.channel
             self.run.update(values)
             return self.run
         self.fake.get_doc.side_effect = doc
@@ -148,8 +152,35 @@ class AdmissionTests(unittest.TestCase):
         self.episode = self.enterContext(patch.object(service,'episode',return_value=_dict(name='ticket',ai_disabled=0)))
         self.claims = self.enterContext(patch.object(flows,'claims',return_value=False))
         self.event = self.enterContext(patch.object(flows,'create_event'))
+        self.waiting = self.enterContext(patch('relay_core.automation.channel.owns_reply', return_value=False))
         self.confirm = self.enterContext(patch.object(ai,'continue_search',return_value=False))
         self.keyword = self.enterContext(patch('relay_core.opt_out.is_keyword', return_value=False))
+
+    def test_waiting_flow_owns_reply_even_with_search_confirmation_and_reordered_steps(self):
+        self.channel.automation_steps = [_dict(step='AI skill', enabled=1, ai_skill='skill', on_reply='Stop')]
+        self.claims.return_value = True
+        self.waiting.return_value = True
+        self.confirm.return_value = True
+        with patch('relay_core.automation.channel.identity'):
+            self.assertEqual(service.create_run(self.message)['status'], 'Completed')
+        self.event.assert_called_once_with(self.message)
+        self.confirm.assert_not_called()
+
+    def test_configured_pipeline_is_queued_without_claiming_a_competing_flow(self):
+        self.channel.automation_steps = [_dict(step='Assign', enabled=1, team='Support', on_reply='Continue')]
+        self.claims.return_value = True
+        with patch('relay_core.automation.channel.identity') as identity:
+            service.create_run(self.message)
+        identity.assert_called_once()
+        self.assertEqual(self.run.stage, 'Channel')
+        self.event.assert_not_called()
+        self.assertEqual(json.loads(self.run.pipeline_state)['steps'][0]['step'], 'Assign')
+
+    def test_disabled_channel_never_starts_flow_or_ai(self):
+        self.channel.automation_enabled = 0
+        self.claims.return_value = True
+        self.assertEqual(service.create_run(self.message), {'status':'Disabled'})
+        self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
 
     def test_an_opt_out_keyword_gets_no_automatic_reply(self):
         self.keyword.return_value = True
