@@ -165,6 +165,8 @@ def directory_items(rows, channels=None):
     from relay_core.api import business_types
     configured=set(business_types())
     providers=dict(frappe.get_list('Relay Channel',fields=['name','channel'],as_list=True,limit_page_length=0))
+    from relay_core.contacts import linked_contacts
+    linked = linked_contacts(names)
     latest=latest_messages(names,channels)
     states={row.relay_contact:row for row in frappe.get_all('Relay Conversation State',
         filters={'state_key':['in',[state_key(name) for name in names]]},fields=['relay_contact','starred','folder',*READ_FIELDS])}
@@ -178,7 +180,7 @@ def directory_items(rows, channels=None):
         state=states.get(row.name) or {}
         business=({'doctype':last['business_doctype'],'name':last['business_name']}
                   if last.get('business_doctype') in configured and last.get('business_name') else None)
-        items.append(dict(row,provider=providers.get(last.get('channel')),channel=last.get('channel'),business=business,assignment=assignments.get(row.name,{}),id=row.name,
+        items.append(dict(row,unlinked=row.name not in linked,provider=providers.get(last.get('channel')),channel=last.get('channel'),business=business,assignment=assignments.get(row.name,{}),id=row.name,
                           starred=state.get('starred',0),folder=state.get('folder',''),
                           latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
                           unread=unread.get(row.name,0),unread_more=False))

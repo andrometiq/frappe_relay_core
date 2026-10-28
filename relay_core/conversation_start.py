@@ -32,12 +32,39 @@ def business_channels(contact, business_doctype, business_name):
         'Relay Contact Endpoint', row['value'], 'channel')) for row in rows]
 
 
-@frappe.whitelist(methods=['GET'])
-def business_options(contact, business_doctype, business_name):
-    return business_channels(contact,business_doctype,business_name)
+@frappe.whitelist(methods=['POST'])
+def business_options(contact, business_doctype, business_name, channel=None):
+    enroll_business_contact(contact, business_doctype, business_name, channel)
+    return business_channels(contact, business_doctype, business_name)
+
+
+def enroll_business_contact(contact, business_doctype, business_name, channel=None):
+    """Only a readable linked Contact can supply numbers and emails for starting a chat."""
+    person = business_contact(contact, business_doctype, business_name)
+    from relay_core.identity import contact_identities
+    from relay_core.contacts import ensure_relay
+    from relay_core.contact_lifecycle import enroll
+    identities = contact_identities(person)
+    filters = {'enabled': 1, 'account': connection_value('relay_hub_account'),
+               'channel': ['in', ['WhatsApp', 'Email']]}
+    if channel:
+        filters['name'] = channel
+    channels = frappe.get_list('Relay Channel', filters=filters, fields=['name', 'channel'], limit_page_length=0)
+    if channel and not channels:
+        frappe.throw('Choose an accessible WhatsApp or Email channel', frappe.PermissionError)
+    if not any(identities[row.channel] for row in channels):
+        return None
+    relay = ensure_relay(person)
+    # A number or email bound to another contact stays there; the contact's other identities still work.
+    for row in channels:
+        for value in sorted(identities[row.channel]):
+            enroll(relay, row.name, row.channel, value)
+    return relay
 
 
 def ensure_business_binding(contact, channel_name, business_doctype, business_name, endpoint=None):
+    if frappe.db.get_value('Relay Channel', channel_name, 'channel') in ('WhatsApp', 'Email'):
+        enroll_business_contact(contact, business_doctype, business_name, channel_name)
     choices = [row for row in business_channels(contact, business_doctype, business_name)
                if row['value'] == channel_name and (endpoint is None or row['endpoint'] == endpoint)]
     if len(choices) != 1:
@@ -52,8 +79,19 @@ def send_business(contact, channel, kind, data, request_key, business_doctype, b
     return send(relay, endpoint, kind, data, request_key, business_doctype, business_name)
 
 
+def start_contact(contact, business_doctype=None, business_name=None):
+    require_access()
+    try:
+        readable_contact(contact)
+    except frappe.PermissionError:
+        if not business_doctype or not business_name:
+            raise
+        person = frappe.db.get_value('Relay Contact', contact, 'contact')
+        business_contact(person, business_doctype, business_name)
+
+
 def target(contact, endpoint, business_doctype=None, business_name=None):
-    require_access();readable_contact(contact)
+    start_contact(contact, business_doctype, business_name)
     binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
     if binding.relay_contact!=contact or not binding.verified:
         frappe.throw('Choose a verified endpoint for this contact',frappe.PermissionError)
@@ -74,7 +112,7 @@ def target(contact, endpoint, business_doctype=None, business_name=None):
 
 @frappe.whitelist(methods=['GET'])
 def options(contact, business_doctype=None, business_name=None):
-    require_access();readable_contact(contact)
+    start_contact(contact, business_doctype, business_name)
     rows=frappe.get_all('Relay Contact Endpoint',filters={'relay_contact':contact,'verified':1},fields=['name'],limit_page_length=50)
     result=[]
     for row in rows:

@@ -127,3 +127,24 @@ def bindings(channel, provider, value):
         if len(rows) < 500:
             break
         start += len(rows)
+
+
+def contacts_by_phone(number=None):
+    """Normalized number -> its Frappe Contacts: ones with a Relay Contact first, then ones linked to a Customer, then oldest.
+    With a number, only Contacts whose stored phones end in its last ten digits are read."""
+    import frappe
+    digits = lambda column: f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({column},' ',''),'-',''),'(',''),')',''),'.','') LIKE %(tail)s"
+    narrow = 'WHERE ' + ' OR '.join(map(digits, ('p.phone', 'c.mobile_no', 'c.phone'))) if number else ''
+    rows = frappe.db.sql("""SELECT c.name, c.creation, p.phone, c.mobile_no, c.phone contact_phone, r.name relay,
+            EXISTS(SELECT 1 FROM `tabDynamic Link` l WHERE l.parent = c.name AND l.parenttype = 'Contact'
+                AND l.link_doctype = 'Customer') customer
+        FROM `tabContact` c LEFT JOIN `tabContact Phone` p ON p.parent = c.name AND p.parenttype = 'Contact'
+        LEFT JOIN `tabRelay Contact` r ON r.contact = c.name """ + narrow, {'tail': '%' + (number or '')[-10:]}, as_dict=True)
+    rows.sort(key=lambda row: (not row.relay, not row.customer, row.creation, row.name))
+    result = {}
+    for row in rows:
+        for value in (row.phone, row.mobile_no, row.contact_phone):
+            found = phone_number(value) if value else None
+            if found and row.name not in result.setdefault(found, []):
+                result[found].append(row.name)
+    return result

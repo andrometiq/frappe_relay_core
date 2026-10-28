@@ -65,6 +65,9 @@ def extract_messages(payload):
                 context = {'provider': 'WhatsApp', 'participant_id': row['from'], 'message_id': message['id'],
                            'reply_to_message_id': (message.get('context') or {}).get('id')}
                 row['provider_context'] = context
+                profiles = [item.get('profile', {}).get('name') for item in value.get('contacts', [])
+                            if item.get('wa_id') == row['from'] and isinstance(item.get('profile'), dict)]
+                row['profile_name'] = next((name for name in profiles if isinstance(name, str)), None)
                 if message.get('group_id'):
                     group_id = message['group_id']
                     if not isinstance(group_id, str) or not 1 <= len(group_id) <= 200:
@@ -161,17 +164,23 @@ def project(name, business_overrides=None):
         if not contact and not context.get('group_id'):
             from relay_core.contact_lifecycle import sibling_contact
             contact = sibling_contact(channel, row['from'])
+        private_whatsapp = medium == 'WhatsApp' and not context.get('group_id') and row['from'].isdigit()
+        if not contact and private_whatsapp:
+            from relay_core.contact_lifecycle import whatsapp_contact
+            contact = whatsapp_contact(channel, row['from'], row.get('profile_name'))
         if not contact:
             decisions[row['id']] = 'triage_unverified'
             ensure_episode(event=event, channel=channel, row=row)
             unresolved = True; continue
         from relay_core.business_routing import resolve
-        was_triage = decisions.get(row['id'], '').startswith('triage_')
+        previous_rule = decisions.get(row['id'], '')
+        was_triage = previous_rule.startswith('triage_')
+        recover_unlinked = private_whatsapp and previous_rule in ('triage_unverified', 'triage_no_business')
         business, rule = resolve(contact, channel, row['from'], context, row, event,
                                  (business_overrides or {}).get(row['id']), position=position)
         decisions[row['id']] = rule
         context['business_rule'] = rule
-        if not business:
+        if not business and not (private_whatsapp and rule == 'triage_no_business'):
             ensure_episode(event=event, channel=channel, row=row)
             unresolved = True
             continue
@@ -190,7 +199,7 @@ def project(name, business_overrides=None):
         from relay_core.timeline import provider_time
         _, source_action = source_episode(channel, row)
         ticket = frappe.db.get_value('Relay Ticket', {'source_action_key': source_action}, 'name')
-        if was_triage and not ticket:
+        if was_triage and not ticket and not recover_unlinked:
             intent = ensure_episode(event=event, channel=channel, row=row)
             if not intent:
                 decisions[row['id']] = 'triage_owner_unavailable'
@@ -198,7 +207,7 @@ def project(name, business_overrides=None):
                 continue
             ticket = intent.name
         message = frappe.get_doc({'doctype': 'Relay Message', 'relay_contact': contact, 'channel': channel,
-            'business_doctype': business[0], 'business_name': business[1],
+            'business_doctype': business[0] if business else None, 'business_name': business[1] if business else None,
             'direction': 'Incoming', 'status': 'Delivered', 'sent_at': provider_time(payload, row), 'content': text, 'sender_endpoint': row['from'], 'source_key': key,
             'provider_id': row['id'], 'message_type': kind,
             'provider_context': json.dumps(context, sort_keys=True),

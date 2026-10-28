@@ -69,10 +69,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 <template>
   <section class="incoming-workspace">
     <header>
+      <h2>Remaining triage</h2>
       <div>
         <p>
-          Link incoming messages to the right business contact so your team can
-          handle them.
+          Review ambiguous senders and conversations that still need triage.
         </p>
       </div>
       <Button label="Refresh" :disabled="busy" @click="run(() => load())" />
@@ -98,7 +98,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
           /></template>
         </article>
         <p v-if="!rows.length && !busy" class="incoming-empty">
-          No unlinked or ambiguous incoming messages.
+          No conversations need triage.
         </p>
         <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </div>
@@ -131,7 +131,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 .incoming-workspace {
   padding: 24px;
   overflow: auto;
-  height: 100%;
 }
 .incoming-workspace header {
   display: flex;

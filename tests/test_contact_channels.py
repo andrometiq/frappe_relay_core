@@ -77,7 +77,8 @@ class ProjectionBindingTests(unittest.TestCase):
                 patch('relay_core.whatsapp_templates.project', return_value=False), \
                 patch('relay_core.call_records.ingest', return_value=False), patch('relay_core.bulk_updates.link_reply'), \
                 patch('relay_core.realtime.changed'), patch('relay_core.tickets.ensure_episode') as triage, \
-                patch.object(contact_lifecycle, 'sibling_contact', return_value=None) as sibling:
+                patch.object(contact_lifecycle, 'sibling_contact', return_value=None) as sibling, \
+                patch.object(contact_lifecycle, 'whatsapp_contact', return_value=None):
             projection.project('event')
         return sibling, triage
 
