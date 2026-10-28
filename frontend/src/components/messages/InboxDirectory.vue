@@ -1,7 +1,7 @@
 <script setup>
 import { recordTitle } from '../../services/recordTitle'
 import { linkedTitle } from '../../services/linkedTitle'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
@@ -67,6 +67,16 @@ watch(query, (_value, _previous, onCleanup) => {
 })
 watch([mode, medium, () => JSON.stringify(params.value), folder], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
+// Load the next page when the end of the list scrolls into view; re-observing after each page catches a short list.
+const more = ref(null)
+let moreObserver
+watch([more, loading], () => {
+  moreObserver?.disconnect()
+  if (!more.value || loading.value) return
+  moreObserver = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting) && next.value && !loading.value) load(next.value) }, { rootMargin: '200px 0px' })
+  moreObserver.observe(more.value)
+}, { flush: 'post' })
+onBeforeUnmount(() => moreObserver?.disconnect())
 const { folders, changes, moved, move } = useChatFolders()
 // A move changes only that row; a folder view or a deleted folder reloads the page.
 watch(moved, value => {
@@ -141,7 +151,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
         </span>
       </button>
       <WorkspaceState v-if="!loading && !rows.length && !error" compact :title="query || activeFilters.length ? 'No conversations found' : folder ? 'No conversations in this folder' : mode === 'unread' ? 'You’re all caught up' : 'No conversations yet'" :description="query ? 'Try a different name or clear your search.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Use Move to folder on a conversation to file it here.' : 'Browse your businesses to start a conversation.'"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else label="Browse businesses" @click="mode = 'business'" /></WorkspaceState>
-      <Button v-if="next" class="directory-load-more" label="More conversations" :loading="loading" @click="load(next)" />
+      <div v-if="next" ref="more" class="directory-load-more" role="status">{{ loading ? 'Loading more conversations…' : '' }}</div>
     </div>
     <template v-if="capabilities.folders">
       <Dropdown ref="rowMenu" :options="rowActions" />
