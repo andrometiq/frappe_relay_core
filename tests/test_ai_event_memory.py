@@ -136,12 +136,52 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(self.record.status, 'Failed')
         self.assertEqual(self.published(), {'memory_status': 'Failed', 'memory_error': 'AI Model failed'})
 
+    def test_failed_build_keeps_its_call_logs_and_logs_the_traceback(self):
+        self.compose.side_effect = TimeoutError('Deadline reached')
+        event_memory.EventBuild('EV-1').run()
+        self.fake.db.rollback.assert_not_called()
+        self.assertEqual(self.fake.db.commit.call_count, 2, 'Call logs are committed, then the failure is published')
+        self.fake.log_error.assert_called_once()
+        self.assertEqual(self.fake.log_error.call_args.kwargs['reference_name'], 'BUILD-1')
+        self.assertEqual((self.record.status, self.record.error), ('Failed', 'Deadline reached'))
+
+    def test_failed_build_rolls_back_only_an_unusable_transaction(self):
+        self.compose.side_effect = ValueError('AI Model failed')
+        self.fake.db.commit.side_effect = [RuntimeError('Deadlock'), None]
+        event_memory.EventBuild('EV-1').run()
+        self.fake.db.rollback.assert_called_once()
+        self.assertEqual(self.published()['memory_status'], 'Failed')
+
     def test_published_revision_is_not_rebuilt_unless_forced(self):
         self.fake.db.get_value.return_value = ('Ready', 'R1')
         event_memory.EventBuild('EV-1').run()
         self.compose.assert_not_called()
         event_memory.EventBuild('EV-1').run(force=True)
         self.compose.assert_called_once()
+
+
+class QueueTests(unittest.TestCase):
+    def test_a_queued_build_receives_the_event_through_the_real_enqueue_arguments(self):
+        import inspect
+        from frappe.utils.background_jobs import enqueue
+        fake = MagicMock()
+        fake.db.get_value.return_value = ('Ready', 'R0')
+        fake.session.user = 'owner@example.com'
+        runs = []
+
+        def run_job(method, *args, **kwargs):
+            self.assertEqual(method, 'relay_core.ai.event_memory.build')
+            job_kwargs = inspect.signature(enqueue).bind(method, *args, **kwargs).arguments['kwargs']
+            event_memory.build(**job_kwargs)
+
+        fake.enqueue.side_effect = run_job
+        with patch.object(event_memory, 'frappe', fake), patch.object(event_memory, 'get_revision', return_value='R1'), \
+             patch('relay_core.ai_features.is_enabled', return_value=True), \
+             patch.object(event_memory.EventBuild, 'run', autospec=True,
+                          side_effect=lambda build, force: runs.append((build.event, build.triggered_by, force))):
+            event_memory.on_file_change(_dict(attached_to_doctype=event_memory.EVENT, attached_to_name='EV-1'))
+            event_memory.rebuild.__wrapped__('EV-2')
+        self.assertEqual(runs, [('EV-1', 'owner@example.com', False), ('EV-2', 'owner@example.com', True)])
 
 
 class SourceTests(unittest.TestCase):

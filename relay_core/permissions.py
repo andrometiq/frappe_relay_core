@@ -67,6 +67,8 @@ def after_migrate():
     install_roles()
     from relay_core.timeline import install_indexes
     install_indexes()
+    from relay_core.ai.memory import install_indexes as install_memory_indexes
+    install_memory_indexes()
     frappe.db.add_index('Relay Message', ['relay_contact', 'name'], 'relay_contact_history')
     frappe.db.add_index('Relay Message', ['relay_contact', 'channel', 'name'], 'relay_channel_history')
     frappe.db.add_index('Relay Message', ['conversation_key', 'name'], 'relay_conversation_history')

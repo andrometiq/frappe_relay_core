@@ -2,8 +2,10 @@
 
 The nightly job folds new messages into Day rows, then rolls finished days into weeks, weeks into months and months
 into years. A row is covered by its parent when its cursor is not after the parent's cursor; only covered rows are
-pruned. The nightly job reads messages created from the start of the month of the oldest kept day; a one-time backfill
-folds older months straight into Month and Year rows, so the two never read the same message. Records without a business record use the chat's contact key, as in Relay Chat."""
+pruned. Messages are placed by their sent time (creation when empty), the time that orders the thread. The nightly
+job reads messages sent from the start of the month of the oldest kept day; a one-time backfill folds older months
+straight into Month and Year rows, so the two never read the same message. Records without a business record use the
+chat's contact key, as in Relay Chat."""
 import hashlib
 import json
 import re
@@ -19,6 +21,7 @@ from relay_core import ai_features
 from relay_core.ai.adapter import MAX_JSON_PROMPT_LENGTH, complete_json
 from relay_core.automation.service import internal_save
 from relay_core.relay_chats import key_of
+from relay_core.timeline import timeline_time
 
 MEMORY = 'Relay Memory'
 MESSAGE = 'Relay Message'
@@ -32,10 +35,22 @@ BATCH = 50
 MAX_LINES = 80
 MAX_LINE_LENGTH = 280
 MAX_MESSAGE_LENGTH = 2000
-EVENT_BUDGET = 16000
+EVENT_BUDGET = 8000
+MAX_EVENTS_PER_CALL = 60
 MODEL_TIMEOUT = 90
 STAMP = r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}'
 LINE = re.compile(rf'{STAMP}(?: to {STAMP})?(?: \| [^|\n]+){{5}}')
+TEAM_USERS = ('', 'Administrator', 'Guest')
+REDACTED = '[redacted]'
+SECRETS = (
+    (re.compile(r'(?i)\b(otp|one[ -]time (?:password|code|pin)|verification code|security code)\b([^\d\n]{0,25})\d{4,8}\b'),
+     rf'\1\2{REDACTED}'),
+    (re.compile(r'(?i)\b\d{4,8}\b(?=\s+(?:is\s+)?(?:your\s+|the\s+)?(?:otp|one[ -]time|verification code)\b)'), REDACTED),
+    (re.compile(r'(?i)\b(password|passwd|pwd|passcode|api[ _-]?key|access[ _-]?token|auth[ _-]?token|token|secret)'
+                r'(\s*(?::|=|\bis\b)\s*)\S+'), rf'\1\2{REDACTED}'),
+    (re.compile(r'(?i)\b(password|passwd|pwd|passcode)(\s+)(?=\S*\d)\S+'), rf'\1\2{REDACTED}'),
+    (re.compile(r'(?i)\b(bearer)(\s+)[\w.~+/=-]{8,}'), rf'\1\2{REDACTED}'),
+)
 
 PROMPT = (
     'You keep the memory of one contact address of one business record. Merge previous_summary and new_events into '
@@ -68,16 +83,48 @@ def period(level: str, day: date) -> tuple[date, date]:
 
 def summarize(model: str, previous: str, events: list[str], reference: tuple[str, str]) -> str:
     """The one model call: the previous summary merged with new event lines, validated line by line. Input over the
-    prompt limit is rejected, never cut. `reference` names the business record in the AI call log."""
+    prompt limit is rejected, never cut. Overlong lines are cut to MAX_LINE_LENGTH; a wrong line format rejects the
+    answer. `reference` names the business record in the AI call log."""
     prompt = json.dumps({'instruction': PROMPT, 'previous_summary': previous, 'new_events': events}, ensure_ascii=False)
     if len(prompt) > MAX_JSON_PROMPT_LENGTH:
         raise ValueError(f'Memory input has {len(prompt)} characters; the limit is {MAX_JSON_PROMPT_LENGTH}')
     lines = complete_json(model, prompt, timeout=MODEL_TIMEOUT, reference=reference).get('lines')
-    if (not isinstance(lines, list) or len(lines) > MAX_LINES
-            or not all(isinstance(line, str) and len(line) <= MAX_LINE_LENGTH and LINE.fullmatch(line)
-                       for line in lines)):
+    if not isinstance(lines, list) or len(lines) > MAX_LINES or not all(isinstance(line, str) for line in lines):
+        raise ValueError('The memory model returned invalid lines')
+    lines = [fit_line(line.strip()) for line in lines]
+    if not all(len(line) <= MAX_LINE_LENGTH and LINE.fullmatch(line) for line in lines):
         raise ValueError('The memory model returned invalid lines')
     return '\n'.join(lines)
+
+
+def fit_line(line: str) -> str:
+    """`line` cut to MAX_LINE_LENGTH. The middle of the asked, outcome, who and sent fields goes first, in that order,
+    so times, the channel and file ids or document names at the ends of fields stay."""
+    fields = line.split(' | ')
+    if len(fields) != 6:
+        return line
+    for index in (3, 5, 2, 4):
+        overflow = len(' | '.join(fields)) - MAX_LINE_LENGTH
+        if overflow <= 0:
+            break
+        fields[index] = cut_middle(fields[index], len(fields[index]) - overflow)
+    return ' | '.join(fields)
+
+
+def cut_middle(text: str, size: int) -> str:
+    """`text` in at most `size` characters (at least one), with an ellipsis in place of the middle."""
+    if len(text) <= size:
+        return text
+    keep = max(size, 1) - 1
+    tail = keep // 2
+    return text[:keep - tail] + '…' + (text[-tail:] if tail else '')
+
+
+def redact(text: str) -> str:
+    """`text` with passwords, OTPs and tokens replaced, before it goes to the model."""
+    for pattern, replacement in SECRETS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def event_line(row, medium: str) -> str:
@@ -89,9 +136,11 @@ def event_line(row, medium: str) -> str:
     if row.direction == 'Incoming':
         who = display_name(row.relay_contact) or row.sender_endpoint or row.relay_contact
     else:
-        who = row.legacy_author or row.owner
+        author = row.legacy_author or row.owner or ''
+        who = team_label(row.channel) if author in TEAM_USERS else user_name(author)
     sent = data.get('attachment') or (data.get('media') or {}).get('filename')
-    fields = [str(row.sent_at or row.creation)[:16], medium, who, directory_preview(row, MAX_MESSAGE_LENGTH), sent, '-']
+    fields = [str(row.sent_at or row.creation)[:16], medium, who, redact(directory_preview(row, MAX_MESSAGE_LENGTH)),
+              sent, '-']
     return ' | '.join(re.sub(r'[|\s]+', ' ', str(value or '-')).strip() or '-' for value in fields)
 
 
@@ -139,7 +188,7 @@ class Memory:
 
     def messages(self, since: date | None = None, until: date | None = None, after: str = '', limit: int = BATCH,
                  newest_first: bool = False) -> list:
-        """Up to `limit` messages of this address that may belong to this record, created from `since` and before
+        """Up to `limit` messages of this address that may belong to this record, sent from `since` and before
         `until`, named after `after`."""
         message = frappe.qb.DocType(MESSAGE)
         if self.is_contact_key:
@@ -150,9 +199,9 @@ class Memory:
             IfNull(message.business_name, '') == '')
         query = frappe.qb.from_(message).select(*MESSAGE_FIELDS).where(address).where(record)
         if since:
-            query = query.where(message.creation >= since)
+            query = query.where(timeline_time() >= since)
         if until:
-            query = query.where(message.creation < until)
+            query = query.where(timeline_time() < until)
         if after:
             query = query.where(message.name > after)
         order = frappe.qb.desc if newest_first else frappe.qb.asc
@@ -170,18 +219,18 @@ class Memory:
         self.prune()
 
     def add_messages(self, model: str, since: date) -> None:
-        """Fold messages created from `since` and after the cursor into their Day rows, one batch at a time."""
+        """Fold messages sent from `since` and after the cursor into their Day rows, one batch at a time."""
         after = self.get_cursor(since)
         while batch := self.messages(since, after=after):
             by_day = defaultdict(list)
             for row in filter(self.belongs, batch):
-                by_day[getdate(row.creation)].append(row)
+                by_day[getdate(row.sent_at or row.creation)].append(row)
             for day, rows in sorted(by_day.items()):
                 self.fold_rows(self.row('Day', day), period('Day', day), rows, model)
             after = batch[-1].name
 
     def backfill(self, model: str, start: date) -> None:
-        """Fold the messages created in the month of `start` into its Month row, then that month into the Year row.
+        """Fold the messages sent in the month of `start` into its Month row, then that month into the Year row.
         Resumes after the Month row's cursor, so a re-run folds nothing twice. The Year cursor stays with the nightly
         rolls; a job that stops between the two saves leaves that month out of the Year row."""
         row = self.row('Month', start)
@@ -198,25 +247,28 @@ class Memory:
             self.merge(self.row('Year', bounds[0]), bounds, [row.summary], model, row.channel, '', added)
 
     def fold_rows(self, row, bounds, rows, model) -> None:
-        """Merge messages into `row` in parts whose event lines fit EVENT_BUDGET."""
+        """Merge messages into `row` in parts of at most MAX_EVENTS_PER_CALL messages whose event lines fit
+        EVENT_BUDGET, so each call stays well inside MODEL_TIMEOUT."""
         medium = medium_of(rows[0].channel)
         lines = [event_line(item, medium) for item in rows]
         start = 0
         while start < len(lines):
             end, size = start, 0
-            while end < len(lines) and (end == start or size + len(lines[end]) <= EVENT_BUDGET):
+            while end < len(lines) and end - start < MAX_EVENTS_PER_CALL and (
+                    end == start or size + len(lines[end]) <= EVENT_BUDGET):
                 size += len(lines[end])
                 end += 1
             self.merge(row, bounds, lines[start:end], model, medium, rows[end - 1].name, end - start)
             start = end
 
     def merge(self, row, bounds, events, model, channel, last, count) -> None:
-        """Merge events into `row`. A failed model call marks the row Failed with the reason and stops the job."""
+        """Merge events into `row`. A failed model call, such as an invalid answer, a provider error or a timeout,
+        marks the row Failed with the reason, keeps its summary and cursor, and stops the job."""
         row.update(period_start=bounds[0], period_end=bounds[1], channel=channel)
         try:
             summary = summarize(model, row.summary or '', events, self.record) if events else row.summary
-        except ValueError as error:
-            row.update(status='Failed', error=str(error))
+        except Exception as error:
+            row.update(status='Failed', error=(str(error) or type(error).__name__)[:1000])
             self.save(row)
             raise
         row.update(summary=summary, status='Ready', error='', last_message=max(row.last_message or '', last),
@@ -262,6 +314,18 @@ def display_name(contact: str) -> str | None:
     return frappe.get_cached_value('Relay Contact', contact, 'display_name')
 
 
+def user_name(user: str) -> str:
+    from frappe.utils import get_fullname
+    return get_fullname(user)
+
+
+def team_label(channel: str) -> str:
+    """The sender of messages that a system user sent: "<company> team", else the channel label."""
+    company, label, title = frappe.get_cached_value('Relay Channel', channel, ['company', 'label', 'title']) or (
+        None, None, None)
+    return f'{company} team' if company else label or title or 'Team'
+
+
 def get_memory(business_doctype: str, business_name: str, address: str, recent: int = 10) -> str:
     """Memory text for the AI runtime: years, the last 12 months, this month's weeks, the last 7 days and the last
     `recent` messages. System use only: it reads without permission checks and is not whitelisted."""
@@ -274,15 +338,15 @@ def window_start() -> date:
 
 
 def targets(since: date, until: date | None = None) -> dict:
-    """{(doctype, name, address): last message name} of addresses with an incoming message created from `since` and
+    """{(doctype, name, address): last message name} of addresses with an incoming message sent from `since` and
     before `until`. Outgoing-only addresses, such as campaign recipients, get no memory."""
     message = frappe.qb.DocType(MESSAGE)
     columns = [message.business_doctype, message.business_name, message.relay_contact, message.sender_endpoint,
                message.direction]
     query = (frappe.qb.from_(message).select(*columns, Max(message.name).as_('last'))
-             .where(message.creation >= since).where(IfNull(message.legacy_triage, 0) == 0).groupby(*columns))
+             .where(timeline_time() >= since).where(IfNull(message.legacy_triage, 0) == 0).groupby(*columns))
     if until:
-        query = query.where(message.creation < until)
+        query = query.where(timeline_time() < until)
     found, incoming = {}, set()
     for row in query.run(as_dict=True):
         key = (*key_of(row), row.sender_endpoint or row.relay_contact)
@@ -330,9 +394,11 @@ def fold(business_doctype: str, business_name: str, address: str) -> None:
 
 
 @frappe.whitelist(methods=['POST'])
-def backfill(month: str) -> int:
+def backfill(month: str, business_doctype: str | None = None, business_name: str | None = None,
+             address: str | None = None) -> int:
     """One-time fold of `month` (YYYY-MM), which must be before the nightly window, into Month and Year rows.
-    Run it once per month, oldest month first. Returns the number of queued addresses. Never runs by itself:
+    Run it once per month, oldest month first. The optional business record and address limit it to those memories.
+    Returns the number of queued addresses. Never runs by itself:
     bench --site <site> execute relay_core.ai.memory.backfill --kwargs "{'month': '2026-08'}" """
     frappe.only_for('System Manager')
     if not memory_model():
@@ -342,7 +408,9 @@ def backfill(month: str) -> int:
     start = getdate(month + '-01')
     if start >= window_start():
         frappe.throw('The nightly memory job covers this month')
-    found = targets(start, add_months(start, 1))
+    wanted = (business_doctype, business_name, address)
+    found = [key for key in targets(start, add_months(start, 1))
+             if all(not value or value == part for value, part in zip(wanted, key))]
     for key in found:
         queue('backfill_address', key, month=month)
     return len(found)
@@ -356,3 +424,14 @@ def backfill_address(business_doctype: str, business_name: str, address: str, mo
     memory = Memory(business_doctype, business_name, address)
     with memory.lock():
         memory.backfill(model, getdate(month + '-01'))
+
+
+def install_indexes() -> None:
+    """Indexes for the scans by message time. Runs after timeline.install_indexes, which adds the time column."""
+    if frappe.conf.db_type == 'postgres':
+        for name, scope in (('relay_memory_time', ''), ('relay_memory_endpoint_time', 'sender_endpoint, ')):
+            frappe.db.sql(f'CREATE INDEX IF NOT EXISTS "{name}" ON "tabRelay Message" '
+                          f'({scope}(COALESCE(sent_at, creation)), name)')
+        return
+    frappe.db.add_index(MESSAGE, ['relay_timeline_time', 'name'], 'relay_memory_time')
+    frappe.db.add_index(MESSAGE, ['sender_endpoint', 'relay_timeline_time', 'name'], 'relay_memory_endpoint_time')

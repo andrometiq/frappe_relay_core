@@ -78,10 +78,11 @@ def queue_build(event: str, force: bool = False) -> None:
     if status != 'Building':
         frappe.db.set_value(EVENT, event, 'memory_status', 'Pending', update_modified=False)
     # The revision is part of the job id: a build of older inputs never hides the build of newer ones.
+    # frappe.enqueue has its own `event` argument, so the job gets the event as `relay_event`.
     job = hashlib.sha256(f'{event}:{revision}'.encode()).hexdigest()[:32]
     frappe.enqueue('relay_core.ai.event_memory.build', queue='long', timeout=LOCK_TIMEOUT,
                    job_id='relay-ai-event-' + job, deduplicate=True, enqueue_after_commit=True,
-                   event=event, triggered_by=frappe.session.user, force=force)
+                   relay_event=event, triggered_by=frappe.session.user, force=force)
 
 
 def on_file_change(doc, method=None) -> None:
@@ -98,10 +99,10 @@ def rebuild(event: str) -> None:
 
 
 @ai_features.when_enabled
-def build(event: str, triggered_by: str | None = None, force: bool = False) -> None:
-    key = frappe.cache.make_key('relay-ai-event:' + event)
+def build(relay_event: str, triggered_by: str | None = None, force: bool = False) -> None:
+    key = frappe.cache.make_key('relay-ai-event:' + relay_event)
     with frappe.cache.lock(key, timeout=LOCK_TIMEOUT, blocking_timeout=LOCK_TIMEOUT):
-        EventBuild(event, triggered_by).run(force)
+        EventBuild(relay_event, triggered_by).run(force)
 
 
 class EventBuild:
@@ -129,9 +130,19 @@ class EventBuild:
             problems = [f'{source.label}: {source.reason}' for source in self.sources if source.status != 'Read']
             status = 'Partial' if problems else 'Ready'
         except Exception as error:
-            frappe.db.rollback()
+            self.keep_failure_logs(record.name)
             memory, status, problems = '', 'Failed', [str(error) or type(error).__name__]
         self.publish(record, revision, status, memory, problems)
+
+    def keep_failure_logs(self, build_name: str) -> None:
+        """Commit the AI call logs of the failed build; roll back only when the transaction is no longer usable.
+        Then log the traceback against the build."""
+        try:
+            frappe.db.commit()
+        except Exception:
+            frappe.db.rollback()
+        frappe.log_error(title=f'Relay AI event memory failed: {self.event}', reference_doctype=BUILD,
+                         reference_name=build_name)
 
     def start(self, revision: str, model: str | None):
         from relay_core.automation.service import internal_save
