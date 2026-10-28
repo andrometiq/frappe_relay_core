@@ -33,12 +33,12 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         raise ValueError('Incoming message exceeds the skill prompt budget')
     from frappe_tools.ai import agent
     from frappe_tools.utils import llm
-    deadline = deadline or time.monotonic() + 20
+    from relay_core.ai.service import REPLY_TIMEOUT, authorize_search, check_continuation
+    deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     if deadline <= time.monotonic():
-        raise ValueError('Event turn deadline exceeded')
-    account, model, secrets, options = route(skill.ai_model)
-    options['timeout'] = min(options.get('timeout', 20), deadline - time.monotonic())
-    from relay_core.ai.service import authorize_search, check_continuation
+        raise TimeoutError('AI model did not answer in time')
+    account, model, secrets, options = route(skill.ai_model, timeout=REPLY_TIMEOUT)
+    options['timeout'] = min(options.get('timeout', REPLY_TIMEOUT), deadline - time.monotonic())
     reader = Reader(skill, user, business, scope,
         authorize=lambda contract, arguments: authorize_search(run_id, skill, contract, arguments))
     references = contracts(skill)
@@ -149,7 +149,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         check_continuation(run_id)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise ValueError('Event turn deadline exceeded')
+            raise TimeoutError('AI model did not answer in time')
         options['timeout'] = min(options['timeout'], remaining)
         correction = ('\nYour previous answer was empty with no actions, search or handoff. '
                       'Provide a non-empty reply, propose the allowed actions, declare a needed search, '
@@ -158,8 +158,15 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             (system + correction, llm.redact_secrets(text, secrets), RESPONSE), options,
             dict(extraction=None, target_doctype=business[0], phase=None,
                  reference_doctype='Relay Automation Run' if run_id else None, reference_name=run_id, run_id=run_id))
-        if time.monotonic() >= deadline or reader.failed or not outcome.get('ok'):
-            raise ValueError('Decision or authorization failed')
+        if reader.failed:
+            raise ValueError('Business data authorization failed; review required')
+        if time.monotonic() >= deadline:
+            raise TimeoutError('AI model did not answer in time')
+        if not outcome.get('ok'):
+            error = ' '.join(str(outcome.get('error') or 'No error details returned').split())
+            if re.search(r'timed?\s*out|deadline|time budget', error, re.IGNORECASE):
+                raise TimeoutError('AI model did not answer in time')
+            raise ValueError(('AI provider error: ' + llm.redact_secrets(error, secrets))[:500])
         value = outcome['result']['data']
         if not isinstance(value, dict) or set(value) not in ({'reply', 'handoff', 'reason'}, {'reply', 'handoff', 'reason', 'search'}):
             raise ValueError('Invalid skill decision')

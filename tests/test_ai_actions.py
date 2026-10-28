@@ -268,7 +268,7 @@ class ExecutionAdapter(unittest.TestCase):
         self.continuation.side_effect = None
         self.attempt.reset_mock()
         with patch.object(self.adapter.time, 'monotonic', side_effect=[0, 0, 0, 0, 21]):
-            with self.assertRaisesRegex(ValueError, 'deadline'):
+            with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
                 self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Thanks', deadline=20)
         self.attempt.assert_called_once()
 
