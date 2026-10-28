@@ -26,3 +26,9 @@ export function listTime(value, now = Date.now()) {
   if (days < 7) return date.toLocaleDateString([], { weekday: 'short' })
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) })
 }
+
+// A full date and clock time, such as "28 Oct, 17:31".
+export function dateTime(value) {
+  const date = new Date(String(value || '').replace(' ', 'T'))
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+}

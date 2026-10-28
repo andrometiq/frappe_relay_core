@@ -23,7 +23,7 @@ try {
   assert.equal(await detail.getByText('AI active',{exact:true}).count(),0)
   assert.ok(!(await detail.innerText()).includes('7500'))
   assert.ok(!(await detail.innerText()).includes('1792867625249477656'))
-  await detail.getByRole('link',{name:'Open conversation · WhatsApp',exact:true}).first().waitFor()
+  await detail.getByRole('link',{name:'Open chat · WhatsApp',exact:true}).first().waitFor()
   for(const width of [390,1440]) {
     await page.setViewportSize({width,height:900})
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false)

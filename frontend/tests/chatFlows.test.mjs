@@ -76,7 +76,7 @@ test('the new message dialog asks only what it needs and has a Cancel button', a
   assert.match(start, /<Button label="Cancel" variant="ghost" :disabled="busy" @click="close" \/>/)
   assert.match(start, /contactCaption\(row\.display_name \|\| row\.contact, "Unknown number"\)/)
   assert.match(start, /initialOptions: templateId && templateLabel/)
-  assert.match(start, /coreApi\("whatsapp_templates\.directory"/)
+  assert.match(start, /approvedTemplates\(after => coreApi\("whatsapp\.execute"/)
 })
 
 test('a chat that fails to load stays open with a retry; only 403 or 404 leaves', () => {

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { listTime } from '../src/components/relativeTime.js'
+import { listTime, dateTime } from '../src/components/relativeTime.js'
 
 const now = new Date(2026, 9, 27, 15, 30).getTime()
 const at = (...parts) => new Date(...parts).toISOString()
@@ -16,4 +16,10 @@ test('the conversation list shows clock time today, then Yesterday, weekday and 
 test('the conversation list time is empty for missing or invalid values', () => {
   assert.equal(listTime('', now), '')
   assert.equal(listTime('not a date', now), '')
+})
+
+test('a full time reads as day, month and 24-hour clock time', () => {
+  assert.equal(dateTime('2026-10-28 17:31:48.960076'), new Date(2026, 9, 28, 17, 31).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }))
+  assert.equal(dateTime(''), '')
+  assert.equal(dateTime('not a time'), '')
 })

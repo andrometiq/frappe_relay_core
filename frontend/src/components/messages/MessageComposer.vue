@@ -96,7 +96,7 @@ async function attachFile(event) {
   if (attachment.value) kind.value=requestedAttachmentKind.value;
   else attachment.value=previous;
 }
-const emit = defineEmits(["template", "mode"]);
+const emit = defineEmits(["template", "mode", "closed"]);
 const noting = computed(() => props.mode === "note");
 // Only typing fields expand the composer. A button press must not move the tabs before its click lands.
 const expandOn = event => { if (event.target.matches("textarea, input:not([type=file]), select")) focused.value = true; };
@@ -156,6 +156,9 @@ watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
 const windowClosedReason = "More than 24 hours since the customer wrote. You can only send a template.";
 const offReason = computed(() => props.offText || (windowState.value.channel_disabled ? channelOffText(sourceContext.value.provider) : ""));
 const closed = computed(() => !!offReason.value || !windowState.value.open);
+// The thread hides Reply and reactions while only a template can be sent.
+watch(closed, value => emit("closed", value), { immediate: true });
+onBeforeUnmount(() => emit("closed", false));
 const windowHint = computed(() => {
   const seconds = windowState.value.remaining_seconds;
   if (!windowState.value.open || !Number.isFinite(seconds)) return "";

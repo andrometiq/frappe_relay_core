@@ -4,7 +4,7 @@ import { computed, inject, nextTick, onMounted, ref } from 'vue'
 import { Button, ErrorMessage, FeatherIcon, toast } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { linkedTitle } from '../services/linkedTitle'
-import { businessTypeOptions, isPrimaryLink, linkFromChoice, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../services/contactLinks'
+import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkHint, linksHeading, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../services/contactLinks'
 
 // `start` opens the link form at once, with the search focused.
 const props = defineProps({ contact: { type: String, required: true }, detail: { type: Object, required: true }, start: Boolean })
@@ -66,7 +66,8 @@ async function removeLink(link) {
 
 <template>
   <div class="contact-links">
-    <div class="info-group-title"><span>Linked to · {{ links.length }}</span>
+    <p v-if="start && adding && types.length" class="info-hint">{{ linkHint(types) }}</p>
+    <div class="info-group-title"><span>{{ linksHeading(links.length) }}</span>
       <button v-if="detail.can_edit_links && !adding" type="button" class="info-group-action" :disabled="busy" @click="startAdding">+ Link customer</button></div>
     <ErrorMessage :message="error" />
     <form v-if="adding" ref="linkForm" class="contact-link-form info-card" aria-label="Link to a business record" @submit.prevent="addLink">

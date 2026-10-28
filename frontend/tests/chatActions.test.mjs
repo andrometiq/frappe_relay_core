@@ -28,6 +28,15 @@ test('one chevron opens one menu: reply first, info before the divider, team act
   assert.match(thread, /<MessageMenu v-if="menu"[^>]*:area="viewport"/)
 })
 
+test('a closed reply window hides Reply and reactions but keeps the other actions', async () => {
+  const thread = await read('messages/MessageThread.vue'), composer = await read('messages/MessageComposer.vue'), messages = await read('ConnectedMessages.vue')
+  assert.match(thread, /const items = props\.replyClosed \? \[\] : \[\{ label: "Reply"/)
+  assert.match(thread, /:emoji="!replyClosed && canReact\(menu\.message\) \? quickReactions : \[\]"/)
+  assert.match(composer, /watch\(closed, value => emit\("closed", value\), \{ immediate: true \}\)/)
+  assert.match(messages, /@closed="replyClosed = \$event"/)
+  assert.match(messages, /:reply-closed="replyClosed"/)
+})
+
 test('the reaction pill has no close buttons and offers removal only after a reaction', async () => {
   const picker = await read('messages/ReactionPicker.vue')
   assert.doesNotMatch(picker, /icon="x"|×|Close/)

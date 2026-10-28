@@ -16,6 +16,7 @@ import MessageThread from "./messages/MessageThread.vue";
 import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
 import { useMessages } from "../composables/useMessages";
+import { useThreadNotes } from "../composables/useThreadNotes";
 import { sendNumbersKey, useSendNumbers } from "../composables/useSendNumbers";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
@@ -62,7 +63,6 @@ const searchOpen = computed(() => panel.value === 'search');
 const noteBusiness = computed(() => noteMessages.value[0]?.business_name
   ? { businessDoctype: noteMessages.value[0].business_doctype, businessName: noteMessages.value[0].business_name }
   : activeBusiness.value);
-const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
 const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
 
 provide(messagesKey, state);
@@ -76,11 +76,13 @@ const {
   busy, error, connectionError, notice, channel, history, reply,
   focusMessage, openQuote, send, run,
 } = state;
+const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
+const threadNotes = useThreadNotes(conversationContact), replyClosed = ref(false);
 
 const startOpen = ref(false), startTemplate = ref(false), startBusiness = ref(false), startContact = ref(""), startChannel = ref(""), startContactLabel = ref(""), summaryOpen = ref(false);
 const linkedContacts = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const activeBusinessContact = ref("");
-let contactRequest = 0;
+let contactRequest = 0, pickSingleContact = false;
 
 const active = computed(() => selected.value || businessName.value);
 // A contact without a name is shown by its phone number.
@@ -204,6 +206,7 @@ function chooseContact(contact, updateRoute = true) {
 }
 function showAllContacts() {
   if (busy.value) return;
+  pickSingleContact = false;
   state.clearRecipient();
   closeNotes();
   activeBusinessContact.value = "";
@@ -301,10 +304,18 @@ watch([businessType, businessName], () => {
   closeNotes(); closeTicket(); panel.value = ''; linking.value = false;
   summaryOpen.value = false;
   activeBusinessContact.value = "";
+  pickSingleContact = true;
   lastVisible.value = "";
   visibleMessages.value = [];
   loadBusinessContacts();
 }, { immediate: true });
+// A record with one contact opens on that contact's chat, so the composer shows without a click.
+watch([linkedContacts, messagesByContact, busy], () => {
+  const only = linkedContacts.value.length === 1 ? linkedContacts.value[0].value : "";
+  if (!pickSingleContact || busy.value || !businessName.value || !messagesByContact.value.has(only)) return;
+  pickSingleContact = false;
+  if (!source.value && [only, ""].includes(activeBusinessContact.value)) chooseContact(only);
+}, { flush: 'post' });
 function readContactRoute() {
   if (location.hash.split('?')[0] !== '#/messages' || busy.value) return;
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
@@ -415,7 +426,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </WorkspaceState>
       <MessageThread v-else :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :paging="paging" :paging-error="pagingError" :error="state.error.value" :emoji="emoji"
-        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="startNote" @ticket="openTicket"
+        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" :notes="threadNotes.items.value" :reply-closed="replyClosed" @note="startNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="loadOlder" @retry-page="pagingError = ''" @reply="replyTo"
         @quote="openQuote" @reconcile="state.checkPending" @retry="state.retryPending" @discard="state.deletePending" @send="send" @toast="showToast" />
@@ -443,13 +454,13 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" @mode="setComposeMode">
         <template #channel><SendChannel /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+          @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
         <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" @mode="setComposeMode" @template="startInChat(true)">
+      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" @mode="setComposeMode" @template="startInChat(true)" @closed="replyClosed = $event">
         <template #channel><SendChannel /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+          @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
         <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
       <div v-else-if="active && !loadFailed" class="business-compose-start">
