@@ -23,3 +23,9 @@ export function setTheme(value) {
 media.addEventListener('change', () => { if (theme.value === 'system') apply() })
 window.addEventListener('storage', event => { if (event.key === 'theme') { theme.value=normalize(event.newValue)||'system';apply() } })
 apply()
+
+// Automatic -> Light -> Dark, as the account menu button cycles them.
+export const THEME_LABELS = { system: ['monitor', 'Automatic'], light: ['sun', 'Light'], dark: ['moon', 'Dark'] }
+export function cycleTheme() {
+  setTheme(allowed[(allowed.indexOf(theme.value) + 1) % allowed.length])
+}
