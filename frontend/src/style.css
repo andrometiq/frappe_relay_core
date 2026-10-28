@@ -904,6 +904,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .relay-input-suffix{display:flex;align-items:center;flex:none;padding-right:8px}
 .relay-input-suffix kbd{padding:1px 6px;border:1px solid var(--relay-stroke-strong);border-radius:4px;color:var(--relay-ink-3);font:11px var(--relay-font)}
 :is(.relay-titlebar-search,.directory-search) .relay-input::placeholder{color:var(--relay-ink-3)}
+:is(.relay-titlebar-search,.directory-search) .relay-input-shell:focus-within{border:1px solid var(--relay-stroke);border-bottom-color:var(--relay-stroke-strong);background:var(--relay-layer);box-shadow:none}
 .nav-row{position:relative}
 .nav-chevron{position:absolute;top:50%;right:4px;display:grid;place-items:center;width:28px;height:28px;border-radius:5px;color:var(--relay-ink-3);transform:translateY(-50%)}
 .nav-chevron:hover{background:var(--relay-hover)}
