@@ -59,8 +59,8 @@ test('manager triage starts, loads pending messages and watches the selected con
   }finally{scope.stop()}
 })
 
-test('catch-up across 150 rows preserves pagination and advances the ingestion cursor',async()=>{
-  const messages=Array.from({length:202},(_,index)=>row(index+1,'2026-10-24'))
+test('catch-up across 300 rows preserves pagination and advances the ingestion cursor',async()=>{
+  const messages=Array.from({length:302},(_,index)=>row(index+1,'2026-10-24'))
   const cursors=[]
   const api=async(method,args)=>{
     if(method==='api.message_snapshots')return {items:messages.filter(row=>JSON.parse(args.names).includes(row.name))}
@@ -78,13 +78,13 @@ test('catch-up across 150 rows preserves pagination and advances the ingestion c
     await fixture.refresh('messages')
     assert.equal(fixture.state.connectionError.value,'')
     assert.equal(fixture.state.more.value,true)
-    assert.deepEqual(fixture.state.rows.value.map(row=>row.name),messages.slice(-150).map(row=>row.name))
-    assert.deepEqual(cursors,[0,50,100,150,200].map(index=>messages[index].name))
+    assert.deepEqual(fixture.state.rows.value.map(row=>row.name),messages.slice(-300).map(row=>row.name))
+    assert.deepEqual(cursors,[0,50,100,150,200,250,300].map(index=>messages[index].name))
     await fixture.refresh('messages')
-    assert.equal(cursors.length,6)
+    assert.equal(cursors.length,8)
     assert.equal(cursors.at(-1),messages.at(-1).name)
     assert.equal(fixture.state.connectionError.value,'')
-    assert.equal(fixture.state.rows.value.length,150)
+    assert.equal(fixture.state.rows.value.length,300)
   }finally{fixture.stop()}
 })
 
@@ -162,8 +162,8 @@ test('navigation puts WhatsApp under Channels with manager campaigns, omits call
   const text=await readFile(new URL('../src/SiteApp.vue',import.meta.url),'utf8')
   assert.match(text, /Contacts: defineAsyncComponent/)
   const contacts = await readFile(new URL('../src/components/ContactsWorkspace.vue', import.meta.url), 'utf8')
-  assert.match(contacts, /UnlinkedContacts v-if="tab === 'unlinked' && capabilities.manage"/)
-  assert.match(text, /name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', group: 'Channels', channel: 'WhatsApp'/)
+  assert.match(contacts, /v-if="tab === 'unlinked' && capabilities.manage"[\s\S]*<IncomingWorkspace \/>/)
+  assert.match(text, /name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', channel: 'WhatsApp'/)
   assert.doesNotMatch(text, /name: 'Campaigns'/)
   const section = await readFile(new URL('../src/components/whatsapp/WhatsAppSection.vue', import.meta.url), 'utf8')
   assert.match(section, /\.\.\.whatsappSections\(capabilities\.value\)/)
@@ -340,4 +340,25 @@ test('a picked WhatsApp number sends from its newest loaded message, else names 
     fixture.state.clearRecipient()
     assert.equal(fixture.state.viaNumber.value,'')
   } finally {fixture.stop()}
+})
+
+test('a newer page that returns after switching chats is dropped',async()=>{
+  let release
+  const api=async(method,args)=>{
+    if(method==='api.message_snapshots')return {items:[]}
+    if(method!=='api.messages')return {}
+    if(args.after)return new Promise(resolve=>release=()=>resolve({items:[row(900,'2026-10-25')],last:row(900).name,has_more:false}))
+    const items=args.contact==='a'?[row(1,'2026-10-24')]:[row(2,'2026-10-24')]
+    return {items,first:items[0].name,last:items[0].name,has_more:false}
+  }
+  const fixture=setup(api)
+  try{
+    fixture.state.selected.value='a'
+    await fixture.state.history()
+    const pending=fixture.state.loadNewer()
+    fixture.state.selected.value='b'
+    await fixture.state.history()
+    release(); await pending
+    assert.deepEqual(fixture.state.rows.value.map(r=>r.name),[row(2).name])
+  }finally{fixture.stop()}
 })

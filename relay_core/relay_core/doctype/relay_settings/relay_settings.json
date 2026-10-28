@@ -12,6 +12,7 @@
     "enable_ai_features",
     "enable_chat_folders",
     "enable_teams",
+    "enable_flows",
     "ai_handoff_owner",
     "transcription_provider",
     "send_whatsapp_read_receipts",
@@ -62,6 +63,13 @@
       "label": "Enable teams",
       "default": "0",
       "description": "Show team management, team assignment and team labels in Relay. Team membership still controls who sees a chat."
+    },
+    {
+      "fieldname": "enable_flows",
+      "fieldtype": "Check",
+      "label": "Enable flows",
+      "default": "0",
+      "description": "Show the flow builder and run published flows on incoming WhatsApp messages."
     },
     {
       "fieldname": "ai_handoff_owner",
@@ -129,5 +137,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-27 21:00:00.000000"
+  "modified": "2026-10-27 23:30:00.000000"
 }

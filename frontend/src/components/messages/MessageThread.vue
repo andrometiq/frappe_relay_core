@@ -6,12 +6,15 @@ import { useMessageInfo } from "../../composables/useMessageInfo";
 import LoadingRows from "../LoadingRows.vue";
 import ReadByBubble from "./ReadByBubble.vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
-import ParticipantReceipts from "./ParticipantReceipts.vue";
+import MessageMenu from "./MessageMenu.vue";
+import ReactionPicker from "./ReactionPicker.vue";
+import MessageInfoDialog from "./MessageInfoDialog.vue";
+import { useMobileLayout } from "../../composables/useMobileLayout";
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } from "vue";
-import { Button, FeatherIcon, Dropdown, Dialog } from "@relay/ui";
+import { Button, FeatherIcon } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
-import { messageData, objectValue, attachmentDownloadURL, reactionLabels } from "../messageContent";
+import { messageData, objectValue, attachmentDownloadURL, reactionLabels, ownReaction } from "../messageContent";
 import { channelCan, multipleChannels } from "../../services/enabledChannels";
 import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
@@ -22,6 +25,8 @@ const props = defineProps({
   canComment: Boolean,
   more: Boolean,
   busy: Boolean,
+  paging: Boolean,
+  pagingError: String,
   emoji: String,
   selected: String,
   anchor: String,
@@ -32,7 +37,10 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "reconcile",
+  "retry",
+  "discard",
   "older",
+  "retryPage",
   "newer",
   "position",
   "reply",
@@ -42,6 +50,7 @@ const emit = defineEmits([
   "visibleMessages",
   "quote",
   "note",
+  "toast",
 ]);
 const capabilities = inject("relayCapabilities", ref({}));
 const showChannel = computed(() => multipleChannels(capabilities.value));
@@ -49,6 +58,8 @@ const threadRows = computed(() => groupSends(props.rows || []));
 const numberTags = computed(() => messageNumberTags(threadRows.value, capabilities.value));
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
+// A chat send the server rejected, or one that never reached the server, offers Retry and Delete.
+const isUnsent = message => !message.emailRequest && (message.action ? message.status === 'Failed' : message.status === 'Unconfirmed' && !!message.request);
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
@@ -63,7 +74,24 @@ useRealtimeRefresh([],['reads'],loadReaders);
 const viewport = ref(null), content = ref(null);
 const scroll = createScrollHold(() => viewport.value);
 const reactionTarget = ref(null);
-const reactionChoices = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
+// One menu for the whole thread: a menu per bubble made every older page slow to draw.
+const isMobile = useMobileLayout();
+const menu = ref(null);
+function openMenu(message, event) {
+  const trigger = event.currentTarget;
+  menu.value = menu.value?.message.name === message.name ? null : { message, trigger, sheet: false };
+}
+// Phones open the same actions as a bottom sheet on a long press.
+let pressTimer;
+function pressStart(message, event) {
+  if (!isMobile.value || message._pending || event.pointerType === "mouse") return;
+  const bubble = event.currentTarget;
+  pressTimer = setTimeout(() => { menu.value = { message, trigger: bubble, sheet: true }; navigator.vibrate?.(10); }, 450);
+}
+function pressEnd() { clearTimeout(pressTimer); }
+onBeforeUnmount(pressEnd);
+const reactionChoices = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
+const quickReactions = ["👍", "❤️", "😁", "👏", "😢"];
 function canReact(message) {
   return !objectValue(message.provider_context).group_id && can(message, "reactions");
 }
@@ -83,7 +111,7 @@ function react(message, emoji) {
   reactionTarget.value = null;
   emit("send", message, "reaction", { emoji });
 }
-watch(() => props.selected, () => { reactionTarget.value = null; });
+watch(() => props.selected, () => { reactionTarget.value = null; menu.value = null; });
 const {info,coverage,coverageError,infoOpen,showInfo,refreshCoverage,close:closeInfo}=useMessageInfo(()=>props.rows||[],()=>props.selected);
 useRealtimeRefresh([],['reads'],refreshCoverage);
 onBeforeUnmount(closeInfo);
@@ -181,9 +209,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('focus', trackVisible);
   document.removeEventListener('visibilitychange', trackVisible);
 });
-function requestPage(direction) {if(!props.busy)emit(direction);}
-const earlier = useLoadMore({ root: viewport, margin: '1500px 0px', loading: () => props.busy, error: () => props.error, hasMore: () => props.more && props.rows?.length, load: () => requestPage('older') });
-const later = useLoadMore({ root: viewport, margin: '60px 0px', loading: () => props.busy, error: () => props.error, hasMore: () => props.newer, load: () => requestPage('newer') });
+// Older pages load about three screens ahead, so a fast scroll does not reach the top first.
+const earlier = useLoadMore({ root: viewport, margin: '3000px 0px', loading: () => props.paging, error: () => props.pagingError, hasMore: () => props.more && props.rows?.length, load: () => emit('older') });
+const later = useLoadMore({ root: viewport, margin: '1500px 0px', loading: () => props.paging, error: () => props.pagingError, hasMore: () => props.newer, load: () => emit('newer') });
 watch(
   () => props.rows,
   async (_rows, previous) => {
@@ -198,12 +226,25 @@ function scrolled() {
   scroll.scrolled();
 
 }
+// Plain-HTTP sites have no Clipboard API, so the copy falls back to a hidden text area.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard) await navigator.clipboard.writeText(text);
+    else {
+      const area = Object.assign(document.createElement("textarea"), { value: text });
+      document.body.appendChild(area); area.select();
+      const copied = document.execCommand("copy"); area.remove();
+      if (!copied) throw Error("Copy refused");
+    }
+    emit("toast", "Copied");
+  } catch { emit("toast", "Could not copy"); }
+}
+// Quick reactions sit on top of the menu; the actions follow, most used first.
 function actions(message) {
-  const items = [
-    { label: "Message info", icon: "info", onClick: () => showInfo(message) },
-  ];
+  const items = [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
+  if (message.content) items.push({ label: "Copy text", icon: "copy", onClick: () => copyText(message.content) });
   const download = attachmentDownloadURL(message);
-  if (download) items.push({label: 'Download attachment', icon: 'download', onClick: () => {
+  if (download) items.push({label: 'Download', icon: 'download', onClick: () => {
     const link = document.createElement('a');
     link.href = download;
     link.download = '';
@@ -211,36 +252,16 @@ function actions(message) {
     link.click();
     link.remove();
   }});
-  if (props.canComment)
-    items.push({
-      label: "Discuss internally",
-      icon: "message-square",
-      onClick: () => emit("note", message),
-    }, {
-      label: "Create ticket",
-      icon: "bookmark",
-      onClick: () => emit("ticket", message),
-    });
-  if (canReact(message))
-    items.push(
-      {
-        label: "React",
-        icon: "smile",
-        onClick: () =>
-          reactionTarget.value = message.name,
-      },
-      {
-        label: "Clear reaction",
-        icon: "x",
-        onClick: () => emit("send", message, "reaction", { emoji: "" }),
-      },
-    );
+  items.push({ label: "Message info", icon: "info", onClick: () => showInfo(message) });
   if (messageData(message).kind === "sticker")
-    items.push({
-      label: "Resend sticker",
-      icon: "repeat",
-      onClick: () => emit("send", message, "sticker"),
-    });
+    items.push({ label: "Resend sticker", icon: "repeat", onClick: () => emit("send", message, "sticker") });
+  if (props.canComment)
+    items.push({ divider: true }, { label: "Add internal note", icon: "message-square", onClick: () => emit("note", message) },
+      {
+        label: "Create ticket",
+        icon: "bookmark",
+        onClick: () => emit("ticket", message),
+      });
   return items.map((item) => ({ ...item, disabled: props.busy }));
 }
 </script>
@@ -248,6 +269,7 @@ function actions(message) {
   <div
     ref="viewport"
     class="message-thread"
+    :class="{ 'has-menu-sheet': menu?.sheet }"
     aria-label="Conversation"
     @scroll.passive="scrolled"
   >
@@ -255,6 +277,7 @@ function actions(message) {
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
     </div>
+    <p v-if="pagingError" class="message-page-error" role="alert">Could not load more messages. <button type="button" @click="emit('retryPage')">Retry</button></p>
     <div v-if="more" ref="earlier" class="h-px" aria-hidden="true" />
     <div ref="content" class="message-thread-content">
     <template v-for="(message, index) in threadRows" :key="message.name">
@@ -278,9 +301,13 @@ function actions(message) {
         :class="{
           'ml-auto': message.direction === 'Outgoing',
           'anchored-message': message.name === anchor,
+          'menu-target': menu?.message.name === message.name,
         }"
         :data-message="message._pending ? null : message.name"
         tabindex="-1"
+        v-memo="[message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
+        @pointerdown="pressStart(message, $event)" @pointerup="pressEnd" @pointercancel="pressEnd" @pointerleave="pressEnd"
+        @contextmenu="isMobile && $event.preventDefault()"
       >
         <div v-if="message.contact_label" class="message-sender">
           {{ message.direction === "Outgoing" ? "To " + readableName(message.contact_label, "Contact") : readableName(message.contact_label, "Contact") }}
@@ -340,33 +367,17 @@ function actions(message) {
             /></span>
           </span>
           <span v-if="!message._pending && !message.sends && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
-          <span v-if="message._pending" class="pending-status">{{channelStatus(message)}}
+          <span v-if="message._pending && isUnsent(message)" class="pending-status is-unsent">Not sent
+            <Button label="Retry" :disabled="busy" @click="emit('retry', message)" /><Button label="Delete" :disabled="busy" @click="emit('discard', message)" />
+          </span>
+          <span v-else-if="message._pending" class="pending-status">{{channelStatus(message)}}
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
         </footer>
-        <div v-if="!message._pending" class="message-actions">
-          <Button v-if="canReact(message)" icon="smile" label="Add reaction" title="Add reaction"
-            :disabled="busy" @click="reactionTarget = reactionTarget === message.name ? null : message.name" />
-          <Button
-            icon="corner-up-left"
-            label="Reply"
-            title="Reply"
-            :disabled="busy"
-            @click="emit('reply', message)"
-          /><Dropdown :options="actions(message)" placement="right"
-            ><Button
-              icon="more-horizontal"
-              label="Message actions"
-              title="Message actions"
-              :disabled="busy"
-          /></Dropdown>
-        </div>
-        <div v-if="reactionTarget === message.name" class="reaction-picker" role="group" aria-label="Choose reaction" @keydown.esc="reactionTarget = null">
-          <button v-for="reaction in reactionChoices" :key="reaction" type="button"
-            :aria-label="'React ' + reaction" :disabled="busy" @click="react(message, reaction)">{{ reaction }}</button>
-          <button type="button" aria-label="Remove reaction" title="Remove reaction" :disabled="busy" @click="react(message, '')">×</button>
-          <button type="button" aria-label="Close reactions" title="Close reactions" @click="reactionTarget = null">Close</button>
-        </div>
+        <button v-if="!message._pending" type="button" class="message-menu-trigger" aria-label="Message actions" title="Message actions"
+          aria-haspopup="menu" :aria-expanded="menu?.message.name === message.name" @click="openMenu(message, $event)"><FeatherIcon name="chevron-down" :size="16" /></button>
+        <ReactionPicker v-if="reactionTarget === message.name" :choices="reactionChoices" :current="ownReaction(message.reactions)" :busy="busy"
+          @pick="react(message, $event)" @close="reactionTarget = null" />
         <div v-if="reactionLabels(message.reactions).length" class="message-reactions" aria-label="Reactions">
           <span v-for="reaction in reactionLabels(message.reactions)" :key="reaction" class="message-reaction">{{ reaction }}</span>
         </div>
@@ -376,57 +387,20 @@ function actions(message) {
     </div>
     <div v-if="newer" ref="later" class="h-px" aria-hidden="true" />
   </div>
-  <Dialog v-model="infoOpen" :options="{ title: 'Message info', size: 'lg' }"
-    ><template #body-content
-      ><div v-if="info">
-        <p class="message-info-content">{{ info.content }}</p>
-        <dl>
-          <dt>Channel</dt>
-          <dd>
-            {{ objectValue(info.provider_context).provider || info.channel }}
-          </dd>
-          <dt>Direction</dt>
-          <dd>{{ info.direction }}</dd>
-          <dt>Status</dt>
-          <dd>
-            {{ info.direction === "Incoming" ? "Received" : channelStatus(info) }}
-          </dd>
-          <dt>Time</dt>
-          <dd>{{ timeOf(info)?.toLocaleString() || "Unavailable" }}</dd>
-          <dt v-if="info.edited_at">Edited</dt>
-          <dd v-if="info.edited_at">{{ info.edited_at }}</dd>
-          <dt>Message reference</dt>
-          <dd>{{ info.name }}</dd>
-        </dl>
-        <ParticipantReceipts v-if="info.direction==='Outgoing' && can(info, 'group_receipts') && objectValue(info.provider_context).group_id" :message="info.name" />
-        <section aria-label="Operator read coverage" class="mt-4 space-y-2">
-          <h3 class="font-medium">Seen by your team</h3>
-          <p v-if="coverageError" role="alert">{{ coverageError }}</p>
-          <template v-if="coverage"
-            ><p v-if="coverage.expected">
-              {{ coverage.read }} of {{ coverage.expected }} assigned operators
-              have viewed this message.
-            </p>
-            <p v-else>No assigned team coverage requirement.</p>
-            <p v-if="!coverage.read_by.length">No recorded views yet.</p>
-            <p v-for="reader in coverage.read_by" :key="reader.user">
-              {{ reader.full_name }} ·
-              {{ new Date(reader.read_at).toLocaleString() }}
-            </p>
-            <p v-if="coverage.more">Showing the most recent 100 readers.</p>
-            <p v-if="coverage.unread_by.length">
-              Not yet viewed:
-              {{
-                coverage.unread_by.map((reader) => reader.full_name).join(", ")
-              }}
-            </p></template
-          >
-        </section>
-      </div></template
-    ></Dialog
-  >
+  <MessageMenu v-if="menu" :key="menu.message.name" :trigger="menu.trigger" :area="viewport" :sheet="menu.sheet" :items="actions(menu.message)"
+    :emoji="canReact(menu.message) ? quickReactions : []" :current="ownReaction(menu.message.reactions)"
+    @close="menu = null" @react="react(menu.message, $event)" @more="reactionTarget = menu.message.name" />
+  <MessageInfoDialog v-model="infoOpen" :info="info" :coverage="coverage" :coverage-error="coverageError" :contact-name="contactName"
+    :receipts="!!info && can(info, 'read_receipts')" :group-receipts="!!info && can(info, 'group_receipts')" />
 </template>
 
 <style scoped>
 .conversation-bubble:has(.message-readers){margin-bottom:24px}
+.conversation-bubble{position:relative}
+.message-menu-trigger{position:absolute;top:4px;right:4px;z-index:2;display:grid;place-items:center;width:24px;height:24px;min-height:0;padding:0;border-radius:999px;background:var(--surface-modal,var(--surface-white));box-shadow:0 1px 3px #0002;color:var(--ink-gray-6);opacity:0;transition:opacity .1s}
+.conversation-bubble:is(:hover,:focus-within)>.message-menu-trigger,.message-menu-trigger[aria-expanded="true"]{opacity:1}
+.message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
+@media (hover:none){.message-menu-trigger{display:none}}
+.has-menu-sheet .conversation-bubble:not(.menu-target){opacity:.35}
+.conversation-bubble.menu-target{box-shadow:0 0 0 2px var(--relay-accent,#2f6fdb)}
 </style>

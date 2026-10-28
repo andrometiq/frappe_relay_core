@@ -91,6 +91,8 @@ def after_migrate():
     frappe.db.add_index('Relay Campaign Recipient', ['campaign','status','name'], 'relay_campaign_pending')
     frappe.db.add_index('Relay Ticket Notification', ['status','next_attempt'], 'relay_ticket_pending')
     frappe.db.add_index('Relay Hub Event', ['projection_status','name'], 'relay_event_projection')
+    from relay_core.ticket_settings import seed_defaults
+    seed_defaults()
 
 
 def assignment_allowed(contact, user=None):
@@ -182,7 +184,8 @@ def company_allowed(company, user=None):
         return False
     query = frappe.qb.get_query('Company', filters={'name': company}, fields=['name'],
                                 ignore_permissions=False, user=user, limit=1)
-    return bool(query.run()) and frappe.get_doc('Company', company).has_permission('read', user=user)
+    return bool(query.run()) and frappe.permissions.has_permission('Company', 'read', frappe.get_doc('Company', company),
+                                                                   user=user, print_logs=False)
 
 
 def company_condition(doctype, user=None):

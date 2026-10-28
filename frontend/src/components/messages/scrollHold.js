@@ -16,7 +16,9 @@ export function createScrollHold(viewport) {
     else {
       const row = rows().find(item => item.dataset.message === hold.name)
       if (!row) return false
-      node.scrollTop += offsetOf(node, row) - hold.offset
+      // The browser's own scroll anchoring usually keeps the row in place; writing scrollTop then would stop a fling.
+      const drift = offsetOf(node, row) - hold.offset
+      if (Math.abs(drift) >= 1) node.scrollTop += drift
     }
     expectedTop = node.scrollTop
     return true

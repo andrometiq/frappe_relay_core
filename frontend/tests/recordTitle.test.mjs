@@ -7,10 +7,10 @@ test('captions prefer business and person titles while preserving identifiers', 
   assert.equal(recordTitle(record), 'Maya Rao')
   assert.equal(record.name, 'RELAY-CON-0000000026')
   assert.equal(recordTitle({ name: 'CUST-0026', title: 'Rao Textiles' }), 'Rao Textiles')
-  assert.equal(recordTitle({ name: 'RELAY-TKT-0000000001', subject: 'Missing delivery' }), 'Missing delivery')
+  assert.equal(recordTitle({ name: 'TKT-00001', subject: 'Missing delivery' }), 'Missing delivery')
 })
 test('generated identifiers stay out of fallback captions without stripping meaningful numbers', () => {
-  for (const value of ['RELAY-CH-0000000026', '1792867625249477656', 'a'.repeat(32), 'ac48d129ef', '']) assert.equal(readableName(value, 'Channel'), 'Channel')
+  for (const value of ['RELAY-CH-0000000026', '1792867625249477656', 'a'.repeat(32), 'a'.repeat(40), 'b'.repeat(64), '']) assert.equal(readableName(value, 'Channel'), 'Channel')
   assert.equal(recordTitle({ title: 'Warehouse 26' }), 'Warehouse 26')
   assert.equal(recordTitle({ name: 'order_update' }), 'order_update')
 })
@@ -27,4 +27,15 @@ test('notification captions hide generated timestamp suffixes without changing s
   assert.equal(recordTitle(ticket), 'Notification')
   assert.equal(ticket.subject, 'Notification 1792867625249477656')
   assert.equal(recordTitle({subject:'Notification 1250'}), 'Notification 1250')
+})
+
+test('short ticket numbers are not shown as titles', () => {
+  assert.equal(recordTitle({ name: 'TKT-00001' }, 'Ticket'), 'Ticket')
+  assert.equal(recordTitle({ name: 'TKT-123456' }, 'Ticket'), 'Ticket')
+})
+
+test('real names and phone numbers are not hidden', () => {
+  assert.equal(readableName('BBBBBBBBBBBB', 'Contact'), 'BBBBBBBBBBBB')
+  assert.equal(readableName('ac48d129ef', 'Contact'), 'ac48d129ef')
+  assert.equal(readableName('919876543210', 'Contact'), '+91 98765 43210')
 })

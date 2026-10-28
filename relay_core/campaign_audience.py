@@ -149,14 +149,16 @@ def matching(audience: dict) -> tuple[list[str], dict]:
 
 
 def where(channel: str, audience: dict) -> tuple[str, dict]:
-    """Contacts that match every filter, or no filter at all, plus the ones added and less the ones removed."""
+    """Contacts that match every filter, plus the ones added and less the ones removed. No filter picks every contact,
+    unless contacts were added by hand: then only those."""
     sql, values = base(channel)
     clauses, matched = matching(audience)
-    match = ' AND '.join(clauses) or '1=1'
+    match = ' AND '.join(clauses)
     if audience.get('include'):
-        match = f'({match}) OR `tabRelay Contact`.name IN %(include)s'
+        added = '`tabRelay Contact`.name IN %(include)s'
+        match = f'({match}) OR {added}' if match else added
         matched['include'] = tuple(audience['include'])
-    sql += f' AND ({match})'
+    sql += f" AND ({match or '1=1'})"
     if audience.get('exclude'):
         sql += ' AND `tabRelay Contact`.name NOT IN %(exclude)s'
         matched['exclude'] = tuple(audience['exclude'])

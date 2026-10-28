@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import { Avatar, Button, Dropdown, FeatherIcon } from '@relay/ui'
 import ContactDetails from '../ContactDetails.vue'
 import WorkspaceState from '../WorkspaceState.vue'
+import { phoneCaption } from '../../services/phoneNumber'
 
-const props = defineProps({ title: String, contact: String, primary: Object, channel: String, canOrganize: Boolean })
+const props = defineProps({ title: String, contact: String, primary: Object, channel: String, canOrganize: Boolean, link: Boolean })
 const emit = defineEmits(['close', 'cases', 'notes', 'changed'])
 const phone = ref('')
 const menu = computed(() => [
@@ -16,7 +17,7 @@ const menu = computed(() => [
 <template>
   <section class="contact-info-page" aria-label="Contact info">
     <header class="contact-info-bar">
-      <Button icon="chevron-left" variant="ghost" aria-label="Back to chat" title="Back to chat" @click="emit('close')" />
+      <Button icon="chevron-left" variant="ghost" aria-label="Close" title="Back to chat" @click="emit('close')" />
       <h2>Contact info</h2>
       <Dropdown v-if="menu.length" :options="menu"><Button icon="more-vertical" variant="ghost" aria-label="Contact actions" title="Contact actions" /></Dropdown>
     </header>
@@ -24,13 +25,13 @@ const menu = computed(() => [
       <div class="contact-info-hero">
         <Avatar :label="title" size="xl" aria-hidden="true" />
         <strong>{{ title }}</strong>
-        <small v-if="phone || primary">{{ [phone, primary?.title].filter(Boolean).join(' · ') }}</small>
+        <small v-if="phone || primary">{{ [phoneCaption(phone) || phone, primary?.title].filter(Boolean).join(' · ') }}</small>
         <div class="contact-info-actions">
           <a v-if="phone" class="contact-info-action" :href="'tel:' + phone.replace(/[^0-9+]/g, '')"><FeatherIcon name="phone" :size="18" />Call</a>
           <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('cases')"><FeatherIcon name="bookmark" :size="18" />Ticket</button>
         </div>
       </div>
-      <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" @loaded="phone = $event.phone" @changed="emit('changed')" />
+      <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" :link="link" @loaded="phone = $event.phone" @changed="emit('changed')" />
       <template v-else>
         <h4 class="info-group-title">Details</h4>
         <dl class="info-card">

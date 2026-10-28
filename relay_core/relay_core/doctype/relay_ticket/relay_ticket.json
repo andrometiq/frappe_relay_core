@@ -7,7 +7,9 @@
     "subject",
     "brief",
     "category",
+    "ticket_type",
     "status",
+    "ticket_status",
     "assigned_to",
     "priority",
     "watchers",
@@ -45,18 +47,29 @@
     {
       "fieldname": "category",
       "label": "Category",
-      "fieldtype": "Select",
-      "options": "Query\nPayment evidence\nSupport\nOther",
-      "default": "Query",
+      "fieldtype": "Link",
+      "options": "Relay Ticket Category",
       "reqd": 1
     },
     {
+      "fieldname": "ticket_type",
+      "label": "Type",
+      "fieldtype": "Link",
+      "options": "Relay Ticket Type"
+    },
+    {
       "fieldname": "status",
-      "label": "Status",
+      "label": "State",
       "fieldtype": "Select",
       "options": "Open\nIn progress\nResolved\nClosed",
       "default": "Open",
       "reqd": 1
+    },
+    {
+      "fieldname": "ticket_status",
+      "label": "Ticket status",
+      "fieldtype": "Link",
+      "options": "Relay Ticket Status"
     },
     {
       "fieldname": "messages",
@@ -195,7 +208,7 @@
       "read_only": 1
     }
   ],
-  "autoname": "RELAY-TKT-.##########",
+  "autoname": "TKT-.#####",
   "naming_rule": "Expression (old style)",
   "track_changes": 1,
   "permissions": [
@@ -233,5 +246,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-27 12:00:00.000000"
+  "modified": "2026-10-28 15:00:00.000000"
 }

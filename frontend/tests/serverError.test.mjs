@@ -15,3 +15,8 @@ test('a web page stored as a delivery error shows as a short reason', async () =
   assert.equal(deliveryError('<html><body>oops</body></html>'), 'Send failed: the server returned a web page instead of a WhatsApp reply.')
   assert.equal(deliveryError('Recipient is not on WhatsApp'), 'Recipient is not on WhatsApp')
 })
+
+test('escaped angle brackets are shown as characters', async () => {
+  const { serverError } = await import('../src/services/serverError.js')
+  assert.equal(serverError({ message: 'Name cannot contain &lt; or &gt;' }, 'x'), 'Name cannot contain < or >')
+})

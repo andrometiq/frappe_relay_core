@@ -1,7 +1,8 @@
 <script setup>
 import { useLoadMore } from '../../composables/useLoadMore'
 import { ref, watch, onBeforeUnmount } from 'vue'
-import { Button, FormControl, ErrorMessage } from '@relay/ui'
+import { FormControl, ErrorMessage } from '@relay/ui'
+import ChatPanel from './ChatPanel.vue'
 import { coreApi } from '../../services/coreApi'
 const props=defineProps({contact:String})
 const emit=defineEmits(['open','close'])
@@ -19,7 +20,7 @@ async function search(older=false){
 }
 const moreSentinel = useLoadMore({ loading: busy, hasMore: more, error, load: () => search(true) })
 </script>
-<template><section class="message-search-panel" aria-label="Search messages"><form @submit.prevent="search()"><FormControl v-model="query" type="search" aria-label="Search message text" placeholder="Search this conversation"/><Button icon="x" label="Close message search" @click="emit('close')"/></form><ErrorMessage :message="error"/><div class="message-search-results"><button v-for="message in rows" :key="message.name" type="button" @click="emit('open',message.name)"><span>{{message.content}}</span><small>{{message.direction==='Outgoing'?'You':'Contact'}} · {{message.creation}}</small></button><p v-if="searched&&!busy&&!rows.length">No matching messages.</p><div v-if="more" ref="moreSentinel" class="h-px" aria-hidden="true" /></div></section></template>
+<template><ChatPanel class="message-search-panel" title="Search conversation" @close="emit('close')"><form @submit.prevent="search()"><FormControl v-model="query" maxlength="200" type="search" aria-label="Search message text" placeholder="Search this conversation"/></form><ErrorMessage :message="error"/><div class="message-search-results"><button v-for="message in rows" :key="message.name" type="button" @click="emit('open',message.name)"><span>{{message.content}}</span><small>{{message.direction==='Outgoing'?'You':'Contact'}} · {{message.creation}}</small></button><p v-if="searched&&!busy&&!rows.length">No matching messages.</p><div v-if="more" ref="moreSentinel" class="h-px" aria-hidden="true" /></div></ChatPanel></template>
 <style scoped>
-.message-search-panel{padding:12px 20px;border-bottom:1px solid var(--outline-gray-2);background:var(--surface-white)}.message-search-panel form{display:flex;gap:8px}.message-search-panel form>div{flex:1;min-width:0}.message-search-results{max-height:220px;overflow:auto}.message-search-results button{display:block;text-align:left;padding:10px 8px;width:100%;border-bottom:1px solid var(--outline-gray-2)}.message-search-results button:hover{background:var(--surface-gray-2)}.message-search-results span{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.message-search-results small{color:var(--ink-gray-5);font-size:12px}.message-search-results p{font-size:13px;padding:12px}
+.message-search-panel form{padding:12px 16px}.message-search-results{padding:0 8px 12px}.message-search-results button{display:block;text-align:left;padding:10px 8px;width:100%;border-bottom:1px solid var(--outline-gray-2)}.message-search-results button:hover{background:var(--surface-gray-2)}.message-search-results span{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.message-search-results small{color:var(--ink-gray-5);font-size:12px}.message-search-results p{font-size:13px;padding:12px}
 </style>

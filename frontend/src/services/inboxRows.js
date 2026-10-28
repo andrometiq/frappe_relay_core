@@ -16,3 +16,15 @@ export function mergeChangedRows(rows, changed) {
 export function onlyChangedRows(kinds) {
   return kinds.size > 0 && [...kinds].every(kind => CHANGED_ROW_KINDS.has(kind))
 }
+
+// Only a manager may link an unlinked chat; a business row is already linked.
+export function canLinkRow(row, manage) {
+  return row.kind !== 'business' && Boolean(row.unlinked) && Boolean(manage)
+}
+
+// Row menu actions. A business row stands for its newest chat, so it offers only the read state.
+export function rowActionKeys(row, { folders = false, manage = false } = {}) {
+  const chat = row.kind !== 'business'
+  return [row.unread ? 'read' : 'unread', ...(chat ? ['star'] : []), ...(chat && folders ? ['move'] : []),
+    ...(chat && folders && row.folder ? ['unfile'] : []), ...(canLinkRow(row, manage) ? ['link'] : [])]
+}

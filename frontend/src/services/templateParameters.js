@@ -1,4 +1,6 @@
 // Provider parameter logic adapted from the legacy app; the Relay interface is independent.
+import { headerMediaParameter } from "./templateMedia.js";
+
 function parseComponents(template) {
   const value = template?.components;
   if (Array.isArray(value)) return value;
@@ -114,7 +116,8 @@ export function buildTemplateComponents(descriptors, values) {
   const components = [];
   const grouped = new Map();
   for (const descriptor of descriptors) {
-    const raw = String(values?.[descriptor.key] || "").trim();
+    const media = descriptor.kind === "media" ? headerMediaParameter(descriptor.parameterType, values?.[descriptor.key]) : null;
+    const raw = descriptor.kind === "media" ? media : String(values?.[descriptor.key] || "").trim();
     if (!raw) throw new Error(`${descriptor.label} is required.`);
     if (descriptor.componentType === "BUTTON") {
       components.push({
@@ -128,15 +131,8 @@ export function buildTemplateComponents(descriptors, values) {
     const key = descriptor.componentType.toLowerCase();
     if (!grouped.has(key)) grouped.set(key, { type: key, parameters: [] });
     const target = grouped.get(key);
-    if (descriptor.kind === "media") {
-      const media =
-        raw.startsWith("http://") || raw.startsWith("https://")
-          ? { link: raw }
-          : { id: raw };
-      target.parameters.push({
-        type: descriptor.parameterType,
-        [descriptor.parameterType]: media,
-      });
+    if (media) {
+      target.parameters.push(media);
     } else {
       target.parameters.push({
         type: "text",
@@ -150,29 +146,48 @@ export function buildTemplateComponents(descriptors, values) {
   return [...grouped.values(), ...components];
 }
 
-export function templatePreview(template, descriptors, values) {
-  let text = String(
-    template?.body_text ||
-      parseComponents(template).find(
-        (row) => String(row.type).toUpperCase() === "BODY",
-      )?.text ||
-      template?.name ||
-      template?.template_name ||
-      "",
-  );
-  for (const descriptor of descriptors.filter(
-    (row) => row.componentType === "BODY",
-  )) {
-    const value = String(
-      values?.[descriptor.key] ||
-        descriptor.example ||
-        `{{${descriptor.variable}}}`,
-    );
+function fillPlaceholders(text, descriptors, values, componentType) {
+  let result = String(text || "");
+  for (const descriptor of descriptors.filter((row) => row.componentType === componentType && row.kind === "text")) {
     const placeholder = descriptor.parameterName || descriptor.variable;
-    text = text.replace(
-      new RegExp(`\\{\\{\\s*${placeholder}\\s*\\}\\}`, "g"),
-      value,
-    );
+    const value = String(values?.[descriptor.key] || descriptor.example || `{{${placeholder}}}`);
+    result = result.replace(new RegExp(`\\{\\{\\s*${placeholder}\\s*\\}\\}`, "g"), () => value);
   }
-  return text;
+  return result;
+}
+
+const BUTTON_ICONS = { URL: "external-link", PHONE_NUMBER: "phone", COPY_CODE: "copy", OTP: "copy" };
+
+// One WhatsApp-style rendering for the send dialog and the template editor; empty values show the example or the placeholder.
+export function templateRendering(template, descriptors, values) {
+  const result = { header: "", media: "", mediaUrl: "", body: "", footer: "", buttons: [] };
+  for (const component of parseComponents(template)) {
+    const type = String(component?.type || "").toUpperCase();
+    const format = String(component?.format || "TEXT").toUpperCase();
+    if (type === "HEADER" && format === "TEXT") result.header = fillPlaceholders(component.text, descriptors, values, "HEADER");
+    else if (type === "HEADER") {
+      const chosen = values?.[descriptors.find((row) => row.kind === "media")?.key];
+      result.media = format.toLowerCase();
+      result.mediaUrl = String(chosen?.link || component?.example?.header_handle?.[0] || "");
+    }
+    else if (type === "BODY") result.body = fillPlaceholders(component.text, descriptors, values, "BODY");
+    else if (type === "FOOTER") result.footer = String(component.text || "").trim();
+    else if (type === "BUTTONS") {
+      result.buttons = (component.buttons || []).map((button) => {
+        const buttonType = String(button?.type || "").toUpperCase();
+        return {
+          key: button?._client_key,
+          text: String(button?.text || "").trim() || (buttonType === "OTP" ? "Copy code" : buttonType),
+          icon: BUTTON_ICONS[buttonType] || "corner-up-left",
+        };
+      });
+    }
+  }
+  if (!result.body && (template?.body_text || template?.name || template?.template_name))
+    result.body = String(template.body_text || template.name || template.template_name);
+  return result;
+}
+
+export function templatePreview(template, descriptors, values) {
+  return templateRendering(template, descriptors, values).body;
 }

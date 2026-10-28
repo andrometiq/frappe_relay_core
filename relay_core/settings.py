@@ -2,7 +2,7 @@
 import re
 import frappe
 from relay_core import features
-from relay_core.permissions import require_access, can_configure
+from relay_core.permissions import require_access, can_configure, can_manage
 from relay_core.hub import HubClient
 
 # Channels the Relay UI offers. Telegram and Email backends stay intact for a later switch-on.
@@ -22,18 +22,20 @@ def value(key):
 
 @frappe.whitelist(methods=['GET'])
 def connection():
+    """Feature switches for every Relay user; the Hub URL and account only for managers."""
     require_access()
-    return {'url':value('relay_hub_url') or '', 'account':value('relay_hub_account') or '',
+    configure=can_configure();manager=configure or can_manage()
+    return {'url':(value('relay_hub_url') or '') if manager else '', 'account':(value('relay_hub_account') or '') if manager else '',
             'token_configured':bool(value('relay_hub_token')),
             'callback_configured':bool(value('relay_callback_secret')),
-            'can_configure':can_configure(),
+            'can_configure':configure,
             'ai_enabled':features.is_enabled('ai'), 'folders_enabled':features.is_enabled('folders'),
-            'teams_enabled':features.is_enabled('teams'), 'can_switch_ai':'System Manager' in frappe.get_roles()}
+            'teams_enabled':features.is_enabled('teams'), 'flows_enabled':features.is_enabled('flows'), 'can_switch_ai':'System Manager' in frappe.get_roles()}
 
 
 @frappe.whitelist(methods=['POST'])
 def save_feature(feature, enabled):
-    """Turn one Relay Settings switch on or off: ai, folders or teams."""
+    """Turn one Relay Settings switch on or off: ai, folders, teams or flows."""
     require_access()
     if 'System Manager' not in frappe.get_roles():
         frappe.throw('Only a System Manager can turn Relay features on or off', frappe.PermissionError)

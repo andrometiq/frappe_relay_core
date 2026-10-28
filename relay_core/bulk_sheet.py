@@ -87,9 +87,9 @@ def build_components(fields, values):
 def read_rows(path):
     """Yield (sheet row number, header -> text) without loading the workbook."""
     lower = path.lower()
-    if lower.endswith('.csv'):
+    if lower.endswith(('.csv', '.tsv')):
         with open(path, newline='', encoding='utf-8-sig') as handle:
-            yield from labelled(csv.reader(handle))
+            yield from labelled(csv.reader(handle, delimiter='\t' if lower.endswith('.tsv') else ','))
     elif lower.endswith('.xlsx'):
         from openpyxl import load_workbook
         book = load_workbook(path, read_only=True, data_only=True)
@@ -98,7 +98,7 @@ def read_rows(path):
         finally:
             book.close()
     else:
-        raise ValueError('Upload a .xlsx or .csv file')
+        raise ValueError('Upload a .xlsx, .csv or .tsv file')
 
 
 def labelled(source):

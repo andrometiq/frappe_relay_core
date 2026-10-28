@@ -52,35 +52,29 @@ function fixture(t, override = () => {}) {
   return {state, calls, records, row, realtime:(kind) => realtime({kinds:new Set([kind])})}
 }
 
-for (const status of ['Submitted', 'Queued']) test(`${status} preserves edits made during send and clears unchanged fields`, async t => {
+for (const status of ['Submitted', 'Queued']) test(`${status}: the composer clears at once and keeps a draft typed during the send`, async t => {
   const response = deferred()
-  const {state, row} = fixture(t, method => method === 'messaging.send' ? response.promise : undefined)
+  const {state} = fixture(t, method => method === 'messaging.send' ? response.promise : undefined)
   await state.open('A')
   state.body.value = 'First draft'; state.attachment.value = {name:'first-file'}; state.quoting.value = true
   const send = state.send()
-  assert.equal(state.busy.value, true)
-  state.body.value = 'Follow-up draft'; state.attachment.value = {name:'second-file'}; state.source.value = row('other-quote')
-  response.resolve({status, action:'action'})
-  await send
-  assert.equal(state.body.value, 'Follow-up draft')
-  assert.equal(state.attachment.value.name, 'second-file')
-  assert.equal(state.quoting.value, true)
-  await state.send()
   assert.equal(state.body.value, '')
   assert.equal(state.attachment.value, null)
   assert.equal(state.quoting.value, false)
+  assert.equal(state.busy.value, false)
+  state.body.value = 'Follow-up draft'
+  response.resolve({status, action:'action'})
+  await send
+  assert.equal(state.body.value, 'Follow-up draft')
 })
 
-test('reaction and a changed business scope preserve the composer', async t => {
+test('a reaction keeps the composer', async t => {
   const response = deferred()
   const {state} = fixture(t, method => method === 'messaging.send' ? response.promise : undefined)
   await state.open('A'); state.body.value = 'Draft'; state.quoting.value = true
   const send = state.send(state.source.value, 'reaction', {emoji:'👍'})
   response.resolve({status:'Submitted', action:'action'}); await send
   assert.equal(state.body.value, 'Draft'); assert.equal(state.quoting.value, true)
-  const again = state.send(); state.businessType.value = 'Supplier'; state.businessName.value = 'B'
-  await again
-  assert.equal(state.body.value, 'Draft')
 })
 
 test('reopened contacts and channels read current messages and statuses without polling', async t => {

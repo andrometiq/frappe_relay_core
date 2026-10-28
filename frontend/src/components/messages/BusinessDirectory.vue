@@ -120,7 +120,7 @@ const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, 
   </div>
   <ErrorMessage class="px-4" :message="error" />
   <div class="business-directory-controls">
-    <div class="business-search-row"><TextInput type="search" v-model="query" placeholder="Search or start a business chat"
+    <div class="business-search-row"><TextInput type="search" maxlength="80" v-model="query" placeholder="Search or start a business chat"
       aria-label="Search businesses" :disabled="!doctype"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
     <div v-if="filtersOpen" class="business-directory-filters">
       <ChoiceField v-if="types.length > 1" :field="{ label: 'Business type', options: types, readOnly: busy || loading }" v-model="doctype" @update:model-value="loadInitialGroup" />

@@ -1,4 +1,5 @@
 // Functional template transformations adapted from frappe_whatsapp_core; Relay has its own editor UI.
+import { templateParameterDescriptors, templateRendering } from "./templateParameters.js";
 const DEFAULT_COMPONENTS = [{ type: "BODY", text: "" }];
 const STANDARD_COMPONENTS = new Set(["HEADER", "BODY", "FOOTER", "BUTTONS"]);
 
@@ -407,6 +408,8 @@ export function templateIssues(form, { submit = true } = {}) {
   const footer = String(form.footer_text || "").trim();
   if (!String(form.template_name || "").trim() || !String(form.language_code || "").trim())
     issues.push("Template name and language are required.");
+  else if (String(form.template_name).trim().length > 512)
+    issues.push("Template name must be at most 512 characters.");
   else if (!/^[a-z0-9_]{1,512}$/.test(String(form.template_name).trim()))
     issues.push("Template name must use lowercase letters, numbers and underscores.");
   if (!["MARKETING", "UTILITY", "AUTHENTICATION"].includes(category)) issues.push("Choose a template category.");
@@ -440,24 +443,26 @@ export function templateIssues(form, { submit = true } = {}) {
   return [...issues, ...(submit ? buttonIssues(form) : [])];
 }
 
-function sampled(text, values = {}) {
-  return String(text || "").replace(PLACEHOLDER, (match, name) => String(values[name] || "").trim() || match);
-}
-
 // WhatsApp-style preview content with the current examples filled in.
 export function templatePreview(form) {
   const type = String(form.header_type || "NONE").toUpperCase();
-  return {
-    header: type === "TEXT" ? sampled(form.header_text, form.sample_values?.header) : "",
-    media: ["IMAGE", "VIDEO", "DOCUMENT", "LOCATION"].includes(type) ? type.toLowerCase() : "",
-    body: sampled(form.body_text, form.sample_values?.body),
-    footer: String(form.footer_text || "").trim(),
-    buttons: (form.buttons || []).map((button) => ({
-      key: button._client_key,
-      text: String(button.text || "").trim() || (button.type === "OTP" ? "Copy code" : button.type),
-      icon: { URL: "external-link", PHONE_NUMBER: "phone", COPY_CODE: "copy", OTP: "copy" }[button.type] || "corner-up-left",
-    })),
+  const template = {
+    parameter_format: form.parameter_format,
+    components: [
+      ...(type === "NONE" ? [] : [{ type: "HEADER", format: type, text: form.header_text,
+        example: form.header_media_example ? { header_handle: [form.header_media_example] } : undefined }]),
+      { type: "BODY", text: form.body_text },
+      { type: "FOOTER", text: form.footer_text },
+      { type: "BUTTONS", buttons: form.buttons || [] },
+    ],
   };
+  const descriptors = templateParameterDescriptors(template);
+  const samples = {};
+  for (const field of descriptors.filter((row) => row.kind === "text")) {
+    const name = String(field.parameterName ?? field.variable);
+    samples[field.key] = form.sample_values?.[field.componentType.toLowerCase()]?.[name];
+  }
+  return templateRendering(template, descriptors, samples);
 }
 
 export function templateRequest(

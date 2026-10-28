@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyProgress, approvedTemplates, campaignActions, campaignMessage, mergeCampaign, messageLabel, messageTypes, missingMapping, percent, placeholders, windowNotice } from "../src/services/campaignProgress.js";
+import { applyProgress, approvedTemplates, campaignActions, shownCounters, campaignMessage, mergeCampaign, messageLabel, messageTypes, missingMapping, percent, placeholders, windowNotice } from "../src/services/campaignProgress.js";
 
 test("progress events merge counters only for the open campaign", () => {
   const campaign = { name: "Winter launch Oct 2026", status: "Running", counts: { total: 5000, sent: 10 } };
@@ -58,6 +58,13 @@ test("text and media campaigns follow the registry kinds and fill sheet columns"
 
 test("the reply window preflight counts numbers and warns about the rest", () => {
   assert.equal(windowNotice(null), "");
-  assert.equal(windowNotice({ open: 3, closed: 0 }), "3 of 3 numbers messaged you in the last 24 hours and can get this message.");
-  assert.match(windowNotice({ open: 1, closed: 1200 }), /^1 of 1,201 numbers.*1,200 rows will be marked Failed: Outside the 24-hour reply window\.$/);
+  assert.equal(windowNotice({ open: 3, closed: 0 }), "3 of 3 people wrote to you in the last 24 hours and will get this message.");
+  assert.match(windowNotice({ open: 0, closed: 4 }), /^None of these 4 people .* Use an approved template instead\.$/);
+  assert.match(windowNotice({ open: 1, closed: 1200 }), /^1 of 1,201 people.*The other 1,200 will be skipped\. Use an approved template to reach everyone\.$/);
+});
+
+test("a draft shows only the people count and any skipped rows; a started campaign shows every counter", () => {
+  assert.deepEqual(shownCounters("Draft", { total: 4, skipped: 0 }).map(([key]) => key), ["total"]);
+  assert.deepEqual(shownCounters("Draft", { total: 4, skipped: 6 }).map(([key]) => key), ["total", "skipped"]);
+  assert.equal(shownCounters("Running", { total: 4 }).length, 8);
 });

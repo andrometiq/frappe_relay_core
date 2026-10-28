@@ -47,6 +47,8 @@ class BoundaryTests(unittest.TestCase):
             cache=Mock(lock=lambda *a, **kw: nullcontext()), db=Mock(), get_all=Mock(return_value=[]),
             get_list=Mock(return_value=[]), get_doc=Mock(), utils=Mock(get_datetime=lambda value: value),
             parse_json=json.loads)
+        self.frappe.__path__ = []  # A package, so business_access can import frappe.permissions.
+        self.module('frappe.permissions', has_permission=Mock(return_value=True))
         self.frappe.db.get_value.return_value = None
         self.frappe.db.exists.return_value = False
         self.identity = self.load('relay_core.identity')
@@ -165,6 +167,7 @@ class ProjectionTests(BoundaryTests):
         self.tickets = self.module('relay_core.tickets', ensure_episode=Mock(return_value=None),
             source_episode=lambda *a: ('provider-key', 'action-key'), triage_owner=Mock(return_value=None))
         self.routing = self.module('relay_core.business_routing', resolve=Mock(return_value=(None, 'triage_no_business')))
+        self.module('relay_core.ai_features', is_enabled=Mock(return_value=True))
         self.projection = self.load('relay_core.automation.projection')
         self.projection.apply_updates = Mock(return_value='Ignored')
         self.lifecycle.sibling_contact = Mock(return_value=None)

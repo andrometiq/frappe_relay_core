@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, shallowRef, unref, watch } from 'vue'
 import { coreApi } from '../services/coreApi'
-import { sharedQueueCounts } from '../services/queueCounts'
+import { countLabel, sharedQueueCounts } from '../services/queueCounts'
 import { watchRealtime } from './useRealtimeRefresh'
 
 // One live count per medium and filter set for the whole app; refetched on the inbox realtime events, never polled.
@@ -18,4 +18,12 @@ export function useQueueCounts(medium, filters = {}) {
   }, { immediate: true })
   onScopeDispose(() => lease.value?.release())
   return { counts: computed(() => lease.value.counts.value) }
+}
+
+// The inbox list has one row per business record or uncovered chat; the Chats badge counts the same rows.
+export const INBOX_ROWS = Object.freeze({ rows: 'business' })
+
+export function useUnreadChats(medium) {
+  const { counts } = useQueueCounts(medium, INBOX_ROWS)
+  return computed(() => countLabel(counts.value.unread))
 }

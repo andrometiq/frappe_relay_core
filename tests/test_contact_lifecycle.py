@@ -150,7 +150,8 @@ class LinkedBusinessAccessTests(unittest.TestCase):
     def test_removed_contact_link_ends_message_access(self):
         record = Mock(); record.has_permission.return_value = True
         fake = SimpleNamespace(session=SimpleNamespace(user='reader'), get_doc=Mock(return_value=record),
-                               DoesNotExistError=LookupError)
+                               DoesNotExistError=LookupError, permissions=SimpleNamespace(has_permission=Mock(
+                                   side_effect=lambda doctype, ptype, doc, user=None, print_logs=True: doc.has_permission(ptype, user=user))))
         message = _dict(relay_contact='RELAY-CON-A', business_doctype='Customer', business_name='Sim Customer')
         with patch.object(business_access, 'frappe', fake), \
                 patch.object(business_access, 'candidates', return_value=[('Customer', 'Sim Customer')]) as links:

@@ -12,3 +12,10 @@ test('language names retain provider codes and preserve existing uncommon langua
  const form=templateForm({account_name:'test',template_name:'tamil_greeting',language_code:'ta',category:'UTILITY',components:[{type:'BODY',text:'வணக்கம்'}]})
  assert.equal(templateRequest(form,{submit:true}).template.language_code,'ta')
 })
+
+test('common languages come first, then the rest by name',()=>{
+ const values=templateLanguages().map(r=>r.value)
+ assert.deepEqual(values.slice(0,5),['en','en_US','en_GB','hi','ta'])
+ const rest=templateLanguages().slice(12).map(r=>r.label)
+ assert.deepEqual(rest,[...rest].sort((a,b)=>a.localeCompare(b,'en')))
+})

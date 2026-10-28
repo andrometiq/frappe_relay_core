@@ -17,17 +17,16 @@ test('the inbox shows folder controls only while folders are on', async () => {
   const inbox = await read('components/messages/InboxDirectory.vue')
   assert.match(inbox, /<InboxFolders v-if="capabilities\.folders/)
   assert.match(inbox, /v-if="capabilities\.folders && row\.folder/)
-  assert.match(inbox, /<template v-if="capabilities\.folders">\s*<Dropdown ref="rowMenu"[^]*<MoveToFolderDialog/)
-  assert.match(inbox, /if \(!capabilities\.value\.folders\) return/)
-  const tools = await read('components/messages/ConversationTools.vue')
-  assert.match(tools, /<MoveToFolderDialog v-if="capabilities\.folders"/)
+  const actions = await read('components/messages/InboxRowActions.vue')
+  assert.match(actions, /<MoveToFolderDialog v-if="capabilities\.folders"/)
+  assert.match(actions, /rowActionKeys\(item, \{ folders: capabilities\.value\.folders/)
 })
 
-test('the inbox tabs are All, Unread and Read, with no chat assignment anywhere in the list', async () => {
+test('the inbox tabs come from TABS, with no chat assignment anywhere in the list', async () => {
   const inbox = await read('components/messages/InboxDirectory.vue')
   assert.match(inbox, /v-for="\[value, label, hint\] in TABS"/)
   assert.match(inbox, /:title="hint"/)
-  assert.doesNotMatch(inbox, /assign|Mine|Unassigned/i)
+  assert.doesNotMatch(inbox, /assignment|assigned|Mine|Unassigned/i)
 })
 
 test('the assignment line says who has the chat and who chose them', () => {

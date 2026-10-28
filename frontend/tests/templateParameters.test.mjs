@@ -5,6 +5,7 @@ import {
 	buildTemplateComponents,
 	templateParameterDescriptors,
 	templatePreview,
+	templateRendering,
 } from '../src/services/templateParameters.js'
 
 test('named body placeholders emit exact parameter_name fields', () => {
@@ -65,11 +66,21 @@ test('positional placeholders remain provider-compatible without parameter_name'
 test('header media and dynamic buttons retain their provider component shapes', () => {
  const template={components:[{type:'HEADER',format:'IMAGE'},{type:'BODY',text:'Hello {{1}}'},{type:'BUTTONS',buttons:[{type:'URL',text:'Track',url:'https://example.invalid/{{1}}'}]}]}
  const fields=templateParameterDescriptors(template)
- const values=Object.fromEntries(fields.map(field=>[field.key,field.kind==='media'?'123456':field.componentType==='BUTTON'?'order-7':'Sam']))
+ const values=Object.fromEntries(fields.map(field=>[field.key,field.kind==='media'?{id:'123456',filename:'offer.png',size:9}:field.componentType==='BUTTON'?'order-7':'Sam']))
  assert.deepEqual(buildTemplateComponents(fields,values),[
   {type:'header',parameters:[{type:'image',image:{id:'123456'}}]},
   {type:'body',parameters:[{type:'text',text:'Sam'}]},
   {type:'button',sub_type:'url',index:'0',parameters:[{type:'text',text:'order-7'}]},
  ])
  assert.throws(()=>buildTemplateComponents(fields,{}),/required/)
+})
+
+test('rendering shows header, body, footer and buttons for Meta-synced templates without examples', () => {
+ const template={parameter_format:'NAMED',components:[{type:'HEADER',format:'TEXT',text:'Hi {{name}}'},{type:'BODY',text:'Order {{order}}'},{type:'FOOTER',text:'Thanks'},{type:'BUTTONS',buttons:[{type:'QUICK_REPLY',text:'Yes'}]}]}
+ const fields=templateParameterDescriptors(template)
+ assert.deepEqual(templateRendering(template,fields,{}),{header:'Hi {{name}}',media:'',mediaUrl:'',body:'Order {{order}}',footer:'Thanks',buttons:[{key:undefined,text:'Yes',icon:'corner-up-left'}]})
+ assert.equal(templatePreview(template,fields,{'BODY:1:order':'7'}),'Order 7')
+ const media=templateRendering({components:[{type:'HEADER',format:'IMAGE'},{type:'BODY',text:'Plain'}]},[],{})
+ assert.equal(media.media,'image'); assert.equal(media.body,'Plain')
+ assert.equal(templateRendering({name:'welcome',components:'[]'},[],{}).body,'welcome')
 })

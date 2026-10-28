@@ -6,7 +6,7 @@ export default async function automationWorkspacesAcceptance(browser, origin) {
   const errors = [], writes = [], reads = []
   let status = 'Open', assigned = 'owner@example.invalid'
   let businessName = 'Local supplier'
-  const ticket = () => ({ name: 'RELAY-TKT-0000000001', subject: 'Supplier ledger doubt', brief: 'Review October entries.',
+  const ticket = () => ({ name: 'TKT-00001', subject: 'Supplier ledger doubt', brief: 'Review October entries.',
     creation: '2026-10-01 12:00:00', business_doctype: 'Supplier', business_name: businessName, category: 'Support',
     status, assigned_to: assigned, can_assign: true, messages: [{ message: 'RELAY-MSG-0000000001', channel: 'WhatsApp' }] })
   const skill = { name: 'RELAY-AIS-0000000001', title: 'Supplier ledger', enabled: 0, business_doctype: 'Supplier',

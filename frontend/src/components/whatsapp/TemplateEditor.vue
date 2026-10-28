@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { Button, ErrorMessage, FormControl } from "@relay/ui";
+import { Button, Dialog, ErrorMessage, FormControl, toast } from "@relay/ui";
 import FrappeFormSection from "../frappe/FrappeFormSection.vue";
 import FrappeFormView from "../frappe/FrappeFormView.vue";
 import RelaySelect from "../RelaySelect.vue";
@@ -33,7 +33,11 @@ const attempted = ref(false);
 const issues = computed(() => templateIssues(form.value));
 const preview = computed(() => templatePreview(form.value));
 const headerTypes = computed(() => ["NONE", "TEXT", "IMAGE", "VIDEO", "DOCUMENT", ...(form.value.header_type === "LOCATION" ? ["LOCATION"] : [])]
-  .map((value) => ({ value, label: sentenceCase(value) })));
+  .map((value) => ({ value, label: value === "NONE" ? "No header" : sentenceCase(value) })));
+// Leaving with unsaved changes asks first.
+const initial = JSON.stringify(form.value);
+const discarding = ref(false);
+function leave() { if (JSON.stringify(form.value) === initial) emit("cancel"); else discarding.value = true; }
 const variableHint = computed(() => `Add variables like ${form.value.parameter_format === "NAMED" ? "{{customer_name}}" : "{{1}}"} with text before and after them.`);
 function addButton() {
   addTemplateButton(form.value);
@@ -49,6 +53,7 @@ const busy = ref(false);
 const error = ref("");
 const sampleName = ref("");
 const samples = computed(() => templateSampleFields(form.value));
+const headerFileHint = { IMAGE: "JPEG or PNG", VIDEO: "MP4", DOCUMENT: "PDF" };
 const sampleAccept = computed(
   () =>
     ({
@@ -78,7 +83,7 @@ async function uploadSample(event) {
       file.size > 4 * 1024 * 1024 ||
       !sampleAccept.value.split(",").includes(file.type)
     )
-      throw Error("Choose a matching JPEG, PNG, MP4 or PDF file up to 4 MiB.");
+      throw Error(`Choose a ${headerFileHint[form.header_type]} file up to 4 MiB.`);
     const content = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -135,6 +140,7 @@ async function save() {
       },
       true,
     );
+    toast(props.template?.id ? "Changes sent to Meta for approval" : "Template sent to Meta for approval");
     emit("saved");
   } catch (exception) {
     error.value = exception.message;
@@ -150,12 +156,19 @@ async function save() {
       :title="template?.id ? template.name : 'New message template'"
       :breadcrumbs="['Templates', template?.id ? template.name : 'New']"
       :status="template?.status"
-      @back="emit('cancel')"
+      @back="leave"
     >
       <template #actions>
-        <Button label="Cancel" :disabled="busy" @click="emit('cancel')" />
-        <Button :label="template?.id ? 'Submit changes' : 'Submit for review'" type="submit" variant="solid" :loading="busy" :disabled="!enabled || (attempted && issues.length > 0)" />
+        <Button variant="outline" label="Cancel" :disabled="busy" @click="leave" />
+        <Button :label="template?.id ? 'Send changes to Meta' : 'Send to Meta for approval'" type="submit" variant="solid" :loading="busy" :disabled="!enabled || (attempted && issues.length > 0)" />
       </template>
+      <Dialog v-model="discarding" :options="{ title: 'Discard changes?', size: 'sm' }">
+        <p>Your changes to this template are not saved.</p>
+        <template #actions>
+          <Button variant="outline" label="Keep editing" autofocus @click="discarding = false" />
+          <Button variant="solid" theme="red" label="Discard" @click="discarding = false; emit('cancel')" />
+        </template>
+      </Dialog>
 
       <ErrorMessage :message="error" />
       <section v-if="attempted && issues.length" class="template-issues" role="alert" aria-label="Fix before submitting">
@@ -164,28 +177,34 @@ async function save() {
       </section>
       <FrappeFormSection>
         <div class="frappe-field-grid">
-          <FormControl label="Template name" v-model="form.template_name" :disabled="busy || !!template?.id" required />
+          <div>
+            <FormControl label="Template name" :model-value="form.template_name" placeholder="order_update" :disabled="busy || !!template?.id" required @update:model-value="value => form.template_name = String(value).toLowerCase().replace(/\s+/g, '_')" />
+            <small class="template-field-hint">Use lowercase letters, numbers and underscores. Spaces become underscores.</small>
+          </div>
           <TemplateLanguageField v-model="form.language_code" :disabled="busy || !!template?.id" />
           <RelaySelect label="Category" v-model="form.category" :options="[{ value: 'UTILITY', label: 'Utility' }, { value: 'MARKETING', label: 'Marketing' }, { value: 'AUTHENTICATION', label: 'Authentication' }]" :disabled="busy || !!template?.id" />
-          <RelaySelect label="Parameters" v-model="form.parameter_format" :options="[{ value: 'NAMED', label: 'Named: {{customer_name}}' }, { value: 'POSITIONAL', label: 'Numbered: {{1}}' }]" :disabled="busy || !!template?.id" />
+          <div>
+            <RelaySelect label="How to write variables" v-model="form.parameter_format" :options="[{ value: 'NAMED', label: 'Names, like {{customer_name}}' }, { value: 'POSITIONAL', label: 'Numbers, like {{1}}' }]" :disabled="busy || !!template?.id" />
+            <small class="template-field-hint" v-text="'Variables are filled in for each person when you send, for example: Hi {{customer_name}}.'" />
+          </div>
         </div>
       </FrappeFormSection>
 
-      <FrappeFormSection title="Message content" description="Compose the message Meta will review.">
+      <FrappeFormSection title="Message content" description="Meta reviews this message before you can send it. This usually takes under a day.">
         <div class="frappe-field-grid">
           <RelaySelect label="Header" v-model="form.header_type" :options="headerTypes" :disabled="busy" />
           <FormControl v-if="form.header_type === 'TEXT'" label="Header text" v-model="form.header_text" maxlength="60" :disabled="busy" />
           <div v-if="['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.header_type)" class="frappe-file-field">
             <label>Header sample<input type="file" :accept="sampleAccept" :disabled="busy || !enabled" @change="uploadSample" /></label>
-            <small>Matching file type, up to 4 MiB. Do not include customer information.</small>
-            <p v-if="sampleName" role="status">Uploaded: {{ sampleName }}</p>
-          </div>
-          <div v-if="['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.header_type)" class="frappe-field-advanced">
-            <details><summary>Use an existing sample handle</summary><FormControl label="Sample media handle" v-model="form.header_media_example" :disabled="busy" /></details>
+            <small>{{ headerFileHint[form.header_type] }} file, up to 4 MiB. Do not include customer information.</small>
+            <p v-if="sampleName || form.header_media_example" role="status">{{ sampleName ? `Uploaded: ${sampleName}` : "A sample is attached." }}</p>
           </div>
           <FormControl class="frappe-grid-wide" label="Message body" type="textarea" :rows="6" v-model="form.body_text" :disabled="busy" maxlength="1024" required />
           <p class="frappe-grid-wide template-field-hint">{{ variableHint }} {{ form.body_text.length }} / 1024</p>
-          <FormControl class="frappe-grid-wide" label="Footer (optional, no variables)" v-model="form.footer_text" maxlength="60" :disabled="busy" />
+          <div class="frappe-grid-wide">
+            <FormControl label="Footer (optional)" v-model="form.footer_text" maxlength="60" :disabled="busy" />
+            <small class="template-field-hint">Short text under the message. Variables are not allowed here.</small>
+          </div>
         </div>
       </FrappeFormSection>
 
@@ -224,7 +243,7 @@ async function save() {
               <FormControl v-if="button.type === 'VOICE_CALL'" label="Call request validity (minutes)" type="number" v-model="button.ttl_minutes" :disabled="busy" />
             </div>
           </article>
-          <Button label="Add button" icon-left="plus" :disabled="busy || form.buttons.length >= 10" @click="addButton" />
+          <Button variant="outline" label="Add button" icon-left="plus" :disabled="busy || form.buttons.length >= 10" @click="addButton" />
         </div>
       </FrappeFormSection>
 

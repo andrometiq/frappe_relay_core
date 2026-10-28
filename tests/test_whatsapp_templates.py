@@ -25,7 +25,8 @@ class Store:
     """In-memory Relay WhatsApp Template rows behind the frappe calls the module uses."""
     def __init__(self):
         self.rows, self.requests = {}, []
-        self.frappe = SimpleNamespace(db=Mock(), get_doc=self.get_doc, get_all=self.get_all,
+        self.channels = [_dict(name='WA', waba_id='')]
+        self.frappe = SimpleNamespace(db=Mock(), get_doc=self.get_doc, get_all=self.get_all, _dict=_dict,
             publish_realtime=Mock(), realtime=SimpleNamespace(get_doctype_room=lambda doctype: doctype),
             log_error=Mock(), ValidationError=type('ValidationError', (Exception,), {}), cache=Cache(),
             utils=SimpleNamespace(now=lambda: '2026-10-26 09:00:00'))
@@ -39,7 +40,9 @@ class Store:
     def get_doc(self, doctype, name=None):
         return _dict(doctype) if isinstance(doctype, dict) else self.rows[name]
 
-    def get_all(self, doctype, filters=None, pluck=None, fields=None):
+    def get_all(self, doctype, filters=None, pluck=None, fields=None, **kwargs):
+        if doctype == 'Relay Channel':
+            return [row for row in self.channels if filters.get('name') in (None, row.name)][:1]
         rows = [row for row in self.rows.values() if row.account == filters['account']
                 and row.status != 'DELETED' and row.template_id not in (filters.get('template_id') or ['', []])[1]]
         return [row[pluck] for row in rows]
@@ -250,6 +253,24 @@ class TemplateRenderTests(unittest.TestCase):
             self.assertEqual(whatsapp_templates.sync_status()['synced_at'], '2026-10-26 09:00:00')
 
 
+    def test_send_without_a_channel_renders_the_default_channel_waba(self):
+        self.store.channels = [_dict(name='WA-B', waba_id='666')]
+        whatsapp_templates.remember('essdee', [dict(MARKETING, id='103')], '555')
+        whatsapp_templates.remember('essdee', [dict(ROW, id='201', name='relay_test_marketing', language='en',
+            components=[{'type': 'BODY', 'text': 'Other WABA'}])], '666')
+        self.assertEqual(whatsapp_templates.definition('relay_test_marketing', 'en')['id'], '201')
+        self.store.channels.append(_dict(name='WA-A', waba_id='555'))
+        self.assertEqual(whatsapp_templates.definition('relay_test_marketing', 'en', 'WA-A')['id'], '103')
+        self.hub.execute.assert_not_called()
+
+    def test_cache_miss_scans_the_default_channel(self):
+        self.store.channels = [_dict(name='WA-B', waba_id='666')]
+        self.hub.execute.return_value = page([dict(ROW, **MARKETING, id='103', status='APPROVED')])
+        with patch('relay_core.hub_channels.hub_arguments', side_effect=lambda channel, arguments: dict(arguments, channel=channel)):
+            self.assertEqual(whatsapp_templates.definition('relay_test_marketing', 'en')['id'], '103')
+        self.assertEqual(self.hub.execute.call_args.args[0]['channel'], 'WA-B')
+        self.assertIsNotNone(self.store.frappe.cache.hget(whatsapp_templates.DEFINITIONS + 'essdee:666', 'relay_test_marketing|en'))
+
     def test_single_send_stores_the_rendered_body_as_message_text(self):
         from relay_core import conversation_start, messaging
         self.store.frappe.cache.hset(whatsapp_templates.DEFINITIONS + 'essdee', 'relay_test_marketing|en', MARKETING)
@@ -295,6 +316,22 @@ class LocalTemplateListTests(unittest.TestCase):
         self.assertEqual(result['sync'], {'synced_at': '2026-10-26 09:09:50', 'templates': 1, 'syncing': False})
         self.frappe.enqueue.assert_not_called()
         self.assertEqual(self.frappe.get_all.call_args.kwargs['filters'], {'account': 'essdee', 'status': ['!=', 'DELETED']})
+
+    def test_content_synced_for_a_waba_reaches_the_unfiltered_directory(self):
+        self.rows[0].waba_id = '555'
+        whatsapp_templates.remember('essdee', [dict(MARKETING, id='103')], '555')
+        self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:09:50', 'templates': 1})
+        data = whatsapp_templates.directory()['data']
+        self.assertEqual(data[0]['components'], MARKETING['components'])
+
+    def test_same_template_name_in_two_wabas_keeps_each_waba_content(self):
+        other = [{'type': 'BODY', 'text': 'Other WABA'}]
+        self.rows = [_dict(self.rows[0], waba_id='555'), _dict(self.rows[0], template_id='201', waba_id='666')]
+        whatsapp_templates.remember('essdee', [dict(MARKETING, id='103')], '555')
+        whatsapp_templates.remember('essdee', [dict(MARKETING, id='201', components=other)], '666')
+        self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:09:50', 'templates': 2})
+        data = whatsapp_templates.directory()['data']
+        self.assertEqual([(row['id'], row['components']) for row in data], [('103', MARKETING['components']), ('201', other)])
 
     def test_stale_or_incomplete_copy_queues_one_sync_per_minute(self):
         self.cache.set_value(whatsapp_templates.SYNCED + 'essdee', {'synced_at': '2026-10-26 09:00:00', 'templates': 1})

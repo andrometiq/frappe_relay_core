@@ -89,7 +89,7 @@ onBeforeUnmount(() => {
   <aside class="conversation-summary" aria-label="Conversation summary">
     <header>
       <h2>Conversation summary</h2>
-      <Button icon="x" label="Close summary" @click="emit('close')" />
+      <Button icon="x" aria-label="Close summary" title="Close summary" @click="emit('close')" />
     </header>
     <div class="summary-content">
       <ErrorMessage :message="error" />

@@ -110,7 +110,7 @@ useRealtimeRefresh([],['message_actions'],check)
 </script>
 <template>
   <form class="message-composer email-composer compact-composer" :class="{'is-expanded': expanded}" aria-label="Email composer" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="send">
-    <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
+    <div v-if="expanded && $slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
     <div v-if="expanded" class="flex flex-wrap gap-2" role="group" aria-label="Email action"><Button v-for="[value,label] in [['reply','Reply'],['reply-all','Reply all'],['forward','Forward']]" :key="value" :label="label" :variant="draft.mode===value?'solid':'ghost'" :disabled="disabled" @click="modeChanged(value)" /></div>
     <div v-if="expanded" class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" aria-label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" size="xs" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
     <div v-if="recipientsOpen" class="grid gap-2 sm:grid-cols-2"><FormControl v-model="draft.cc" label="CC" :disabled="disabled" /><FormControl v-model="draft.bcc" label="BCC (private delivery audit only)" :disabled="disabled" /></div>

@@ -59,7 +59,7 @@ class DispatchRecoveryTests(unittest.TestCase):
         intent={'contact':'contact','endpoint':'endpoint','kind':'text','data':{'text':'Hello'},'business_doctype':'Customer','business_name':'customer-two'}
         self.action.update(owner='sender',status='Rejected',start_contact='contact',payload=json.dumps({'start':intent}))
         self.api.frappe.session=SimpleNamespace(user='sender')
-        with patch.object(self.api,'require_access'),patch.object(conversation_start,'action_target') as target,patch.object(conversation_start,'send') as send:
+        with patch.object(self.api,'require_access'),patch.object(self.api,'hide_pending'),patch.object(conversation_start,'action_target') as target,patch.object(conversation_start,'send') as send:
             self.api.retry('action')
         target.assert_called_once_with(self.action)
         self.assertEqual(send.call_args.args[-2:],('Customer','customer-two'))

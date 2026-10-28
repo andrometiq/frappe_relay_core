@@ -45,17 +45,18 @@ test('read mutations refresh the unread queue without waiting for a socket, but 
       ['inbox.update', { contact: 'contact', last_read: 'message' }],
       ['message_reads.mark', { contact: 'contact', messages: '["message"]' }],
       ['business_inbox.mark_visible', { doctype: 'Customer', name: 'customer', messages: '["message"]' }],
+      ['message_reads.mark_chat', { contact: 'contact', read: 0 }],
     ]) {
       await coreApi(method, values, true)
       await refreshed
       assert.deepEqual(state.rows.value, [])
     }
-    assert.equal(loads, initial + 3)
+    assert.equal(loads, initial + 4)
     await coreApi('inbox.update', { contact: 'contact' }, true)
-    assert.equal(loads, initial + 3, 'Presence-only updates must not cause refresh loops')
+    assert.equal(loads, initial + 4, 'Presence-only updates must not cause refresh loops')
     fail = true
     await assert.rejects(coreApi('inbox.update', { contact: 'contact', last_read: 'wrong-message' }, true), /another contact/)
-    assert.equal(loads, initial + 3)
+    assert.equal(loads, initial + 4)
   } finally {
     off?.(); scope.stop()
     globalThis.fetch = originalFetch; globalThis.window = originalWindow

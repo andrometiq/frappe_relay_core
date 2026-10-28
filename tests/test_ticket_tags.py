@@ -32,7 +32,7 @@ class TicketTagTests(unittest.TestCase):
         spec.loader.exec_module(self.module)
 
     def ticket(self, tagged=(), assigned_to=None, previous=None):
-        doc = types.SimpleNamespace(name='RELAY-TKT-0000000001', subject='Refund <late>', priority='High',
+        doc = types.SimpleNamespace(name='TKT-00001', subject='Refund <late>', priority='High',
             assigned_to=assigned_to, watchers=[types.SimpleNamespace(user=user) for user in tagged],
             flags=types.SimpleNamespace(relay_quiet_tags=False), get_doc_before_save=lambda: previous)
         doc.get = lambda key, default=None: getattr(doc, key, default)
@@ -61,7 +61,7 @@ class TicketTagTests(unittest.TestCase):
         (assigned, users), (tagged, tag_users) = [entry.args for entry in self.logs.call_args_list]
         self.assertEqual((assigned['type'], users), ('Assignment', ['owner@example.invalid']))
         self.assertEqual((tagged['type'], tag_users), ('Mention', ['new@example.invalid']))
-        self.assertEqual(assigned['link'], '/relay#/tickets?ticket=RELAY-TKT-0000000001')
+        self.assertEqual(assigned['link'], '/relay#/tickets?ticket=TKT-00001')
         self.assertIn('Refund &lt;late&gt;', assigned['subject'])
         notice = self.f.publish_realtime.call_args_list[0]
         self.assertEqual(notice.args[0], 'relay_ticket_notice')
@@ -85,13 +85,13 @@ class TicketTagTests(unittest.TestCase):
 
     def test_comment_rejects_empty_body_and_inaccessible_mention_before_writing(self):
         self.f.get_doc = Mock()
-        with self.assertRaises(ValueError): self.module.add_comment('RELAY-TKT-0000000001', '  ')
+        with self.assertRaises(ValueError): self.module.add_comment('TKT-00001', '  ')
         ticket = self.ticket()
         ticket.check_permission = Mock()
         self.f.get_doc.return_value = ticket
         self.tickets.permission.return_value = False
         with self.assertRaises(PermissionError):
-            self.module.add_comment('RELAY-TKT-0000000001', 'Please check', ['blocked@example.invalid'])
+            self.module.add_comment('TKT-00001', 'Please check', ['blocked@example.invalid'])
         self.assertEqual(self.f.get_doc.call_count, 1)
 
 
