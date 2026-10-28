@@ -163,7 +163,8 @@ function showAllContacts() {
 function openStart(contact = "") {
   startContact.value = businessName.value ? contact : selected.value;
   startChannel.value = numbers.active.value && startContact.value === numbers.contact.value ? numbers.current.value : "";
-  startContactLabel.value = linkedContacts.value.find(item => item.value === contact)?.label || "";
+  startContactLabel.value = businessName.value ? linkedContacts.value.find(item => item.value === contact)?.label || ""
+    : startContact.value ? recordTitle(contactRecord.value, "") || recordTitle(contactRecord.value?.primary, "") : "";
   startOpen.value = true;
 }
 async function started(result) {

@@ -5,15 +5,16 @@ import {ref,computed,watch,effectScope} from 'vue'
 import {sha256Hex} from '../src/services/crypto.js'
 import {useStoredDraft} from '../src/composables/useStoredDraft.js'
 import {channelCan} from '../src/services/enabledChannels.js'
+import {readableName} from '../src/services/recordTitle.js'
 import {whatsappCapabilities} from './channelCapabilities.js'
 // Telegram and Email stay off in v1; these tests still cover their start paths.
 const inject=()=>ref({...whatsappCapabilities,channels:{...whatsappCapabilities.channels,Email:{email_threading:true}}})
 import {templateParameterDescriptors,buildTemplateComponents} from '../src/services/templateParameters.js'
 const source=(await readFile(new URL('../src/components/messages/StartConversation.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm,'')
-const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations};')
+const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan','readableName',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations};')
 for(const status of ['Queued','Submitted','Uncertain'])test(`conversation start ${status}`,async()=>{
  const events=[],calls=[],storage=new Map()
- const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan)
+ const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName)
  state.endpoints.value=[{value:'endpoint',provider:'Telegram'}];state.endpoint.value='endpoint';state.body.value='Hello'
  await state.send()
  assert.equal(calls.length,1)
@@ -38,7 +39,7 @@ for (const reconcile of [false, true]) test(`old template draft renews its actua
  function mount() {
    const scope = effectScope(); scopes.push(scope)
    const state = scope.run(()=>make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer'}),()=>()=>{},api,
-     sha256Hex,()=> 'request-'+ ++keys,templateParameterDescriptors,buildTemplateComponents,sessionStorage,AbortController,setTimeout,clearTimeout,()=>()=>true,useStoredDraft,inject,channelCan))
+     sha256Hex,()=> 'request-'+ ++keys,templateParameterDescriptors,buildTemplateComponents,sessionStorage,AbortController,setTimeout,clearTimeout,()=>()=>true,useStoredDraft,inject,channelCan,readableName))
    state.endpoints.value = [{value:'endpoint',channel:'channel',provider:'WhatsApp',window:{open:false}}]
    state.endpoint.value = 'endpoint'
    return {...state,unmount:()=>scope.stop()}
@@ -79,7 +80,7 @@ for (const viaReconcile of [false, true]) test(`rejected start can be edited and
  const state = make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer'}),()=>()=>{},async(method,args)=>{
    calls.push({method,args})
    return {status:viaReconcile && calls.length === 1 ? 'Uncertain' : 'Rejected',action:'rejected-action'}
- },sha256Hex,()=> 'request-'+ ++keys,()=> [],()=> [],{getItem:key=>memory.get(key),setItem:(key,value)=>memory.set(key,value),removeItem:key=>memory.delete(key)},AbortController,setTimeout,clearTimeout,()=>()=>true,(_scope,_read,write)=>{restore=write;return ()=>{}},inject,channelCan)
+ },sha256Hex,()=> 'request-'+ ++keys,()=> [],()=> [],{getItem:key=>memory.get(key),setItem:(key,value)=>memory.set(key,value),removeItem:key=>memory.delete(key)},AbortController,setTimeout,clearTimeout,()=>()=>true,(_scope,_read,write)=>{restore=write;return ()=>{}},inject,channelCan,readableName)
  state.endpoints.value=[{value:'endpoint',channel:'channel',provider:'Email'}];state.endpoint.value='endpoint'
  state.body.value='Order quantity 25';state.subject.value='Order';state.parameters.value={number:'25'}
  await state.send()
@@ -104,7 +105,7 @@ test('a business start preselects the WhatsApp number picked in Send via and lis
  const rows = [{value:'WA-1',endpoint:'E1',provider:'WhatsApp',window:{open:false}},{value:'WA-2',endpoint:'E2',provider:'WhatsApp',window:{open:false}}]
  const api = async (method,args) => { calls.push({method,args}); return method === 'conversation_start.business_options' ? rows : {data:[]} }
  const state = make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact',businessDoctype:'Customer',businessName:'local-customer',channel:'WA-2'}),()=>()=>{},api,
-   ()=> 'digest',()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan)
+   ()=> 'digest',()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem:()=>{},removeItem:()=>{}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName)
  await state.destinations()
  assert.equal(state.endpoint.value,'E2')
  assert.equal(state.kind.value,'template')
