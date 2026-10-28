@@ -138,10 +138,11 @@ def save(channel, values, modified):
     doc.check_permission('read')
     if str(doc.modified) != modified:
         frappe.throw('Channel changed. Reload before saving.')
-    if values.get('automation_enabled') not in (0, 1, False, True):
+    if 'automation_enabled' in values and values['automation_enabled'] not in (0, 1, False, True):
         frappe.throw('Enabled must be 0 or 1')
     doc.update({key: values[key] for key in FIELDS if key in values})
-    doc.set('automation_steps', rows)
+    if 'steps' in values:
+        doc.set('automation_steps', rows)
     # Managers may edit only this allowlist, not channel transport configuration.
     doc.save(ignore_permissions=True)
     return read(channel)
@@ -377,9 +378,9 @@ def dry_run(channel, text, contact=None):
             identity(message, config)
         except (ValueError, frappe.PermissionError):
             reason = 'Identity is missing or ambiguous'
+        from relay_core.automation.service import staff_owned
         person = frappe.get_doc('Relay Contact', contact)
-        held = message.get('ticket') and frappe.db.get_value('Relay Ticket', message.ticket, 'ai_disabled')
-        if person.automation_paused or held:
+        if not reason and staff_owned(person, message=message):
             reason = 'Conversation is owned by staff'
     if not reason and human_request(text):
         reason = 'Sender requested a person; handoff before all steps'
