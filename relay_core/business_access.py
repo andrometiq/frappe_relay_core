@@ -225,11 +225,17 @@ def email_prompt_contexts(contact, channel, endpoint, message_id):
             yield context
 
 
-def choose_business(contact, doctype=None, name=None):
+def linked_business(contact, doctype=None, name=None):
+    """The named business link of the contact, or else its primary one."""
     links = candidates(contact)
     business = (doctype, name) if doctype or name else primary(contact, links)
     if business not in links:
         frappe.throw('Choose a linked business record')
+    return business
+
+
+def choose_business(contact, doctype=None, name=None):
+    business = linked_business(contact, doctype, name)
     frappe.get_doc(*business).check_permission('read')
     return business
 

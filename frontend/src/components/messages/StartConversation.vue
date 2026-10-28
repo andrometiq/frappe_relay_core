@@ -10,6 +10,7 @@ import { useEnabledChannels } from "../../composables/useEnabledChannels";
 import { channelCan } from "../../services/enabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import { readableName } from "../../services/recordTitle";
+import { phoneCaption } from "../../services/phoneNumber";
 import {
   templateParameterDescriptors,
   buildTemplateComponents,
@@ -48,6 +49,7 @@ const businessDoctype = computed(() => props.businessDoctype || chosenRecord.val
 const businessName = computed(() => props.businessName || chosenRecord.value?.name);
 const templates = ref([]),
   templateId = ref(""),
+  templateLabel = ref(""),
   parameters = ref({}),
   cursor = ref(""),
   pending = ref(null),
@@ -68,13 +70,20 @@ let generation = 0;
 let contactGeneration = 0, contactTimer, contactController;
 
 // A phone number as a name looks like a generated key to recordTitle, which would caption it "Record".
-const contactCaption = (value, fallback) => /^\d{7,}$/.test(String(value || "").trim()) ? "+" + String(value).trim() : readableName(value, fallback);
+const contactCaption = (value, fallback) => phoneCaption(value) || readableName(value, fallback);
 async function searchDirectory(query, signal) {
   const result = await coreApi("inbox.directory", { query }, false, { signal });
-  return (result.items || []).map(row => ({ value: row.name, label: contactCaption(row.display_name, "Contact") }));
+  return (result.items || []).map(row => ({ value: row.name, label: contactCaption(row.display_name || row.contact, "Unknown number") }));
 }
 const contactField = computed(() => ({ label: "Contact", placeholder: "Search by name or number…", search: searchDirectory, readOnly: busy.value || !!pending.value,
-  initialOptions: contact.value ? [{ value: contact.value, label: props.contactLabel || contactCaption(contact.value, "Contact") }] : [] }));
+  initialOptions: props.contact ? [{ value: props.contact, label: props.contactLabel || contactCaption(props.contact, "Unknown number") }] : [] }));
+// From a chat the contact is fixed, so the dialog names it instead of asking.
+const fixedContact = computed(() => props.template && !!props.contact && !props.businessName);
+// Free text is possible only inside an open reply window on a number staff did not pick for templates.
+const kindOptions = computed(() => [
+  ...(destination.value?.window?.open && !props.channel ? [{ value: "text", label: "Message" }] : []),
+  { value: "template", label: "Approved template" },
+]);
 
 function initialContacts() {
   const rows = Array.isArray(props.contacts) ? props.contacts : [];
@@ -164,14 +173,16 @@ watch(contact, () => {
   if (contact.value) destinations();
 }, {flush:'sync'});
 watch(templateId, () => (parameters.value = {}), {flush:'sync'});
+watch(template, row => { if (row) templateLabel.value = row.name + " · " + row.language; });
+watch(kindOptions, options => { if (can("templates") && kind.value === "text" && !options.some(row => row.value === "text")) kind.value = "template"; });
 
 watch(sendChannel, (_now, before) => { if (before) { templateId.value = ''; parameters.value = {}; } }, {flush: 'sync'});
 watch(mediaChannel, (_now, before) => { if (before) for (const field of descriptors.value) if (field.kind === 'media') delete parameters.value[field.key]; });
 const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
-  () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
-  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=props.template ? 'template' : saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
-  () => ({body:'',subject:'',kind:props.template ? 'template' : can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
+  () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,templateLabel:templateLabel.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
+  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=props.template ? 'template' : saved.kind || 'text'; templateId.value=saved.templateId || ''; templateLabel.value=saved.templateLabel || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
+  () => ({body:'',subject:'',templateLabel:'',kind:props.template ? 'template' : can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 let templateRequest;
 function loadTemplates(next = false) {
   if (templatesBusy.value) return templateRequest;
@@ -190,8 +201,17 @@ async function fetchTemplates(next) {
     templates.value = [...(next ? templates.value : []), ...(result.data || []).filter(row => row.status === "APPROVED")];
     cursor.value = result.paging?.has_more ? result.paging?.cursors?.after || "" : "";
     if (!templateId.value) templateId.value = templates.value[0]?.id || "";
+    else if (!next) await loadSavedTemplate(current);
   } catch (e) { if (current === templatesGeneration) templatesError.value = e.message; }
   finally { if (current === templatesGeneration) templatesBusy.value = false; }
+}
+// A restored template may sit past the first page, so the local template copy finds it by its id.
+async function loadSavedTemplate(current) {
+  const id = templateId.value;
+  if (templates.value.some(row => row.id === id)) return;
+  const result = await coreApi("whatsapp_templates.directory", sendChannel.value ? { channel: sendChannel.value } : {});
+  const row = (result.data || []).find(item => item.id === id && item.status === "APPROVED");
+  if (current === templatesGeneration && row) templates.value = [...templates.value, row];
 }
 watch(() => kind.value === 'template' && destination.value?.provider === 'WhatsApp' ? sendChannel.value || 'default' : '', scope => {
   ++templatesGeneration; templatesBusy.value = false; templatesError.value = "";
@@ -267,13 +287,23 @@ async function send() {
     }
   });
 }
+// The send button says what is missing while it cannot send.
+const sendBlocked = computed(() => {
+  if (pending.value) return "";
+  if (!destination.value) return contact.value ? "This contact has no number to send to" : "Choose a contact first";
+  if (kind.value === "template") return template.value ? "" : "Choose a template first";
+  if (!body.value.trim()) return "Type a message first";
+  if (kind.value === "email" && !subject.value.trim()) return "Add a subject first";
+  if (destination.value.provider === "Telegram" && [...body.value].length > 4096) return "The message is too long";
+  return "";
+});
 onMounted(async () => {
   if (contact.value) await destinations();
 });
 onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contactController?.abort(); });
 </script>
 <template>
-  <Dialog v-model="shown" :options="{ title: props.template ? 'Send approved template' : 'New conversation', size: 'lg' }"
+  <Dialog v-model="shown" :options="{ title: props.template ? 'Send template' : 'New conversation', size: 'lg' }" :disable-outside-click-to-close="busy"
     ><template #body-content
       ><div class="space-y-4">
         <div v-if="props.businessName" class="start-contact-picker">
@@ -296,9 +326,13 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <p v-else-if="!contactOptions.length">No linked contacts match this search.</p>
           </div>
         </div>
+        <p v-else-if="fixedContact" class="text-sm">To <strong>{{ props.contactLabel || contactCaption(contact, "this contact") }}</strong><template v-if="destination"> · {{ destination.label }}</template></p>
         <ChoiceField v-else v-model="contact" :field="contactField" />
         <ChoiceField v-if="records.length" v-model="record" :field="{ label: 'Business record', options: records, readOnly: busy || !!pending }" />
-        <ChoiceField v-if="endpoints.length" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
+        <template v-if="endpoints.length">
+          <ChoiceField v-if="endpoints.length > 1" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
+          <p v-else-if="!fixedContact" class="text-sm text-ink-gray-5">Sends through {{ destination?.label }}</p>
+        </template>
         <p v-else-if="contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
           {{ props.businessName
@@ -311,21 +345,10 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             {{
               destination.window.open
                 ? "The reply window is open. You can send a message or an approved template."
-                : "The reply window is closed. Choose an approved template."
+                : "More than 24 hours since the customer wrote. You can only send a template."
             }}
           </p>
-          <RelaySelect
-            v-if="can('templates')"
-            label="Message type"
-            v-model="kind"
-            :disabled="busy || !!pending"
-            :options="[
-              ...(destination.window.open && !channel
-                ? [{ value: 'text', label: 'Message' }]
-                : []),
-              { value: 'template', label: 'Approved template' },
-            ]"
-          />
+          <RelaySelect v-if="can('templates') && kindOptions.length > 1" label="Message type" v-model="kind" :disabled="busy || !!pending" :options="kindOptions" />
           <FormControl v-if="kind === 'email'" v-model="subject" label="Subject" :disabled="busy || !!pending" maxlength="998" />
           <p v-if="destination.provider === 'Telegram'" class="text-xs">Private Telegram chat · {{ [...body].length }} / 4096 characters</p>
           <FormControl
@@ -340,7 +363,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <p v-if="templatesBusy" role="status">Loading approved templates…</p>
             <ErrorMessage :message="templatesError" />
             <Button v-if="templatesError" label="Retry templates" @click="loadTemplates()" />
-            <ChoiceField v-model="templateId" :field="{ label: 'Template', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
+            <p v-else-if="!templatesBusy && !templates.length" class="text-sm text-ink-gray-5">No approved templates yet. Ask a manager to add one in Templates.</p>
+            <ChoiceField v-if="templates.length || templateId" v-model="templateId" :field="{ label: 'Template', placeholder: 'Search templates…', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), initialOptions: templateId && templateLabel ? [{ value: templateId, label: templateLabel }] : [], readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
               /><template v-for="field in descriptors" :key="field.key">
               <TemplateMediaField v-if="field.kind === 'media'" v-model="parameters[field.key]" :field="field"
                 :channel="mediaChannel" :disabled="busy || !!pending" />
@@ -357,19 +381,21 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
         </template>
         <ErrorMessage :message="error" />
         <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
-        <Button v-if="pending?.status === 'Rejected'" label="Edit message" :disabled="busy" @click="editRejected" />
-        <Button
-          v-else
-          :label="pending ? 'Check delivery' : 'Send message'"
-          variant="solid"
-          :loading="busy"
-          :disabled="
-            !destination ||
-            (!pending && (kind !== 'template' ? (!body.trim() || (kind === 'email' && !subject.trim()) || (destination.provider === 'Telegram' && [...body].length > 4096)) : !template))
-          "
-          @click="send"
-        />
-        <Button v-if="pending" label="Open conversation" @click="emit('sent',{contact:contact,message:pending.message,status:pending.status});shown=false" />
-</div></template
-  ></Dialog>
+      </div></template
+    >
+    <template #actions="{ close }">
+      <Button label="Cancel" variant="ghost" :disabled="busy" @click="close" />
+      <Button v-if="pending" label="Open conversation" @click="emit('sent',{contact:contact,message:pending.message,status:pending.status});shown=false" />
+      <Button v-if="pending?.status === 'Rejected'" label="Edit message" :disabled="busy" @click="editRejected" />
+      <Button
+        v-else
+        :label="pending ? 'Check delivery' : kind === 'template' ? 'Send template' : 'Send message'"
+        variant="solid"
+        :loading="busy"
+        :disabled="!!sendBlocked"
+        :title="sendBlocked || undefined"
+        @click="send"
+      />
+    </template>
+  </Dialog>
 </template>

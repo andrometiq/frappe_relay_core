@@ -131,18 +131,28 @@ def object_value(value):
     return value
 
 
-def readable_source(name):
+def readable_message(name):
+    """A message and its channel that the user may read, whether or not the channel can send now."""
     require_access()
     validate_reference(name, 'MSG')
     source = frappe.get_doc('Relay Message', name); source.check_permission('read')
     readable_contact(source.relay_contact)
     channel = frappe.get_doc('Relay Channel', source.channel); channel.check_permission('read')
+    return source, channel
+
+
+def readable_source(name):
+    source, channel = readable_message(name)
     if not is_current(channel, connection_value('relay_hub_account')):
         frappe.throw('Conversation channel is disabled or belongs to another account', frappe.PermissionError)
+    require_binding(source)
+    return source, channel, context_of(source)
+
+
+def require_binding(source):
     key = hashlib.sha256((source.channel + ':' + (source.sender_endpoint or '')).encode()).hexdigest()
     if frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': key, 'verified': 1}, 'relay_contact') != source.relay_contact:
         frappe.throw('Conversation binding is missing or revoked', frappe.PermissionError)
-    return source, channel, context_of(source)
 
 
 def _prepare(source, channel, context, kind, data):
@@ -875,8 +885,12 @@ def require_reply_window(source, channel, context):
 
 @frappe.whitelist(methods=['GET'])
 def reply_window(message):
-    source,channel,context=readable_source(message)
-    if channel.channel!='WhatsApp' or context.get('group_id'):return {'open':True}
+    """A chat on a disabled channel reads as closed; permission failures still deny."""
+    source, channel = readable_message(message)
+    if not is_current(channel, connection_value('relay_hub_account')):
+        return {'open': False, 'channel_disabled': True}
+    require_binding(source)
+    if channel.channel!='WhatsApp' or context_of(source).get('group_id'):return {'open':True}
     from relay_core.service_window import status
     return status(source.relay_contact,channel.name,source.sender_endpoint)
 

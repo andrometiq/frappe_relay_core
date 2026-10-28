@@ -126,6 +126,28 @@ class FlowTriggers(unittest.TestCase):
         self.assertEqual(json.loads(run.values)['_visits'], {'ask': 2})
 
 
+class FlowTicketCategories(unittest.TestCase):
+    def nodes(self, *categories):
+        return [{'id': f'ticket_{i}', 'kind': 'ticket', 'text': 'Needs a person', **({'category': c} if c else {})}
+                for i, c in enumerate(categories)] + [{'id': 'done', 'kind': 'end'}]
+
+    def test_any_configured_category_name_passes_the_contract(self):
+        self.assertEqual(definition(self.nodes('Billing', ''))[0]['category'], 'Billing')
+        for bad in ('x' * 141, 5):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'Ticket category is too long'):
+                definition(self.nodes(bad))
+
+    def test_an_enabled_flow_checks_each_named_category_in_ticket_settings(self):
+        with patch('relay_core.ticket_settings.require_enabled') as require:
+            service.require_ticket_categories(self.nodes('Billing', '', 'Billing', 'Returns'))
+        self.assertEqual([call.args for call in require.call_args_list], [('category', 'Billing'), ('category', 'Returns')])
+
+    def test_a_turned_off_or_unknown_category_stops_the_save(self):
+        with patch('relay_core.ticket_settings.require_enabled', side_effect=frappe.ValidationError('The ticket category "Query" is turned off')):
+            with self.assertRaisesRegex(frappe.ValidationError, 'turned off'):
+                service.require_ticket_categories(self.nodes('Query'))
+
+
 class FlowSwitch(unittest.TestCase):
     def test_a_switch_the_site_does_not_have_yet_is_off(self):
         site = Mock(ValidationError=frappe.ValidationError)

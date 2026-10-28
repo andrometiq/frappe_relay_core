@@ -50,7 +50,7 @@ def preferred(kind, label):
     return rows[0].name if rows else label
 
 
-def _require_enabled(kind, label):
+def require_enabled(kind, label):
     enabled = frappe.db.get_value(DOCTYPES[kind], label, 'enabled')
     if enabled is None:
         frappe.throw(f'Invalid ticket {kind}')
@@ -64,14 +64,14 @@ def apply(doc):
     for kind in ('category', 'type'):
         value = doc.get(TICKET_FIELDS[kind])
         if value and (not previous or value != previous.get(TICKET_FIELDS[kind])):
-            _require_enabled(kind, value)
+            require_enabled(kind, value)
     chosen = doc.get('ticket_status')
     if chosen:
         state = frappe.db.get_value(DOCTYPES['status'], chosen, 'state')
         if not state:
             frappe.throw('Invalid ticket status')
         if not previous or chosen != previous.get('ticket_status'):
-            _require_enabled('status', chosen)
+            require_enabled('status', chosen)
             doc.status = state
             return
         if state == doc.status:

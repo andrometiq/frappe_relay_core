@@ -248,6 +248,7 @@ function actions(message) {
     const link = document.createElement('a');
     link.href = download;
     link.download = '';
+    if (!download.startsWith('/')) Object.assign(link, { target: '_blank', rel: 'noopener noreferrer' });
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -397,7 +398,9 @@ function actions(message) {
 <style scoped>
 .conversation-bubble:has(.message-readers){margin-bottom:24px}
 .conversation-bubble{position:relative}
-.message-menu-trigger{position:absolute;top:4px;right:4px;z-index:2;display:grid;place-items:center;width:24px;height:24px;min-height:0;padding:0;border-radius:999px;background:var(--surface-modal,var(--surface-white));box-shadow:0 1px 3px #0002;color:var(--ink-gray-6);opacity:0;transition:opacity .1s}
+/* The menu button sticks to the top of the visible thread, so a tall message scrolled under the header keeps it. */
+.conversation-bubble:has(>.message-menu-trigger){display:flex;flex-direction:column}
+.message-menu-trigger{order:-1;position:sticky;top:4px;z-index:2;align-self:flex-end;flex:none;margin:-4px -8px -20px 0;display:grid;place-items:center;width:24px;height:24px;min-height:0;padding:0;border-radius:999px;background:var(--surface-modal,var(--surface-white));box-shadow:0 1px 3px #0002;color:var(--ink-gray-6);opacity:0;transition:opacity .1s}
 .conversation-bubble:is(:hover,:focus-within)>.message-menu-trigger,.message-menu-trigger[aria-expanded="true"]{opacity:1}
 .message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
 @media (hover:none){.message-menu-trigger{display:none}}

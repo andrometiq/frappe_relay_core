@@ -135,7 +135,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
   </div>
   <InboxFilterPanel v-model="filters" v-model:open="filtersOpen" :anchor="isMobile ? mobileFilterButton : filterButton" :options="options" @browse="browse" />
   <InboxFolders v-if="capabilities.folders && mode !== 'business'" v-model="folder" />
-  <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
+  <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType || filters.businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
   <template v-else>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
@@ -145,12 +145,10 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
           :aria-pressed="row.kind === 'business' ? businessType === row.doctype && businessName === row.record : selected === row.name" :disabled="busy" @click="openRow(row)">
           <span class="directory-avatar"><Avatar :label="rowTitle(row)" /><span v-if="manyMediums" class="directory-channel" :title="row.provider || 'Chat'" :aria-label="row.provider || 'Chat'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
           <span class="directory-contact-copy">
-            <span class="directory-contact-top"><strong :title="rowTitle(row)">{{ rowTitle(row) }}</strong><FeatherIcon v-if="row.starred" name="star" :size="12" class="directory-star" aria-label="Starred" /><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
+            <span class="directory-contact-top"><strong>{{ rowTitle(row) }}</strong><FeatherIcon v-if="row.starred" name="star" :size="12" class="directory-star" aria-label="Starred" /><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
             <span class="directory-contact-bottom"><span v-if="manyNumbers && numberName(capabilities, row.channel)" class="number-tag">{{ numberName(capabilities, row.channel) }}</span><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
-            <span class="directory-contact-context">
-              <span v-if="row.kind === 'business'" class="directory-business">{{ row.doctype }}<template v-if="row.contact_name"> · {{ recordTitle(row.contact_name, 'Unknown number') }}</template><template v-if="row.contact_count > 1"> +{{ row.contact_count - 1 }}</template></span>
-              <span v-else-if="row.unlinked" class="directory-unlinked">Not linked</span>
-              <span v-else class="directory-business">Linked to a customer</span>
+            <span v-if="(row.unlinked && !rowActions?.canLink(row)) || (capabilities.folders && row.folder && folderLabel(folders, row.folder))" class="directory-contact-context">
+              <span v-if="row.unlinked && !rowActions?.canLink(row)" class="directory-unlinked">Not linked</span>
               <span v-if="capabilities.folders && row.folder && folderLabel(folders, row.folder)" class="directory-folder"><FeatherIcon name="folder" :size="12" />{{ folderLabel(folders, row.folder) }}</span>
             </span>
           </span>
@@ -175,14 +173,22 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
 .inbox-filter-count { position:absolute; top:-3px; right:-3px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--relay-accent); color:var(--relay-accent-ink); font-size:10.5px; font-weight:600; line-height:16px; text-align:center; pointer-events:none; }
 .v1-queues > .inbox-filter-trigger { margin-left:auto; }
 .directory-row { position:relative; }
+/* Rows breathe: clear padding, a 4px gap between name and message, a bold name over a muted message. */
+.directory-rows .directory-row > .directory-contact { min-height:70px; gap:12px; padding:12px 16px; border-bottom:1px solid var(--relay-stroke); }
+.directory-rows .directory-row > .directory-contact .directory-contact-copy { display:flex; flex-direction:column; gap:4px; }
+.directory-rows .directory-row > .directory-contact .directory-contact-top strong { font-size:14px; font-weight:600; color:var(--relay-ink); }
+.directory-rows .directory-row > .directory-contact .directory-contact-bottom small { margin-top:0; font-size:13px; color:var(--relay-ink-3); }
 .directory-unlinked { color:var(--ink-amber-3, #b45309); font-weight:600; }
 .directory-star { flex:none; color:var(--ink-amber-3, #b45309); fill:currentColor; }
-.directory-link { position:absolute; top:30px; right:10px; height:20px; min-height:0; padding:0 8px; border:1px solid var(--relay-accent); border-radius:10px; color:var(--relay-accent-text); font-size:11.5px; font-weight:600; }
+.directory-link { position:absolute; bottom:14px; right:14px; height:20px; min-height:0; padding:0 8px; border:1px solid var(--relay-accent); border-radius:10px; color:var(--relay-accent-text); font-size:11.5px; font-weight:600; }
 .directory-link:hover { background:var(--relay-accent-soft); }
 .directory-row-menu { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:var(--relay-layer-strong); color:var(--relay-ink-2); box-shadow:var(--relay-shadow-1); opacity:0; pointer-events:none; }
 .directory-row:hover > .directory-row-menu, .directory-row-menu:focus-visible { opacity:1; pointer-events:auto; }
 @media (hover:none) { .directory-row-menu { display:none; } }
-@media (max-width:768px) { .directory-link { top:34px; right:18px; height:24px; } }
+@media (max-width:768px) { .directory-link { right:18px; height:24px; } }
+/* The Link button sits on the context line and the row menu takes the time's place, so neither covers text. */
+.directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context) { padding-right:56px; }
+@media (hover:hover) { .directory-row:hover .directory-contact-top time { visibility:hidden; } }
 .inbox-filter-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 16px 0; }
 .inbox-filter-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; min-height:24px; padding:0 4px 0 10px; border-radius:12px; background:var(--relay-accent-soft); color:var(--relay-accent-text); font-size:12px; overflow-wrap:anywhere; }
 .inbox-filter-chip button { display:grid; place-items:center; width:20px; height:20px; border-radius:10px; }

@@ -5,11 +5,47 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="robots" content="noindex,nofollow">
   <title>Relay Core</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/relay_core/images/relay.svg">
   {% for script in relay_preloads %}<link rel="modulepreload" href="{{ script | e }}">{% endfor %}
-  {% for stylesheet in relay_styles %}<link rel="stylesheet" href="{{ stylesheet | e }}">{% endfor %}
+  <script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.bootTheme=t}catch(e){}</script>
+  <style>
+    .relay-boot{--b-bg:#eef1f7;--b-pane:rgba(255,255,255,.66);--b-line:rgba(0,0,0,.08);--b-bone:#e3e6ec;--b-ink:#1b1b1f;position:fixed;inset:0;display:grid;grid-template:40px 1fr/72px 340px 1fr;background:var(--b-bg);color:var(--b-ink);font:600 14px/1 system-ui,sans-serif}
+    @media (prefers-color-scheme:dark){html:not([data-boot-theme=light]) .relay-boot{--b-bg:#16181e;--b-pane:rgba(255,255,255,.045);--b-line:rgba(255,255,255,.08);--b-bone:#2a2c33;--b-ink:#f3f3f5}}
+    html[data-boot-theme=dark] .relay-boot{--b-bg:#16181e;--b-pane:rgba(255,255,255,.045);--b-line:rgba(255,255,255,.08);--b-bone:#2a2c33;--b-ink:#f3f3f5}
+    .relay-boot header{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:0 14px}
+    .relay-boot header img{width:20px;height:20px;border-radius:5px}
+    .relay-boot aside{display:flex;flex-direction:column;align-items:center;gap:22px;padding-top:14px}
+    .relay-boot aside i,.relay-boot .b-row span,.relay-boot .b-row b,.relay-boot .b-row em,.relay-boot .b-search{display:block;background:var(--b-bone);border-radius:6px}
+    .relay-boot aside i{width:28px;height:28px;border-radius:8px}
+    .relay-boot .b-list{background:var(--b-pane);border:1px solid var(--b-line);border-width:1px 1px 0;border-radius:8px 0 0;padding:16px;overflow:hidden}
+    .relay-boot .b-search{height:32px;margin:40px 0 24px}
+    .relay-boot .b-row{display:grid;grid-template-columns:40px 1fr;gap:8px 12px;padding:14px 0}
+    .relay-boot .b-row span{grid-row:span 2;width:40px;height:40px;border-radius:50%}
+    .relay-boot .b-row b{height:10px;width:55%;margin-top:6px}
+    .relay-boot .b-row em{height:10px;width:85%}
+    .relay-boot nav{display:none}
+    @media (max-width:768px){
+      .relay-boot{grid-template:56px 1fr 52px/1fr}
+      .relay-boot aside,.relay-boot .b-pane{display:none}
+      .relay-boot .b-list{border:0;border-radius:0;background:none;padding:0 16px}
+      .relay-boot .b-search{margin:8px 0 16px}
+      .relay-boot nav{display:flex;justify-content:space-around;align-items:center;border-top:1px solid var(--b-line);background:var(--b-pane)}
+      .relay-boot nav i{width:24px;height:24px;border-radius:7px;background:var(--b-bone)}
+    }
+  </style>
 </head>
 <body>
-  <div id="app" data-csrf="{{ relay_csrf | e }}" data-user="{{ relay_user | e }}" data-capabilities="{{ relay_capabilities | e }}" data-site="{{ relay_site | e }}" data-socket-port="{{ relay_socket_port | e }}"></div>
+  <div id="app" data-csrf="{{ relay_csrf | e }}" data-user="{{ relay_user | e }}" data-capabilities="{{ relay_capabilities | e }}" data-site="{{ relay_site | e }}" data-socket-port="{{ relay_socket_port | e }}">
+    <div class="relay-boot" role="status" aria-label="Loading Relay">
+      <header><img src="/assets/relay_core/images/relay.svg" alt="">Relay</header>
+      <aside aria-hidden="true"><i></i><i></i><i></i><i></i></aside>
+      <div class="b-list" aria-hidden="true"><div class="b-search"></div>{% for row in range(6) %}<div class="b-row"><span></span><b></b><em></em></div>{% endfor %}</div>
+      <div class="b-pane"></div>
+      <nav aria-hidden="true"><i></i><i></i><i></i><i></i></nav>
+    </div>
+  </div>
+  {# The stylesheet sits after the boot skeleton: the skeleton paints first, and the module script still waits for the stylesheet. #}
+  {% for stylesheet in relay_styles %}<link rel="stylesheet" href="{{ stylesheet | e }}">{% endfor %}
   <script type="module" src="{{ relay_script | e }}"></script>
 </body>
 </html>

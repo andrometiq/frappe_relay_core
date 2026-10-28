@@ -46,7 +46,7 @@ export async function searchLinkChoices(types, search) {
   if (results.length && results.every(result => result.status === 'rejected')) throw results[0].reason
   const limit = types.length > 1 ? 10 : 30
   return results.flatMap((result, index) => result.status === 'fulfilled'
-    ? result.value.slice(0, limit).map(row => ({ value: types[index].value + SEPARATOR + row.name, label: row.label || row.name, description: types[index].label }))
+    ? result.value.slice(0, limit).map(row => ({ value: types[index].value + SEPARATOR + row.name, label: row.label || row.name, ...(types.length > 1 ? { description: types[index].label } : {}) }))
     : [])
 }
 

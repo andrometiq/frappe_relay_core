@@ -82,3 +82,12 @@ class MarkChatTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReceiptTimeTests(unittest.TestCase):
+    def test_provider_receipt_times_are_given_in_the_site_time_zone(self):
+        doc = _dict(message_updates='{"delivery": {"timestamp": 1761600000, "times": {"Sent": 1761600000, "Read": 1761600600}}}')
+        with patch('frappe.utils.data.get_system_timezone', return_value='Asia/Kolkata'):
+            self.assertEqual(message_reads.receipt_times(doc), {'Sent': '2025-10-28 02:50:00', 'Read': '2025-10-28 03:00:00'})
+        self.assertEqual(message_reads.receipt_times(_dict(message_updates=None)), {})
+        self.assertEqual(message_reads.receipt_times(_dict(message_updates='{"delivery": {"timestamp": 5}}')), {})

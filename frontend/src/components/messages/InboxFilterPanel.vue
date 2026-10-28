@@ -97,7 +97,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); re
           <p v-if="filters.businessType && filters.businessType !== NO_RECORD && !filters.businessName" class="inbox-filter-hint">Leave the record empty to show every {{ filters.businessType }}.</p>
         </fieldset>
         <div class="inbox-filter-foot">
-          <button type="button" class="inbox-filter-link" @click="browse('business')"><FeatherIcon name="briefcase" :size="14" />Browse customers</button>
+          <button type="button" class="inbox-filter-link" @click="browse('business')"><FeatherIcon name="briefcase" :size="14" />Browse {{ filters.businessType && filters.businessType !== NO_RECORD ? filters.businessType + ' records' : 'all records' }}</button>
           <Button variant="solid" label="Done" @click="open = false" />
         </div>
       </div>
