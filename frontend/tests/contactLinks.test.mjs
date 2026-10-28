@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkedLabel, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../src/services/contactLinks.js'
+import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkHint, linkedLabel, linksHeading, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../src/services/contactLinks.js'
 
 const customer = { doctype: 'Customer', name: 'C1' }, order = { doctype: 'Sales Order', name: 'SO-1' }
 
@@ -67,4 +67,20 @@ test('browsing records shows every record type as a choice and starts on the fil
   const inbox = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   assert.match(directory, /v-if="types\.length > 1" class="business-type-options" role="radiogroup"/)
   assert.match(inbox, /:selected-doctype="businessType \|\| filters\.businessType"/)
+})
+
+test('the links heading says "Not linked yet" instead of a zero count', () => {
+  assert.equal(linksHeading(0), 'Not linked yet')
+  assert.equal(linksHeading(2), 'Linked to · 2')
+})
+
+test('the link hint skips the type step when only one record type can be linked', async () => {
+  assert.equal(linkHint([{ value: 'Supplier', label: 'Supplier' }]), 'Find the supplier. The chat then shows its name.')
+  assert.match(linkHint([{ value: 'Customer', label: 'Customer' }, { value: 'Supplier', label: 'Supplier' }]), /^Choose the record type, then find the record/)
+  const { readFile } = await import('node:fs/promises')
+  const links = await readFile(new URL('../src/components/ContactLinks.vue', import.meta.url), 'utf8')
+  const details = await readFile(new URL('../src/components/ContactDetails.vue', import.meta.url), 'utf8')
+  assert.match(links, /v-if="start && adding && types\.length" class="info-hint">\{\{ linkHint\(types\) \}\}/)
+  assert.match(links, /\{\{ linksHeading\(links\.length\) \}\}/)
+  assert.doesNotMatch(details, /Choose the record type/)
 })

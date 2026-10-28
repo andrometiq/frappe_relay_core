@@ -6,12 +6,14 @@ import {sha256Hex} from '../src/services/crypto.js'
 import {useStoredDraft} from '../src/composables/useStoredDraft.js'
 import {channelCan} from '../src/services/enabledChannels.js'
 import {readableName} from '../src/services/recordTitle.js'
+import {approvedTemplates} from '../src/services/campaignProgress.js'
 import {whatsappCapabilities} from './channelCapabilities.js'
 // Telegram and Email stay off in v1; these tests still cover their start paths.
 const inject=()=>ref({...whatsappCapabilities,channels:{...whatsappCapabilities.channels,Email:{email_threading:true}}})
 import {templateParameterDescriptors,buildTemplateComponents} from '../src/services/templateParameters.js'
 const source=(await readFile(new URL('../src/components/messages/StartConversation.vue',import.meta.url),'utf8')).split('<script setup>')[1].split('</script>')[0].replace(/^import [\s\S]*?from ["'][^"']+["'];/gm,'')
-const make=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan','readableName',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations,records,record};')
+const build=new Function('ref','computed','watch','onMounted','onBeforeUnmount','defineProps','defineEmits','coreApi','sha256Hex','randomUUID','templateParameterDescriptors','buildTemplateComponents','sessionStorage','AbortController','setTimeout','clearTimeout','useEnabledChannels','useStoredDraft','inject','channelCan','readableName','approvedTemplates',source+'\nreturn {send,body,subject,parameters,endpoint,endpoints,pending,shown,editRejected,templates,templateId,kind,loadTemplates,destinations,records,record};')
+const make=(...args)=>build(...args.slice(0,21),approvedTemplates)
 for(const status of ['Queued','Submitted','Uncertain'])test(`conversation start ${status}`,async()=>{
  const events=[],calls=[],storage=new Map()
  const state=make(ref,computed,watch,()=>{},()=>{},()=>({contact:'contact'}),()=> (...args)=>events.push(args),async(method,args)=>{calls.push({method,args});return {status,action:'action',message:null}},()=> 'digest',()=> 'stable-request-key',()=> [],()=> [],{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName)
@@ -116,13 +118,15 @@ test('a business start preselects the WhatsApp number picked in Send via and lis
  assert.equal(calls.at(-1).args.channel,'WA-1')
 })
 
-test('approved templates load on showing template mode, append pages and ignore a stale number', async () => {
+test('approved templates load every page on showing template mode and ignore a stale number', async () => {
  const calls = [], scope = effectScope()
  let release
  const state = scope.run(() => make(ref,computed,watch,()=>{},()=>{},()=>({businessName:'local-customer',businessDoctype:'Customer'}),()=>()=>{},async(method,args)=>{
    calls.push({method,args})
    if (args.channel === 'old') return new Promise(resolve => release = resolve)
-   return {data:[{id:args.arguments.after ? 'two' : 'one',name:'Order update',status:'APPROVED'},{id:'draft',status:'PENDING'}],paging:{has_more:!args.arguments.after,cursors:{after:'page-2'}}}
+   // The first Hub page can hold only pending templates.
+   return args.arguments.after ? {data:[{id:'two',name:'Order update',status:'APPROVED'}],paging:{has_more:false}}
+     : {data:[{id:'draft',status:'PENDING'}],paging:{has_more:true,cursors:{after:'page-2'}}}
  },sha256Hex,()=> 'key',()=> [],()=> [],{getItem:()=>null,setItem(){},removeItem(){}},AbortController,setTimeout,clearTimeout,()=>()=>true,()=>()=>{},inject,channelCan,readableName))
  state.endpoints.value = [{value:'old',channel:'old',provider:'WhatsApp'}, {value:'new',channel:'new',provider:'WhatsApp'}]
  state.endpoint.value = 'old'
@@ -131,12 +135,11 @@ test('approved templates load on showing template mode, append pages and ignore 
  assert.equal(calls[0].args.channel,'old')
  state.endpoint.value = 'new'
  await state.loadTemplates()
- assert.deepEqual(state.templates.value.map(row=>row.id),['one'])
- release({data:[{id:'stale',status:'APPROVED'}]}); await new Promise(resolve=>setImmediate(resolve))
- assert.deepEqual(state.templates.value.map(row=>row.id),['one'])
- await state.loadTemplates(true)
- assert.deepEqual(state.templates.value.map(row=>row.id),['one','two'])
+ assert.deepEqual(state.templates.value.map(row=>row.id),['two'])
+ assert.equal(state.templateId.value,'two')
  assert.equal(calls.at(-1).args.arguments.after,'page-2')
+ release({data:[{id:'stale',status:'APPROVED'}]}); await new Promise(resolve=>setImmediate(resolve))
+ assert.deepEqual(state.templates.value.map(row=>row.id),['two'])
  assert.ok(calls.every(call=>call.method==='whatsapp.execute' && call.args.operation==='templates.list'))
  scope.stop()
 })

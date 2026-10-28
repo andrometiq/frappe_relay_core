@@ -10,6 +10,7 @@ import { useEnabledChannels } from "../../composables/useEnabledChannels";
 import { channelCan } from "../../services/enabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import { readableName } from "../../services/recordTitle";
+import { approvedTemplates } from "../../services/campaignProgress";
 import { phoneCaption } from "../../services/phoneNumber";
 import {
   templateParameterDescriptors,
@@ -51,7 +52,6 @@ const templates = ref([]),
   templateId = ref(""),
   templateLabel = ref(""),
   parameters = ref({}),
-  cursor = ref(""),
   pending = ref(null),
   renewRequestKey = ref(false);
 const destination = computed(() =>
@@ -184,38 +184,28 @@ const clearDraft = useStoredDraft(
   saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=props.template ? 'template' : saved.kind || 'text'; templateId.value=saved.templateId || ''; templateLabel.value=saved.templateLabel || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
   () => ({body:'',subject:'',templateLabel:'',kind:props.template ? 'template' : can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 let templateRequest;
-function loadTemplates(next = false) {
+function loadTemplates() {
   if (templatesBusy.value) return templateRequest;
-  templateRequest = fetchTemplates(next);
+  templateRequest = fetchTemplates();
   return templateRequest;
 }
-async function fetchTemplates(next) {
+// Every approved template of the number, across Hub pages, as the campaign form lists them.
+async function fetchTemplates() {
   const current = ++templatesGeneration, channel = sendChannel.value;
   templatesBusy.value = true; templatesError.value = "";
   try {
-    const result = await coreApi("whatsapp.execute", {
-      operation: "templates.list", arguments: next && cursor.value ? {after: cursor.value} : {},
-      ...(channel ? {channel} : {}),
-    }, true);
+    const rows = await approvedTemplates(after => coreApi("whatsapp.execute", {
+      operation: "templates.list", arguments: after ? {after} : {}, ...(channel ? {channel} : {}),
+    }, true));
     if (current !== templatesGeneration) return;
-    templates.value = [...(next ? templates.value : []), ...(result.data || []).filter(row => row.status === "APPROVED")];
-    cursor.value = result.paging?.has_more ? result.paging?.cursors?.after || "" : "";
-    if (!templateId.value) templateId.value = templates.value[0]?.id || "";
-    else if (!next) await loadSavedTemplate(current);
+    templates.value = rows;
+    if (!rows.some(row => row.id === templateId.value)) templateId.value = rows[0]?.id || "";
   } catch (e) { if (current === templatesGeneration) templatesError.value = e.message; }
   finally { if (current === templatesGeneration) templatesBusy.value = false; }
 }
-// A restored template may sit past the first page, so the local template copy finds it by its id.
-async function loadSavedTemplate(current) {
-  const id = templateId.value;
-  if (templates.value.some(row => row.id === id)) return;
-  const result = await coreApi("whatsapp_templates.directory", sendChannel.value ? { channel: sendChannel.value } : {});
-  const row = (result.data || []).find(item => item.id === id && item.status === "APPROVED");
-  if (current === templatesGeneration && row) templates.value = [...templates.value, row];
-}
 watch(() => kind.value === 'template' && destination.value?.provider === 'WhatsApp' ? sendChannel.value || 'default' : '', scope => {
   ++templatesGeneration; templatesBusy.value = false; templatesError.value = "";
-  templates.value = []; cursor.value = "";
+  templates.value = [];
   if (scope) loadTemplates();
 }, {immediate: true, flush: 'sync'});
 onBeforeUnmount(() => { ++templatesGeneration; });
@@ -364,7 +354,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <ErrorMessage :message="templatesError" />
             <Button v-if="templatesError" label="Retry templates" @click="loadTemplates()" />
             <p v-else-if="!templatesBusy && !templates.length" class="text-sm text-ink-gray-5">No approved templates yet. Ask a manager to add one in Templates.</p>
-            <ChoiceField v-if="templates.length || templateId" v-model="templateId" :field="{ label: 'Template', placeholder: 'Search templates…', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), initialOptions: templateId && templateLabel ? [{ value: templateId, label: templateLabel }] : [], readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
+            <ChoiceField v-if="templates.length || templateId" v-model="templateId" :field="{ label: 'Template', placeholder: 'Search templates…', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), initialOptions: templateId && templateLabel ? [{ value: templateId, label: templateLabel }] : [], readOnly: busy || !!pending, loading: templatesBusy, error: templatesError }"
               /><template v-for="field in descriptors" :key="field.key">
               <TemplateMediaField v-if="field.kind === 'media'" v-model="parameters[field.key]" :field="field"
                 :channel="mediaChannel" :disabled="busy || !!pending" />

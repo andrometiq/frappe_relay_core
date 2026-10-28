@@ -19,6 +19,7 @@ import { channelCan, multipleChannels } from "../../services/enabledChannels";
 import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
 import { groupSends } from "../../services/sendGroups";
+import { notesInThread } from "../../services/threadNotes";
 const props = defineProps({
   rows: Array,
   contactName: String,
@@ -34,6 +35,8 @@ const props = defineProps({
   newer: Boolean,
   error: String,
   unread: String,
+  notes: { type: Array, default: () => [] },
+  replyClosed: Boolean,
 });
 const emit = defineEmits([
   "reconcile",
@@ -54,8 +57,9 @@ const emit = defineEmits([
 ]);
 const capabilities = inject("relayCapabilities", ref({}));
 const showChannel = computed(() => multipleChannels(capabilities.value));
-const threadRows = computed(() => groupSends(props.rows || []));
-const numberTags = computed(() => messageNumberTags(threadRows.value, capabilities.value));
+const sentRows = computed(() => groupSends(props.rows || []));
+const threadRows = computed(() => notesInThread(sentRows.value, props.notes, { more: props.more, newer: props.newer }));
+const numberTags = computed(() => messageNumberTags(sentRows.value, capabilities.value));
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
 // A chat send the server rejected, or one that never reached the server, offers Retry and Delete.
@@ -241,7 +245,7 @@ async function copyText(text) {
 }
 // Quick reactions sit on top of the menu; the actions follow, most used first.
 function actions(message) {
-  const items = [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
+  const items = props.replyClosed ? [] : [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
   if (message.content) items.push({ label: "Copy text", icon: "copy", onClick: () => copyText(message.content) });
   const download = attachmentDownloadURL(message);
   if (download) items.push({label: 'Download', icon: 'download', onClick: () => {
@@ -297,7 +301,14 @@ function actions(message) {
       <div v-if="numberTags[message.name]" class="message-number-line" :class="{ 'is-outgoing': message.direction === 'Outgoing' }">
         <span class="number-tag">{{ numberTags[message.name] }}</span>
       </div>
+      <article v-if="message.note" class="note-bubble" aria-label="Internal note">
+        <header><FeatherIcon name="lock" :size="13" /><strong>{{ message.note.author_name }}</strong>
+          <time :title="timeOf(message)?.toLocaleString()" :datetime="timeOf(message)?.toISOString()">{{ timeLabel(message) }}</time></header>
+        <p>{{ message.note.body }}</p>
+        <small>Only your team sees this</small>
+      </article>
       <article
+        v-else
         class="conversation-bubble"
         :class="{
           'ml-auto': message.direction === 'Outgoing',
@@ -389,7 +400,7 @@ function actions(message) {
     <div v-if="newer" ref="later" class="h-px" aria-hidden="true" />
   </div>
   <MessageMenu v-if="menu" :key="menu.message.name" :trigger="menu.trigger" :area="viewport" :sheet="menu.sheet" :items="actions(menu.message)"
-    :emoji="canReact(menu.message) ? quickReactions : []" :current="ownReaction(menu.message.reactions)"
+    :emoji="!replyClosed && canReact(menu.message) ? quickReactions : []" :current="ownReaction(menu.message.reactions)"
     @close="menu = null" @react="react(menu.message, $event)" @more="reactionTarget = menu.message.name" />
   <MessageInfoDialog v-model="infoOpen" :info="info" :coverage="coverage" :coverage-error="coverageError" :contact-name="contactName"
     :receipts="!!info && can(info, 'read_receipts')" :group-receipts="!!info && can(info, 'group_receipts')" />
@@ -405,5 +416,10 @@ function actions(message) {
 .message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
 @media (hover:none){.message-menu-trigger{display:none}}
 .has-menu-sheet .conversation-bubble:not(.menu-target){opacity:.35}
+.note-bubble{align-self:center;width:min(420px,90%);margin:6px auto;padding:8px 12px;border:1px solid color-mix(in srgb,var(--relay-amber) 45%,transparent);border-radius:8px;background:color-mix(in srgb,var(--relay-amber) 10%,var(--surface-white));color:var(--relay-ink,var(--ink-gray-8));font-size:13px}
+.note-bubble header{display:flex;align-items:center;gap:6px;color:var(--relay-amber);font-size:12px}
+.note-bubble time{margin-left:auto;font-size:11px;color:var(--ink-gray-5)}
+.note-bubble p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.note-bubble small{font-size:11px;color:var(--relay-amber)}
 .conversation-bubble.menu-target{box-shadow:0 0 0 2px var(--relay-accent,#2f6fdb)}
 </style>

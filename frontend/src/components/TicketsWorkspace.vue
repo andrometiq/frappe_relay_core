@@ -163,13 +163,13 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
         <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" :title="recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
           <div class="automation-card-heading"><strong>{{ row.business_name ? linkedTitle(row.business_doctype, row.business_name) : recordTitle(row, 'Ticket') }}</strong><span class="flex gap-1"><Badge v-if="['High', 'Urgent'].includes(row.priority)" :label="row.priority" :theme="priorityTheme(row.priority)" /><Badge :label="look(row).label" :theme="look(row).theme" /></span></div>
           <span v-if="row.business_name" class="ticket-card__subject">{{ recordTitle(row, 'Ticket') }}</span>
-          <span class="ticket-card__meta">{{ row.category }} · <span :class="{ 'ticket-unassigned': !row.assigned_to }">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</span> · {{ relativeTime(row.creation) }}</span>
+          <span class="ticket-card__meta">{{ row.category }} · <span :class="{ 'ticket-unassigned': !row.assigned_to }">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</span> · {{ row.name }} · {{ relativeTime(row.creation) }}</span>
         </button>
         <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button variant="outline" label="Clear filters" @click="reset" /></WorkspaceState>
         <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </div>
       <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <header class="ticket-detail__head"><Button class="mobile-only" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2>{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" icon="x" variant="ghost" aria-label="Close" title="Close" @click="close" /></header>
+        <header class="ticket-detail__head"><Button class="mobile-only" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><div class="ticket-detail__title"><small>{{ selected.name }}</small><h2>{{ recordTitle(selected, 'Ticket') }}</h2></div><Button class="desktop-only" icon="x" variant="ghost" aria-label="Close" title="Close" @click="close" /></header>
         <div class="ticket-detail__fields">
           <span class="ticket-detail__label">Status</span>
           <div v-if="selected.can_edit" class="ticket-status-switch" role="radiogroup" aria-label="Status">
@@ -210,7 +210,7 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
           </a>
           <p>Open each draft, check the details and submit when ready.</p>
         </div>
-        <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
+        <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open chat · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
         <section v-if="aiEnabled" aria-label="AI history" class="space-y-3">
           <h3 class="font-semibold">AI history</h3>
           <p v-if="!detailBusy && !history.items.length">No AI activity recorded.</p>
@@ -248,7 +248,7 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
           <p v-if="!detailBusy && !transcript.items.length">No messages in this conversation yet.</p>
           <ol class="space-y-3">
             <li v-for="message in transcript.items" :key="message.name" class="ticket-history-entry">
-              <p>{{ message.direction }} · {{ message.status }} · {{ relativeTime(message.sent_at || message.creation) }}</p>
+              <p>{{ message.direction }}<template v-if="message.direction === 'Outgoing' && message.status"> · {{ message.status }}</template> · {{ relativeTime(message.sent_at || message.creation) }}</p>
               <p class="whitespace-pre-wrap">{{ message.content || 'Attachment or message content unavailable' }}</p>
               <a class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.name)">Open message</a>
             </li>
@@ -273,7 +273,9 @@ const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcrip
 .ticket-unassigned { color: var(--relay-amber, #b86e00); }
 .ticket-detail { min-width: 0; overflow-wrap: anywhere; }
 .ticket-detail__head { display: flex; align-items: center; gap: 8px; }
-.ticket-detail__head h2 { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
+.ticket-detail__title { flex: 1; min-width: 0; }
+.ticket-detail__title small { display: block; font-size: 12px; color: var(--ink-gray-5); }
+.ticket-detail__head h2 { font-size: 16px; font-weight: 600; }
 .ticket-detail__fields { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 10px 12px; font-size: 13px; }
 .ticket-detail__label { color: var(--ink-gray-5); font-size: 12.5px; }
 .ticket-status-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); justify-self: start; max-width: 100%; }

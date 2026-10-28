@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, ref, watch, inject } from "vue";
+import { FeatherIcon } from "@relay/ui";
 import {
   messageData,
   objectValue,
@@ -9,7 +10,8 @@ import {
   unsupportedNotice,
   orderLines,
   templateParts,
-  templateDocumentURL,
+  templateHeaderView,
+  documentType,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
 import { deliveryError } from '../services/serverError';
@@ -26,6 +28,8 @@ const props = defineProps({ message: { type: Object, required: true }, showReply
 watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
 const template = computed(() => templateParts(data.value));
+const header = computed(() => template.value && templateHeaderView(props.message));
+const headerData = computed(() => header.value && { kind: header.value.type, media: { file_name: header.value.fileName } });
 const context = computed(() => objectValue(props.message.provider_context));
 const mediaError = ref(false);
 watch(() => props.message.name, () => { mediaError.value = false; });
@@ -50,8 +54,20 @@ const video = computed(
     <template v-if="!translationOpen || !['text','email'].includes(data.kind)">
     <EmailContent v-if="data.email" :message="message" :email="data.email" />
     <div v-if="data.kind === 'text' && template" class="message-template">
-      <a v-if="template.document && templateDocumentURL(message)" class="message-template-document underline" :href="templateDocumentURL(message)" target="_blank" rel="noopener noreferrer">{{ template.document }}</a>
-      <span v-else-if="template.document" class="message-template-document">{{ template.document }}</span>
+      <AttachmentViewer v-if="header?.kept" :message="message" :data="headerData" />
+      <a v-else-if="header?.link && header.type === 'image'" class="media-frame block" :href="header.link" target="_blank" rel="noopener noreferrer">
+        <img :src="header.link" alt="Template image" class="media-fill" loading="lazy" referrerpolicy="no-referrer" />
+      </a>
+      <div v-else-if="header?.link && header.type === 'video'" class="media-frame media-frame-video">
+        <video :src="header.link" controls playsinline preload="metadata" class="media-fill" />
+      </div>
+      <component :is="header.link ? 'a' : 'div'" v-else-if="header?.type === 'document'" class="media-document"
+        :href="header.link || undefined" :target="header.link ? '_blank' : undefined" :rel="header.link ? 'noopener noreferrer' : undefined">
+        <FeatherIcon name="file-text" :size="26" />
+        <span class="media-document-text"><strong :title="header.fileName">{{ header.fileName || 'Document' }}</strong>
+          <span class="media-meta">{{ documentType(headerData.media) }}</span></span>
+        <FeatherIcon v-if="header.link" name="external-link" :size="18" />
+      </component>
       <strong v-if="template.header">{{ template.header }}</strong>
       <p class="whitespace-pre-wrap break-words">{{ data.text }}</p>
       <small v-if="template.footer" class="message-template-footer">{{ template.footer }}</small>

@@ -43,11 +43,12 @@ const columnsUsed = computed(() => placeholders(text.value));
 const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
 const noApprovedTemplates = computed(() => type.value === "template" && !busy.value && !templates.value.length && (!manyNumbers.value || number.value));
 const createMissing = computed(() => [
-  title.value.trim().length < 3 && "a title of at least 3 characters",
-  manyNumbers.value && !number.value && "a WhatsApp number",
-  type.value === "template" && !template.value && (noApprovedTemplates.value ? "an approved template (none yet)" : "an approved template"),
-  type.value === "text" && !text.value.trim() && "the message text",
+  title.value.trim().length < 3 && "add a title of at least 3 characters",
+  manyNumbers.value && !number.value && "choose a WhatsApp number",
+  type.value === "template" && !template.value && (noApprovedTemplates.value ? "choose an approved template (none yet)" : "choose an approved template"),
+  type.value === "text" && !text.value.trim() && "add the message text",
 ].filter(Boolean));
+const missingList = new Intl.ListFormat("en", { type: "conjunction" });
 const labels = { start: "Send now", unschedule: "Unschedule", pause: "Pause", resume: "Resume", cancel: "Cancel campaign" };
 const actionLabel = (action) => action === "cancel" && campaign.value.status === "Draft" ? "Discard draft" : labels[action];
 // A Draft starts from "Start sending" under When to send, so the header keeps only the other actions.
@@ -173,7 +174,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         </div>
         <div class="campaign-actions">
           <Button label="Create campaign" variant="solid" :loading="busy" :disabled="!ready" @click="create" />
-          <p v-if="createMissing.length" class="campaign-hint" role="status">To create the campaign, add {{ createMissing.join(", ") }}.</p>
+          <p v-if="createMissing.length" class="campaign-hint" role="status">To create the campaign, {{ missingList.format(createMissing) }}.</p>
           <p v-else class="campaign-hint">Next you choose who gets it: Relay contacts or an uploaded sheet.</p>
         </div>
       </FrappeFormSection>
