@@ -12,6 +12,7 @@ import {
   templateDocumentURL,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
+import { deliveryError } from '../services/serverError';
 const chat=inject(messagesKey,null), translationOpen=ref(false);
 const translationEnabled=computed(()=>chat?.channels.value.some(row=>row.value===props.message.channel&&row.translation_enabled));
 const MessageTranslation=defineAsyncComponent(()=>import('./MessageTranslation.vue'));
@@ -200,7 +201,7 @@ const video = computed(
       From ad{{ data.referral.headline ? ": " + data.referral.headline : "" }}
     </p>
     <p v-if="message.status === 'Failed' && message.delivery_error" class="text-xs text-ink-red-3 break-words" role="alert">
-      {{ message.delivery_error }}
+      {{ deliveryError(message.delivery_error) }}
     </p>
     <dl
       v-if="data.form_response"
