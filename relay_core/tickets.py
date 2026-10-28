@@ -758,7 +758,8 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def directory(query='', ticket_status=None, mine=None, after=None):
+def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
+              exclude_assignees=None):
     """Newest tickets first, 30 per page; `after` continues below the given ticket."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
@@ -770,6 +771,22 @@ def directory(query='', ticket_status=None, mine=None, after=None):
         if not isinstance(ticket_status, str) or len(ticket_status) > 140:
             frappe.throw('Invalid ticket filter')
         filters['ticket_status'] = ticket_status
+    or_filters = []
+    for field, value in (('assigned_to', assigned_to), ('ticket_type', ticket_type)):
+        if value is not None:
+            if not isinstance(value, str) or len(value) > 140:
+                frappe.throw('Invalid ticket filter')
+            filters[field] = value if value else ['is', 'not set']
+    if exclude_assignees is not None:
+        excluded = frappe.parse_json(exclude_assignees) if isinstance(exclude_assignees, str) else exclude_assignees
+        if (not isinstance(excluded, list) or not 1 <= len(excluded) <= 8
+                or any(not isinstance(user, str) or len(user) > 140 for user in excluded)):
+            frappe.throw('Invalid assignee filter')
+        users = [user for user in excluded if user]
+        if '' in excluded:
+            filters['assigned_to'] = ['not in', users + ['']]
+        else:
+            or_filters = [['assigned_to', 'not in', users], ['assigned_to', 'is', 'not set']]
     if frappe.utils.cint(mine):
         filters['assigned_to'] = frappe.session.user
     if after:
@@ -778,7 +795,8 @@ def directory(query='', ticket_status=None, mine=None, after=None):
         if not created:
             frappe.throw('Invalid ticket cursor')
         filters['creation'] = ['<', created]
-    rows = frappe.get_list('Relay Ticket', filters=filters, fields=LIST_FIELDS, order_by='creation desc', page_length=31)
+    rows = frappe.get_list('Relay Ticket', filters=filters, or_filters=or_filters, fields=LIST_FIELDS,
+                           order_by='creation desc', page_length=31)
     return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None}
 
 

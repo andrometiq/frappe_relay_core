@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { COLOURS, chartRows, emptySettings, isClosed, movedNames, pickerOptions, removalHint, statusLook, ticketTotals } from '../src/services/ticketSettings.js'
+import { COLOURS, assigneeChartRows, ticketFilterRoute, ticketFiltersFromRoute, chartRows, emptySettings, isClosed, movedNames, pickerOptions, removalHint, statusLook, ticketTotals } from '../src/services/ticketSettings.js'
 
 const settings = { ...emptySettings(), statuses: [
   { name: 'Open', label: 'Open', colour: 'amber', state: 'Open' }, { name: 'Started', label: 'Started', colour: 'red', state: 'Open' },
@@ -97,4 +97,31 @@ export async function resolve(specifier, context, next) {
   apply({ types: ['Saved'] })
   pending[2]({ types: ['Renamed'] }); await third
   assert.deepEqual(settings.value.types, ['Saved'])
+})
+
+
+test('assignee chart keeps top eight and totals the rest, with distinct names and working filters', () => {
+  const counts = Array.from({ length: 11 }, (_, index) => ({ assigned_to: index === 10 ? null : `user${index}@example.invalid`, tickets: 11 - index }))
+  const rows = assigneeChartRows(counts.reverse(), user => user?.startsWith('user') ? 'Same name' : 'Unassigned')
+  assert.equal(rows.length, 9)
+  assert.equal(rows[0].label, 'Same name (user0@example.invalid)')
+  assert.equal(rows[8].label, 'Others')
+  assert.equal(rows[8].tickets, 6)
+  assert.equal(rows.reduce((sum, row) => sum + row.tickets, 0), 66)
+  for (const row of rows) {
+    const filters = ticketFiltersFromRoute(ticketFilterRoute(row.filters))
+    for (const [field, value] of Object.entries(row.filters)) assert.equal(filters[field], value)
+  }
+  assert.deepEqual(JSON.parse(rows[8].filters.exclude_assignees), Array.from({ length: 8 }, (_, index) => `user${index}@example.invalid`))
+  assert.equal(assigneeChartRows(counts.slice(0, 2), user => user || 'Unassigned').length, 2)
+  assert.deepEqual(assigneeChartRows([], user => user), [])
+})
+
+test('empty assignee and type filters survive navigation and differ from all tickets', () => {
+  const unassigned = ticketFiltersFromRoute(ticketFilterRoute({ assigned_to: '' }))
+  const noType = ticketFiltersFromRoute(ticketFilterRoute({ ticket_type: '' }))
+  assert.equal(unassigned.assigned_to, '')
+  assert.equal(noType.ticket_type, '')
+  assert.equal(ticketFiltersFromRoute('#/tickets').assigned_to, undefined)
+  assert.equal(ticketFiltersFromRoute(ticketFilterRoute({ ticket_type: 'Orders & returns' })).ticket_type, 'Orders & returns')
 })

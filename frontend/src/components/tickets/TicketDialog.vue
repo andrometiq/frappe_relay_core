@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Badge, Button, Dialog, FormControl } from '@relay/ui'
+import { Badge, Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
 import ChoiceField from '../fields/ChoiceField.vue'
 import TicketDiscussion from '../TicketDiscussion.vue'
 import { coreApi } from '../../services/coreApi'
@@ -10,7 +10,7 @@ import { distinctPeople } from '../../services/ticketForm'
 import { isClosed, pickerOptions, statusLook } from '../../services/ticketSettings'
 import { dateTime } from '../relativeTime'
 
-const props = defineProps({ ticket: Object, settings: Object, busy: Boolean, aiEnabled: Boolean })
+const props = defineProps({ ticket: Object, settings: Object, busy: Boolean, aiEnabled: Boolean, error: String })
 const emit = defineEmits(['update', 'close'])
 const records = ref([])
 const open = computed({ get: () => true, set: value => { if (!value) emit('close') } })
@@ -37,6 +37,7 @@ watch(() => props.ticket.contact_person, async person => {
 <template>
   <Dialog v-model="open" :options="{ title, size: 'lg' }">
     <div class="ticket-dialog" :aria-busy="busy">
+      <ErrorMessage v-if="error" :message="error" />
       <dl class="ticket-dialog__fields">
         <dt>Status</dt>
         <dd>

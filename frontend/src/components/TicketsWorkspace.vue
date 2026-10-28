@@ -9,7 +9,7 @@ import TicketSettings from './TicketSettings.vue'
 import TicketDashboard from './tickets/TicketDashboard.vue'
 import TicketDialog from './tickets/TicketDialog.vue'
 import { useTicketSettings } from '../composables/useTicketSettings'
-import { emptyTicketFilters, pickerOptions, statusLook } from '../services/ticketSettings'
+import { emptyTicketFilters, pickerOptions, statusLook, ticketFiltersFromRoute } from '../services/ticketSettings'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import WorkspaceState from './WorkspaceState.vue'
@@ -22,7 +22,7 @@ const { settings, load: loadSettings } = useTicketSettings()
 const view = ref('dashboard')
 const views = [{ value: 'dashboard', label: 'Dashboard' }, { value: 'tickets', label: 'Tickets' }]
 const filters = ref(emptyTicketFilters())
-const page = ref({ items: [] }), selected = ref(null), error = ref('')
+const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref('')
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
 const statusTabs = computed(() => pickerOptions(settings.value.statuses, 'All'))
@@ -49,7 +49,7 @@ async function load(cursor = {}) {
   finally { if (request === generation) listBusy.value = false }
 }
 const setFilter = values => { filters.value = { ...filters.value, ...values } }
-function dismiss() { ++detailGeneration; selected.value = null; detailBusy.value = false }
+function dismiss() { ++detailGeneration; selected.value = null; detailBusy.value = false; saveError.value = '' }
 function select(row) {
   openRoute('#/tickets?ticket=' + encodeURIComponent(row.name), !!selected.value)
   show(row)
@@ -58,10 +58,15 @@ function show(row) {
   dismiss(); selected.value = row; error.value = ''
   detail(row.name)
 }
-function close() { closeRoute('#/tickets'); dismiss() }
+function close() { closeRoute('#/tickets?view=tickets'); dismiss() }
 function readRoute() {
   if (location.hash.split('?')[0] !== '#/tickets') return
-  const name = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket')
+  const params = new URLSearchParams(location.hash.split('?')[1] || '')
+  view.value = params.get('view') === 'tickets' || params.has('ticket') ? 'tickets' : 'dashboard'
+  if (params.get('view') === 'tickets') {
+    filters.value = ticketFiltersFromRoute(location.hash)
+  }
+  const name = params.get('ticket')
   if (!name) { if (selected.value) dismiss() }
   else if (name !== selected.value?.name) show(page.value.items.find(row => row.name === name) || { name })
 }
@@ -74,18 +79,20 @@ const updated = {
 }
 async function update(method, values = {}) {
   const name = selected.value.name
-  saving.value = true; error.value = ''
+  saving.value = true; saveError.value = ''
   try {
     await coreApi('tickets.' + method, { name, ...values }, true)
     if (selected.value?.name === name) await load()
     toast(updated[method](values))
-  } catch (e) { error.value = e.message }
-  finally { saving.value = false }
+  } catch (e) {
+    if (selected.value?.name === name) saveError.value = e.message
+    else error.value = e.message
+  } finally { saving.value = false }
 }
 useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
 onMounted(() => { loadSettings().catch(e => { error.value = e.message }) })
-onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute) })
-onBeforeUnmount(() => window.removeEventListener('popstate', readRoute))
+onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
+onBeforeUnmount(() => { window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
 useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
 const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.next, error, load: () => load(page.value.next) })
 </script>
@@ -112,6 +119,10 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <div class="ticket-status-tabs" role="tablist" aria-label="Ticket status">
           <button v-for="option in statusTabs" :key="option.value" type="button" role="tab" :aria-selected="filters.ticket_status === option.value" @click="setFilter({ ticket_status: option.value })">{{ option.label }}</button>
         </div>
+        <div v-if="filters.assigned_to !== undefined || filters.ticket_type !== undefined || filters.exclude_assignees" class="ticket-toolbar">
+          <span>{{ filters.exclude_assignees ? 'Other assignees' : filters.assigned_to !== undefined ? 'Assigned to: ' + linkedTitle('User', filters.assigned_to, 'Unassigned') : 'Type: ' + (filters.ticket_type || 'No type') }}</span>
+          <Button label="Clear filter" variant="ghost" @click="filters = emptyTicketFilters(); openRoute('#/tickets?view=tickets', true)" />
+        </div>
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
         <ul v-if="page.items.length" class="ticket-list">
           <li v-for="row in page.items" :key="row.name">
@@ -131,7 +142,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </template>
     </template>
-    <TicketDialog v-if="selected" :ticket="selected" :settings="settings" :busy="busy" :ai-enabled="aiEnabled" @update="update" @close="close" />
+    <TicketDialog v-if="selected" :ticket="selected" :settings="settings" :error="saveError" :busy="busy" :ai-enabled="aiEnabled" @update="update" @close="close" />
   </div></section>
 </template>
 

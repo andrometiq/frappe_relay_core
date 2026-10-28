@@ -92,6 +92,26 @@ class TicketTests(unittest.TestCase):
         for bad in (dict(query='x' * 81), dict(ticket_status=['Open'])):
             with self.subTest(bad=bad), self.assertRaises(ValueError): self.module.directory(**bad)
 
+    def test_dashboard_filters_apply_to_the_permission_checked_directory(self):
+        self.f.get_list = Mock(return_value=[])
+        self.module.directory(assigned_to='a@example.invalid', ticket_type='Delivery')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+                         {'assigned_to': 'a@example.invalid', 'ticket_type': 'Delivery'})
+        self.module.directory(assigned_to='', ticket_type='')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+                         {'assigned_to': ['is', 'not set'], 'ticket_type': ['is', 'not set']})
+        self.module.directory(exclude_assignees=['a@example.invalid'])
+        self.assertEqual(self.f.get_list.call_args.kwargs['or_filters'], [
+            ['assigned_to', 'not in', ['a@example.invalid']], ['assigned_to', 'is', 'not set']])
+        self.module.directory(exclude_assignees=['', 'a@example.invalid'])
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters']['assigned_to'],
+                         ['not in', ['a@example.invalid', '']])
+        for bad in (dict(assigned_to=['a']), dict(ticket_type='x' * 141),
+                    dict(exclude_assignees=[]), dict(exclude_assignees=['a'] * 9),
+                    dict(exclude_assignees=[None])):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.module.directory(**bad)
+
     def test_directory_pages_newest_first_by_creation(self):
         rows = [Record(name=f'TKT-{n:05d}') for n in range(31, 0, -1)]
         self.f.get_list = Mock(return_value=rows)
