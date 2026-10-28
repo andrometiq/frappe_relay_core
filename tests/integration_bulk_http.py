@@ -118,6 +118,12 @@ try:
             body = response.json()['message']
             assert {'status', 'last_error', 'issues', 'recipients', 'counts', 'next'} <= set(body), sorted(body)
             assert (body['status'], body['last_error']) == ('Draft', 'The first row must hold unique column names'), body
+            preview = {'name': title, 'audience': {'include': ['RELAY-CON-NOT-ON-THIS-NUMBER']}}
+            response = requests.post(base + 'relay_core.campaign_audience.preview', json=preview, headers=manager_headers, timeout=20)
+            assert response.status_code == 200, (response.status_code, response.text[:300])
+            assert response.json()['message'] == {'count': 0, 'opted_out': 0, 'sample': []}, response.text[:300]
+            response = requests.post(base + 'relay_core.campaign_audience.preview', json=preview, headers=headers, timeout=20)
+            assert response.status_code == 403, response.status_code
             response = requests.post(base + 'relay_core.bulk_campaigns.control', json={'name': title, 'action': 'start'},
                                      headers=manager_headers, timeout=20)
             assert response.status_code == 417 and 'last import failed' in response.text, (response.status_code, response.text[:300])
@@ -136,7 +142,7 @@ try:
             assert enqueue.call_args.kwargs == {'slot': 'control'}, enqueue.call_args
     print(f'PASS bulk update HTTP: 500-row signed batch accepted in {elapsed * 1000:.0f} ms per call, replay stored once, '
           'unsigned/unauthenticated/foreign/oversized/invalid-state batches rejected without writes; campaign APIs deny guests and non-managers; '
-          'a manager reads the campaign shape, cannot start it after a failed import, and resumes it with no pending rows')
+          'a manager previews hand-added contacts (non-managers denied), reads the campaign shape, cannot start it after a failed import, and resumes it with no pending rows')
 finally:
     server.shutdown()
     server.server_close()

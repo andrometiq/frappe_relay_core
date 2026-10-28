@@ -10,18 +10,18 @@ const navigation = [
 ]
 const names = items => items.map(item => item.name)
 
-test('the tab bar shows Inbox, Tickets and WhatsApp and More keeps the other allowed pages', () => {
+test('the tab bar shows Chats, Tickets and Contacts and More keeps the other allowed pages', () => {
   const admin = { configure: true, teams: true, enabled_channels: ['WhatsApp'] }
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, admin)))
-  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'WhatsApp'])
-  assert.deepEqual(names(more), ['Contacts', 'Skills', 'Teams', 'Settings'])
+  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'Contacts'])
+  assert.deepEqual(names(more), ['Skills', 'WhatsApp', 'Teams', 'Settings'])
 })
 
-test('the tab bar uses the same gating as the sidebar', () => {
+test('the tab bar uses the same gating as the rail', () => {
   const user = { configure: false, teams: false, enabled_channels: [] }
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, user)))
-  assert.deepEqual(names(tabs), ['Messages', 'Tickets'])
-  assert.deepEqual(names(more), ['Contacts'])
+  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'Contacts'])
+  assert.deepEqual(names(more), [])
 })
 
 test('contact info is the chat route with info=1', () => {

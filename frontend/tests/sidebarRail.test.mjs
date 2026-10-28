@@ -1,39 +1,48 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { railGroups } from '../src/services/navigation.js'
 
 const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/SiteApp.vue', import.meta.url), 'utf8')
-const rail = css.slice(css.indexOf('/* Desktop sidebar: an icon rail'))
+const rail = css.slice(css.indexOf('/* Desktop rail:'))
 const block = (source, selector) => source.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\{([^}]*)\\}'))?.[1] || ''
+const page = name => ({ name, label: name })
+const names = groups => groups.map(group => [group.name, group.pages.map(item => item.name)])
 
-test('the desktop sidebar is a 56px rail that overlays the content when it expands', () => {
-  assert.ok(rail.startsWith('/* Desktop sidebar'), 'rail rules exist')
-  assert.match(rail, /@media\(min-width:769px\)/)
-  assert.match(block(rail, '.v1-shell.relay-shell'), /grid-template-columns:56px minmax\(0,1fr\)/)
-  assert.match(block(rail, '.v1-shell.relay-shell>.app-nav'), /position:relative;z-index:30;width:56px/)
-  assert.match(block(rail, '.v1-shell.relay-shell>.app-nav:is(:hover,:has(:focus-visible))'), /width:232px/)
+test('the desktop rail is 72px wide and every item shows its label and a tooltip', () => {
+  assert.match(block(rail, '.v1-shell.relay-shell'), /grid-template-columns:72px minmax\(0,1fr\)/)
+  assert.match(app, /class="rail-label">\{\{ group\.name \}\}/)
+  assert.equal((app.match(/:title="group\.name"/g) || []).length, 2)
+  assert.ok(!/rail-label[^{]*\{[^}]*(opacity:0|display:none)/.test(rail), 'labels are never hidden')
 })
 
-test('hover and keyboard focus expand the rail; a mouse click alone does not keep it open', () => {
-  assert.ok(rail.includes(':is(:hover,:has(:focus-visible))'))
-  assert.ok(!/:focus-within/.test(rail))
+test('rail groups keep the order Chats, Tickets, Contacts, WhatsApp, Automation and Settings at the bottom', () => {
+  const all = ['Messages', 'Tickets', 'Contacts', 'WhatsApp', 'Business events', 'Flows', 'Skills', 'Settings', 'Teams', 'Activity'].map(page)
+  const groups = railGroups(all)
+  assert.deepEqual(names(groups), [['Chats', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['WhatsApp', ['WhatsApp']],
+    ['Automation', ['Business events', 'Flows', 'Skills']], ['Settings', ['Settings', 'Teams', 'Activity']]])
+  assert.deepEqual(groups.filter(group => group.bottom).map(group => group.name), ['Settings'])
+  assert.equal(groups.find(group => group.name === 'Tickets').icon, 'ticket')
 })
 
-test('the animation is short and switched off for reduced motion', () => {
-  const durations = [...rail.matchAll(/(\d+)ms/g)].map(match => Number(match[1]))
-  assert.ok(durations.every(ms => ms <= 180), `durations ${durations}`)
-  assert.match(rail, /prefers-reduced-motion:reduce\)\{\s*[^}]*transition:none!important/)
+test('a group without allowed pages is hidden and a group opens its first allowed page', () => {
+  assert.deepEqual(names(railGroups(['Messages', 'Tickets', 'Contacts', 'Teams'].map(page))),
+    [['Chats', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['Settings', ['Teams']]])
+  assert.match(app, /@click="view = group\.pages\[0\]\.name"/)
+  assert.match(app, /v-if="currentGroup\?\.pages\.length > 1" class="v1-tabs workspace-subtabs"/)
 })
 
-test('labels fade in the rail, and the unread badge stays visible on the icon', () => {
-  assert.equal((app.match(/class="relay-nav-label"/g) || []).length, 3)
-  assert.match(rail, /\.relay-nav-label[^{]*\{opacity:0/)
-  assert.match(block(rail, '.v1-shell.relay-shell .app-nav:not(:hover,:has(:focus-visible)) .nav-count'), /position:absolute/)
-  assert.ok(!/nav-count[^{]*\{[^}]*(opacity:0|display:none)/.test(rail))
+test('the Chats badge and the inbox Unread tab read one count', () => {
+  const counts = readFileSync(new URL('../src/composables/useQueueCounts.js', import.meta.url), 'utf8')
+  const inbox = readFileSync(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
+  assert.match(counts, /useQueueCounts\(medium, INBOX_ROWS\)/)
+  assert.match(inbox, /\.\.\.params\.value, \.\.\.INBOX_ROWS/)
+  assert.match(app, /useUnreadChats\(/)
+  assert.match(app, /:badge="inboxBadge"/)
 })
 
-test('the phone layout keeps the bottom tab bar and hides the sidebar', () => {
+test('the phone layout keeps the bottom tab bar and hides the rail', () => {
   const mobile = readFileSync(new URL('../src/mobile.css', import.meta.url), 'utf8')
   assert.match(mobile, /\.v1-shell\.relay-shell>\.app-nav,\.v1-shell\.relay-shell>\.relay-nav-backdrop\{display:none!important\}/)
   assert.match(app, /<MobileTabBar v-if="isMobile && ready"/)

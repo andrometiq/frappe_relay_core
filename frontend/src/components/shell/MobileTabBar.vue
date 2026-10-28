@@ -1,20 +1,13 @@
 <script setup>
-import { computed, inject, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { FeatherIcon } from '@relay/ui'
 import { splitMobileNav } from '../../services/mobileNav'
-import { countLabel } from '../../services/queueCounts'
-import { defaultMedium } from '../../services/enabledChannels'
-import { useQueueCounts } from '../../composables/useQueueCounts'
 
-const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String })
+const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String, badge: String })
 const emit = defineEmits(['navigate', 'section'])
 const open = defineModel('open', { type: Boolean, default: false })
 const split = computed(() => splitMobileNav(props.items))
 const sheet = ref(null)
-const tabLabels = { Messages: 'Inbox' }
-const capabilities = inject('relayCapabilities')
-const { counts } = useQueueCounts(computed(() => defaultMedium(capabilities.value)))
-const badge = computed(() => countLabel(counts.value.unread))
 function go(name) {
   open.value = false
   emit('navigate', name)
@@ -36,7 +29,7 @@ watch(open, async value => {
       :aria-current="view === item.name ? 'page' : undefined" @click="go(item.name)">
       <span class="mobile-tab-icon"><FeatherIcon :name="item.icon" :size="20" />
         <span v-if="item.name === 'Messages' && badge" class="mobile-tab-badge" :aria-label="`${badge} unread chats`">{{ badge }}</span></span>
-      <span>{{ tabLabels[item.name] || item.label }}</span>
+      <span>{{ item.label }}</span>
     </button>
     <button type="button" class="mobile-tab" :class="{ active: open || split.more.some(item => item.name === view) }"
       aria-haspopup="dialog" :aria-expanded="open" @click="open = !open">

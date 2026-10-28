@@ -9,13 +9,16 @@ const CHANNELS = [
 ]
 const memory = () => { const store = new Map(); return { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value), store } }
 
-test('the inbox has only All, Unread and Read tabs', () => {
-  assert.deepEqual(TABS.map(([value]) => value), ['all', 'unread', 'read'])
+test('the inbox has All, Unread and Not linked tabs, and a saved Read tab falls back to All', () => {
+  assert.deepEqual(TABS.map(([value, label]) => [value, label]), [['all', 'All'], ['unread', 'Unread'], ['unlinked', 'Not linked']])
+  const storage = memory()
+  storage.setItem(storageKey('ann@x'), JSON.stringify({ tab: 'read' }))
+  assert.equal(loadFilters(storage, 'ann@x').tab, 'all')
 })
 
 test('filters persist per user and survive a blocked or damaged store', () => {
   const storage = memory()
-  const filters = { tab: 'read', channels: ['WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
+  const filters = { tab: 'unlinked', channels: ['WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
   saveFilters(storage, 'ann@x', filters)
   assert.deepEqual(loadFilters(storage, 'ann@x'), filters)
   assert.deepEqual(loadFilters(storage, 'bob@x'), EMPTY_FILTERS, 'Another user starts with no filters')

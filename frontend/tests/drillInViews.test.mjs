@@ -8,6 +8,7 @@ import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
 import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
 import { inputTime, siteTime } from '../src/services/campaignAudience.js'
+import { emptySettings, emptyTicketFilters, pickerOptions, statusLook } from '../src/services/ticketSettings.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -33,7 +34,8 @@ function tickets(t) {
     if (method === 'tickets.read') return { name: values.name, status: 'Open' }
     return { items: [], next: null }
   }
-  return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }) }, ['selected', 'select', 'close', 'error', 'page'])
+  return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters,
+    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {

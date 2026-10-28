@@ -152,7 +152,7 @@ const recordSentinel = useLoadMore({ loading: busy, hasMore: () => recordNext.va
       <header><div><p v-if="groupingField">Grouped by {{ groupingField }}</p><p v-else>Business responsibility groups</p></div></header>
       <div class="team-filters">
         <ChoiceField v-if="types.length > 1" :field="{ label: 'Business type', options: types, readOnly: busy }" v-model="doctype" />
-        <TextInput v-model="groupQuery" type="search" placeholder="Search business groups" aria-label="Search business groups"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>
+        <TextInput v-model="groupQuery" maxlength="80" type="search" placeholder="Search business groups" aria-label="Search business groups"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput>
       </div>
       <ErrorMessage :message="error" />
       <VirtualScroller :items="groups" :item-size="58" class="team-group-list">
@@ -163,8 +163,8 @@ const recordSentinel = useLoadMore({ loading: busy, hasMore: () => recordNext.va
     </aside>
 
     <main v-if="selected" class="team-records">
-      <header class="team-heading"><Button class="mobile-only" icon="chevron-left" aria-label="Back to business groups" @click="clearSelection" /><Avatar :label="selected.label" /><div><h2>{{ selected.label }}</h2><p>{{ records.length }} loaded · {{ visibleUnread }} unread in this view</p></div><Badge :label="owner ? `Handled by ${owner}` : 'Unclaimed'" :theme="owner ? 'blue' : 'gray'" /><Button v-if="!owner" label="Take group" variant="solid" :disabled="busy" @click="claim()" /><Button v-else-if="owner === user" label="Release" :disabled="busy" @click="claim(true)" /></header>
-      <div class="team-record-search"><TextInput v-model="recordQuery" type="search" placeholder="Search records, contacts, or mobile numbers" aria-label="Search team business records"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
+      <header class="team-heading"><Button variant="ghost" class="mobile-only" icon="chevron-left" aria-label="Back to business groups" @click="clearSelection" /><Avatar :label="selected.label" /><div><h2>{{ selected.label }}</h2><p>{{ records.length }} loaded · {{ visibleUnread }} unread in this view</p></div><Badge :label="owner ? `Handled by ${owner}` : 'Unclaimed'" :theme="owner ? 'blue' : 'gray'" /><Button v-if="!owner" label="Take group" variant="solid" :disabled="busy" @click="claim()" /><Button variant="outline" v-else-if="owner === user" label="Release" :disabled="busy" @click="claim(true)" /></header>
+      <div class="team-record-search"><TextInput v-model="recordQuery" maxlength="80" type="search" placeholder="Search records, contacts, or mobile numbers" aria-label="Search team business records"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
       <VirtualScroller :items="records" :item-size="76" class="team-record-list">
         <template #item="{ item }"><button type="button" class="relative" @click="openRecord(item)"><Avatar :label="item.label" /><span class="team-record-copy"><span><strong>{{ item.label }}</strong><time v-if="item.last_activity" :title="item.last_activity">{{ relativeTime(item.last_activity) }}</time></span><small>{{ item.summary || item.last_message || item.description || "No WhatsApp activity yet" }}</small></span><Badge v-if="item.unread" :label="String(item.unread)" theme="blue" /><FeatherIcon name="chevron-right" class="h-4 w-4 text-ink-gray-4" /><span v-if="item === records.at(-1)" ref="recordSentinel" class="absolute bottom-0 left-0 w-full h-px" aria-hidden="true" /></button></template>
       </VirtualScroller>

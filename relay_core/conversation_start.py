@@ -5,7 +5,7 @@ import re
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
-from relay_core import messaging, whatsapp, service_window, whatsapp_templates
+from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates
 from relay_core.automation.service import internal_save
 from relay_core.message_types import text
 
@@ -142,7 +142,7 @@ def options(contact, business_doctype=None, business_name=None):
     for row in rows:
         try:source,channel,context=target(contact,row.name,business_doctype,business_name)
         except (frappe.PermissionError,frappe.ValidationError):continue
-        result.append({'value':row.name,'label':channel.channel+' · '+source.sender_endpoint,'provider':channel.channel,
+        result.append({'value':row.name,'label':channel.channel+' · '+source.sender_endpoint,'provider':channel.channel,'channel':channel.name,
                        'window':service_window.status(contact,channel.name,source.sender_endpoint) if channel.channel=='WhatsApp' else {'open':True}})
     return result
 
@@ -182,8 +182,9 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
             tool='telegram.message';args={'operation':'text','chat_id':int(source.sender_endpoint),'text':content['text']}
     elif kind=='template' and channel.channel=='WhatsApp':
         if set(data)-{'name','language','components'} or not re.fullmatch(r'[a-z0-9_]{1,512}',data.get('name','')) or not re.fullmatch(r'[A-Za-z_]{2,20}',data.get('language','')):
-            raise ValueError('Choose a valid template')
-        if not isinstance(data.get('components',[]),list) or len(json.dumps(data))>32000:raise ValueError('Invalid template parameters')
+            frappe.throw('Choose a valid template')
+        if not isinstance(data.get('components',[]),list) or len(json.dumps(data))>32000:frappe.throw('Invalid template parameters')
+        template_media.check_header(data.get('components',[]))
         tool='whatsapp.execute';args={'operation':'templates.send','to':source.sender_endpoint,**data}
         content=whatsapp_templates.message_content(data,channel=channel.name)
     else:raise ValueError('Unsupported starting message')

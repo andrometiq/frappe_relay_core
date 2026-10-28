@@ -50,7 +50,7 @@ export default async function testMessages(page, origin = 'http://127.0.0.1:1812
     await page.getByRole('button',{name:'Send',exact:true}).click(); await waitSend(1)
     if(JSON.stringify(Object.keys(sends[0].body).sort())!==JSON.stringify(['data','kind','message','request_key'])) throw new Error('Browser supplied provider routing')
     if(sends[0].body.message!==rows[0].name || sends[0].body.data.text!=='A contextual answer' || sends[0].headers['x-frappe-csrf-token']!=='synthetic-csrf-token') throw new Error('Reply contract mismatch')
-    await quote.getByRole('button',{name:'Message actions',exact:true}).click();await Promise.all([page.waitForResponse(r=>r.url().includes('relay_core.messaging.send')),page.getByRole('menuitem',{name:'Clear reaction',exact:true}).click()]); await waitSend(2)
+    await quote.getByRole('button',{name:'Add reaction',exact:true}).click();await Promise.all([page.waitForResponse(r=>r.url().includes('relay_core.messaging.send')),page.getByRole('button',{name:'Remove reaction',exact:true}).click()]); await waitSend(2)
     if(sends[1].body.kind!=='reaction' || sends[1].body.data.emoji!=='') throw new Error('Reaction was not cleared')
     await page.locator('.composer-options summary').click()
     await page.getByLabel('Type',{exact:true}).selectOption('location')

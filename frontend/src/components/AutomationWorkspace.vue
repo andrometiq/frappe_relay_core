@@ -132,7 +132,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
           <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
-          <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'event' : 'event rule' }}</h2><Button label="Dismiss" :disabled="busy" @click="draft = null" /></div>
+          <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'event' : 'event rule' }}</h2><Button icon="x" aria-label="Dismiss editor" title="Dismiss editor" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="titleCaption" label="Title" required :disabled="busy" />
           <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" :kind="skill ? 'doctype' : 'business_doctype'" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">

@@ -72,5 +72,8 @@ has_permission['Relay Chat Folder'] = 'relay_core.chat_folders.permission'
 permission_query_conditions['Relay Chat Folder'] = 'relay_core.chat_folders.query'
 
 # Configured Relay Document Actions add a "Send on WhatsApp" button to their desk forms.
-boot_session = "relay_core.document_actions.boot_session"
-app_include_js = ["/assets/relay_core/js/document_actions.js"]
+boot_session = ["relay_core.document_actions.boot_session", "relay_core.whatsapp_redirects.boot_session"]
+app_include_js = ["/assets/relay_core/js/document_actions.js", "/assets/relay_core/js/whatsapp_redirects.js"]
+
+# Old /whatsapp links open /relay once WhatsApp Core is switched off or removed.
+page_renderer = ["relay_core.whatsapp_redirects.WhatsAppRedirectPage"]

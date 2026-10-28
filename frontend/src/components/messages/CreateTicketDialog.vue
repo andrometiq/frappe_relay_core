@@ -3,19 +3,30 @@ import { computed, ref, watch } from 'vue'
 import { Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
 import RemoteLinkField from '../fields/RemoteLinkField.vue'
 import { coreApi } from '../../services/coreApi'
+import { useTicketSettings } from '../../composables/useTicketSettings'
+import { pickerOptions } from '../../services/ticketSettings'
 import { TICKET_PRIORITIES, ticketPayload, ticketRoute, ticketSubject } from '../../services/ticketForm'
 
 const open = defineModel({ type: Boolean, default: false })
 const props = defineProps({ contact: String, message: Object, quoted: Boolean, contactName: String })
 const emit = defineEmits(['created'])
-const form = ref({ subject: '', brief: '', priority: 'Medium', assignedTo: '', tagged: [] })
+const { settings, load: loadSettings } = useTicketSettings()
+const form = ref({ subject: '', brief: '', priority: 'Medium', category: '', ticketType: '', assignedTo: '', tagged: [] })
+const categories = computed(() => pickerOptions(settings.value.categories))
+const types = computed(() => pickerOptions(settings.value.types, '', 'No type'))
 const busy = ref(false), error = ref('')
 const colleagues = computed(() => ({ method: 'collaboration.colleagues', params: { contact: props.contact }, readOnly: busy.value }))
-const ready = computed(() => form.value.subject.trim() && props.message?.name)
+const ready = computed(() => form.value.subject.trim() && form.value.category && props.message?.name)
 
 function prepare() {
-  form.value = { subject: ticketSubject(props.message, props.contactName ? 'Follow up with ' + props.contactName : 'Follow up'), brief: '', priority: 'Medium', assignedTo: '', tagged: [] }
+  form.value = { subject: ticketSubject(props.message, props.contactName ? 'Follow up with ' + props.contactName : 'Follow up'), brief: '', priority: 'Medium', category: categories.value[0]?.value || '', ticketType: '', assignedTo: '', tagged: [] }
   error.value = ''
+  loadSettings().then(reconcile, e => { error.value = e.message })
+}
+function reconcile() {
+  const has = (options, value) => options.some(option => option.value === value)
+  if (!has(categories.value, form.value.category)) form.value.category = categories.value[0]?.value || ''
+  if (!has(types.value, form.value.ticketType)) form.value.ticketType = ''
 }
 function tag(values) {
   if (values.length > 20) { error.value = 'Tag at most 20 colleagues'; return }
@@ -31,6 +42,7 @@ async function create() {
   finally { busy.value = false }
 }
 watch(open, value => { if (value) prepare() }, { immediate: true })
+watch(settings, () => { if (open.value) reconcile() })
 </script>
 
 <template>
@@ -39,6 +51,10 @@ watch(open, value => { if (value) prepare() }, { immediate: true })
       <blockquote v-if="quoted && message" class="create-ticket-quote">{{ ticketSubject(message, 'Attachment or message without text') }}</blockquote>
       <FormControl v-model="form.subject" label="Subject" required maxlength="140" :disabled="busy" />
       <FormControl v-model="form.brief" type="textarea" label="Description" maxlength="4000" rows="3" placeholder="What needs to happen?" :disabled="busy" />
+      <div class="create-ticket-row">
+        <FormControl v-model="form.category" type="select" label="Category" :options="categories" :disabled="busy" />
+        <FormControl v-if="settings.types.length" v-model="form.ticketType" type="select" label="Type" :options="types" :disabled="busy" />
+      </div>
       <div class="create-ticket-row">
         <FormControl v-model="form.priority" type="select" label="Priority" :options="TICKET_PRIORITIES" :disabled="busy" />
         <RemoteLinkField v-model="form.assignedTo" :field="{ ...colleagues, label: 'Assign to', placeholder: 'Search colleagues…' }" />

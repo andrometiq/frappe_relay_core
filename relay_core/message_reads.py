@@ -38,33 +38,80 @@ def mark(contact, messages):
         doc = frappe.get_doc('Relay Message', name); doc.check_permission('read')
         if doc.relay_contact != contact: frappe.throw('Message belongs to another conversation', frappe.PermissionError)
         frappe.get_doc('Relay Channel', doc.channel).check_permission('read')
-    user = frappe.session.user
-    from relay_core.inbox import state_key
-    with frappe.cache.lock('relay-inbox-' + state_key(contact), timeout=15, blocking_timeout=3):
-        previous = getattr(frappe.flags, 'relay_read_write', False)
-        frappe.flags.relay_read_write = True
-        try:
-            state_name=frappe.db.get_value('Relay Conversation State',{'state_key':state_key(contact)},'name')
-            state=frappe.get_doc('Relay Conversation State',state_name) if state_name else frappe.new_doc('Relay Conversation State')
-            if not state.get('exact_reads'):
-                state.user=user;state.relay_contact=contact;state.state_key=state_key(contact)
-                state.read_baseline=state.last_read or '';state.exact_reads=1
-                state.save()
-            changed = False
-            for name in names:
-                key = hashlib.sha256((user+':'+name).encode()).hexdigest()
-                if not frappe.db.exists('Relay Message Read', {'read_key':key}):
-                    frappe.get_doc({'doctype':'Relay Message Read','user':user,'relay_contact':contact,'message':name,'read_key':key}).insert(ignore_permissions=True)
-                    changed = True
-            if changed:
-                from relay_core.realtime import contact_changed
-                contact_changed(contact, 'reads')
-            frappe.db.commit()
-        finally: frappe.flags.relay_read_write = previous
+    from relay_core.conversation_state import fresh_write
+    fresh_write(lambda: record_contact_reads(contact, names))
     from relay_core import whatsapp_presence
     try: whatsapp_presence.mark_read(contact, names)
     except Exception: frappe.log_error('WhatsApp read receipt was not queued')  # Operator reads stay recorded.
     return {'marked':names}
+
+
+def record_contact_reads(contact, names):
+    from relay_core.conversation_state import start_exact_reads
+    start_exact_reads(contact)
+    if insert_reads([(contact, name) for name in names]):
+        from relay_core.realtime import contact_changed
+        contact_changed(contact, 'reads')
+    frappe.db.commit()
+
+
+def insert_reads(rows) -> bool:
+    """Store the session user's reads of (contact, message) rows once. Return True when a read is new.
+
+    Rows get hash names, as the shared naming series row serializes every reader."""
+    user, now = frappe.session.user, frappe.utils.now_datetime()
+    keys = {hashlib.sha256((user+':'+message).encode()).hexdigest(): (contact, message) for contact, message in rows}
+    known = set(frappe.get_all('Relay Message Read', filters={'read_key':['in',list(keys)]}, pluck='read_key'))
+    new = [(frappe.generate_hash(length=10), now, now, user, user, user, contact, message, key)
+           for key, (contact, message) in keys.items() if key not in known]
+    if new:
+        frappe.db.bulk_insert('Relay Message Read', ['name','creation','modified','owner','modified_by','user','relay_contact','message','read_key'],
+                              new, ignore_duplicates=True)
+    return bool(new)
+
+
+@frappe.whitelist(methods=['POST'])
+def mark_chat(contact, read=1):
+    """Mark the session user's chat read, or its newest incoming message unread, from the chat list.
+
+    It changes only this user's read state and sends no read receipt to the customer."""
+    require_access(); readable_contact(contact)
+    if str(read) not in ('0', '1'):
+        frappe.throw('Invalid read flag')
+    from relay_core.conversation_state import fresh_write
+    fresh_write(lambda: set_chat_read(contact, str(read) == '1'))
+    from relay_core.inbox import unread_count
+    return {'contact': contact, 'unread': unread_count(contact)}
+
+
+def set_chat_read(contact, read):
+    """Read moves both read positions to the newest message, so no per-message rows are written.
+    Unread drops the user's read of the newest incoming message and, when the baseline covers it, moves the baseline
+    to the message before it."""
+    from relay_core.conversation_state import STATE, ensure_state, start_exact_reads
+    filters = {'relay_contact': contact} if read else {'relay_contact': contact, 'direction': 'Incoming', 'legacy_source': ['is', 'not set']}
+    newest = newest_message(filters)
+    if not newest:
+        return
+    name = ensure_state(contact)
+    start_exact_reads(contact)
+    current = frappe.db.get_value(STATE, name, ['last_read', 'read_baseline'], as_dict=True, for_update=True)
+    if read:
+        values = {field: newest for field in ('last_read', 'read_baseline') if (current.get(field) or '') < newest}
+    else:
+        frappe.db.delete('Relay Message Read', {'user': frappe.session.user, 'message': newest})
+        values = {'read_baseline': newest_message({'relay_contact': contact, 'name': ['<', newest]}) or ''} if (current.read_baseline or '') >= newest else {}
+    if values:
+        frappe.db.set_value(STATE, name, values, update_modified=False)
+    from relay_core.realtime import contact_changed
+    contact_changed(contact, 'reads')
+    frappe.db.commit()
+
+
+def newest_message(filters):
+    """The newest message the session user can read under these filters; message names grow with time."""
+    rows = frappe.get_list('Relay Message', filters=filters, order_by='name desc', limit_page_length=1, pluck='name')
+    return rows[0] if rows else None
 
 
 @frappe.whitelist(methods=['GET'])

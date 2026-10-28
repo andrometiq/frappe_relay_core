@@ -92,8 +92,11 @@ async function attachFile(event) {
   if (attachment.value) kind.value=requestedAttachmentKind.value;
   else attachment.value=previous;
 }
-const props = defineProps({ recipient: String });
-const emit = defineEmits(["template", "note"]);
+// `noteOpen` marks the Internal note tab while the notes panel is open.
+const props = defineProps({ recipient: String, contactName: String, noteOpen: Boolean });
+const emit = defineEmits(["template", "note", "reply"]);
+// Only typing fields expand the composer. A button press must not move the tabs before its click lands.
+const expandOn = event => { if (event.target.matches("textarea, input:not([type=file]), select")) focused.value = true; };
 const { options: sendOptions } = useSendChannel();
 // On a site with several WhatsApp numbers the "Send via" number picker replaces the channel menu.
 const numbers = inject(sendNumbersKey, null);
@@ -151,6 +154,7 @@ watch(
 );
 useRealtimeRefresh([], ['messages'], checkWindow);
 watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
+const windowClosedReason = "The 24-hour window is closed. Send an approved template.";
 const windowHint = computed(() => {
   const seconds = windowState.value.remaining_seconds;
   if (!windowState.value.open || !Number.isFinite(seconds)) return "";
@@ -214,27 +218,27 @@ function keydown(event) {
 }
 </script>
 <template>
-  <form class="message-composer compact-composer" :class="{'is-expanded': expanded}" @focusin="focused = true" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="canSend && send()">
+  <form class="message-composer compact-composer" :class="{'is-expanded': expanded}" @focusin="expandOn" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="canSend && send()">
     <div v-if="!isMobile" class="composer-tabs" role="group" aria-label="Compose">
-      <button type="button" class="active" aria-pressed="true">Reply</button>
-      <button type="button" aria-pressed="false" :disabled="busy" @click="emit('note')">Internal note</button>
+      <button type="button" :class="{ active: !noteOpen }" :aria-pressed="!noteOpen" @click="emit('reply'); draftInput?.focus()">Reply</button>
+      <button type="button" :class="{ active: noteOpen }" :aria-pressed="noteOpen" :disabled="busy" @click="emit('note')">Internal note</button>
       <button v-if="can('templates')" type="button" aria-pressed="false" :disabled="busy" @click="emit('template')">Template</button>
     </div>
     <div class="composer-extras">
       <div v-if="isMobile && manyNumbers" class="composer-via-row"><SendNumber /></div>
-      <div v-if="expanded" class="composer-recipient"><slot name="recipient" /></div>
+      <div v-if="expanded && $slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
       <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
       <p v-if="windowError" role="alert" class="text-sm">{{ windowError }}</p>
       <div v-else-if="!windowState.open" class="composer-window-notice">
-        <span>The WhatsApp reply window is closed.</span><Button label="Use an approved template" @click="emit('template')" />
+        <span>{{ windowClosedReason }}</span><Button label="Use an approved template" @click="emit('template')" />
       </div>
       <div v-if="quoting" class="composer-quote">
-        Replying to {{ (source.content || "Message").slice(0, 80) }}<span v-if="sourceContext.message_thread_id"> · Topic {{ sourceContext.message_thread_id }}</span>
-        <Button icon="x" label="Cancel reply" title="Cancel reply" @click="cancelReply" />
+        <span class="composer-quote-body"><strong>{{ source.direction === "Outgoing" ? "You" : props.contactName || "Contact" }}</strong><span>{{ (source.content || "Message").split("\n")[0].slice(0, 120) }}</span></span>
+        <Button icon="x" variant="ghost" aria-label="Cancel reply" title="Cancel reply" @click="cancelReply" />
       </div>
       <div v-else-if="sourceContext.message_thread_id" class="text-xs text-ink-gray-5">Topic {{ sourceContext.message_thread_id }}</div>
       <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
-      <details v-if="expanded && sourceContext.provider === 'WhatsApp' && !manyNumbers" class="composer-identity"><summary><span>From {{ identity?.display_phone_number || 'Number unavailable' }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
+      <details v-if="expanded && sourceContext.provider === 'WhatsApp' && !manyNumbers && identity?.display_phone_number" class="composer-identity"><summary><span>From {{ identity.display_phone_number }}</span><small v-if="windowState.open" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
       <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
       <span v-if="kind !== 'text'" class="composer-selection">{{attachTypes[kind]?.[0] || kind}}
         <Button icon="x" aria-label="Cancel attachment" title="Cancel attachment" :disabled="busy" @click="kind='text';attachment=null" />
@@ -243,7 +247,7 @@ function keydown(event) {
     <div v-if="isMobile" class="composer-plus"><Dropdown :options="plusOptions"><Button icon="plus" variant="ghost" aria-label="Send options, templates and notes" title="Send options, templates and notes" /></Dropdown></div>
     <div class="composer-input" :class="{ 'is-text': kind === 'text' }">
       <textarea ref="draftInput" v-if="kind === 'text'" v-model="body" class="chat-draft" aria-label="Message"
-        :placeholder="isMobile ? 'Message' : props.recipient ? 'Write a reply to ' + props.recipient + '…' : 'Write a message…'"
+        :placeholder="isMobile ? 'Message' : props.recipient ? 'Write a reply to ' + props.recipient + '…' : 'Message'"
         rows="1" @keydown="keydown" @input="resizeDraft();typing()" />
       <div v-else-if="kind === 'location'" class="flex flex-wrap gap-3">
         <FormControl v-model="latitude" type="number" label="Latitude" /><FormControl v-model="longitude" type="number" label="Longitude" />
@@ -270,6 +274,6 @@ function keydown(event) {
     <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
       :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
     <span v-if="!isMobile" class="composer-channel"><SendNumber v-if="manyNumbers" /><slot v-else name="channel" /></span>
-    <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" title="Send · Enter" type="submit" variant="solid" :disabled="!canSend" />
+    <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" :title="windowState.open ? 'Send · Enter' : windowClosedReason" type="submit" variant="solid" :disabled="!canSend" />
   </form>
 </template>

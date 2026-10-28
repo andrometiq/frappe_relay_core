@@ -8,7 +8,7 @@ import { useMobileLayout } from '../../composables/useMobileLayout'
 import { NO_RECORD, withoutFilters } from '../../services/inboxFilters'
 
 /** Inbox filters by channel and business record: a popover under the filter button on desktop, a bottom sheet on the phone. */
-const props = defineProps({ anchor: Object, options: { type: Array, default: () => [] }, manage: Boolean })
+const props = defineProps({ anchor: Object, options: { type: Array, default: () => [] } })
 const open = defineModel('open', { type: Boolean, default: false })
 const filters = defineModel({ type: Object, required: true })
 const emit = defineEmits(['browse'])
@@ -86,9 +86,9 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); re
           <p class="inbox-filter-hint">With no channel ticked, the inbox shows every channel.</p>
         </fieldset>
         <fieldset class="inbox-filter-group">
-          <legend>Business record</legend>
-          <div class="inbox-filter-types" role="radiogroup" aria-label="Business type">
-            <button v-for="[value, label] in [['', 'Any'], ...types.map(type => [type, type]), [NO_RECORD, 'No record']]" :key="value" type="button" role="radio"
+          <legend>Customer or supplier</legend>
+          <div class="inbox-filter-types" role="radiogroup" aria-label="Customer type">
+            <button v-for="[value, label] in [['', 'Any'], ...types.map(type => [type, type])]" :key="value" type="button" role="radio"
               :aria-checked="filters.businessType === value" @click="chooseType(value)">{{ label }}</button>
           </div>
           <p v-if="typeError" role="alert" class="inbox-filter-hint">{{ typeError }}</p>
@@ -97,8 +97,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); re
           <p v-if="filters.businessType && filters.businessType !== NO_RECORD && !filters.businessName" class="inbox-filter-hint">Leave the record empty to show every {{ filters.businessType }}.</p>
         </fieldset>
         <div class="inbox-filter-foot">
-          <button type="button" class="inbox-filter-link" @click="browse('business')"><FeatherIcon name="briefcase" :size="14" />Browse businesses</button>
-          <button v-if="manage" type="button" class="inbox-filter-link" @click="browse('unlinked')"><FeatherIcon name="user-x" :size="14" />Unlinked senders</button>
+          <button type="button" class="inbox-filter-link" @click="browse('business')"><FeatherIcon name="briefcase" :size="14" />Browse customers</button>
           <Button variant="solid" label="Done" @click="open = false" />
         </div>
       </div>

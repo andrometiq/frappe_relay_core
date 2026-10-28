@@ -126,6 +126,27 @@ def check_counts(name, medium, listed, counts):
     print(f'PASS {name} {medium or "all channels"}: ' + ' '.join(f'{mode}={len(listed[mode])}' for mode in MODES))
 
 
+def check_business_rows(name, user, contacts):
+    """Business rows: every record row is readable, a record the user cannot read is never shown, and counts equal rows."""
+    from relay_core import queue_counts
+    from relay_core.permissions import readable_contact
+    frappe.set_user(user)
+    listed = {mode: directory_rows('WhatsApp', mode, rows='business') for mode in ('all', 'unread', 'unlinked')}
+    records = {(row['doctype'], row['record']) for row in listed['all'] if row['kind'] == 'business'}
+    assert all(frappe.get_doc(*record).has_permission('read') for record in records), f'{name}: a listed record is not readable'
+    assert all(not denied(lambda contact=row['name']: readable_contact(contact)) for row in listed['all'] if row['kind'] == 'contact')
+    assert len(records) == len([row for row in listed['all'] if row['kind'] == 'business']), f'{name}: a record is listed twice'
+    hidden = frappe.db.sql("""select distinct l.link_name from `tabRelay Contact` r join `tabDynamic Link` l on l.parent=r.contact
+        and l.parenttype='Contact' and l.parentfield='links' and l.link_doctype='Customer' where r.name in %(contacts)s""", {'contacts': contacts})
+    denied_records = [row[0] for row in hidden if not frappe.get_doc('Customer', row[0]).has_permission('read')]
+    assert not {('Customer', record) for record in denied_records} & records, f'{name}: a record the user cannot read is listed'
+    assert all(row['kind'] == 'contact' and row['unlinked'] for row in listed['unlinked'])
+    counts = queue_counts.read('WhatsApp', rows='business')
+    assert (counts['all'], counts['unread'], counts['unlinked']) == tuple(len(listed[mode]) for mode in ('all', 'unread', 'unlinked')), f'{name}: counts differ from rows'
+    print(f'PASS {name} business rows: records={len(records)} all={len(listed["all"])} unlinked={len(listed["unlinked"])} denied records hidden={len(denied_records)}')
+    return records
+
+
 def check_filters(user):
     """Channel and business filters narrow rows and counts alike, alone and together."""
     from relay_core import queue_counts
@@ -146,6 +167,90 @@ def check_filters(user):
     assert linked and not linked & unlinked, 'A chat with a customer is never in No record'
 
 
+def chat(fixtures, customers, primary=None):
+    """A Relay Contact whose Frappe Contact links to these customers."""
+    person = fixtures.insert('Contact', first_name=fixtures.tag)
+    for index, customer in enumerate(customers, 1):
+        fixtures.insert('Dynamic Link', parent=person, parenttype='Contact', parentfield='links', link_doctype='Customer',
+                        link_name=customer, idx=index)
+    return fixtures.insert('Relay Contact', contact=person, display_name=fixtures.tag, primary_doctype=primary and 'Customer',
+                           primary_name=primary)
+
+
+def message(fixtures, contact, channel, minute, business=None):
+    sent = frappe.utils.add_to_date('2030-01-01 10:00:00', minutes=minute)
+    name = fixtures.insert('Relay Message', relay_contact=contact, channel=channel, direction='Incoming', content=f'{fixtures.tag} {minute}',
+                           sent_at=sent, business_doctype=business and 'Customer', business_name=business)
+    frappe.db.set_value('Relay Contact', contact, {'last_message': name, 'last_message_at': sent}, update_modified=False)
+    return name
+
+
+def record_row(customer):
+    from relay_core import inbox
+    rows = inbox.directory(rows='business', business_type='Customer', business_name=customer)['items']
+    return next(row for row in rows if row['kind'] == 'business' and row['record'] == customer)
+
+
+def check_record_ownership(fixtures):
+    """A record shows the preview, activity and unread count of its own thread: unstamped history belongs only to the
+    chat's primary record, and every chat counts, not only the first 20."""
+    from relay_core import business_inbox
+    frappe.set_user('Administrator')
+    channel = frappe.get_all('Relay Channel', filters={'channel': 'WhatsApp'}, pluck='name', limit_page_length=1)[0]
+    owner, other, crowded = (fixtures.insert('Customer', customer_name=fixtures.tag + suffix) for suffix in ('-owner', '-other', '-crowded'))
+    shared = chat(fixtures, [owner, other], primary=owner)
+    stamped = message(fixtures, shared, channel, 1, business=other)
+    message(fixtures, shared, channel, 2)
+    newest = message(fixtures, shared, channel, 3)
+    for customer, preview, unread in ((owner, newest, 2), (other, stamped, 1)):
+        thread = business_inbox.messages('Customer', customer)['items']
+        row = record_row(customer)
+        assert [item['name'] for item in thread][-1] == preview and len(thread) == unread, f'{customer}: unexpected thread'
+        assert row['latest_preview'] == frappe.db.get_value('Relay Message', preview, 'content'), f'{customer}: preview is not from its thread'
+        assert row['unread'] == unread, f'{customer}: unread {row["unread"]} differs from its thread {unread}'
+    assert record_row(other)['last_message_at'].startswith('2030-01-01 10:01'), 'Unstamped history moves only its owner'
+    members = [chat(fixtures, [crowded]) for _ in range(25)]
+    for minute, member in enumerate(members, 10):
+        message(fixtures, member, channel, minute)
+    row = record_row(crowded)
+    assert (row['contact_count'], row['unread']) == (25, 25), f'A record counts every chat: {row["contact_count"]}, {row["unread"]}'
+    assert row['contact'] == members[-1], 'The newest chat gives the preview'
+    print('PASS record previews and unread follow thread ownership; 25 chats all count')
+
+
+def unread_records(customer):
+    from relay_core import inbox
+    rows = inbox.directory(mode='unread', rows='business', business_type='Customer', business_name=customer)['items']
+    return [row['record'] for row in rows if row['kind'] == 'business']
+
+
+def check_link_rules(fixtures):
+    """Unstamped ownership in rows, unread tab and counts uses the thread's candidates: more than 50 raw links of any
+    type give no owner, and a link whose record is gone is not a candidate."""
+    from relay_core import business_inbox, queue_counts
+    frappe.set_user('Administrator')
+    channel = frappe.get_all('Relay Channel', filters={'channel': 'WhatsApp'}, pluck='name', limit_page_length=1)[0]
+    enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
+    disabled = next(doctype for doctype in ('Lead', 'Project', 'Address', 'Note') if doctype not in enabled)
+    crowded, valid = (fixtures.insert('Customer', customer_name=fixtures.tag + suffix) for suffix in ('-capped', '-valid'))
+    capped = chat(fixtures, [crowded], primary=crowded)
+    person = frappe.db.get_value('Relay Contact', capped, 'contact')
+    for index in range(2, 52):
+        fixtures.insert('Dynamic Link', parent=person, parenttype='Contact', parentfield='links', link_doctype=disabled,
+                        link_name=f'{fixtures.tag}-{disabled}-{index}', idx=index)
+    stale = chat(fixtures, [valid, fixtures.tag + '-deleted'])
+    for contact in (capped, stale):
+        message(fixtures, contact, channel, 40)
+    for customer, unread in ((crowded, 0), (valid, 1)):
+        thread = business_inbox.messages('Customer', customer)['items']
+        assert len(thread) == unread, f'{customer}: thread has {len(thread)} messages, expected {unread}'
+        assert record_row(customer)['unread'] == unread, f'{customer}: row unread differs from its thread'
+        assert unread_records(customer) == ([customer] if unread else []), f'{customer}: Unread tab differs from its thread'
+        counts = queue_counts.read(rows='business', business_type='Customer', business_name=customer)
+        assert counts['unread'] == unread, f'{customer}: unread count {counts["unread"]} differs from its thread {unread}'
+    print('PASS 51 raw links give no unstamped owner; a deleted link target is not a candidate')
+
+
 def main():
     frappe.init(site=SITE, sites_path=SITES)
     frappe.connect()
@@ -162,8 +267,12 @@ def main():
         assert visible['team'] and visible['multi'] and visible['claim'], 'Every scenario must show some conversations'
         assert visible['restricted'] < visible['team'], 'User permissions must narrow the team rows'
         assert visible['multi'] - visible['team'], 'Viewer access must add the shared team without its members'
+        shown = {name: check_business_rows(name, users[name], contacts) for name in ('team', 'restricted')}
+        assert shown['restricted'] < shown['team'], 'User permissions must hide some of the team records'
         check_filters('Administrator')
         check_filters(users['team'])
+        check_record_ownership(fixtures)
+        check_link_rules(fixtures)
         frappe.set_user(users['none'])
         from relay_core import inbox, queue_counts
         assert denied(inbox.directory) and denied(queue_counts.read)

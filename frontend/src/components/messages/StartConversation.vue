@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from "vue";
 import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
-import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import ChoiceField from "../fields/ChoiceField.vue";
 import RelaySelect from "../RelaySelect.vue";
+import TemplateMediaField from "./TemplateMediaField.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
 import { useEnabledChannels } from "../../composables/useEnabledChannels";
@@ -13,14 +13,18 @@ import { readableName } from "../../services/recordTitle";
 import {
   templateParameterDescriptors,
   buildTemplateComponents,
+  templateRendering,
 } from "../../services/templateParameters";
 // `channel` is the WhatsApp number staff picked in "Send via"; the message and its templates go through that number.
 // A business record lists one endpoint per number, so the picked number is preselected there and staff may change it.
-const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String, channel:String });
+// `template` opens straight on an approved template for this chat, as when its reply window is closed.
+const props = defineProps({ contact: String, contactLabel:String, contacts:Array, businessDoctype:String, businessName:String, channel:String, template:Boolean });
 const emit = defineEmits(["close", "sent"]);
 const channelEnabled = useEnabledChannels();
 const capabilities = inject("relayCapabilities", ref({}));
 const sendChannel = computed(() => props.businessName ? destination.value?.channel || "" : props.channel);
+// A header file is uploaded through the number that sends the template.
+const mediaChannel = computed(() => sendChannel.value || destination.value?.channel || "");
 const numberLabel = computed(() => {
   const row = (capabilities.value.whatsapp_numbers || []).find(item => item.name === sendChannel.value);
   return row ? [row.label, row.address].filter(Boolean).join(' · ') : '';
@@ -35,7 +39,7 @@ const shown = ref(true),
   notice = ref(""),
   body = ref(""),
   subject = ref(""),
-  kind = ref(props.channel ? "template" : "text");
+  kind = ref(props.channel || props.template ? "template" : "text");
 const contactQuery = ref(""), contactOptions = ref([]), contactsBusy = ref(false), contactsError = ref("");
 // A contact with several records and no primary picks the record the new chat belongs to.
 const records = ref([]), record = ref("");
@@ -57,10 +61,20 @@ const template = computed(() =>
 const descriptors = computed(() =>
   templateParameterDescriptors(template.value),
 );
+const rendering = computed(() => template.value ? templateRendering(template.value, descriptors.value, parameters.value) : null);
 const templatesBusy = ref(false), templatesError = ref("");
 let templatesGeneration = 0;
 let generation = 0;
 let contactGeneration = 0, contactTimer, contactController;
+
+// A phone number as a name looks like a generated key to recordTitle, which would caption it "Record".
+const contactCaption = (value, fallback) => /^\d{7,}$/.test(String(value || "").trim()) ? "+" + String(value).trim() : readableName(value, fallback);
+async function searchDirectory(query, signal) {
+  const result = await coreApi("inbox.directory", { query }, false, { signal });
+  return (result.items || []).map(row => ({ value: row.name, label: contactCaption(row.display_name, "Contact") }));
+}
+const contactField = computed(() => ({ label: "Contact", placeholder: "Search by name or number…", search: searchDirectory, readOnly: busy.value || !!pending.value,
+  initialOptions: contact.value ? [{ value: contact.value, label: props.contactLabel || contactCaption(contact.value, "Contact") }] : [] }));
 
 function initialContacts() {
   const rows = Array.isArray(props.contacts) ? props.contacts : [];
@@ -126,7 +140,7 @@ async function destinations() {
       !!props.businessName,
     );
     if (current !== generation) return;
-    endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : undefined}));
+    endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : row.channel}));
     endpoint.value = (endpoints.value.find(row => props.businessName && row.channel === props.channel) || endpoints.value[0])?.value || "";
     if (!endpoints.value.length && !props.businessName && !record.value) await loadRecords(current);
   } catch (e) {
@@ -152,11 +166,12 @@ watch(contact, () => {
 watch(templateId, () => (parameters.value = {}), {flush:'sync'});
 
 watch(sendChannel, (_now, before) => { if (before) { templateId.value = ''; parameters.value = {}; } }, {flush: 'sync'});
+watch(mediaChannel, (_now, before) => { if (before) for (const field of descriptors.value) if (field.kind === 'media') delete parameters.value[field.key]; });
 const clearDraft = useStoredDraft(
   () => endpoint.value ? JSON.stringify(['start', document.getElementById('app')?.dataset.user, props.businessDoctype, props.businessName, contact.value, endpoint.value]) : '',
   () => ({body:body.value,subject:subject.value,kind:kind.value,templateId:templateId.value,parameters:parameters.value,pending:pending.value,renewRequestKey:renewRequestKey.value}),
-  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
-  () => ({body:'',subject:'',kind:can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
+  saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=props.template ? 'template' : saved.kind || 'text'; templateId.value=saved.templateId || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
+  () => ({body:'',subject:'',kind:props.template ? 'template' : can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 let templateRequest;
 function loadTemplates(next = false) {
   if (templatesBusy.value) return templateRequest;
@@ -258,7 +273,7 @@ onMounted(async () => {
 onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contactController?.abort(); });
 </script>
 <template>
-  <Dialog v-model="shown" :options="{ title: 'New conversation', size: 'lg' }"
+  <Dialog v-model="shown" :options="{ title: props.template ? 'Send approved template' : 'New conversation', size: 'lg' }"
     ><template #body-content
       ><div class="space-y-4">
         <div v-if="props.businessName" class="start-contact-picker">
@@ -281,14 +296,14 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <p v-else-if="!contactOptions.length">No linked contacts match this search.</p>
           </div>
         </div>
-        <RemoteLinkField v-else v-model="contact" :field="{label:'Contact',method:'inbox.directory',params:{},placeholder:'Search contacts…',inlineResults:true,initialOptions:contact?[{value:contact,label:contactLabel||readableName(contact,'Contact')}]:[],readOnly:busy||!!pending}" />
+        <ChoiceField v-else v-model="contact" :field="contactField" />
         <ChoiceField v-if="records.length" v-model="record" :field="{ label: 'Business record', options: records, readOnly: busy || !!pending }" />
         <ChoiceField v-if="endpoints.length" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
         <p v-else-if="contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
         <p v-else-if="contact" class="text-sm text-ink-gray-5">
           {{ props.businessName
-            ? "No verified channel is available for this contact. Enroll an authenticated identity in Contacts & links."
-            : "No eligible channel identity is available. Review the contact’s binding in Desk, or choose its business record from Business context when it has multiple links." }}
+            ? "This contact has no number we can send to. Add a mobile number to the contact."
+            : "This contact has no WhatsApp number we can send to. Add a mobile number to the contact." }}
         </p>
         <template v-if="destination">
           <p v-if="channel && numberLabel" class="text-sm">Sends an approved template through {{ numberLabel }}.</p>
@@ -326,13 +341,19 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <ErrorMessage :message="templatesError" />
             <Button v-if="templatesError" label="Retry templates" @click="loadTemplates()" />
             <ChoiceField v-model="templateId" :field="{ label: 'Template', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
-              /><FormControl
-              v-for="field in descriptors"
-              :key="field.key"
-              :label="field.label"
-              v-model="parameters[field.key]"
-              :disabled="busy || !!pending"
-          /></template>
+              /><template v-for="field in descriptors" :key="field.key">
+              <TemplateMediaField v-if="field.kind === 'media'" v-model="parameters[field.key]" :field="field"
+                :channel="mediaChannel" :disabled="busy || !!pending" />
+              <FormControl v-else :label="field.label" v-model="parameters[field.key]" :disabled="busy || !!pending" />
+            </template>
+            <div v-if="rendering" class="flex flex-col gap-1 whitespace-pre-wrap rounded-lg bg-surface-gray-2 p-3 text-sm" aria-label="Template preview">
+              <strong v-if="rendering.header">{{ rendering.header }}</strong>
+              <img v-if="rendering.media === 'image' && rendering.mediaUrl" :key="rendering.mediaUrl" :src="rendering.mediaUrl" alt="Image header" class="max-h-40 w-full rounded object-cover" referrerpolicy="no-referrer" @error="$event.target.remove()" />
+              <em v-else-if="rendering.media" class="capitalize">{{ rendering.media }} header</em>
+              <p>{{ rendering.body }}</p>
+              <small v-if="rendering.footer" class="text-ink-gray-5">{{ rendering.footer }}</small>
+              <span v-for="(button, index) in rendering.buttons" :key="index" class="rounded border border-outline-gray-2 px-2 py-1 text-center">{{ button.text }}</span>
+            </div></template>
         </template>
         <ErrorMessage :message="error" />
         <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
@@ -349,10 +370,6 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           @click="send"
         />
         <Button v-if="pending" label="Open conversation" @click="emit('sent',{contact:contact,message:pending.message,status:pending.status});shown=false" />
-        <Button
-          label="Close"
-          :disabled="busy"
-          @click="shown = false"
-        /></div></template
+</div></template
   ></Dialog>
 </template>

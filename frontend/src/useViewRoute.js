@@ -1,14 +1,33 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
-// Old hashes of screens that moved into a section tab.
+// Old hashes of screens that moved into a section tab, and the WhatsApp Core screens a /whatsapp link opens.
 const MOVED_ROUTES = {
   '/incoming': '/contacts?tab=unlinked',
   '/templates': '/whatsapp',
   '/campaigns': '/whatsapp?tab=campaigns',
+  '/inbox': '/messages',
+  '/ai-queue': '/tickets',
+  '/groups': '/messages',
+  '/calling': '/messages',
+  '/health': '/activity',
+  '/flows/automation': '/flows',
 }
 
+// WhatsApp Core links that name a record: #/inbox/<conversation>, #/flows/<flow>, #/flows/meta/<form>.
+const MOVED_PREFIXES = [
+  [/^\/inbox\/([^/]+)$/, id => '/messages?legacy_conversation=' + encodeURIComponent(id)],
+  [/^\/flows\/meta\/[^/]+$/, () => '/whatsapp?tab=forms'],
+  [/^\/flows\/(?:automation\/)?([^/]+)$/, id => '/flows?legacy=' + encodeURIComponent(id)],
+]
+
 export function movedRoute(hash) {
-  return MOVED_ROUTES[hash.slice(1).split('?')[0]] || null
+  const path = hash.slice(1).split('?')[0]
+  if (MOVED_ROUTES[path]) return MOVED_ROUTES[path]
+  for (const [pattern, target] of MOVED_PREFIXES) {
+    const match = path.match(pattern)
+    if (match) return target(decodeURIComponent(match[1] || ''))
+  }
+  return null
 }
 
 // The section tab named in the hash query, such as #/whatsapp?tab=campaigns.

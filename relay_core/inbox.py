@@ -35,30 +35,25 @@ def validate_state(doc):
 
 @frappe.whitelist(methods=['POST'])
 def update(contact, last_read=None, starred=None, folder=None):
+    """Save the read cursor, star and folder of the session user's chat; called on every scroll and chat switch."""
     require_access(); readable_contact(contact)
-    key=state_key(contact)
-    # Serialize per-user updates across tabs and workers without locking other users.
-    with frappe.cache.lock('relay-inbox-'+key, timeout=10, blocking_timeout=3):
-        name=frappe.db.get_value('Relay Conversation State', {'state_key':key},'name')
-        doc=frappe.get_doc('Relay Conversation State',name) if name else frappe.new_doc('Relay Conversation State')
-        doc.user=frappe.session.user;doc.relay_contact=contact;doc.state_key=key
-        if last_read is not None:
-            validate_reference(last_read,'MSG')
-            marker=frappe.get_doc('Relay Message',last_read);marker.check_permission('read')
-            if marker.relay_contact!=contact:frappe.throw('Read position belongs to another contact')
-            if not marker.get('legacy_source'):doc.last_read=last_read
-        if starred is not None:
-            if str(starred) not in ('0','1','True','False'): frappe.throw('Invalid starred flag')
-            doc.starred=int(str(starred) in ('1','True'))
-        if folder is not None:
-            features.require('folders')
-            doc.folder=folder or None
-        old_cursor=frappe.db.get_value('Relay Conversation State',name,'last_read') if name else None
-        doc.last_seen=frappe.utils.now_datetime();doc.save()
-        if doc.last_read != old_cursor:
-            from relay_core.realtime import contact_changed
-            contact_changed(contact,'reads')
-        frappe.db.commit()
+    values={}
+    if last_read is not None:
+        validate_reference(last_read,'MSG')
+        marker=frappe.get_doc('Relay Message',last_read);marker.check_permission('read')
+        if marker.relay_contact!=contact:frappe.throw('Read position belongs to another contact')
+        if not marker.get('legacy_source'):values['last_read']=last_read
+    if starred is not None:
+        if str(starred) not in ('0','1','True','False'): frappe.throw('Invalid starred flag')
+        values['starred']=int(str(starred) in ('1','True'))
+    if folder is not None:
+        features.require('folders')
+        if folder:
+            from relay_core.chat_folders import own_folder
+            own_folder(folder)
+        values['folder']=folder or None
+    from relay_core.conversation_state import fresh_write, save_state
+    fresh_write(lambda: save_state(contact, values))
     return read(contact)
 
 
@@ -71,32 +66,43 @@ def read(contact):
     return dict(state, unread=unread, unread_more=False, assignment=assignment, can_assign=frappe.has_permission('Relay Conversation Assignment', 'write'))
 
 
-MODES = ('all', 'unread', 'read')
+MODES = ('all', 'unread', 'read', 'unlinked')
+ROWS = ('contact', 'business')
 
 
 @frappe.whitelist(methods=['GET'])
 def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None, channel=None,
-              channels=None, business_type=None, business_name=None):
+              channels=None, business_type=None, business_name=None, rows='contact'):
     """Filter before pagination and expose only accessible conversation previews.
 
     `since` returns only conversations active at or after that time, so a live client can update the changed rows.
     `channels` narrows the list to some Relay Channels, such as WhatsApp numbers; `channel` is the one-channel form.
     `business_type` and `business_name` keep the chats of one business type or record; `none` keeps chats without one.
-    Read keeps the chats without unread incoming messages for the session user."""
+    Read keeps the chats without unread incoming messages for the session user; Unlinked keeps chats without a business record.
+    A search matches every word of the name in any order, or a mobile number or email of the chat.
+    `rows='business'` gives one row per readable business record and contact rows only for chats that no readable record
+    covers; its cursor is opaque and it pages forward only."""
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>140 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
-    if str(starred) not in ('0','1') or mode not in MODES:
+    if str(starred) not in ('0','1') or mode not in MODES or rows not in ROWS or rows=='business' and before:
         frappe.throw('Invalid conversation filter')
     from pypika import Order
     from pypika.functions import Coalesce
     from relay_core.inbox_filters import business_filter, channel_names as chosen_channels
-    contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
+    contact=frappe.qb.DocType('Relay Contact')
     channel_names=chosen_channels(medium, channel, channels)
     activity=Coalesce(contact.last_message_at,contact.creation)
     search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters={},
-                               ignore_permissions=False,order_by='',limit=31)
-    search=filtered_contacts(search, channel_names, business_filter(business_type, business_name), mode)
+                               ignore_permissions=False,order_by='',limit=None if rows=='business' else 31)
+    search=filtered_contacts(search, channel_names, business_filter(business_type, business_name),
+                             'unlinked' if mode=='unlinked' else 'all' if rows=='business' else mode)
+    search=chosen_states(search, starred, folder, team)
+    if rows=='business':
+        if channel_names==[]:return {'items':[],'previous':None,'next':None}
+        from relay_core import inbox_records
+        return inbox_records.page(search, query=query, mode=mode, after=after, since=activity_time(since) if since else None,
+                                  channels=channel_names, business_type=business_type, business_name=business_name)
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
         stamp=anchor.last_message_at or anchor.creation
@@ -106,8 +112,18 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         search=search.where(activity>=activity_time(since))
     search=search.orderby(activity,order=Order.asc if before else Order.desc).orderby(contact.name,order=Order.asc if before else Order.desc)
     if query.strip():
-        pattern='%'+ '%'.join('\\'+c if c in '%_\\' else c for c in query.strip())+'%'
-        search=search.where(contact.display_name.like(pattern)|contact.name.like(pattern))
+        from relay_core.inbox_records import contact_search
+        search=search.where(contact_search(query))
+    rows=search.run(as_dict=True) if channel_names!=[] else [];more=len(rows)>30;page=rows[:30]
+    if before:page.reverse()
+    items=directory_items(page,channel_names)
+    return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
+            'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+
+
+def chosen_states(search, starred=0, folder='', team=None):
+    """Keep the chats in the user's folder, starred chats, or the chats assigned to a readable team."""
+    contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
     if folder: features.require('folders')
     if folder or str(starred)=='1':
         states=frappe.qb.from_(saved).select(saved.relay_contact).where(saved.user==frappe.session.user)
@@ -120,23 +136,25 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         readable_filter_team(team)
         assignment=frappe.qb.DocType('Relay Conversation Assignment')
         search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.team==team)))
-    rows=search.run(as_dict=True) if channel_names!=[] else [];more=len(rows)>30;page=rows[:30]
-    if before:page.reverse()
-    items=directory_items(page,channel_names)
-    return {'items':items,'previous':{'before':page[0].name} if page and (more if before else bool(after)) else None,
-            'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
+    return search
 
 
 def filtered_contacts(query, channels=None, business=None, mode='all'):
     """Narrow a Relay Contact query to the chosen channels, business record and read state.
 
-    Unread and Read split the chats on unread incoming messages of the session user on those channels."""
+    Unread and Read split the chats on unread incoming messages of the session user on those channels;
+    Unlinked keeps the chats whose Frappe Contact links to no enabled business type."""
     contact=frappe.qb.DocType('Relay Contact')
     if channels:
         from relay_core.inbox_filters import channel_contacts
         query=query.where(contact.name.isin(channel_contacts(channels)))
     if business is not None:
         query=query.where(business)
+    if mode=='unlinked':
+        links=frappe.qb.DocType('Dynamic Link');types=frappe.qb.DocType('Relay Contact Type')
+        linked=(frappe.qb.from_(links).select(links.parent).where(links.parenttype=='Contact').where(links.parentfield=='links')
+                .where(links.link_doctype.isin(frappe.qb.from_(types).select(types.business_doctype).where(types.enabled==1))))
+        query=query.where(contact.contact.isnull()|contact.contact.notin(linked))
     if mode in ('unread','read'):
         unseen=_unread_query(['relay_contact'])
         if channels:unseen=unseen.where(frappe.qb.DocType('Relay Message').channel.isin(channels))
@@ -393,18 +411,8 @@ def save_view(contact, message, channel='', offset=0, at_bottom=0):
     except (ValueError, TypeError): frappe.throw('Invalid viewport offset')
     if not -2000 <= offset <= 2000 or str(at_bottom) not in ('0','1'):
         frappe.throw('Invalid viewport position')
-    key = state_key(contact)
-    with frappe.cache.lock('relay-inbox-'+key, timeout=10, blocking_timeout=3):
-        name = frappe.db.get_value('Relay Conversation State', {'state_key':key}, 'name')
-        if not name:
-            state=frappe.get_doc({'doctype':'Relay Conversation State','state_key':key,'user':frappe.session.user,'relay_contact':contact}).insert()
-            name=state.name
-        raw = frappe.db.get_value('Relay Conversation State', name, 'chat_views', for_update=True)
-        views = json.loads(raw) if isinstance(raw,str) else (raw or {})
-        view_key=channel or 'combined'
-        if view_key not in views and len(views)>=100: views.pop(next(iter(views)))
-        views['_active']=channel
-        views[view_key]={'name':message,'offset':offset,'atBottom':str(at_bottom)=='1'}
-        frappe.db.set_value('Relay Conversation State', name, 'chat_views', json.dumps(views), update_modified=False)
-        frappe.db.commit()
+    view = {'name':message,'offset':offset,'atBottom':str(at_bottom)=='1'}
+    from relay_core.conversation_state import fresh_write, save_chat_view
+    fresh_write(lambda: save_chat_view(contact, channel, view))
     return {'saved':True}
+

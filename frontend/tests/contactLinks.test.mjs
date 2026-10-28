@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessTypeOptions, isPrimaryLink, linkedLabel, linksWith, linksWithout, primaryRequest, recordIcon } from '../src/services/contactLinks.js'
+import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkedLabel, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../src/services/contactLinks.js'
 
 const customer = { doctype: 'Customer', name: 'C1' }, order = { doctype: 'Sales Order', name: 'SO-1' }
 
@@ -39,4 +39,16 @@ test('the chat header counts linked records other than the primary', () => {
   assert.equal(linkedLabel({ primary: null, link_count: 2 }), '2 linked')
   assert.equal(linkedLabel({ primary: null, link_count: 0 }), '')
   assert.equal(linkedLabel(null), '')
+})
+
+test('one link search covers every type, names the type and skips a type that fails', async () => {
+  const types = [{ value: 'Customer', label: 'Customer' }, { value: 'Supplier', label: 'Supplier' }]
+  const choices = await searchLinkChoices(types, async doctype => {
+    if (doctype === 'Supplier') throw Error('Not permitted')
+    return [{ name: 'CUST-1', label: 'Anil Garments' }, { name: 'CUST-2' }]
+  })
+  assert.deepEqual(choices.map(row => [row.label, row.description]), [['Anil Garments', 'Customer'], ['CUST-2', 'Customer']])
+  assert.deepEqual(linkFromChoice(choices[0].value), { doctype: 'Customer', name: 'CUST-1' })
+  await assert.rejects(searchLinkChoices(types, async () => { throw Error('Offline') }), /Offline/)
+  assert.deepEqual(await searchLinkChoices([], async () => []), [])
 })

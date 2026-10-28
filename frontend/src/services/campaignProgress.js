@@ -1,6 +1,6 @@
 // Campaign progress shown from counters only; rows are paged separately.
 export const COUNTERS = [
-  ["total", "Recipients"], ["queued", "Waiting"], ["sent", "Sent"], ["delivered", "Delivered"],
+  ["total", "People"], ["queued", "Waiting"], ["sent", "Sent"], ["delivered", "Delivered"],
   ["read", "Read"], ["replied", "Replied"], ["failed", "Failed"], ["skipped", "Skipped"],
 ];
 
@@ -71,9 +71,19 @@ export function messageLabel(campaign) {
   return kind ? kind[0].toUpperCase() + kind.slice(1) : { "messages.send": "Text", "messages.media": "Media" }[campaign?.operation] || "—";
 }
 
+// Text and media reach only numbers that wrote in the last 24 hours; this is normal, not an error.
 export function windowNotice(window) {
   if (!window) return "";
   const total = window.open + window.closed;
-  return `${window.open.toLocaleString()} of ${total.toLocaleString()} numbers messaged you in the last 24 hours and can get this message.`
-    + (window.closed ? ` ${window.closed.toLocaleString()} rows will be marked Failed: Outside the 24-hour reply window.` : "");
+  if (!window.open) return `None of these ${total.toLocaleString()} people wrote to you in the last 24 hours, so this message will not reach them. Use an approved template instead.`;
+  const reach = `${window.open.toLocaleString()} of ${total.toLocaleString()} people wrote to you in the last 24 hours and will get this message.`;
+  return window.closed
+    ? `${reach} The other ${window.closed.toLocaleString()} will be skipped. Use an approved template to reach everyone.`
+    : reach;
+}
+
+// A draft shows only the people count and the skipped rows; every counter shows once sending starts.
+export function shownCounters(status, counts) {
+  if (status !== "Draft") return COUNTERS;
+  return COUNTERS.filter(([key]) => key === "total" || (key === "skipped" && counts?.skipped));
 }

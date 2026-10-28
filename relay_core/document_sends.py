@@ -115,12 +115,12 @@ def report_cell(row, index, column):
     return html.escape(str(frappe.format_value(value, frappe._dict(column))))
 
 
-def upload(channel, name, raw):
-    """Hub media id of the PDF, uploaded through the channel's WhatsApp number."""
+def upload(channel, name, raw, media_type='document', mime_type='application/pdf'):
+    """Hub media id of the file, uploaded through the channel's WhatsApp number."""
     from relay_core.hub_channels import hub_arguments
     from relay_core.whatsapp import HubError, client
     result = client().execute(hub_arguments(channel, {'operation': 'messages.media_upload',
-        'media_type': 'document', 'mime_type': 'application/pdf', 'filename': name,
+        'media_type': media_type, 'mime_type': mime_type, 'filename': name,
         'content_base64': base64.b64encode(raw).decode()}))
     media_id = str(result.get('id') or '')
     if not re.fullmatch(r'[0-9]{1,100}', media_id):

@@ -12,7 +12,8 @@ class ActionPermissionTests(unittest.TestCase):
     def setUp(self):
         self.source = _dict(has_permission=Mock(return_value=True))
         self.fake = SimpleNamespace(session=SimpleNamespace(user='sender'), get_doc=Mock(return_value=self.source),
-                                    DoesNotExistError=LookupError)
+                                    DoesNotExistError=LookupError, permissions=SimpleNamespace(has_permission=Mock(
+                                        side_effect=lambda doctype, ptype, doc, user=None, print_logs=True: doc.has_permission(ptype, user=user))))
         self.enterContext(patch.object(access, 'frappe', self.fake))
         self.reference = self.enterContext(patch.object(access, 'reference', return_value=('Customer', 'C1')))
         self.action = _dict(owner='sender', payload='{}', source_message='source')
@@ -28,6 +29,7 @@ class ActionPermissionTests(unittest.TestCase):
         ticket = _dict(doctype='Relay Ticket', business_doctype='Customer', business_name='C1')
         with patch.object(access, 'candidates', side_effect=AssertionError('a ticket has no contact')):
             self.assertTrue(access.allowed(ticket, user='sender'))
+            self.assertFalse(self.fake.permissions.has_permission.call_args.kwargs['print_logs'], 'A probe must not add denial text')
             self.source.has_permission.return_value = False
             self.assertFalse(access.allowed(ticket, user='sender'))
         message = _dict(doctype='Relay Message', relay_contact='contact', business_doctype='Customer', business_name='C1')

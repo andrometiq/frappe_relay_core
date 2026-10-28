@@ -16,7 +16,6 @@
   /* App bar */
   .v1-shell.relay-shell .v1-header{gap:8px;height:auto;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 12px 10px;border:0;background:transparent}
   .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:24px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
-  .v1-shell.relay-shell .relay-mobile-menu{display:inline-flex;width:40px;height:40px;min-height:40px;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
   .v1-shell.relay-shell .v1-connection.is-connected{display:none}
@@ -102,7 +101,7 @@
   .send-number-hint{margin-left:auto;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}
   .v1-shell.relay-shell .conversation-heading-actions{gap:0}
-  .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-viewers,.conversation-assign,.conversation-ticket){display:none}
+  .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-assign,.conversation-ticket){display:none}
   .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:38px;height:38px;min-height:38px;border-radius:8px}
   .mobile-record-bar{display:flex;flex:none;align-items:center;gap:6px;padding:8px 12px;overflow-x:auto;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);scrollbar-width:none}
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}

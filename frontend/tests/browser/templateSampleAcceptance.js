@@ -17,11 +17,11 @@ async (page) => {
  await p.getByRole('button',{name:'New template',exact:true}).click();
  await p.getByLabel('Header',{exact:true}).selectOption('DOCUMENT');
  await p.locator('input[type=file]').evaluate(input=>{const transfer=new DataTransfer();transfer.items.add(new File(['%PDF-1.7\nfixture'],'sample.pdf',{type:'application/pdf'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));});
- await p.getByText('Sample uploaded: sample.pdf',{exact:true}).waitFor();
- await p.getByText('Use an existing sample handle',{exact:true}).click();
- if(await p.getByLabel('Sample media handle',{exact:true}).inputValue()!=='4:fixture-handle')throw Error('Handle missing');
+ await p.getByText('Uploaded: sample.pdf',{exact:true}).waitFor();
+ if(await p.getByLabel('Sample media handle').count())throw Error('Handle field must not be shown');
+ if(!await p.getByText('document header').isVisible())throw Error('Preview media placeholder missing');
  await p.getByLabel('Header',{exact:true}).selectOption('IMAGE');
- if(await p.getByLabel('Sample media handle',{exact:true}).inputValue()!=='')throw Error('Old sample retained for different header');
+ if(await p.getByText('Uploaded: sample.pdf').count())throw Error('Old sample retained for different header');
  if(calls.length!==1||calls[0].arguments.media_type!=='document')throw Error('Wrong upload request');
  if(errors.length)throw Error(JSON.stringify(errors));
  return {fixture:true,uploadRequests:calls.length,handlePopulated:true,formatChangeClearsHandle:true,errors};
