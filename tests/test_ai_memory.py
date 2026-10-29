@@ -318,7 +318,8 @@ class SchedulingTests(unittest.TestCase):
         where = fake.qb.from_.return_value.select.return_value.where.call_args.args[0]
         self.assertIn('relay_timeline_time', str(where), 'Targets select by sent time, not creation')
 
-    def test_backfill_accepts_only_a_month_before_the_nightly_window(self):
+    @patch('relay_core.ai_features.is_enabled', return_value=True)
+    def test_backfill_accepts_only_a_month_before_the_nightly_window(self, enabled):
         fake = MagicMock()
         fake.db.get_single_value.return_value = 'Summary Model'
         fake.throw.side_effect = ValueError
@@ -332,7 +333,8 @@ class SchedulingTests(unittest.TestCase):
         fake.only_for.assert_called_with('System Manager')
         self.assertEqual(fake.enqueue.call_args.kwargs['month'], '2026-08')
 
-    def test_backfill_can_be_limited_to_one_record_or_address(self):
+    @patch('relay_core.ai_features.is_enabled', return_value=True)
+    def test_backfill_can_be_limited_to_one_record_or_address(self, enabled):
         fake = MagicMock()
         fake.db.get_single_value.return_value = 'Summary Model'
         found = {(*RECORD, 'A'): 'M-1', (*RECORD, 'B'): 'M-2', ('Customer', 'C2', 'A'): 'M-3'}

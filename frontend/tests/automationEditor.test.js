@@ -73,7 +73,7 @@ test('save validation requires complete sender and company scope and bounded own
   assert.deepEqual(eventErrors(draft,[],[],'Email'),[])
   assert.ok(eventErrors({...draft,enabled:1},[],[],'Email').length)
   assert.ok(eventErrors({...draft,reply_style:'x'.repeat(2001)},[],[],'Email').length)
-  const reference={name:'ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
+  const reference={name:'ledger',report:'supplier_ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
   assert.deepEqual(eventErrors(draft,[reference],[],'Email'),[])
   assert.ok(eventErrors(draft,[reference],[],'WhatsApp').length)
   assert.ok(eventErrors({...draft,business_doctype:'Customer'},[reference],[],'Email').length)

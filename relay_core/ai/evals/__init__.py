@@ -6,6 +6,7 @@ from pathlib import Path
 
 import frappe
 from relay_core.business_access import document_name
+from relay_core import ai_features
 
 
 def load_cases(cases):
@@ -16,9 +17,15 @@ def load_cases(cases):
     if not isinstance(cases, list) or not 1 <= len(cases) <= 50:
         raise ValueError('Provide 1–50 eval cases')
     for case in cases:
-        if (not isinstance(case, dict) or set(case) - {'message', 'history', 'expected', 'must_contain', 'must_not_contain'}
+        if (not isinstance(case, dict) or set(case) - {'message', 'history', 'expected', 'must_contain', 'must_not_contain', 'language', 'transcript', 'events'}
                 or not isinstance(case.get('message'), str) or not 1 <= len(case['message']) <= 4000):
             raise ValueError('Each eval case needs a message of 1–4000 characters')
+        if case.get('language') not in (None, 'Malayalam', 'Hindi', 'Tamil', 'English'):
+            raise ValueError('Unsupported eval language')
+        if 'transcript' in case and (not isinstance(case['transcript'], str) or not 1 <= len(case['transcript']) <= 4000):
+            raise ValueError('Use a bounded voice transcript')
+        if 'events' in case and (not isinstance(case['events'], str) or len(case['events']) > 2000):
+            raise ValueError('Use bounded synthetic event facts')
         expected = case.get('expected')
         expected = [expected] if isinstance(expected, str) else expected
         if not isinstance(expected, list) or not expected or any(item not in ('reply', 'handoff', 'decline') for item in expected):
@@ -44,16 +51,20 @@ def grade(case, decision):
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
     from relay_core.flows.actions import definitions
     outcome = 'decline' if decision.get('decline') else 'handoff' if decision.get('handoff') else 'reply'
+    from relay_core.ai.language import notice, detect
+    text = case.get('transcript') or case.get('message', '')
     if outcome == 'decline':
-        reply = PRIVACY_REPLY
+        reply = notice('decline', text, PRIVACY_REPLY)
     elif outcome == 'handoff':
-        reply = ACKNOWLEDGEMENT
+        reply = notice('handoff', text, ACKNOWLEDGEMENT)
     else:
         registered = definitions() if decision.get('actions') else {}
         reply = '\n'.join([decision.get('reply', ''), *(row['parameters']['text']
             for row in decision.get('actions', []) if registered[row['action']]['effect'] == 'reply')]).strip()
     expected = case['expected'] if isinstance(case['expected'], list) else [case['expected']]
     reasons = []
+    if case.get('language') and detect(reply)['language'] != case['language']:
+        reasons.append('Reply language/script does not match ' + case['language'])
     if outcome not in expected:
         reasons.append(f'Expected {" or ".join(expected)}, got {outcome}')
     if outcome == 'reply' and not reply:
@@ -69,6 +80,7 @@ def grade(case, decision):
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def run(skill, model=None, cases=None, allow_live=False):
     """Run saved cases through the same text decision used by decide(), with normal AI call logs.
 
@@ -112,8 +124,13 @@ def run(skill, model=None, cases=None, allow_live=False):
     results = []
     for index, case in enumerate(cases, 1):
         try:
-            decision = decide_text(selected, case['message'], selected.run_as_user, business, scope,
-                                   copy.deepcopy(case.get('history', [])))
+            from types import SimpleNamespace
+            from relay_core.ai.language import incoming
+            text = incoming({'message_type': 'voice' if case.get('transcript') else 'text',
+                             'transcript': case.get('transcript'), 'content': case['message']})
+            reference = SimpleNamespace(prompt={'reference_data': {'events': case['events']}}, used=None) if case.get('events') else None
+            decision = decide_text(selected, text, selected.run_as_user, business, scope,
+                                   copy.deepcopy(case.get('history', [])), reference)
             result = grade(case, decision)
         except Exception as error:
             # Provider errors can contain private payloads; expose only the error class.

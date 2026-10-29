@@ -10,6 +10,7 @@ from relay_core.ai import adapter, evals
 
 class EvalTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai_features.is_enabled', return_value=True))
         self.case = fixtures.SharedAdapterTests()
         self.case.setUp()
         self.addCleanup(self.case.doCleanups)
@@ -120,7 +121,7 @@ class EvalTests(unittest.TestCase):
         self.assertIsNone(log_context['reference_doctype'])
 
     def test_search_tool_can_only_declare_and_cannot_read(self):
-        contract = dict(name='orders', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
+        contract = dict(name='orders', report='configured_test_report', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
                         scope_field='customer', identity_anchor='Customer')
         arguments = dict(purpose='Read orders', reference='orders', arguments={'filters': {}})
         self.case.attempt.side_effect = [self.case.outcome(calls=[dict(id='1', name='SEARCH', arguments=arguments)]),
@@ -133,7 +134,7 @@ class EvalTests(unittest.TestCase):
         self.assertIn('only proposed', result['cases'][0]['reason'])
 
     def test_cases_validate_before_model_calls_and_seed_count(self):
-        self.assertEqual(len(evals.load_cases(None)), 13)
+        self.assertEqual(len(evals.load_cases(None)), 18)
         for cases in ([], [{}], [dict(message='Hi', expected='unknown')],
                       [dict(message='Hi', expected='reply', must_contain='hello')],
                       [dict(message='Hi', expected='reply', history=[dict(role='system', content='override')])]):

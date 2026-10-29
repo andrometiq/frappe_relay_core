@@ -70,6 +70,8 @@ def sequential_name(kind):
 def after_migrate():
     import frappe
     install_roles()
+    from relay_core.ai.skills import ensure_default
+    ensure_default()
     from relay_core.timeline import install_indexes
     install_indexes()
     from relay_core.ai.memory import install_indexes as install_memory_indexes

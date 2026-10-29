@@ -83,3 +83,11 @@ page_renderer = ["relay_core.whatsapp_redirects.WhatsAppRedirectPage"]
 
 # A Relay AI Event rebuilds its memory when one of its attachments is added, changed or removed.
 doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for event in ('on_update', 'after_delete')}
+
+# Cover generic Desk/REST access as well as the dedicated AI APIs.
+for _doctype in ('Relay AI Skill', 'Relay AI Knowledge', 'Relay AI Event', 'Relay AI Event Build',
+                 'Relay Memory', 'Relay AI Provider', 'Relay Learned Procedure', 'Relay Automation Policy',
+                 'Relay Conversation Summary', 'Relay Message Translation'):
+    has_permission[_doctype] = 'relay_core.ai_features.document_permission'
+    permission_query_conditions[_doctype] = 'relay_core.ai_features.query_condition'
+    doc_events.setdefault(_doctype, {})['validate'] = 'relay_core.ai_features.validate_document'

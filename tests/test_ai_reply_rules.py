@@ -104,7 +104,7 @@ class ReplyDecisionTests(unittest.TestCase):
 
     def test_foreign_search_is_declined_before_declaration_or_read(self):
         case = self.case
-        contract = dict(name='orders', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
+        contract = dict(name='orders', report='configured_test_report', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
             scope_field='customer', identity_anchor='Customer', identity_fields={'WhatsApp': 'phone'}, company_field='company')
         scope = dict(provider='WhatsApp', endpoint='15550000001', company='Local Company')
         for via_tool in (False, True):

@@ -394,6 +394,7 @@ def fold(business_doctype: str, business_name: str, address: str) -> None:
 
 
 @frappe.whitelist(methods=['POST'])
+@ai_features.required
 def backfill(month: str, business_doctype: str | None = None, business_name: str | None = None,
              address: str | None = None) -> int:
     """One-time fold of `month` (YYYY-MM), which must be before the nightly window, into Month and Year rows.

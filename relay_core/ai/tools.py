@@ -25,11 +25,14 @@ def contracts(skill):
     names = set()
     for row in value:
         required = {'name', 'method', 'doctype', 'fields', 'scope_field'}
-        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field'}:
+        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field', 'report'}:
             raise ValueError('Each tool needs name, method, doctype, fields and scope_field')
         if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', row['name']) or row['name'] in names:
             raise ValueError('Tool names must be distinct lowercase identifiers')
         names.add(row['name'])
+        if row.get('report'):
+            from relay_core.ai.reports import validate
+            validate(row, skill.business_doctype)
         if row['method'] not in ('get_doc', 'get_list'):
             raise ValueError('Only get_doc and get_list are allowed')
         from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field

@@ -59,7 +59,8 @@ def trigger(message):
             data = json.loads(data)
         if isinstance(data, dict) and data.get('selection_type') == 'template_button':
             return data.get('selection_id')
-    return (message.content or '').strip()
+    from relay_core.ai.language import incoming
+    return incoming(message).strip()
 
 
 def validate_result(value, names):
@@ -95,15 +96,22 @@ def validate_result(value, names):
 
 
 def select(message, skills, run_id, deadline, *, history=None):
-    if human_request(message.content):
-        return dict(selected=None, scores=[], method='human', reason=human_reason(message.content))
+    from relay_core.ai.language import incoming
+    from relay_core.ai.skills import is_default
+    text = incoming(message)
+    fallback = next((skill for skill in skills if is_default(skill)), None)
+    skills = [skill for skill in skills if not is_default(skill)]
+    if human_request(text):
+        return dict(selected=None, scores=[], method='human', reason=human_reason(text))
     exact = [skill.name for skill in skills if skill.get('exact_trigger') and skill.exact_trigger == trigger(message)]
     if exact:
         return dict(selected=exact[0] if len(exact) == 1 else None, scores=[], method='exact',
                     reason='Exact event trigger' if len(exact) == 1 else 'Ambiguous exact event trigger')
+    if not skills and fallback:
+        return dict(selected=fallback.name, scores=[], method='default', reason='Default skill fallback')
     if not skills:
         return dict(selected=None, scores=[], method='none', reason='No enabled event')
-    if len(message.content or '') > MAX_TEXT:
+    if len(text) > MAX_TEXT:
         raise ValueError('Message exceeds matching budget')
     from relay_core.ai.adapter import match
     from relay_core.automation.service import reserve_attempt
@@ -111,9 +119,11 @@ def select(message, skills, run_id, deadline, *, history=None):
     reserve_attempt(frappe._dict(name='matching:' + message.channel,
         daily_limit=sum(int(skill.daily_limit) for skill in skills)))
     value = match(skills[0].ai_model, [{'id': s.name, 'target': s.target} for s in skills],
-                  message.content or '', run_id, deadline, **({'history': history} if history else {}))
+                  text, run_id, deadline, **({'history': history} if history else {}))
     result = validate_result(value, {skill.name for skill in skills})
     if not result['selected']:
-        result['reason'] = (human_reason(message.content) if value['human_request'] else
-            'No confident event match for request: ' + ' '.join((message.content or '').split())[:350])
+        result['reason'] = (human_reason(text) if value['human_request'] else
+            'No confident event match for request: ' + ' '.join(text.split())[:350])
+    if not result['selected'] and fallback and not value['human_request']:
+        result.update(selected=fallback.name, method='default', reason='Default skill fallback')
     return result

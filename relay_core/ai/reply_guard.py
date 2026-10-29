@@ -1,6 +1,7 @@
 """Bounded outgoing privacy checks; names use primary keys, never unindexed title scans."""
 import json
 import re
+import unicodedata
 
 import frappe
 
@@ -18,6 +19,7 @@ class ReplyBlocked(ValueError):
 
 
 def phones(text):
+    text = ''.join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in text)
     for pattern in (DOCUMENT, DATE, MONEY):
         text = pattern.sub('|', text)
     return {digits for match in PHONE.finditer(text)
@@ -40,10 +42,13 @@ def contacts(*evidence):
 
 
 def copied(reply, sources):
-    words = re.findall(r'\w+', reply.casefold())
+    def words_of(text):
+        return ''.join(char if char.isalnum() or unicodedata.category(char).startswith('M') else ' '
+                       for char in text.casefold()).split()
+    words = words_of(reply)
     runs = {tuple(words[i:i + 12]) for i in range(len(words) - 11)}
     for source in sources:
-        words = re.findall(r'\w+', (source or '').casefold())
+        words = words_of(source or '')
         if any(tuple(words[i:i + 12]) in runs for i in range(len(words) - 11)):
             return True
     return False

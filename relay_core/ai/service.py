@@ -25,7 +25,7 @@ def context(skill, message):
         raise ValueError('Channel automation is disabled')
     if message.channel != skill.channel or channel.channel not in ('WhatsApp', 'Telegram', 'Email') or not channel.enabled:
         raise ValueError('Skill channel is unavailable')
-    if message.direction != 'Incoming' or message.message_type not in ('text', '', None, 'photo', 'image'):
+    if message.direction != 'Incoming' or message.message_type not in ('text', '', None, 'photo', 'image', 'voice', 'audio'):
         raise ValueError('This skill requires incoming text or an image')
     from relay_core.identity import authenticated_sender
     from relay_core.automation.provenance import context_of, conversation_key
@@ -44,7 +44,7 @@ def context(skill, message):
         source.check_permission('read')
         source.apply_fieldlevel_read_permissions()
         if any(source.get(field) != message.get(field) for field in
-               ('content', 'message_data', 'provider_context', 'sender_endpoint')):
+               ('content', 'transcript', 'message_data', 'provider_context', 'sender_endpoint')):
             raise frappe.PermissionError('Source message fields are not accessible')
         frappe.get_doc(*business).check_permission('read')
         if not company_allowed(channel.company):
@@ -52,13 +52,17 @@ def context(skill, message):
     scope = dict(sender, site=frappe.local.site, company=channel.company,
         channel=message.channel, conversation=conversation, message=message.name,
         contact=contact.name, person=person.name, business=list(business), user=user)
+    if message.message_type in ('voice', 'audio'):
+        from relay_core.ai.language import incoming
+        scope['transcript_hash'] = hashlib.sha256(incoming(message).encode()).hexdigest()
     return user, business, scope
 
 
 def decide(skill, message, run_id=None, *, deadline=None):
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     user, business, scope = context(skill, message)
-    text = message.content or ''
+    from relay_core.ai.language import incoming
+    text = incoming(message)
     from relay_core.ai.matching import human_request
     if human_request(text):
         return decide_text(skill, text, user, business, scope, [], run_id=run_id, deadline=deadline)
@@ -90,7 +94,7 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text, **(reference.prompt if reference else {})}, default=str)
+        prompt = json.dumps({'history': history, 'incoming': text, **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -204,8 +208,21 @@ def declare_search(run, skill, message, decision):
     run.search_plan, run.stage = json.dumps(record), 'Search'
     statement = (f"I will search {plan['reference']} to {plan['purpose']}. "
                  f"Fields: {', '.join(plan['fields'])}. Search: {canonical(plan['arguments'])}.")
+    from relay_core.ai.language import detect, incoming
+    language = detect(incoming(message))['language']
+    labels = {
+        'Malayalam': ('റിപ്പോർട്ട് പരിശോധിക്കും', 'ലക്ഷ്യം', 'വിവരങ്ങൾ', 'തിരച്ചിൽ',
+            ' ഈ തീയതി പരിധിയും തിരച്ചിലും സ്ഥിരീകരിക്കാൻ അതെ എന്ന് മറുപടി നൽകുക; അല്ലെങ്കിൽ മാറ്റം പറയുക.'),
+        'Hindi': ('रिपोर्ट जाँचूँगा', 'उद्देश्य', 'फ़ील्ड', 'खोज',
+            ' इस तारीख सीमा और खोज की पुष्टि के लिए हाँ लिखें या बदलाव बताएं।'),
+        'Tamil': ('அறிக்கையைச் சரிபார்க்கிறேன்', 'நோக்கம்', 'விவரங்கள்', 'தேடல்',
+            ' இந்த தேதி வரம்பையும் தேடலையும் உறுதிப்படுத்த ஆம் என்று பதிலளிக்கவும் அல்லது மாற்றத்தைக் கூறவும்.'),
+    }.get(language)
+    if labels:
+        statement = (f"{labels[0]}: {plan['reference']}. {labels[1]}: {plan['purpose']}. "
+                     f"{labels[2]}: {', '.join(plan['fields'])}. {labels[3]}: {canonical(plan['arguments'])}.")
     if confirmation_required(skill, plan):
-        statement += ' Please confirm this exact search by replying yes, or tell me what to change.'
+        statement += labels[4] if labels else ' Please confirm this exact search by replying yes, or tell me what to change.'
     if len(statement) > 2000:
         raise ValueError('Search declaration is too large')
     decision.update(reply=statement, search=plan)
@@ -267,7 +284,8 @@ def authorize_search(run_id, skill, contract, arguments):
 
 def pending_search(message, ticket, *, exclude=None, lock=True):
     """Read the latest confirmation candidate; only continue_search consumes it."""
-    if not ticket or (message.content or '').strip().casefold().rstrip('.!') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please'):
+    from relay_core.ai.language import incoming
+    if not ticket or incoming(message).strip().casefold().rstrip('.!।') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please', 'അതെ', 'हाँ', 'हां', 'ஆம்'):
         return None
     filters = {'ticket': ticket}
     if exclude:
@@ -394,7 +412,8 @@ def process(name, *, deadline=None):
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
             elif decision.get('decline'):
                 from relay_core.ai.adapter import PRIVACY_REPLY
-                result = dispatch_reply(run, skill, message, PRIVACY_REPLY, slot='reply')
+                from relay_core.ai.language import message_notice
+                result = dispatch_reply(run, skill, message, message_notice('decline', message, PRIVACY_REPLY), slot='reply')
                 run = lock_run(name)
                 run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
                 internal_save(run)
@@ -497,7 +516,8 @@ def send_reply(message, reply, *, slot='reply'):
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
     from relay_core.ai.adapter import PRIVACY_REPLY
-    if reply != PRIVACY_REPLY:
+    from relay_core.ai.language import message_notice
+    if reply != message_notice('decline', message, PRIVACY_REPLY):
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
@@ -681,7 +701,7 @@ def admit(run):
             if result.get('decline'):
                 from relay_core.ai.adapter import decline_decision
                 run.status = 'Pending'
-                run.decision = json.dumps(dict(decline_decision(contexts[skill.name][0]), scope=scopes[skill.name]))
+                run.decision = json.dumps(dict(decline_decision(contexts[skill.name][0], matching.trigger(message)), scope=scopes[skill.name]))
             episode(run, message)
             internal_save(run)
         frappe.db.commit()

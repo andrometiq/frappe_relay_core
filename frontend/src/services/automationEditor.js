@@ -54,13 +54,14 @@ export function eventErrors(draft, references, actions, provider) {
   const errors = []
   if (!draft.title?.trim()) errors.push('Give the event a readable title.')
   if (!draft.business_doctype) errors.push('Choose a business type.')
-  if (!draft.instructions?.trim()) errors.push('Write the event memory and rules.')
+  if (!draft.instructions?.trim()) errors.push('Write the skill instructions.')
   for (const [key, limit] of [['target', 2000], ['instructions', 8000], ['reply_style', 2000], ['exact_trigger', 140]]) {
     if ((draft[key] || '').length > limit) errors.push(`${referenceName(key)} is too long.`)
   }
   if (draft.enabled && (!draft.target?.trim() || !draft.channel || !draft.ai_model || !draft.run_as_user || !draft.handoff_owner)) errors.push('Enabled events need a target, channel, model, run-as user and handoff owner.')
   if (!(Number(draft.daily_limit) >= 1 && Number(draft.daily_limit) <= 1000)) errors.push('Choose a daily model limit from 1 to 1000.')
   for (const row of references) {
+    if (!row.report) errors.push('Choose a configured report; legacy record references cannot answer data questions.')
     if (!row.name || !row.doctype || !row.scope_field || !row.fields.length) errors.push('Complete each read reference and choose readable fields.')
     if (!row.company_field || !row.identity_fields?.[provider] || row.identity_anchor !== draft.business_doctype) errors.push('Choose the channel, authenticated identity field and company field for every reference.')
   }

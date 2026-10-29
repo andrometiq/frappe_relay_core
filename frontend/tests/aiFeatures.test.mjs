@@ -31,3 +31,22 @@ test('only a System Manager sees the AI switch in Settings', async () => {
   assert.match(settings, /v-if="config\.can_switch_ai" class="workflow-card settings-features"/)
   assert.match(settings, /\{ key: 'ai', label: 'Enable AI features'/)
 })
+
+
+test('knowledge and events pages and direct content loads require AI', async () => {
+  const app = await read('SiteApp.vue')
+  for (const name of ['Knowledge', 'Events']) {
+    assert.match(app, new RegExp("name: '" + name + "'[^}]*ai: true"))
+    assert.equal(navAllowed({name, ai:true, skills:true}, {...manager, ai:false}), false)
+    assert.equal(navAllowed({name, ai:true, skills:true}, {...manager, ai:true}), true)
+  }
+  const content = await read('components/AIContentWorkspace.vue')
+  assert.match(content, /capabilities.value.ai && capabilities.value.skills/)
+  assert.match(content, /if \(!allowed.value\)/)
+  assert.match(content, /ai.knowledge/)
+  assert.match(content, /ai.events/)
+  const editor = await read('components/AutomationWorkspace.vue')
+  assert.match(editor, /capabilities.value.ai && capabilities.value.skills/)
+  assert.match(editor, /Configured reports/)
+  assert.doesNotMatch(editor, /label="Memory and rules"/)
+})
