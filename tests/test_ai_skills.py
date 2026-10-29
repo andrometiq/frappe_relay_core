@@ -582,6 +582,8 @@ class SharedAdapterTests(unittest.TestCase):
             if isinstance(value, Mock): self.attempt = value
 
     def outcome(self, data=None, calls=None):
+        if isinstance(data, dict) and {'reply', 'handoff', 'reason'} <= data.keys():
+            data = {'data_question': False, **data}
         return {'ok': True, 'result': {'data': data, 'tool_calls': calls or [], 'response': {}}}
 
     def test_uses_shared_engine_with_model_deadline_no_extraction_task_alias(self):
@@ -867,6 +869,7 @@ class ConversationIdentityTests(unittest.TestCase):
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_takeover_during_image_observation_prevents_next_model(self):
+        self.f.get_list.return_value = []
         original = self.f.get_doc.side_effect
         self.f.get_doc.side_effect = lambda dt, name: Doc(supports_vision=1) if dt=='AI Model' else Doc() if dt=='Relay Automation Run' else original(dt,name)
         self.message.message_type = 'image'

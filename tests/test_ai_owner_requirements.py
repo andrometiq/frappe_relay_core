@@ -22,7 +22,7 @@ class OwnerBoundaries(unittest.TestCase):
             self.assertFalse(ai_features.document_permission())
             self.assertEqual(ai_features.query_condition(), '1=0')
         with patch.object(ai_features, 'is_enabled', return_value=True):
-            self.assertIsNone(ai_features.document_permission())
+            self.assertTrue(ai_features.document_permission())
             self.assertEqual(ai_features.query_condition(), '')
 
     def test_default_creation_is_idempotent_and_keeps_owner_changes(self):

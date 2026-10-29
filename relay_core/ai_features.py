@@ -36,8 +36,8 @@ def when_enabled(function):
 
 
 def document_permission(doc=None, user=None, permission_type=None):
-    # None preserves DocPerm and other hooks when enabled.
-    return None if is_enabled() else False
+    # Controller hooks may deny access; True leaves role/user permissions in force.
+    return is_enabled()
 
 
 def query_condition(user=None):
