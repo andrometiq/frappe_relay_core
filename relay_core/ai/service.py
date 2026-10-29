@@ -56,14 +56,12 @@ def context(skill, message):
 
 
 def decide(skill, message, run_id=None, *, deadline=None):
-    from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
-    from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     user, business, scope = context(skill, message)
     text = message.content or ''
-    from relay_core.ai.matching import human_request, human_reason
+    from relay_core.ai.matching import human_request
     if human_request(text):
-        return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
+        return decide_text(skill, text, user, business, scope, [], run_id=run_id, deadline=deadline)
     history = conversation_history(skill, message, user, business, scope)
     from relay_core.ai.event_memory import ReplyContext
     # The authenticated sender's own memory of this record, plus events published to its business type.
@@ -80,8 +78,19 @@ def decide(skill, message, run_id=None, *, deadline=None):
         if run_id:
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
+    return decide_text(skill, text, user, business, scope, history, reference, run_id, deadline=deadline)
+
+
+def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None):
+    """Shared text decision; a missing reference means no saved memory or event notes."""
+    from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
+    from relay_core.ai.tools import fingerprint
+    deadline = deadline or time.monotonic() + REPLY_TIMEOUT
+    from relay_core.ai.matching import human_request, human_reason
+    if human_request(text):
+        return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text, **reference.prompt}, default=str)
+        prompt = json.dumps({'history': history, 'incoming': text, **(reference.prompt if reference else {})}, default=str)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -91,12 +100,12 @@ def decide(skill, message, run_id=None, *, deadline=None):
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
             decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope), context=None if decision.get('decline') else reference.used)
-        if reference.lines:
+            return dict(decision, scope=fingerprint(scope), context=reference.used if reference and not decision.get('decline') else None)
+        if reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
             history.pop(0)
-        elif reference.events:
+        elif reference and reference.events:
             reference.events.pop()
         else:
             raise ValueError('Incoming message exceeds the skill prompt budget')
@@ -487,6 +496,10 @@ def send_reply(message, reply, *, slot='reply'):
 
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
+    from relay_core.ai.adapter import PRIVACY_REPLY
+    if reply != PRIVACY_REPLY:
+        from relay_core.ai.reply_guard import check_delivery
+        check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
     try:
         result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))

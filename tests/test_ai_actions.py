@@ -432,6 +432,7 @@ class OrderedReplyDelivery(unittest.TestCase):
 class VerifiedContactExecution(unittest.TestCase):
     """Run context, execution, journal and dispatch together with a local transport fake."""
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.reply_guard.check_delivery'))
         from test_ai_skills import ConversationIdentityTests
         from relay_core.ai.actions import REPLY, reply
         from relay_core import business_access
