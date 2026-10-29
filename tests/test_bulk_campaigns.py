@@ -575,6 +575,9 @@ class ControlTests(unittest.TestCase):
 
 
 class ImportTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(bulk_campaigns, 'sheet_contact', return_value=('existing', None)))
+
     def test_import_marks_duplicates_and_opt_outs_and_inserts_in_chunks(self):
         fields = bulk_sheet.template_fields(POSITIONAL)
         doc = _dict(name='Winter launch', status='Importing', channel='WhatsApp-001', country='IN', source_file='/private/files/a.csv',
