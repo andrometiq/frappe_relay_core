@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
 from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates
@@ -15,8 +16,8 @@ def business_contact(contact, business_doctype, business_name):
     require_access()
     from relay_core.business_inbox import check_type
     check_type(business_doctype)
-    business=frappe.get_doc(business_doctype,business_name);business.check_permission('read')
-    person=frappe.get_doc('Contact',contact);person.check_permission('read')
+    business_document(business_doctype, business_name)
+    person=frappe.get_doc('Contact',contact)
     if not any(link.link_doctype==business_doctype and link.link_name==business_name for link in person.links):
         frappe.throw('Contact is not linked to this business',frappe.PermissionError)
     return person
@@ -121,15 +122,17 @@ def start_business(contact, business_doctype=None, business_name=None):
 def records(contact):
     """Readable records to choose from when the contact has several and none is marked primary."""
     start_contact(contact)
-    from relay_core.business_access import candidates, primary
+    from relay_core.business_access import candidates, primary, allowed_types
     links = candidates(contact)
     if primary(contact, links):
         return []
     rows = []
+    visible = allowed_types()
     for doctype, name in links:
-        doc = frappe.get_doc(doctype, name)
-        if doc.has_permission('read'):
-            title = doc.get(doc.meta.title_field) if doc.meta.title_field else None
+        if doctype in visible:
+            doc = frappe.get_doc(doctype, name)
+            from relay_core.business_groups import title_field
+            title = doc.get(title_field(doctype))
             rows.append({'doctype': doctype, 'name': name, 'title': str(title or name)})
     return rows
 

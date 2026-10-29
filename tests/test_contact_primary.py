@@ -24,6 +24,8 @@ class PrimaryLinkTests(unittest.TestCase):
         self.fake = fake_frappe()
         self.fake.db.get_value.side_effect = lambda *args, **kwargs: self.marked
         self.enterContext(patch.object(access, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.business_groups.title_field', return_value='customer_name'))
+        self.types = self.enterContext(patch.object(access, 'allowed_types', return_value={'Customer', 'Supplier'}))
         self.links = self.enterContext(patch.object(access, 'candidates', return_value=[]))
 
     def test_primary_with_no_one_or_several_links(self):
@@ -65,30 +67,32 @@ class PrimaryLinkTests(unittest.TestCase):
         record.get.return_value = 'Primary customer'
         self.fake.get_doc.return_value = record
         self.assertEqual(access.primary_record('contact'), {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'})
-        record.has_permission.return_value = False
+        self.types.return_value = set()
         self.assertIsNone(access.primary_record('contact'))
 
 class ConversationAccessTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe()
         self.enterContext(patch.object(access, 'frappe', self.fake))
+        self.assignment = self.enterContext(patch('relay_core.permissions.assignment_allowed', return_value=True))
+        self.enterContext(patch.object(access, 'primary', return_value=None))
         self.allowed = self.enterContext(patch.object(access, 'allowed', return_value=False))
         self.contact = self.fake.get_doc.return_value
 
     def test_contact_conversation_shows_every_message_to_its_readers(self):
         message = _dict(doctype='Relay Message', relay_contact='contact', business_doctype='Supplier', business_name='S1')
         self.contact.has_permission.return_value = True
+        self.assertFalse(access.message_allowed(message, user='reader'), 'A shared contact never grants an unassigned type')
+        self.allowed.return_value = True
         self.assertTrue(access.message_allowed(message, user='reader'))
-        self.fake.get_doc.assert_called_with('Relay Contact', 'contact')
-        self.contact.has_permission.assert_called_with('read', user='reader')
 
     def test_contact_conversation_denies_non_readers_and_triage(self):
         message = _dict(doctype='Relay Message', relay_contact='contact')
-        self.contact.has_permission.return_value = False
+        self.assignment.return_value = False
         self.assertFalse(access.message_allowed(message, user='reader'))
-        self.contact.has_permission.return_value = True
+        self.assignment.return_value = True
         self.assertFalse(access.message_allowed(_dict(message, legacy_triage=1), user='reader'))
-        self.fake.get_doc.side_effect = LookupError
+        self.assignment.return_value = False
         self.assertFalse(access.message_allowed(message, user='reader'))
 
     def test_business_timeline_takes_unstamped_messages_only_from_resolved_contacts(self):

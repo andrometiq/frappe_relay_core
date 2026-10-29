@@ -6,7 +6,7 @@ import json
 from contextvars import ContextVar
 import frappe
 from relay_core import ai_features, ticket_settings
-from relay_core.permissions import require_access, readable_contact, sees_all_teams
+from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
 
 _episode_transition = ContextVar('relay_episode_transition', default=None)
@@ -755,13 +755,11 @@ def assign(name, user=''):
 
 
 def permission(doc, user=None, permission_type=None):
-    from relay_core.permissions import can_read_contact_as, company_allowed
-    from relay_core.business_access import allowed, reference
+    from relay_core.permissions import can_read_contact_as
+    from relay_core.business_access import allowed, reference, relay_user
     user = user or frappe.session.user
     if user == 'Administrator': return True
-    if not (user in (doc.owner, doc.get('assigned_to')) or sees_all_teams(user) or doc.messages):
-        return False
-    if doc.get('company') and not company_allowed(doc.company, user): return False
+    if not relay_user(user): return False
     if doc.get('business_doctype') or doc.get('business_name'):
         if not (doc.get('business_doctype') and doc.get('business_name')) or not allowed(doc, user):
             return False
@@ -782,20 +780,14 @@ def permission(doc, user=None, permission_type=None):
 
 def query_condition(user=None):
     from relay_core.business_access import explicit_condition
-    from relay_core.permissions import company_condition
     user = user or frappe.session.user
     if user == 'Administrator': return ''
-    quoted = frappe.db.escape(user)
-    # Ticket messages follow the conversation row rule; a ticket without messages needs ownership.
-    gate = '1=1' if sees_all_teams(user) else (
-        f"(`tabRelay Ticket`.owner={quoted} OR `tabRelay Ticket`.assigned_to={quoted} OR EXISTS "
-        f"(SELECT 1 FROM `tabRelay Ticket Message` o WHERE o.parent=`tabRelay Ticket`.name AND o.parenttype='Relay Ticket'))")
     messages = frappe.qb.get_query('Relay Message', fields=['name'], ignore_permissions=False,
                                    user=user, order_by='').get_sql()
     contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
                                    user=user, order_by='').get_sql()
     links = "t.parent=`tabRelay Ticket`.name AND t.parenttype='Relay Ticket'"
-    return f"""({gate}) AND ({company_condition('Relay Ticket', user)}) AND ({explicit_condition('Relay Ticket', user, allow_empty=True)})
+    return f"""({explicit_condition('Relay Ticket', user, allow_empty=True)})
         AND (EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links}) OR
              (COALESCE(`tabRelay Ticket`.source_hub_event,'')!=''
               AND COALESCE(`tabRelay Ticket`.source_provider_message_key,'')!=''

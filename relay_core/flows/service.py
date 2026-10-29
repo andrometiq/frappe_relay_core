@@ -428,7 +428,8 @@ def scope(run,message, *, handoff=False):
     if not target or target not in candidates(contact.name):raise ValueError('Flow business context is missing or ambiguous')
     if target[0]!=version.business_doctype:raise ValueError('Flow business type changed')
     if source.get('business_name') and target!=(source.business_doctype,source.business_name):raise ValueError('Flow message belongs to another business')
-    frappe.get_doc(*target).check_permission('read')
+    from relay_core.business_access import business_document
+    business_document(*target)
     return version,source,channel
 
 
@@ -655,7 +656,8 @@ def readable_run(run):
         target = reference(source)
     if not target:
         frappe.throw('Flow business context is unavailable', frappe.PermissionError)
-    frappe.get_doc(*target).check_permission('read')
+    from relay_core.business_access import business_document
+    business_document(*target)
     return target
 
 

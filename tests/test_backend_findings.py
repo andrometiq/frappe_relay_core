@@ -27,6 +27,9 @@ class RoutingRegression(RoutingFixtures, unittest.TestCase):
 
 
 class BackendFindings(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch('relay_core.business_access.relay_user', return_value=True))
+
     def fake(self):
         f = Mock(session=_dict(user='manager'), PermissionError=PermissionError,
                  DoesNotExistError=LookupError, ValidationError=ValueError,
@@ -67,6 +70,7 @@ class BackendFindings(unittest.TestCase):
         f=self.fake(); f.get_doc.side_effect=[Mock(has_permission=lambda *a:True),Mock(has_permission=lambda *a:False)]
         with patch.object(telegram,'frappe',f), patch.object(telegram,'require_access'), \
                 patch.object(telegram,'group_binding',return_value=('contact','channel')), \
+                patch.object(business_access,'allowed_types',return_value={'Customer'}), \
                 patch.object(business_access,'candidates',return_value=[('Customer','C'),('Supplier','S')]), \
                 patch.object(telegram,'client') as hub:
             with self.assertRaises(PermissionError): telegram.groups('topics.delete',{'chat_id':-123,'message_thread_id':25})
@@ -158,7 +162,7 @@ class BackendFindings(unittest.TestCase):
     def test_flow_runs_and_cases_check_specific_business(self):
         f=self.fake(); f.get_doc.return_value.check_permission.side_effect=PermissionError
         run=_dict(relay_contact='shared',business_doctype='Supplier',business_name='private')
-        with patch.object(flows,'frappe',f), patch.object(flows,'readable_contact'):
+        with patch.object(flows,'frappe',f), patch.object(flows,'readable_contact'), patch.object(business_access,'business_document',side_effect=PermissionError):
             with self.assertRaises(PermissionError): flows.readable_run(run)
         with patch.object(cases,'frappe',f), patch.object(business_access,'readable_business',side_effect=PermissionError):
             for call in (lambda:cases._read(run),lambda:cases.authorize(run,'recipient')):
@@ -272,37 +276,47 @@ class BackendFindings(unittest.TestCase):
             self.assertEqual([r.name for r in cases.directory('shared')['items']],['own'])
             self.assertEqual([r.name for r in cases.workspace()['items']],['own'])
 
-    def test_old_single_business_note_resolves_scope_for_replies(self):
+    @patch('relay_core.business_access.business_document')
+    def test_old_single_business_note_resolves_scope_for_replies(self, business):
         f=self.fake();f.parse_json.return_value=[]
         note=_dict(relay_contact='contact',messages='[]')
         with patch.object(collaboration,'frappe',f),patch.object(business_access,'reference',return_value=('Customer','customer')),patch.object(collaboration,'readable_contact'):
             collaboration.authorize(note)
         self.assertEqual((note.business_doctype,note.business_name),('Customer','customer'))
 
-    def test_business_note_follows_the_conversation_not_the_business_record(self):
+    @patch('relay_core.business_access.business_document')
+    def test_business_note_requires_conversation_and_business(self, business):
         f=self.fake();f.parse_json.return_value=[]
         note=_dict(relay_contact='contact',messages='[]',business_doctype='Customer',business_name='private')
         with patch.object(collaboration,'frappe',f),patch.object(business_access,'allowed',return_value=False):
             with patch.object(collaboration,'readable_contact') as reader:
                 self.assertIs(collaboration.authorize(note),note)
                 reader.assert_called_once_with('contact')
+                business.assert_called_with('Customer', 'private', None)
+                business.side_effect = PermissionError
+                with self.assertRaises(PermissionError): collaboration.authorize(note)
             with patch.object(collaboration,'readable_contact',side_effect=PermissionError):
                 with self.assertRaises(PermissionError):collaboration.authorize(note)
             with patch.object(permissions,'can_read_contact_as',return_value=False):
                 with self.assertRaises(PermissionError):collaboration.authorize(note,'outsider')
         self.assertEqual((note.business_doctype,note.business_name),('Customer','private'))
 
-    def test_new_business_note_needs_a_link_but_not_business_read(self):
+    @patch('relay_core.business_access.unlinked_contact', return_value=False)
+    @patch('relay_core.business_access.business_document')
+    def test_new_business_note_needs_link_and_business_access(self, business, unlinked):
         f=self.fake()
         with patch.object(collaboration,'frappe',f),patch.object(business_access,'candidates',return_value=[('Customer','C1')]),\
                 patch.object(business_access,'primary',return_value=('Customer','C1')):
             self.assertEqual(collaboration.business_scope('linked',[]),('Customer','C1'))
-            f.get_doc.assert_not_called()
+            business.assert_called_once_with('Customer', 'C1')
+            business.side_effect = PermissionError
+            with self.assertRaises(PermissionError): collaboration.business_scope('linked', [])
             with patch.object(business_access,'frappe',f),self.assertRaises(ValueError):
                 f.throw.side_effect=ValueError
                 collaboration.business_scope('linked',[],'Customer','other')
 
-    def test_conversation_note_uses_conversation_read_rule(self):
+    @patch('relay_core.business_access.unlinked_contact', return_value=True)
+    def test_conversation_note_uses_conversation_read_rule(self, unlinked):
         f=self.fake();f.parse_json.return_value=[]
         note=_dict(relay_contact='unlinked',messages='[]',business_doctype=None,business_name=None)
         with patch.object(collaboration,'frappe',f),patch.object(business_access,'reference',return_value=None),patch.object(business_access,'readable_business') as business:

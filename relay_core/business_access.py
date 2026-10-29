@@ -4,6 +4,72 @@ import frappe
 import frappe.permissions
 
 
+def allowed_types(user=None):
+    """The Relay business access rule. Desk permissions and teams do not grant access."""
+    from relay_core.permissions import USER, MANAGER
+    user = user or frappe.session.user
+    roles = set(frappe.get_roles(user))
+    if user != 'Administrator' and not roles.intersection({USER, MANAGER, 'System Manager'}):
+        return set()
+    enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
+    if user == 'Administrator' or roles.intersection({MANAGER, 'System Manager'}):
+        return enabled
+    assigned = frappe.get_all('Relay Contact Type User', filters={
+        'user': user, 'parenttype': 'Relay Contact Type', 'parentfield': 'users'}, pluck='parent')
+    return enabled.intersection(assigned)
+
+
+def relay_user(user=None):
+    from relay_core.permissions import USER, MANAGER
+    user = user or frappe.session.user
+    return user == 'Administrator' or bool(set(frappe.get_roles(user)).intersection({USER, MANAGER, 'System Manager'}))
+
+
+def require_type(doctype, user=None):
+    if not isinstance(doctype, str) or doctype not in allowed_types(user):
+        frappe.throw('Business type is not accessible', frappe.PermissionError)
+
+
+def business_document(doctype, name, user=None):
+    require_type(doctype, user)
+    if not isinstance(name, str) or not name.strip() or len(name) > 140 or any(ord(c) < 32 for c in name):
+        frappe.throw('Choose a business record')
+    return frappe.get_doc(doctype, name)
+
+
+def person_condition(expression, user=None):
+    """Contact membership, applied before pagination and counts; unlinked people are shared."""
+    if not relay_user(user):
+        return '1=0'
+    types = ', '.join(frappe.db.escape(dt) for dt in sorted(allowed_types(user))) or "''"
+    links = (f"SELECT 1 FROM `tabDynamic Link` l WHERE l.parent={expression} "
+             "AND l.parenttype='Contact' AND l.parentfield='links'")
+    return f"(NOT EXISTS ({links}) OR EXISTS ({links} AND l.link_doctype IN ({types})))"
+
+
+def unlinked_contact(contact):
+    """No Contact business links at all, including types not configured in Relay."""
+    person = frappe.db.get_value('Relay Contact', contact, 'contact')
+    return not person or not frappe.db.exists('Dynamic Link', {
+        'parent': person, 'parenttype': 'Contact', 'parentfield': 'links'})
+
+
+def person_allowed(name, user=None):
+    return bool(frappe.db.sql(f"SELECT 1 FROM `tabContact` WHERE name=%s AND {person_condition('`tabContact`.name', user)}", name))
+
+
+def require_person(name, user=None):
+    if not person_allowed(name, user):
+        frappe.throw('Contact is not accessible', frappe.PermissionError)
+
+
+def people_query(**kwargs):
+    """Relay-scoped Contact reads without changing Contact's Desk permissions."""
+    from pypika.terms import LiteralValue
+    return frappe.qb.get_query('Contact', ignore_permissions=True, **kwargs).where(
+        LiteralValue(person_condition('`tabContact`.name')))
+
+
 def scoped_document(doctype, name, filters, fields=()):
     """Read one name through query hooks, then recheck fixed scope and fields."""
     from frappe_tools.ai.tools import get_readable_meta, get_readable_columns
@@ -52,9 +118,10 @@ def primary_record(contact, links=None):
     """The primary record the current user can read, for a conversation header."""
     target = primary(contact, links)
     if not target: return None
+    if target[0] not in allowed_types(): return None
     doc = frappe.get_doc(*target)
-    if not doc.has_permission('read'): return None
-    title = doc.get(doc.meta.title_field) if doc.meta.title_field else None
+    from relay_core.business_groups import title_field
+    title = doc.get(title_field(target[0]))
     return {'doctype': target[0], 'name': target[1], 'title': str(title or target[1])}
 
 
@@ -73,25 +140,19 @@ def reference(doc):
 
 def message_allowed(doc, user=None):
     """A message is readable through its business, or through its contact's one conversation."""
-    if allowed(doc, user): return True
-    if doc.get('legacy_triage'): return False
-    try: return frappe.get_doc('Relay Contact', doc.relay_contact).has_permission('read', user=user)
-    except frappe.DoesNotExistError: return False
+    if doc.get('legacy_triage'): return (user or frappe.session.user) == 'Administrator'
+    if reference(doc): return allowed(doc, user)
+    from relay_core.permissions import assignment_allowed
+    return assignment_allowed(doc.relay_contact, user)
 
 
-def allowed(doc,user=None):
-    if (user or frappe.session.user) == 'Administrator': return True
-    if doc.get('legacy_triage'): return False
-    target=reference(doc)
-    if not target:return False
-    # A removed Contact link ends access to that business's history at once; a validated
-    # ticket notification is the one stored exception, as it reaches a subscriber's own contact.
-    # A ticket has no contact: its stored business alone decides.
+def allowed(doc, user=None):
+    if doc.get('legacy_triage'): return (user or frappe.session.user) == 'Administrator'
+    target = reference(doc)
+    if not target or target[0] not in allowed_types(user): return False
     if (doc.get('doctype') != 'Relay Ticket' and not doc.get('ticket_notification')
-            and target not in candidates(doc.relay_contact)):return False
-    # A probe: the denial text must not reach the response, as message reads fall back to the contact.
-    try:return frappe.permissions.has_permission(target[0],'read',frappe.get_doc(*target),user=user,print_logs=False)
-    except frappe.DoesNotExistError:return False
+            and target not in candidates(doc.relay_contact)): return False
+    return bool(frappe.db.exists(*target))
 
 
 def associate(doc,method=None):
@@ -235,7 +296,7 @@ def linked_business(contact, doctype=None, name=None):
 
 def choose_business(contact, doctype=None, name=None):
     business = linked_business(contact, doctype, name)
-    frappe.get_doc(*business).check_permission('read')
+    business_document(*business)
     return business
 
 
@@ -259,7 +320,7 @@ def action_permission(doc, user=None, permission_type=None):
         except frappe.DoesNotExistError:
             return False
     try:
-        return frappe.get_doc(*business).has_permission('read', user=user)
+        return business[0] in allowed_types(user) and bool(frappe.db.exists(*business))
     except frappe.DoesNotExistError:
         return False
 
@@ -273,10 +334,8 @@ def action_query(user=None):
               f"NULLIF(JSON_UNQUOTE(JSON_EXTRACT({table}.payload, '$.start.{key}')), 'null'))"
               for index, key in enumerate(('business_doctype', 'business_name'))]
     clauses = []
-    for dt in frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'):
-        if not frappe.has_permission(dt, 'read', user=user):
-            continue
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=False, user=user, order_by='').get_sql()
+    for dt in sorted(allowed_types(user)):
+        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
         clauses.append(f'({fields[0]}={frappe.db.escape(dt)} AND {fields[1]} IN ({query}))')
     scope = ' OR '.join(clauses) or '1=0'
     sources = frappe.qb.get_query('Relay Message', fields=['name'], ignore_permissions=False,
@@ -302,16 +361,33 @@ def unlinked_start(contact, user):
 
 def explicit_condition(doctype, user=None, *, allow_empty=False):
     user = user or frappe.session.user
-    if user == 'Administrator': return ''
     table = '`tab' + doctype + '`'
     clauses = []
-    for dt in frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'):
-        if not frappe.has_permission(dt, 'read', user=user): continue
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=False, user=user, order_by='').get_sql()
+    for dt in sorted(allowed_types(user)):
+        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
         clauses.append(f'({table}.business_doctype={frappe.db.escape(dt)} AND {table}.business_name IN ({query}))')
-    if allow_empty:
+    if allow_empty and relay_user(user):
         clauses.append(f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='')")
     return '(' + ' OR '.join(clauses) + ')' if clauses else '1=0'
+
+
+def message_condition(user=None):
+    """Business ownership for message queries, including unstamped primary history."""
+    table = '`tabRelay Message`'
+    explicit = explicit_condition('Relay Message', user)
+    linked = (f"EXISTS (SELECT 1 FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact "
+              f"WHERE r.name={table}.relay_contact AND l.parenttype='Contact' AND l.parentfield='links' "
+              f"AND l.link_doctype={table}.business_doctype AND l.link_name={table}.business_name)")
+    types = ', '.join(frappe.db.escape(dt) for dt in sorted(allowed_types(user))) or "''"
+    # A valid marked primary owns unstamped history. Do not let another link expose it.
+    private_primary = (f"EXISTS (SELECT 1 FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact "
+                       "JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1 "
+                       f"WHERE r.name={table}.relay_contact AND l.parenttype='Contact' AND l.parentfield='links' "
+                       "AND l.link_doctype=r.primary_doctype AND l.link_name=r.primary_name "
+                       f"AND l.link_doctype NOT IN ({types}))")
+    return (f"(({explicit}) AND (COALESCE({table}.ticket_notification,'')!='' OR {linked})) OR "
+            f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='' "
+            f"AND NOT {private_primary})")
 
 
 def readable_business(doc, user=None):

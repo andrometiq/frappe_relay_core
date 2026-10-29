@@ -19,6 +19,10 @@ class ApiTests(unittest.TestCase):
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
         self.api.require_access=Mock();self.api.readable_contact=Mock()
+        self.f.PermissionError=ValueError
+        self.person_access=self.enterContext(patch('relay_core.business_access.require_person'))
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Customer'}))
+        self.people_query=self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: self.f.qb.get_query('Contact', **kwargs)))
         self.api.contact_query=Mock(return_value='independent_business_scope')
         self.f.qb=Mock()
         search=self.f.qb.get_query.return_value
@@ -56,7 +60,7 @@ class ApiTests(unittest.TestCase):
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
+        self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,'flows':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
@@ -86,8 +90,8 @@ class ApiTests(unittest.TestCase):
         expected={
             'Relay Communication User':(False,False,False,False,False,False,False),
             'Relay Communication Team User':(False,False,False,True,False,False,False),
-            'Relay Communication Manager':(True,True,True,True,False,True,True),
-            'System Manager':(True,True,True,True,True,True,True),
+            'Relay Communication Manager':(True,False,True,True,False,True,True),
+            'System Manager':(True,False,True,True,True,True,True),
         }
         for role,values in expected.items():
             self.use_role(role)
@@ -173,12 +177,12 @@ class ContactDetailsTests(unittest.TestCase):
                 ('Relay Channel', 'email'): types.SimpleNamespace(channel='Email', has_permission=lambda _: True)}
         self.f.get_doc.side_effect=lambda dt,name:docs[(dt,name)]
         self.api.business_types=Mock(return_value=['Customer'])
-        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'), exists=lambda dt,name: True)
         endpoint=types.SimpleNamespace(name='binding', channel='wa', verified=0)
         self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
         with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False):
             result=self.api.contact_details('fixture-contact')
-        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}])
+        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}, {'doctype':'Customer','name':'private'}])
         self.assertIsNone(result['primary'])
         self.assertEqual([row.channel for row in result['endpoints']],['wa','email'])
         self.assertEqual([row.provider for row in result['endpoints']],['WhatsApp','Email'])
@@ -196,7 +200,7 @@ class ContactDetailsTests(unittest.TestCase):
         person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(),links=[])
         self.f.get_doc.return_value=person
         self.api.business_types=Mock(return_value=[])
-        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'), exists=lambda dt,name: True)
         self.f.get_all=Mock()
         self.api.readable_contact.side_effect=PermissionError('Not assigned')
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
@@ -206,6 +210,7 @@ class ContactDetailsTests(unittest.TestCase):
         person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(side_effect=PermissionError),links=[])
         self.f.get_doc.return_value=person
         self.f.db=types.SimpleNamespace(get_value=Mock(return_value=None))
+        self.person_access.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
         self.api.readable_contact.assert_not_called()
 
@@ -218,15 +223,15 @@ class ChannelUITests(unittest.TestCase):
         result = self.api.contact_directory('a%_', 'before')
         self.assertEqual(len(result['items']), 30)
         self.assertEqual(result['next'], '29')
-        query = self.f.get_list.call_args.kwargs
+        query = self.people_query.call_args.kwargs
         self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before']])
         self.assertIn(['Contact', 'full_name', 'like', '%a\\%\\_%'], query['or_filters'])
         self.assertIn(['Contact', 'mobile_no', 'like', '%a\\%\\_%'], query['or_filters'])
-        self.assertEqual(query['page_length'], 31)
+        self.assertEqual(query['limit'], 31)
         self.api.business_types = Mock(return_value=['Customer'])
         self.api.contact_directory('', None, 'Customer')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], [['Dynamic Link', 'link_doctype', '=', 'Customer']])
-        self.assertTrue(self.f.get_list.call_args.kwargs['distinct'])
+        self.assertEqual(self.people_query.call_args.kwargs['filters'], [['Dynamic Link', 'link_doctype', '=', 'Customer']])
+        self.assertTrue(self.people_query.call_args.kwargs['distinct'])
         with self.assertRaises(ValueError): self.api.contact_directory('', None, 'User')
         self.api.require_access.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_directory()

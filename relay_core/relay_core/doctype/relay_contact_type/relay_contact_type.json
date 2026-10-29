@@ -11,7 +11,8 @@
     "enabled",
     "label",
     "grouping_fields",
-    "grouping_field"
+    "grouping_field",
+    "users"
   ],
   "fields": [
     {
@@ -49,6 +50,12 @@
       "description": "Choose a field from the business document to group the inbox. Leave blank to show all records.",
       "hidden": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "users",
+      "fieldtype": "Table",
+      "label": "Users",
+      "options": "Relay Contact Type User"
     }
   ],
   "permissions": [
@@ -67,7 +74,8 @@
       "read": 1,
       "report": 1,
       "export": 1,
-      "print": 1
+      "print": 1,
+      "write": 1
     },
     {
       "role": "System Manager",

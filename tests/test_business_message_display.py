@@ -23,6 +23,7 @@ class Query:
 
 class BusinessMessageDisplayTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.require_type'))
         self.channel = Mock()
         self.channel.get.side_effect = {'channel':'Email','title':'Support','mailbox_address':'support@example.invalid'}.get
         self.business = Mock()
@@ -39,14 +40,15 @@ class BusinessMessageDisplayTests(unittest.TestCase):
     def test_page_has_trusted_metadata_and_checks_business_channel_and_contact(self):
         query = Mock(return_value=Query([self.row]))
         with patch.dict(sys.modules, {'relay_core.timeline':SimpleNamespace(page_query=query)}):
+            self.api.business_document=lambda dt,name: self.f.get_doc(dt,name)
             result = self.api.messages('Customer','customer',names=[self.row.name])
         self.assertEqual(result['items'][0]['channel_title'],'Support')
         self.assertEqual(result['items'][0]['provider_context']['mailbox_addresses'],['support@example.invalid'])
         self.assertEqual(result['items'][0]['contact_label'],'Maya')
-        self.business.check_permission.assert_called_once_with('read')
+        self.business.check_permission.assert_not_called()
         self.channel.check_permission.assert_called_once_with('read')
         self.api.readable_contact.assert_called_once_with(self.row.relay_contact)
-        self.business.check_permission.side_effect = PermissionError
+        self.api.check_type.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.messages('Customer','customer')
 
     def test_context_preserves_metadata_on_the_anchor_and_adjacent_pages(self):

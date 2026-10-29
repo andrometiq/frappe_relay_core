@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core.business_access import business_document
 from relay_core.permissions import require_access, readable_contact, can_read_contact_as
 
 MAX_BUSINESS_CHATS = 100
@@ -98,6 +99,8 @@ def mark_chat(contact=None, read=1, business_doctype=None, business_name=None):
     from relay_core import relay_chats
     from relay_core.conversation_state import fresh_write
     key = relay_chats.key_of({'relay_contact': contact}) if contact else (business_doctype, business_name)
+    if key[0] != relay_chats.CONTACT:
+        business_document(*key)
 
     def write():
         for name in chats:
@@ -117,7 +120,7 @@ def business_chats(doctype, name):
     check_type(doctype)
     if not isinstance(name, str) or not name or len(name) > 140:
         frappe.throw('Choose a business record')
-    frappe.get_doc(doctype, name).check_permission('read')
+    business_document(doctype, name)
     people = frappe.get_all('Dynamic Link', filters={'link_doctype': doctype, 'link_name': name, 'parenttype': 'Contact',
                             'parentfield': 'links'}, pluck='parent', limit_page_length=MAX_BUSINESS_CHATS)
     if not people:

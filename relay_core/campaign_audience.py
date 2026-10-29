@@ -244,14 +244,16 @@ def source_values(rows: list, used: set):
     persons = {row.name: row for row in frappe.get_all('Contact', filters={'name': ['in', people]},
                fields=['name', *contact_fields], limit_page_length=0)} if contact_fields else {}
     records = {}
+    from relay_core.business_access import require_type
     for doctype, fields in record_fields(used).items():
+        require_type(doctype)
         links = frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
                                'parent': ['in', people], 'link_doctype': doctype},
                                fields=['parent', 'link_name'], order_by='idx asc', limit_page_length=0)
         first = {}
         for link in links:
             first.setdefault(link.parent, link.link_name)
-        readable = {row.name: row for row in frappe.get_list(doctype, filters={'name': ['in', list(set(first.values()))]},
+        readable = {row.name: row for row in frappe.get_all(doctype, filters={'name': ['in', list(set(first.values()))]},
                     fields=['name', *fields], limit_page_length=0)} if first else {}
         records[doctype] = {person: readable.get(record) for person, record in first.items()}
 

@@ -4,6 +4,7 @@ import hashlib
 
 import frappe
 from relay_core.permissions import can_manage, readable_contact, require_access
+from relay_core.business_access import business_document, allowed_types, require_person
 
 
 def business_links(links):
@@ -18,7 +19,7 @@ def business_links(links):
             frappe.throw('Choose a business type and record')
         if not frappe.db.exists('Relay Contact Type', {'business_doctype': doctype, 'enabled': 1}):
             frappe.throw('Choose a configured business type', frappe.PermissionError)
-        frappe.get_doc(doctype, name).check_permission('read')
+        business_document(doctype, name)
         result.append((doctype, name))
     return list(dict.fromkeys(result))
 
@@ -92,6 +93,7 @@ def ensure_relay(person):
 def set_links(contact, links):
     """Replace the business links the user can read; other links stay as they are."""
     require_access()
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     manager = can_manage_links(person.name)
     if not manager:
@@ -121,7 +123,7 @@ def add_link(contact, doctype, name):
 
 def readable(row):
     try:
-        return frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')
+        return row.link_doctype in allowed_types() and bool(frappe.db.exists(row.link_doctype, row.link_name))
     except frappe.DoesNotExistError:
         return False
 
@@ -130,6 +132,7 @@ def readable(row):
 def set_primary(contact, doctype=None, name=None):
     """Mark one linked record as primary; no record clears the mark."""
     require_access()
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     if not can_manage_links(person.name):
         person.check_permission('write')
@@ -191,19 +194,19 @@ def linked_contacts(names):
 
 
 def unlinked_people():
-    """A query-builder filter, so Contact permissions still apply before pagination."""
+    """A query-builder filter for people with no configured business links."""
     person = frappe.qb.DocType('Contact')
     link = frappe.qb.DocType('Dynamic Link')
     types = frappe.qb.DocType('Relay Contact Type')
-    linked = (frappe.qb.from_(link).join(types).on((types.business_doctype == link.link_doctype) & (types.enabled == 1))
+    linked = (frappe.qb.from_(link).join(types).on(types.business_doctype == link.link_doctype)
               .select(link.parent).where((link.parenttype == 'Contact') & (link.parentfield == 'links')))
     return person.name.notin(linked)
 
 
 @frappe.whitelist(methods=['GET'])
 def unlinked(query='', after=None, before=None):
-    """Manager contact queue, newest activity first, with stable keyset pagination."""
-    require_access(manage=True)
+    """Shared unlinked contact queue, newest activity first, with stable keyset pagination."""
+    require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Search must be at most 80 characters')
     values = {'query': '%' + query.strip() + '%'}
@@ -213,11 +216,13 @@ def unlinked(query='', after=None, before=None):
         validate_reference(after, 'CON')
         values.update(after=after, before=frappe.utils.get_datetime(before))
         cursor = 'AND (COALESCE(r.last_message_at,r.creation),r.name) < (%(before)s,%(after)s)'
+    from relay_core.business_access import person_condition
+    scope = person_condition('r.contact')
     rows = frappe.db.sql("""SELECT r.name, r.contact, r.display_name, r.last_message_at, r.creation,
             COALESCE(NULLIF(c.mobile_no,''),c.phone) phone
         FROM `tabRelay Contact` r LEFT JOIN `tabContact` c ON c.name=r.contact
-        WHERE NOT EXISTS (SELECT 1 FROM `tabDynamic Link` l
-            JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1
+        WHERE """ + scope + """ AND NOT EXISTS (SELECT 1 FROM `tabDynamic Link` l
+            JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype
             WHERE l.parent=r.contact AND l.parenttype='Contact' AND l.parentfield='links')
         AND (r.display_name LIKE %(query)s OR c.full_name LIKE %(query)s OR c.mobile_no LIKE %(query)s
             OR c.phone LIKE %(query)s OR EXISTS (SELECT 1 FROM `tabContact Phone` p

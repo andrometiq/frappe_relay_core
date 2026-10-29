@@ -130,9 +130,8 @@ def contacts(query='', before=None, after=None, limit=50):
 @frappe.whitelist(methods=['GET'])
 def business_types():
     require_access()
-    types = frappe.get_all('Relay Contact Type', filters={'enabled': 1},
-        pluck='business_doctype', limit_page_length=200)
-    return sorted({name for name in types if frappe.has_permission(name, 'read')})
+    from relay_core.business_access import allowed_types
+    return sorted(allowed_types())
 
 
 @frappe.whitelist(methods=['GET'])
@@ -143,14 +142,13 @@ def business_records(doctype, query=''):
     if not frappe.db.exists('Relay Contact Type', {'business_doctype': doctype, 'enabled': 1}):
         frappe.throw('Business type is not configured', frappe.PermissionError)
     from relay_core.business_inbox import check_type
-    from frappe.desk.search import search_link
-    from frappe.utils import strip_html
-    from html import unescape
+    from relay_core.business_groups import title_field
     check_type(doctype)
-    rows = search_link(doctype=doctype, txt=query, page_length=30, ignore_user_permissions=False)
-    return [frappe._dict({'name': row['value'], 'value': row['value'],
-             'label': unescape(strip_html(row.get('label') or row['value'])),
-             'description': unescape(strip_html(row.get('description') or ''))}) for row in rows[:30]]
+    field = title_field(doctype)
+    pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    rows = frappe.get_all(doctype, fields=list(dict.fromkeys(['name', field])),
+        or_filters=[['name', 'like', pattern], [field, 'like', pattern]], order_by='name asc', page_length=30)
+    return [frappe._dict(name=row.name, value=row.name, label=row.get(field) or row.name, description='') for row in rows]
 
 
 @frappe.whitelist(methods=['GET'])
@@ -215,7 +213,7 @@ def capabilities():
     from relay_core.hub_channels import site_numbers
     enabled_names=[item.name for item in channels]
     numbers={medium:site_numbers(medium) for medium in enabled_names}
-    teams=features.is_enabled('teams')
+    teams=False
     from relay_core.contact_import import allowed as contact_transfer_allowed
     return {'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
@@ -252,18 +250,17 @@ def conversation_channels(contact):
 def contact_details(contact):
     """Read permitted business links and channel endpoint provenance for a Contact."""
     require_access()
+    from relay_core.business_access import require_person
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
     # A visible conversation shows its contact's name and phone without Contact read.
     if relay:
         readable_contact(relay)
-    else:
-        person.check_permission('read')
     configured = set(business_types())
     links = [{'doctype': row.link_doctype, 'name': row.link_name}
              for row in person.links
-             if row.link_doctype in configured
-             and frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')]
+             if row.link_doctype in configured and frappe.db.exists(row.link_doctype, row.link_name)]
     endpoints, primary = [], None
     if relay:
         from relay_core.business_access import primary_record
@@ -301,7 +298,7 @@ def contact_directory(query='', after=None, business_type=None, business_name=No
     if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
         frappe.throw('Invalid contact search')
     if business_type and business_type not in business_types():
-        frappe.throw('Choose a configured business type')
+        frappe.throw('Business type is not accessible', frappe.PermissionError)
     if str(unlinked) not in ('0', '1'):
         frappe.throw('Invalid contact filter')
     if business_name:
@@ -309,7 +306,8 @@ def contact_directory(query='', after=None, business_type=None, business_name=No
             frappe.throw('Invalid business record')
         if not business_type:
             frappe.throw('Choose a business type first')
-        frappe.get_doc(business_type, business_name).check_permission('read')
+        from relay_core.business_access import business_document
+        business_document(business_type, business_name)
     filters = [['Contact', 'name', '>', after]] if after else []
     or_filters = []
     if query.strip():
@@ -322,8 +320,9 @@ def contact_directory(query='', after=None, business_type=None, business_name=No
     if str(unlinked) == '1':
         from relay_core.contacts import unlinked_people
         filters.append(unlinked_people())
-    rows = frappe.get_list('Contact', filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
-        order_by='name asc', page_length=31, distinct=True)
+    from relay_core.business_access import people_query
+    rows = people_query(filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
+        order_by='name asc', limit=31, distinct=True).run(as_dict=True)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 
 
@@ -334,7 +333,9 @@ def contact_profile(contact):
     from relay_core.business_access import candidates, primary_record
     from relay_core.contacts import contact_emails
     links = candidates(doc.name)
-    readable = [link for link in links if frappe.has_permission(link[0], 'read', doc=link[1])]
+    from relay_core.business_access import allowed_types
+    visible = allowed_types()
+    readable = [link for link in links if link[0] in visible]
     email = person.email_id or contact_emails([person.name]).get(person.name, '')
     return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
             'primary': primary_record(doc.name, links), 'link_count': len(readable),

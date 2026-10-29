@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core.business_access import business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.automation.projection import extract_messages, project
 from relay_core.settings import value as connection_value
@@ -80,7 +81,7 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
     links = candidates(contact)
     business = (business_doctype, business_name) if business_doctype or business_name else links[0] if len(links) == 1 else None
     if business not in links: frappe.throw('Choose a linked business record')
-    frappe.get_doc(*business).check_permission('read')
+    business_document(*business)
     from relay_core.identity import bindings, normalize
     endpoint=normalize(medium, matches[0]['from']);key=hashlib.sha256((channel+':'+endpoint).encode()).hexdigest()
     with frappe.cache.lock('relay-enroll:'+key,timeout=30):
@@ -102,9 +103,9 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
 @frappe.whitelist(methods=['GET'])
 def businesses(contact):
     require_access(manage=True); readable_contact(contact)
-    from relay_core.business_access import candidates
-    return [{'doctype': dt, 'name': name} for dt, name in candidates(contact)
-            if frappe.get_doc(dt, name).has_permission('read')]
+    from relay_core.business_access import candidates, allowed_types
+    visible = allowed_types()
+    return [{'doctype': dt, 'name': name} for dt, name in candidates(contact) if dt in visible]
 
 
 @frappe.whitelist(methods=['POST'])

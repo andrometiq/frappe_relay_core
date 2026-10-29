@@ -64,12 +64,23 @@ def search_filters(query):
     """A record whose title or name has every word, in order, or a chat whose last writer has that number or email."""
     words = query.split()[:MAX_WORDS]
     pattern = '%' + '%'.join(like(word)[1:-1] for word in words) + '%'
-    found = [[CHAT, 'title', 'like', pattern], [CHAT, 'business_name', 'like', pattern]]
+    from relay_core.business_access import allowed_types
+    from relay_core.business_groups import title_field
+    chat = frappe.qb.DocType(CHAT)
+    titles = (chat.business_doctype == CONTACT) & chat.title.like(pattern)
+    for doctype in sorted(allowed_types()):
+        field = title_field(doctype)
+        if field == 'name':
+            continue
+        record = frappe.qb.DocType(doctype)
+        matches = frappe.qb.from_(record).select(record.name).where(record[field].like(pattern))
+        titles |= (chat.business_doctype == doctype) & chat.business_name.isin(matches)
+    found = titles | chat.business_name.like(pattern)
     values = search_values(query)
     if 'endpoint' in values:
         contacts = [row[0] for row in endpoint_contacts(values['endpoint']).limit(100).run()]
-        found.append([CHAT, 'last_contact', 'in', contacts or ['']])
-    return found
+        found |= chat.last_contact.isin(contacts or [''])
+    return [found]
 
 
 def encode_cursor(rows):
@@ -97,7 +108,9 @@ def page(*, query='', mode='all', after=None, since=None, channels=None, busines
         filters += [[CHAT, 'last_message_at', '<=', at], [CHAT, 'name', 'not in', names]]
     if since:
         filters.append([CHAT, 'last_message_at', '>=', since])
-    rows = frappe.get_list(CHAT, fields=FIELDS, filters=filters, or_filters=search_filters(query) if query.strip() else None,
+    if query.strip():
+        filters += search_filters(query)
+    rows = frappe.get_list(CHAT, fields=FIELDS, filters=filters,
                            order_by='last_message_at desc, name desc', limit_page_length=PAGE + 1)
     more = len(rows) > PAGE
     rows = rows[:PAGE]
@@ -116,11 +129,13 @@ def counts(channels=None, business_type=None, business_name=None):
 
 
 def items(rows):
+    from relay_core.relay_chats import title
     providers = dict(frappe.get_list('Relay Channel', fields=['name', 'channel'], as_list=True, limit_page_length=0))
     chats = contact_rows([row.business_name for row in rows if row.business_doctype == CONTACT])
     result = []
     for row in rows:
-        item = {'id': row.name, 'title': row.title, 'display_name': row.title, 'channel': row.last_channel,
+        caption = row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
+        item = {'id': row.name, 'title': caption, 'display_name': caption, 'channel': row.last_channel,
                 'provider': providers.get(row.last_channel), 'latest_preview': row.last_message_preview or '',
                 'latest_at': row.last_message_at, 'last_message_at': str(row.last_message_at), 'unread': row.unread_count or 0,
                 'unread_more': False, 'starred': 0, 'folder': '', 'unlinked': False, 'assignment': {}}

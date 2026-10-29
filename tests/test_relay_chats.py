@@ -25,6 +25,7 @@ class RelayChatTests(unittest.TestCase):
         self.row = None
         self.fake.db.get_value.side_effect = self.get_value
         self.enterContext(patch.object(relay_chats, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.business_groups.title_field', return_value='customer_name'))
         self.enterContext(patch('relay_core.inbox.directory_preview', return_value='Hello'))
 
     def get_value(self, doctype, filters, fields=None, **kwargs):
@@ -108,10 +109,11 @@ class RelayChatPermissionTests(unittest.TestCase):
         self.fake.qb.get_query.return_value.get_sql.return_value = 'SELECT name FROM `tabRelay Contact` WHERE scoped'
         self.enterContext(patch.object(relay_chats, 'frappe', self.fake))
         self.enterContext(patch('relay_core.business_access.explicit_condition', return_value='(records)'))
+        self.role = self.enterContext(patch('relay_core.business_access.relay_user', return_value=True))
 
     def test_administrator_sees_every_chat_and_a_user_without_contacts_none(self):
-        self.assertEqual(relay_chats.query('Administrator'), '')
-        self.fake.has_permission.return_value = False
+        self.assertIn('(records)', relay_chats.query('Administrator'))
+        self.role.return_value = False
         self.assertEqual(relay_chats.query(), '1=0')
 
     def test_a_user_who_sees_every_team_gets_readable_records_and_visible_chats(self):
@@ -120,11 +122,11 @@ class RelayChatPermissionTests(unittest.TestCase):
         self.assertEqual(condition, "((records) OR (`tabRelay Chat`.business_doctype='Relay Contact' AND "
                                     "`tabRelay Chat`.business_name IN (SELECT name FROM `tabRelay Contact` WHERE scoped)))")
 
-    def test_an_assigned_user_also_needs_a_visible_contact_of_the_record(self):
-        with patch('relay_core.permissions.assignment_condition', return_value='(assigned)'):
-            condition = relay_chats.query()
-        self.assertIn('(records) AND EXISTS (SELECT 1 FROM `tabDynamic Link` l JOIN `tabRelay Contact`', condition)
-        self.assertIn('l.link_doctype=`tabRelay Chat`.business_doctype AND l.link_name=`tabRelay Chat`.business_name AND (assigned)', condition)
+    def test_business_records_do_not_need_team_assignment(self):
+        condition = relay_chats.query()
+        self.assertIn('(records)', condition)
+        self.assertNotIn('Relay Conversation Assignment', condition)
+        self.assertNotIn('Relay Team', condition)
 
     def test_one_row_is_checked_with_the_same_condition(self):
         self.fake.db.sql.return_value = []

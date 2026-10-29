@@ -27,6 +27,8 @@ class ContactImportTests(TestCase):
             log_error=Mock(), session=SimpleNamespace(user='staff'), get_roles=lambda: [])
         self.fake.db.exists.return_value = True
         self.people = {}
+        self.enterContext(patch('relay_core.business_access.require_person', side_effect=lambda name: self.people[name].check_permission('read')))
+        self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: SimpleNamespace(run=lambda **kw: self.fake.get_list('Contact', **kwargs))))
         self.fake.get_doc.side_effect = lambda dt, name: self.people[name]
         self.fake.get_all.side_effect = self.get_all
         self.fake.db.sql.side_effect = lambda *args, **kwargs: [Person(name=name, creation='2026-01-01',

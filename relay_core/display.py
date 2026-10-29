@@ -9,21 +9,28 @@ def titles(records):
     records = frappe.parse_json(records) if isinstance(records, str) else records
     if not isinstance(records, list) or len(records) > 50:
         frappe.throw('Request at most 50 record titles')
+    from relay_core.business_access import allowed_types, person_allowed
+    business_types = allowed_types()
     items = []
     for row in records:
         if not isinstance(row, dict) or any(not isinstance(row.get(key), str) or not row[key].strip()
                 or len(row[key]) > 140 or any(ord(c) < 32 for c in row[key]) for key in ('doctype', 'name')):
             frappe.throw('Invalid record title reference')
         doctype, name = row['doctype'], row['name']
-        if not frappe.has_permission(doctype, 'read'):
+        relay_read = doctype in business_types or doctype == 'Contact' and person_allowed(name)
+        if (doctype == 'Contact' or frappe.db.exists('Relay Contact Type', doctype)) and not relay_read:
+            continue
+        if not relay_read and not frappe.has_permission(doctype, 'read'):
             continue
         meta = frappe.get_meta(doctype)
-        field = meta.title_field or 'name'
+        from relay_core.business_groups import title_field
+        field = title_field(doctype) if relay_read else meta.title_field or 'name'
         fields = ['name', field] if field != 'name' else ['name']
         if doctype == 'Relay Channel':
             fields.extend(['channel', 'account'])
         # get_list applies document/user permissions and field-level access.
-        result = frappe.get_list(doctype, filters={'name': name}, fields=fields, page_length=1)
+        read = frappe.get_all if relay_read else frappe.get_list
+        result = read(doctype, filters={'name': name}, fields=fields, page_length=1)
         if result:
             title = result[0].get(field)
             if doctype == 'Relay Channel':

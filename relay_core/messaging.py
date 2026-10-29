@@ -748,7 +748,8 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
         check_type(business_doctype)
         if not isinstance(business_name, str) or not business_name or len(business_name) > 140:
             frappe.throw('Choose a business record')
-        frappe.get_doc(business_doctype, business_name).check_permission('read')
+        from relay_core.business_access import business_document
+        business_document(business_doctype, business_name)
     if contact or not business:
         validate_reference(contact, 'CON')
         readable_contact(contact)

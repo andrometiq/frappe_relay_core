@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 class TicketTagTests(unittest.TestCase):
     def setUp(self):
+        self.types = self.enterContext(patch('relay_core.business_access.allowed_types', return_value=set()))
         def throw(message, exception=ValueError): raise exception(message)
         self.logs = Mock()
         self.f = types.SimpleNamespace(throw=throw, whitelist=lambda **kw: lambda fn: fn, PermissionError=PermissionError,

@@ -2,6 +2,7 @@
 import hashlib
 from contextvars import ContextVar
 import frappe
+from relay_core.business_access import business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core import tickets
 
@@ -155,7 +156,7 @@ def business_context(row):
         raise frappe.PermissionError('Ticket must have one business for notifications')
     business = next(iter(businesses))
     if not all(business):raise frappe.PermissionError('Ticket business is incomplete')
-    frappe.get_doc(*business).check_permission('read')
+    business_document(*business)
     return business
 
 
@@ -171,7 +172,7 @@ def recipient_business(contact, channel, address, doctype=None, name=None, notif
         sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)
         if sub.user != frappe.session.user:
             raise frappe.PermissionError('Notification owner changed')
-        frappe.get_doc(doctype, name).check_permission('read')
+        business_document(doctype, name)
         return doctype, name
     if row.status != 'Pending':raise frappe.PermissionError('Notification is no longer pending')
     endpoint, target, business = authorized(row)
