@@ -554,6 +554,7 @@ class SkillDeliveryTests(unittest.TestCase):
 
 class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
         # Privacy lookup data is supplied by the dedicated reply guard tests.
         guard_db = framework()
         guard_db.db.exists.return_value = False
@@ -702,7 +703,7 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertEqual(result['reply'], '')
 
     def test_search_proposes_without_reading_and_rejects_malformed_calls(self):
-        reference = dict(name='ledger', method='get_list', doctype='GL Entry', scope_field='party', fields=['posting_date','debit','credit'])
+        reference = dict(name='ledger', report='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party', fields=['posting_date','debit','credit'])
         arguments = dict(purpose='Review your ledger', reference='ledger',
             arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}})
         reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[], read=Mock())

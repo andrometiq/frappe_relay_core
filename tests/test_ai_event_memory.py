@@ -114,6 +114,15 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(json.loads(self.record.sources)[0]['id'], 'description')
         self.saved.assert_called_once()
 
+    def test_plain_event_publishes_without_model(self):
+        self.fake.get_doc.return_value = _dict(description='SIHMA event on 5 Nov at Kochi', links=[])
+        with patch.object(event_memory, 'attached_files', return_value=[]), \
+                patch.object(event_memory, 'event_model', return_value=None):
+            event_memory.EventBuild('EV-1').run()
+        self.compose.assert_not_called()
+        self.assertEqual(self.record.status, 'Ready')
+        self.assertEqual(self.published()['memory'], 'SIHMA event on 5 Nov at Kochi')
+
     def test_edit_during_build_is_not_published(self):
         self.revisions.side_effect = ['R1', 'R2']
         event_memory.EventBuild('EV-1').run()

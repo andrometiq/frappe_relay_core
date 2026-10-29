@@ -142,6 +142,12 @@ def save(channel, values, modified):
             frappe.throw('Step fields must be text')
     doc = frappe.get_doc('Relay Channel', channel, for_update=True)
     doc.check_permission('read')
+    if 'steps' in values:
+        from relay_core import ai_features
+        requested = [{key: row.get(key) for key in STEP_FIELDS} for row in rows if row.get('step') == 'AI skill']
+        existing = [row for row in steps(doc) if row['step'] == 'AI skill']
+        if requested != existing:
+            ai_features.require()
     if str(doc.modified) != modified:
         frappe.throw('Channel changed. Reload before saving.')
     if 'automation_enabled' in values and values['automation_enabled'] not in (0, 1, False, True):
@@ -159,6 +165,9 @@ def references(kind, query=''):
     require_access(manage=True)
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid reference search')
+    if kind == 'ai_skill':
+        from relay_core import ai_features
+        ai_features.require()
     if kind == 'user':
         from relay_core.teams import agents
         return [dict(value=row.name, label=row.full_name or row.name) for row in agents(query)]
@@ -237,7 +246,7 @@ def ai_available(message, row):
     from relay_core import ai_features
     if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return False
-    if message.get('message_type') not in ('text', '', None, 'photo', 'image'):
+    if message.get('message_type') not in ('text', '', None, 'photo', 'image', 'voice', 'audio'):
         return False
     if not row.get('ai_skill'):
         return True

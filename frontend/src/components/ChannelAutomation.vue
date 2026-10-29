@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { channelValues, channelLabel, displayedSteps, newChannelStep, STEP_TYPES, TICKET_RULES, WORKING_DAYS } from '../services/channelAutomation'
@@ -9,6 +9,9 @@ import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 
+const capabilities = inject('relayCapabilities')
+const aiEnabled = computed(() => Boolean(capabilities.value.ai))
+const stepTypes = computed(() => STEP_TYPES.filter(step => aiEnabled.value || step !== 'AI skill'))
 const channel = ref(''), draft = ref(null), saved = ref(''), busy = ref(false), error = ref(''), notice = ref('')
 const kind = ref('Flow'), text = ref(''), contact = ref(''), trace = ref(null), stale = ref(false)
 let generation = 0
@@ -69,19 +72,19 @@ useRealtimeRefresh(['Relay Channel'], ['channel_automation'], () => {
       <div class="automation-card-heading"><h2 class="font-semibold">{{ channelLabel(draft) }}</h2><FormControl v-model="draft.automation_enabled" type="checkbox" label="Automation enabled" :disabled="busy" /></div>
       <p v-if="stale" role="status">This channel changed elsewhere. <Button label="Reload saved settings" :disabled="busy" @click="load" /></p>
       <fieldset class="automation-section" :disabled="busy"><legend>On incoming message</legend>
-        <p class="text-sm">Steps run top to bottom. A step that replies stops the list unless set to Continue. A waiting flow keeps handling replies. A confirmed search continues at the AI step.</p>
+        <p class="text-sm">Steps run top to bottom. A step that replies stops the list unless set to Continue. A waiting flow keeps handling replies. </p>
         <ol class="channel-steps">
-          <li v-for="(step, index) in visibleSteps" :key="index" class="channel-step">
+          <template v-for="(step, index) in visibleSteps" :key="index"><li v-if="aiEnabled || step.step !== 'AI skill'" class="channel-step">
             <div class="automation-card-heading"><strong>{{ index + 1 }}. {{ step.step }}</strong><span v-if="usingDefaults" class="text-sm">Default</span><FormControl v-model="step.enabled" type="checkbox" label="Enabled" :disabled="busy || usingDefaults" /></div>
             <RemoteLinkField v-if="step.step === 'AI skill' && !usingDefaults" v-model="step.ai_skill" :field="reference('ai_skill', step.ai_skill, 'AI skill (leave blank to match automatically)')" />
             <div v-if="step.step === 'Assign'" class="grid gap-3 sm:grid-cols-2"><RemoteLinkField v-model="step.user" :field="reference('user', step.user, 'User')" /></div>
             <FormControl v-if="step.step === 'Ticket'" v-model="step.ticket_rule" type="select" label="Ticket rule" :options="TICKET_RULES" :disabled="busy || usingDefaults" />
             <FormControl v-if="step.step === 'Out of hours reply'" v-model="step.message" type="textarea" label="Out of hours message" rows="3" maxlength="2000" :disabled="busy || usingDefaults" />
             <p v-if="usingDefaults" class="text-sm">{{ step.step === 'Flow' ? 'Run a matching flow.' : 'Find an automatic AI skill for this message.' }}</p><div class="channel-step-footer"><FormControl v-model="step.on_reply" type="select" label="After this step handles the message" :options="['Stop', 'Continue']" :disabled="busy || usingDefaults" /><div v-if="!usingDefaults" class="channel-step-buttons"><Button icon="arrow-up" :aria-label="`Move step ${index + 1} up`" :disabled="busy || index === 0" @click="moveStep(draft.steps, index, -1)" /><Button icon="arrow-down" :aria-label="`Move step ${index + 1} down`" :disabled="busy || index === draft.steps.length - 1" @click="moveStep(draft.steps, index, 1)" /><Button icon="trash" :aria-label="`Remove step ${index + 1}`" :disabled="busy || usingDefaults" @click="draft.steps.splice(index, 1)" /></div></div>
-          </li>
+          </li></template>
         </ol>
         <Button v-if="usingDefaults" label="Customize default steps" :disabled="busy" @click="draft.steps = displayedSteps(draft)" />
-        <div class="channel-add"><FormControl v-model="kind" type="select" label="New step" :options="STEP_TYPES" :disabled="busy" /><Button label="Add step" icon-left="plus" :disabled="busy || draft.steps.length >= 20" @click="draft.steps = [...displayedSteps(draft), newChannelStep(kind)]" /></div>
+        <div class="channel-add"><FormControl v-model="kind" type="select" label="New step" :options="stepTypes" :disabled="busy" /><Button label="Add step" icon-left="plus" :disabled="busy || draft.steps.length >= 20" @click="draft.steps = [...displayedSteps(draft).filter(step => draft.steps.length || aiEnabled || step.step !== 'AI skill'), newChannelStep(kind)]" /></div>
         <p class="text-sm">Steps that do not match are skipped. After a reply, only Assign and Ticket steps can continue. Ticket rule Never leaves the existing conversation ticket unchanged.</p>
       </fieldset>
       <fieldset class="automation-section" :disabled="busy"><legend>Business hours</legend>
@@ -97,7 +100,7 @@ useRealtimeRefresh(['Relay Channel'], ['channel_automation'], () => {
       <RemoteLinkField v-model="contact" :field="reference('contact', contact, 'Contact (optional)')" />
       <FormControl v-model="text" type="textarea" label="Incoming message" rows="3" maxlength="4000" :disabled="busy" />
       <Button type="submit" label="Test message" :loading="busy" :disabled="busy || dirty || !text.trim()" />
-      <ol v-if="trace" class="channel-trace" aria-live="polite"><li v-for="(row, index) in trace" :key="index"><strong>{{ row.step }} · {{ row.runs ? 'Would run' : 'Skipped' }}</strong><p>{{ row.reason }}</p></li></ol>
+      <ol v-if="trace" class="channel-trace" aria-live="polite"><li v-for="(row, index) in trace.filter(row => aiEnabled || row.step !== 'AI skill')" :key="index"><strong>{{ row.step }} · {{ row.runs ? 'Would run' : 'Skipped' }}</strong><p>{{ row.reason }}</p></li></ol>
     </form>
   </div></section>
 </template>

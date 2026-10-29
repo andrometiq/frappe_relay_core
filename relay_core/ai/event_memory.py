@@ -68,6 +68,7 @@ def get_revision(event: str) -> str:
     return hashlib.sha256(inputs.encode()).hexdigest()
 
 
+@ai_features.when_enabled
 def queue_build(event: str, force: bool = False) -> None:
     """Queue one build after commit when the inputs differ from the published memory."""
     revision = get_revision(event)
@@ -125,10 +126,17 @@ class EventBuild:
         model = event_model()
         record = self.start(revision, model)
         try:
-            if not model:
-                raise ValueError('Set an event memory model in Relay Settings')
-            self.sources = self.read_sources(model, record.name)
-            memory = compose(model, frappe.get_doc(EVENT, self.event), self.sources, record.name)
+            event = frappe.get_doc(EVENT, self.event)
+            if not attached_files(self.event) and not event.links:
+                # Plain-text event records need no model or transcription provider.
+                memory = (event.description or '').strip()
+                if not memory:
+                    raise ValueError('Write an event description')
+            else:
+                if not model:
+                    raise ValueError('Set an event memory model in Relay Settings')
+                self.sources = self.read_sources(model, record.name)
+                memory = compose(model, event, self.sources, record.name)
             problems = [f'{source.label}: {source.reason}' for source in self.sources if source.status != 'Read']
             status = 'Partial' if problems else 'Ready'
         except Exception as error:

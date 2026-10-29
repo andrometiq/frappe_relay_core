@@ -80,7 +80,8 @@ def authorize_notice(action, message):
     prefix = 'email:' if action.operation == 'email' else ''
     key = hashlib.sha256((prefix + frappe.session.user + ':' + reply_key(message.name, 'handoff', run)).encode()).hexdigest()
     body = payload.get('email_values', {}).get('body') if prefix else payload.get('content', {}).get('text')
-    if action.request_key != key or body != ACKNOWLEDGEMENT or action.operation not in ('text', 'email'):
+    from relay_core.ai.language import message_notice
+    if action.request_key != key or body != message_notice('handoff', message, ACKNOWLEDGEMENT) or action.operation not in ('text', 'email'):
         raise ValueError('Invalid handoff acknowledgement')
     notice_scope(run, message)
 
@@ -99,7 +100,8 @@ def acknowledge(name):
         with as_user(decision['notice_user']):
             message = frappe.get_doc('Relay Message', run.message)
             notice_scope(run, message)
-            result = send_reply(message, ACKNOWLEDGEMENT, slot='handoff')
+            from relay_core.ai.language import message_notice
+            result = send_reply(message, message_notice('handoff', message, ACKNOWLEDGEMENT), slot='handoff')
             # Queued/uncertain sends are recovered by the existing message journal.
             decision['handoff_notice'] = 'Journaled' if result['status'] in (
                 'Submitted', 'Queued', 'Uncertain', 'Dispatching') else 'Blocked'

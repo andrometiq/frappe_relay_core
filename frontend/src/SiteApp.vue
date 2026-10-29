@@ -22,6 +22,8 @@ const location = window.location
 const views = {
   Messages: ConnectedMessages,
   Tickets: defineAsyncComponent(() => import('./components/TicketsWorkspace.vue')),
+  Knowledge: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
+  Events: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
   Skills: defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   'Business events': defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   'Channel automation': defineAsyncComponent(() => import('./components/ChannelAutomation.vue')),
@@ -40,6 +42,8 @@ const navigation = [
   { name: 'Business events', label: 'Business events', icon: 'zap', business_events: true },
   { name: 'Channel automation', label: 'Channel automation', icon: 'list-ordered', manage: true },
   { name: 'Flows', label: 'Flows', icon: 'git-branch', flows: true },
+  { name: 'Knowledge', label: 'Knowledge base', icon: 'book-open', ai: true, skills: true },
+  { name: 'Events', label: 'AI events', icon: 'calendar', ai: true, skills: true },
   { name: 'Skills', label: 'AI skills', icon: 'bot', ai: true, skills: true },
   { name: 'Settings', label: 'Settings', icon: 'settings', manage: true },
   { name: 'Teams', label: 'Roles & access', icon: 'user-check' },
@@ -131,7 +135,7 @@ onErrorCaptured(e => {
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <AccessDenied v-else-if="current && !navAllowed(current, capabilities)" :page="current" :capabilities="capabilities" />
-      <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events'].includes(view) ? { kind: view === 'Skills' ? 'skills' : 'business_events' } : {}" />
+      <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events', 'Knowledge', 'Events'].includes(view) ? { kind: {Skills:'skills', 'Business events':'business_events', Knowledge:'knowledge', Events:'events'}[view] } : {}" />
     </main>
     <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :sections="sections" :view="view" :section="section" :badge="inboxBadge" @navigate="view = $event" @section="openSection">
       <template #footer>

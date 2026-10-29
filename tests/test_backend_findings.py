@@ -355,5 +355,9 @@ class BackendFindings(unittest.TestCase):
             slug=dt.lower().replace(' ','_')
             meta=json.loads(Path(f'relay_core/relay_core/doctype/{slug}/{slug}.json').read_text())
             self.assertEqual({row['role'] for row in meta['permissions']},{'System Manager'},dt)
-            self.assertNotIn(dt,hooks.has_permission)
-            self.assertNotIn(dt,hooks.permission_query_conditions)
+            if dt in ('Relay Conversation Summary', 'Relay Message Translation'):
+                self.assertEqual(hooks.has_permission[dt], 'relay_core.ai_features.document_permission')
+                self.assertEqual(hooks.permission_query_conditions[dt], 'relay_core.ai_features.query_condition')
+            else:
+                self.assertNotIn(dt,hooks.has_permission)
+                self.assertNotIn(dt,hooks.permission_query_conditions)

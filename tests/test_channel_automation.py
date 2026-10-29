@@ -180,7 +180,8 @@ class ChannelApiTests(unittest.TestCase):
         self.doc.save.assert_called_once_with(ignore_permissions=True)
         self.assertEqual(self.doc.automation_enabled, 0)
 
-    def test_partial_save_preserves_every_omitted_field(self):
+    @patch('relay_core.ai_features.is_enabled', return_value=True)
+    def test_partial_save_preserves_every_omitted_field(self, enabled):
         self.doc.update(timezone='UTC', open_time='09:00', close_time='17:00', working_days='Monday',
                         automation_steps=[row('Flow')])
         channel.save('channel', {'steps': [row('AI skill')]}, 'revision')

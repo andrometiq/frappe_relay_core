@@ -175,7 +175,7 @@ class GuardWiringTests(unittest.TestCase):
 
     def test_adapter_search_contacts_survive_saved_decision_and_delivery(self):
         case = self.adapter_case()
-        reference = dict(name='supplier', method='get_doc', doctype='Supplier', scope_field='name',
+        reference = dict(name='supplier', report='configured_test_report', method='get_doc', doctype='Supplier', scope_field='name',
                          fields=['name', 'phone', 'email'])
         plan = dict(purpose='Read your contact details', reference='supplier', fields=reference['fields'],
                     arguments={'name': 'SELF'})
