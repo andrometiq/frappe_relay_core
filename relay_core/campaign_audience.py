@@ -33,8 +33,8 @@ def is_plain(field) -> bool:
 def segment_fields(doctype: str) -> list:
     """The type's grouping field, then the customer or supplier group and territory when the DocType has them."""
     meta = frappe.get_meta(doctype)
-    grouping = frappe.db.get_value('Relay Contact Type', {'business_doctype': doctype}, 'grouping_field')
-    names = dict.fromkeys(filter(None, (grouping, *SEGMENT_FIELDS)))
+    from relay_core.business_groups import configuration
+    names = dict.fromkeys((*configuration(doctype), *SEGMENT_FIELDS))
     return [field for field in map(meta.get_field, names)
             if is_plain(field) and field.fieldtype in ('Link', 'Select', 'Data')]
 

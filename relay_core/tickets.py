@@ -399,7 +399,8 @@ def validate_ticket(doc, check_assignment=True):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket_status=None):
+def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket_status=None,
+           business_type=None, business_record=None):
     from relay_core import ticket_tags
     require_access()
     if isinstance(messages, str):
@@ -411,6 +412,9 @@ def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket
     for name in messages:
         validate_reference(name, 'MSG')
     business_doctype, business_name = ticket_tags.message_business(messages)
+    if business_type is not None or business_record is not None:
+        if (business_type or None, business_record or None) != (business_doctype or None, business_name or None):
+            frappe.throw('Choose the business record that owns the selected messages')
     doc = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
                           'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
                           'assigned_to': assigned_to or None,
@@ -759,12 +763,16 @@ def query_condition(user=None):
 
 @frappe.whitelist(methods=['GET'])
 def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
-              exclude_assignees=None):
+              exclude_assignees=None, business_type=None):
     """Newest tickets first, 30 per page; `after` continues below the given ticket."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid ticket search')
     filters = {}
+    if business_type:
+        from relay_core.business_inbox import check_type
+        check_type(business_type)
+        filters['business_doctype'] = business_type
     if query:
         filters['subject'] = ['like', '%' + query.replace('%', '\\%').replace('_', '\\_') + '%']
     if ticket_status:
@@ -797,7 +805,9 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         filters['creation'] = ['<', created]
     rows = frappe.get_list('Relay Ticket', filters=filters, or_filters=or_filters, fields=LIST_FIELDS,
                            order_by='creation desc', page_length=31)
-    return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None}
+    from relay_core.business_groups import ticket_values
+    columns = ticket_values(rows[:30], business_type)
+    return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None, 'group_fields': columns}
 
 
 @frappe.whitelist(methods=['GET'])

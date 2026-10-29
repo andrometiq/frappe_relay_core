@@ -10,6 +10,7 @@
     "business_doctype",
     "enabled",
     "label",
+    "grouping_fields",
     "grouping_field"
   ],
   "fields": [
@@ -35,10 +36,19 @@
       "fieldtype": "Data"
     },
     {
+      "fieldname": "grouping_fields",
+      "label": "Grouping Fields",
+      "fieldtype": "Table",
+      "options": "Relay Business Group Field",
+      "description": "Direct business fields. Lower priorities appear first; ties follow row order."
+    },
+    {
       "fieldname": "grouping_field",
       "label": "Grouping Field",
       "fieldtype": "Autocomplete",
-      "description": "Choose a field from the business document to group the inbox. Leave blank to show all records."
+      "description": "Choose a field from the business document to group the inbox. Leave blank to show all records.",
+      "hidden": 1,
+      "read_only": 1
     }
   ],
   "permissions": [

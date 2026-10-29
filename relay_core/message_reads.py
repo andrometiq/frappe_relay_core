@@ -13,10 +13,9 @@ def can_read_message_as(doc,user):
 
 def expected_readers(doc):
     if doc.get('business_doctype') and doc.get('business_name'):
-        config=frappe.db.get_value('Relay Contact Type',{'business_doctype':doc.business_doctype,'enabled':1},
-            ['grouping_field'],as_dict=True)
-        if config is not None:
-            field=config.grouping_field or ''
+        if frappe.db.exists('Relay Contact Type', {'business_doctype':doc.business_doctype,'enabled':1}):
+            from relay_core.business_groups import configuration
+            field=next(iter(configuration(doc.business_doctype)), '')
             value=frappe.db.get_value(doc.business_doctype,doc.business_name,field) if field else ''
             from relay_core.business_groups import key
             owner=frappe.db.get_value('Relay Business Group Claim',key(doc.business_doctype,field,value or ''),'assigned_to')

@@ -135,7 +135,9 @@ class ContactApiTests(unittest.TestCase):
 class BusinessTypeApiTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe()
+        self.fake._dict = _dict
         self.enterContext(patch.object(business_types, 'frappe', self.fake))
+        self.groups = self.enterContext(patch('relay_core.business_groups.configuration', return_value=[]))
         self.access = self.enterContext(patch.object(business_types, 'require_access'))
         self.enterContext(patch.object(business_types, 'can_configure', lambda: 'System Manager' in self.fake.get_roles()))
 
@@ -143,7 +145,7 @@ class BusinessTypeApiTests(unittest.TestCase):
         self.fake.get_all.return_value = [_dict(business_doctype='Customer'), _dict(business_doctype='Supplier')]
         self.fake.has_permission.side_effect = lambda doctype, ptype: doctype == 'Customer'
         self.fake.get_roles.return_value = ['Relay Communication User']
-        self.assertEqual(business_types.list_types(), [_dict(business_doctype='Customer')])
+        self.assertEqual(business_types.list_types(), [_dict(business_doctype='Customer', grouping_field='', grouping_fields=[])])
         self.assertEqual(self.fake.get_all.call_args.kwargs['filters'], {'enabled': 1})
         self.fake.get_roles.return_value = ['System Manager']
         business_types.list_types()
@@ -172,7 +174,8 @@ class BusinessTypeApiTests(unittest.TestCase):
         doc.get.side_effect = lambda field: getattr(doc, field)
         result = business_types.save('Customer', '0', ' Customers ', 'customer_group')
         self.assertEqual((doc.business_doctype, doc.enabled, doc.label, doc.grouping_field),
-                         ('Customer', 0, 'Customers', 'customer_group'))
+                         ('Customer', 0, 'Customers', ''))
+        doc.set.assert_called_once_with('grouping_fields', [{'fieldname': 'customer_group', 'priority': 1}])
         doc.save.assert_called_once_with()
         self.assertEqual(result['business_doctype'], 'Customer')
         with self.assertRaises(ValueError):

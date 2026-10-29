@@ -294,19 +294,34 @@ def channel_options():
 
 
 @frappe.whitelist(methods=['GET'])
-def contact_directory(query='', after=None, business_type=None):
+def contact_directory(query='', after=None, business_type=None, business_name=None, unlinked=0):
     """Contacts by name; `business_type` keeps the contacts linked to a record of that type."""
     require_access()
     if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
         frappe.throw('Invalid contact search')
     if business_type and business_type not in business_types():
         frappe.throw('Choose a configured business type')
+    if str(unlinked) not in ('0', '1'):
+        frappe.throw('Invalid contact filter')
+    if business_name:
+        if not isinstance(business_name, str) or len(business_name) > 140:
+            frappe.throw('Invalid business record')
+        if not business_type:
+            frappe.throw('Choose a business type first')
+        frappe.get_doc(business_type, business_name).check_permission('read')
     filters = [['Contact', 'name', '>', after]] if after else []
+    or_filters = []
     if query.strip():
-        filters.append(['Contact', 'full_name', 'like', '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'])
+        pattern = '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        or_filters = [['Contact', field, 'like', pattern] for field in ('name', 'full_name', 'mobile_no', 'phone', 'email_id')]
     if business_type:
         filters.append(['Dynamic Link', 'link_doctype', '=', business_type])
-    rows = frappe.get_list('Contact', filters=filters, fields=['name', 'full_name', 'mobile_no'],
+    if business_name:
+        filters.append(['Dynamic Link', 'link_name', '=', business_name])
+    if str(unlinked) == '1':
+        from relay_core.contacts import unlinked_people
+        filters.append(unlinked_people())
+    rows = frappe.get_list('Contact', filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
         order_by='name asc', page_length=31, distinct=True)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 

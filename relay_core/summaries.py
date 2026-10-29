@@ -169,6 +169,51 @@ def read(name):
             'result':frappe.parse_json(doc.result) if doc.status=='Ready' and not stale else None,'reason':doc.reason}
 
 
+def business_previews(doctype, names):
+    """Read summary evidence in one batch for a directory page; never show stale or hidden evidence."""
+    if not names or not ai_features.is_enabled():
+        return {}
+    summaries = frappe.get_all('Relay Conversation Summary', filters={'business_doctype': doctype,
+        'business_name': ['in', names], 'status': 'Ready'}, fields=['business_name', 'channel', 'sources', 'input_hash', 'result'],
+        order_by='modified desc', limit_page_length=300)
+    sources = []
+    for summary in summaries:
+        try:
+            evidence = frappe.parse_json(summary.sources)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(evidence, list) and 0 < len(evidence) <= 200 and all(isinstance(name, str) for name in evidence):
+            sources.append((summary, evidence))
+    if not sources:
+        return {}
+    from relay_core.business_groups import message_scope
+    values = {'doctype': doctype, 'names': names, 'sources': tuple({name for _, evidence in sources for name in evidence})}
+    permitted = message_scope(values, 'summary_')
+    messages = frappe.db.sql(f"""SELECT m.name, m.business_name, m.channel, m.content, m.direction, m.sent_at, m.creation,
+        COALESCE(NULLIF(r.display_name, ''), r.name) AS contact_label
+        FROM `tabRelay Message` m JOIN `tabRelay Contact` r ON r.name=m.relay_contact
+        WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND m.name IN %(sources)s
+          AND COALESCE(m.legacy_triage, 0)=0 AND {permitted}
+          AND EXISTS (SELECT 1 FROM `tabDynamic Link` l WHERE l.parent=r.contact AND l.parenttype='Contact'
+              AND l.parentfield='links' AND l.link_doctype=m.business_doctype AND l.link_name=m.business_name)
+        """, values, as_dict=True)
+    by_name = {row.name: row for row in messages}
+    previews = {}
+    for summary, evidence in sources:
+        if summary.business_name in previews or any(name not in by_name for name in evidence):
+            continue
+        rows = [by_name[name] for name in evidence]
+        if any(row.business_name != summary.business_name or row.channel != summary.channel for row in rows):
+            continue
+        content = [{'message': row.name, 'time': str(row.sent_at or row.creation), 'direction': row.direction,
+                    'text': row.content or '', 'contact': row.contact_label} for row in rows]
+        if digest(content) == summary.input_hash:
+            result = frappe.parse_json(summary.result) or {}
+            if isinstance(result, dict) and isinstance(result.get('overview'), str):
+                previews[summary.business_name] = result['overview']
+    return previews
+
+
 @frappe.whitelist(methods=['GET'])
 @ai_features.required
 def latest(contact=None,business_doctype=None,business_name=None):
