@@ -33,6 +33,7 @@ const recordField = computed(() => ({
   label: pickedType.value?.label || 'Record', placeholder: pickedType.value ? 'Find ' + pickedType.value.label.toLowerCase() : 'Choose a record type first',
   readOnly: busy.value || !pickedType.value,
   search: async (query, signal) => {
+    if (!pickedType.value) return []
     const rows = await searchLinkChoices([pickedType.value], doctype => coreApi('api.business_records', { doctype, query }, false, { signal }))
     for (const row of rows) choiceLabels.set(row.value, row.label)
     return rows
@@ -46,7 +47,7 @@ async function startAdding() {
     try { types.value = businessTypeOptions(await coreApi('business_types.list_types')) }
     catch (e) { error.value = e.message; return }
   }
-  if (types.value.length === 1) recordType.value = types.value[0].value
+  recordType.value = ''; choice.value = ''
   await nextTick()
   linkForm.value?.querySelector(recordType.value ? 'input' : 'button')?.focus()
 }
@@ -68,10 +69,10 @@ async function removeLink(link) {
   <div class="contact-links">
     <p v-if="start && adding && types.length" class="info-hint">{{ linkHint(types) }}</p>
     <div class="info-group-title"><span>{{ linksHeading(links.length) }}</span>
-      <button v-if="detail.can_edit_links && !adding" type="button" class="info-group-action" :disabled="busy" @click="startAdding">+ Link customer</button></div>
+      <button v-if="detail.can_edit_links && !adding" type="button" class="info-group-action" :disabled="busy" @click="startAdding">+ Link record</button></div>
     <ErrorMessage :message="error" />
     <form v-if="adding" ref="linkForm" class="contact-link-form info-card" aria-label="Link to a business record" @submit.prevent="addLink">
-      <div v-if="types.length > 1" class="contact-link-types" role="radiogroup" aria-label="Record type">
+      <div v-if="types.length" class="contact-link-types" role="radiogroup" aria-label="Record type">
         <span class="contact-link-step">Record type</span>
         <div class="contact-link-type-options"><button v-for="type in types" :key="type.value" type="button" role="radio" :aria-checked="recordType === type.value" :disabled="busy" @click="pickType(type.value)">{{ type.label }}</button></div>
       </div>
@@ -93,13 +94,13 @@ async function removeLink(link) {
           </span>
           <span v-if="detail.can_set_primary && links.length > 1" class="info-switch-label" aria-hidden="true">Main</span>
           <button v-if="detail.can_set_primary && links.length > 1" type="button" role="switch" class="info-switch" :aria-checked="isPrimaryLink(detail.primary, link)"
-            :aria-label="'Main customer: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" title="Main customer" @click="setPrimary(link, !isPrimaryLink(detail.primary, link))" />
+            :aria-label="'Main record: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" title="Main record" @click="setPrimary(link, !isPrimaryLink(detail.primary, link))" />
           <Button v-if="detail.can_edit_links" class="info-remove" icon="x" variant="ghost" size="xs" :aria-label="'Remove link: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" @click="removing = keyOf(link); adding = false" />
         </template>
       </li>
     </ul>
-    <p v-else-if="!adding" class="info-hint">{{ detail.can_edit_links ? 'Not linked to a customer yet.' : 'Not linked to a customer yet. A manager can link it.' }}</p>
-    <p v-if="links.length > 1" class="info-hint">The main customer shows in the chat header{{ capabilities.ai ? ' and gives AI its context' : '' }}.</p>
+    <p v-else-if="!adding" class="info-hint">{{ detail.can_edit_links ? 'Not linked to a business record yet.' : 'Not linked to a business record yet. A manager can link it.' }}</p>
+    <p v-if="links.length > 1" class="info-hint">The main record shows in the chat header{{ capabilities.ai ? ' and gives AI its context' : '' }}.</p>
   </div>
 </template>
 
@@ -109,8 +110,9 @@ async function removeLink(link) {
 .contact-link-types { display:flex; flex-direction:column; gap:6px; }
 .contact-link-step { color:var(--relay-ink-3); font-size:12px; }
 .contact-link-type-options { display:flex; flex-wrap:wrap; gap:6px; }
-.contact-link-type-options button { min-height:30px; padding:0 12px; border:1px solid var(--relay-stroke); border-radius:15px; color:var(--relay-ink-2); font-size:13px; }
+.contact-link-type-options button { min-height:44px; padding:0 12px; border:1px solid var(--relay-stroke); border-radius:15px; color:var(--relay-ink-2); font-size:13px; }
 .contact-link-type-options button[aria-checked="true"] { border-color:var(--relay-accent); background:var(--relay-accent-soft); color:var(--relay-accent-text); font-weight:600; }
 .contact-link-form-actions { display:flex; justify-content:flex-end; gap:8px; }
 .info-switch-label { flex:none; color:var(--relay-ink-3); font-size:11.5px; }
+@media (max-width:768px) { .info-group-action, .info-item-copy a { display:inline-flex; align-items:center; min-height:44px; } .contact-links :deep(:is(button,input)) { min-height:44px !important; min-width:44px !important; } }
 </style>

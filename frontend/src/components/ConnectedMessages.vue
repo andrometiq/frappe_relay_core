@@ -367,7 +367,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 
     <aside class="contact-directory">
       <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
-        @business="openBusiness" @select="openContact" @start="openStart()" />
+        @business="openBusiness" @select="openContact" @start="openStart()" @navigate="state.clearSelection(false)" />
     </aside>
 
     <Teleport v-if="isMobile && !active" to="#relay-header-actions" defer>
@@ -492,7 +492,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         @close="summaryOpen = false" @open="focusMessage" />
     </div>
     <div v-else class="connected-thread whatsapp-empty-pane" aria-label="No open conversation">
-      <WorkspaceState title="Choose a conversation" description="Select a customer on the left to view messages and reply." icon="message-circle" />
+      <WorkspaceState title="Choose a conversation" description="Select a business record on the left to view messages and reply." icon="message-circle" />
     </div>
     </Transition>
 
