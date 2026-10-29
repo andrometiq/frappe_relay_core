@@ -3,8 +3,10 @@ import base64
 import hashlib
 import json
 import mimetypes
+import re
 import time
 import frappe
+from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 from redis.exceptions import LockError
 from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.automation.contracts import canonical
@@ -133,7 +135,14 @@ def campaign_message(message):
 
 def fixed_file(doc):
     """(File, MIME type) that every row of a media campaign sends, or None when rows carry links."""
-    value = (json.loads(doc.column_map or '{}').get('fixed') or {}).get('media_url')
+    mapping = json.loads(doc.column_map or '{}')
+    attachment = mapping.get('header_attachment')
+    if attachment:
+        if attachment['mode'] != 'static':
+            return None
+        from relay_core.campaign_media import checked_file
+        return checked_file(attachment['files'][0], header_type(doc))
+    value = (mapping.get('fixed') or {}).get('media_url')
     if not bulk_sheet.is_site_file(value):
         return None
     kind = json.loads(doc.arguments)['message']['kind']
@@ -153,15 +162,24 @@ def media_upload(hub, doc):
     if doc.media_id and frappe.utils.get_datetime(doc.media_uploaded_at) > frappe.utils.add_to_date(now, days=-MEDIA_DAYS):
         return {}
     file, mime_type = found
-    with open(file.get_full_path(), 'rb') as handle:
-        content = base64.b64encode(handle.read()).decode()
-    kind = json.loads(doc.arguments)['message']['kind']
-    payload = whatsapp.prepare('messages.media_upload', {'media_type': bulk_sheet.MESSAGE_MEDIA[kind], 'mime_type': mime_type,
-                               'filename': file.file_name, 'content_base64': content})
-    media_id = str(hub.execute(hub_arguments(doc.channel, payload)).get('id') or '')
-    if not media_id:
-        raise whatsapp.HubError('Hub returned no media id')
+    snapshot = json.loads(doc.arguments)
+    kind = bulk_sheet.MESSAGE_MEDIA[snapshot['message']['kind']] if 'message' in snapshot else header_type(doc)
+    media_id = upload_media_file(hub, doc.channel, file, mime_type, kind)
     return {'media_id': media_id, 'media_uploaded_at': now}
+
+
+def upload_media_file(hub, channel, file, mime_type, kind, filename=None):
+    from relay_core.template_media import MAX_BYTES
+    with open(file.get_full_path(), 'rb') as handle:
+        raw = handle.read(MAX_BYTES + 1)
+    if not 1 <= len(raw) <= MAX_BYTES:
+        raise ValueError('Header attachment must contain 1 byte to 4 MiB')
+    payload = whatsapp.prepare('messages.media_upload', {'media_type': kind, 'mime_type': mime_type,
+        'filename': filename or file.file_name, 'content_base64': base64.b64encode(raw).decode()})
+    media_id = str(hub.execute(hub_arguments(channel, payload)).get('id') or '')
+    if not re.fullmatch(r'[0-9]{1,100}', media_id):
+        raise whatsapp.HubError('Hub returned no media id')
+    return media_id
 
 
 def uploaded_file(file_url):
@@ -192,7 +210,7 @@ def inspect(name, file_url):
     doc.source_file, doc.recipient_filters = file_url, None
     internal_save(doc)
     fields = json.loads(doc.arguments)['fields']
-    return {'columns': header, 'sample': sample, 'fields': fields, 'mapping': bulk_sheet.suggest(header, fields)}
+    return {'columns': header, 'sample': sample, 'fields': fields, 'mapping': bulk_sheet.suggest(header, fields, first_phone=True)}
 
 
 @frappe.whitelist(methods=['POST'])
@@ -203,7 +221,9 @@ def import_rows(name, mapping):
     mapping = frappe.parse_json(mapping) if isinstance(mapping, str) else mapping
     try:
         header, _ = bulk_sheet.columns(source_path(doc.source_file), sample=1)
-        mapping = bulk_sheet.check_mapping(mapping, header, json.loads(doc.arguments)['fields'])
+        if not header or not isinstance(mapping, dict):
+            raise ValueError('Upload recipient rows and choose their mapping')
+        mapping = bulk_sheet.check_mapping({**mapping, 'phone': header[0]}, header, json.loads(doc.arguments)['fields'])
     except ValueError as exc:
         frappe.throw(str(exc))
     doc.column_map, doc.recipient_filters = canonical(mapping), None
@@ -212,8 +232,12 @@ def import_rows(name, mapping):
 
 
 def start_import(doc):
-    fixed_file(doc)
+    try:
+        fixed_file(doc)
+    except (ValueError, OSError) as exc:
+        frappe.throw(str(exc))
     doc.status, doc.last_error = 'Importing', ''
+    doc.media_id, doc.media_uploaded_at = None, None
     internal_save(doc)
     enqueue('import_job', doc.name)
 
@@ -304,7 +328,7 @@ def import_job(name):
     try:
         add_rows(doc, recipient_rows(doc), set())
         doc.last_error = ''
-    except ValueError as exc:
+    except (ValueError, OSError, ValidationError, PermissionError) as exc:
         frappe.db.rollback()
         remove_unsent(name)  # Chunks before the error were committed; none of them may start.
         doc.last_error = str(exc)[:500]
@@ -326,9 +350,35 @@ def add_rows(doc, rows, seen):
     """Check and insert (row number, column -> text) rows in chunks; sheet and JSON rows share this path."""
     snapshot, mapping = json.loads(doc.arguments), json.loads(doc.column_map)
     fields, message = snapshot['fields'], snapshot.get('message')
-    chunk = []
+    attachment, resolved = mapping.get('header_attachment'), {}
+    if attachment:
+        from relay_core.campaign_media import resolve
+        # Only the destination set is retained; the uploaded sheet remains streamed.
+        if doc.source_file:
+            numbers = {phone_number(row.get(mapping['phone']), doc.country) for _, row in recipient_rows(doc)}
+        else:
+            rows = list(rows)
+            numbers = {phone_number(row.get(mapping['phone']), doc.country) for _, row in rows}
+        resolved = resolve(attachment, header_type(doc), numbers - {None})
+    chunk, enrolled = [], {}
     for number, row in rows:
-        destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country)
+        destination = phone_number(row.get(mapping['phone']), doc.country)
+        header_file, media_problem = resolved.get(destination, (None, None))
+        destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country, header_file)
+        if destination and media_problem:
+            problem = media_problem
+        if doc.source_file and not doc.recipient_filters:
+            values = values or {'values': {}}
+            if not destination:
+                values['contact_status'] = 'invalid'
+            elif destination in enrolled:
+                values['contact_status'] = 'existing'
+                problem = problem or enrolled[destination]
+            else:
+                contact_status, contact_problem = sheet_contact(doc.channel, destination)
+                enrolled[destination] = contact_problem
+                values['contact_status'] = contact_status
+                problem = problem or contact_problem
         if not problem and message:
             problem = bulk_sheet.message_problem(message, values['values'])
         if not problem and destination in seen:
@@ -340,6 +390,38 @@ def add_rows(doc, rows, seen):
             insert_chunk(doc, chunk)
             chunk = []
     insert_chunk(doc, chunk)
+
+
+def sheet_contact(channel, number):
+    """Use the existing enrollment path, holding its person lock through commit.
+
+    The indexed lookup also preserves revoked bindings and opt-outs. A fresh transaction
+    inside the lock sees another campaign's committed endpoint before creating anything.
+    """
+    from relay_core.contact_lifecycle import endpoint_key, sibling_contact, whatsapp_contact
+    with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
+        frappe.db.commit()
+        existing = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, number)},
+                                       ['relay_contact', 'verified'], as_dict=True, for_update=True)
+        if existing:
+            return 'existing', None if existing.verified else 'Endpoint verification revoked'
+        try:
+            relay = sibling_contact(channel, number) or whatsapp_contact(channel, number, locked=True)
+            frappe.db.commit()  # Enrollment must be visible before the Redis lock is released.
+        except Exception:
+            frappe.db.rollback()
+            raise
+        return ('created', None) if relay else ('existing', 'Contact binding needs review')
+
+
+def contact_counts(name):
+    rows = frappe.db.sql(f"""SELECT JSON_UNQUOTE(JSON_EXTRACT(arguments, '$.contact_status')) AS kind,
+        COUNT(*) AS count FROM `tab{RECIPIENT}` WHERE campaign=%s GROUP BY kind""", name, as_dict=True)
+    return {kind: sum(row.count for row in rows if row.kind == kind) for kind in ('created', 'existing', 'invalid')}
+
+
+def header_type(doc):
+    return next(field['media'] for field in json.loads(doc.arguments)['fields'] if field['key'] == 'header_media')
 
 
 def remove_unsent(campaign):
@@ -420,6 +502,7 @@ def read(name, after=None, status=None):
             'audience': json.loads(doc.recipient_filters) if doc.recipient_filters else None,
             'time_zone': frappe.utils.get_system_timezone(),
             'fields': snapshot['fields'], 'counts': counts(doc), 'issues': issues,
+            'contact_counts': contact_counts(name) if doc.source_file else None,
             'recipients': rows[:50], 'next': rows[49].sheet_row if len(rows) > 50 else None}
 
 
@@ -485,6 +568,8 @@ def check_ready(doc):
         if doc.operation == 'templates.send':
             approved_template(hub, doc.template_name, doc.language, doc.channel)
         return media_upload(hub, doc)
+    except (ValueError, OSError) as exc:
+        frappe.throw(str(exc))
     except whatsapp.HubError as exc:
         frappe.throw(whatsapp.failure_message(exc))
 
@@ -541,6 +626,7 @@ def push(doc, deadline):
     """Push Pending rows 50 at a time. True when the slice ran out of time with rows left."""
     snapshot = json.loads(doc.arguments)
     hub = whatsapp.client()
+    has_attachments = bool(json.loads(doc.column_map or '{}').get('header_attachment'))
     while time.monotonic() < deadline:
         if current_status(doc.name) != 'Running':
             return False
@@ -555,8 +641,22 @@ def push(doc, deadline):
             rows = within_window(doc, rows)
         if not rows:
             continue
-        for row in rows:
-            row.message = hub_message(doc, snapshot, row)
+        try:
+            rows = prepare_messages(hub, doc, snapshot, rows, deadline=deadline)
+        except whatsapp.HubError as exc:
+            retry_later(doc, whatsapp.failure_message(exc))
+            continue
+        except (ValueError, OSError, ValidationError, PermissionError) as exc:
+            doc.status, doc.last_error = 'Paused', str(exc)[:500]
+            internal_save(doc)
+            frappe.db.commit()
+            return False
+        if has_attachments:
+            if current_status(doc.name) != 'Running':
+                return False
+            rows = without_opted_out(doc, rows)
+        if not rows:
+            continue
         messages = [{'key': row.request_key, 'message': row.message} for row in rows]
         # Attempted before Hub sends: a reply can arrive before this batch's admission commits.
         frappe.db.sql(f"UPDATE `tab{RECIPIENT}` SET attempted=1 WHERE name IN %s", (tuple(row.name for row in rows),))
@@ -582,12 +682,58 @@ def push(doc, deadline):
     return True
 
 
-def hub_message(doc, snapshot, row):
+def prepare_messages(hub, doc, snapshot, rows, *, deadline=None):
+    attachment = json.loads(doc.column_map or '{}').get('header_attachment')
+    if not attachment:
+        for row in rows:
+            row.message = hub_message(doc, snapshot, row)
+        return rows
+    from relay_core.campaign_media import checked_file
+    kind = header_type(doc)
+    files = {(item['file_url'], item['filename']) for item in attachment['files']}
+    ready = []
+    for row in rows:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        arguments = json.loads(row.arguments)
+        item = arguments['values'].get('header_media')
+        try:
+            if not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files:
+                raise ValueError('Missing header attachment')
+            file, mime = checked_file(item, kind)
+        except (ValueError, OSError, DoesNotExistError, PermissionError, ValidationError) as exc:
+            frappe.db.set_value(RECIPIENT, row.name, {'status': 'Skipped', 'reason': str(exc)[:500]})
+            continue
+        if attachment['mode'] == 'static':
+            fresh = media_upload(hub, doc)
+            if fresh:
+                doc.update(fresh)
+                frappe.db.set_value('Relay Campaign', doc.name, fresh, update_modified=False)
+            media_id = doc.media_id
+        else:
+            cached = arguments.get('header_upload') or {}
+            now = frappe.utils.now_datetime()
+            if (cached.get('id') and cached.get('at')
+                    and frappe.utils.get_datetime(cached['at']) > frappe.utils.add_to_date(now, days=-MEDIA_DAYS)):
+                media_id = cached['id']
+            else:
+                media_id = upload_media_file(hub, doc.channel, file, mime, kind, item['filename'])
+                arguments['header_upload'] = {'id': media_id, 'at': str(now)}
+                row.arguments = canonical(arguments)
+                frappe.db.set_value(RECIPIENT, row.name, 'arguments', row.arguments, update_modified=False)
+                frappe.db.commit()  # Reuse this upload if bulk admission is retried.
+        header = {'id': media_id, **({'filename': item['filename']} if kind == 'document' else {})}
+        row.message = hub_message(doc, snapshot, row, header)
+        ready.append(row)
+    return ready
+
+
+def hub_message(doc, snapshot, row, header_media=None):
     values = json.loads(row.arguments)['values']
     if 'message' in snapshot:
         return {**bulk_sheet.build_message(snapshot['message'], values, doc.media_id), 'to': row.destination}
     return {'operation': 'templates.send', 'to': row.destination, 'name': doc.template_name, 'language': doc.language,
-            'components': bulk_sheet.build_components(snapshot['fields'], values)}
+            'components': bulk_sheet.build_components(snapshot['fields'], values, header_media)}
 
 
 def without_opted_out(doc, rows):
@@ -646,6 +792,7 @@ def cancel_remaining(doc, deadline):
     in_chunks(doc.name, 'Pending', lambda names: frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Cancelled',
         modified=NOW(6) WHERE name IN %s AND status='Pending' ''', (names,)))
     hub = whatsapp.client()
+    has_attachments = bool(json.loads(doc.column_map or '{}').get('header_attachment'))
     while time.monotonic() < deadline:
         if is_waiting(doc.name, deadline):
             continue
