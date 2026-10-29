@@ -355,7 +355,7 @@ class GroupAggregateTests(unittest.TestCase):
 
     def test_current_behavior_docs_have_no_validation_or_handoff_sections(self):
         from pathlib import Path
-        doc = (Path(__file__).resolve().parents[1] / 'docs/business-grouping-phase-1.md').read_text()
+        doc = (Path(__file__).resolve().parents[1] / 'docs/business-grouping.md').read_text()
         self.assertNotRegex(doc.lower(), r'validation|handoff|migrat|bench |export-fixtures')
         self.assertIn('record badges count unread messages', doc)
         self.assertIn('Contacts tiles show contact counts', doc)
