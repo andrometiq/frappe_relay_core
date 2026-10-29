@@ -161,6 +161,7 @@ class ProjectionLatencyTests(unittest.TestCase):
             projection.on_event(_dict(name='status', payload=json.dumps({'channel_statuses': []}), flags=_dict()))
         self.assertEqual(len(callbacks), 51)  # Redis is touched only after commit.
         rq = MagicMock()
+        rq.fetch_job.return_value.get_status.return_value = 'queued'
         pipe = rq.connection.pipeline.return_value.__enter__.return_value
         reserved = {}
         pipe.get.side_effect = reserved.get

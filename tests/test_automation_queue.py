@@ -56,6 +56,7 @@ class AutomationQueueTests(unittest.TestCase):
     def test_signal_coalesces_300_arrivals_and_uses_default(self):
         fake = Mock(conf={})
         rq = MagicMock()
+        rq.fetch_job.return_value.get_status.return_value = 'queued'
         pipe = rq.connection.pipeline.return_value.__enter__.return_value
         pipe.get.side_effect = [None] + [b'waiting'] * 299
         with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq) as get_queue, \
@@ -68,9 +69,49 @@ class AutomationQueueTests(unittest.TestCase):
         pipe.execute.assert_called_once()
         self.assertEqual(pipe.set.call_args.kwargs, {'ex': queue.WAKE_TTL})
 
+    def test_stale_signal_replaced_when_job_is_missing_or_not_live(self):
+        for status in (None, 'finished', 'failed', 'stopped', 'canceled'):
+            with self.subTest(status=status):
+                fake = Mock(conf={})
+                rq = MagicMock()
+                pipe = rq.connection.pipeline.return_value.__enter__.return_value
+                pipe.get.return_value = b'lost-token'
+                rq.fetch_job.return_value = None if status is None else Mock(
+                    get_status=Mock(return_value=status))
+                with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq), \
+                        patch.object(queue, 'create_job_id', side_effect=lambda value: value):
+                    self.assertIs(queue.wake(), rq.enqueue_call.return_value)
+                rq.fetch_job.assert_called_once_with('relay-message-automation-drain:lost-token')
+                rq.enqueue_call.assert_called_once()
+                token = pipe.set.call_args.args[1]
+                self.assertNotEqual(token, 'lost-token')
+                self.assertEqual(rq.enqueue_call.call_args.kwargs['job_id'],
+                                 f'relay-message-automation-drain:{token}')
+                pipe.execute.assert_called_once()
+                fake.db.sql.assert_not_called()  # The site-wide turn lock is unchanged.
+                fake.log_error.assert_not_called()
+
+    def test_live_signal_job_keeps_its_reservation(self):
+        for status in ('queued', 'started'):
+            with self.subTest(status=status):
+                fake = Mock(conf={})
+                rq = MagicMock()
+                pipe = rq.connection.pipeline.return_value.__enter__.return_value
+                pipe.get.return_value = b'live-token'
+                rq.fetch_job.return_value.get_status.return_value = status
+                with patch.object(queue, 'frappe', fake), patch.object(queue, 'get_queue', return_value=rq), \
+                        patch.object(queue, 'create_job_id', side_effect=lambda value: value):
+                    queue.wake()
+                rq.fetch_job.assert_called_once_with('relay-message-automation-drain:live-token')
+                rq.enqueue_call.assert_not_called()
+                pipe.set.assert_not_called()
+                pipe.execute.assert_not_called()
+                fake.log_error.assert_not_called()
+
     def test_interrupted_enqueue_does_not_publish_an_orphan_reservation(self):
         fake = Mock(conf={})
         rq = MagicMock()
+        rq.fetch_job.return_value.get_status.return_value = 'queued'
         pipe = rq.connection.pipeline.return_value.__enter__.return_value
         pipe.get.return_value = None
         rq.enqueue_call.side_effect = ConnectionError()
@@ -88,6 +129,7 @@ class AutomationQueueTests(unittest.TestCase):
     def test_competing_wake_retries_watch_conflict_and_keeps_winners_job(self):
         fake = Mock(conf={})
         rq = MagicMock()
+        rq.fetch_job.return_value.get_status.return_value = 'queued'
         pipe = rq.connection.pipeline.return_value.__enter__.return_value
         pipe.get.side_effect = [None, b'winner']
         pipe.execute.side_effect = queue.WatchError()
