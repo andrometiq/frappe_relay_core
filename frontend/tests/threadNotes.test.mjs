@@ -30,7 +30,7 @@ test('added notes show in the thread at once and live note changes come from Soc
   const notes = await read('composables/useThreadNotes.js'), messages = await read('components/ConnectedMessages.vue')
   assert.match(notes, /useRealtimeRefresh\(\[\], \['comments'\], load\)/)
   assert.doesNotMatch(notes, /setInterval|setTimeout/)
-  assert.equal((messages.match(/@added="showToast\('Note added'\); threadNotes\.load\(\)"/g) || []).length, 2)
+  assert.equal((messages.match(/@added="showToast\('Note added'\); threadNotes\.load\(\)"/g) || []).length, 3)
   assert.match(messages, /:notes="threadNotes\.items\.value"/)
   const thread = await read('components/messages/MessageThread.vue')
   assert.match(thread, /<article v-if="message\.note" class="note-bubble"/)

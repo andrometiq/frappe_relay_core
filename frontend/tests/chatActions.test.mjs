@@ -32,7 +32,7 @@ test('a closed reply window hides Reply and reactions but keeps the other action
   const thread = await read('messages/MessageThread.vue'), composer = await read('messages/MessageComposer.vue'), messages = await read('ConnectedMessages.vue')
   assert.match(thread, /const items = props\.replyClosed \|\| !sends \? \[\] : \[\{ label: "Reply"/)
   assert.match(thread, /:emoji="!replyClosed && canReact\(menu\.message\) \? quickReactions : \[\]"/)
-  assert.match(composer, /watch\(closed, value => emit\("closed", value\), \{ immediate: true \}\)/)
+  assert.match(composer, /watch\(\(\) => closed\.value \|\| !!windowError\.value \|\| windowChecking\.value, value => emit\("closed", value\)/)
   assert.match(messages, /@closed="replyClosed = \$event"/)
   assert.match(messages, /:reply-closed="replyClosed"/)
 })
@@ -67,7 +67,6 @@ test('reply, reactions and resends show only on messages of the channel picked t
   assert.match(thread, /can\(message, "reactions"\) && onPickedChannel\(message, props\.provider\)/)
   assert.match(thread, /if \(sends && messageData\(message\)\.kind === "sticker"\)/)
   assert.match(messages, /<MessageThread [^>]*:provider="provider"/)
-  assert.equal((composer.match(/v-if="can\('saved_replies'\)"/g) || []).length, 2, 'Saved replies show only where the channel has them')
-  assert.equal((composer.match(/v-if="can\('templates'\)"/g) || []).length, 2)
+  assert.match(composer, /composerActions\(\{ can, kinds: kinds\.value/)
+  assert.match(composer, /v-if="can\('templates'\) && !offReason"/)
 })
-
