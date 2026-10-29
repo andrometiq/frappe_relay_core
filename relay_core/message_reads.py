@@ -2,7 +2,7 @@
 import hashlib
 import json
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact, can_read_contact_as
 
 MAX_BUSINESS_CHATS = 100
@@ -41,6 +41,7 @@ def mark(contact, messages):
     from relay_core.relay_chats import key_of
     owners, chats = {contact: primary(contact)}, {}
     for name in names:
+        document_name(name)
         doc = frappe.get_doc('Relay Message', name); doc.check_permission('read')
         if doc.relay_contact != contact: frappe.throw('Message belongs to another conversation', frappe.PermissionError)
         frappe.get_doc('Relay Channel', doc.channel).check_permission('read')
@@ -161,6 +162,7 @@ def newest_message(filters):
 
 @frappe.whitelist(methods=['GET'])
 def coverage(message):
+    document_name(message)
     require_access()
     doc = frappe.get_doc('Relay Message', message); doc.check_permission('read'); readable_contact(doc.relay_contact)
     frappe.get_doc('Relay Channel', doc.channel).check_permission('read')

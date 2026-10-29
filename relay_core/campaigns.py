@@ -2,7 +2,7 @@
 import hashlib
 import time
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
@@ -15,6 +15,7 @@ def digest(value):return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
 def campaign(name,active=False):
+    document_name(name)
     require_access('Relay Campaign');doc=frappe.get_doc('Relay Campaign',name);doc.check_permission('read')
     if doc.business_doctype:
         business_document(doc.business_doctype,doc.business_name)

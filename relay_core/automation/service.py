@@ -8,7 +8,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
@@ -140,6 +140,7 @@ def replies(policy, channel):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def enqueue(message):
+    document_name(message)
     require_access(manage=True)
     doc = frappe.get_doc('Relay Message', message)
     doc.check_permission('read')

@@ -1,5 +1,6 @@
 """Ticket statuses and types that managers configure. Each status is of type Open or Closed."""
 import frappe
+from relay_core.business_access import document_name
 
 STATUS_TYPES = ('Open', 'Closed')
 DOCTYPES = {'status': 'Relay Ticket Status', 'type': 'Relay Ticket Type'}
@@ -72,11 +73,14 @@ def _require_manager(kind):
 @frappe.whitelist(methods=['POST'])
 def save(kind, label, name=None, colour=None, state=None):
     """Add a value, or change one: a new `label` renames it everywhere it is used."""
+    document_name(label)
     _require_manager(kind)
     doctype = _kind(kind)
     label = (label or '').strip() if isinstance(label, str) else ''
     if not label or len(label) > 60:
         frappe.throw('Name must contain 1–60 characters')
+    if name is not None and name != '':
+        document_name(name)
     if name:
         if name != label:
             frappe.rename_doc(doctype, name, label)
@@ -110,6 +114,7 @@ def reorder(kind, names):
     if not isinstance(names, list) or sorted(names) != sorted(frappe.get_all(doctype, pluck='name')):
         frappe.throw('Send every value once')
     for index, name in enumerate(names):
+        document_name(name)
         if frappe.db.get_value(doctype, name, 'sort_order') != (index + 1) * 10:
             doc = frappe.get_doc(doctype, name)
             doc.sort_order = (index + 1) * 10

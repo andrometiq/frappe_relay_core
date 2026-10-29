@@ -9,6 +9,7 @@ import json
 import time
 
 import frappe
+from relay_core.business_access import document_name
 from frappe.utils import cint, getdate, now_datetime
 
 from relay_core import ai_features
@@ -94,6 +95,7 @@ def on_file_change(doc, method=None) -> None:
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def rebuild(event: str) -> None:
+    document_name(event)
     frappe.get_doc(EVENT, event).check_permission('write')
     queue_build(event, force=True)
 

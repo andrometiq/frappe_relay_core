@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact
 from relay_core.case_contracts import lifecycle, transition
 
@@ -33,11 +34,15 @@ def _read(doc):
 
 @frappe.whitelist(methods=['GET'])
 def read(name):
+    document_name(name)
     require_access()
     return _read(frappe.get_doc('Relay Case',name))
 
 
 def create(case_type, contact, title, field_values, request_key, source_flow=None, business_doctype=None, business_name=None):
+    document_name(case_type)
+    if source_flow is not None and source_flow != "":
+        document_name(source_flow)
     require_access();readable_contact(contact)
     if not isinstance(title,str) or not 1<=len(title.strip())<=140:
         frappe.throw('Enter a case title of 1–140 characters')
@@ -73,6 +78,7 @@ def create(case_type, contact, title, field_values, request_key, source_flow=Non
 
 @frappe.whitelist(methods=['POST'])
 def move(name, stage, values, modified):
+    document_name(name)
     require_access()
     if isinstance(values,str):values=frappe.parse_json(values)
     if not isinstance(values,dict):frappe.throw('Case fields must be an object')
@@ -138,6 +144,7 @@ def create_manual(case_type, contact, title, field_values, request_key, business
 
 @frappe.whitelist(methods=['POST'])
 def assign(name, user, modified):
+    document_name(name)
     require_access(manage=True)
     if not isinstance(user,str):frappe.throw('Choose an agent')
     with frappe.cache.lock('relay-case-edit-'+hashlib.sha256(name.encode()).hexdigest(),timeout=30,blocking_timeout=3):
@@ -150,6 +157,7 @@ def assign(name, user, modified):
 
 @frappe.whitelist(methods=['GET'])
 def agents(name, query=''):
+    document_name(name)
     require_access(manage=True)
     from relay_core.teams import _agent_options
     doc=frappe.get_doc('Relay Case',name);authorize(doc)

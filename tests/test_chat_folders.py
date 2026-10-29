@@ -10,6 +10,7 @@ from test_contact_primary import fake_frappe
 class ChatFolderTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe()
+        self.enterContext(patch('relay_core.business_access.frappe', self.fake))
         self.fake.session.user = 'agent@example.invalid'
         self.fake.db.escape = lambda value: "'" + value + "'"
         self.owners = {'F-MINE': 'agent@example.invalid', 'F-OTHER': 'other@example.invalid'}
@@ -47,9 +48,14 @@ class ChatFolderTests(unittest.TestCase):
 
     def test_another_users_folder_is_not_found(self):
         self.assertIs(chat_folders.own_folder('F-MINE'), self.fake.get_doc.return_value)
-        for folder in ('F-OTHER', 'F-MISSING', None, 'x' * 141):
+        for folder in ('F-OTHER', 'F-MISSING'):
             with self.assertRaises(LookupError, msg=repr(folder)):
                 chat_folders.own_folder(folder)
+        for folder in (None, 'x' * 141, {'user': 'other@example.invalid'}):
+            self.fake.get_doc.reset_mock()
+            with self.assertRaises(ValueError):
+                chat_folders.own_folder(folder)
+            self.fake.get_doc.assert_not_called()
 
     def test_rename_and_delete_deny_another_users_folder_without_writing(self):
         with self.assertRaises(LookupError):

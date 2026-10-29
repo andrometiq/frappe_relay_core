@@ -7,6 +7,7 @@ import re
 import time
 from io import BytesIO
 import frappe
+from relay_core.business_access import document_name
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 from redis.exceptions import LockError
 from relay_core import bulk_sheet, service_window, whatsapp
@@ -122,6 +123,7 @@ def is_bulk(doc):
 
 
 def bulk(name, statuses=None):
+    document_name(name)
     require_access('Relay Campaign', 'write')
     doc = frappe.get_doc('Relay Campaign', name)
     doc.check_permission('read')

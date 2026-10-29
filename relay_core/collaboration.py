@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.api import validate_reference
 
@@ -121,6 +122,8 @@ def comments(contact, before=None):
 
 @frappe.whitelist(methods=['POST'])
 def add(contact, body, request_key, messages=None, reply_to=None, assigned_to=None, mentions=None, business_doctype=None, business_name=None):
+    if reply_to is not None and reply_to != "":
+        document_name(reply_to)
     require_access(); readable_contact(contact)
     if not isinstance(body,str) or not 1<=len(body.strip())<=4000:
         frappe.throw('Comment must contain 1–4000 characters')
@@ -158,6 +161,7 @@ def add(contact, body, request_key, messages=None, reply_to=None, assigned_to=No
 
 @frappe.whitelist(methods=['POST'])
 def edit(name, body=None, remove=0):
+    document_name(name)
     require_access()
     if str(remove) not in ('0','1','False','True'):frappe.throw('Invalid removal flag')
     frappe.db.get_value('Relay Internal Comment',name,'name',for_update=True)
@@ -216,6 +220,7 @@ def notify(doc):
 
 @frappe.whitelist(methods=['POST'])
 def task_status(name,status):
+    document_name(name)
     require_access()
     if status not in ('Open','Done'):frappe.throw('Invalid task status')
     frappe.db.get_value('Relay Internal Comment',name,'name',for_update=True)
@@ -248,6 +253,7 @@ def notifications(before=None):
 
 @frappe.whitelist(methods=['POST'])
 def mark_notification(name):
+    document_name(name)
     require_access();doc=frappe.get_doc('Relay Notification',name)
     if doc.user!=frappe.session.user:frappe.throw('Notification belongs to another user',frappe.PermissionError)
     frappe.db.set_value('Relay Notification',doc.name,'is_read',1)

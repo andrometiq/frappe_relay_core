@@ -3,6 +3,7 @@ links; Relay Contact keeps only which link is primary."""
 import hashlib
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import can_manage, readable_contact, require_access
 from relay_core.business_access import business_document, allowed_types, require_person
 
@@ -101,6 +102,10 @@ def set_links(contact, links):
     wanted = business_links(links)
     configured = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     kept = [row for row in person.links if row.link_doctype not in configured or not readable(row)]
+    relay = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
+    if relay:
+        from relay_core.business_access import preserve_primary_history
+        preserve_primary_history(relay)
     person.set('links', [{'link_doctype': row.link_doctype, 'link_name': row.link_name} for row in kept]
                + [{'link_doctype': doctype, 'link_name': name} for doctype, name in wanted])
     if manager:
@@ -112,6 +117,7 @@ def set_links(contact, links):
 
 def add_link(contact, doctype, name):
     """Append through the existing link service, preserving inaccessible links."""
+    document_name(contact)
     person = frappe.get_doc('Contact', contact)
     wanted = [{'doctype': row.link_doctype, 'name': row.link_name} for row in person.links
               if frappe.db.exists('Relay Contact Type', {'business_doctype': row.link_doctype, 'enabled': 1})
@@ -146,6 +152,8 @@ def set_primary(contact, doctype=None, name=None):
         target = business_links([{'doctype': doctype, 'name': name}])[0]
         if target not in candidates(relay):
             frappe.throw('Link the record to this contact first')
+    from relay_core.business_access import preserve_primary_history
+    preserve_primary_history(relay, authorize=True)
     doc = frappe.get_doc('Relay Contact', relay)
     doc.primary_doctype, doc.primary_name = target
     doc.save(ignore_permissions=True)

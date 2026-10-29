@@ -4,6 +4,7 @@ import json
 import uuid
 
 import frappe
+from relay_core.business_access import document_name
 
 from relay_core.permissions import readable_contact, require_access
 
@@ -16,6 +17,7 @@ def _messages(contact, names):
         frappe.throw('Choose at most 500 messages')
     names = list(dict.fromkeys(names))
     for name in names:
+        document_name(name)
         message = frappe.get_doc('Relay Message', name)
         message.check_permission('read')
         if message.relay_contact != contact:
@@ -52,6 +54,8 @@ def directory(contact, after=None):
 
 @frappe.whitelist(methods=['POST'])
 def save(contact, values, name=None, request_key=None):
+    if name is not None and name != '':
+        document_name(name)
     require_access()
     readable_contact(contact)
     if isinstance(values, str):

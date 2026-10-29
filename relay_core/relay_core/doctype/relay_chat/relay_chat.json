@@ -28,7 +28,7 @@
       "fieldname": "title",
       "label": "Title",
       "fieldtype": "Data",
-      "in_list_view": 1,
+      "permlevel": 1,
       "read_only": 1
     },
     {

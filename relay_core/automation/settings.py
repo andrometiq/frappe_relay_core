@@ -1,5 +1,6 @@
 """Installed automation configuration; API secrets are write-only."""
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access, can_manage
 
@@ -42,6 +43,8 @@ def policies(after=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def save_policy(values,name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access(configure=True)
     if isinstance(values,str):values=frappe.parse_json(values)
     if not isinstance(values,dict) or set(values)-set(POLICY_FIELDS):frappe.throw('Invalid policy fields')

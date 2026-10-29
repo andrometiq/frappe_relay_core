@@ -9,6 +9,7 @@ import re
 import zipfile
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 from relay_core.legacy_media import copy_stream, source_file
 
@@ -54,6 +55,7 @@ def related(doctype, filters):
 
 
 def describe(conversation):
+    document_name(conversation)
     old = frappe.get_doc('WhatsApp Core Conversation', conversation); old.check_permission('read')
     identity = frappe.get_doc('WhatsApp Core Identity', old.remote_identity); identity.check_permission('read')
     channel = frappe.get_doc('WhatsApp Core Channel', old.channel); channel.check_permission('read')
@@ -194,6 +196,7 @@ def open_attachment(bundle, meta):
 
 
 def load(file_name):
+    document_name(file_name)
     require_access(configure=True)
     file = frappe.get_doc('File', file_name); file.check_permission('read')
     if not file.is_private or not str(file.file_url).startswith('/private/files/'):

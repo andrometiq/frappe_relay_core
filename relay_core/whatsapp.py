@@ -1,7 +1,7 @@
 """Frappe boundary for the account-scoped Hub adapter."""
 import re
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.settings import value as connection_value
 from relay_core.hub import HubClient, HubError
 from relay_core.permissions import require_access, require_business_assignment, can_manage
@@ -69,7 +69,7 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
         from relay_core.template_media import check_header
         check_header(arguments.get('components') or [])
     if operation in {'messages.media','messages.send','messages.react','messages.location','messages.contacts','templates.send'}:
-        if not isinstance(contact,str) or not contact:frappe.throw('Select one contact')
+        document_name(contact)
         if not isinstance(business_doctype,str) or not isinstance(business_name,str) or not business_doctype or not business_name:frappe.throw('Select a business record')
         business_document(business_doctype,business_name)
         if not configured_business_type(business_doctype):

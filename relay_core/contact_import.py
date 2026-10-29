@@ -3,6 +3,7 @@ from contextlib import ExitStack
 from io import BytesIO
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core import bulk_sheet, contacts, identity
 
 COLUMNS = ('Mobile', 'Email', 'Contact name', 'Business type', 'Business record')
@@ -125,6 +126,7 @@ def matches(rows, region):
 
 
 def existing_person(name, *, write=False):
+    document_name(name)
     person = frappe.get_doc('Contact', name)
     from relay_core.business_access import require_person
     require_person(name)

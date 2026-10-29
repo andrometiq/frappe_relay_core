@@ -1,18 +1,18 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features, features
 from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
                                     can_configure, sees_all_teams)
 
 
 def validate_reference(value, prefix):
+    document_name(value)
     if prefix == 'CH':
-        if not isinstance(value, str) or not value.strip() or len(value) > 140 or any(ord(c) < 32 for c in value):
-            frappe.throw('Invalid Relay channel reference')
         return
     pattern = r'TKT-[0-9]{5,12}' if prefix == 'TKT' else r'RELAY-' + prefix + r'-[0-9]{10}'
-    if not isinstance(value, str) or not re.fullmatch(pattern, value):
+    if not re.fullmatch(pattern, value):
         frappe.throw('Invalid Relay record reference')
 
 
@@ -354,6 +354,7 @@ def contact_preferences(contact, business_doctype, business_name):
 
 @frappe.whitelist(methods=['POST'])
 def save_contact_preference(contact, business_doctype, business_name, endpoint, consent, priority=10):
+    document_name(endpoint)
     require_access(configure=True)
     from relay_core.conversation_start import business_contact
     from relay_core.channel_preferences import scope_key

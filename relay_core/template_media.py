@@ -7,6 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 import frappe
+from relay_core.business_access import document_name
 
 from relay_core.bulk_sheet import media_url
 from relay_core.channels import channel as channel_definition
@@ -66,6 +67,7 @@ def check_header(components):
 @frappe.whitelist(methods=['POST'])
 def upload(channel, media_type, filename, content_base64):
     """Hub media id of a header file, uploaded through the WhatsApp number that sends the template."""
+    document_name(channel)
     from relay_core.document_sends import upload as hub_upload
     from relay_core.hub import HubError
     from relay_core.hub_channels import is_current
