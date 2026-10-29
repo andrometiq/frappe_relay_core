@@ -1,20 +1,30 @@
-"""Permission-filtered business grouping. Claims never grant document access."""
+"""Read-time business grouping. Business permissions apply before counts and pagination."""
 import hashlib
 import json
+import re
 import frappe
 from relay_core.business_inbox import check_type
 from relay_core.permissions import require_access
 
+PAGE = 30
 
-def configuration(doctype):
-    check_type(doctype)
-    config = frappe.get_doc('Relay Contact Type', {'business_doctype': doctype, 'enabled': 1})
-    field = config.get('grouping_field') or ''
-    if field:
-        meta = frappe.get_meta(doctype).get_field(field)
-        if not meta or meta.fieldtype not in ('Link', 'Select', 'Data') or meta.permlevel:
-            frappe.throw('Business grouping configuration is invalid')
-    return field
+
+def configuration(doctype, config=None):
+    """The single reader of configured levels, including the one-release scalar fallback.
+
+    No permission checks here: permission predicates themselves use this configuration.
+    Public callers check the business type before querying its records.
+    """
+    config = config if config is not None else frappe.get_cached_doc('Relay Contact Type', doctype)
+    rows = config.get('grouping_fields') or []
+    fields = [row.get('fieldname') for row in sorted(rows, key=lambda row: (int(row.get('priority') or 0), int(row.get('idx') or 0)))]
+    if not fields and config.get('grouping_field'):
+        fields = [config.get('grouping_field')]
+    from relay_core.relay_core.doctype.relay_contact_type.relay_contact_type import _is_grouping_field
+    meta = frappe.get_meta(doctype)
+    if len(fields) > 6 or len(set(fields)) != len(fields) or any(not _is_grouping_field(meta.get_field(field)) for field in fields):
+        frappe.throw('Business grouping configuration is invalid')
+    return fields
 
 
 def validate_text(value):
@@ -24,132 +34,294 @@ def validate_text(value):
 
 
 def key(doctype, field, value):
-    return hashlib.sha256(json.dumps([doctype,field,value]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([doctype, field, value]).encode()).hexdigest()
+
+
+def install_indexes(doctype, config=None):
+    for field in configuration(doctype, config=config):
+        index = 'relay_group_' + hashlib.sha256(field.encode()).hexdigest()[:12]
+        frappe.db.add_index(doctype, [field], index)
 
 
 def group_filters(field, value):
-    if value=='__all__':return []
+    if value == '__all__':
+        return []
     if not field:
-        if value: frappe.throw('This business type has no grouping field')
+        if value:
+            frappe.throw('This business type has no grouping field')
         return []
     return [[field, '=', value]] if value else [[field, 'is', 'not set']]
 
 
-@frappe.whitelist(methods=['GET'])
-def directory(doctype, query='', after=None, include_all=0):
-    field=configuration(doctype);validate_text(query)
-    if after is not None:validate_text(after)
-    if str(include_all) not in ('0','1'):frappe.throw('Invalid directory option')
-    if not field:return {'field':'','items':[{'value':'','label':'All records'}],'next':None}
-    filters=[]
-    if query:filters.append([field,'like','%'+query.replace('%','\\%').replace('_','\\_')+'%'])
-    if after is not None:filters.append([field,'>',after])
-    rows=frappe.get_list(doctype,fields=[field],filters=filters,group_by=field,order_by=field+' asc',page_length=32)
-    # MariaDB groups NULL and empty text separately. Relay presents both as one
-    # Ungrouped bucket, so normalise before applying the visible page boundary.
-    unique=[];seen=set()
+def path_values(path, fields):
+    path = frappe.parse_json(path) if isinstance(path, str) else ([] if path is None else path)
+    if not isinstance(path, list) or len(path) > len(fields):
+        frappe.throw('Invalid grouping path')
+    for value in path:
+        validate_text(value)
+    return path
+
+
+def page_start(start):
+    if isinstance(start, bool) or not str(start).isdigit() or not 0 <= int(start) <= 100000:
+        frappe.throw('Invalid page')
+    return int(start)
+
+
+def identifier(value):
+    # Identifiers come only from configured DocTypes and validated metadata.
+    return '`' + value.replace('`', '``') + '`'
+
+
+def title_field(doctype):
+    meta = frappe.get_meta(doctype)
+    field = meta.get_field(meta.title_field) if meta.title_field else None
+    return meta.title_field if field and not field.hidden and not field.permlevel else 'name'
+
+
+def bound_query(query, values, prefix):
+    """Keep QB parameters separate and escape percent literals in raw permission hooks."""
+    sql, parameters = query.walk()
+    values.update({prefix + name: value for name, value in parameters.items()})
+    return re.sub(r'%\(([^)]+)\)s|%',
+                  lambda match: '%(' + prefix + match[1] + ')s' if match[1] in parameters else match[0].replace('%', '%%'), sql)
+
+
+def record_scope(doctype, values, prefix='record_'):
+    """Use the same Frappe query hooks and User Permissions as the directory/thread."""
+    return bound_query(frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=False,
+                       user=frappe.session.user, order_by=''), values, prefix)
+
+
+def message_scope(values, prefix='message_'):
+    # Check the contact and channel too, as the business thread does before displaying a message.
+    messages = record_scope('Relay Message', values, prefix)
+    contacts = record_scope('Relay Contact', values, prefix + 'contact_')
+    channels = record_scope('Relay Channel', values, prefix + 'channel_')
+    return f"m.name IN ({messages}) AND m.relay_contact IN ({contacts}) AND m.channel IN ({channels})"
+
+
+def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals=False, after=None,
+              group_search=False, contact_search=False, channels=None, business_name=None, contacts=False):
+    validate_text(query)
+    offset = page_start(start)
+    title = 'b.' + identifier(title_field(doctype))
+    values = {'doctype': doctype, 'query': '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%', 'start': offset}
+    conditions = [f'b.name IN ({record_scope(doctype, values)})']
+    for index, value in enumerate(path):
+        column = 'b.' + identifier(fields[index])
+        if value:
+            conditions.append(f'{column}=%(level{index})s')
+            values[f'level{index}'] = value
+        else:
+            conditions.append(f"({column} IS NULL OR {column}='')")
+    field = fields[len(path)] if not records and not totals and len(path) < len(fields) else ''
+    bucket = f"COALESCE(b.{identifier(field)}, '')" if field else 'b.name'
+    if query:
+        search = f'b.name LIKE %(query)s OR {title} LIKE %(query)s'
+        if group_search:
+            search = f'{bucket} LIKE %(query)s'
+        elif contact_search:
+            people = record_scope('Contact', values, 'search_contact_')
+            search += f""" OR EXISTS (SELECT 1 FROM `tabDynamic Link` l JOIN `tabContact` p ON p.name=l.parent
+                WHERE l.parenttype='Contact' AND l.parentfield='links' AND l.link_doctype=%(doctype)s
+                  AND l.link_name=b.name AND p.name IN ({people})
+                  AND (p.name LIKE %(query)s OR p.full_name LIKE %(query)s OR p.mobile_no LIKE %(query)s
+                       OR p.phone LIKE %(query)s OR p.email_id LIKE %(query)s))"""
+        conditions.append('(' + search + ')')
+    if business_name:
+        validate_text(business_name)
+        conditions.append('b.name=%(business_name)s')
+        values['business_name'] = business_name
+    if after is not None:
+        validate_text(after)
+        conditions.append(f'{bucket}>%(after)s')
+        values['after'] = after
+    selection = '' if totals else (f'{bucket} AS value, ' if field else f"b.name, COALESCE(NULLIF({title}, ''), b.name) AS label, ")
+    grouping = '' if totals else (' GROUP BY ' + bucket + (', ' + title if not field and title != 'b.`name`' else ''))
+    order = '' if totals else (' ORDER BY value ASC' if field else ' ORDER BY b.name ASC')
+    limit = '' if totals else ' LIMIT 31 OFFSET %(start)s'
+    if contacts:
+        people = record_scope('Contact', values, 'count_contact_')
+        joins = f"""LEFT JOIN `tabDynamic Link` l ON l.link_doctype=%(doctype)s AND l.link_name=b.name
+            AND l.parenttype='Contact' AND l.parentfield='links'
+            LEFT JOIN `tabContact` p ON p.name=l.parent AND p.name IN ({people})"""
+        metrics = 'COUNT(DISTINCT p.name) AS contact_count, 0 AS unread, 0 AS unread_records, NULL AS last_activity'
+    else:
+        from relay_core.relay_chats import query as chat_query
+        if not chat_query():
+            # Only an unrestricted viewer can use counters that include every contact.
+            activity = '`tabRelay Chat`'
+        else:
+            from relay_core.inbox import _unread_query
+            permitted = message_scope(values)
+            unread = bound_query(_unread_query(['name']), values, 'unread_')
+            activity = f"""(SELECT m.business_doctype, m.business_name,
+                SUM(CASE WHEN m.name IN ({unread}) THEN 1 ELSE 0 END) AS unread_count,
+                MAX(COALESCE(m.sent_at, m.creation)) AS last_message_at,
+                MAX(CASE WHEN m.position=1 THEN m.channel END) AS last_channel
+                FROM (SELECT m.name, m.business_doctype, m.business_name, m.sent_at, m.creation, m.channel,
+                    ROW_NUMBER() OVER (PARTITION BY m.business_name ORDER BY COALESCE(m.sent_at, m.creation) DESC, m.name DESC) AS position
+                    FROM `tabRelay Message` m WHERE m.business_doctype=%(doctype)s
+                      AND COALESCE(m.legacy_triage, 0)=0 AND {permitted}) m
+                GROUP BY m.business_doctype, m.business_name)"""
+        joins = f'LEFT JOIN {activity} activity ON activity.business_doctype=%(doctype)s AND activity.business_name=b.name'
+        if channels is not None:
+            # Match Inbox's channel filter: the channel of the newest readable activity.
+            values['channels'] = tuple(channels) or ('',)
+            conditions.append('activity.last_channel IN %(channels)s')
+        metrics = """COALESCE(SUM(activity.unread_count), 0) AS unread,
+            COUNT(DISTINCT CASE WHEN activity.unread_count>0 THEN b.name END) AS unread_records,
+            MAX(activity.last_message_at) AS last_activity"""
+    rows = frappe.db.sql(f"""SELECT {selection}COUNT(DISTINCT b.name) AS record_count, {metrics}
+        FROM {identifier('tab' + doctype)} b {joins}
+        WHERE {' AND '.join(conditions)}{grouping}{order}{limit}""", values, as_dict=True)
     for row in rows:
-        value=row.get(field) or ''
-        if value in seen:continue
-        seen.add(value);unique.append({'value':value,'label':value or 'Ungrouped'})
-    page=unique[:30]
-    next_cursor=page[-1]['value'] if page and (len(unique)>30 or len(rows)==32) else None
-    if str(include_all)=='1' and after is None and not query:page.insert(0,{'value':'__all__','label':'All teams'})
-    return {'field':field,'items':page,'next':next_cursor}
+        for metric in ('unread', 'unread_records', 'record_count', 'contact_count'):
+            if metric in row:
+                row[metric] = int(row.get(metric) or 0)
+        if field:
+            row['label'] = row['value'] or 'Not set'
+    return rows
 
 
 @frappe.whitelist(methods=['GET'])
-def records(doctype, group='', query='', start=0):
+def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None, channels=None,
+           business_type=None, business_name=None, contacts=0):
+    """Type tiles, then one configured level at a time, then paginated record tiles."""
     require_access()
-    field=configuration(doctype);validate_text(group);validate_text(query)
-    if isinstance(start,bool) or not str(start).isdigit() or not 0<=int(start)<=100000:frappe.throw('Invalid page')
-    from frappe.desk.search import search_widget, build_for_autosuggest
-    from frappe.utils import strip_html
-    from html import unescape
-    offset=int(start)
-    rows=build_for_autosuggest(search_widget(doctype=doctype,txt=query,filters=group_filters(field,group),page_length=31,start=offset,ignore_user_permissions=False),doctype=doctype)
-    linked_more=False
-    if query.strip():
-        contact_rows=build_for_autosuggest(search_widget(doctype='Contact',txt=query,page_length=31,start=offset,
-            ignore_user_permissions=False),doctype='Contact')
-        linked_more=len(contact_rows)>30
-        contact_rows=contact_rows[:30]
-        if contact_rows:
-            contact_names=[row['value'] for row in contact_rows]
-            labels={row['value']:unescape(strip_html(row.get('label') or row['value'])) for row in contact_rows}
-            links=frappe.get_all('Dynamic Link',filters={'parenttype':'Contact','parentfield':'links',
-                'parent':['in',contact_names],'link_doctype':doctype},fields=['parent','link_name'],limit_page_length=300)
-            by_business={}
-            for link in links:by_business.setdefault(link.link_name,[]).append(labels.get(link.parent,link.parent))
-            candidates=list(by_business)
-            if candidates:
-                allowed=frappe.get_list(doctype,filters=group_filters(field,group)+[['name','in',candidates]],
-                    fields=['name'],order_by='name asc',page_length=31)
-                existing={row['value'] for row in rows}
-                for allowed_row in allowed:
-                    if allowed_row.name in existing:continue
-                    rows.append({'value':allowed_row.name,'label':allowed_row.name,
-                        'description':'Contact: '+', '.join(by_business[allowed_row.name][:3])})
-    has_more=len(rows)>30 or linked_more
-    rows=rows[:30]
-    items=[]
-    for row in rows[:30]:
-        label=unescape(strip_html(row.get('label') or row['value']))
-        description=unescape(strip_html(row.get('description') or '')).strip()
-        for prefix in (label+', ',row['value']+', '):
-            if description.casefold().startswith(prefix.casefold()):
-                description=description[len(prefix):].strip();break
-        items.append({'name':row['value'],'label':label,'description':description})
-    names=[item['name'] for item in items]
-    if names:
-        from relay_core.permissions import message_query
-        permitted = (message_query() or '1=1').replace('`tabRelay Message`', 'm')
-        activity=frappe.db.sql(f"""
-            SELECT m.business_name,
-                   SUM(CASE WHEN m.direction='Incoming' AND (s.last_read IS NULL OR m.name>s.last_read) THEN 1 ELSE 0 END) AS unread,
-                   MAX(COALESCE(m.sent_at,m.creation)) AS last_activity
-            FROM `tabRelay Message` m
-            JOIN `tabRelay Channel` c ON c.name=m.channel AND c.channel='WhatsApp'
-            LEFT JOIN `tabRelay Business Conversation State` s
-              ON s.business_doctype=m.business_doctype AND s.business_name=m.business_name AND s.user=%(user)s
-            WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND ({permitted})
-            GROUP BY m.business_name
-        """,{'user':frappe.session.user,'doctype':doctype,'names':tuple(names)},as_dict=True)
-        latest=frappe.db.sql(f"""
-            WITH ranked AS (
-                SELECT m.business_name,m.content,COALESCE(m.sent_at,m.creation) AS last_activity,
-                       ROW_NUMBER() OVER(PARTITION BY m.business_name ORDER BY COALESCE(m.sent_at,m.creation) DESC,m.name DESC) AS relay_rank
-                FROM `tabRelay Message` m
-                JOIN `tabRelay Channel` c ON c.name=m.channel AND c.channel='WhatsApp'
-                WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND ({permitted})
-            )
-            SELECT business_name,content,last_activity FROM ranked WHERE relay_rank=1
-        """,{'doctype':doctype,'names':tuple(names)},as_dict=True)
-        summaries=frappe.get_all('Relay Conversation Summary',filters={'business_doctype':doctype,
-            'business_name':['in',names],'status':'Ready'},fields=['name','business_name'],
-            order_by='modified desc',limit_page_length=300)
-        activity_by={row.business_name:row for row in activity}
-        latest_by={row.business_name:row for row in latest}
-        summary_by={}
-        for row in summaries:
-            if row.business_name in summary_by:continue
-            from relay_core.summaries import read as read_summary
-            try:
-                result = read_summary(row.name)['result']
-            except (frappe.PermissionError, ValueError):
+    validate_text(query)
+    offset = page_start(start)
+    from relay_core.inbox_filters import channel_names, business_filter
+    business_filter(business_type, business_name)  # Validate the same filters as Inbox counts.
+    channels = channel_names(medium, channel, channels)
+    if str(contacts) not in ('0', '1'):
+        frappe.throw('Invalid contacts option')
+    options = dict(channels=channels, business_name=business_name, contacts=str(contacts) == '1')
+    if business_type == 'none' or (doctype and business_type and doctype != business_type):
+        return {'items': [], 'next': None, 'kind': 'type', 'fields': []}
+    if not doctype:
+        from relay_core.business_types import list_types
+        items = []
+        for config in list_types():
+            if not config.enabled:
                 continue
-            if result: summary_by[row.business_name] = result.get('overview', '')
-        for item in items:
-            current=activity_by.get(item['name'],{});recent=latest_by.get(item['name'],{})
-            item.update(unread=int(current.get('unread') or 0),last_activity=str(recent.get('last_activity') or ''),
-                last_message=(recent.get('content') or '')[:240],summary=summary_by.get(item['name'],'')[:500])
-    claim=frappe.db.get_value('Relay Business Group Claim',key(doctype,field,group),'assigned_to') if items else None
-    return {'items':items,'next':offset+30 if has_more else None,'assigned_to':claim,'user':frappe.session.user}
+            dt = config.business_doctype
+            if business_type and dt != business_type:
+                continue
+            counts = aggregate(dt, configuration(dt), [], query, totals=True, **options)[0]
+            if (query or business_name or channels is not None) and not counts['record_count']:
+                continue
+            items.append(dict(counts, kind='type', doctype=dt, label=config.label or dt))
+        if options['contacts']:
+            from relay_core.contacts import unlinked_people
+            count = frappe.qb.get_query('Contact', fields=[{'COUNT': 'name', 'as': 'total'}], filters=[unlinked_people()],
+                                       ignore_permissions=False).run(as_dict=True)[0]['total']
+            items.append({'kind': 'unlinked', 'label': 'Not linked', 'contact_count': int(count)})
+        return {'items': items, 'next': None, 'kind': 'type', 'fields': []}
+    check_type(doctype)
+    fields = configuration(doctype)
+    path = path_values(path, fields)
+    kind = 'group' if len(path) < len(fields) else 'record'
+    rows = aggregate(doctype, fields, path, query, offset, **options)
+    return {'items': [dict(row, kind=kind, doctype=doctype) for row in rows[:PAGE]],
+            'next': offset + PAGE if len(rows) > PAGE else None, 'kind': kind,
+            'fields': [{'fieldname': field, 'label': frappe.get_meta(doctype).get_field(field).label or field} for field in fields]}
+
+
+@frappe.whitelist(methods=['GET'])
+def directory(doctype, query='', after=None, include_all=0, path=None, start=0):
+    """Compatibility adapter for team pickers; counts use the same aggregation as tiles."""
+    check_type(doctype)
+    fields = configuration(doctype)
+    selected = path_values(path, fields)
+    validate_text(query)
+    if str(include_all) not in ('0', '1'):
+        frappe.throw('Invalid directory option')
+    if len(selected) == len(fields):
+        return {'field': '', 'items': [{'value': '', 'label': 'All records'}], 'next': None}
+    rows = aggregate(doctype, fields, selected, query, start, after=after, group_search=True)
+    page = rows[:PAGE]
+    next_value = page[-1]['value'] if len(rows) > PAGE else None
+    if str(include_all) == '1' and after is None and not query:
+        page.insert(0, {'value': '__all__', 'label': 'All teams'})
+    return {'field': fields[len(selected)], 'items': page, 'next': next_value}
+
+
+@frappe.whitelist(methods=['GET'])
+def records(doctype, group='', query='', start=0, path=None):
+    """Legacy team records and record pickers, backed by the tile query."""
+    check_type(doctype)
+    fields = configuration(doctype)
+    validate_text(group)
+    selected = path_values(path, fields) if path is not None else ([group] if fields and group != '__all__' else [])
+    rows = aggregate(doctype, fields, selected, query, start, records=True, contact_search=True)
+    enrich_records(doctype, rows[:PAGE])
+    field = fields[0] if fields else ''
+    owner = frappe.db.get_value('Relay Business Group Claim', key(doctype, field, group), 'assigned_to') if rows else None
+    return {'items': rows[:PAGE], 'next': int(start) + PAGE if len(rows) > PAGE else None,
+            'assigned_to': owner, 'user': frappe.session.user}
+
+
+def enrich_records(doctype, rows):
+    """Restore Teams previews with page-wide queries, under the thread's permissions."""
+    if not rows:
+        return
+    values = {'doctype': doctype, 'names': tuple(row['name'] for row in rows)}
+    permitted = message_scope(values, 'preview_')
+    latest = frappe.db.sql(f"""SELECT business_name, content FROM (
+        SELECT m.business_name, m.content, ROW_NUMBER() OVER (PARTITION BY m.business_name
+            ORDER BY COALESCE(m.sent_at, m.creation) DESC, m.name DESC) AS position
+        FROM `tabRelay Message` m WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s
+          AND COALESCE(m.legacy_triage, 0)=0 AND {permitted}) ranked WHERE position=1""", values, as_dict=True)
+    people = record_scope('Contact', values, 'description_')
+    linked = frappe.db.sql(f"""SELECT DISTINCT l.link_name, p.name, p.full_name FROM `tabDynamic Link` l
+        JOIN `tabContact` p ON p.name=l.parent WHERE l.parenttype='Contact' AND l.parentfield='links'
+          AND l.link_doctype=%(doctype)s AND l.link_name IN %(names)s AND p.name IN ({people})
+        ORDER BY p.name""", values, as_dict=True)
+    descriptions = {}
+    for person in linked:
+        descriptions.setdefault(person['link_name'], []).append(person['full_name'] or person['name'])
+    from relay_core.summaries import business_previews
+    summaries = business_previews(doctype, values['names'])
+    messages = {row['business_name']: row['content'] for row in latest}
+    for row in rows:
+        names = descriptions.get(row['name'], [])[:3]
+        row.update(last_message=(messages.get(row['name']) or '')[:240], summary=summaries.get(row['name'], '')[:500],
+                   description='Contact: ' + ', '.join(names) if names else '')
+
+
+def ticket_values(tickets, business_type=None):
+    """One batched UNION query for a page, even when tickets span several business types."""
+    grouped = {}
+    for ticket in tickets:
+        if ticket.get('business_doctype') and ticket.get('business_name'):
+            grouped.setdefault(ticket['business_doctype'], set()).add(ticket['business_name'])
+    columns = configuration(business_type) if business_type else []
+    queries, values = [], {}
+    for index, (doctype, names) in enumerate(grouped.items()):
+        if not frappe.has_permission(doctype, 'read'):
+            continue
+        fields = columns if doctype == business_type else []
+        pairs = ', '.join(f"{frappe.db.escape(field)}, COALESCE(b.{identifier(field)}, '')" for field in fields)
+        title = 'b.' + identifier(title_field(doctype))
+        queries.append(f"""SELECT %(type{index})s AS business_doctype, b.name AS business_name,
+            COALESCE(NULLIF({title}, ''), b.name) AS business_title, JSON_OBJECT({pairs}) AS group_values
+            FROM {identifier('tab' + doctype)} b
+            WHERE b.name IN %(names{index})s AND b.name IN ({record_scope(doctype, values, f'ticket{index}_')})""")
+        values.update({f'type{index}': doctype, f'names{index}': tuple(sorted(names))})
+    found = frappe.db.sql(' UNION ALL '.join(queries), values, as_dict=True) if queries else []
+    by_record = {(row['business_doctype'], row['business_name']): row for row in found}
+    for ticket in tickets:
+        row = by_record.get((ticket.get('business_doctype'), ticket.get('business_name')), {})
+        ticket['business_title'] = row.get('business_title') or ''
+        ticket['group_values'] = frappe.parse_json(row.get('group_values') or '{}')
+    return [{'fieldname': field, 'label': frappe.get_meta(business_type).get_field(field).label or field} for field in columns]
 
 
 @frappe.whitelist(methods=['POST'])
 def claim(doctype, group='', release=False):
-    require_access();field=configuration(doctype);validate_text(group)
+    require_access();check_type(doctype);field=next(iter(configuration(doctype)), '');validate_text(group)
     if group=='__all__':frappe.throw('Choose one business team')
     if not frappe.get_list(doctype,filters=group_filters(field,group),fields=['name'],page_length=1):
         frappe.throw('No accessible records in this group',frappe.PermissionError)
@@ -172,7 +344,7 @@ def claim(doctype, group='', release=False):
 def responsible(contact,user):
     from relay_core.business_access import candidates
     for dt,name in candidates(contact):
-        field=frappe.db.get_value('Relay Contact Type',{'business_doctype':dt,'enabled':1},'grouping_field') or ''
+        field=next(iter(configuration(dt)), '')
         value=frappe.db.get_value(dt,name,field) if field else ''
         if frappe.db.get_value('Relay Business Group Claim',key(dt,field,value or ''),'assigned_to')==user:return True
     return False
@@ -180,8 +352,8 @@ def responsible(contact,user):
 
 def responsibility_condition(user,contact_expression):
     clauses=[]
-    for config in frappe.get_all('Relay Contact Type',filters={'enabled':1},fields=['business_doctype','grouping_field'],limit_page_length=200):
-        dt=config.business_doctype;field=config.grouping_field or ''
+    for config in frappe.get_all('Relay Contact Type',filters={'enabled':1},fields=['business_doctype'],limit_page_length=200):
+        dt=config.business_doctype;field=next(iter(configuration(dt)), '')
         meta=frappe.get_meta(dt)
         if field and (not meta.get_field(field) or meta.get_field(field).fieldtype not in ('Link','Select','Data')):continue
         business=frappe.qb.DocType(dt);link=frappe.qb.DocType('Dynamic Link');relay=frappe.qb.DocType('Relay Contact');claim=frappe.qb.DocType('Relay Business Group Claim')

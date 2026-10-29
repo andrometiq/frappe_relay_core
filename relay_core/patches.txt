@@ -14,3 +14,4 @@ relay_core.patches.v1_0.rename_tickets_to_short_names
 [post_model_sync]
 relay_core.patches.v1_0.use_open_and_closed_ticket_statuses
 relay_core.patches.v1_0.build_relay_chats
+relay_core.patches.v1_0.add_business_group_fields

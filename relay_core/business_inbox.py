@@ -188,9 +188,11 @@ def context(doctype,name):
     meta=frappe.get_meta(doctype)
     title=(doc.get(meta.title_field) if meta.title_field else None) or name
     contacts=_linked_contacts(doctype,name,limit=101)
-    grouping_field=frappe.db.get_value('Relay Contact Type',{'business_doctype':doctype,'enabled':1},'grouping_field') or ''
+    from relay_core.business_groups import configuration
+    fields = configuration(doctype)
     return {'name':name,'title':title,'doctype':doctype,'doctype_label':frappe._(doctype),
-            'grouping_value':doc.get(grouping_field) if grouping_field else '',
+            'grouping_value':doc.get(fields[0]) if fields else '',
+            'groups': [{'fieldname': field, 'value': doc.get(field) or ''} for field in fields],
             'contact_count':min(len(contacts),100),'contact_count_limited':len(contacts)>100}
 
 

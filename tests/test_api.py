@@ -216,7 +216,9 @@ class ChannelUITests(unittest.TestCase):
         self.assertEqual(len(result['items']), 30)
         self.assertEqual(result['next'], '29')
         query = self.f.get_list.call_args.kwargs
-        self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before'], ['Contact', 'full_name', 'like', '%a\\%\\_%']])
+        self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before']])
+        self.assertIn(['Contact', 'full_name', 'like', '%a\\%\\_%'], query['or_filters'])
+        self.assertIn(['Contact', 'mobile_no', 'like', '%a\\%\\_%'], query['or_filters'])
         self.assertEqual(query['page_length'], 31)
         self.api.business_types = Mock(return_value=['Customer'])
         self.api.contact_directory('', None, 'Customer')

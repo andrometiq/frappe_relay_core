@@ -66,6 +66,22 @@ class TicketTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.module.create('subject',messages)
         self.f.get_doc.assert_not_called()
 
+    def test_create_rejects_a_selected_record_that_does_not_own_the_message(self):
+        with patch('relay_core.ticket_tags.message_business', return_value=('Supplier', 'LOCAL-1')):
+            with self.assertRaisesRegex(ValueError, 'owns the selected messages'):
+                self.module.create('Local ticket', [self.message.name], business_type='Supplier', business_record='LOCAL-2')
+        self.f.get_doc.assert_not_called()
+
+    def test_business_type_filter_and_page_enrichment_are_batched(self):
+        self.f.get_list = Mock(return_value=[Record(name='TKT-00001', business_doctype='Supplier', business_name='LOCAL-1')])
+        with patch('relay_core.business_inbox.check_type') as check_type, \
+                patch('relay_core.business_groups.ticket_values', return_value=[{'fieldname': 'region', 'label': 'Region'}]) as values:
+            result = self.module.directory(business_type='Supplier')
+        check_type.assert_called_once_with('Supplier')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'business_doctype': 'Supplier'})
+        values.assert_called_once_with(result['items'], 'Supplier')
+        self.assertEqual(result['group_fields'], [{'fieldname': 'region', 'label': 'Region'}])
+
     def test_read_rechecks_access_instead_of_exposing_stale_links(self):
         self.doc.name='TKT-00001';self.doc.check_permission=Mock()
         self.f.get_doc.side_effect=lambda doctype,name: self.doc if doctype=='Relay Ticket' else self.message if doctype=='Relay Message' else self.contact

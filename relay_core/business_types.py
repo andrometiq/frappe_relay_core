@@ -2,7 +2,13 @@
 import frappe
 from relay_core.permissions import require_access, can_configure
 
-FIELDS = ['business_doctype', 'label', 'enabled', 'grouping_field']
+FIELDS = ['business_doctype', 'label', 'enabled']
+
+
+def with_groups(row, config=None):
+    from relay_core.business_groups import configuration
+    fields = configuration(row['business_doctype'], config=config)
+    return frappe._dict(row, grouping_field=fields[0] if fields else '', grouping_fields=fields)
 
 
 @frappe.whitelist(methods=['GET'])
@@ -12,11 +18,11 @@ def list_types():
     filters = {} if can_configure() else {'enabled': 1}
     rows = frappe.get_all('Relay Contact Type', filters=filters, fields=FIELDS,
                           order_by='business_doctype asc', limit_page_length=200)
-    return [row for row in rows if frappe.has_permission(row.business_doctype, 'read')]
+    return [with_groups(row) for row in rows if frappe.has_permission(row.business_doctype, 'read')]
 
 
 @frappe.whitelist(methods=['POST'])
-def save(business_doctype, enabled=1, label=None, grouping_field=None):
+def save(business_doctype, enabled=1, label=None, grouping_field=None, grouping_fields=None):
     require_access(configure=True)
     if not isinstance(business_doctype, str) or not frappe.db.exists('DocType', business_doctype):
         frappe.throw('Choose a business DocType')
@@ -35,6 +41,15 @@ def save(business_doctype, enabled=1, label=None, grouping_field=None):
     doc.business_doctype = business_doctype
     doc.enabled = int(str(enabled) in ('1', 'True'))
     if label is not None: doc.label = label.strip()
-    if grouping_field is not None: doc.grouping_field = grouping_field.strip()
+    if grouping_fields is not None:
+        rows = frappe.parse_json(grouping_fields) if isinstance(grouping_fields, str) else grouping_fields
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            frappe.throw('Grouping fields must be a list of fieldname and priority rows')
+        doc.set('grouping_fields', [{'fieldname': row.get('fieldname'), 'priority': row.get('priority')} for row in rows])
+        doc.grouping_field = ''
+    elif grouping_field is not None:
+        # The old API remains writable, but its value is stored in the new table.
+        doc.set('grouping_fields', [{'fieldname': grouping_field.strip(), 'priority': 1}] if grouping_field.strip() else [])
+        doc.grouping_field = ''
     doc.save()
-    return {field: doc.get(field) for field in FIELDS}
+    return with_groups({field: doc.get(field) for field in FIELDS}, config=doc)

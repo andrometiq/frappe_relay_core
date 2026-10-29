@@ -178,6 +178,16 @@ def linked_contacts(names):
     return {row[0] for row in rows}
 
 
+def unlinked_people():
+    """A query-builder filter, so Contact permissions still apply before pagination."""
+    person = frappe.qb.DocType('Contact')
+    link = frappe.qb.DocType('Dynamic Link')
+    types = frappe.qb.DocType('Relay Contact Type')
+    linked = (frappe.qb.from_(link).join(types).on((types.business_doctype == link.link_doctype) & (types.enabled == 1))
+              .select(link.parent).where((link.parenttype == 'Contact') & (link.parentfield == 'links')))
+    return person.name.notin(linked)
+
+
 @frappe.whitelist(methods=['GET'])
 def unlinked(query='', after=None, before=None):
     """Manager contact queue, newest activity first, with stable keyset pagination."""
