@@ -454,11 +454,13 @@ Tips: do not start or end the body with a variable. Do not put an offer in a Uti
 3. Pick the Message type. Use "Template" to reach everyone. Text, Photo, Video and Document reach only numbers that wrote to you in the last 24 hours.
 4. Pick the Approved template, or write the text. In text you can use `{{column}}` to fill a value from a sheet column.
 5. Click "Create campaign". The campaign opens as a Draft.
-6. Under Recipients, choose "Relay contacts" or "Upload a file".
-7. With Relay contacts: filter by Tag, Linked to (business type and its segments), Number contains, and Last message from and to. The line under the filters shows how many numbers match. Use "Add a contact" and "Remove" for single people. Under Message values, pick a contact or record field for each template variable, or type the same value for all. Click "Add N numbers".
-8. With a file: upload an `.xlsx` or `.csv`. Pick the Phone number column and a column or fixed value for each variable. Click "Check and import rows".
-9. Under When to send, choose "Send now" and click "Start sending", or choose "Schedule at", pick the start time and click "Schedule".
+6. Under "1. Upload or choose recipients", choose "Relay contacts" or "Upload sheet".
+7. With Relay contacts: filter by Tag, Linked to (business type and its segments), Number contains, and Last message from and to. The line under the filters shows how many numbers match. Use "Add a contact" and "Remove" for single people. Under Message values, pick a contact or record field for each template variable, or type the same value for all. Click "Validate".
+8. With a file: download the Excel template and fill it in, keeping mobile numbers in the first column. Upload `.xlsx`, `.csv`, `.tsv` or a ZIP with exactly one sheet and mobile-named header files. Map the remaining values and click "Validate". Review the ready/error counts and download the Excel error report if needed. Nothing is sent during validation.
+9. Once at least one row is ready, under "3. Send", choose "Send now" and click "Start sending", or choose "Schedule at", pick the start time and click "Schedule".
 10. Watch the counters. Use Pause, Resume or Cancel campaign if needed.
+
+See [Bulk campaigns](bulk-campaigns.md) for ZIP limits, validation, sending and logs.
 
 What happens: numbers that opted out are skipped and show "Skipped: opted out". Replies to the campaign come into the normal Inbox and count as Replied. Adding recipients again replaces only the rows not sent yet.
 
