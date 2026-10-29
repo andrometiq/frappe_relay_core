@@ -35,7 +35,8 @@ class FollowupTests(unittest.TestCase):
         fake.get_doc.side_effect = [_dict(name='message'), run, _dict(name='message'), run]
         contact = _dict(automation_paused=0, automation_generation=2, save=Mock())
         with patch.object(service, 'frappe', fake), patch.object(service, 'internal_save') as save, \
-                patch.object(service, 'episode') as episode, patch.object(service, 'lock_contact', return_value=contact):
+                patch.object(service, 'episode') as episode, patch.object(service, 'lock_contact', return_value=contact), \
+                patch('relay_core.ai.handoff.queue_acknowledgement'):
             service.configuration_failure('message', ValueError('Competing enabled skills'))
             self.assertEqual(run.status, 'Handoff')
             self.assertEqual(run.reason, 'Automation configuration requires review')

@@ -100,6 +100,10 @@ def delivery_fence(action, source, context):
         return
     if not automatic_delivery(payload):
         return
+    if payload.get('handoff_notice'):
+        from relay_core.ai.handoff import authorize_notice
+        authorize_notice(action, source)
+        return
     rows = delivery_episodes(source, context)
     current = [[row.name, int(row.generation or 0)] for row in rows]
     expected = payload.get('delivery_episodes')
@@ -462,6 +466,8 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
     payload = {'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
         'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}
+    from relay_core.ai.handoff import outgoing_notice
+    if outgoing_notice.get(): payload['handoff_notice'] = True
     if send_group: payload['send_group'] = send_group
     delivery_snapshot(payload, source, context)
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
@@ -576,6 +582,10 @@ def admission_scope(action):
 
 def automation_scope(action, source, *, recovery=True):
     payload = object_value(action.payload)
+    if payload.get('handoff_notice'):
+        from relay_core.ai.handoff import authorize_notice
+        authorize_notice(action, source)
+        return
     if payload.get('flow_run'):
         from relay_core.flows.service import scope as flow_scope
         marker = payload['flow_run']
@@ -603,7 +613,7 @@ def automation_scope(action, source, *, recovery=True):
             except Superseded:
                 raise
             except Exception:
-                if not recovery:
+                if not recovery or json.loads(run.decision or '{}').get('decline'):
                     raise
                 from relay_core.ai.handoff import handoff
                 handoff(run, skill, 'Reply recovery authorization failed; review required')

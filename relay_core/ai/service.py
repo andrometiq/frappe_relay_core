@@ -61,9 +61,9 @@ def decide(skill, message, run_id=None, *, deadline=None):
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     user, business, scope = context(skill, message)
     text = message.content or ''
-    from relay_core.ai.matching import human_request
+    from relay_core.ai.matching import human_request, human_reason
     if human_request(text):
-        return {'handoff': True, 'reply': '', 'reason': 'Sender requested a person', 'user': user, 'reads': []}
+        return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
     history = conversation_history(skill, message, user, business, scope)
     from relay_core.ai.event_memory import ReplyContext
     # The authenticated sender's own memory of this record, plus events published to its business type.
@@ -91,7 +91,7 @@ def decide(skill, message, run_id=None, *, deadline=None):
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
             decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope), context=reference.used)
+            return dict(decision, scope=fingerprint(scope), context=None if decision.get('decline') else reference.used)
         if reference.lines:
             reference.trim_memory(overflow)
         elif history:
@@ -144,8 +144,19 @@ def conversation_history(skill, message, user, business, scope):
                     continue
                 if not isinstance(source.get('content'), str):
                     continue
+                replies = [decision['reply']] if decision['reply'].strip() else []
+                # Completed EXECUTE replies contain the actual clarification, while
+                # the top-level reply is intentionally empty. Never replay draft inputs.
+                from relay_core.flows.actions import definitions
+                registered = definitions() if decision.get('actions') else {}
+                replies.extend(row['parameters']['text'] for row in decision.get('actions', [])
+                    if registered.get(row.get('action'), {}).get('effect') == 'reply'
+                    and isinstance(row.get('parameters', {}).get('text'), str))
+                reply = '\n'.join(replies)
+                if not reply.strip() or len(reply) > 2000:
+                    continue
                 history.extend([{'direction': 'Incoming', 'content': source.content},
-                    {'direction': 'Outgoing', 'content': decision['reply']}])
+                    {'direction': 'Outgoing', 'content': reply}])
     except frappe.PermissionError:
         return []  # Optional history never borrows the run-as user's broader access.
     return history
@@ -372,6 +383,12 @@ def process(name, *, deadline=None):
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
             if decision['handoff']:
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
+            elif decision.get('decline'):
+                from relay_core.ai.adapter import PRIVACY_REPLY
+                result = dispatch_reply(run, skill, message, PRIVACY_REPLY, slot='reply')
+                run = lock_run(name)
+                run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
+                internal_save(run)
             else:
                 from relay_core.flows.actions import validate_sequence
                 if run.stage != 'Search':
@@ -417,7 +434,10 @@ def process(name, *, deadline=None):
         run = lock_run(name)
         if run.status not in ('Pending', 'Deciding'):
             return
-        if skill.mode == 'Shadow':
+        if json.loads(run.decision or '{}').get('decline'):
+            run.status, run.reason = 'Cancelled', reason
+            internal_save(run)
+        elif skill.mode == 'Shadow':
             run.status, run.reason = 'Shadow', reason
             internal_save(run)
         else:
@@ -516,6 +536,9 @@ def complete_delivery(action):
             if run.status == 'Pending':
                 frappe.enqueue('relay_core.automation.service.process', name=run.name, queue=QUEUE, enqueue_after_commit=True)
         internal_save(run)
+    elif json.loads(run.decision or '{}').get('decline'):
+        run.status, run.reason = 'Cancelled', 'Decline delivery rejected'
+        internal_save(run)
     else:
         skill = frappe.get_doc('Relay AI Skill', run.skill)
         try:
@@ -527,6 +550,8 @@ def complete_delivery(action):
 
 
 def recover_deliveries():
+    from relay_core.ai.handoff import recover_acknowledgements
+    recover_acknowledgements()
     run = frappe.qb.DocType('Relay Automation Run')
     action = frappe.qb.DocType('Relay Message Action')
     newer = frappe.qb.DocType('Relay Message Action').as_('newer_announcement_or_reply')
@@ -640,6 +665,10 @@ def admit(run):
         else:
             skill = next(s for s in fresh if s.name == result['selected'])
             select_skill(run, message, skill.name)
+            if result.get('decline'):
+                from relay_core.ai.adapter import decline_decision
+                run.status = 'Pending'
+                run.decision = json.dumps(dict(decline_decision(contexts[skill.name][0]), scope=scopes[skill.name]))
             episode(run, message)
             internal_save(run)
         frappe.db.commit()

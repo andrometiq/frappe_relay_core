@@ -346,7 +346,7 @@ class ExecutionAdapter(unittest.TestCase):
         self.skill.execution_policy = 'Execute'
         self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
         ledger = summarize([dict(company='Sim Company', debit='100.10', credit='40.05')], True)
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
         self.attempt.side_effect = [self.outcome(calls=[dict(id='reply', name='EXECUTE',
             arguments=dict(action='reply', parameters={'text': 'Closing balance 999999'}))]),
             self.outcome(dict(reply='', handoff=False, reason=''))]
