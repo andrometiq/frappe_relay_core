@@ -28,7 +28,7 @@ class TicketTests(unittest.TestCase):
         self.module.ticket_settings = Mock()
         self.module.ticket_settings.is_closed.side_effect = lambda doc: doc.get('ticket_status') == 'Closed'
         self.module.ticket_settings.status_of.side_effect = lambda status_type: status_type
-        self.message = types.SimpleNamespace(name='RELAY-MSG-0000000001',relay_contact='RELAY-CON-0000000001',channel='RELAY-CH-0000000001',check_permission=Mock())
+        self.message = types.SimpleNamespace(name='RELAY-MSG-0000000001',relay_contact='RELAY-CON-0000000001',channel='RELAY-CH-0000000001',check_permission=Mock(), apply_fieldlevel_read_permissions=Mock())
         self.contact = types.SimpleNamespace(check_permission=Mock())
         self.f.get_doc.side_effect = lambda doctype, name: self.message if doctype == 'Relay Message' else self.contact
         self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence', ticket_status='Open', owner='Sim Staff', messages=[types.SimpleNamespace(message=self.message.name)])
@@ -41,6 +41,49 @@ class TicketTests(unittest.TestCase):
         self.f.get_all = Mock(return_value=[])
         self.f.db = types.SimpleNamespace(get_value=Mock(return_value='Sim Person'))
         self.f.utils = types.SimpleNamespace(cint=lambda value: int(value or 0))
+
+    def test_create_stores_exactly_selected_messages(self):
+        names = [self.message.name, 'RELAY-MSG-0000000002']
+        inserted = Record(name='TKT-00002', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        with patch('relay_core.ticket_tags.message_business', return_value=('Customer', 'LOCAL-1')):
+            result = self.module.create('Delivery issue', names)
+        payload = self.f.get_doc.call_args.args[0]
+        self.assertEqual(payload['messages'], [{'message': name} for name in names])
+        self.assertEqual((payload['business_doctype'], payload['business_name']), ('Customer', 'LOCAL-1'))
+        inserted.insert.assert_called_once()
+        self.assertEqual(result['name'], 'TKT-00002')
+
+    def test_ai_evidence_appends_idempotently_and_uses_existing_decision(self):
+        message = Record(name='RELAY-MSG-0000000002', direction='Incoming', content='Please replace the damaged parcel')
+        first = Record(name=self.message.name, content='Please help')
+        ticket = Record(name='TKT-00002', subject='Please help', brief='Please help', messages=[Record(message=first.name)])
+        ticket.append = lambda field, row: ticket.messages.append(Record(**row))
+        self.f.get_doc.side_effect = lambda *args, **kw: first
+        run = Record(decision='{"reason":"Customer wants a replacement for the damaged parcel."}')
+        for _ in range(2): self.module.enrich_episode(ticket, message, run)
+        self.assertEqual([row.message for row in ticket.messages], [first.name, message.name])
+        self.assertEqual(ticket.subject, 'Customer wants a replacement for the damaged parcel.')
+        self.assertEqual(ticket.brief, ticket.subject)
+
+    def test_ai_does_not_overwrite_human_edits_even_if_restored_to_fallback(self):
+        message = Record(name=self.message.name, direction='Incoming', content='Please help')
+        ticket = Record(name='TKT-00002', subject='Please help', brief='Staff instructions', messages=[Record(message=message.name)])
+        self.f.get_doc.side_effect = lambda *args, **kw: message
+        self.f.get_all.return_value = ['{"changed":[["subject","Edited","Please help"]]}']
+        self.module.enrich_episode(ticket, message, Record(decision='{"reason":"Replace damaged parcel"}'))
+        self.assertEqual((ticket.subject, ticket.brief), ('Please help', 'Staff instructions'))
+
+    def test_ai_plain_fallback_and_evidence_beyond_manual_limit(self):
+        message = Record(name='RELAY-MSG-0000000051', direction='Incoming', content='<b>Replace</b>\n  damaged parcel')
+        ticket = Record(name='TKT-00002', subject='Human title', brief='Human brief', messages=[Record(message=str(n)) for n in range(50)])
+        ticket.append = lambda field, row: ticket.messages.append(Record(**row))
+        self.f.get_doc.side_effect = lambda *args, **kw: Record(content='Original')
+        self.module.enrich_episode(ticket, message)
+        self.assertEqual(len(ticket.messages), 51)
+        self.assertEqual(ticket.subject, 'Human title')
+        self.module.enrich_episode(ticket, message, new=True)
+        self.assertEqual((ticket.subject, ticket.brief), ('Replace damaged parcel', 'Replace damaged parcel'))
 
     def test_each_link_requires_message_and_contact_read_permission(self):
         self.module.validate_ticket(self.doc)

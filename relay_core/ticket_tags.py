@@ -29,10 +29,12 @@ def message_business(names):
     targets = {tuple(frappe.db.get_value('Relay Message', name, ['business_doctype', 'business_name']) or ())
                for name in names}
     if len(targets) != 1:
-        return None, None
+        frappe.throw('Select messages from the same business record')
     target = targets.pop()
-    if len(target) != 2 or not all(target) or not frappe.has_permission(target[0], 'read', doc=target[1]):
+    if len(target) != 2 or not all(target):
         return None, None
+    if not frappe.has_permission(target[0], 'read', doc=target[1]):
+        frappe.throw('You cannot read the business record', frappe.PermissionError)
     return target
 
 

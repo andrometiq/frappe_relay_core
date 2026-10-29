@@ -360,13 +360,33 @@ class HandoffTests(unittest.TestCase):
         for _ in range(2): self.service.handoff(self.run, self.skill, 'Permission denied')
         self.assertEqual(self.ensure.call_count, 2)
         self.ensure.assert_called_with(self.message, owner='fallback', run=self.run,
-            subject='Conversation needs a person', reason='Permission denied')
+            reason='Permission denied')
         self.assertEqual(self.run.ticket, 'TKT-1')
         self.assertEqual(self.run.status, 'Handoff')
         self.assertEqual(self.contact.automation_generation, 0)
         self.assertEqual(self.contact.automation_paused, 0)
         self.hold.assert_called_with('TKT-1')
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_handoff_keeps_triggering_messages_and_human_wording(self):
+        from relay_core import tickets
+        self.ticket.messages = []
+        self.ticket.append = lambda field, values: self.ticket.messages.append(Doc(values))
+        self.message.update(direction='Incoming', content='Please replace two damaged shirts.')
+        self.run.decision = json.dumps({'reason': 'Customer requests replacement of damaged shirts.'})
+        def admission(message, **kwargs):
+            tickets.enrich_episode(self.ticket, message, kwargs['run'], new=not self.ticket.messages)
+            return self.ticket
+        self.ensure.side_effect = admission
+        with patch.object(tickets, 'frappe', self.f):
+            self.service.handoff(self.run, self.skill, 'Outside skill')
+            self.assertEqual(self.ticket.subject, 'Customer requests replacement of damaged shirts.')
+            self.assertEqual(self.ticket.brief, self.ticket.subject)
+            self.ticket.subject, self.ticket.brief = 'Human subject', 'Human explanation'
+            self.message.name = 'MSG-2'; self.run.message = 'MSG-2'
+            for _ in range(2): self.service.handoff(self.run, self.skill, 'Outside skill')
+        self.assertEqual([row.message for row in self.ticket.messages], ['MSG-1', 'MSG-2'])
+        self.assertEqual((self.ticket.subject, self.ticket.brief), ('Human subject', 'Human explanation'))
 
     def test_no_owner_leaves_work_recoverable_without_unassigned_ticket(self):
         self.service.eligible = lambda *args: False

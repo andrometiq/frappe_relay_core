@@ -37,6 +37,15 @@ class TicketTagTests(unittest.TestCase):
         doc.get = lambda key, default=None: getattr(doc, key, default)
         return doc
 
+    def test_message_business_rejects_cross_business_and_unreadable_records(self):
+        self.f.db.get_value.side_effect = [('Customer', 'LOCAL-1'), ('Customer', 'LOCAL-2')]
+        with self.assertRaisesRegex(ValueError, 'same business'):
+            self.module.message_business(['one', 'two'])
+        self.f.db.get_value.side_effect = None
+        self.f.db.get_value.return_value = ('Customer', 'LOCAL-1')
+        self.f.has_permission.return_value = False
+        with self.assertRaises(PermissionError): self.module.message_business(['one'])
+
     def test_user_list_rejects_duplicates_wrong_types_and_too_many(self):
         self.assertEqual(self.module.user_list('["a@example.invalid"]'), ['a@example.invalid'])
         self.assertEqual(self.module.user_list(None), [])
