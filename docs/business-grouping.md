@@ -34,16 +34,16 @@ Inbox filters apply to the records and counts in each group.
 
 Contacts tiles show contact counts; open a record to see its linked contacts.
 
-The Not linked tile contains contacts without a link to an enabled business type.
+The Not linked tile contains contacts without a link to a configured business type.
 
 Inbox search matches record titles and names; Contacts search finds contacts at any level.
 
 Use the breadcrumbs or Back to return; Back restores the search that opened a contact or thread.
 
-Teams search matches group values, record names, and linked contacts.
+Team and group claim controls are hidden.
 
 Tickets show the business type and record; a business type filter also shows its group fields.
 
 To link a contact, select the business type, then select the record.
 
-Counts and results include only records, contacts, and messages that the user can read.
+Counts and results use the shared [business type access rule](business-access.md), independently of Contact/Customer Desk read permissions.
