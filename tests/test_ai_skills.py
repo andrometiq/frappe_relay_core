@@ -377,6 +377,7 @@ class HandoffTests(unittest.TestCase):
 
 class SkillDeliveryTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.reply_guard.check_delivery'))
         from contextvars import ContextVar
         self.f = framework()
         self.run = Doc(name='RUN-1', status='Pending', skill='SKILL-1', execution_user='service', message='MSG-1', attempts=0)
@@ -533,6 +534,10 @@ class SkillDeliveryTests(unittest.TestCase):
 
 class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
+        # Privacy lookup data is supplied by the dedicated reply guard tests.
+        guard_db = framework()
+        guard_db.db.exists.return_value = False
+        self.enterContext(patch('relay_core.ai.reply_guard.frappe', guard_db))
         try:
             from frappe_tools.ai import agent, client
             from frappe_tools.utils import llm
