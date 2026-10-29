@@ -3,8 +3,8 @@ import { subscribeRoom, onRealtime } from '../services/realtime'
 import { realtimeRefreshQueue } from '../services/realtimeRefreshQueue'
 
 // Refresh on the given realtime kinds, reconnects and a return to the tab. Returns the stop function.
-export function watchRealtime(doctypes, kinds, refresh) {
-  const queue = realtimeRefreshQueue(refresh, () => document.visibilityState === 'visible')
+export function watchRealtime(doctypes, kinds, refresh, delay) {
+  const queue = realtimeRefreshQueue(refresh, () => document.visibilityState === 'visible', delay)
   function changed(event) {
     if (event?.kind === 'reconnect' || event?.kind === 'permissions' || kinds.includes(event?.kind)) queue.schedule(event.kind)
   }
@@ -20,8 +20,8 @@ export function watchRealtime(doctypes, kinds, refresh) {
   }
 }
 
-export function useRealtimeRefresh(doctypes, kinds, refresh) {
+export function useRealtimeRefresh(doctypes, kinds, refresh, delay) {
   let stop
-  onMounted(() => { stop = watchRealtime(doctypes, kinds, refresh) })
+  onMounted(() => { stop = watchRealtime(doctypes, kinds, refresh, delay) })
   onBeforeUnmount(() => stop?.())
 }

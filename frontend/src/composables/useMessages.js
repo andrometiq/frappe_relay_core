@@ -104,11 +104,14 @@ export function useMessages() {
     }
   }
   async function refreshPendingStatuses() {
+    const generation=requestSequence, identity=conversationIdentity();
     await retireCompletedActions();
+    if(generation!==requestSequence || identity!==conversationIdentity())return;
     const scope=selected.value||businessType.value+':'+businessName.value;
     const items=pendingMessages.value.filter(row=>row.scope===scope&&row.action).slice(0,50);
     if(!items.length)return;
     const result=await coreApi('messaging.action_snapshots',{names:JSON.stringify(items.map(row=>row.action))});
+    if(generation!==requestSequence || identity!==conversationIdentity())return;
     const readableActions=new Set(result.items.map(item=>item.action));
     pendingMessages.value=pendingMessages.value.filter(row=>!items.includes(row)||readableActions.has(row.action));
     for(const state of result.items){
@@ -153,7 +156,7 @@ export function useMessages() {
     busy = ref(false),
     error = ref(""),
     notice = ref("");
-  // Sends in flight and their request keys. Realtime refreshes wait for them like for `busy`.
+  // Sends in flight and their request keys. New incoming rows can refresh during a send.
   const sending = ref(0), sendingKeys = new Set();
   const newer = ref(false),
     last = ref(null),
@@ -162,6 +165,8 @@ export function useMessages() {
   const windows = new Map(), preferredChannels = new Map();
   let restoredRefreshPending = false;
   const viewPosition = ref(null), newArrivals = ref(0), UNREAD_OFFSET = 56;
+  let bufferedArrivals = new Map();
+  function clearArrivals() { bufferedArrivals.clear(); newArrivals.value=0; }
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
@@ -178,13 +183,14 @@ export function useMessages() {
     const key = windowKey();
     if (!businessName.value || !key || !rows.value.length) return;
     windows.delete(key);
-    windows.set(key, {rows: rows.value, before: before.value, last: last.value, ingestionCursor:ingestionCursor.value, more:more.value, newer:newer.value, position:viewPosition.value});
+    windows.set(key, {rows: rows.value, before: before.value, last: last.value, ingestionCursor:ingestionCursor.value, more:more.value, newer:newer.value, position:viewPosition.value, arrivals:[...bufferedArrivals.values()]});
     while(windows.size>20) windows.delete(windows.keys().next().value);
   }
   function restoreWindow() {
     const saved=windows.get(windowKey());
     if (!saved) { viewPosition.value=null; return false; }
     ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
+    bufferedArrivals=new Map((saved.arrivals||[]).map(row=>[row.name,row]));newArrivals.value=bufferedArrivals.size;
     viewPosition.value=saved.position;restored.value=saved.position?.atBottom?'':saved.position?.name||'';
     if(!businessName.value && !source.value)source.value=defaultSendSource(rows.value,capabilities.value);
     restoredRefreshPending = true;
@@ -201,6 +207,7 @@ export function useMessages() {
   }
   function rememberPosition(value) {
     viewPosition.value=value;
+    if(value.atBottom && !newer.value) showArrivals();
     if(businessName.value)pendingPosition={business:true,doctype:businessType.value,name:businessName.value,
       message:value.name,offset:value.offset,at_bottom:value.atBottom?1:0};
     else if(selected.value)pendingPosition={contact:selected.value,channel:channel.value,message:value.name,offset:value.offset,at_bottom:value.atBottom?1:0};
@@ -232,89 +239,141 @@ export function useMessages() {
     if(!source.value)source.value=defaultSendSource(rows.value,capabilities.value);
     updateChannels();
   }
+  function appendRows(items) {
+    const combined = [...new Map([...rows.value, ...items].map(row=>[row.name,row])).values()]
+      .sort((a,b)=>String(a.sent_at||a.creation).localeCompare(String(b.sent_at||b.creation))||a.name.localeCompare(b.name));
+    rows.value = combined.slice(-300);
+    if (combined.length > 300) more.value = true;
+    before.value = rows.value[0]?.name;
+    last.value = rows.value.at(-1)?.name || last.value;
+    updateChannels();
+  }
+  function showArrivals() {
+    if (!bufferedArrivals.size) return;
+    appendRows([...bufferedArrivals.values()]);
+    clearArrivals();
+  }
   async function latest() {
-    await run(async()=>{restored.value=''; viewPosition.value=null; newArrivals.value=0; await history();});
+    await run(async()=>{
+      restored.value=''; viewPosition.value=null;
+      if(bufferedArrivals.size && !newer.value) showArrivals();
+      else {
+        const arrivals=[...bufferedArrivals.values()], identity=conversationIdentity();
+        const loading=history(), generation=requestSequence;
+        await loading;
+        if(arrivals.length && generation===requestSequence && identity===conversationIdentity())appendRows(arrivals);
+      }
+    });
   }
   let requestSequence = 0;
   const connectionError = ref('');
-  let refreshing = false;
-  async function refreshVisible() {
-    if (refreshing || busy.value || sending.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
+  let refreshing = false, snapshotting = false, snapshotAgain = false;
+  function refreshError(err) {
+    connectionError.value = err.message || 'Live updates unavailable.';
+    if([401,403].includes(err.status)){rows.value=[];pendingMessages.value=[];clearArrivals();clearRecipient();windows.clear();}
+  }
+  async function refreshNew() {
+    if (refreshing || busy.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
     const generation = requestSequence, identity = conversationIdentity();
     refreshing = true;
     restoredRefreshPending = false;
     try {
       if(!last.value){await history();return;}
-      const page = {items:[]};
-      let cursor = ingestionCursor.value, hasMore = true;
+      let hasMore = true;
       while (hasMore) {
-        const batch = await historyRequest({since:cursor,limit:50,...(channel.value?{channel:channel.value}:{})});
+        const batch = await historyRequest({since:ingestionCursor.value,limit:50,...(channel.value?{channel:channel.value}:{})});
         if (generation !== requestSequence || identity !== conversationIdentity()) return;
-        page.items.push(...batch.items);
-        cursor = batch.ingestion_cursor || cursor;
+        if (batch.items.length) {
+          const known = new Set(rows.value.map(row=>row.name));
+          for (const row of batch.items) if (!known.has(row.name)) bufferedArrivals.set(row.name,row);
+          newArrivals.value=bufferedArrivals.size;
+          if(!newer.value && (!viewPosition.value || viewPosition.value.atBottom)) showArrivals();
+        }
+        ingestionCursor.value = batch.ingestion_cursor || ingestionCursor.value;
         hasMore = batch.has_more && batch.items.length > 0;
       }
-      if (generation !== requestSequence || identity !== conversationIdentity()) return;
-      if (rows.value.length) {
-        const names = JSON.stringify(rows.value.filter(row=>!row._pending).map(row=>row.name));
-        const snapshots = {items:[]};
-        const allNames = JSON.parse(names);
-        for(let offset=0;offset<allNames.length;offset+=50){
-          const batchNames=JSON.stringify(allNames.slice(offset,offset+50));
-          const batch=businessName.value ? await historyRequest({names:batchNames,limit:50})
-            : await coreApi('api.message_snapshots',{contact:selected.value,names:batchNames});
-          snapshots.items.push(...batch.items);
-        }
-        if (generation !== requestSequence || identity !== conversationIdentity()) return;
-        const updated = new Map(snapshots.items.map(row=>[row.name,row]));
-        const checked = new Set(JSON.parse(names));
-        if(source.value && checked.has(source.value.name) && !updated.has(source.value.name))source.value=null;
-        // An unchanged message keeps its object, so the thread does not redraw its bubble.
-        const changed = row => updated.has(row.name) && JSON.stringify(updated.get(row.name)) !== JSON.stringify(row);
-        rows.value = rows.value.filter(row=>!checked.has(row.name)||updated.has(row.name)).map(row=>changed(row)?updated.get(row.name):row);
-      }
       connectionError.value = '';
-      if (page.items.length) {
-        if(viewPosition.value && !viewPosition.value.atBottom) { newArrivals.value=page.items.length; return; }
-        const known = new Set(rows.value.map(row => row.name));
-        const combined = [...rows.value, ...page.items.filter(row => !known.has(row.name))].sort((a,b)=>String(a.sent_at||a.creation).localeCompare(String(b.sent_at||b.creation))||a.name.localeCompare(b.name));
-        rows.value = combined.slice(-300);
-        if (combined.length > 300) more.value = true;
-        before.value = rows.value[0]?.name;
-        last.value = rows.value.at(-1)?.name || last.value;
-        updateChannels();
-      }
-      ingestionCursor.value = cursor;
     } catch (err) {
-      if (generation === requestSequence) {
-        connectionError.value = err.message || 'Live updates unavailable.';
-        if([401,403].includes(err.status)){rows.value=[];pendingMessages.value=[];clearRecipient();windows.clear();}
-      }
+      if (generation === requestSequence && identity === conversationIdentity()) refreshError(err);
     } finally {
       refreshing = false;
       if (restoredRefreshPending) await refreshVisible();
     }
   }
-  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
-    if(kinds.has('reconnect'))pagingError.value='';
-    if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearRecipient();}
-    if(busy.value||sending.value){actionRefreshPending=true;return;}
+  async function refreshSnapshots() {
+    if (snapshotting) { snapshotAgain=true; return; }
+    if (busy.value || sending.value) { actionRefreshPending=true; return; }
+    if (!conversationIdentity() || document.visibilityState !== 'visible') return;
+    const generation = requestSequence, identity = conversationIdentity();
+    const current = () => generation === requestSequence && identity === conversationIdentity();
+    snapshotting=true;
+    snapshotAgain=false;
+    try {
+      const allNames = [...new Set([...rows.value, ...bufferedArrivals.values()].filter(row=>!row._pending).map(row=>row.name))];
+      const snapshots = [];
+      for(let offset=0;offset<allNames.length;offset+=150){
+        if(!current())return;
+        const requests=[];
+        for(let start=offset;start<Math.min(offset+150,allNames.length);start+=50){
+          const names=JSON.stringify(allNames.slice(start,start+50));
+          requests.push(businessName.value ? historyRequest({names,limit:50})
+            : coreApi('api.message_snapshots',{contact:selected.value,names}));
+        }
+        // Wait for the entire wave even on failure, keeping the global limit at three.
+        const results=await Promise.allSettled(requests);
+        if(!current())return;
+        const failed=results.find(result=>result.status==='rejected');
+        if(failed)throw failed.reason;
+        for(const result of results)snapshots.push(...result.value.items);
+      }
+      if(!current())return;
+      const updated = new Map(snapshots.map(row=>[row.name,row]));
+      const checked = new Set(allNames);
+      if(source.value && checked.has(source.value.name) && !updated.has(source.value.name))source.value=null;
+      // Merge into current rows: a new arrival during this sweep must survive it.
+      const merge = items => items.filter(row=>!checked.has(row.name)||updated.has(row.name))
+        .map(row=>updated.has(row.name) && JSON.stringify(updated.get(row.name))!==JSON.stringify(row)?updated.get(row.name):row);
+      rows.value=merge(rows.value);
+      bufferedArrivals=new Map(merge([...bufferedArrivals.values()]).map(row=>[row.name,row]));
+      newArrivals.value=bufferedArrivals.size;
+    } catch(err) {
+      if(current())refreshError(err);
+    } finally {
+      snapshotting=false;
+      if(snapshotAgain) { snapshotAgain=false; void refreshSnapshots(); }
+    }
+  }
+  async function refreshVisible() {
+    await refreshNew();
+    void refreshSnapshots();
+  }
+  async function refreshDetails(kinds) {
+    if(busy.value || sending.value){actionRefreshPending=true;return;}
+    const generation=requestSequence, identity=conversationIdentity();
+    const current=()=>generation===requestSequence && identity===conversationIdentity();
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) {
       windows.clear();
-      try { await restorePending(); } catch(e) { if([401,403].includes(e.status)){pendingMessages.value=[];rows.value=[];clearRecipient();} }
+      try { await restorePending(); } catch(e) { if(current() && [401,403].includes(e.status))refreshError(e); }
+      if(!current())return;
+      await refreshPendingStatuses().catch(()=>{});
     }
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) await refreshPendingStatuses().catch(()=>{});
+    if(current() && (kinds.has('reconnect') || kinds.has('visible') || kinds.has('contacts'))) await refreshMetadata();
+  }
+  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
+    if(document.visibilityState !== 'visible')return;
+    if(kinds.has('reconnect'))pagingError.value='';
+    if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearArrivals();clearRecipient();}
+    if(busy.value){actionRefreshPending=true;return;}
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('permissions') || kinds.has('message_actions')) await refreshVisible();
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('contacts')) await refreshMetadata();
-  });
+    // Recovery and metadata must not hold up the queue's next incoming message.
+    void refreshDetails(kinds).catch(()=>{});
+  },40);
   let actionRefreshPending = false;
   async function refreshActionState() {
     if (busy.value || sending.value) { actionRefreshPending = true; return; }
     actionRefreshPending = false;
-    await restorePending();
-    await refreshPendingStatuses();
     await refreshVisible();
-    await refreshMetadata();
+    await refreshDetails(new Set(['visible']));
   }
   watch(() => busy.value || sending.value > 0, value => {
     if (!value && actionRefreshPending) refreshActionState().catch(()=>{});
@@ -365,7 +424,7 @@ export function useMessages() {
 
   function filterChannel(value) {
     if(busy.value || channel.value===value) return;
-    clearRecipient();saveWindow();++requestSequence;
+    clearRecipient();saveWindow();clearArrivals();++requestSequence;
     channel.value=value;rows.value=[];source.value=null;quoting.value=false;
     restored.value='';firstUnread.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
     clearRecipient();
@@ -408,7 +467,7 @@ export function useMessages() {
           ...rows.value,
         ].slice(0, 300)
       : page.items;
-    if(!older)ingestionCursor.value=page.ingestion_cursor||'RELAY-MSG-0000000000';
+    if(!older){clearArrivals();ingestionCursor.value=page.ingestion_cursor||'RELAY-MSG-0000000000';}
     before.value = page.first;
     last.value = older ? rows.value.at(-1)?.name : page.last;
     newer.value = older && (rows.value.length >= 300 || newer.value);
@@ -425,7 +484,7 @@ export function useMessages() {
 
   function open(contact) {
     if (busy.value || !contact) return;
-    clearRecipient();saveWindow();
+    clearRecipient();saveWindow();clearArrivals();
     ++requestSequence;
     businessName.value = "";
     businessType.value = "";
@@ -472,7 +531,7 @@ export function useMessages() {
     openRoute("#/messages?" + params.toString(), replace);
   }
   function clearSelection(updateRoute = true) {
-    clearRecipient();saveWindow();++requestSequence;loadFailed.value=null;
+    clearRecipient();saveWindow();clearArrivals();++requestSequence;loadFailed.value=null;
     selected.value="";businessName.value="";businessType.value="";businessContext.value=null;
     rows.value=[];source.value=null;quoting.value=false;
     if(updateRoute && location.hash.split('?')[0]==='#/messages')closeRoute("#/messages");
@@ -481,7 +540,7 @@ export function useMessages() {
     const name=typeof record==='string'?record:record?.name;
     if (busy.value || !doctype || !name) return;
     const switching=!!(selected.value||businessName.value);
-    clearRecipient();saveWindow();
+    clearRecipient();saveWindow();clearArrivals();
     ++requestSequence;
     selected.value = "";
     businessType.value = doctype;
@@ -537,6 +596,9 @@ export function useMessages() {
       ].slice(-300);
       last.value = page.last || last.value;
       newer.value = page.has_more;
+      for(const row of rows.value)bufferedArrivals.delete(row.name);
+      newArrivals.value=bufferedArrivals.size;
+      if(!newer.value && viewPosition.value?.atBottom)showArrivals();
       before.value = rows.value[0]?.name;
       more.value = true;
     });
@@ -569,7 +631,7 @@ export function useMessages() {
         updateChannels();return;
       }
       const changed = selected.value !== page.contact || !!businessName.value;
-      if (changed) clearRecipient();
+      if (changed) {clearRecipient();clearArrivals();}
       ++requestSequence;
       businessName.value = '';
       selected.value = page.contact;
