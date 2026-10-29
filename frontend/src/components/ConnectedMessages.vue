@@ -59,7 +59,8 @@ const activeBusiness = computed(() => ({
 const noteBusy = ref(false);
 const composeMode = ref('reply'), noteMessages = ref([]), noteReply = ref(null);
 const noteContact = computed(() => noteMessages.value[0]?.relay_contact || conversationContact.value);
-const ticketOpen = ref(false), ticketMessage = ref(null), ticketQuoted = ref(false);
+const ticketMessages = ref([]);
+const ticketOpen = ref(false), ticketMessage = ref(null);
 // One side panel at a time: "notes", "search" or "contact".
 const panel = ref('');
 const notesOpen = computed(() => panel.value === 'notes' && !!conversationContact.value);
@@ -252,11 +253,11 @@ function openContact(contact) {
   return state.open(contact);
 }
 function openTicket(message) {
-  ticketQuoted.value = !!message;
-  ticketMessage.value = message || contactRows.value.at(-1) || null;
+  ticketMessages.value = Array.isArray(message) ? message : [message || contactRows.value.at(-1)].filter(Boolean);
+  ticketMessage.value = ticketMessages.value[0] || null;
   ticketOpen.value = !!ticketMessage.value;
 }
-function closeTicket() { ticketOpen.value = false; ticketMessage.value = null; ticketQuoted.value = false; }
+function closeTicket() { ticketOpen.value = false; ticketMessage.value = null; ticketMessages.value = []; }
 function closeNotes() { casesOpen.value = false; topicsOpen.value = false; if (panel.value === 'notes') panel.value = ''; setComposeMode('reply'); }
 function openNotes() { if (conversationContact.value) panel.value = 'notes'; }
 function setComposeMode(mode) {
@@ -429,7 +430,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <ErrorMessage class="px-4" :message="plainChatError(loadFailed ? '' : error) || contactsError" />
       <p v-if="connectionError" role="status" class="relay-connection-state">{{ connectionError }}</p>
       <p v-if="notice" role="status" class="feedback-panel">{{ notice }}</p>
-      <CreateTicketDialog v-if="ticketMessage" :key="ticketMessage.name" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :quoted="ticketQuoted" :contact-name="title" @created="showToast('Ticket created', $event.href)" />
+      <CreateTicketDialog v-if="ticketMessage" :key="ticketMessage.name" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :messages="ticketMessages" :contact-name="title" @created="showToast('Ticket created', $event.href)" />
 
       <div class="conversation-body">
       <WorkspaceState v-if="loadFailed && !visibleRows.length" class="conversation-load-failed" title="Could not load messages" :description="loadFailedReason" icon="alert-circle">

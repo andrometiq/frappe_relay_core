@@ -79,6 +79,12 @@ watch(() => props.ticket.contact_person, async person => {
           Review {{ draft.doctype }} · {{ linkedTitle(draft.doctype, draft.name) }} · {{ ['Draft', 'Submitted', 'Cancelled'][draft.docstatus] }}
         </a>
       </section>
+      <section v-if="ticket.messages?.length" class="ticket-evidence" aria-label="Linked messages">
+        <h3>Linked messages · {{ ticket.messages.length }}</h3>
+        <a v-for="message in ticket.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">
+          {{ message.content || 'Attachment or message without text' }}
+        </a>
+      </section>
       <TicketDiscussion v-if="ticket.messages" :ticket="ticket" />
     </div>
     <template #actions>
@@ -89,6 +95,8 @@ watch(() => props.ticket.contact_person, async person => {
 </template>
 
 <style scoped>
+.ticket-evidence { display:flex; flex-direction:column; gap:8px; max-height:280px; overflow:auto; }
+.ticket-evidence a { display:block; min-height:44px; padding:12px; background:var(--surface-gray-1); border-radius:8px; white-space:pre-wrap; }
 .ticket-dialog { display: flex; flex-direction: column; gap: 24px; overflow-wrap: anywhere; }
 .ticket-dialog__id { font-size: 12px; color: var(--ink-gray-6); }
 .ticket-dialog__editable { padding: 16px; border-radius: 8px; background: var(--surface-gray-1); }

@@ -1,5 +1,7 @@
 """Ticket actions shared by Desk/API; all message references checked server-side."""
 import hashlib
+import html
+import re
 import json
 from contextvars import ContextVar
 import frappe
@@ -250,6 +252,49 @@ def _ensure_triage(event, channel, row):
     return doc
 
 
+def customer_text(value, limit=500):
+    """Plain, bounded customer intent; never expose an exception or tool journal."""
+    if not isinstance(value, str):
+        return ''
+    value = html.unescape(re.sub(r'<[^>]*>', '', value))
+    value = ''.join(c for c in value if c.isprintable() or c.isspace())
+    return ' '.join(value.split())[:limit]
+
+
+def episode_description(message, run=None):
+    decision = _history_json(run.get('decision')) if run else {}
+    summary = next((customer_text(decision.get(key)) for key in ('summary', 'reason')
+                    if customer_text(decision.get(key))), '')
+    text = summary or customer_text(message.get('content')) or 'Customer sent an attachment for review'
+    return text[:140], text
+
+
+def enrich_episode(ticket, message, run=None, *, new=False):
+    """Keep selected evidence and refine untouched fallback text using an existing decision."""
+    if message.get('direction') != 'Incoming':
+        return
+    if message.name not in {row.message for row in ticket.messages}:
+        ticket.append('messages', {'message': message.name})
+    title, brief = episode_description(message, run)
+    if new:
+        ticket.subject, ticket.brief = title, brief
+        return
+    # Never replace existing prose except the original automatic fallback, and never
+    # after an audited edit (even if a person restored the original wording).
+    first = frappe.get_doc('Relay Message', ticket.messages[0].message)
+    fallback = episode_description(first)
+    desired = (title, brief)
+    candidates = [field for field, old, value in zip(('subject', 'brief'), fallback, desired)
+                  if ticket.get(field) == old and old != value]
+    if not candidates or not run or not run.get('decision'):
+        return
+    versions = frappe.get_all('Version', filters={'ref_doctype': 'Relay Ticket', 'docname': ticket.name}, pluck='data')
+    edited = {change[0] for data in versions for change in _history_json(data).get('changed', []) if change}
+    for field, value in zip(('subject', 'brief'), desired):
+        if field in candidates and field not in edited:
+            setattr(ticket, field, value)
+
+
 def ensure_episode(message=None, *, owner=None, run=None, subject='Conversation needs attention',
                    reason='', event=None, channel=None, row=None):
     """Internal, atomic admission shared by automation paths; caller owns commit.
@@ -310,6 +355,7 @@ def ensure_episode(message=None, *, owner=None, run=None, subject='Conversation 
                 source_action_key=episode_key, active_scope_key=active_key,
                 source_provider_message_key=message.get('provider_message_key'),
                 messages=[{'message': message.name}]))
+        enrich_episode(ticket, message, run, new=not existing)
         _save_episode(ticket, new=not existing)
         if message.get('ticket') != ticket.name:
             # Advance modified so an older loaded message cannot erase this link.
@@ -344,7 +390,7 @@ def validate_ticket(doc, check_assignment=True):
                 doc.get(key) != previous.get(key) for key in protected)):
             frappe.throw('Episode scope can only be changed by an internal transition', frappe.PermissionError)
     if (not doc.messages and not (doc.get('source_hub_event') and doc.get('source_provider_message_key')
-            and doc.get('company') and doc.get('conversation_key'))) or len(doc.messages) > 50:
+            and doc.get('company') and doc.get('conversation_key'))) or (len(doc.messages) > 50 and not doc.get('conversation_key')):
         frappe.throw('Link between 1 and 50 messages')
     if doc.get('active_scope_key') == '':
         doc.active_scope_key = None
@@ -447,8 +493,10 @@ def read(name):
         message = frappe.get_doc('Relay Message', row.message)
         message.check_permission('read')
         readable_contact(message.relay_contact)
+        message.apply_fieldlevel_read_permissions()
         links.append({'message': message.name, 'contact': message.relay_contact,
-                      'channel': message.channel})
+                      'channel': message.channel, 'content': customer_text(getattr(message, 'content', ''), 500),
+                      'direction': getattr(message, 'direction', ''), 'creation': getattr(message, 'creation', None)})
     drafts = []
     for row in frappe.get_all('Relay Flow Action', filters={'ticket': doc.name, 'status': 'Completed',
             'target_doctype': ['is', 'set'], 'target_name': ['is', 'set']},

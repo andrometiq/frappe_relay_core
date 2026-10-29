@@ -21,6 +21,30 @@ import { createScrollHold } from "./scrollHold";
 import { dayDividers, quoteIndex, timeOf } from "./threadIndex";
 import { groupSends } from "../../services/sendGroups";
 import { notesInThread } from "../../services/threadNotes";
+import { selectMessages, selectableMessage } from '../../services/messageSelection'
+const selecting = ref(false), selectedMessages = ref([]), selectionAnchor = ref('')
+const selection = computed(() => selectedMessages.value.map(message => message.name))
+let suppressTap = null
+function cancelSelection() { selecting.value = false; selectedMessages.value = []; selectionAnchor.value = ''; suppressTap = null }
+function startSelection(message) {
+  if (!props.canComment || !selectableMessage(message)) return
+  selecting.value = true; selectedMessages.value = [message]; selectionAnchor.value = message.name; menu.value = null
+}
+function toggleSelection(message, event) {
+  if (!selecting.value) return
+  event.preventDefault(); event.stopPropagation()
+  const ghostTap = event.type === 'click' && suppressTap === message.name
+  suppressTap = null
+  if (ghostTap) return
+  const next = selectMessages(sentRows.value, selection.value, message.name, selectionAnchor.value, event.shiftKey)
+  if (next === selection.value && selectableMessage(message)) emit('toast', 'Select at most 50 messages')
+  const messages = new Map([...selectedMessages.value, ...sentRows.value].map(row => [row.name, row]))
+  selectedMessages.value = next.map(name => messages.get(name)); selectionAnchor.value = message.name
+}
+function ticketFromSelection() {
+  emit('ticket', selectedMessages.value)
+  cancelSelection()
+}
 const props = defineProps({
   rows: Array,
   contactName: String,
@@ -89,16 +113,22 @@ const isMobile = useMobileLayout();
 const menu = ref(null);
 function openMenu(message, event) {
   const trigger = event.currentTarget;
-  menu.value = menu.value?.message.name === message.name ? null : { message, trigger, sheet: false };
+  menu.value = menu.value?.message.name === message.name ? null : { message, trigger, sheet: isMobile.value };
 }
-// Phones open the same actions as a bottom sheet on a long press.
-let pressTimer;
+// A long press starts selection; moving the pointer cancels it so scrolling stays natural.
+let pressTimer, pressPoint, pressedMessage;
 function pressStart(message, event) {
-  if (!isMobile.value || message._pending || event.pointerType === "mouse") return;
-  const bubble = event.currentTarget;
-  pressTimer = setTimeout(() => { menu.value = { message, trigger: bubble, sheet: true }; navigator.vibrate?.(10); }, 450);
+  pressEnd(); suppressTap = null;
+  if (!isMobile.value || !props.canComment || selecting.value || message._pending || event.pointerType === "mouse") return;
+  pressPoint = [event.clientX, event.clientY];
+  pressTimer = setTimeout(() => { startSelection(message); pressedMessage = message.name; navigator.vibrate?.(10); }, 450);
 }
-function pressEnd() { clearTimeout(pressTimer); }
+function pressEnd(event) {
+  clearTimeout(pressTimer); pressPoint = null;
+  if (event?.type === 'pointerup') suppressTap = pressedMessage;
+  pressedMessage = null;
+}
+function pressMove(event) { if (pressPoint && Math.hypot(event.clientX - pressPoint[0], event.clientY - pressPoint[1]) > 10) pressEnd(); }
 onBeforeUnmount(pressEnd);
 const reactionChoices = ["👍", "❤️", "🔥", "🥰", "👏", "😁", "🤔", "😢"];
 const quickReactions = ["👍", "❤️", "😁", "👏", "😢"];
@@ -121,7 +151,7 @@ function react(message, emoji) {
   reactionTarget.value = null;
   emit("send", message, "reaction", { emoji });
 }
-watch(() => props.selected, () => { reactionTarget.value = null; menu.value = null; });
+watch(() => props.selected, () => { reactionTarget.value = null; menu.value = null; cancelSelection(); });
 const {info,coverage,coverageError,infoOpen,showInfo,refreshCoverage,close:closeInfo}=useMessageInfo(()=>props.rows||[],()=>props.selected);
 useRealtimeRefresh([],['reads'],refreshCoverage);
 onBeforeUnmount(closeInfo);
@@ -242,6 +272,7 @@ function actions(message) {
   items.push({ label: "Message info", icon: "info", onClick: () => showInfo(message) });
   if (sends && messageData(message).kind === "sticker")
     items.push({ label: "Resend sticker", icon: "repeat", onClick: () => emit("send", message, "sticker") });
+  if (props.canComment) items.push({ label: "Select", icon: "check-square", onClick: () => startSelection(message) });
   if (props.canComment)
     items.push({ divider: true }, { label: "Add internal note", icon: "message-square", onClick: () => emit("note", message) },
       {
@@ -258,8 +289,14 @@ function actions(message) {
     class="message-thread"
     :class="{ 'has-menu-sheet': menu?.sheet }"
     aria-label="Conversation"
+    @keydown.esc="cancelSelection"
     @scroll.passive="scrolled"
   >
+    <div v-if="selecting" class="message-selection-bar" role="toolbar" aria-label="Selected messages">
+      <span role="status">{{ selection.length }} selected</span>
+      <Button label="Create ticket" variant="solid" :disabled="!selection.length" @click="ticketFromSelection" />
+      <Button label="Cancel" variant="ghost" @click="cancelSelection" />
+    </div>
     <LoadingRows v-if="busy && !rows.length" label="Loading messages…" :count="3" />
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
@@ -290,13 +327,20 @@ function actions(message) {
           'ml-auto': message.direction === 'Outgoing',
           'anchored-message': message.name === anchor,
           'menu-target': menu?.message.name === message.name,
+          'is-selecting': selecting && selectableMessage(message),
+          'is-selected': selection.includes(message.name),
         }"
         :data-message="message._pending ? null : message.name"
-        tabindex="-1"
-        v-memo="[message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
-        @pointerdown="pressStart(message, $event)" @pointerup="pressEnd" @pointercancel="pressEnd" @pointerleave="pressEnd"
+        :tabindex="selecting && selectableMessage(message) ? 0 : -1"
+        :role="selecting && selectableMessage(message) ? 'checkbox' : undefined"
+        :aria-checked="selecting && selectableMessage(message) ? selection.includes(message.name) : undefined"
+        @click.capture="toggleSelection(message, $event)"
+        @keydown.space="selecting && toggleSelection(message, $event)"
+        v-memo="[selecting, selection.includes(message.name), message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
+        @pointermove="pressMove" @pointerdown="pressStart(message, $event)" @pointerup="pressEnd" @pointercancel="pressEnd" @pointerleave="pressEnd"
         @contextmenu="isMobile && $event.preventDefault()"
       >
+        <span v-if="selecting && selectableMessage(message)" class="message-selection-check" aria-hidden="true"><FeatherIcon :name="selection.includes(message.name) ? 'check-square' : 'square'" :size="20" /></span>
         <div v-if="message.contact_label" class="message-sender">
           {{ message.direction === "Outgoing" ? "To " + readableName(message.contact_label, "Contact") : readableName(message.contact_label, "Contact") }}
         </div>
@@ -362,8 +406,8 @@ function actions(message) {
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
         </footer>
-        <button v-if="!message._pending" type="button" class="message-menu-trigger" aria-label="Message actions" title="Message actions"
-          aria-haspopup="menu" :aria-expanded="menu?.message.name === message.name" @click="openMenu(message, $event)"><FeatherIcon name="chevron-down" :size="16" /></button>
+        <button v-if="!message._pending && !selecting" type="button" class="message-menu-trigger" aria-label="Message actions" title="Message actions"
+          aria-haspopup="menu" :aria-expanded="menu?.message.name === message.name" @pointerdown.stop @click="openMenu(message, $event)"><FeatherIcon name="chevron-down" :size="16" /></button>
         <ReactionPicker v-if="reactionTarget === message.name" :choices="reactionChoices" :current="ownReaction(message.reactions)" :busy="busy"
           @pick="react(message, $event)" @close="reactionTarget = null" />
         <div v-if="reactionLabels(message.reactions).length" class="message-reactions" aria-label="Reactions">
@@ -383,6 +427,13 @@ function actions(message) {
 </template>
 
 <style scoped>
+.message-selection-bar { position:sticky; top:0; z-index:5; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; background:var(--surface-modal); border:1px solid var(--outline-gray-3); border-radius:8px; }
+.message-selection-bar span { margin-right:auto; }
+.message-selection-bar :deep(button) { min-height:44px; }
+.message-thread .message-thread-content .conversation-bubble.is-selecting { cursor:pointer; user-select:none; min-height:44px; padding-left:40px; }
+.conversation-bubble.is-selected { outline:2px solid var(--relay-accent); }
+.message-selection-check { position:absolute; left:10px; top:12px; color:inherit; }
+
 .conversation-bubble:has(.message-readers){margin-bottom:24px}
 .conversation-bubble{position:relative}
 /* The menu button sticks to the top of the visible thread, so a tall message scrolled under the header keeps it. */
@@ -390,7 +441,10 @@ function actions(message) {
 .message-menu-trigger{order:-1;position:sticky;top:4px;z-index:2;align-self:flex-end;flex:none;margin:-4px -8px -20px 0;display:grid;place-items:center;width:24px;height:24px;min-height:0;padding:0;border-radius:999px;background:var(--surface-modal,var(--surface-white));box-shadow:0 1px 3px #0002;color:var(--ink-gray-6);opacity:0;transition:opacity .1s}
 .conversation-bubble:is(:hover,:focus-within)>.message-menu-trigger,.message-menu-trigger[aria-expanded="true"]{opacity:1}
 .message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
-@media (hover:none){.message-menu-trigger{display:none}}
+@media (hover:none){
+  .message-menu-trigger{display:grid;opacity:1;position:absolute;top:0;right:0;width:44px;height:44px;margin:0}
+  .message-thread .message-thread-content .conversation-bubble:has(>.message-menu-trigger){padding-right:48px}
+}
 .has-menu-sheet .conversation-bubble:not(.menu-target){opacity:.35}
 .note-bubble{align-self:center;width:min(420px,90%);margin:6px auto;padding:8px 12px;border:1px solid color-mix(in srgb,var(--relay-note-ink) 45%,transparent);border-radius:8px;background:var(--relay-note-bg);color:var(--relay-ink,var(--ink-gray-8));font-size:13px}
 .note-bubble header{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--relay-note-ink);font-size:12px}

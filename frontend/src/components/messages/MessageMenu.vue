@@ -66,6 +66,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.message-menu .relay-menu__item { min-height:44px; }
 .message-menu { position:fixed; z-index:90; display:flex; flex-direction:column; gap:1px; width:232px; padding:4px; overflow:auto; }
 .message-menu-emoji { display:flex; justify-content:space-between; gap:2px; padding:2px 2px 6px; margin-bottom:4px; border-bottom:1px solid var(--relay-stroke, var(--outline-gray-2)); }
 .message-menu-emoji button { display:grid; place-items:center; width:34px; height:34px; min-height:34px; border-radius:999px; font-size:20px; line-height:1; color:var(--ink-gray-7); }
