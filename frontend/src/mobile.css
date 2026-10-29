@@ -91,11 +91,6 @@
   .conversation-title-button{display:block;max-width:100%;min-height:0!important;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line{overflow:hidden;color:var(--relay-green);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line:has(.number-tag){display:flex;align-items:center;gap:6px;color:var(--relay-ink-3)}
-  .composer-via-row .send-number{display:flex;align-items:center;gap:6px;width:100%}
-  .composer-via-row .send-number-button{position:relative;height:28px;padding:0;border:0;background:none;font-size:12px}
-  .composer-via-row .send-number-button::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
-  .composer-via-row .send-number-pill{height:26px;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:13px;background:var(--relay-layer-strong);color:var(--relay-ink-2)}
-  .send-number-hint{margin-left:auto;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}
   .v1-shell.relay-shell .conversation-heading-actions{gap:0}
   .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-assign,.conversation-ticket){display:none}
@@ -109,16 +104,6 @@
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble{border-radius:8px}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:8px}
 
-  /* Composer: "+" menu, a rounded input pill with the attach button inside, and a round Send button */
-  .v1-shell.relay-shell .compact-composer:not(.email-composer){grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"extras extras extras" "plus input send";align-items:end;gap:0 6px;max-height:45%;margin:0;padding:8px 10px calc(6px + env(safe-area-inset-bottom));border:0;border-top:1px solid var(--relay-stroke);border-radius:0;background:var(--relay-layer);box-shadow:none}
-  .compact-composer>.composer-extras{padding:0 0 6px;font-size:12px}
-  .compact-composer>.composer-plus{grid-area:plus}
-  .compact-composer>.composer-plus .relay-button{width:38px;height:40px;min-height:40px;color:var(--relay-ink-2)}
-  .compact-composer>.composer-input.is-text{min-height:40px;padding:0 6px 0 14px;border:1px solid var(--relay-stroke);border-radius:20px;background:var(--relay-layer-strong)}
-  .compact-composer>.composer-input:not(.is-text){padding:0}
-  .v1-shell.relay-shell .compact-composer .chat-draft{min-height:38px;padding:9px 0;font-size:16px;line-height:20px}
-  .compact-composer .composer-input .relay-button{width:30px;height:30px;min-height:30px;min-width:0;color:var(--relay-ink-2)}
-  .v1-shell.relay-shell .compact-composer>.composer-send{width:40px;height:40px;min-height:40px;margin:0;padding:0;border-radius:50%;box-shadow:var(--relay-shadow-2)}
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
 
   /* Contact info page */

@@ -5,18 +5,22 @@ import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
 import { channelCan } from "../../services/enabledChannels";
 import { channelOffText } from "../../services/chatErrors";
-import { Button, FormControl, Dropdown, FeatherIcon } from "@relay/ui";
+import { Button, FormControl, FeatherIcon } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 import { useMobileLayout } from "../../composables/useMobileLayout";
+import ComposerMore from "./ComposerMore.vue";
+import { attachmentKinds, composerActions } from "../../services/composerActions";
+import { sha256Hex } from "../../services/crypto";
+import { messageData } from "../messageContent";
+import { formatBytes } from "../../services/mediaCache";
 import { useSendChannel } from "../../composables/useSendChannel";
 import { sendNumbersKey } from "../../composables/useSendNumbers";
 import SendNumber from "./SendNumber.vue";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
-const showReplies=ref(false), focused=ref(false);
+const showReplies = ref(false), editing = ref(false), uploading = ref(false), preview = ref("");
 const isMobile = useMobileLayout();
-const expanded = computed(() => focused.value || !!body.value || quoting.value || kind.value !== 'text');
 
 import { compositionScope, telegramLimit } from '../../services/channelComposition';
 import { useStoredDraft } from '../../composables/useStoredDraft';
@@ -35,26 +39,36 @@ const {
   kind,
   kinds,
   body,
-  emoji,
   latitude,
   longitude,
   contactName,
   phone,
-  busy,
+  busy: working,
+  sending = ref(0),
   error,
   send,
 } = inject(messagesKey);
+const busy = computed(() => working.value || sending.value > 0);
 const capabilities = inject("relayCapabilities", ref({}));
 const can = feature => channelCan(capabilities.value, sourceContext.value.provider, feature);
 // `mode` is "reply" or "note"; the note slot holds the internal note form, so a note never goes to the customer.
 // `offText` marks a switched-off channel: replies show that banner and only notes stay open.
-const props = defineProps({ recipient: String, contactName: String, mode: { type: String, default: "reply" }, offText: String });
+const props = defineProps({ recipient: String, contactName: String, mode: { type: String, default: "reply" }, offText: String, noteBusy: Boolean });
 const attachmentInput = ref(null);
-const draftScope = computed(() => props.offText ? '' : compositionScope(source.value, document.getElementById('app')?.dataset.user));
+// Chat drafts belong to the conversation/route, even when a different message is quoted.
+const draftScope = computed(() => compositionScope(source.value ? {
+  ...source.value, name: undefined, sender_endpoint: undefined,
+  // Historical outgoing messages can store our number as sender_endpoint. The selected contact owns this draft.
+  business_doctype: businessType.value, business_name: businessName.value,
+  relay_contact: selected.value || source.value.relay_contact,
+} : null, document.getElementById('app')?.dataset.user));
 useStoredDraft(() => draftScope.value,
-  () => ({body:body.value,kind:kind.value,attachment:attachment.value}),
-  saved => { body.value=saved.body || ''; kind.value=saved.kind || 'text'; attachment.value=saved.attachment || null; });
-const limit = computed(() => sourceContext.value.provider === 'Telegram' ? telegramLimit(kind.value) : null);
+  () => ({ body: body.value, kind: kind.value, attachment: attachment.value, latitude: latitude.value, longitude: longitude.value, contactName: contactName.value, phone: phone.value }),
+  saved => { body.value = saved.body || ''; kind.value = saved.kind || 'text'; attachment.value = saved.attachment || null;
+    latitude.value = saved.latitude || ''; longitude.value = saved.longitude || ''; contactName.value = saved.contactName || ''; phone.value = saved.phone || ''; },
+  // Restore drafts saved by the previous, per-message composer on first use of the conversation key.
+  () => JSON.parse(sessionStorage.getItem('relay-draft-' + sha256Hex(compositionScope(source.value, document.getElementById('app')?.dataset.user))) || 'null') || {});
+const limit = computed(() => sourceContext.value.provider === 'Telegram' && ['text', 'photo', 'video', 'audio', 'voice', 'document'].includes(kind.value) ? telegramLimit(kind.value) : null);
 watch(() => sourceContext.value.provider, provider => { if(provider === 'WhatsApp' && !identity.value) loadIdentity(); }, {immediate:true});
 const draftInput = ref(null);
 const requestedAttachmentKind = ref("document");
@@ -72,12 +86,28 @@ async function chooseAttachment(value = "document") {
   await nextTick();
   attachmentInput.value?.click();
 }
-const attachTypes = {photo:['Photo','image','image/*'],video:['Video','video','video/*'],audio:['Audio','music','audio/*'],voice:['Voice message','mic','audio/ogg,audio/webm'],document:['File','file','']};
-const attachmentOptions = computed(()=>[
-  ...kinds.value.filter(value=>attachTypes[value]).map(value=>({label:attachTypes[value][0],icon:attachTypes[value][1],onClick:()=>chooseAttachment(value)})),
-  ...kinds.value.filter(value=>['location','contact'].includes(value)).map(value=>({label:value==='location'?'Location':'Contact',icon:value==='location'?'map-pin':'user',onClick:()=>{kind.value=value;attachment.value=null;}})),
-]);
-const emojiOptions=['😀','😊','👍','❤️','🙏','🎉'].map(value=>({label:value,onClick:()=>body.value+=value}));
+const actions = computed(() => composerActions({ can, kinds: kinds.value, closed: closed.value, off: !!offReason.value, busy: busy.value }));
+const hasSticker = computed(() => rows.value.some(row => messageData(row).kind === 'sticker'));
+const mediaKind = computed(() => ['photo', 'video', 'audio', 'voice', 'document'].includes(kind.value));
+const captionAllowed = computed(() => !(sourceContext.value.provider === 'WhatsApp' && ['audio', 'voice'].includes(kind.value)));
+const characterCount = computed(() => [...body.value].length);
+const showCount = computed(() => limit.value && characterCount.value >= limit.value * .9 && (editing.value || characterCount.value > limit.value));
+async function focusDraft() { await nextTick(); resizeDraft(); draftInput.value?.focus({ preventScroll: true }); }
+function clearQuote() { cancelReply(); focusDraft(); }
+function clearAttachment() { kind.value = 'text'; attachment.value = null; clearPreview(); focusDraft(); }
+function clearPreview() { if (preview.value) URL.revokeObjectURL(preview.value); preview.value = ''; }
+watch(attachment, value => { if (!value) clearPreview(); });
+onBeforeUnmount(clearPreview);
+function moreAction(action) {
+  if (action === 'saved') showReplies.value = true;
+  else if (action === 'template') emit('template');
+  else if (action === 'note') { stopTyping(); emit('mode', 'note'); }
+  else if (['location', 'contact'].includes(action)) { kind.value = action; attachment.value = null; }
+  else chooseAttachment(action);
+}
+function insertEmoji(value) { body.value += value; focusDraft(); }
+function closeReplies() { showReplies.value = false; focusDraft(); }
+watch(() => props.mode, value => { if (value === 'reply') focusDraft(); else stopTyping(); });
 function resizeDraft() {
   const node=draftInput.value;
   if (!node) return;
@@ -90,28 +120,41 @@ async function attachFile(event) {
   event.target.value='';
   if (!file) return;
   const formatError = attachmentFormatError(capabilities.value, sourceContext.value.provider, requestedAttachmentKind.value, file.name);
-  if (formatError) { error.value = formatError; return; }
-  const previous=attachment.value;
-  await uploadAttachment(file);
-  if (attachment.value) kind.value=requestedAttachmentKind.value;
-  else attachment.value=previous;
+  if (formatError) { error.value = formatError; if (!attachment.value) kind.value = requestedAttachmentKind.value; return; }
+  const previous = attachment.value;
+  uploading.value = true;
+  try {
+    await uploadAttachment(file);
+    if (attachment.value) {
+      kind.value = requestedAttachmentKind.value;
+      clearPreview();
+      if (['photo', 'video'].includes(kind.value)) preview.value = URL.createObjectURL(file);
+    } else {
+      attachment.value = previous;
+      // Keep the requested kind visible after a first upload failure; never send its caption as text.
+      if (!previous) kind.value = requestedAttachmentKind.value;
+    }
+  } finally { uploading.value = false; }
+  focusDraft();
 }
 const emit = defineEmits(["template", "mode", "closed"]);
 const noting = computed(() => props.mode === "note");
-// Only typing fields expand the composer. A button press must not move the tabs before its click lands.
-const expandOn = event => { if (event.target.matches("textarea, input:not([type=file]), select")) focused.value = true; };
-const { options: sendOptions } = useSendChannel();
+const { choices: sendChoices } = useSendChannel();
 // On a site with several WhatsApp numbers the "Send via" number picker replaces the channel menu.
 const numbers = inject(sendNumbersKey, null);
 const manyNumbers = computed(() => !!numbers?.active.value);
 // The channel menu shows only when there is a real choice.
-const channelChoice = computed(() => !manyNumbers.value && sendOptions.value.length > 1);
+const channelChoice = computed(() => !manyNumbers.value && sendChoices.value.size > 1);
+const windowChecking = ref(false), windowReceivedAt = ref(Date.now()), now = ref(Date.now());
+const clockTimer = setInterval(() => { now.value = Date.now(); }, 30000);
 const windowState = ref({ open: true }),
   windowError = ref("");
 let windowGeneration = 0, expiryTimer;
 async function checkWindow() {
   const generation = ++windowGeneration;
   clearTimeout(expiryTimer);
+  windowChecking.value = false;
+  windowReceivedAt.value = Date.now();
   if (!can("reply_window_hours") || sourceContext.value.group_id) {
     windowState.value = { open: true };
     windowError.value = "";
@@ -125,11 +168,13 @@ async function checkWindow() {
     if (chosenWindow.open && Number.isFinite(chosenWindow.remaining_seconds)) expiryTimer = setTimeout(() => { windowState.value = { ...windowState.value, open: false }; }, Math.min(chosenWindow.remaining_seconds * 1000, 2147483647));
     return;
   }
+  windowChecking.value = true;
   try {
     const result = await coreApi("messaging.reply_window", {
       message: source.value.name,
     });
     if (generation === windowGeneration) {
+      windowReceivedAt.value = Date.now();
       windowState.value = result;
       if(result.open && Number.isFinite(result.remaining_seconds)) expiryTimer=setTimeout(()=>{windowState.value={...windowState.value,open:false};},Math.min(result.remaining_seconds*1000,2147483647));
       windowError.value = "";
@@ -139,7 +184,7 @@ async function checkWindow() {
       windowState.value = { open: false };
       windowError.value = e.message;
     }
-  }
+  } finally { if (generation === windowGeneration) windowChecking.value = false; }
 }
 watch(
   () => source.value?.name,
@@ -153,21 +198,19 @@ watch(
 );
 useRealtimeRefresh([], ['messages'], checkWindow);
 watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
-const windowClosedReason = "More than 24 hours since the customer wrote. You can only send a template.";
+
 const offReason = computed(() => props.offText || (windowState.value.channel_disabled ? channelOffText(sourceContext.value.provider) : ""));
-const closed = computed(() => !!offReason.value || !windowState.value.open);
+const closed = computed(() => !!offReason.value || (!windowState.value.open && !windowError.value && !windowChecking.value));
 // The thread hides Reply and reactions while only a template can be sent.
-watch(closed, value => emit("closed", value), { immediate: true });
+watch(() => closed.value || !!windowError.value || windowChecking.value, value => emit("closed", value), { immediate: true });
 onBeforeUnmount(() => emit("closed", false));
-const windowHint = computed(() => {
-  const seconds = windowState.value.remaining_seconds;
-  if (!windowState.value.open || !Number.isFinite(seconds)) return "";
-  return Math.max(1, Math.ceil(seconds / 3600)) + " h left to reply";
-});
-onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); });
+const remainingSeconds = computed(() => Math.max(0, (windowState.value.remaining_seconds || 0) - Math.max(0, now.value - windowReceivedAt.value) / 1000));
+const windowHint = computed(() => windowState.value.open && Number.isFinite(windowState.value.remaining_seconds) && remainingSeconds.value <= 3600
+  ? `${Math.max(1, Math.ceil(remainingSeconds.value / 60))} min left to reply` : '');
+onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); clearInterval(clockTimer); });
 const canSend = computed(
   () =>
-    !busy.value &&
+    !busy.value && !offReason.value && !windowChecking.value && !windowError.value &&
     (!limit.value || [...body.value].length <= limit.value) &&
     windowState.value.open &&
     (kind.value === "text"
@@ -181,7 +224,7 @@ const canSend = computed(
             : false),
 );
 const busyReason = "Wait for the current send to finish";
-const sendTitle = computed(() => busy.value ? busyReason
+const sendTitle = computed(() => windowError.value ? "Check the reply window before sending" : windowChecking.value ? "Checking reply window" : busy.value ? busyReason
   : limit.value && [...body.value].length > limit.value ? "The message is too long for this channel"
   : canSend.value ? "Send · Enter"
   : kind.value === "text" ? "Type a message first" : "Add the file or details first");
@@ -227,99 +270,70 @@ function keydown(event) {
 }
 </script>
 <template>
-  <form class="message-composer compact-composer" :class="{ 'is-expanded': expanded, 'is-note': noting, 'is-closed': closed && !noting }"
-    @focusin="expandOn" @focusout="focused = $event.currentTarget.contains($event.relatedTarget)" @submit.prevent="!noting && canSend && send()">
-    <div class="composer-tabs" role="group" aria-label="Compose">
-      <button type="button" :class="{ active: !noting }" :aria-pressed="!noting" @click="emit('mode', 'reply'); nextTick(() => draftInput?.focus())">Reply</button>
-      <button type="button" :class="{ active: noting }" :aria-pressed="noting" @click="emit('mode', 'note')"><FeatherIcon name="lock" :size="12" />Internal note</button>
-      <template v-if="isMobile && !noting && !closed">
-        <span v-if="windowHint" class="composer-tabs-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
-        <button v-if="can('templates')" type="button" class="composer-tab-action" :disabled="busy" :title="busy ? busyReason : 'Send an approved template'" @click="emit('template')"><FeatherIcon name="file-text" :size="13" />Template</button>
-        <Button v-if="can('saved_replies')" icon="zap" variant="ghost" class="composer-tab-icon" aria-label="Saved replies" :title="busy ? busyReason : 'Saved replies'" :disabled="busy" @click="showReplies = true" />
-      </template>
-    </div>
-    <slot v-if="noting" name="note" />
-    <div v-else-if="closed" class="composer-closed">
-      <p role="status"><FeatherIcon :name="offReason ? 'alert-circle' : 'clock'" :size="15" />{{ offReason || (windowError ? "Could not check the 24-hour reply window. " + windowError : windowClosedReason) }}</p>
-      <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
-      <div class="composer-closed-actions">
-        <SendNumber v-if="manyNumbers" />
-        <Button v-if="can('templates') && !offReason" class="composer-closed-send" label="Send template" icon-left="file-text" variant="solid" @click="emit('template')" />
-      </div>
-    </div>
-    <template v-else>
-      <div class="composer-extras">
-        <div v-if="isMobile && (manyNumbers || channelChoice)" class="composer-via-row"><SendNumber v-if="manyNumbers" /><slot v-else name="channel" /></div>
-        <div v-if="expanded && $slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
-        <p v-if="error" role="alert" class="text-sm text-ink-red-3">{{ error }}</p>
-        <div v-if="quoting" class="composer-quote">
-          <span class="composer-quote-body"><strong>{{ source.direction === "Outgoing" ? "You" : props.contactName || "Contact" }}</strong><span>{{ (source.content || "Message").split("\n")[0].slice(0, 120) }}</span></span>
-          <Button icon="x" variant="ghost" aria-label="Cancel reply" title="Cancel reply" @click="cancelReply" />
-        </div>
-        <div v-else-if="sourceContext.message_thread_id" class="text-xs text-ink-gray-5">Topic {{ sourceContext.message_thread_id }}</div>
-        <details v-if="expanded && sourceContext.provider === 'WhatsApp' && !manyNumbers && identity?.display_phone_number" class="composer-identity"><summary><span>From {{ identity.display_phone_number }}</span><small :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : '24-hour reply window open'">24h reply window open</small></summary><WhatsAppIdentity /></details>
-        <p v-if="expanded && limit" class="text-xs" :role="[...body].length > limit ? 'alert' : undefined">{{ [...body].length }} / {{ limit }} characters · Telegram plain text</p>
-        <span v-if="kind !== 'text'" class="composer-selection">{{attachTypes[kind]?.[0] || kind}}
-          <Button icon="x" aria-label="Cancel attachment" title="Cancel attachment" :disabled="busy" @click="kind='text';attachment=null" />
-        </span>
-      </div>
-      <div v-if="isMobile" class="composer-plus"><Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="plus" variant="ghost" aria-label="Attach" :title="busy ? busyReason : 'Attach a photo, file or more'" :disabled="busy" /></Dropdown></div>
-      <div class="composer-input" :class="{ 'is-text': kind === 'text' }">
-        <textarea ref="draftInput" v-if="kind === 'text'" v-model="body" class="chat-draft" aria-label="Message"
-          :placeholder="isMobile ? 'Message' : props.recipient ? 'Write a reply to ' + props.recipient + '…' : 'Message'"
-          rows="1" @keydown="keydown" @input="resizeDraft();typing()" />
-        <div v-else-if="kind === 'location'" class="flex flex-wrap gap-3">
-          <FormControl v-model="latitude" type="number" label="Latitude" /><FormControl v-model="longitude" type="number" label="Longitude" />
-        </div>
-        <div v-else-if="kind === 'contact'" class="flex flex-wrap gap-3">
-          <FormControl v-model="contactName" label="Contact name" /><FormControl v-model="phone" label="Phone number" />
-        </div>
-        <div v-else-if="['photo', 'video', 'audio', 'voice', 'document'].includes(kind)" class="space-y-2">
-          <div class="attachment-preview">
-            <span>{{ attachment ? attachment.filename : 'Choose '+(attachTypes[kind]?.[0] || 'attachment').toLowerCase()+' · up to 4 MiB' }}</span>
-            <Button :label="attachment?'Replace':'Choose file'" :disabled="busy" @click="chooseAttachment(kind)" />
-          </div>
-          <FormControl v-if="!(sourceContext.provider === 'WhatsApp' && ['audio', 'voice'].includes(kind))" label="Caption" type="textarea" v-model="body" @keydown="keydown" />
-        </div>
-        <p v-else class="text-sm">Select an existing sticker to resend.</p>
-      </div>
-      <div v-if="!isMobile" class="composer-toolbar">
-        <Dropdown v-if="attachmentOptions.length" :options="attachmentOptions"><Button icon="paperclip" variant="ghost" aria-label="Add attachment" :title="busy ? busyReason : 'Add attachment'" :disabled="busy" /></Dropdown>
-        <Dropdown :options="emojiOptions"><Button icon="smile" variant="ghost" aria-label="Insert emoji" :title="busy ? busyReason : 'Insert emoji'" :disabled="busy" /></Dropdown>
-        <Button v-if="can('templates')" class="composer-chip" icon-left="file-text" label="Template" variant="ghost" :title="busy ? busyReason : 'Send an approved template'" :disabled="busy" @click="emit('template')" />
-        <Button v-if="can('saved_replies')" class="composer-chip" icon-left="zap" label="Saved replies" variant="ghost" :title="busy ? busyReason : 'Insert a saved reply'" :disabled="busy" @click="showReplies=true" />
-        <span v-if="windowHint" class="composer-window-hint" :title="windowState.expires_at ? 'Open until ' + windowState.expires_at : undefined">{{ windowHint }}</span>
-      </div>
-      <input type="file" ref="attachmentInput" aria-label="Attachment" class="sr-only"
-        :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
-      <span v-if="!isMobile && (manyNumbers || channelChoice)" class="composer-channel"><SendNumber v-if="manyNumbers" /><slot v-else name="channel" /></span>
-      <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
+  <form class="message-composer composer-dock" :class="{ 'is-note': noting }" aria-label="Message composer" @submit.prevent="!noting && canSend && send()">
+    <template v-if="noting">
+      <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span>
+        <Button label="Back to reply" variant="ghost" :disabled="busy || noteBusy" @click="emit('mode', 'reply')" /></div>
+      <slot name="note" />
     </template>
-    <CannedReplies v-if="showReplies" :source="source" @close="showReplies=false" @select="applySavedReply" />
+    <template v-else>
+      <div v-if="$slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
+      <div v-if="manyNumbers || channelChoice || windowHint" class="composer-context-bar">
+        <SendNumber v-if="manyNumbers" /><slot v-else-if="channelChoice" name="channel" />
+        <span v-if="windowHint" class="composer-window-hint" role="status">{{ windowHint }}</span>
+      </div>
+      <p v-if="sourceContext.message_thread_id" class="composer-status">Topic {{ sourceContext.message_thread_id }}</p>
+      <div v-if="quoting" class="composer-context composer-quote">
+        <span class="composer-quote-body"><strong>{{ source.direction === 'Outgoing' ? 'You' : props.contactName || 'Contact' }}</strong><span>{{ (source.content || 'Message').split('\n')[0].slice(0, 120) }}</span></span>
+        <Button icon="x" variant="ghost" aria-label="Cancel reply" title="Cancel reply" :disabled="busy" @click="clearQuote" />
+      </div>
+      <p v-if="error" role="alert" class="composer-error">{{ error }}</p>
+      <div v-if="windowError" class="composer-error" role="alert"><span>Could not check the reply window. Your draft is saved. {{ windowError }}</span><Button label="Check again" variant="ghost" :disabled="windowChecking" @click="checkWindow" /></div>
+      <p v-if="busy || windowChecking" role="status" class="composer-status">{{ uploading ? 'Uploading…' : busy ? 'Sending…' : 'Checking reply window…' }}</p>
+      <template v-if="!closed">
+        <div v-if="mediaKind" class="composer-context composer-attachment">
+          <img v-if="preview && kind === 'photo'" :src="preview" alt="Selected attachment" />
+          <video v-else-if="preview && kind === 'video'" :src="preview" muted preload="metadata" />
+          <FeatherIcon v-else :name="attachmentKinds[kind]?.[1] || 'file'" />
+          <span><strong>{{ attachment?.filename || 'Choose ' + attachmentKinds[kind]?.[0].toLowerCase() }}</strong><small>{{ attachment ? formatBytes(attachment.size) : 'Up to 4 MiB' }}</small></span>
+          <Button :label="attachment ? 'Replace' : 'Choose file'" variant="ghost" :disabled="busy" @click="chooseAttachment(kind)" />
+          <Button icon="x" aria-label="Remove attachment" title="Remove attachment" variant="ghost" :disabled="busy" @click="clearAttachment" />
+        </div>
+        <div v-if="['location', 'contact'].includes(kind)" class="composer-detail-fields">
+          <div class="composer-context"><strong>{{ kind === 'location' ? 'Share a location' : 'Share a contact' }}</strong><Button label="Cancel" variant="ghost" :disabled="busy" @click="clearAttachment" /></div>
+          <div class="composer-field-grid">
+            <template v-if="kind === 'location'"><FormControl v-model="latitude" type="number" step="any" min="-90" max="90" label="Latitude" :disabled="busy" /><FormControl v-model="longitude" type="number" step="any" min="-180" max="180" label="Longitude" :disabled="busy" /></template>
+            <template v-else><FormControl v-model="contactName" label="Contact name" :disabled="busy" /><FormControl v-model="phone" label="Phone number" :disabled="busy" /></template>
+          </div>
+        </div>
+        <p v-if="showCount" class="composer-status" :class="{ 'composer-error': characterCount > limit }" :role="characterCount > limit ? 'alert' : 'status'">{{ characterCount.toLocaleString() }} / {{ limit.toLocaleString() }}<template v-if="characterCount > limit"> · {{ characterCount - limit }} over limit</template></p>
+      </template>
+      <div class="composer-writing" :class="{ 'composer-closed': closed }">
+        <ComposerMore :actions="actions" :disabled="busy" :has-sticker="hasSticker" @action="moreAction" @emoji="insertEmoji">
+          <template #details>
+            <p>{{ sourceContext.provider || 'No channel' }} · {{ source.channel_title || source.channel }}</p>
+            <p v-if="recipient">To {{ recipient }}</p>
+            <WhatsAppIdentity v-if="sourceContext.provider === 'WhatsApp' && !manyNumbers" />
+            <p v-if="manyNumbers">From {{ numbers.chosen.value?.label }} · {{ numbers.chosen.value?.address }}</p>
+            <p v-if="offReason">{{ offReason }}</p>
+            <p v-else-if="windowError">Could not check the reply window.</p>
+            <p v-else-if="can('reply_window_hours') && !sourceContext.group_id">{{ windowState.open ? 'Reply window open' : 'Reply window closed' }}<template v-if="windowState.expires_at"> · Expires {{ windowState.expires_at }}</template><template v-if="windowState.open && Number.isFinite(windowState.remaining_seconds)"> · {{ Math.ceil(remainingSeconds / 60) }} minutes remaining</template></p>
+          </template>
+        </ComposerMore>
+        <template v-if="closed">
+          <div class="composer-closed-copy" role="status"><strong><FeatherIcon :name="offReason ? 'alert-circle' : 'clock'" :size="16" />{{ offReason || '24-hour reply window closed' }}</strong><p v-if="!offReason">Send an approved template to continue.</p></div>
+          <Button v-if="can('templates') && !offReason" label="Choose template" icon-left="file-text" variant="solid" :disabled="busy" @click="emit('template')" />
+        </template>
+        <template v-else>
+          <textarea v-if="kind === 'text' || (mediaKind && captionAllowed)" ref="draftInput" v-model="body" class="chat-draft"
+            :aria-label="mediaKind ? 'Caption' : 'Message'" :placeholder="mediaKind ? 'Add a caption…' : 'Message…'" rows="1" :readonly="busy"
+            @focus="editing = true" @blur="editing = false" @keydown="keydown" @input="resizeDraft(); typing()" />
+          <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
+          <Button class="composer-send" :label="isMobile ? '' : busy && !uploading ? 'Sending…' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
+        </template>
+      </div>
+      <input type="file" ref="attachmentInput" aria-label="Attachment" hidden :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
+    </template>
+    <CannedReplies v-if="showReplies" :source="source" @close="closeReplies" @select="applySavedReply" />
   </form>
 </template>
-
-<style scoped>
-.composer-tabs > button { display:inline-flex; align-items:center; gap:5px; }
-.composer-tabs > button:nth-child(2).active { background:var(--relay-note-bg); color:var(--relay-note-ink); }
-.v1-shell.relay-shell .compact-composer.is-note:not(.email-composer) { grid-template-areas:"tabs" "note"; grid-template-columns:minmax(0,1fr); border-color:color-mix(in srgb, var(--relay-note-ink) 45%, transparent); border-bottom-color:var(--relay-note-ink); background:var(--relay-note-bg); }
-.v1-shell.relay-shell .compact-composer.is-closed:not(.email-composer) { grid-template-areas:"tabs" "closed"; grid-template-columns:minmax(0,1fr); }
-.composer-closed { grid-area:closed; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:6px 8px 8px; padding:10px 12px; border:1px solid var(--outline-gray-2); border-radius:8px; background:var(--surface-gray-2); color:var(--ink-gray-6); }
-.composer-closed > p { flex:1 1 260px; }
-.composer-closed > p[role=status] { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--relay-ink, var(--ink-gray-8)); }
-.composer-closed-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
-.v1-shell.relay-shell .compact-composer .composer-toolbar .composer-chip.relay-button { width:auto; padding:0 8px; gap:5px; font-size:12px; }
-.composer-tab-action { margin-left:auto; color:var(--relay-ink-2) !important; }
-.composer-tabs-hint { margin-left:auto; color:var(--relay-ink-3); font-size:11px; white-space:nowrap; align-self:center; }
-.composer-tabs-hint + .composer-tab-action { margin-left:0; }
-.v1-shell.relay-shell .compact-composer .composer-tab-icon.relay-button { width:28px; height:28px; min-height:28px; color:var(--relay-ink-2); }
-@media (max-width: 768px) {
-  .v1-shell.relay-shell .compact-composer:not(.email-composer) { grid-template-areas:"tabs tabs tabs" "extras extras extras" "plus input send"; }
-  .v1-shell.relay-shell .compact-composer.is-note:not(.email-composer) { grid-template-areas:"tabs" "note"; grid-template-columns:minmax(0,1fr); }
-  .v1-shell.relay-shell .compact-composer.is-closed:not(.email-composer) { grid-template-areas:"tabs" "closed"; grid-template-columns:minmax(0,1fr); }
-  .compact-composer > .composer-tabs { align-items:center; padding:0 0 6px; }
-  .composer-closed { margin:0; }
-  .composer-closed-actions { width:100%; }
-  .composer-closed-send { flex:1; }
-}
-</style>

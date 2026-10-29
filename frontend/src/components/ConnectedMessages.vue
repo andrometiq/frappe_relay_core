@@ -15,6 +15,8 @@ import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
 import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
+import ComposerMore from "./messages/ComposerMore.vue";
+import { composerActions } from "../services/composerActions";
 import ContactEndpoints from "./messages/ContactEndpoints.vue";
 import { useMessages } from "../composables/useMessages";
 import { useThreadNotes } from "../composables/useThreadNotes";
@@ -54,6 +56,7 @@ const activeBusiness = computed(() => ({
   businessName: businessName.value || source.value?.business_name || "",
 }));
 // The composer is in "reply" or "note" mode; a note can link one message or answer another note.
+const noteBusy = ref(false);
 const composeMode = ref('reply'), noteMessages = ref([]), noteReply = ref(null);
 const noteContact = computed(() => noteMessages.value[0]?.relay_contact || conversationContact.value);
 const ticketOpen = ref(false), ticketMessage = ref(null), ticketQuoted = ref(false);
@@ -460,21 +463,29 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" @mode="setComposeMode">
-        <template #channel><SendChannel /></template>
+      <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">
+        <template #channel><SendChannel :disabled="!!state.sending.value" /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
-        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+          @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy || !!state.sending.value || state.quoting.value" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" @mode="setComposeMode" @template="startInChat(true)" @closed="replyClosed = $event">
-        <template #channel><SendChannel /></template>
+      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode" @template="startInChat(true)" @closed="replyClosed = $event">
+        <template #channel><SendChannel :disabled="!!state.sending.value" /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
-        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+          @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy || !!state.sending.value || state.quoting.value" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
-      <div v-else-if="active && !loadFailed" class="business-compose-start">
-        <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
-          :disabled="busy || contactsBusy" @click="startInChat()" />
+      <div v-else-if="active && !loadFailed" class="composer-dock" :class="{ 'is-note': composeMode === 'note' }">
+        <template v-if="composeMode === 'note' && noteContact">
+          <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span><Button label="Back to reply" variant="ghost" :disabled="noteBusy" @click="setComposeMode('reply')" /></div>
+          <NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
+            @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" />
+        </template>
+        <div v-else class="composer-writing composer-closed">
+          <ComposerMore v-if="noteContact" :actions="composerActions({ off: true, busy })" @action="setComposeMode('note')"><template #details>No channel is available for this conversation.</template></ComposerMore>
+          <p class="composer-closed-copy" role="status">No channel is available for this conversation.</p>
+          <Button icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'" :disabled="busy || contactsBusy" @click="startInChat()" />
+        </div>
       </div>
 
       <ConversationSummary v-if="summaryOpen && businessName && capabilities.ai" :business-doctype="businessType" :business-name="businessName"

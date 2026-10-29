@@ -223,7 +223,7 @@
 .relay-shell .conversation-bubble{border-color:var(--outline-gray-2);background:var(--surface-white);border-radius:8px;padding:12px 14px;max-width:min(85%,600px);margin-bottom:20px;font-size:14px;box-shadow:0 1px 2px #00000003}
 .relay-shell .conversation-bubble.ml-auto{background:var(--surface-gray-1);border-color:var(--outline-gray-2)}
 .relay-shell .message-composer{padding:14px 24px;border-color:var(--outline-gray-2);gap:10px}.relay-shell .message-composer>button[type=submit]{align-self:flex-end;min-width:76px}
-.composer-options summary{cursor:pointer;font-size:12px;color:var(--ink-gray-5);width:fit-content}.composer-options[open]{padding-bottom:4px}
+.composer-options[open]{padding-bottom:4px}
 .relay-shell .feedback-panel{background:var(--surface-gray-1);border:1px solid var(--outline-gray-2);color:var(--ink-gray-7);font-size:12px;border-radius:6px}
 @media(min-width:901px){.relay-shell .app-nav.mobile-nav-open{position:static;width:auto;box-shadow:none}}
 @media(max-width:1100px) and (min-width:901px){.relay-shell{grid-template-columns:184px minmax(0,1fr)}.relay-shell .connected-inbox{grid-template-columns:275px minmax(0,1fr)}}
@@ -253,12 +253,12 @@
 
 .relay-shell .message-composer{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:8px;padding:10px 18px;background:var(--surface-white)}
 .message-composer>div,.message-composer>details,.message-composer>p{grid-column:1 / -1}.message-composer>.composer-quote{border-left:3px solid var(--outline-blue-1);padding:6px 9px;background:var(--surface-gray-1);border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.relay-shell .message-composer>button[type=submit]{min-width:40px;width:40px;height:40px;align-self:end;justify-self:end;margin-bottom:2px}.chat-draft{display:block;width:100%;min-width:0;min-height:40px;max-height:130px;resize:vertical;border:1px solid var(--outline-gray-2);border-radius:9px;padding:10px 12px;font:inherit;font-size:14px;background:var(--surface-gray-1);line-height:20px}.chat-draft:focus{outline:2px solid var(--outline-blue-1);outline-offset:1px}.composer-keyboard-hint{grid-column:1 / -1;color:var(--ink-gray-5);font-size:12px;text-align:right}.composer-options summary{font-size:12px;color:var(--ink-blue-2)}.relay-shell .composer-options{margin:0;padding:0}
+.relay-shell .message-composer>button[type=submit]{min-width:40px;width:40px;height:40px;align-self:end;justify-self:end;margin-bottom:2px}.chat-draft{display:block;width:100%;min-width:0;min-height:40px;max-height:130px;resize:vertical;border:1px solid var(--outline-gray-2);border-radius:9px;padding:10px 12px;font:inherit;font-size:14px;background:var(--surface-gray-1);line-height:20px}.chat-draft:focus{outline:2px solid var(--outline-blue-1);outline-offset:1px}.composer-keyboard-hint{grid-column:1 / -1;color:var(--ink-gray-5);font-size:12px;text-align:right}
 @media(max-width:768px){.composer-keyboard-hint{display:none}.relay-shell .message-composer{padding:9px 12px}}
 
 .directory-tabs{display:flex;gap:6px;padding:0 16px 12px}.directory-tabs button{font-size:12px;color:var(--ink-blue-2);padding:5px 10px;border-radius:14px;background:var(--surface-gray-1)}.directory-tabs button.active{background:var(--surface-blue-1);color:var(--ink-blue-2);font-weight:600}.directory-contact-copy{min-width:0;flex:1}.directory-contact-top,.directory-contact-bottom{display:flex;align-items:center;gap:9px;min-width:0;justify-content:space-between}.directory-contact-top strong{min-width:0;font-size:13px}.directory-contact-top time{font-size:12px;white-space:nowrap;color:var(--ink-gray-5)}.directory-contact-bottom small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:5px;font-size:12px}.directory-unread{flex-shrink:0;background:var(--ink-green-2);color:var(--surface-white);min-width:20px;height:20px;display:inline-grid;place-items:center;font-size:12px;border-radius:10px;padding:0 4px}
 
-.relay-shell .composer-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:8px;border:0!important;background:transparent!important;padding:0!important;white-space:normal!important;overflow:visible!important}.composer-toolbar>div{min-width:120px;max-width:100%}
+
 
 
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
@@ -270,9 +270,8 @@
 .channel-tabs button:focus-visible{outline:2px solid var(--outline-blue-1)}
 .jump-latest{position:absolute!important;right:24px;bottom:145px;z-index:4;box-shadow:0 3px 14px #0002;animation:chat-arrive 160ms ease-out;background:var(--surface-white)!important}
 @keyframes chat-arrive{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.composer-selection,.attachment-preview{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-gray-6)}
-.attachment-preview{border:1px solid var(--outline-gray-2);padding:10px;border-radius:8px;justify-content:space-between}
-.relay-shell .composer-toolbar{align-items:center;gap:6px}.relay-shell .composer-toolbar>div{min-width:0}
+
+
 
 .channel-unread{margin-left:6px;border-radius:8px;background:var(--surface-gray-4);color:var(--ink-gray-8);padding:1px 5px;font-size:12px}
 .relay-shell .email-composer{display:flex;gap:10px}.relay-shell .email-composer>button[type=submit]{width:auto;min-width:110px}
@@ -559,7 +558,6 @@
   .v1-shell .message-composer,.v1-shell .message-thread,.v1-shell .business-recipient-bar { padding-inline:16px; }
   .v1-shell .message-composer,.v1-shell .business-compose-start { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
   .v1-shell .chat-draft { font-size:16px; }
-  .v1-shell .composer-toolbar>.relay-badge { display:none; }
   .v1-shell .frappe-list-filters { grid-template-columns:1fr; padding-inline:16px; }
   .v1-shell .frappe-list-scroll { padding-inline:16px; }
   .v1-shell .frappe-list-row-head { display:none; }
@@ -646,10 +644,10 @@
 .directory-contact-context { display:flex; align-items:center; gap:8px; margin-top:8px; min-width:0; font-size:12px; color:var(--ink-gray-6); }
 .directory-business { max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 6px; border-radius:4px; background:var(--surface-gray-2); }
 .directory-load-more { min-height:1px; margin:12px 16px; color:var(--ink-gray-5); font-size:12px; text-align:center; }
-.composer-window-notice,.composer-quote { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:12px; }
-.composer-identity { color:var(--ink-gray-6); font-size:12px; }
-.composer-identity summary { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 12px; cursor:pointer; }
-.composer-identity small { color:var(--ink-green-2); font-size:12px; }
+.composer-quote { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:12px; }
+
+
+
 .v1-shell .message-composer { position:sticky; bottom:0; }
 .v1-shell .message-composer>button[type=submit] .relay-button__label { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .v1-shell .frappe-list-toolbar { min-height:76px; }
@@ -729,17 +727,9 @@
 .conversation-tools > div:first-child { flex-wrap:nowrap; gap:2px; }
 .v1-shell .conversation-heading-actions button { width:40px; height:40px; }
 .conversation-unread { white-space:nowrap; padding:0 4px; }
-.v1-shell .compact-composer { position:static; padding:6px 12px; max-height:40%; }
-.v1-shell .compact-composer:not(.email-composer) { grid-template-columns:auto minmax(0,1fr) 40px; align-items:center; }
-.compact-composer .composer-channel { grid-column:1; display:flex; min-width:0; max-width:145px; }
-.composer-channel .relay-button__label { overflow:hidden; text-overflow:ellipsis; }
 .send-via { display:flex; flex-direction:column; min-width:0; gap:1px; }
 .send-via__caption { font-size:12px; line-height:1.2; color:var(--ink-gray-5); padding-left:2px; }
 .send-via .relay-button { max-width:100%; }
-.compact-composer .chat-draft { grid-column:2; }
-.compact-composer > button[type=submit] { grid-column:3; }
-.compact-composer .composer-keyboard-hint { grid-column:1 / -1; }
-.compact-composer .composer-recipient:empty { display:none; }
 @media (max-width:768px) {
   .v1-content { padding:10px 12px; }
   .workspace-heading p { display:none; }
@@ -749,8 +739,6 @@
   .v1-shell .conversation-heading { padding:4px 8px; gap:4px; }
   .v1-shell .conversation-meta:empty { display:none; }
   .conversation-unread { display:none; }
-  .v1-shell .compact-composer { padding:6px 8px max(6px,env(safe-area-inset-bottom)); }
-  .compact-composer .composer-channel { max-width:116px; }
 }
 .automation-filter-bar .relay-field__label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
 .automation-filter-bar .relay-field { position:relative; }
@@ -1005,7 +993,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-number small{font-size:12px;font-weight:500;opacity:.85}
 .message-number-line{display:flex;margin:6px 4px -1px}
 .message-number-line.is-outgoing{justify-content:flex-end}
-.compact-composer>.composer-channel:has(.send-number){max-width:360px}
 .send-number-button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-width:0;height:30px;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:6px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12.5px}
 .send-number-button:hover:not(:disabled){background:var(--relay-hover)}
 .send-number-button:disabled{opacity:.55;cursor:not-allowed}
@@ -1105,28 +1092,10 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .message-unread-divider::before,.v1-shell.relay-shell .message-unread-divider::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--relay-accent) 45%,transparent)}
 .v1-shell.relay-shell .message-unread-divider span{padding:0;border:0;background:transparent;color:var(--relay-accent-text);font-size:11.5px;font-weight:600}
 
-/* Composer card: Reply, Internal note and Template tabs, the draft, then tools, channel and Send */
-.v1-shell.relay-shell .compact-composer:not(.email-composer){position:static;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-areas:"tabs tabs tabs tabs" "extras extras extras extras" "input input input input" "tools . channel send";gap:0;max-height:45%;margin:8px 16px 14px;padding:0;overflow:auto;border:1px solid var(--relay-stroke);border-bottom:2px solid var(--relay-accent);border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-2)}
-.compact-composer>.composer-tabs{grid-area:tabs;display:flex;gap:2px;padding:6px 8px 0;font-size:12px}
-.composer-tabs>button{padding:4px 10px;border-radius:5px;color:var(--relay-ink-3)}
-.composer-tabs>button:hover:not(:disabled){background:var(--relay-hover)}
-.composer-tabs>button.active{background:var(--relay-hover);color:var(--relay-ink);font-weight:600}
-.compact-composer>.composer-extras{grid-area:extras;display:flex;flex-direction:column;gap:6px;padding:6px 14px 0}
-.compact-composer>.composer-extras:empty{display:none}
-.compact-composer>.composer-input{grid-area:input;display:flex;align-items:center;min-width:0}
-.compact-composer>.composer-input:not(.is-text){padding:8px 14px}
-.v1-shell.relay-shell .compact-composer .chat-draft{display:block;flex:1;width:100%;min-height:44px;max-height:130px;padding:8px 14px;border:0;border-radius:0;background:none;color:var(--relay-ink);font:inherit;font-size:13.5px;line-height:1.45;resize:none;outline:0}
-.v1-shell.relay-shell .compact-composer .chat-draft:focus{border:0;outline:0}
-.compact-composer>.composer-toolbar{grid-area:tools;display:flex;align-items:center;gap:2px;padding:4px 8px 8px}
-.v1-shell.relay-shell .compact-composer .composer-toolbar .relay-button{width:32px;height:32px;min-height:32px;border:0;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
 .composer-window-hint{padding:0 2px;margin-left:4px;color:var(--relay-ink-3);font-size:11px;white-space:nowrap}
-.compact-composer>.composer-channel{grid-area:channel;display:flex;align-items:center;max-width:220px;min-width:0;padding:4px 8px 8px 0}
 .send-via-chip.relay-button{min-height:28px;height:28px;max-width:100%;padding:0 6px;gap:6px;color:var(--relay-ink-3);font-size:12px}
 .send-via-chip svg{width:14px;height:14px;color:#25a35a}
 .send-via-chip .relay-button__label{overflow:hidden;text-overflow:ellipsis}
-.v1-shell.relay-shell .compact-composer>.composer-send{grid-area:send;align-self:center;width:auto;min-width:0;height:32px;min-height:32px;margin:4px 8px 8px 0;padding:0 12px;border-radius:6px}
-.v1-shell.relay-shell .compact-composer>.composer-send .relay-button__label{position:static;width:auto;height:auto;overflow:visible;clip-path:none}
-.v1-shell.relay-shell .compact-composer .composer-identity{font-size:12px}
 
 /* Contact details: grouped cards with icon tiles, switches and key-value rows */
 .info-group-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:14px 4px 6px;color:var(--relay-ink-3);font-size:12px;font-weight:600;letter-spacing:normal;list-style:none;cursor:default}
@@ -1197,3 +1166,62 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 @keyframes reply-flash{0%,60%{outline:2px solid var(--outline-blue-1);outline-offset:3px;background:var(--surface-blue-2,#e8f1ff)}100%{outline-color:transparent}}
 
 .message-page-error{display:flex;gap:8px;justify-content:center;align-items:center;padding:8px;font-size:13px;color:var(--ink-gray-6)}.message-page-error button{color:var(--ink-blue-3);font-weight:500}
+
+/* Composer: one stable writing row, with context only when it is relevant. */
+.v1-shell.relay-shell .composer-dock { position:static; display:flex; flex-direction:column; flex:none; gap:8px; min-width:0; max-height:50%; overflow:auto; margin:8px 16px 16px; padding:0; border:0; background:transparent; box-shadow:none; }
+.composer-dock .composer-writing { display:flex; align-items:flex-end; gap:8px; padding:6px; min-width:0; border:1px solid var(--relay-control-border); border-radius:10px; background:var(--relay-layer); }
+.composer-dock .composer-writing:focus-within { border-color:var(--relay-accent); }
+.v1-shell.relay-shell .composer-dock .chat-draft { flex:1; align-self:center; width:100%; min-width:0; min-height:44px; max-height:130px; padding:10px 4px; border:0; border-radius:6px; background:transparent; color:var(--relay-ink); font:inherit; font-size:14px; line-height:24px; resize:none; overflow-y:auto; }
+.composer-dock .chat-draft::placeholder { color:var(--relay-ink-3); opacity:1; }
+.v1-shell.relay-shell .composer-dock .relay-button { min-height:44px; min-width:44px; height:auto; }
+.v1-shell.relay-shell .composer-dock .composer-more-trigger { flex:none; width:44px; height:44px; padding:0; background:transparent; color:var(--relay-ink-2); }
+.v1-shell.relay-shell .composer-dock .composer-send { flex:none; min-width:96px; height:44px; padding:0 12px; border-radius:8px; background:var(--relay-accent); color:var(--relay-accent-ink); }
+.v1-shell.relay-shell .composer-dock .composer-send:disabled { background:var(--relay-layer-strong); color:var(--relay-ink-3); opacity:1; }
+.composer-dock :is(button,textarea,input,summary):focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
+.composer-dock .composer-context { display:flex; align-items:center; gap:12px; padding:8px 8px 8px 12px; border:1px solid var(--relay-stroke-strong); border-radius:8px; background:var(--relay-layer); font-size:13px; }
+.composer-dock .composer-quote { border-left:3px solid var(--relay-accent); }
+.composer-context > strong, .composer-attachment > span { flex:1; min-width:0; }
+.composer-attachment > span { display:flex; flex-direction:column; }
+.composer-attachment strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.composer-attachment small { color:var(--relay-ink-3); font-size:12px; }
+.composer-attachment > img, .composer-attachment > video { width:48px; height:48px; object-fit:cover; border-radius:6px; }
+.composer-context-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:44px; color:var(--relay-ink-3); font-size:12px; }
+.composer-context-bar .composer-window-hint { margin-left:auto; font-size:12px; }
+.composer-status { color:var(--relay-ink-3); font-size:12px; }
+.composer-kind-hint { flex:1; align-self:center; }
+.composer-error { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 12px; border-radius:8px; background:var(--surface-red-1); color:var(--relay-red); font-size:13px; }
+.composer-error > span { flex:1; }
+.composer-dock .composer-closed { align-items:center; flex-wrap:wrap; padding:12px; border-color:var(--relay-stroke-strong); }
+.composer-closed-copy { flex:1; min-width:180px; }
+.composer-closed-copy strong { display:flex; align-items:center; gap:8px; font-size:14px; }
+.composer-closed-copy p { font-size:13px; margin-top:4px; color:var(--relay-ink-3); }
+.composer-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+.v1-shell.relay-shell .composer-dock.is-note { padding:8px; background:var(--relay-note-bg); color:var(--relay-note-ink); border:1px solid var(--relay-note-ink); border-radius:10px; }
+.composer-note-head { display:flex; align-items:center; gap:8px; font-size:12px; }
+.composer-note-head > span { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
+.composer-note-head .relay-button { color:var(--relay-note-ink); font-size:12px; }
+.composer-recipient:empty { display:none; }
+@media (max-width:768px) {
+  .v1-shell.relay-shell .composer-dock { margin:6px 8px max(12px,env(safe-area-inset-bottom)); max-height:60%; }
+  .composer-dock .composer-writing { border-radius:18px; padding:5px; }
+  .v1-shell.relay-shell .composer-dock .chat-draft { min-height:48px; font-size:16px; padding:11px 0; }
+  .v1-shell.relay-shell .composer-dock .composer-send { width:48px; min-width:48px; height:48px; padding:0; border-radius:50%; }
+  .composer-note-head > span { display:block; }
+  .composer-note-head > span > span { display:block; }
+  .composer-closed-copy { min-width:0; flex-basis:calc(100% - 60px); }
+  .composer-dock .composer-closed > .relay-button { width:100%; }
+  .composer-field-grid { grid-template-columns:1fr; }
+  .composer-attachment { flex-wrap:wrap; }
+}
+
+.composer-dock .composer-more-trigger svg, .composer-dock .composer-send svg { width:20px; height:20px; }
+.composer-dock .business-recipient-bar button { min-height:44px; min-width:44px; }
+
+.v1-shell.relay-shell .composer-dock :is(input,select,summary) { min-height:44px; }
+.relay-menu--touch .relay-menu__item { min-height:44px; }
+.relay-menu--touch .relay-menu__item:focus-visible { outline:2px solid var(--relay-accent); outline-offset:-2px; }
+.relay-dialog:is(.saved-replies-dialog,.composer-template-dialog) :is(.relay-button,input,[role=combobox]) { min-height:44px; }
+/* The field's focus ring follows its writing surface, without adding another box inside it. */
+.v1-shell.relay-shell .composer-dock :is(.composer-writing,.note-input) textarea:focus { outline:0; }
+.composer-writing:has(textarea:focus-visible) { outline:2px solid var(--relay-accent); outline-offset:-2px; }
+.note-input:has(textarea:focus-visible) { outline:2px solid var(--relay-note-ink); outline-offset:1px; }
