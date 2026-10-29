@@ -398,7 +398,11 @@ def sheet_contact(channel, number):
     The indexed lookup also preserves revoked bindings and opt-outs. A fresh transaction
     inside the lock sees another campaign's committed endpoint before creating anything.
     """
+    import phonenumbers
     from relay_core.contact_lifecycle import endpoint_key, sibling_contact, whatsapp_contact
+    # Sheets are typed by hand: never enroll a number that is only length-possible.
+    if not phonenumbers.is_valid_number(phonenumbers.parse('+' + number, None)):
+        return 'invalid', 'Invalid phone number'
     with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
         frappe.db.commit()
         existing = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, number)},
