@@ -8,6 +8,8 @@ import csv
 import json
 import os
 import secrets
+import zipfile
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
@@ -15,7 +17,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns as bulk, test_mode, whatsapp
+from relay_core import bulk_campaigns as bulk, bulk_updates, test_mode, whatsapp, settings, inbound
 from relay_core.automation.service import internal_save
 from relay_core.contact_lifecycle import endpoint_key
 
@@ -35,8 +37,7 @@ account = RUN.replace(' ', '-')
 channel = frappe.get_doc({'doctype': 'Relay Channel', 'channel': 'WhatsApp', 'account': account, 'enabled': 1}).insert()
 frappe.db.commit()
 # Reserved NANP 555 numbers, accepted as possible E.164 identities, never sent to a real provider.
-base = int(secrets.token_hex(3), 16) % 9000000
-numbers = ['1555' + str(base + index).zfill(7) for index in range(60)]
+numbers = [str(12025550100 + index) for index in range(60)]
 files = {}
 
 
@@ -92,6 +93,8 @@ try:
     with ExitStack() as stack:
         stack.enter_context(patch.object(test_mode, 'is_enabled', return_value=True))
         stack.enter_context(patch.object(frappe, 'enqueue'))
+        original_setting = settings.value
+        stack.enter_context(patch.object(settings, 'value', side_effect=lambda key: account if key == 'relay_hub_account' else original_setting(key)))
         stack.enter_context(patch.object(bulk, 'uploaded_file', side_effect=lambda url: files[url]))
         hub = Hub()
         stack.enter_context(patch.object(whatsapp, 'client', return_value=hub))
@@ -125,8 +128,61 @@ try:
         assert len(hub.uploads) == 3 and len(hub.messages) == 61
         bulk.send_job(doc.name)
         assert len(hub.uploads) == 3 and len(hub.messages) == 61
+        # A ZIP takes the same sheet validation and send path; File bytes stay in this repository.
+        bundle = BytesIO()
+        with zipfile.ZipFile(bundle, 'w') as archive:
+            archive.writestr('sheet/people.csv', 'Recipients,Offer\n' + numbers[6] + ',25 percent\n' + numbers[7] + ',50 percent\n' + numbers[8] + ',75 percent\nbad,Invalid')
+            archive.writestr('media/' + numbers[6] + '.png', b'\x89PNG\r\n\x1a\n')
+            archive.writestr('media/' + numbers[8] + '.png', b'\x89PNG\r\n\x1a\n')
+            archive.writestr('__MACOSX/._people.csv', 'ignored')
+        source = fixture('people.zip', bundle.getvalue())['file_url']
+        template = {'name': 'local_offer', 'language': 'en', 'components': [
+            {'type': 'HEADER', 'format': 'IMAGE'}, {'type': 'BODY', 'text': '{{1}}'}]}
+        zipdoc = internal_save(frappe.get_doc({'doctype': 'Relay Campaign', 'title': RUN + ' ZIP',
+            'channel': channel.name, 'operation': 'templates.send', 'template_name': 'local_offer', 'language': 'en',
+            'arguments': json.dumps(bulk.template_snapshot(template)), 'status': 'Draft', 'account': account,
+            'country': 'US', 'reply_window_hours': 72, 'request_key': account + '-zip'}), new=True)
+        def save_zip_file(filename, raw, *args, **kwargs):
+            assert kwargs['is_private'] == 1
+            return _dict(file_url=fixture(filename, raw)['file_url'])
+        with patch('frappe.utils.file_manager.save_file', side_effect=save_zip_file):
+            inspected = bulk.inspect(zipdoc.name, source)
+        bulk.import_rows(zipdoc.name, inspected['mapping'])
+        frappe.db.commit()
+        before = len(hub.messages)
+        bulk.import_job(zipdoc.name)
+        assert len(hub.messages) == before  # Validate never calls Hub.
+        result = bulk.read(zipdoc.name)
+        assert result['validated'] and len(result['error_rows']) == 2, result
+        assert frappe.db.count(bulk.RECIPIENT, {'campaign': zipdoc.name, 'status': 'Pending'}) == 2
+        bulk.error_report(zipdoc.name)
+        from openpyxl import load_workbook
+        report = load_workbook(BytesIO(frappe.local.response.filecontent))
+        assert report.active.max_row == 3
+        report.close()
+        with patch.object(whatsapp, 'checked_client', return_value=(hub, {})), patch.object(bulk, 'approved_template', return_value=template):
+            bulk.control(zipdoc.name, 'start')
+        frappe.db.commit()
+        bulk.send_job(zipdoc.name)
+        assert len(hub.messages) == before + 2
+        recipients = frappe.get_all(bulk.RECIPIENT, filters={'campaign': zipdoc.name, 'status': 'Queued'},
+            fields=['name', 'request_key', 'arguments'], order_by='sheet_row')
+        assert all(json.loads(row.arguments)['validation']['status'] == 'Validated' for row in recipients)
+        event = inbound.insert_event({'account': account, 'event_key': account + '-zip-result',
+            'hub_event_id': account + '-zip-result', 'payload': '{}'}, inline=True)
+        with patch('relay_core.bulk_updates.connection_value', return_value=account):
+            bulk_updates.project_batch(event, [{'key': row.request_key, 'id': 7000 + index, 'state': 'submitted',
+                'status': 'sent' if index == 0 else 'failed', 'message_id': 'local-only-zip-result-' + str(index),
+                'error': {} if index == 0 else {'code': 131026, 'title': 'Local-only simulated failure'}}
+                for index, row in enumerate(recipients)])
+        frappe.db.commit()
+        assert bulk_updates.recount(zipdoc.name)['status'] == 'Completed'
+        assert frappe.db.get_value(bulk.RECIPIENT, recipients[0].name, 'status') == 'Sent'
+        assert frappe.db.get_value(bulk.RECIPIENT, recipients[1].name, 'status') == 'Failed'
+        assert frappe.db.get_value(bulk.RECIPIENT, recipients[1].name, 'reason') == 'Meta error 131026: Local-only simulated failure'
+        assert [entry['phase'] for entry in bulk.read(zipdoc.name)['phases']] == ['Uploaded', 'Validating', 'Validated', 'Running', 'Completed']
         # Separate DB connections exercise the real Redis lock and unique endpoint index.
-        concurrent_number = '1555' + str(base + 60).zfill(7)
+        concurrent_number = '12025550160'
         def enroll(_):
             frappe.init(site=SITE, sites_path=str(SITES)); frappe.connect(); frappe.set_user('Administrator')
             frappe.flags.mute_emails = True

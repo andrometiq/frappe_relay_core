@@ -337,7 +337,7 @@ class FakeCache:
         return MagicMock()
 
 
-UTILS = SimpleNamespace(cint=frappe.utils.cint, flt=frappe.utils.flt, now_datetime=lambda: '2026-10-26 10:00:00')
+UTILS = SimpleNamespace(now=lambda: '2026-10-26 10:00:00', cint=frappe.utils.cint, flt=frappe.utils.flt, now_datetime=lambda: '2026-10-26 10:00:00')
 FAILURE_MESSAGE = bulk_campaigns.whatsapp.failure_message
 
 
@@ -349,9 +349,9 @@ def manager_text(error):
 class SenderTests(unittest.TestCase):
     def setUp(self):
         self.cache = FakeCache()
-        self.db = Mock()
+        self.db = Mock(count=Mock(return_value=60))
         self.db.get_value.return_value = 'Running'
-        self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock())
+        self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock(), session=_dict(user='manager@example.invalid'))
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         self.enterContext(patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
@@ -547,7 +547,7 @@ class ControlTests(unittest.TestCase):
     def test_start_checks_the_template_before_taking_the_lock_and_rechecks_status_inside(self):
         order = []
         cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()), delete_value=Mock())
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=cache, utils=UTILS, enqueue=Mock(),
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=cache, utils=UTILS, enqueue=Mock(),
                                session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Draft', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72)
@@ -568,7 +568,7 @@ class ControlTests(unittest.TestCase):
 
 
     def test_resume_works_when_every_row_is_already_in_hub(self):
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), cache=FakeCache(), utils=UTILS,
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False), count=Mock(return_value=0)), cache=FakeCache(), utils=UTILS,
                                enqueue=Mock(), session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Paused', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72, started_at='2026-10-26 09:00:00')
@@ -623,7 +623,7 @@ class ImportTests(unittest.TestCase):
                     column_map=json.dumps({'phone': 'Mobile', 'fields': {}, 'fixed': {}}), arguments=json.dumps({'fields': []}))
         order = []
         db = Mock(rollback=Mock(side_effect=lambda: order.append('rollback')))
-        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc))
+        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc), log_error=Mock(), utils=UTILS, session=_dict(user='manager@example.invalid'))
 
         def rows(path):
             yield 2, {'Mobile': '9876543210'}
@@ -654,6 +654,10 @@ class ImportTests(unittest.TestCase):
 
 
 class JsonRowTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(bulk_campaigns.service_window, 'open_numbers', side_effect=lambda channel, numbers: set(numbers)))
+        self.enterContext(patch.object(bulk_campaigns, 'internal_save'))
+
     message = {'kind': 'photo', 'caption': 'Hi {{name}}'}
 
     def doc(self, **values):

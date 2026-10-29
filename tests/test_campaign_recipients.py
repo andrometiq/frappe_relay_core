@@ -27,6 +27,8 @@ def campaign(**values):
 
 class FilterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+        self.enterContext(patch('frappe.session', _dict(user='manager@example.com')))
         self.enterContext(patch('relay_core.business_access.require_type'))
         self.enterContext(patch('frappe.throw', side_effect=throw))
         self.enterContext(patch.object(campaign_audience, 'linked_types', return_value=['Customer']))
@@ -117,6 +119,9 @@ class FilterTests(unittest.TestCase):
 
 class ScheduleTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+        self.enterContext(patch('frappe.session', _dict(user='manager@example.com')))
+        self.enterContext(patch.object(bulk_campaigns, 'check_validation'))
         self.enterContext(patch('frappe.throw', side_effect=throw))
         self.enterContext(patch('frappe.utils.now_datetime', return_value=NOW))
 
@@ -160,7 +165,7 @@ class ScheduleTests(unittest.TestCase):
             campaign_schedule.start('Winter launch')
         enqueue.assert_not_called()
         fake.db.set_value.assert_called_once_with('Relay Campaign', 'Winter launch', {
-            'status': 'Paused', 'last_error': 'The scheduled start failed: Choose an approved template'})
+            'status': 'Paused', 'arguments': doc.arguments, 'last_error': 'The scheduled start failed. Check the channel and validate again.'})
         self.assertEqual(fake.set_user.call_args_list[-1].args, ('Administrator',))
 
     def test_a_started_campaign_queues_its_first_slice(self):
@@ -228,7 +233,7 @@ class CampaignSkipTests(unittest.TestCase):
 
     def test_import_skips_opted_out_numbers_with_the_reason(self):
         db = Mock()
-        doc = _dict(name='Winter launch', channel='WA')
+        doc = _dict(name='Winter launch', channel='WA', arguments='{}')
         with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(db=db, utils=SimpleNamespace(now=lambda: 'now'),
                                                                     session=_dict(user='manager@example.com'))), \
                 patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, {'911'})):

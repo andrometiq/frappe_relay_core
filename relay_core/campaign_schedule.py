@@ -62,14 +62,17 @@ def start(name: str):
         doc.update(bulk_campaigns.check_ready(doc))
         doc.started_at = doc.started_at or frappe.utils.now_datetime()
         open_reply_window(doc.reply_window_hours)
+        bulk_campaigns.phase(doc, 'Running')
         internal_save(doc)
         bulk_campaigns.enqueue('send_job', name, slot='control')  # Queued when this commits.
         changed(name)
         frappe.db.commit()
-    except (frappe.ValidationError, frappe.PermissionError) as exc:
+    except (frappe.ValidationError, frappe.PermissionError):
         frappe.db.rollback()
+        frappe.log_error(title='Campaign scheduled start failed')
+        bulk_campaigns.phase(doc, 'Scheduled start failed')
         frappe.db.set_value('Relay Campaign', name, {'status': 'Paused',
-                            'last_error': f'The scheduled start failed: {exc}'[:500]})
+                            'arguments': doc.arguments, 'last_error': 'The scheduled start failed. Check the channel and validate again.'})
         changed(name)
         frappe.db.commit()
     finally:
