@@ -1,7 +1,9 @@
 """Recipient rows from a sheet or JSON, WhatsApp template parameters and text or media messages for bulk campaigns."""
 import csv
 import re
+from decimal import Decimal, InvalidOperation
 from urllib.parse import unquote, urlsplit
+import phonenumbers
 from relay_core.channels import channel
 from relay_core.identity import phone_number
 
@@ -13,6 +15,29 @@ MAX_ROWS = 100000
 MAX_VALUE = 1024
 MESSAGE_MEDIA = {'photo': 'image', 'video': 'video', 'document': 'document'}  # Registry kind -> Meta media type.
 PLACEHOLDER = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+
+
+def sheet_phone(value, region):
+    """Mobile E.164 digits, accepting Excel's exact integer text representations."""
+    text = str(value or '').strip()
+    if re.fullmatch(r'[0-9]+\.0+', text):
+        text = text.split('.')[0]
+    elif re.fullmatch(r'[+-]?[0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+', text):
+        try:
+            number = Decimal(text)
+        except InvalidOperation:
+            return None
+        if (len(number.as_tuple().digits) > 15 or not 0 < number < 10**15
+                or number != number.to_integral_value()):
+            return None
+        text = str(int(number))
+    destination = phone_number(text, region)
+    if destination:
+        number = phonenumbers.parse('+' + destination, None)
+        if (phonenumbers.is_valid_number(number) and phonenumbers.number_type(number) in
+                (phonenumbers.PhoneNumberType.MOBILE, phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE)):
+            return destination
+    return None
 
 
 def template_fields(template):
@@ -217,7 +242,7 @@ def is_site_file(value):
 
 def prepare_row(row, mapping, fields, region, header_file=None):
     """Return (destination, values, problem). Problems are user-facing reasons."""
-    destination = phone_number(row.get(mapping['phone']), region)
+    destination = sheet_phone(row.get(mapping['phone']), region)
     if not destination:
         return None, None, 'Invalid phone number'
     values = {}

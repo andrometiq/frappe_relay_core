@@ -45,7 +45,7 @@ async function chooseFiles(event) {
       <input type="file" :multiple="mode === 'dynamic'" :aria-label="mode === 'static' ? 'Header attachment' : 'Contact header attachments'" @change="chooseFiles" />
     </label>
     <p>Private files, up to 4 MiB each. Use {{ media === 'image' ? 'JPG or PNG' : media === 'video' ? 'MP4' : 'a WhatsApp-supported document' }}.</p>
-    <p v-if="mode === 'dynamic'">Name files by mobile number, for example 919876543210.{{ media === 'image' ? 'jpg' : media === 'video' ? 'mp4' : 'pdf' }}. A number without its country code is accepted only when it uniquely matches. Missing, duplicate and wrong-type attachments are excluded in the preview.</p>
+    <p v-if="mode === 'dynamic'">Name files by mobile number, with or without the country code; spaces are allowed. For example, 98765 43210.{{ media === 'image' ? 'jpg' : media === 'video' ? 'mp4' : 'pdf' }}. Numbers without a country code use the sending company's country. Missing, duplicate and wrong-type attachments are excluded in the preview.</p>
     <div v-if="files.length" class="header-selected" role="status">
       <span>{{ mode === 'static' ? files[0].filename : `${files.length} files selected` }}</span>
       <Button label="Clear files" variant="outline" :disabled="busy || uploading" @click="chooseMode(mode)" />
