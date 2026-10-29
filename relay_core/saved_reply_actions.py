@@ -7,6 +7,7 @@ No browser-supplied handler path or arguments are accepted.
 import hashlib
 import json
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 from relay_core.flows.actions import definitions
 from relay_core.flows.action_contracts import inputs, resolve
@@ -31,6 +32,7 @@ def catalog():
 
 @frappe.whitelist(methods=['POST'])
 def execute(message, reply, request_key):
+    document_name(reply)
     require_access()
     if not isinstance(request_key,str) or not 16<=len(request_key)<=140:
         frappe.throw('A stable action request key is required')

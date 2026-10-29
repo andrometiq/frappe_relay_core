@@ -2,13 +2,14 @@
 import hashlib
 import json
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.automation.projection import extract_messages, project
 from relay_core.settings import value as connection_value
 
 
 def event_rows(name):
+    document_name(name)
     require_access(manage=True)
     event=frappe.get_doc('Relay Hub Event',name)
     if event.account!=connection_value('relay_hub_account'):frappe.throw('Event belongs to another Hub account',frappe.PermissionError)
@@ -110,6 +111,7 @@ def businesses(contact):
 
 @frappe.whitelist(methods=['POST'])
 def revoke(endpoint):
+    document_name(endpoint)
     require_access(manage=True)
     doc = frappe.get_doc('Relay Contact Endpoint', endpoint)
     readable_contact(doc.relay_contact)

@@ -1,5 +1,6 @@
 """Business DocTypes whose records a contact can be linked to."""
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access, can_manage
 
 FIELDS = ['business_doctype', 'label', 'enabled']
@@ -29,6 +30,7 @@ def list_types():
 
 @frappe.whitelist(methods=['POST'])
 def save(business_doctype, enabled=None, label=None, grouping_field=None, grouping_fields=None, users=None):
+    document_name(business_doctype)
     require_access(manage=True)
     if not isinstance(business_doctype, str) or not frappe.db.exists('DocType', business_doctype):
         frappe.throw('Choose a business DocType')

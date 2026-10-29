@@ -2,6 +2,7 @@
 from collections import Counter
 from html import escape
 import frappe
+from relay_core.business_access import document_name
 from relay_core.business_inbox import messages
 
 
@@ -45,6 +46,7 @@ def download(doctype, name):
 
 @frappe.whitelist(methods=['GET'])
 def from_run(run):
+    document_name(run)
     from relay_core.permissions import require_access
     from relay_core.messaging import readable_source
     require_access(manage=True)

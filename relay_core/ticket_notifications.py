@@ -2,7 +2,7 @@
 import hashlib
 from contextvars import ContextVar
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core import tickets
 
@@ -15,6 +15,7 @@ def digest(*parts):
 
 
 def destination(name):
+    document_name(name)
     endpoint = frappe.get_doc('Relay Contact Endpoint', name)
     # Endpoint configuration is administrator-only. This facade exposes only
     # verified endpoints belonging to the current user's readable Contact.

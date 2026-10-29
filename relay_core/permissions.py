@@ -16,6 +16,8 @@ def sees_all_teams(user=None):
 def readable_contact(name):
     """Relay roles decide who sees a conversation; the Frappe Contact is read for its name only."""
     import frappe
+    from relay_core.business_access import document_name
+    document_name(name)
     relay = frappe.get_doc('Relay Contact', name); relay.check_permission('read')
     return relay, frappe.get_doc('Contact', relay.contact)
 

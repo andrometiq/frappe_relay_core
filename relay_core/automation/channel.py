@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 
 STEP_FIELDS = ('step', 'enabled', 'ai_skill', 'team', 'user', 'ticket_rule', 'message', 'on_reply')
@@ -46,6 +47,8 @@ def outside_hours(channel, now=None):
 
 
 def validate_assignment(team=None, user=None):
+    if team is not None and team != "":
+        document_name(team)
     from relay_core.teams import validate_agent
     if not (team or user):
         frappe.throw('Choose a team or user')
@@ -69,6 +72,7 @@ def assign_conversation(contact, team=None, user=None):
 
 
 def validate_skill(name, channel, business=None, *, check_read=True):
+    document_name(name)
     skill = frappe.get_doc('Relay AI Skill', name)
     if check_read:
         skill.check_permission('read')
@@ -108,6 +112,7 @@ def validate(doc):
 
 @frappe.whitelist(methods=['GET'])
 def read(channel):
+    document_name(channel)
     require_access(manage=True)
     doc = frappe.get_doc('Relay Channel', channel)
     doc.check_permission('read')
@@ -122,6 +127,7 @@ def read(channel):
 
 @frappe.whitelist(methods=['POST'])
 def save(channel, values, modified):
+    document_name(channel)
     require_access(manage=True)
     values = frappe.parse_json(values) if isinstance(values, str) else values
     if not isinstance(values, dict) or set(values) - {*FIELDS, 'steps'}:
@@ -345,6 +351,7 @@ def process(run):
 
 @frappe.whitelist(methods=['GET'])
 def dry_run(channel, text, contact=None):
+    document_name(channel)
     require_access(manage=True)
     if not isinstance(text, str) or not 1 <= len(text.strip()) <= 4000:
         frappe.throw('Enter a message of 1–4000 characters')

@@ -2,6 +2,7 @@
 import json
 from types import SimpleNamespace
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.ai.tools import contracts, as_user
@@ -164,6 +165,8 @@ def directory(after=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def save(values, name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access('Relay AI Skill', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
     if not isinstance(values, dict) or set(values) - set(FIELDS):
@@ -176,6 +179,8 @@ def save(values, name=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def test_skill(name, message):
+    document_name(message)
+    document_name(name)
     require_access('Relay AI Skill', 'write')
     skill = frappe.get_doc('Relay AI Skill', name); skill.check_permission('read')
     source = frappe.get_doc('Relay Message', message); source.check_permission('read')
@@ -214,6 +219,8 @@ def test_skill(name, message):
 @ai_features.required
 def editor_options(kind, query='', doctype=None, business_doctype=None, action=None, selected=None, skill=None):
     """Bounded, permission-checked captions; identifiers are values, never labels."""
+    if skill is not None and skill != "":
+        document_name(skill)
     require_access('Relay AI Skill', 'write')
     from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
     if not isinstance(query, str) or len(query) > 80:

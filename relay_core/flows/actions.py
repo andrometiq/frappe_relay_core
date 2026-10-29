@@ -282,6 +282,8 @@ def execute_ai(run_name, step):
 @frappe.whitelist(methods=['POST'])
 def approve(name, input_hash, scope_fingerprint):
     """Approve an exact proposal only. Execution still rechecks all permissions."""
+    from relay_core.business_access import document_name
+    document_name(name)
     require_access(manage=True)
     try:
         journal = frappe.get_doc('Relay Flow Action', name)

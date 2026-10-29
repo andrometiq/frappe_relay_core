@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.automation.service import internal_save, check_actor, message_hash
@@ -200,6 +201,7 @@ def directory(after=None,query=''):
 
 @frappe.whitelist(methods=['GET'])
 def read(name):
+    document_name(name)
     require_access(manage=True)
     features.require('flows')
     doc=frappe.get_doc('Relay Flow',name);doc.check_permission('read')
@@ -253,6 +255,8 @@ def references(kind,query=''):
 
 @frappe.whitelist(methods=['POST'])
 def save(values,name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access(manage=True)
     features.require('flows')
     if isinstance(values,str):values=frappe.parse_json(values)
@@ -266,6 +270,8 @@ def save(values,name=None):
 @frappe.whitelist(methods=['POST'])
 def validate_draft(values,name=None):
     """Validate a complete AI-authored draft without writing it."""
+    if name is not None and name != "":
+        document_name(name)
     require_access(manage=True)
     if isinstance(values,str):values=frappe.parse_json(values)
     if not isinstance(values,dict) or set(values)-FLOW_FIELDS:frappe.throw('Invalid flow fields')
@@ -289,6 +295,7 @@ def validate_draft(values,name=None):
 
 @frappe.whitelist(methods=['POST'])
 def publish(name):
+    document_name(name)
     require_access(manage=True)
     features.require('flows')
     with frappe.cache.lock('relay-flow-publish-'+name,timeout=15,blocking_timeout=3):
@@ -305,6 +312,7 @@ def publish(name):
 @frappe.whitelist(methods=['POST'])
 def set_enabled(name,enabled):
     """Enable or disable a published flow through an explicit MCP-safe action."""
+    document_name(name)
     require_access(manage=True)
     features.require('flows')
     if enabled not in (0,1,False,True,'0','1'):
@@ -678,6 +686,7 @@ def runs(flow,after=None):
 
 @frappe.whitelist(methods=['POST'])
 def cancel(name):
+    document_name(name)
     require_access(manage=True)
     features.require('flows')
     run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
@@ -691,6 +700,7 @@ def cancel(name):
 
 @frappe.whitelist(methods=['GET'])
 def responses(name):
+    document_name(name)
     require_access(manage=True)
     run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
     read(run.flow)

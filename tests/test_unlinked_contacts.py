@@ -642,6 +642,8 @@ class ManagerLinkTests(BoundaryTests):
         self.frappe.get_doc.side_effect = lambda dt, name: self.person if dt == 'Contact' else self.business
         self.frappe.get_all.return_value = ['Customer']
         self.contacts.summary = Mock(return_value={'contact': 'Person'})
+        self.access.candidates = Mock(side_effect=lambda relay: [
+            (row.link_doctype, row.link_name) for row in self.person.links if row.link_doctype == 'Customer'])
 
     def test_manager_links_unlinked_contact_without_general_contact_write(self):
         self.contacts.set_links('Person', [{'doctype': 'Customer', 'name': 'Local Customer'}])

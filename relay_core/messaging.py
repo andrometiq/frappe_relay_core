@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.settings import value as connection_value
 from relay_core import channels, timeline, whatsapp
@@ -832,6 +833,7 @@ def action_snapshots(names):
 
 @frappe.whitelist(methods=['POST'])
 def reconcile(action):
+    document_name(action)
     doc = frappe.get_doc('Relay Message Action', action); doc.check_permission('read')
     source, channel, context = action_target(doc)
     if channel.channel == 'Email' and doc.operation == 'email':
@@ -963,6 +965,7 @@ def retry_key(action):
 
 @frappe.whitelist(methods=['POST'])
 def retry(action):
+    document_name(action)
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
     if doc.operation == 'business_prompt':
@@ -1011,6 +1014,7 @@ def resend(doc,key,payload):
 @frappe.whitelist(methods=['POST'])
 def dismiss(action):
     """Delete a rejected send from the sender's chat. Message activity keeps the record."""
+    document_name(action)
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
     if doc.owner!=frappe.session.user or doc.status!='Rejected':

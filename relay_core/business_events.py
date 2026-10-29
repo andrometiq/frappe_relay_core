@@ -3,6 +3,7 @@ from contextvars import ContextVar
 import hashlib
 import json
 import frappe
+from relay_core.business_access import document_name
 from relay_core.ai.tools import as_user
 from relay_core.permissions import require_access
 from relay_core.business_references import RELAY_DOCTYPES
@@ -416,6 +417,8 @@ def directory(after=None):
 
 @frappe.whitelist(methods=['POST'])
 def save(values, name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access('Relay Business Event Rule', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
     if not isinstance(values, dict) or set(values) - set(FIELDS): raise ValueError('Invalid event rule fields')
@@ -427,6 +430,7 @@ def save(values, name=None):
 @frappe.whitelist(methods=['GET'])
 def template_preview(name):
     """Read template wording from Hub for the editor; never sends a message."""
+    document_name(name)
     require_access('Relay Business Event Rule', 'write')
     template = frappe.get_doc('Relay WhatsApp Template', name)
     template.check_permission('read')

@@ -3,7 +3,7 @@ import hashlib
 import json
 import re
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
 from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates
@@ -13,6 +13,7 @@ from relay_core.message_types import text
 
 def business_contact(contact, business_doctype, business_name):
     """Resolve one permission-checked Frappe Contact linked to the business."""
+    document_name(contact)
     require_access()
     from relay_core.business_inbox import check_type
     check_type(business_doctype)
@@ -92,6 +93,7 @@ def start_contact(contact, business_doctype=None, business_name=None):
 
 
 def target(contact, endpoint, business_doctype=None, business_name=None):
+    document_name(endpoint)
     start_contact(contact, business_doctype, business_name)
     binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
     if binding.relay_contact!=contact or not binding.verified:
@@ -197,6 +199,9 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
 def channel_endpoint(contact, endpoint, channel):
     """The contact's endpoint on the chosen channel. A WhatsApp number or email address verified on one
     business channel is enrolled on another channel of the same type; Telegram bots need the person first."""
+    document_name(endpoint)
+    if channel is not None and channel != "":
+        document_name(channel)
     if not channel:return endpoint
     binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
     if channel==binding.channel:return endpoint

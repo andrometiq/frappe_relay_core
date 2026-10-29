@@ -30,11 +30,16 @@ def require_type(doctype, user=None):
         frappe.throw('Business type is not accessible', frappe.PermissionError)
 
 
+def document_name(value):
+    """Reject filter selectors before Frappe can resolve them to a document."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 140 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        frappe.throw('Choose a document name of at most 140 printable characters')
+    return value
+
+
 def business_document(doctype, name, user=None):
     require_type(doctype, user)
-    if not isinstance(name, str) or not name.strip() or len(name) > 140 or any(ord(c) < 32 for c in name):
-        frappe.throw('Choose a business record')
-    return frappe.get_doc(doctype, name)
+    return frappe.get_doc(doctype, document_name(name))
 
 
 def person_condition(expression, user=None):
@@ -59,6 +64,7 @@ def person_allowed(name, user=None):
 
 
 def require_person(name, user=None):
+    document_name(name)
     if not person_allowed(name, user):
         frappe.throw('Contact is not accessible', frappe.PermissionError)
 
@@ -72,6 +78,7 @@ def people_query(**kwargs):
 
 def scoped_document(doctype, name, filters, fields=()):
     """Read one name through query hooks, then recheck fixed scope and fields."""
+    document_name(name)
     from frappe_tools.ai.tools import get_readable_meta, get_readable_columns
     meta = get_readable_meta(doctype)
     required = set(fields) | set(filters)
@@ -123,6 +130,19 @@ def primary_record(contact, links=None):
     from relay_core.business_groups import title_field
     title = doc.get(title_field(target[0]))
     return {'doctype': target[0], 'name': target[1], 'title': str(title or target[1])}
+
+
+def preserve_primary_history(contact, *, authorize=False):
+    """Freeze inherited message ownership before changing a primary or its links."""
+    frappe.db.get_value('Relay Contact', contact, 'name', for_update=True)
+    current = primary(contact)
+    if not current:
+        return
+    if authorize:
+        business_document(*current)
+    frappe.db.sql("""UPDATE `tabRelay Message` SET business_doctype=%s, business_name=%s
+        WHERE relay_contact=%s AND COALESCE(business_doctype, '')='' AND COALESCE(business_name, '')=''
+        AND COALESCE(legacy_triage, 0)=0""", (*current, contact))
 
 
 def drop_stale_primary(contact):

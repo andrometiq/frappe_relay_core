@@ -15,6 +15,7 @@ class ApiTests(unittest.TestCase):
             return decorate
         def throw(message,*args):raise ValueError(message)
         self.f=types.SimpleNamespace(whitelist=whitelist,throw=throw,get_doc=Mock(),get_list=Mock(return_value=[]))
+        self.enterContext(patch('relay_core.business_access.frappe', self.f))
         spec=importlib.util.spec_from_file_location('tested_relay_api',Path('relay_core/api.py'))
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)

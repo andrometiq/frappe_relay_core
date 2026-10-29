@@ -48,7 +48,8 @@ def template_media(data):
 def file_content(name,source):
     """A private file kept on the source message. The caller has checked the source, so File's
     owner-only sharing rule does not apply."""
-    if not isinstance(name,str) or not 1<=len(name)<=140:frappe.throw('Invalid attachment reference')
+    from relay_core.business_access import document_name
+    document_name(name)
     file=frappe.get_doc('File',name)
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)

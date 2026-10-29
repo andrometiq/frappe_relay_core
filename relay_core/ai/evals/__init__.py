@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import frappe
+from relay_core.business_access import document_name
 
 
 def load_cases(cases):
@@ -86,6 +87,9 @@ def run(skill, model=None, cases=None, allow_live=False):
     the only intended writes. Model overrides never save the skill. Errors fail the case.
     This checks first-turn policy, not completed multi-step searches or business execution.
     """
+    if model is not None and model != "":
+        document_name(model)
+    document_name(skill)
     from relay_core.permissions import MANAGER, require_access
     from relay_core.test_mode import is_enabled
     from relay_core.ai.service import decide_text

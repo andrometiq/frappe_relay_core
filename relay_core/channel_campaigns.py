@@ -1,7 +1,7 @@
 """Provider-specific campaign preparation and durable Telegram/email receipts."""
 import time
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import business_document, document_name
 from relay_core import whatsapp
 from relay_core.permissions import require_business_assignment, readable_contact
 from relay_core.automation.service import internal_save
@@ -9,6 +9,7 @@ from relay_core.automation.provenance import integer
 
 
 def prepare(doc, contact, args):
+    document_name(contact)
     person=frappe.get_doc('Contact',contact)
     require_business_assignment(contact)
     business_document(doc.business_doctype,doc.business_name)

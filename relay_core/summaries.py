@@ -2,7 +2,7 @@
 import hashlib
 import re
 import frappe
-from relay_core.business_access import business_document
+from relay_core.business_access import document_name, business_document
 from relay_core import ai_features
 from relay_core.permissions import require_access,readable_contact
 from relay_core.automation.contracts import canonical
@@ -158,6 +158,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
 @frappe.whitelist(methods=['GET'])
 @ai_features.required
 def read(name):
+    document_name(name)
     require_access();doc=frappe.get_doc('Relay Conversation Summary',name)
     if doc.get('business_name'):business_document(doc.business_doctype,doc.business_name)
     else:readable_contact(doc.relay_contact)
