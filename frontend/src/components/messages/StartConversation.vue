@@ -294,7 +294,7 @@ onMounted(async () => {
 onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contactController?.abort(); });
 </script>
 <template>
-  <Dialog v-model="shown" :options="{ title: props.template ? 'Send template' : 'New conversation', size: 'lg' }" :disable-outside-click-to-close="busy"
+  <Dialog class="composer-template-dialog" v-model="shown" :options="{ title: props.template ? 'Send template' : 'New conversation', size: 'lg' }" :disable-outside-click-to-close="busy"
     ><template #body-content
       ><div class="space-y-4">
         <div v-if="props.businessName" class="start-contact-picker">
@@ -391,3 +391,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
     </template>
   </Dialog>
 </template>
+
+<style scoped>
+:deep(.relay-button), :deep(input), :deep(select), :deep([role=combobox]) { min-height:44px; }
+</style>
