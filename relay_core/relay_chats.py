@@ -95,9 +95,9 @@ def title(key):
     if doctype == CONTACT:
         row = frappe.db.get_value(CONTACT, name, ['display_name', 'contact'], as_dict=True) or {}
         return row.get('display_name') or row.get('contact') or name
-    meta = frappe.get_meta(doctype)
-    field = meta.title_field if meta.title_field and meta.has_field(meta.title_field) else None
-    return (frappe.db.get_value(doctype, name, field) if field else None) or name
+    from relay_core.business_groups import title_field
+    field = title_field(doctype)
+    return (frappe.db.get_value(doctype, name, field) if field != 'name' else None) or name
 
 
 def mark_read(key, upto=None):
@@ -141,22 +141,12 @@ def install_index():
 
 
 def query(user=None):
-    """Chats of business records the user can read, through a Relay Contact the user can see, and chats of visible
-    contacts. Users who see every team skip the contact check, as in permissions.assignment_condition."""
-    user = user or frappe.session.user
-    if user == 'Administrator':
-        return ''
-    if not frappe.has_permission(CONTACT, 'read', user=user):
-        return '1=0'
-    from relay_core.business_access import explicit_condition
-    from relay_core.permissions import assignment_condition
+    """Business types and shared unlinked chats, with scope applied before pagination."""
+    from relay_core.business_access import explicit_condition, relay_user
+    if not relay_user(user): return '1=0'
     table = '`tabRelay Chat`'
     records = explicit_condition(CHAT, user)
-    assigned = assignment_condition(user)
-    if assigned:
-        records = (f"({records} AND EXISTS (SELECT 1 FROM `tabDynamic Link` l JOIN `tabRelay Contact` "
-                   f"ON `tabRelay Contact`.contact=l.parent WHERE l.parenttype='Contact' AND l.parentfield='links' "
-                   f"AND l.link_doctype={table}.business_doctype AND l.link_name={table}.business_name AND {assigned}))")
+    if not records: records = '1=1'
     contacts = frappe.qb.get_query(CONTACT, fields=['name'], ignore_permissions=False, user=user, order_by='').get_sql()
     return f"({records} OR ({table}.business_doctype='{CONTACT}' AND {table}.business_name IN ({contacts})))"
 

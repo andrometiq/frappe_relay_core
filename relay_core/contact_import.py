@@ -126,7 +126,8 @@ def matches(rows, region):
 
 def existing_person(name, *, write=False):
     person = frappe.get_doc('Contact', name)
-    person.check_permission('read')
+    from relay_core.business_access import require_person
+    require_person(name)
     if write and not contacts.can_manage_links(name):
         person.check_permission('write')
     return person
@@ -226,12 +227,12 @@ def export_rows():
     yield list(COLUMNS)
     start = 0
     while True:
-        names = frappe.get_list('Contact', pluck='name', order_by='name', start=start, page_length=200)
+        from relay_core.business_access import people_query
+        names = people_query(fields=['name'], order_by='name', offset=start, limit=200).run(pluck=True)
         if not names:
             break
         for name in names:
             person = existing_person(name)
-            person.apply_fieldlevel_read_permissions()
             base = [person.get('mobile_no') or person.get('phone') or '', person.get('email_id') or '',
                     person.get('full_name') or person.get('first_name') or name]
             links = person.get('links') or []

@@ -8,6 +8,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
+from relay_core.business_access import business_document
 from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
@@ -61,7 +62,8 @@ def message_hash(message):
 def business_scope(policy, contact, message=None):
     """Recheck business and channel access at decision and delivery time."""
     business_contact = frappe.get_doc('Contact', contact.contact)
-    business_contact.check_permission('read')
+    from relay_core.business_access import require_person
+    require_person(contact.contact)
     from relay_core.business_access import reference,candidates
     target=reference(message) if message else None
     if not target:
@@ -72,7 +74,7 @@ def business_scope(policy, contact, message=None):
         raise ValueError('Business identity is missing or ambiguous')
     doctype,name=target
     if doctype!=policy.business_doctype:raise ValueError('Message does not match the policy business type')
-    frappe.get_doc(doctype, name).check_permission('read')
+    business_document(doctype, name)
     channel = frappe.get_doc('Relay Channel', policy.channel)
     channel.check_permission('read')
     if not channel.enabled or channel.channel!='WhatsApp':

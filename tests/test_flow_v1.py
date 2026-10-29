@@ -44,7 +44,7 @@ class FlowV1Tests(unittest.TestCase):
                        business_doctype='Customer', business_name='customer')
         run = _dict(flow='flow', version='old', status='Waiting', generation=2, conversation_key='route')
         fake = Mock(); fake.get_doc.side_effect = lambda dt, name: {'Relay Flow': flow, 'Relay Flow Version': version}.get(dt, Mock())
-        with patch.object(flows, 'frappe', fake), patch.object(flows, 'check_actor'), \
+        with patch('relay_core.business_access.business_document'), patch.object(flows, 'frappe', fake), patch.object(flows, 'check_actor'), \
              patch.object(flows, 'route', return_value='route'), patch.object(flows, 'readable_contact', return_value=(_dict(automation_paused=0, automation_generation=2), None)), \
              patch('relay_core.messaging.readable_source', return_value=(source, _dict(name='channel', channel='Email'), {'provider':'Email'})), \
              patch('relay_core.business_access.reference', return_value=('Customer','customer')), patch('relay_core.business_access.candidates', return_value=[('Customer','customer')]):

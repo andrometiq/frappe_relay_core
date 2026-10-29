@@ -74,9 +74,10 @@ def send(chat_id, text, reply_to=0, message_thread_id=0, request_key=None, busin
 def authorize_group(contact):
     # Telegram topic metadata has no authoritative business ownership.
     if frappe.session.user == 'Administrator': return
-    from relay_core.business_access import candidates
+    from relay_core.business_access import candidates, allowed_types
     targets = candidates(contact)
-    if not targets or any(not frappe.get_doc(*target).has_permission('read') for target in targets):
+    visible = allowed_types()
+    if not targets or any(target[0] not in visible for target in targets):
         frappe.throw('Group administration requires access to every linked business', frappe.PermissionError)
 
 

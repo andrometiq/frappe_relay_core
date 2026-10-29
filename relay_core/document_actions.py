@@ -92,7 +92,8 @@ def load(doctype, name, action_name):
     business = doc.name if action.business_field == 'name' else doc.get(action.business_field)
     if not business:
         frappe.throw('The document has no business record to send to')
-    frappe.get_doc(action.business_doctype, business).check_permission('read')
+    from relay_core.business_access import business_document
+    business_document(action.business_doctype, business).check_permission('read')
     return action, doc, business
 
 

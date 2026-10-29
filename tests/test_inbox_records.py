@@ -20,6 +20,8 @@ def chat(name, doctype='Customer', record='C1', at=AT, **values):
 
 class InboxRecordTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Customer'}))
+        self.enterContext(patch('relay_core.business_groups.title_field', return_value='customer_name'))
         self.fake = fake_frappe()
         self.fake.qb = MagicMock(wraps=get_query_builder('mariadb'))
         self.fake.qb.DocType = get_query_builder('mariadb').DocType
@@ -28,6 +30,8 @@ class InboxRecordTests(unittest.TestCase):
         self.fake.get_all.return_value = []
         self.chats = []
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.relay_chats.title', side_effect=lambda key:
+            next((row.title for row in self.chats if (row.business_doctype, row.business_name) == key), key[1])))
 
     def get_list(self, doctype, **kwargs):
         if doctype == 'Relay Channel':
@@ -53,13 +57,14 @@ class InboxRecordTests(unittest.TestCase):
 
     def test_search_text_cannot_act_as_a_wildcard(self):
         self.assertEqual(inbox_records.search_values('50%_off')['word0'], '%50\\%\\_off%')
-        self.assertEqual(inbox_records.search_filters('50%_off')[0], [CHAT, 'title', 'like', '%50\\%\\_off%'])
+        self.assertIn("LIKE '%50\\%\\_off%'", inbox_records.search_filters('50%_off')[0].get_sql())
 
     def test_a_search_finds_business_records_by_title_or_name(self):
         self.chats = [chat('RC-1', title='Atal Marketing')]
         rows = inbox_records.page(query='Atal Marketing')['items']
-        self.assertEqual(self.chat_call().kwargs['or_filters'], [[CHAT, 'title', 'like', '%Atal%Marketing%'],
-                                                                 [CHAT, 'business_name', 'like', '%Atal%Marketing%']])
+        search = self.chat_call().kwargs['filters'][-1].get_sql(quote_char='`')
+        self.assertIn('`customer_name` LIKE', search)
+        self.assertIn("OR `business_name` LIKE '%Atal%Marketing%'", search)
         self.assertEqual([(row['kind'], row['doctype'], row['record'], row['title']) for row in rows],
                          [('business', 'Customer', 'C1', 'Atal Marketing')])
 

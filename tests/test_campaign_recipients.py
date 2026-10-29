@@ -27,6 +27,7 @@ def campaign(**values):
 
 class FilterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.require_type'))
         self.enterContext(patch('frappe.throw', side_effect=throw))
         self.enterContext(patch.object(campaign_audience, 'linked_types', return_value=['Customer']))
         self.enterContext(patch.object(campaign_audience, 'segment_fields',
@@ -75,14 +76,14 @@ class FilterTests(unittest.TestCase):
         fake = Mock(db=Mock(sql=Mock(side_effect=lambda *args, **kwargs: pages.pop(0))))
         fake.get_all.side_effect = lambda doctype, **kwargs: {
             'Contact': [_dict(name='Asha', first_name='Asha'), _dict(name='Ravi', first_name='Ravi')],
-            'Dynamic Link': [_dict(parent='Asha', link_name='CUST-1')]}[doctype]
+            'Dynamic Link': [_dict(parent='Asha', link_name='CUST-1')], 'Customer': [_dict(name='CUST-1', city='Chennai')]}[doctype]
         fake.get_list.return_value = [_dict(name='CUST-1', city='Chennai')]
         with patch.object(campaign_audience, 'frappe', fake):
             rows = list(campaign_audience.contact_rows(doc))
         self.assertEqual(rows, [
             (1, {'phone': '919876543210', 'contact.first_name': 'Asha', 'Customer.city': 'Chennai'}),
             (2, {'phone': '919876543211', 'contact.first_name': 'Ravi', 'Customer.city': ''})])
-        self.assertEqual(fake.get_list.call_args.kwargs['fields'], ['name', 'city'])  # Record reads keep permissions.
+        self.assertEqual(fake.get_all.call_args.kwargs['fields'], ['name', 'city'])  # Relay type access was checked first.
 
     def test_import_saves_filters_and_mapping_and_starts_the_import(self):
         doc = campaign(source_file='/private/files/old.csv')

@@ -10,6 +10,7 @@ from relay_core import business_access, business_routing as routing, business_ro
 
 class RoutingFixtures:
     def setUp(self):
+        self.enterContext(patch('relay_core.business_groups.title_field', return_value='title'))
         self.now = datetime(2026, 10, 24, 12)
         self.links = [('Customer', 'customer-one'), ('Supplier', 'supplier-two')]
         self.states, self.actions, self.references = {}, {}, {}
@@ -549,6 +550,7 @@ class TriageEpisodeTests(unittest.TestCase):
 
 class TriageEnrollmentTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.relay_user', return_value=True))
         from relay_core import enrollment
         self.api = enrollment
         self.event = _dict(name='event', account='account', creation='today', payload=json.dumps({
@@ -614,4 +616,4 @@ class TriageEnrollmentTests(unittest.TestCase):
             self.assertFalse(tickets.permission(doc), 'Partial business scope must deny before contact fallback')
             doc.business_doctype = None
         with patch.object(tickets, 'frappe', fake), patch('relay_core.permissions.company_allowed', return_value=False):
-            self.assertFalse(tickets.permission(doc))
+            self.assertTrue(tickets.permission(doc), 'Unlinked triage uses Relay access, not Company Desk read')

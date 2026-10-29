@@ -2,6 +2,7 @@
 import hashlib
 import re
 import frappe
+from relay_core.business_access import business_document
 from relay_core import ai_features
 from relay_core.permissions import require_access,readable_contact
 from relay_core.automation.contracts import canonical
@@ -57,7 +58,7 @@ def authorize(doc):
     if doc.get('business_name'):
         from relay_core.business_inbox import check_type
         check_type(doc.business_doctype)
-        frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+        business_document(doc.business_doctype,doc.business_name)
     else:contact,_=readable_contact(doc.relay_contact)
     if not frappe.db.get_value("User",frappe.session.user,"enabled"):raise frappe.PermissionError("User is disabled")
     policy=frappe.get_doc('Relay Automation Policy',doc.policy)
@@ -127,7 +128,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
     require_access()
     if business_name:
         from relay_core.business_inbox import check_type
-        check_type(business_doctype);frappe.get_doc(business_doctype,business_name).check_permission('read')
+        check_type(business_doctype);business_document(business_doctype,business_name)
         contact=None
     else:readable_contact(contact)
     if period not in ('7','30','90','all') or not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}',request_key):frappe.throw('Invalid summary request')
@@ -158,7 +159,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
 @ai_features.required
 def read(name):
     require_access();doc=frappe.get_doc('Relay Conversation Summary',name)
-    if doc.get('business_name'):frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+    if doc.get('business_name'):business_document(doc.business_doctype,doc.business_name)
     else:readable_contact(doc.relay_contact)
     frappe.get_doc('Relay Channel',doc.channel).check_permission('read')
     rows=existing_sources(doc)
@@ -219,7 +220,7 @@ def business_previews(doctype, names):
 def latest(contact=None,business_doctype=None,business_name=None):
     require_access()
     if business_name:
-        frappe.get_doc(business_doctype,business_name).check_permission('read')
+        business_document(business_doctype,business_name)
         filters={'business_doctype':business_doctype,'business_name':business_name}
     else:readable_contact(contact);filters={'relay_contact':contact}
     rows=frappe.get_all('Relay Conversation Summary',filters=filters,pluck='name',order_by='name desc',limit_page_length=1)

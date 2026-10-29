@@ -1,0 +1,22 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Contact Type User",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "user"
+  ],
+  "fields": [
+    {
+      "fieldname": "user",
+      "fieldtype": "Link",
+      "label": "User",
+      "options": "User",
+      "reqd": 1,
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [],
+  "autoname": "RELAY-CTU-.##########"
+}

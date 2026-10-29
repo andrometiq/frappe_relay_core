@@ -1,4 +1,4 @@
-"""Read-time business grouping. Business permissions apply before counts and pagination."""
+"""Read-time business grouping. Relay type access applies before counts and pagination."""
 import hashlib
 import json
 import re
@@ -88,9 +88,16 @@ def bound_query(query, values, prefix):
 
 
 def record_scope(doctype, values, prefix='record_'):
-    """Use the same Frappe query hooks and User Permissions as the directory/thread."""
-    return bound_query(frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=False,
-                       user=frappe.session.user, order_by=''), values, prefix)
+    """Relay business scope, or the existing Relay document/channel query hooks."""
+    from relay_core.business_access import require_type, people_query
+    if doctype == 'Contact':
+        query = people_query(fields=['name'], order_by='')
+    elif doctype in ('Relay Message', 'Relay Contact', 'Relay Channel'):
+        query = frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=False, order_by='')
+    else:
+        require_type(doctype)
+        query = frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=True, order_by='')
+    return bound_query(query, values, prefix)
 
 
 def message_scope(values, prefix='message_'):
@@ -215,8 +222,8 @@ def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None
             items.append(dict(counts, kind='type', doctype=dt, label=config.label or dt))
         if options['contacts']:
             from relay_core.contacts import unlinked_people
-            count = frappe.qb.get_query('Contact', fields=[{'COUNT': 'name', 'as': 'total'}], filters=[unlinked_people()],
-                                       ignore_permissions=False).run(as_dict=True)[0]['total']
+            from relay_core.business_access import people_query
+            count = people_query(fields=[{'COUNT': 'name', 'as': 'total'}], filters=[unlinked_people()]).run(as_dict=True)[0]['total']
             items.append({'kind': 'unlinked', 'label': 'Not linked', 'contact_count': int(count)})
         return {'items': items, 'next': None, 'kind': 'type', 'fields': []}
     check_type(doctype)
@@ -299,8 +306,10 @@ def ticket_values(tickets, business_type=None):
             grouped.setdefault(ticket['business_doctype'], set()).add(ticket['business_name'])
     columns = configuration(business_type) if business_type else []
     queries, values = [], {}
+    from relay_core.business_access import allowed_types
+    visible = allowed_types() if grouped else set()
     for index, (doctype, names) in enumerate(grouped.items()):
-        if not frappe.has_permission(doctype, 'read'):
+        if doctype not in visible:
             continue
         fields = columns if doctype == business_type else []
         pairs = ', '.join(f"{frappe.db.escape(field)}, COALESCE(b.{identifier(field)}, '')" for field in fields)
@@ -323,7 +332,7 @@ def ticket_values(tickets, business_type=None):
 def claim(doctype, group='', release=False):
     require_access();check_type(doctype);field=next(iter(configuration(doctype)), '');validate_text(group)
     if group=='__all__':frappe.throw('Choose one business team')
-    if not frappe.get_list(doctype,filters=group_filters(field,group),fields=['name'],page_length=1):
+    if not frappe.get_all(doctype,filters=group_filters(field,group),fields=['name'],page_length=1):
         frappe.throw('No accessible records in this group',frappe.PermissionError)
     name=key(doctype,field,group)
     # The unique claim identity makes concurrent creation safe; row lock serialises transitions.

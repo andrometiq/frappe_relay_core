@@ -8,8 +8,10 @@ from unittest.mock import Mock, patch
 
 class DisplayTitlesTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value=set()))
+        self.enterContext(patch('relay_core.business_access.person_allowed', return_value=False))
         def throw(message): raise ValueError(message)
-        self.f = types.SimpleNamespace(whitelist=lambda **kw: lambda fn: fn, throw=throw,
+        self.f = types.SimpleNamespace(db=Mock(exists=Mock(return_value=False)), whitelist=lambda **kw: lambda fn: fn, throw=throw,
             has_permission=Mock(return_value=True), get_meta=Mock(return_value=types.SimpleNamespace(title_field='customer_name')),
             get_list=Mock(return_value=[{'name':'CUST-0026', 'customer_name':'Rao Textiles'}]))
         spec = importlib.util.spec_from_file_location('tested_display', Path('relay_core/display.py'))

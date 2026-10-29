@@ -33,7 +33,8 @@ def message_business(names):
     target = targets.pop()
     if len(target) != 2 or not all(target):
         return None, None
-    if not frappe.has_permission(target[0], 'read', doc=target[1]):
+    from relay_core.business_access import allowed_types
+    if target[0] not in allowed_types():
         frappe.throw('You cannot read the business record', frappe.PermissionError)
     return target
 

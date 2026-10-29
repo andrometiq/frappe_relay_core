@@ -18,12 +18,16 @@ from relay_core.relay_core.doctype.relay_contact_type import relay_contact_type 
 
 class GroupConfigurationTests(unittest.TestCase):
     def setUp(self):
-        self.meta = Mock()
+        self.meta = Mock(issingle=0, istable=0, module='Selling')
         self.meta.get_field.side_effect = lambda name: _dict(fieldname=name, fieldtype='Data', permlevel=0, hidden=0) if name in ('region', 'team', 'zone') else None
         self.fake = Mock()
+        self.fake.session.user = 'Administrator'
         self.fake.get_meta.return_value = self.meta
         self.fake.throw.side_effect = ValueError
         self.enterContext(patch.object(groups, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.business_access.require_type'))
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Local Business', 'Other'}))
+        self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: self.fake.qb.get_query('Contact', ignore_permissions=True, **kwargs)))
         self.enterContext(patch.object(controller, 'frappe', self.fake))
         self.enterContext(patch.object(controller, 'require_access'))
 
@@ -142,6 +146,9 @@ class GroupAggregateTests(unittest.TestCase):
         self.fake.has_permission.return_value = True
         self.fake.db.sql.side_effect = self.sql
         self.enterContext(patch.object(groups, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.business_access.require_type'))
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Local Business', 'Other'}))
+        self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: self.fake.qb.get_query('Contact', ignore_permissions=True, **kwargs)))
         self.enterContext(patch.object(groups, 'check_type'))
         self.enterContext(patch.object(groups, 'require_access'))
         self.chat_query = self.enterContext(patch('relay_core.relay_chats.query', return_value=''))
@@ -167,8 +174,7 @@ class GroupAggregateTests(unittest.TestCase):
         rows = groups.aggregate('Local Business', ['region', 'team'], [])
         self.assertEqual([(r.value, r.label, r.record_count, r.unread) for r in rows],
                          [('', 'Not set', 2, 8), ('North', 'North', 3, 7)])
-        self.fake.qb.get_query.assert_called_with('Local Business', fields=['name'], ignore_permissions=False,
-                                                user='local-only@example.invalid', order_by='')
+        self.fake.qb.get_query.assert_called_with('Local Business', fields=['name'], ignore_permissions=True, order_by='')
         totals = groups.aggregate('Local Business', [], [], totals=True)[0]
         self.assertEqual((totals.record_count, totals.unread), (5, 15))
         self.db.execute("UPDATE `tabLocal Business` SET allowed=0 WHERE name='c'")
@@ -326,7 +332,7 @@ class GroupAggregateTests(unittest.TestCase):
         original = self.fake.qb.get_query.side_effect
         def query(doctype, **kwargs):
             if kwargs.get('fields') == [{'COUNT': 'name', 'as': 'total'}]:
-                self.assertFalse(kwargs['ignore_permissions'])
+                self.assertTrue(kwargs['ignore_permissions'])
                 self.assertEqual(kwargs['filters'], ['unlinked predicate'])
                 return SimpleNamespace(run=lambda **kwargs: [{'total': 2}])
             return original(doctype, **kwargs)
