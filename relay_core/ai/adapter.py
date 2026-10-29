@@ -49,13 +49,14 @@ SYSTEM_RULES = ('You are a Relay business assistant. These rules take priority o
         'or required fields. Use declared SEARCH for missing configuration. Propose replies with EXECUTE '
         'in the written order. Leave reply empty ONLY when actions are proposed, a search is declared, '
         'or handoff is true. Otherwise provide a non-empty reply to the sender. '
-        'Return JSON with reply, handoff, reason, search, decline (false unless declining).')
+        'Return JSON with reply, handoff, reason, search, decline (false unless declining), '
+        'and data_question (true for record-data requests, false otherwise).')
 
 RESPONSE = {'type': 'object', 'additionalProperties': False,
     'properties': {'reply': {'type': 'string', 'maxLength': 2000}, 'handoff': {'type': 'boolean'},
                    'reason': {'type': 'string', 'maxLength': 500}, 'decline': {'type': 'boolean'},
                    'search': {'type': ['object', 'null']}, 'data_question': {'type': 'boolean'}},
-    'required': ['reply', 'handoff', 'reason']}
+    'required': ['reply', 'handoff', 'reason', 'data_question']}
 
 
 def decline_decision(user, text=''):
@@ -174,15 +175,19 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             return super().run_tool(dict(call, arguments=arguments))
 
     engine = SkillRun(tools, secrets, deadline, max_tool_calls=4)
-    from relay_core.ai.language import instruction, detect, matches
+    from relay_core.ai.language import instruction, resolve, matches
     from relay_core.ai.knowledge import prompt as knowledge_prompt
     try:
-        incoming_text = json.loads(text).get('incoming', '')
+        prompt = json.loads(text)
+        incoming_text = prompt.get('incoming', '')
+        language_history = [*prompt.get('history', []),
+                            {'direction': 'Incoming', 'content': prompt.get('language_context', '')}]
     except (ValueError, AttributeError):
         incoming_text = text
-    language = detect(incoming_text)
+        language_history = []
+    language = resolve(incoming_text, language_history)
     knowledge = knowledge_prompt(business, (scope or {}).get('company'))
-    system = (SYSTEM_RULES + '\nReply language:\n' + instruction(incoming_text)
+    system = (SYSTEM_RULES + '\nReply language:\n' + instruction(incoming_text, language_history)
         + '\nKnowledge base — standing instructions:\n' + (knowledge or '(none)')
         + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(references) +
         '\nAllowed actions:\n' + json.dumps(action_schemas) +
@@ -214,10 +219,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                 raise TimeoutError('AI model did not answer in time')
             raise ValueError(('AI provider error: ' + llm.redact_secrets(error, secrets))[:500])
         value = outcome['result']['data']
-        if (not isinstance(value, dict) or not {'reply', 'handoff', 'reason'} <= set(value)
+        if (not isinstance(value, dict) or not {'reply', 'handoff', 'reason', 'data_question'} <= set(value)
                 or set(value) - {'reply', 'handoff', 'reason', 'search', 'decline', 'data_question'}):
             raise ValueError('Invalid skill decision')
-        if type(value.get('data_question', False)) is not bool or type(value.get('decline', False)) is not bool:
+        if type(value['data_question']) is not bool or type(value.get('decline', False)) is not bool:
             raise ValueError('Invalid skill decision')
         if type(value['handoff']) is not bool or not isinstance(value['reply'], str) or len(value['reply']) > 2000 or not isinstance(value['reason'], str) or len(value['reason']) > 500:
             raise ValueError('Invalid skill decision')
@@ -251,7 +256,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             for reply in replies:
                 if reply.strip() and not matches(reply, language):
                     return dict(reply='', handoff=True, reason='Reply language did not match the latest customer message; staff translation required', reads=[], user=user)
-                check(reply, skill, dict(scope or {}, business=list(business)), evidence=allowed_contacts)
+                check(reply, skill, dict(scope or {}, business=list(business)), evidence=allowed_contacts,
+                      knowledge=knowledge)
         except ReplyBlocked:
             return dict(reply='', handoff=True, reason=REASON, reads=[], user=user)
         value = dict(value, reply_contacts=allowed_contacts)

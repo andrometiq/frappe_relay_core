@@ -82,10 +82,13 @@ def decide(skill, message, run_id=None, *, deadline=None):
         if run_id:
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
-    return decide_text(skill, text, user, business, scope, history, reference, run_id, deadline=deadline)
+    language_context = conversation_language(message, user, business)
+    return decide_text(skill, text, user, business, scope, history, reference, run_id,
+                       deadline=deadline, language_context=language_context)
 
 
-def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None):
+def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None,
+                language_context=''):
     """Shared text decision; a missing reference means no saved memory or event notes."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
     from relay_core.ai.tools import fingerprint
@@ -94,7 +97,9 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text, **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
+        prompt = json.dumps({'history': history, 'incoming': text,
+            **({'language_context': language_context} if language_context else {}),
+            **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -175,13 +180,42 @@ def conversation_history(skill, message, user, business, scope):
     return history
 
 
+def conversation_language(message, user, business):
+    """Read only language evidence, including turns whose report results cannot be replayed."""
+    from relay_core.ai.language import detect, incoming
+    if detect(incoming(message))['script']:
+        return ''
+    before = message.name
+    try:
+        with as_user(user):
+            while True:
+                sources = frappe.get_list('Relay Message', filters={
+                    'conversation_key': message.conversation_key, 'business_doctype': business[0],
+                    'business_name': business[1], 'direction': 'Incoming', 'name': ['<', before]},
+                    fields=['name'], order_by='name desc', page_length=50)
+                for row in sources:
+                    source = frappe.get_doc('Relay Message', row.name)
+                    source.check_permission('read')
+                    source.apply_fieldlevel_read_permissions()
+                    if source.get('message_type') in ('voice', 'audio') and not (source.get('transcript') or '').strip():
+                        continue
+                    text = incoming(source)
+                    if detect(text)['script']:
+                        return text[:2000]
+                if len(sources) < 50:
+                    return ''
+                before = sources[-1].name
+    except frappe.PermissionError:
+        return ''
+
+
 class Superseded(ValueError):
     pass
 
 
 def search_scope(scope):
     from relay_core.ai.tools import fingerprint
-    return fingerprint({key: value for key, value in scope.items() if key != 'message'})
+    return fingerprint({key: value for key, value in scope.items() if key not in ('message', 'transcript_hash')})
 
 
 def confirmation_required(skill, plan):
@@ -204,7 +238,8 @@ def declare_search(run, skill, message, decision):
     record = dict(plan=plan, scope=search_scope(scope), version=str(skill.modified), ticket=run.ticket,
         generation=int(run.generation or 0), ownership_generation=int(frappe.db.get_value(
             'Relay Ticket', run.ticket, 'generation') or 0),
-        origin=run.name, source=message.name, source_hash=message_hash(message), confirmed_by=None, consumed_by=None)
+        origin=run.name, source=message.name, source_hash=message_hash(message),
+        source_transcript_hash=scope.get('transcript_hash'), confirmed_by=None, consumed_by=None)
     run.search_plan, run.stage = json.dumps(record), 'Search'
     statement = (f"I will search {plan['reference']} to {plan['purpose']}. "
                  f"Fields: {', '.join(plan['fields'])}. Search: {canonical(plan['arguments'])}.")
@@ -250,10 +285,12 @@ def check_search(run, skill, record):
     original = json.loads(origin.search_plan)
     source = frappe.get_doc('Relay Message', record['source'])
     source.check_permission('read')
+    source_scope = context(skill, source)[2]
     if (origin.message != source.name or origin.skill != skill.name or origin.skill_version != str(skill.modified)
             or origin.ticket != run.ticket or original['plan'] != record['plan']
             or original['scope'] != record['scope'] or message_hash(source) != record['source_hash']
-            or search_scope(context(skill, source)[2]) != record['scope']):
+            or source_scope.get('transcript_hash') != record.get('source_transcript_hash')
+            or search_scope(source_scope) != record['scope']):
         raise ValueError('Declared search source changed')
     receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, origin.execution_user, origin)},
         ['status', 'source_message', 'payload'], as_dict=True)

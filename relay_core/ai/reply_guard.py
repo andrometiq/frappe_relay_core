@@ -54,7 +54,7 @@ def copied(reply, sources):
     return False
 
 
-def check(reply, skill, scope, *, evidence=()):
+def check(reply, skill, scope, *, evidence=(), knowledge=''):
     """Raise without including leaked text. Allow authorized evidence and Company contacts.
 
     Customer/Supplier checks cover exact capitalised primary-key names up to six words.
@@ -65,7 +65,7 @@ def check(reply, skill, scope, *, evidence=()):
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
     if not reply or reply in (PRIVACY_REPLY, ACKNOWLEDGEMENT):
         return
-    if copied(reply, (SYSTEM_RULES, skill.get('instructions'), skill.get('reply_style'))):
+    if copied(reply, (SYSTEM_RULES, skill.get('instructions'), skill.get('reply_style'), knowledge)):
         raise ReplyBlocked()
     emails = {value.casefold() for value in EMAIL.findall(reply)}
     numbers = phones(reply)
@@ -109,6 +109,8 @@ def check_delivery(run, skill, message, reply):
     # dispatch_reply revalidates the sender scope, event context and reads first.
     decision = json.loads(run.get('decision') or '{}')
     company = frappe.db.get_value('Relay Channel', message.channel, 'company')
+    from relay_core.ai.knowledge import prompt
+    knowledge = prompt((message.business_doctype, message.business_name), company)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
         contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])])
+        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge)
