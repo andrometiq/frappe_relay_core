@@ -1,5 +1,8 @@
 # WhatsApp v1 UI validation
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 Status: uncommitted work on `feat/v1-ui`, prepared for orchestrator review.
 This is not installed-site or release acceptance.
 

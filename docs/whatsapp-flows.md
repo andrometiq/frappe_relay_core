@@ -1,5 +1,8 @@
 # Channel automation and flows
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 A flow guides a customer through questions, answers and business actions on WhatsApp, Telegram or Email. Relay Communication Managers can save, publish and enable flows under **Automation → Flows**. A System Manager turns the feature on in **Settings & Setup** with **Enable flows**. The switch is off by default. While it is off, the Flows page is hidden, the API refuses flow calls and no inbound message starts or continues a flow.
 
 ## Channel automation

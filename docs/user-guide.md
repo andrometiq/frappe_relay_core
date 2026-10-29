@@ -46,7 +46,7 @@ Today Relay shows WhatsApp only. The Email and Telegram chips in the Inbox show 
 | Channel | One business WhatsApp number that the Hub connects to this site. Relay creates the channel list from the Hub. You do not type numbers in by hand. |
 | Contact | A person, from the standard Frappe Contact list. Relay links the contact's verified WhatsApp number to it. A contact is linked to one or more business records, such as a Customer or a Supplier. |
 | Conversation | All messages between one contact and your business number. It shows as one row in the Inbox. |
-| Team | A named group of staff, such as "Sales North". A conversation assigned to a team is visible to every member. |
+| Business type users | Staff assigned to a business record type across every channel. |
 | Folder | A personal label to sort your own Inbox, such as "Follow up". Only you see your folders. |
 | Ticket | A to-do item made from a chat, with a subject, type, status, owner and comments. |
 | Template | A message that Meta approved in advance. Only a template can start a chat or reach a customer after the 24-hour reply window closes. |
@@ -60,41 +60,18 @@ Today Relay shows WhatsApp only. The Email and Telegram chips in the Inbox show 
 
 ## 3. Roles: who sees what
 
-Give each staff member one Relay role in Desk (User form, Roles section). A user without a Relay role cannot open `/relay`.
+Give staff a Relay role in Desk. Configure their business types in Settings > Business types and users.
 
-| Role | For whom | Conversations they see |
-| --- | --- | --- |
-| Relay Communication User | Front-line staff | Only conversations of their own teams, conversations assigned to them, and business groups they took. |
-| Relay Communication Team User | Supervisors who watch all teams | All conversations of all teams. |
-| Relay Communication Manager | Managers | All conversations, plus setup of templates, campaigns, events, teams and billing. |
-| System Manager | The owner or IT | Everything, including Settings, Hub connection, channels and health. |
-| Relay Hub Service | Not a person. One API user for the Hub. | None. It cannot open Desk or `/relay`. It is only for Hub callbacks. |
+| Role | Access |
+| --- | --- |
+| Relay Communication User | Assigned enabled business types, plus shared unlinked contacts and chats. |
+| Relay Communication Manager | Every enabled business type, bulk campaigns and business type assignments. |
+| System Manager | Everything above, plus setup and channel configuration. |
+| Relay Hub Service | Hub callbacks only. |
 
-The Relay role alone decides which conversations a user sees. The user does not need ERPNext roles for this. The linked customer or supplier (name, ledger and other record data) shows only when the user can read that record in ERPNext. Otherwise the chat shows only the contact's name and phone.
-
-A chat without a team or an assigned user is visible only to Team Users, Managers and System Managers. A Relay Communication User does not see it.
-
-Menu and actions by role:
-
-| Menu item or action | User | Team User | Manager | System Manager |
-| --- | --- | --- | --- | --- |
-| Inbox: read, reply, notes, folders, star | Yes | Yes | Yes | Yes |
-| Inbox: assign a conversation to a team or person | No | No | Yes | Yes |
-| Tickets: create, tag, comment | Yes | Yes | Yes | Yes |
-| Tickets: change the assignee on the ticket page | No | No | Yes | Yes |
-| Contacts & Links: view | Yes | Yes | Yes | Yes |
-| Contacts: New contact, Unlinked senders | No | No | Yes | Yes |
-| WhatsApp > Templates: view | Yes | Yes | Yes | Yes |
-| WhatsApp > Templates: create, edit, delete | No | No | Yes | Yes |
-| WhatsApp > Bulk campaigns, Forms | No | No | Yes | Yes |
-| WhatsApp > Billing | No | No | Yes | Yes |
-| Business events | No | No | Yes | Yes |
-| Teams & Access | No | No | Yes | Yes |
-| Saved replies: create and edit (in Desk) | No | No | Yes | Yes |
-| Send on WhatsApp form button | Per action | Per action | Per action | Per action |
-| AI skills (only when AI is on) | No | No | Yes | Yes |
-| Settings & Setup, Activity & Health | No | No | No | Yes |
-| Turn AI features on or off | No | No | No | Yes |
+Contact/Customer read permissions are not needed inside Relay. Desk permissions remain unchanged.
+Teams and group claims do not grant access. The legacy Team User role alone grants no business scope.
+See [Business type access](business-access.md) for the current rule.
 
 The Send on WhatsApp button shows for the roles set on each action. When the Roles table is empty, every Relay user who can read the document sees it.
 
@@ -136,7 +113,7 @@ Conversation header, right side:
 | Button | What it does |
 | --- | --- |
 | Viewing | Shows other staff who have this chat open, so two people do not reply at once. |
-| Assign | Opens "Organize conversation". Managers pick a team and an agent, then "Save assignment". |
+| Business access | Managers assign users to business types in Settings. |
 | Ticket | Opens "Create ticket" for this chat. |
 | "..." menu | Star conversation, Mark read, Move to folder, Remove from folder, Delivery failures and retry, Internal notes, Cases, Topics, Business context, Search conversation. Conversation summary shows only when AI is on. |
 
@@ -362,29 +339,19 @@ Who sets it up: Manager or System Manager, in Desk at Relay Document Action. Who
 
 What happens: after you save the action and reload Desk, the button shows on saved documents of that type. The button opens a dialog with the filled template, the PDF name and the contacts with their numbers. Tick the contacts and click "Send". A green note says how many numbers got it. A list shows any number that failed and why.
 
-### 4.7 Teams & Access
+### 4.7 Roles & access
 
-Who: Manager and System Manager.
-
-![Teams](images/guide/teams.png)
-
-| Tab | What it does |
-| --- | --- |
-| Communication teams | "New team", Team name, "Add member", "Remove", "Save team". A team needs at least one member. Members see every conversation assigned to the team. |
-| Business groups | Groups business records by the grouping field set in Business types (for example, by territory). Open a group and click "Take group" to become the handler. "Release" gives it back. A Relay Communication User then sees the conversations of the group. |
-| Roles & access | Explains the four roles and links to Users and roles, Role permissions and User permissions in Desk. |
-
-![Roles and access](images/guide/roles.png)
-
-What breaks if you change it: when you remove a member from a team, that person stops seeing the team's conversations at once, unless the chat is assigned to them or their role sees all teams.
+This page explains assigned business types, manager access and system setup.
+Team creation, membership, group claiming and team filters are hidden.
+Existing team data and endpoints remain for compatibility.
 
 ### 4.8 Settings & Setup
 
-Who: System Manager.
+Who: Manager and System Manager. Connection changes require System Manager.
 
 ![Settings and setup](images/guide/settings.png)
 
-The setup cards show what is ready: Hub binding, Callback signing secret, WhatsApp channel, Business types and grouping, Contacts and links, Teams and access, and Callback processing and recovery. Click a card to go to that step.
+The setup cards show what is ready: Hub binding, Callback signing secret, WhatsApp channel, Business types and grouping, Contacts and links, and Callback processing and recovery. Click a card to go to that step.
 
 Hub connection:
 
@@ -452,12 +419,12 @@ What happens: Core reads the list of numbers from the Hub and makes one channel 
 
 ### 5.2 Give a staff member access (Manager or System Manager)
 
-1. In Desk, open the person's User. Add one Relay role from the table in part 3. Most staff get Relay Communication User.
-2. Give normal Frappe read permission on Contact and on Customer (or the business DocTypes you use). Use User Permissions if they may see only some customers.
-3. In `/relay`, open Teams & Access > Communication teams. Open a team or click "New team". Use "Add member", then "Save team".
-4. Assign conversations to the team: open a chat, click "Assign", pick the team, "Save assignment".
+1. In Desk, give the person Relay Communication User.
+2. In Relay Settings > Business types and users, add the person to each business type they should handle and save.
 
-What happens: the person sees the team's conversations in Inbox > All, and chats assigned to them in Mine. A Team User or Manager sees all teams without being a member.
+They see those enabled types across all channels, plus unlinked senders. Managers
+and System Managers see every enabled type without being listed. No Contact or
+Customer Desk read permission is required for Relay chats.
 
 ### 5.3 Reply to a customer (all staff)
 
@@ -571,7 +538,7 @@ Steps:
 
 What happens: each old chat is matched to a Relay contact by phone number and to the Relay channel of its number. A second run skips messages already imported and updates changed statuses. Imported messages never trigger automatic replies or opt-outs.
 
-Imported chats have no team. Only Team Users, Managers and System Managers see them. To show them to a team of Relay Communication Users, assign them to that team. Chats that already have an assignment are not changed:
+Imported chats use the same business type access rule as live chats. Unlinked chats are shared. The legacy assignment command below is retained for compatibility and does not grant visibility:
 
 ```sh
 bench --site <your-site> relay-assign-imported-chats --source-site-label sales.example.com --team <Relay Team>
@@ -585,7 +552,7 @@ Messages are not arriving:
 2. Is the sender new? Look in Contacts > Unlinked / ambiguous senders and link the sender.
 3. Does "Channel setup required" show there? Open Configure channel and enable the number. Then click "Verify saved connection" in Settings.
 4. Recovery scheduling must say Active. If not, ask IT to start the Frappe scheduler and workers.
-5. A staff member does not see a chat? Check their role, their team, and their Frappe permission on the customer.
+5. A staff member does not see a chat? Check their Relay role and their assignment to the enabled business type in Settings.
 
 You cannot send:
 
@@ -606,8 +573,8 @@ A template was rejected:
 | If you... | Then... |
 | --- | --- |
 | delete a folder | Its chats stay in your Inbox without a folder. Other people are not affected. |
-| remove a person from a team | They stop seeing that team's chats at once, unless a chat is assigned to them or their role sees all teams. |
-| give someone Relay Communication Team User | They see all teams' chats, but cannot change setup. |
+| remove a user from a business type | A Communication User loses access to that type. |
+| give someone Relay Communication Manager | They see every enabled type and can prepare bulk campaigns. |
 | turn off "Enable AI features" | AI pages and buttons hide and AI background work stops. Inbox, templates, campaigns and business events keep working. |
 | change the callback secret only in Core | The Hub's messages are rejected and no new messages arrive. Put the same secret in the Hub. |
 | save a wrong Hub URL, token or account | Save connection checks with the Hub first. It shows an error and keeps the old values. |

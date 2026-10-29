@@ -1,5 +1,8 @@
 # Core tables and forms
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 Contacts, Teams, Flows, Campaigns, canned replies and recent conversations share `RelayTable`. It defines columns and cell slots, keeps the header fixed above a vertically virtualized body, and contains horizontal scrolling inside the table on narrow screens. Inbox rows share its `PagedRows` paging implementation.
 
 `PagedRows` uses the existing `createPageWindow` with 50-row pages and a 200-row maximum buffer. Rendering follows viewport height plus overscan. Forward and reverse page changes retain a visible row anchor. Request generations and abort signals protect against stale responses; search/filter changes reset the cursor. Earlier/more buttons provide explicit paging alongside automatic scrolling. Unread membership changes reset the inbox list while the existing conversation timeline preserves its own reading position.
