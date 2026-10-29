@@ -442,7 +442,7 @@ function actions(message) {
 .conversation-bubble:is(:hover,:focus-within)>.message-menu-trigger,.message-menu-trigger[aria-expanded="true"]{opacity:1}
 .message-menu-trigger:focus-visible{opacity:1;outline:2px solid var(--outline-blue-1,#5b9bd5)}
 @media (hover:none){
-  .message-menu-trigger{display:grid;opacity:1;position:absolute;top:0;right:0;width:44px;height:44px;margin:0}
+  .message-menu-trigger{display:grid;opacity:.7;position:absolute;top:0;right:0;width:44px;height:44px;margin:0;background:transparent;box-shadow:none;color:inherit}
   .message-thread .message-thread-content .conversation-bubble:has(>.message-menu-trigger){padding-right:48px}
 }
 .has-menu-sheet .conversation-bubble:not(.menu-target){opacity:.35}
