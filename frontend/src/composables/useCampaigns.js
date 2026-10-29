@@ -5,16 +5,7 @@ import { useRealtimeRefresh } from "./useRealtimeRefresh";
 import { applyProgress, approvedTemplates, mergeCampaign } from "../services/campaignProgress";
 import { realtimeRefreshQueue } from "../services/realtimeRefreshQueue";
 
-async function uploadFile(file, failure) {
-  const form = new FormData();
-  form.append("file", file, file.name);
-  form.append("is_private", "1");
-  const response = await fetch("/api/method/upload_file", { method: "POST", credentials: "same-origin", body: form,
-    headers: { "X-Frappe-CSRF-Token": window.frappe?.csrf_token || window.csrf_token || "" } });
-  const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.message?.file_url) throw Error(failure);
-  return body.message.file_url;
-}
+import { uploadFile } from '../services/uploadFile'
 
 export function useCampaigns() {
   const busy = ref(false), error = ref(""), items = ref([]), next = ref(null), campaign = ref(null), sheet = ref(null), templates = ref([]);

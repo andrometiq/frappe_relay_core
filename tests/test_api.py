@@ -35,6 +35,8 @@ class ApiTests(unittest.TestCase):
 
     def use_role(self, role):
         """Answer permission checks from the role -> DocType rights of the DocPerm matrix."""
+        self.f.session = types.SimpleNamespace(user='test@example.invalid')
+        self.f.get_roles = lambda: [role]
         rights={
             'Relay Communication User':set(),
             'Relay Communication Team User':{'all_teams'},
@@ -54,7 +56,7 @@ class ApiTests(unittest.TestCase):
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
+        self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,'flows':True,
                                  'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
@@ -92,6 +94,7 @@ class ApiTests(unittest.TestCase):
             with patch('relay_core.channels.enabled',return_value=[]):
                 result=self.api.capabilities()
             self.assertEqual(tuple(result[flag] for flag in flags),values,role)
+            self.assertEqual(result['contact_transfer'], role in ('Relay Communication Manager', 'System Manager'))
 
     def test_folders_and_teams_switches_hide_their_capabilities(self):
         self.use_role('System Manager')

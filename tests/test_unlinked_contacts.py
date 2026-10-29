@@ -144,7 +144,7 @@ class EnrollmentTests(BoundaryTests):
     def test_legacy_phone_matching_deduplicates_child_rows_and_checks_primary_fields(self):
         # Use the actual shared mapping function, with normalization isolated at its dependency.
         identity = self.load('relay_core.identity')
-        identity.phone_number = lambda value: ''.join(c for c in value if c.isdigit()).removeprefix('00')
+        identity.phone_number = lambda value, region=None: ''.join(c for c in value if c.isdigit()).removeprefix('00')
         self.frappe.db.sql.return_value = [
             Row(name='P1', creation=1, relay='R1', customer=1, phone='+' + NUMBER, mobile_no=NUMBER),
             Row(name='P1', creation=1, relay='R1', customer=1, contact_phone='00' + NUMBER),

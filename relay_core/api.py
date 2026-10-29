@@ -216,7 +216,8 @@ def capabilities():
     enabled_names=[item.name for item in channels]
     numbers={medium:site_numbers(medium) for medium in enabled_names}
     teams=features.is_enabled('teams')
-    return {'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
+    from relay_core.contact_import import allowed as contact_transfer_allowed
+    return {'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
             'ai':ai_features.is_enabled(),
