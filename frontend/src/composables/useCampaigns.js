@@ -1,3 +1,4 @@
+import { campaignError } from '../services/campaignErrors.js';
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { coreApi } from "../services/coreApi";
 import { onRealtime, subscribeRoom } from "../services/realtime";
@@ -12,7 +13,7 @@ export function useCampaigns() {
   const filter = ref(""), replyWindow = ref(null);
   async function run(fn) {
     busy.value = true; error.value = "";
-    try { return await fn(); } catch (e) { error.value = e.message; } finally { busy.value = false; }
+    try { return await fn(); } catch (e) { error.value = campaignError(e); } finally { busy.value = false; }
   }
   const refresh = (after) => run(async () => {
     const page = await coreApi("campaigns.directory", { after });
@@ -27,8 +28,20 @@ export function useCampaigns() {
   });
   const create = (values) => run(async () => { campaign.value = await coreApi("bulk_campaigns.create", values, true); return campaign.value; });
   const upload = (file) => run(async () => {
-    const file_url = await uploadFile(file, "The file could not be uploaded. Use a .xlsx, .csv or .tsv file.");
+    sheet.value = null;
+    const file_url = await uploadFile(file, "The file could not be uploaded. Use a .xlsx, .csv, .tsv or .zip file.");
     sheet.value = await coreApi("bulk_campaigns.inspect", { name: campaign.value.name, file_url }, true);
+    campaign.value = { ...campaign.value, validated: false };
+  });
+  const download = (method) => run(async () => {
+    if (!['sample_sheet', 'error_report'].includes(method)) return;
+    const response = await fetch(`/api/method/relay_core.bulk_campaigns.${method}?name=${encodeURIComponent(campaign.value.name)}`, { credentials: 'same-origin' });
+    if (!response.ok || !response.headers.get('Content-Type')?.includes('spreadsheetml'))
+      throw Object.assign(Error('Download unavailable'), { status: response.status });
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url; link.download = method === 'sample_sheet' ? 'campaign-template.xlsx' : 'campaign-errors.xlsx';
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   // Relay sends this file to Hub once when the campaign starts; rows carry the Hub media ID.
   const uploadMedia = (file) => run(() => uploadFile(file, "The media file could not be uploaded."));
@@ -48,7 +61,7 @@ export function useCampaigns() {
     try {
       const counted = await coreApi("bulk_campaigns.window", { name: current.name });
       if (campaign.value?.name === current.name) replyWindow.value = counted;
-    } catch (e) { error.value = e.message; }
+    } catch (e) { error.value = campaignError(e); }
   });
 
   let leave = null;
@@ -57,8 +70,10 @@ export function useCampaigns() {
   const reread = realtimeRefreshQueue(async () => {
     const name = campaign.value?.name;
     if (!name) return;
-    const fresh = await coreApi("bulk_campaigns.read", { name, status: filter.value || undefined });
-    campaign.value = mergeCampaign(campaign.value, fresh);
+    try {
+      const fresh = await coreApi("bulk_campaigns.read", { name, status: filter.value || undefined });
+      campaign.value = mergeCampaign(campaign.value, fresh);
+    } catch (e) { error.value = campaignError(e); }
   }, () => document.visibilityState === "visible", 500);
   const off = onRealtime((event) => {
     if (event.kind === "campaign_progress" && event.name === campaign.value?.name) {
@@ -69,5 +84,5 @@ export function useCampaigns() {
   useRealtimeRefresh(["Relay Campaign"], ["campaigns"], () => refresh());
   onMounted(refresh);
   onBeforeUnmount(() => { off(); leave?.(); reread.dispose(); });
-  return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, uploadMedia, importRows, control, page };
+  return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, download, uploadMedia, importRows, control, page };
 }

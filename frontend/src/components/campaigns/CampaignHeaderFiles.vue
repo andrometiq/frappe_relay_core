@@ -1,4 +1,5 @@
 <script setup>
+import { campaignError } from '../../services/campaignErrors.js';
 import { computed, ref, useId } from 'vue';
 import { Button, ErrorMessage } from '@relay/ui';
 import { attachmentSelectionError } from '../../services/campaignMedia';
@@ -29,7 +30,7 @@ async function chooseFiles(event) {
       uploaded.push({ file_url, filename: file.name });
       emit('update:modelValue', { mode: mode.value, files: [...uploaded] });
     }
-  } catch (e) { error.value = e.message; }
+  } catch (e) { error.value = campaignError(e); }
   finally { uploading.value = false; emit('uploading', false); }
 }
 </script>

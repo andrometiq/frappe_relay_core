@@ -1,3 +1,4 @@
+import { campaignError } from '../services/campaignErrors.js';
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { attachmentMapping } from '../services/campaignMedia';
 import { coreApi } from "../services/coreApi";
@@ -23,7 +24,7 @@ export function useCampaignAudience(campaign, everyone) {
       mapping.value = own ? { ...own, fields: { ...own.fields }, fixed: { ...own.fixed } } : options.value.mapping;
       if (campaign.value.fields.some(field => field.key === 'header_media'))
         mapping.value = attachmentMapping(mapping.value, own?.header_attachment || { mode: 'static', files: [] });
-    } catch (e) { error.value = e.message; }
+    } catch (e) { error.value = campaignError(e); }
   }
 
   async function count() {
@@ -34,7 +35,7 @@ export function useCampaignAudience(campaign, everyone) {
       const result = await coreApi("campaign_audience.preview", { name: campaign.value.name, audience: cleanAudience(audience.value) }, true);
       if (ticket === asked) { preview.value = result; error.value = ""; }
     } catch (e) {
-      if (ticket === asked) error.value = e.message;
+      if (ticket === asked) error.value = campaignError(e);
     } finally {
       if (ticket === asked) counting.value = false;
     }
@@ -44,7 +45,7 @@ export function useCampaignAudience(campaign, everyone) {
     clearTimeout(searchTimer);
     if (String(query || "").trim().length < 2) { found.value = []; return; }
     searchTimer = setTimeout(async () => {
-      try { found.value = await coreApi("campaign_audience.search", { name: campaign.value.name, query }); } catch (e) { error.value = e.message; }
+      try { found.value = await coreApi("campaign_audience.search", { name: campaign.value.name, query }); } catch (e) { error.value = campaignError(e); }
     }, WAIT_MS);
   }
 
@@ -52,7 +53,7 @@ export function useCampaignAudience(campaign, everyone) {
     busy.value = true; error.value = "";
     try {
       return await coreApi("campaign_audience.import_contacts", { name: campaign.value.name, audience: cleanAudience(audience.value), mapping: mapping.value }, true);
-    } catch (e) { error.value = e.message; } finally { busy.value = false; }
+    } catch (e) { error.value = campaignError(e); } finally { busy.value = false; }
   }
 
   watch([audience, chosen], () => { clearTimeout(countTimer); countTimer = setTimeout(count, WAIT_MS); }, { deep: true });

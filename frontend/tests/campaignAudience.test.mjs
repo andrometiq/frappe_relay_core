@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { audienceSummary, cleanAudience, hasAudienceChoice, sampleSheet, dropContact, emptyAudience, inputTime, missingValues, pickContact, recipientLabel,
+import { audienceSummary, cleanAudience, hasAudienceChoice, dropContact, emptyAudience, inputTime, missingValues, pickContact, recipientLabel,
   scheduleNotice, siteTime, valueOptions } from "../src/services/campaignAudience.js";
 import { campaignActions, statusTheme } from "../src/services/campaignProgress.js";
 
@@ -58,11 +58,4 @@ test("nothing is chosen until a filter, an added contact or everyone is picked",
   assert.equal(hasAudienceChoice({ ...emptyAudience(), include: ["RELAY-CON-1"] }, false), true);
   assert.equal(hasAudienceChoice({ ...emptyAudience(), tag: "VIP" }, false), true);
   assert.equal(hasAudienceChoice(emptyAudience(), true), true);
-});
-
-test("the sample sheet has the mobile number column and one column per message value", () => {
-  const fields = [{ key: "header_media", label: "Header image URL", media: "image" }, { key: "body:customer_name", label: "Body value customer_name", name: "customer_name" },
-    { key: "body:1", label: "Body value 1", name: null }];
-  assert.equal(sampleSheet(fields), "mobile number,customer_name,Body value 1\n919876543210,Example,Example\n");
-  assert.equal(sampleSheet([]), "mobile number\n919876543210\n");
 });

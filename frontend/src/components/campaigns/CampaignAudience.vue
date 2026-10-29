@@ -3,18 +3,20 @@ import CampaignHeaderFiles from './CampaignHeaderFiles.vue';
 import { attachmentMapping } from '../../services/campaignMedia';
 import ChoiceField from '../fields/ChoiceField.vue'
 import { readableName, recordTitle } from '../../services/recordTitle'
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { Badge, Button, ErrorMessage, FormControl, TextInput } from "@relay/ui";
 import RelaySelect from "../RelaySelect.vue";
 import { useCampaignAudience } from "../../composables/useCampaignAudience";
 import { audienceSummary, dropContact, emptyAudience, hasAudienceChoice, missingValues, pickContact, valueOptions } from "../../services/campaignAudience";
 
 const props = defineProps({ campaign: Object, uploadMedia: Function });
-const emit = defineEmits(["imported"]);
+const emit = defineEmits(["imported", "editing"]);
 const campaign = computed(() => props.campaign);
 // A saved audience without filters or added contacts was "everyone on this number".
 const everyone = ref(Boolean(props.campaign.audience) && !hasAudienceChoice(props.campaign.audience, false));
 const { options, audience, chosen, mapping, preview, found, error, busy, counting, load, search, importContacts } = useCampaignAudience(campaign, everyone);
+let loaded = false;
+watch([audience, mapping, everyone], () => { if (loaded) emit('editing'); }, { deep: true });
 // Everyone means no filters; contacts removed by hand stay removed.
 watch(everyone, (value) => { if (value) audience.value = { ...emptyAudience(), exclude: audience.value.exclude }; });
 const query = ref(""), mediaFile = ref(""), headerUploading = ref(false);
@@ -51,7 +53,7 @@ async function submit() {
   const fresh = await importContacts();
   if (fresh) emit("imported", fresh);
 }
-onMounted(load);
+onMounted(async () => { await load(); await nextTick(); loaded = true; });
 </script>
 
 <template>
@@ -107,7 +109,7 @@ onMounted(load);
       </div>
     </div>
     <p v-if="missing.length" class="audience-issue">Still needed: {{ missing.join(", ") }}</p>
-    <div><Button :label="preview?.count ? `Use these ${preview.count.toLocaleString()} people` : 'Use these people'" variant="solid" :loading="busy" :disabled="!chosen || !ready || headerUploading" @click="submit" /></div>
+    <div><Button label="Validate" variant="solid" :loading="busy" :disabled="!chosen || !ready || headerUploading" @click="submit" /></div>
   </div>
 </template>
 

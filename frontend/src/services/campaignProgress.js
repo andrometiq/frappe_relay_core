@@ -1,6 +1,6 @@
 // Campaign progress shown from counters only; rows are paged separately.
 export const COUNTERS = [
-  ["total", "People"], ["queued", "Waiting"], ["sent", "Sent"], ["delivered", "Delivered"],
+  ["total", "People"], ["queued", "Pending"], ["sent", "Sent"], ["delivered", "Delivered"],
   ["read", "Read"], ["replied", "Replied"], ["failed", "Failed"], ["skipped", "Skipped"],
 ];
 
