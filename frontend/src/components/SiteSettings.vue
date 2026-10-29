@@ -8,6 +8,7 @@ import { useTask } from '../composables/useTask'
 import LoadingRows from './LoadingRows.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import SavedRepliesWorkspace from './SavedRepliesWorkspace.vue'
+import BusinessTypeSettings from './BusinessTypeSettings.vue'
 import { channelEnabled } from '../services/enabledChannels'
 const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: false })
 const capabilities = inject('relayCapabilities')
@@ -41,7 +42,6 @@ async function verify() { verified.value = false; await coreApi('settings.verify
 const features = [
   { key: 'ai', label: 'Enable AI features', help: 'Shows AI replies, AI skills and AI history on tickets.' },
   { key: 'folders', label: 'Enable chat folders', help: 'Lets people sort chats into folders in the Chats list.' },
-  { key: 'teams', label: 'Enable teams', help: 'Shows Teams & access, so managers can group people and share chats by team.' },
   { key: 'flows', label: 'Enable automations', help: 'Shows the Flows page, where managers build automatic replies and steps.' },
 ]
 const checklist = computed(() => [
@@ -51,7 +51,6 @@ const checklist = computed(() => [
   { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '/desk/relay-channel' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '/desk/relay-contact-type' },
   { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },
-  ...(capabilities.value.teams ? [{ label: 'Teams and access', icon: 'user-check', state: 'Review membership and permissions', href: '#/teams' }] : []),
   { label: 'Incoming messages and recovery', icon: 'activity', state: 'See what arrived and retry failures', href: '#/activity' },
 ])
 onMounted(() => run(load))
@@ -66,6 +65,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
       <WorkspaceHeading description="Connect your account and prepare your workspace for conversations."><Button variant="outline" label="Refresh setup" icon-left="refresh-cw" :loading="busy" @click="run(load)" /></WorkspaceHeading>
       <ErrorMessage :message="error" /><LoadingRows v-if="busy && !loaded" :count="2" label="Checking configuration…" />
       <div class="v1-card-grid setup-checklist"><a v-for="(step, index) in checklist" :key="step.label" :href="step.href" class="v1-list-card" @click="followStep($event, step)"><span class="setup-step-top"><FeatherIcon :name="step.icon" :size="20" /><Badge :label="!loaded ? 'Not checked' : step.ready ? 'Ready' : 'Review'" :theme="loaded && step.ready ? 'green' : 'gray'" /></span><strong>{{ index + 1 }}. {{ step.label }}</strong><span>{{ step.state }}</span><small>Review setup <FeatherIcon name="arrow-up-right" :size="14" /></small></a></div>
+      <BusinessTypeSettings v-if="capabilities.manage" />
       <form id="hub-connection" class="workflow-card" @submit.prevent="run(save)">
         <h2 class="text-lg font-semibold">Hub connection</h2><p class="text-sm">Relay sends and receives messages through Hub. Enter the details your Hub administrator gave you, save, then select Check connection.</p>
         <div class="settings-fields"><FormControl label="Connection address" v-model="config.url" :disabled="busy || !capabilities.configure" /><FormControl label="Account name" v-model="config.account" :disabled="busy || !capabilities.configure" />
