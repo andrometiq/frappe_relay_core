@@ -73,8 +73,9 @@ export function scheduleNotice(campaign) {
 
 // A CSV the user can fill in: the mobile number column, then one column per value the message needs.
 export function sampleSheet(fields) {
-  const columns = ["mobile number", ...(fields || []).map((field) => field.media ? "image url" : field.name || field.label)];
-  const example = ["919876543210", ...(fields || []).map((field) => field.media ? "https://example.com/photo.jpg" : "Example")];
+  fields = (fields || []).filter(field => field.key !== "header_media");
+  const columns = ["mobile number", ...fields.map((field) => field.media ? "image url" : field.name || field.label)];
+  const example = ["919876543210", ...fields.map((field) => field.media ? "https://example.com/photo.jpg" : "Example")];
   const cell = (value) => /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
   return [columns, example].map((row) => row.map(cell).join(",")).join("\n") + "\n";
 }

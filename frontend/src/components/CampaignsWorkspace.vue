@@ -8,6 +8,8 @@ import FrappeFormView from "./frappe/FrappeFormView.vue";
 import FrappeListView from "./frappe/FrappeListView.vue";
 import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
+import CampaignHeaderFiles from './campaigns/CampaignHeaderFiles.vue';
+import { attachmentMapping } from '../services/campaignMedia';
 import CampaignAudience from "./campaigns/CampaignAudience.vue";
 import { useCampaigns } from "../composables/useCampaigns";
 import { closeRoute, openRoute } from "../useViewRoute";
@@ -25,7 +27,7 @@ const creating = ref(false), title = ref(""), type = ref("template"), template =
 const manyNumbers = computed(() => hasManyNumbers(capabilities.value));
 const number = ref("");
 const numberOptions = computed(() => whatsappNumbers(capabilities.value).map((row) => ({ value: row.name, label: [row.label, row.address].filter(Boolean).join(" · ") })));
-const mediaFile = ref("");
+const mediaFile = ref(""), headerUploading = ref(false);
 const columns = [
   { key: "title", label: "Campaign", width: "minmax(200px,1.4fr)" },
   { key: "status", label: "Status", width: "120px" },
@@ -56,7 +58,7 @@ const headerActions = computed(() => campaignActions(campaign.value?.status).fil
 // Draft recipients come from contacts or from a sheet; nothing is picked until the user chooses one.
 const recipientMode = ref(""), sendMode = ref("now"), startAt = ref("");
 const modeOptions = [{ value: "contacts", label: "Relay contacts" }, { value: "file", label: "Upload sheet" }];
-const fileHint = "Accepted: .xlsx, .csv or .tsv. The first row holds the column names; one row per person.";
+const fileHint = "Accepted: .xlsx, .csv or .tsv. Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
 const sampleUrl = computed(() => "data:text/csv;charset=utf-8," + encodeURIComponent(sampleSheet(campaign.value?.fields)));
 const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
 // Starting or cancelling asks once; the dialog names the people and the message.
@@ -106,7 +108,11 @@ async function chooseFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   await workspace.upload(file);
-  if (sheet.value) mapping.value = { phone: sheet.value.mapping.phone, fields: { ...sheet.value.mapping.fields }, fixed: {} };
+  if (sheet.value) {
+    mapping.value = { phone: sheet.value.mapping.phone, fields: { ...sheet.value.mapping.fields }, fixed: {} };
+    if (sheet.value.fields.some(field => field.key === 'header_media'))
+      mapping.value = attachmentMapping(mapping.value, { mode: 'static', files: [] });
+  }
   mediaFile.value = "";
   event.target.value = "";
 }
@@ -192,6 +198,9 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <div v-for="[key, label] in shownCounters(campaign.status, counts)" :key="key"><span>{{ label }}</span><strong>{{ (counts[key] || 0).toLocaleString() }}</strong>
             <small v-if="key !== 'total' && key !== 'skipped' && counts.total">{{ percent(counts[key], counts.total) }}%</small></div>
         </div>
+        <p v-if="campaign.contact_counts" class="campaign-hint" role="status">
+          Sheet rows: {{ campaign.contact_counts.created }} created · {{ campaign.contact_counts.existing }} existing · {{ campaign.contact_counts.invalid }} invalid numbers.
+        </p>
         <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaign.last_error }}</p>
         <p v-if="replyWindow" :class="replyWindow.open ? 'campaign-note' : 'campaign-issue'" role="status">{{ windowNotice(replyWindow) }}</p>
         <p v-if="scheduleNotice(campaign)" class="campaign-hint" role="status">{{ scheduleNotice(campaign) }}</p>
@@ -210,8 +219,11 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         </label>
         <a class="v1-link campaign-sample" :href="sampleUrl" :download="`${campaign.title || 'campaign'} sample.csv`"><FeatherIcon name="download" :size="14" /> Download sample sheet</a>
         <div v-if="sheet && mapping" class="campaign-mapping">
-          <RelaySelect v-model="mapping.phone" label="Phone number column" :options="sheet.columns" />
-          <div v-for="field in sheet.fields" :key="field.key" class="campaign-map-row">
+          <p class="campaign-hint">Mobile numbers: {{ mapping.phone }} (first column)</p>
+          <CampaignHeaderFiles v-for="field in sheet.fields.filter(field => field.key === 'header_media')" :key="field.key"
+            :model-value="mapping.header_attachment" :media="field.media" :upload="workspace.uploadMedia" :busy="busy"
+            @update:model-value="mapping = attachmentMapping(mapping, $event)" @uploading="headerUploading = $event" />
+          <div v-for="field in sheet.fields.filter(field => field.key !== 'header_media')" :key="field.key" class="campaign-map-row">
             <RelaySelect :model-value="mapping.fields[field.key] || ''" :label="field.label" :options="columnOptions(field)" @update:model-value="setColumn(field.key, $event)" />
             <div v-if="!mapping.fields[field.key] && field.component === 'media'" class="campaign-media">
               <input type="file" :accept="(media(campaign.message.kind) || []).join(',')" :aria-label="`${field.label} file`" :disabled="busy" @change="chooseMedia" />
@@ -221,7 +233,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
             <TextInput v-else-if="!mapping.fields[field.key]" v-model="mapping.fixed[field.key]" :placeholder="field.media ? 'https://…' : 'Same value for every row'" :aria-label="`${field.label} fixed value`" />
           </div>
           <p v-if="missing.length" class="campaign-issue">Still needed: {{ missing.join(", ") }}</p>
-          <Button label="Check and import rows" variant="solid" :loading="busy" :disabled="missing.length > 0" @click="workspace.importRows(mapping)" />
+          <Button label="Check and import rows" variant="solid" :loading="busy" :disabled="missing.length > 0 || headerUploading" @click="workspace.importRows(mapping)" />
         </div>
         </template>
       </FrappeFormSection>

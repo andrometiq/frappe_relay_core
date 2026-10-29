@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { attachmentMapping } from '../services/campaignMedia';
 import { coreApi } from "../services/coreApi";
 import { cleanAudience, emptyAudience, hasAudienceChoice } from "../services/campaignAudience";
 
@@ -19,7 +20,9 @@ export function useCampaignAudience(campaign, everyone) {
       const saved = campaign.value.audience;
       audience.value = { ...emptyAudience(), ...(saved || {}), segments: { ...(saved?.segments || {}) } };
       const own = saved && campaign.value.mapping;
-      mapping.value = own ? { fields: { ...own.fields }, fixed: { ...own.fixed } } : options.value.mapping;
+      mapping.value = own ? { ...own, fields: { ...own.fields }, fixed: { ...own.fixed } } : options.value.mapping;
+      if (campaign.value.fields.some(field => field.key === 'header_media'))
+        mapping.value = attachmentMapping(mapping.value, own?.header_attachment || { mode: 'static', files: [] });
     } catch (e) { error.value = e.message; }
   }
 

@@ -45,7 +45,7 @@ export function statusTheme(status) {
 
 export function missingMapping(fields, mapping) {
   if (!mapping?.phone) return ["Phone number"];
-  return fields.filter((field) => !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
+  return fields.filter((field) => !(field.key === 'header_media' && mapping.header_attachment?.files?.length) && !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
     .map((field) => field.label);
 }
 
