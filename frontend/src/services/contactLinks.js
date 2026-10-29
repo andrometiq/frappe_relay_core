@@ -28,9 +28,8 @@ export function linksHeading(count) {
   return count ? `Linked to · ${count}` : 'Not linked yet'
 }
 
-// With one linkable type the form picks it, so the hint skips the type step.
-export function linkHint(types) {
-  if (types.length === 1) return `Find the ${types[0].label.toLowerCase()}. The chat then shows its name.`
+// Always confirm the business type, including when only one is enabled.
+export function linkHint() {
   return 'Choose the record type, then find the record. The chat then shows its name.'
 }
 

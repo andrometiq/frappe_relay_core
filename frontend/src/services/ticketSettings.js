@@ -80,7 +80,7 @@ export function ticketFilterRoute(filters) {
 export function ticketFiltersFromRoute(hash) {
   const params = new URLSearchParams(hash.split('?')[1] || '')
   const filters = emptyTicketFilters()
-  for (const field of ['assigned_to', 'ticket_type', 'exclude_assignees']) {
+  for (const field of ['assigned_to', 'ticket_type', 'exclude_assignees', 'business_type']) {
     if (params.has(field)) filters[field] = params.get(field)
   }
   return filters

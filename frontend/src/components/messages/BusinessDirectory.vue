@@ -1,168 +1,134 @@
 <script setup>
-import { useLoadMore } from '../../composables/useLoadMore'
-import ChoiceField from '../fields/ChoiceField.vue'
-import { linkedTitle } from '../../services/linkedTitle'
-import { recordTitle } from '../../services/recordTitle'
-import { ref, onMounted, onBeforeUnmount, watch } from "vue";
-import { TextInput, ErrorMessage, FeatherIcon } from "@relay/ui";
-import RemoteLinkField from "../fields/RemoteLinkField.vue";
-import { coreApi } from "../../services/coreApi";
-import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
-import VirtualScroller from "primevue/virtualscroller";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
+import { coreApi } from '../../services/coreApi'
+import { browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread } from '../../services/businessBrowse'
+import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
+import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
+import { listTime } from '../relativeTime'
+import LoadingRows from '../LoadingRows.vue'
 
-const props = defineProps({ selected: String, selectedDoctype: String, busy: Boolean });
-const emit = defineEmits(["select"]);
-const types = ref([]), doctype = ref(""), group = ref(""), groupField = ref(""),
-  query = ref(""), records = ref([]), next = ref(null), owner = ref(""),
-  user = ref(""), loading = ref(false), error = ref(""), filtersOpen = ref(false);
-let timer, sequence = 0;
-
-async function loadRecords(reset = true) {
-  if (!doctype.value || (!reset && (loading.value || next.value === null))) return;
-  const current = reset ? ++sequence : sequence;
-  const start = reset ? 0 : next.value;
-  if (reset) { records.value = []; next.value = null; owner.value = ""; }
-  loading.value = true; error.value = "";
+const props = defineProps({ selected: String, selectedDoctype: String, busy: Boolean, contacts: Boolean, filters: Object })
+const emit = defineEmits(['select', 'contact', 'navigate'])
+const base = props.contacts ? '#/contacts' : '#/messages'
+const state = ref(readBrowse(location.hash)), query = ref(state.value.query), items = ref([]), fields = ref([])
+const loading = ref(false), error = ref(''), next = ref(null), heading = ref(null)
+const people = computed(() => props.contacts && (query.value.trim() || state.value.record || state.value.unlinked))
+const crumbs = computed(() => browseCrumbs(state.value, fields.value))
+let sequence = 0
+async function load(append = false) {
+  const request = ++sequence
+  loading.value = true; error.value = ''
+  if (!append) { items.value = []; next.value = null }
   try {
-    const result = await coreApi("business_groups.records", {
-      doctype: doctype.value, group: group.value, query: query.value, start,
-    });
-    if (current !== sequence) return;
-    const known = new Set(records.value.map(record => record.name));
-    records.value = reset ? result.items : [
-      ...records.value,
-      ...result.items.filter(record => !known.has(record.name)),
-    ];
-    next.value = result.next;
-    owner.value = result.assigned_to;
-    user.value = result.user;
-  } catch (e) {
-    if (current === sequence) error.value = e.message;
-  } finally {
-    if (current === sequence) loading.value = false;
-  }
+    const page = people.value
+      ? await coreApi('api.contact_directory', { query: query.value, after: append ? next.value : null,
+        // Searching at any depth finds contacts directly, without restricting the business path.
+        business_type: query.value.trim() ? null : state.value.doctype || null,
+        business_name: query.value.trim() ? null : state.value.record || null,
+        unlinked: !query.value.trim() && state.value.unlinked ? 1 : 0 })
+      : await coreApi('business_groups.browse', { doctype: state.value.doctype || null,
+        path: JSON.stringify(state.value.path), query: query.value, start: append ? next.value : 0,
+        contacts: props.contacts ? 1 : 0, ...props.filters })
+    if (request !== sequence) return
+    const rows = people.value ? page.items.map(row => ({ ...row, kind: 'contact', label: row.full_name || row.name })) : page.items
+    items.value = append ? [...items.value, ...rows] : rows
+    fields.value = page.fields || fields.value; next.value = page.next
+  } catch (e) { if (request === sequence) error.value = e.message }
+  finally { if (request === sequence) loading.value = false }
 }
-
-async function loadInitialGroup() {
-  const current = ++sequence;
-  records.value = []; next.value = null; group.value = ""; groupField.value = ""; query.value = "";
-  if (!doctype.value) return;
-  loading.value = true; error.value = "";
-  try {
-    const result = await coreApi("business_groups.directory", { doctype: doctype.value, query: "", include_all: 1 });
-    if (current !== sequence) return;
-    groupField.value = result.field;
-    group.value = result.items[0]?.value || "";
-  } catch (e) {
-    if (current === sequence) error.value = e.message;
-  } finally {
-    if (current === sequence) loading.value = false;
-  }
-  if (current === sequence) await loadRecords(true);
+const search = useDebouncedSearch(query, () => load(), () => { ++sequence; items.value = []; next.value = null; loading.value = true })
+let changingLevel = false
+function saveSearch() {
+  if (changingLevel) return
+  const params = new URLSearchParams(location.hash.split('?')[1] || '')
+  if (params.has('business_name') || params.has('contact') || params.has('message')) return
+  window.history.replaceState(window.history.state, '', browseRoute(base, { ...state.value, query: query.value }))
 }
-
-function scrolled(event) {
-  const node = event.currentTarget;
-  if (node.scrollLeft) node.scrollLeft = 0;
+watch(query, saveSearch, { flush: 'sync' })
+function navigate(value) {
+  saveSearch()
+  changingLevel = true
+  query.value = ''; state.value = { ...value, query: '' }
+  changingLevel = false
+  const route = browseRoute(base, state.value)
+  if (location.hash !== route) window.history.pushState({ relayList: true }, '', route)
+  emit('navigate')
+  nextTick(() => heading.value?.focus())
 }
-
-function timeLabel(value) {
-  if (!value) return "";
-  const date = new Date(String(value).replace(" ", "T"));
-  if (Number.isNaN(date.getTime())) return "";
-  const today = new Date();
-  if (date.toDateString() === today.toDateString())
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const age = today.getTime() - date.getTime();
-  if (age >= 0 && age < 6 * 86400000)
-    return date.toLocaleDateString([], { weekday: "short" });
-  return date.toLocaleDateString([], { day: "2-digit", month: "2-digit", year: "2-digit" });
+function choose(tile) {
+  saveSearch()
+  if (tile.kind === 'contact') return emit('contact', tile.name)
+  if (tile.kind === 'record' && !props.contacts) return emit('select', state.value.doctype, tile)
+  navigate(enterBrowse(state.value, tile))
 }
-
-async function claim(release = false) {
-  loading.value = true; error.value = "";
-  try {
-    const result = await coreApi("business_groups.claim", {
-      doctype: doctype.value, group: group.value, release,
-    }, true);
-    owner.value = result.assigned_to;
-  } catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
+function readRoute() {
+  if (location.hash.split('?')[0] !== base) return
+  const params = new URLSearchParams(location.hash.split('?')[1] || '')
+  // Opening a thread keeps this browser at its parent until Back returns here.
+  if (params.has('business_name') || params.has('contact') || params.has('message')) return
+  state.value = readBrowse(location.hash); query.value = state.value.query; emit('navigate')
 }
-
-watch(query, () => {
-  clearTimeout(timer); ++sequence; next.value = null; records.value = [];
-  timer = setTimeout(() => loadRecords(true), 300);
-});
-watch(() => props.selectedDoctype, async value => {
-  if (value && types.value.includes(value) && value !== doctype.value) {
-    doctype.value = value;
-    await loadInitialGroup();
-  }
-});
-onMounted(async () => {
-  try {
-    types.value = await coreApi("api.business_types");
-    doctype.value = types.value.includes(props.selectedDoctype) ? props.selectedDoctype : types.value[0] || "";
-    if (doctype.value) await loadInitialGroup();
-  } catch (e) { error.value = e.message; }
-});
-useRealtimeRefresh(["Relay Message", "Contact", "Relay Conversation Summary"], ["messages", "incoming", "contacts", "reports"], () => loadRecords(true));
-onBeforeUnmount(() => { clearTimeout(timer); ++sequence; });
-const moreSentinel = useLoadMore({ loading, hasMore: () => next.value !== null, error, load: () => loadRecords(false) })
+watch(state, () => load())
+watch(() => JSON.stringify(props.filters), () => navigate({ ...readBrowse(base), query: '' }))
+onMounted(() => { load(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
+onBeforeUnmount(() => { ++sequence; window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
+useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'incoming', 'contacts', 'reads', 'chats', 'permissions'], () => load())
 </script>
 
 <template>
-  <div class="directory-heading">
-    <div class="directory-identity"><h2 class="business-browse-title">Browse records</h2></div>
-    <button type="button" class="directory-heading-action" aria-label="Filter business chats" title="Filter business chats"
-      :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><FeatherIcon name="filter" class="h-4 w-4" /></button>
-  </div>
-  <ErrorMessage class="px-4" :message="error" />
-  <div class="business-directory-controls">
-    <div class="business-search-row"><TextInput type="search" maxlength="80" v-model="query" placeholder="Search or start a business chat"
-      aria-label="Search businesses" :disabled="!doctype"><template #prefix><FeatherIcon name="search" class="h-4 w-4 text-ink-gray-5" /></template></TextInput></div>
-    <div v-if="types.length > 1" class="business-type-options" role="radiogroup" aria-label="Record type">
-      <button v-for="type in types" :key="type" type="button" role="radio" :aria-checked="doctype === type" :disabled="busy || loading"
-        @click="doctype = type; loadInitialGroup()">{{ type }}</button>
-    </div>
-    <div v-if="filtersOpen" class="business-directory-filters">
-      <RemoteLinkField v-if="groupField" :key="doctype + ':' + groupField" v-model="group"
-        :field="{ label: 'Business team', method: 'business_groups.directory', params: { doctype, include_all: 1 }, placeholder: 'Search teams…', readOnly: busy || loading }"
-        @update:model-value="loadRecords(true)" />
-      <div v-if="groupField && records.length" class="business-group-owner">
-        <span>{{ owner ? 'Handled by ' + linkedTitle('User', owner, 'Team member') : "Unclaimed group" }}</span>
-        <button v-if="!owner" :disabled="loading" @click="claim()">Take group</button>
-        <button v-else-if="owner === user" :disabled="loading" @click="claim(true)">Release</button>
-      </div>
-    </div>
-  </div>
-  <VirtualScroller :items="records" :item-size="72" class="directory-rows" aria-label="Businesses"
-    :pt="{ content: { class: 'directory-virtual-content' } }" @scroll.passive="scrolled">
-    <template #item="{ item: record }">
-      <button :key="record.name" class="directory-contact relative" :class="{ selected: selected === record.name }"
-        @click="emit('select', doctype, record)">
-        <span class="business-avatar" aria-hidden="true">{{ recordTitle(record, 'Business').slice(0, 1).toUpperCase() }}</span>
-        <span class="directory-contact-copy">
-          <span class="directory-contact-top"><strong>{{ recordTitle(record, 'Business') }}</strong><time v-if="record.last_activity">{{ timeLabel(record.last_activity) }}</time></span>
-          <span class="directory-contact-bottom"><small>{{ record.last_message || record.summary || record.description || "No WhatsApp messages yet" }}</small><span v-if="record.unread" class="directory-unread">{{ record.unread > 99 ? "99+" : record.unread }}</span></span>
+  <section class="business-browser" :aria-busy="loading">
+    <nav v-if="state.doctype || state.unlinked" class="business-crumbs" aria-label="Business navigation">
+      <button v-for="(crumb, index) in crumbs" :key="index" type="button" :aria-current="index === crumbs.length - 1 ? 'page' : undefined" :title="crumb.title" @click="navigate(crumb.state)">
+        <FeatherIcon v-if="index" name="chevron-right" :size="14" aria-hidden="true" />{{ crumb.label }}
+      </button>
+    </nav>
+    <h3 ref="heading" tabindex="-1" class="business-level">{{ people ? (query.trim() ? 'Contact search' : 'Contacts') : fields[state.path.length]?.label || (state.doctype ? 'Business records' : 'Business types') }}</h3>
+    <form class="business-search" role="search" @submit.prevent="search">
+      <TextInput v-model="query" type="search" maxlength="80" :aria-label="contacts ? 'Search contacts' : 'Search business records'" :placeholder="contacts ? 'Search name, number or email' : 'Search record title or name'">
+        <template #prefix><FeatherIcon name="search" /></template>
+      </TextInput>
+    </form>
+    <ErrorMessage :message="error" />
+    <div class="business-tiles">
+      <LoadingRows v-if="loading && !items.length" label="Loading records…" />
+      <button v-for="tile in items" :key="JSON.stringify([tile.kind, tile.doctype, tile.name, tile.value])" type="button" class="business-tile"
+        :disabled="busy" :aria-pressed="tile.kind === 'record' && selectedDoctype === tile.doctype && selected === tile.name" @click="choose(tile)">
+        <Avatar v-if="tile.kind === 'contact'" :label="tile.label" />
+        <span v-else class="business-tile-icon" aria-hidden="true"><FeatherIcon :name="tile.kind === 'record' ? 'file-text' : tile.kind === 'unlinked' ? 'users' : 'folder'" :size="20" /></span>
+        <span class="business-tile-copy"><strong>{{ tile.label }}</strong>
+          <small v-if="contacts && tile.kind !== 'contact'">{{ tileCount(tile.contact_count, 'contact') }}</small>
+          <small v-else-if="tile.kind === 'type' || tile.kind === 'group'">{{ tileCount(tile.record_count, 'record') }}</small>
+          <small v-else-if="tile.kind === 'record'">{{ tile.last_activity ? 'Last activity ' + listTime(tile.last_activity) : 'No activity yet' }}</small>
+          <small v-else-if="tile.kind === 'contact'">{{ tile.mobile_no || tile.name }}</small>
         </span>
-      <span v-if="record === records.at(-1) && next !== null" ref="moreSentinel" class="absolute bottom-0 left-0 w-full h-px" aria-hidden="true" /></button>
-    </template>
-  </VirtualScroller>
-  <div class="directory-loading-slot">
-    <div v-if="loading" role="status" aria-label="Loading businesses" class="directory-skeletons">
-      <span v-for="index in 3" :key="index" class="directory-skeleton" />
+        <span v-if="!contacts && tileUnread(tile)" class="directory-unread" :aria-label="tileCount(tileUnread(tile), tile.kind === 'record' ? 'unread message' : 'unread record')">{{ tileUnread(tile) }}</span>
+        <FeatherIcon name="chevron-right" :size="16" aria-hidden="true" />
+      </button>
+      <p v-if="!loading && !error && !items.length" class="business-empty">No matching {{ people ? 'contacts' : 'records' }}.</p>
+      <Button v-if="error" label="Retry" @click="load()" />
+      <Button v-if="next != null" label="Load more" :loading="loading" @click="load(true)" />
     </div>
-    <p v-else-if="!records.length" class="p-4 text-sm text-ink-gray-5">
-      {{ types.length ? "No businesses match this view." : "No business type is configured." }}
-    </p>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.business-browse-title { font-size:14px; font-weight:600; }
-.business-type-options { display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 8px; }
-.business-type-options button { min-height:28px; padding:0 11px; border:1px solid var(--relay-stroke); border-radius:14px; color:var(--relay-ink-2); font-size:12.5px; }
-.business-type-options button[aria-checked="true"] { border-color:var(--relay-accent); background:var(--relay-accent-soft); color:var(--relay-accent-text); font-weight:600; }
+.business-browser { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; min-width:0; overflow:auto; color:var(--relay-ink); }
+.business-crumbs { display:flex; flex-wrap:wrap; gap:0 4px; padding:4px 12px; }
+.business-crumbs button { display:inline-flex; align-items:center; gap:4px; min-height:44px; min-width:44px; padding:4px; font-size:12px; color:var(--relay-ink-3); overflow-wrap:anywhere; text-align:left; }
+.business-crumbs [aria-current=page] { color:var(--relay-ink); font-weight:600; }
+.business-level { padding:0 16px; font-size:14px; font-weight:600; }
+.business-search { padding:12px 16px; }
+.business-search :deep(input) { min-height:44px; }
+.business-tiles { display:flex; flex-direction:column; gap:8px; padding:0 12px 16px; }
+.business-tile { display:flex; align-items:center; gap:12px; min-height:76px; width:100%; padding:12px; text-align:left; border:1px solid var(--relay-stroke); border-radius:12px; background:var(--relay-layer); }
+.business-tile:hover, .business-tile[aria-pressed=true] { background:var(--relay-accent-soft); border-color:var(--relay-accent); }
+.business-tile-icon { display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:10px; background:var(--relay-accent-soft); color:var(--relay-accent-text); }
+.business-tile-copy { display:flex; flex:1; flex-direction:column; min-width:0; gap:4px; overflow-wrap:anywhere; }
+.business-tile-copy strong { font-size:14px; font-weight:600; }
+.business-tile-copy small, .business-empty { font-size:12px; color:var(--relay-ink-3); }
+.business-tile:focus-visible, .business-crumbs button:focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
+@media (max-width:768px) {
+  .business-browser :deep(input), .business-browser :deep(button:not(.business-tile)) { min-height:44px !important; min-width:44px; }
+}
 </style>
