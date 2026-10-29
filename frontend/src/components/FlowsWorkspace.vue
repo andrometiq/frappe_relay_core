@@ -14,6 +14,7 @@ import LoadingRows from './LoadingRows.vue'
 
 const capabilities = inject('relayCapabilities')
 const canEdit = computed(() => Boolean(capabilities.value.manage))
+const availableStepKinds = computed(() => STEP_KINDS.filter(item => capabilities.value.ai || item.value !== 'ai_skill'))
 const rows = ref([]), next = ref(null), query = ref(''), filter = ref('all')
 const draft = ref(null), saved = ref(''), catalog = ref([]), runs = ref([]), responses = ref(null)
 const busy = ref(false), error = ref(''), notice = ref(''), stepKind = ref('input'), stepGroup = ref('Standard'), editor = ref(null)
@@ -63,7 +64,9 @@ async function save() {
 const publish = () => run(async () => { edit(await coreApi('flows.service.publish', { name: draft.value.name }, true)); notice.value = 'Published. New conversations use this version.'; await load() })
 const toggle = () => run(async () => { edit(await coreApi('flows.service.set_enabled', { name: draft.value.name, enabled: draft.value.enabled ? 0 : 1 }, true)); await load() })
 const showResponses = row => run(async () => { responses.value = await coreApi('flows.service.responses', { name: row.name }) })
-function addStep() { draft.value.nodes.push(newStep(stepKind.value, draft.value.nodes)) }
+function addStep() {
+  if (availableStepKinds.value.some(item => item.value === stepKind.value)) draft.value.nodes.push(newStep(stepKind.value, draft.value.nodes))
+}
 function toggleType(step, type) {
   const accept = new Set(step.accept || CONTENT_TYPES)
   accept.has(type) ? accept.delete(type) : accept.add(type)
@@ -119,6 +122,8 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             <datalist id="flow-variables"><option v-for="name in variables" :key="name" :value="name" /></datalist>
             <ol class="flow-steps">
               <li v-for="(step, index) in draft.nodes" :key="index" class="flow-step" :data-kind="step.kind">
+                <p v-if="!capabilities.ai && step.kind === 'ai_skill'">AI features are turned off.</p>
+                <template v-else>
                 <div class="flow-step-heading"><span class="flow-step-number">{{ index + 1 }}</span><strong>{{ stepLabel(step.kind) }}</strong><input class="flow-step-id" :value="step.id" aria-label="Step name" :disabled="!canEdit || busy" @change="renameStep(draft.nodes, step, $event.target.value.trim())" /><span class="flow-step-next">{{ nextLabel(draft.nodes, index) }}</span></div>
                 <FormControl v-if="!['condition', 'action', 'wait', 'ai_skill', 'assign'].includes(step.kind)" v-model="step.text" type="textarea" rows="2" :label="step.kind === 'input' ? 'Question' : step.kind === 'end' ? 'Final message (optional)' : step.kind === 'topic' ? 'Summary' : 'Message'" :disabled="!canEdit || busy" />
                 <template v-if="step.kind === 'input'">
@@ -146,9 +151,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                   <FormControl v-model="step.max_visits" type="number" min="1" max="100" label="Repeat limit" placeholder="20" :disabled="!canEdit || busy" />
                   <div class="flow-step-buttons"><Button icon="arrow-up" aria-label="Move step up" :disabled="!canEdit || busy || index === 0" @click="moveStep(draft.nodes, index, -1)" /><Button icon="arrow-down" aria-label="Move step down" :disabled="!canEdit || busy || index === draft.nodes.length - 1" @click="moveStep(draft.nodes, index, 1)" /><Button icon="trash" aria-label="Remove step" :disabled="!canEdit || busy || draft.nodes.length === 1" @click="removeStep(draft.nodes, index)" /></div>
                 </div>
+                </template>
               </li>
             </ol>
-            <div class="flow-add"><FormControl v-model="stepGroup" type="select" label="Step group" :options="['Standard', 'Advanced']" :disabled="!canEdit || busy" @update:model-value="stepKind = $event === 'Advanced' ? 'action' : 'input'" /><FormControl v-model="stepKind" type="select" label="New step" :options="STEP_KINDS.filter(item => (item.group || 'Standard') === stepGroup)" :disabled="!canEdit || busy" /><Button label="Add step" icon-left="plus" :disabled="!canEdit || busy || draft.nodes.length >= 30" @click="addStep" /></div>
+            <div class="flow-add"><FormControl v-model="stepGroup" type="select" label="Step group" :options="['Standard', 'Advanced']" :disabled="!canEdit || busy" @update:model-value="stepKind = $event === 'Advanced' ? 'action' : 'input'" /><FormControl v-model="stepKind" type="select" label="New step" :options="availableStepKinds.filter(item => (item.group || 'Standard') === stepGroup)" :disabled="!canEdit || busy" /><Button label="Add step" icon-left="plus" :disabled="!canEdit || busy || draft.nodes.length >= 30" @click="addStep" /></div>
             <p class="text-sm">Use <code v-pre>{{answer}}</code> in a message to insert an answer, or <code v-pre>{{result.field}}</code> for a business action result. A loop must stop at a question.</p>
           </fieldset>
           <div class="flow-actions"><Button type="submit" label="Save draft" variant="solid" :loading="busy" :disabled="!canEdit || (!dirty && Boolean(draft.name))" />
