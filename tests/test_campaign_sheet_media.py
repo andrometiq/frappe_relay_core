@@ -27,6 +27,11 @@ class SheetContactTests(unittest.TestCase):
         self.sibling = self.enterContext(patch.object(contact_lifecycle, 'sibling_contact', return_value=None))
         self.create = self.enterContext(patch.object(contact_lifecycle, 'whatsapp_contact', return_value='RELAY-C1'))
 
+    def test_length_possible_but_invalid_number_is_not_enrolled(self):
+        self.assertEqual(bulk.sheet_contact('WA', '9199999787611'), ('invalid', 'Invalid phone number'))
+        self.create.assert_not_called()
+        self.fake.cache.lock.assert_not_called()
+
     def test_new_number_uses_shared_helper_and_commits_before_unlock(self):
         events = []
         lock = self.fake.cache.lock.return_value
