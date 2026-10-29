@@ -145,6 +145,7 @@ class AdmissionTests(unittest.TestCase):
         self.message = _dict(name='message', relay_contact='person', channel='channel',
                              direction='Incoming', content='Ledger 1250', message_type='text')
         self.enterContext(patch.object(service,'frappe',self.fake))
+        self.notice = self.enterContext(patch('relay_core.ai.handoff.queue_acknowledgement'))
         self.save = self.enterContext(patch.object(service,'internal_save'))
         self.enterContext(patch.object(service,'message_hash',return_value='hash'))
         self.contact = _dict(automation_generation=0, automation_paused=0, save=Mock())

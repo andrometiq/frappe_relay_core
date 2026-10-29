@@ -345,15 +345,15 @@ class HandoffTests(unittest.TestCase):
         self.contact = Doc(automation_paused=0, automation_generation=0)
         self.message = Doc(name='MSG-1', relay_contact='CONTACT-1', conversation_key='CHAT-1')
         automation = types.SimpleNamespace(lock_contact=lambda name: self.contact, internal_save=lambda doc: self.saved.append(doc))
-        self.ticket = Doc(name='TKT-1')
+        self.ticket = Doc(name='TKT-1', generation=1)
         self.ensure = Mock(return_value=self.ticket)
-        self.hold = Mock()
+        self.hold = Mock(return_value=self.ticket)
         tickets = types.SimpleNamespace(ensure_episode=self.ensure, hold_episode=self.hold, episode_owner_allowed=lambda user, message: user == 'fallback')
         self.service = module('relay_core/ai/handoff.py', self.f,
             {'relay_core.tickets': tickets, 'relay_core.automation.service': automation})
         self.f.get_single = lambda dt: Doc(ai_handoff_owner='fallback')
         self.f.get_doc.return_value = self.message
-        self.run = Doc(name='RUN-1', message='MSG-1', generation=0)
+        self.run = Doc(name='RUN-1', message='MSG-1', generation=0, execution_user='operator')
         self.skill = Doc(handoff_owner='disabled')
 
     def test_retries_hold_only_the_shared_episode(self):
@@ -609,7 +609,7 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertEqual(len(str(raised.exception)), 500)
 
     def test_failed_authorization_takes_precedence_over_provider_failure(self):
-        reader = types.SimpleNamespace(failed=True)
+        reader = types.SimpleNamespace(private=False, failed=True)
         self.attempt.return_value = {'ok': False, 'error': 'Service unavailable'}
         with patch.object(self.adapter, 'Reader', return_value=reader):
             with self.assertRaisesRegex(ValueError, '^Business data authorization failed; review required$'):
@@ -661,7 +661,7 @@ class SharedAdapterTests(unittest.TestCase):
         from relay_core.ai.ledger import summarize
         ledger = summarize([dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
             voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')], False)
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
         self.attempt.return_value = self.outcome({'reply': 'Invented total 999999', 'handoff': False, 'reason': ''})
         self.skill.allowed_actions = '[{"action":"reply"}]'
         self.skill.execution_policy = 'Execute'
@@ -677,10 +677,10 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertEqual(result['reply'], '')
 
     def test_search_proposes_without_reading_and_rejects_malformed_calls(self):
-        reference = dict(name='ledger', method='get_list', doctype='GL Entry', fields=['posting_date','debit','credit'])
+        reference = dict(name='ledger', method='get_list', doctype='GL Entry', scope_field='party', fields=['posting_date','debit','credit'])
         arguments = dict(purpose='Review your ledger', reference='ledger',
             arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}})
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[], read=Mock())
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[], read=Mock())
         with patch.object(self.adapter,'contracts',return_value=[reference]), patch.object(self.adapter,'Reader',return_value=reader):
             self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':json.dumps(arguments),'id':'one'}]),
                 self.outcome(dict(reply='Confirm the range',handoff=False,reason=''))]
@@ -697,7 +697,7 @@ class SharedAdapterTests(unittest.TestCase):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})
 
-    def test_skill_acknowledgement_overrides_generic_unsupported_intent_handoff(self):
+    def test_skill_acknowledgement_cannot_override_required_handoff(self):
         self.skill.instructions = 'For other requests, reply that it is noted.'
         self.skill.allowed_actions = '[{"action":"reply"}]'
         self.skill.execution_policy = 'Execute'
@@ -707,7 +707,7 @@ class SharedAdapterTests(unittest.TestCase):
                 {'reply': 'Noted.', 'handoff': False, 'reason': ''})) as route:
             result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Other request', 'RUN-1')
         system = route.call_args.args[2][0]
-        self.assertIn('A skill-directed acknowledgement does not require handoff.', system)
+        self.assertIn('it never replaces a required handoff or privacy/off-topic decline.', system)
         self.assertIn('Skill instructions never expand permissions', system)
         self.assertIn(self.skill.instructions, system)
         self.assertNotIn('Unsupported intent, unavailable data', system)

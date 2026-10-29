@@ -161,13 +161,15 @@ def episode(run, message, *, hold=False):
 def triage(run, message, reason):
     run.reason = reason[:500]
     try:
-        episode(run, message, hold=True)
+        ticket = episode(run, message, hold=True)
     except (ValueError, frappe.PermissionError, frappe.ValidationError):
         # The run is the durable intent when the configured owner loses access.
         run.stage, run.status = 'Triage', 'Pending'
         run.reason = 'Triage owner unavailable; review required'
     else:
         run.stage, run.status = 'Triage', 'Handoff'
+        from relay_core.ai.handoff import queue_acknowledgement
+        queue_acknowledgement(run, ticket, user=ticket.assigned_to)
     internal_save(run)
 
 
@@ -202,7 +204,7 @@ def create_run(doc):
     if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc):
         return {'status': 'Ignored'}  # An opt-out or opt-in keyword gets no automatic reply.
     from relay_core.flows.service import claims, create_event
-    from relay_core.ai.matching import human_request
+    from relay_core.ai.matching import human_request, human_reason
     from relay_core.email_preferences import automatic_allowed, automatic_reply_exists
     from relay_core.automation.provenance import context_of
     # A shared source lock serializes flow/API/drain replay and email rules.
@@ -246,7 +248,7 @@ def create_run(doc):
     if owned:
         run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
     elif human_request(doc.content):
-        triage(run, doc, 'Sender requested a person')
+        triage(run, doc, human_reason(doc.content))
     elif waiting or flow and not pipeline:
         create_event(doc)
         run.stage, run.status = 'Flow', 'Completed'

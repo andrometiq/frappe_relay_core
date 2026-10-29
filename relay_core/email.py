@@ -122,6 +122,8 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
             'destination':[source.relay_contact,source.channel,source.sender_endpoint],
             'notification':notification, 'automation_run':outgoing_run.get(), 'flow_run':messaging.outgoing_flow.get(),
             'business_event':outgoing_event.get()}
+        from relay_core.ai.handoff import outgoing_notice
+        if outgoing_notice.get(): payload['handoff_notice'] = True
         messaging.delivery_snapshot(payload, source, context)
         action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,
             'source_message':message,'start_contact':None if message else source.relay_contact,
