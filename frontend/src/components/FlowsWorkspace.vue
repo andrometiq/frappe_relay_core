@@ -138,7 +138,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                   <FormControl v-model="step._arguments" type="textarea" rows="3" label="Arguments (JSON; {&quot;var&quot;: &quot;answer&quot;} uses an answer)" class="flow-code" :disabled="!canEdit || busy" />
                 </template>
                 <div v-if="step.kind === 'ai_skill'" class="grid gap-3 sm:grid-cols-2"><RemoteLinkField v-model="step.ai_skill" :field="stepReference('ai_skill', step.ai_skill)" /><FormControl v-model="step.on_reply" type="select" label="After the skill completes" :options="['Continue', 'Stop']" :disabled="!canEdit || busy" /></div>
-                <div v-if="step.kind === 'assign'" class="grid gap-3 sm:grid-cols-2"><RemoteLinkField v-model="step.team" :field="stepReference('team', step.team)" /><RemoteLinkField v-model="step.user" :field="stepReference('user', step.user)" /></div>
+                <div v-if="step.kind === 'assign'" class="grid gap-3 sm:grid-cols-2"><RemoteLinkField v-model="step.user" :field="stepReference('user', step.user)" /></div>
                 <FormControl v-if="step.kind === 'wait'" v-model="step.seconds" type="number" min="1" max="86400" label="Seconds" :disabled="!canEdit || busy" />
                 <div v-if="step.kind === 'topic'" class="grid gap-3 sm:grid-cols-3"><FormControl v-model="step.title" label="Topic title" :disabled="!canEdit || busy" /><FormControl v-model="step.category" label="Category" :disabled="!canEdit || busy" /><FormControl v-model="step.status" type="select" label="Status" :options="['Open', 'Waiting', 'Resolved', 'Archived']" :disabled="!canEdit || busy" /></div>
                 <div class="flow-step-footer">

@@ -41,8 +41,8 @@ const navigation = [
   { name: 'Channel automation', label: 'Channel automation', icon: 'list-ordered', manage: true },
   { name: 'Flows', label: 'Flows', icon: 'git-branch', flows: true },
   { name: 'Skills', label: 'AI skills', icon: 'bot', ai: true, skills: true },
-  { name: 'Settings', label: 'Settings', icon: 'settings', configure: true },
-  { name: 'Teams', label: 'Teams & access', icon: 'user-check', teams: true },
+  { name: 'Settings', label: 'Settings', icon: 'settings', manage: true },
+  { name: 'Teams', label: 'Roles & access', icon: 'user-check' },
   { name: 'Activity', label: 'Activity & health', icon: 'activity', configure: true },
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')

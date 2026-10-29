@@ -7,10 +7,12 @@ import { assignmentLabel } from '../src/services/assignment.js'
 const read = path => readFile(new URL('../src/' + path, import.meta.url), 'utf8')
 const title = (_doctype, name) => name.toUpperCase()
 
-test('the Teams page needs the teams capability, which the backend gives only while teams are on', async () => {
-  assert.match(await read('SiteApp.vue'), /name: 'Teams'[^}]*teams: true/)
-  assert.equal(navAllowed({ name: 'Teams', teams: true }, { manage: true, teams: false }), false)
-  assert.equal(navAllowed({ name: 'Teams', teams: true }, { manage: true, teams: true }), true)
+test('Roles and access replaces team controls and Settings is available to managers', async () => {
+  assert.match(await read('SiteApp.vue'), /name: 'Teams'[^}]*label: 'Roles & access'/)
+  assert.match(await read('SiteApp.vue'), /name: 'Settings'[^}]*manage: true/)
+  assert.doesNotMatch(await read('components/AccessWorkspace.vue'), /Communication teams|teams.save|TeamsWorkspace/)
+  assert.doesNotMatch(await read('components/TeamsWorkspace.vue'), /Take group|business_groups.claim/)
+  assert.doesNotMatch(await read('components/SiteSettings.vue'), /Enable teams/)
 })
 
 test('the inbox shows folder controls only while folders are on', async () => {
