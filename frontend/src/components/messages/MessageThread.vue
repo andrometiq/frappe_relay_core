@@ -143,6 +143,13 @@ watch(
   },
 );
 let visibleTimer;
+// Go to latest clears the saved position; release the reader's scroll anchor too.
+watch(() => props.position, async (position, previous) => {
+  if (position || !previous) return;
+  await nextTick();
+  scroll.toBottom();
+  trackVisible();
+});
 function trackVisible() {
   clearTimeout(visibleTimer);
   visibleTimer = setTimeout(() => {

@@ -92,7 +92,7 @@ test('realtime discovers late provider timestamps and drains ingestion pages',as
   const first=row(1,'2026-10-24'),late=row(2,'2020-01-01'),last=row(3,'2026-10-25'),calls=[]
   const api=async(method,args)=>{
     calls.push({method,args})
-    if(method==='api.message_snapshots')return {items:[first]}
+    if(method==='api.message_snapshots')return {items:[first,late,last].filter(row=>JSON.parse(args.names).includes(row.name))}
     assert.equal(method,'api.messages')
     if(!args.since)return {items:[first],first:first.name,last:first.name,ingestion_cursor:first.name}
     assert.equal(args.after,undefined)
@@ -127,6 +127,8 @@ test('completed queued action retires its key; identical composition gets a fres
     assert.equal(fixture.state.error.value,'')
     assert.equal(Object.keys(sessionStorage).length,2)
     await fixture.refresh('message_actions')
+    // Pending-action recovery now runs independently of the new-row refresh.
+    await new Promise(resolve=>setImmediate(resolve))
     assert.equal(Object.keys(sessionStorage).length,0)
     await fixture.state.send(first,'text',{text:'Same message'})
     assert.deepEqual(keys,['key-1','key-2'])
