@@ -1,4 +1,6 @@
 <script setup>
+import CampaignHeaderFiles from './CampaignHeaderFiles.vue';
+import { attachmentMapping } from '../../services/campaignMedia';
 import ChoiceField from '../fields/ChoiceField.vue'
 import { readableName, recordTitle } from '../../services/recordTitle'
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -15,7 +17,7 @@ const everyone = ref(Boolean(props.campaign.audience) && !hasAudienceChoice(prop
 const { options, audience, chosen, mapping, preview, found, error, busy, counting, load, search, importContacts } = useCampaignAudience(campaign, everyone);
 // Everyone means no filters; contacts removed by hand stay removed.
 watch(everyone, (value) => { if (value) audience.value = { ...emptyAudience(), exclude: audience.value.exclude }; });
-const query = ref(""), mediaFile = ref("");
+const query = ref(""), mediaFile = ref(""), headerUploading = ref(false);
 const known = reactive({});
 
 const tagOptions = computed(() => [{ value: "", label: "Any tag" }, ...(options.value?.tags || [])]);
@@ -91,7 +93,10 @@ onMounted(load);
 
     <div v-if="campaign.fields.length" class="audience-values">
       <strong>Message values</strong>
-      <div v-for="field in campaign.fields" :key="field.key" class="audience-value">
+      <CampaignHeaderFiles v-for="field in campaign.fields.filter(field => field.key === 'header_media')" :key="field.key"
+        :model-value="mapping.header_attachment" :media="field.media" :upload="uploadMedia" :busy="busy"
+        @update:model-value="mapping = attachmentMapping(mapping, $event)" @uploading="headerUploading = $event" />
+      <div v-for="field in campaign.fields.filter(field => field.key !== 'header_media')" :key="field.key" class="audience-value">
         <ChoiceField :model-value="mapping.fields[field.key] || ''" :field="{ label: field.label, options: valueOptions(field, options?.sources || []) }"
           @update:model-value="setSource(field.key, $event)" />
         <div v-if="!mapping.fields[field.key]" class="audience-fixed">
@@ -102,7 +107,7 @@ onMounted(load);
       </div>
     </div>
     <p v-if="missing.length" class="audience-issue">Still needed: {{ missing.join(", ") }}</p>
-    <div><Button :label="preview?.count ? `Use these ${preview.count.toLocaleString()} people` : 'Use these people'" variant="solid" :loading="busy" :disabled="!chosen || !ready" @click="submit" /></div>
+    <div><Button :label="preview?.count ? `Use these ${preview.count.toLocaleString()} people` : 'Use these people'" variant="solid" :loading="busy" :disabled="!chosen || !ready || headerUploading" @click="submit" /></div>
   </div>
 </template>
 
