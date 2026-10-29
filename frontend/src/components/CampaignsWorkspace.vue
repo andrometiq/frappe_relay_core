@@ -8,6 +8,8 @@ import FrappeFormView from "./frappe/FrappeFormView.vue";
 import FrappeListView from "./frappe/FrappeListView.vue";
 import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
+import CampaignValidation from './campaigns/CampaignValidation.vue';
+import { campaignError } from '../services/campaignErrors.js';
 import CampaignHeaderFiles from './campaigns/CampaignHeaderFiles.vue';
 import { attachmentMapping } from '../services/campaignMedia';
 import CampaignAudience from "./campaigns/CampaignAudience.vue";
@@ -17,7 +19,7 @@ import { channelFeature } from "../services/enabledChannels";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
   shownCounters, statusTheme, windowNotice } from "../services/campaignProgress";
-import { inputTime, recipientLabel, sampleSheet, scheduleNotice, siteTime } from "../services/campaignAudience";
+import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
 const workspace = useCampaigns();
@@ -56,10 +58,10 @@ const actionLabel = (action) => action === "cancel" && campaign.value.status ===
 // A Draft starts from "Start sending" under When to send, so the header keeps only the other actions.
 const headerActions = computed(() => campaignActions(campaign.value?.status).filter((action) => !(action === "start" && campaign.value.status === "Draft")));
 // Draft recipients come from contacts or from a sheet; nothing is picked until the user chooses one.
-const recipientMode = ref(""), sendMode = ref("now"), startAt = ref("");
+const recipientMode = ref(""), sendMode = ref("now"), startAt = ref(""), audienceDirty = ref(false);
 const modeOptions = [{ value: "contacts", label: "Relay contacts" }, { value: "file", label: "Upload sheet" }];
-const fileHint = "Accepted: .xlsx, .csv or .tsv. Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
-const sampleUrl = computed(() => "data:text/csv;charset=utf-8," + encodeURIComponent(sampleSheet(campaign.value?.fields)));
+const fileHint = "Accepted: .xlsx, .csv, .tsv or a ZIP containing exactly one sheet and media files (200 MiB / 2000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
+const canSend = computed(() => campaign.value?.validated && !sheet.value && !audienceDirty.value && !headerUploading.value && counts.value.total > 0);
 const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
 // Starting or cancelling asks once; the dialog names the people and the message.
 const confirming = ref("");
@@ -74,12 +76,17 @@ async function confirmAction() {
   if (!error.value) toast(action === "start" ? "Sending started" : "Campaign cancelled");
 }
 function request(action) { if (["start", "cancel"].includes(action)) confirming.value = action; else workspace.control(action); }
-function showCampaign(fresh) { campaign.value = fresh; }
+function showCampaign(fresh) { campaign.value = fresh; sheet.value = null; audienceDirty.value = false; }
+async function validateSheet() {
+  await workspace.importRows(mapping.value);
+  if (!error.value) audienceDirty.value = false;
+}
 async function schedule() {
   await workspace.control("schedule", { scheduled_at: siteTime(startAt.value) });
   if (!error.value) toast("Campaign scheduled");
 }
 watch(() => campaign.value?.name, () => {
+  audienceDirty.value = false;
   recipientMode.value = campaign.value?.source_file ? "file" : campaign.value?.audience ? "contacts" : "";
   sendMode.value = "now"; startAt.value = inputTime(campaign.value?.scheduled_at);
 });
@@ -109,9 +116,9 @@ async function chooseFile(event) {
   if (!file) return;
   await workspace.upload(file);
   if (sheet.value) {
-    mapping.value = { phone: sheet.value.mapping.phone, fields: { ...sheet.value.mapping.fields }, fixed: {} };
+    mapping.value = { ...sheet.value.mapping, fields: { ...sheet.value.mapping.fields }, fixed: {} };
     if (sheet.value.fields.some(field => field.key === 'header_media'))
-      mapping.value = attachmentMapping(mapping.value, { mode: 'static', files: [] });
+      mapping.value = attachmentMapping(mapping.value, sheet.value.mapping.header_attachment || { mode: 'static', files: [] });
   }
   mediaFile.value = "";
   event.target.value = "";
@@ -191,7 +198,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
       <template #actions>
         <Button v-for="action in headerActions" :key="action"
           :label="actionLabel(action)" :variant="action === 'start' || action === 'resume' ? 'solid' : 'outline'" :theme="action === 'cancel' ? 'red' : 'gray'"
-          :loading="busy" :disabled="action === 'start' && !(counts.total > 0)" @click="request(action)" />
+          :loading="busy" :disabled="action === 'start' && !canSend" @click="request(action)" />
       </template>
       <FrappeFormSection :title="campaign.status === 'Draft' ? 'Summary' : 'Progress'">
         <div class="campaign-counters">
@@ -201,23 +208,24 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         <p v-if="campaign.contact_counts" class="campaign-hint" role="status">
           Sheet rows: {{ campaign.contact_counts.created }} created · {{ campaign.contact_counts.existing }} existing · {{ campaign.contact_counts.invalid }} invalid numbers.
         </p>
-        <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaign.last_error }}</p>
+        <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaignError(campaign.last_error) }}</p>
         <p v-if="replyWindow" :class="replyWindow.open ? 'campaign-note' : 'campaign-issue'" role="status">{{ windowNotice(replyWindow) }}</p>
         <p v-if="scheduleNotice(campaign)" class="campaign-hint" role="status">{{ scheduleNotice(campaign) }}</p>
       </FrappeFormSection>
-      <FrappeFormSection v-if="campaign.status === 'Draft'" title="Who gets it"
+      <FrappeFormSection v-if="campaign.status === 'Draft'" title="1. Upload or choose recipients"
         description="Choose Relay contacts or upload a sheet. Choosing again replaces the people not messaged yet.">
         <div class="campaign-tabs" role="tablist" aria-label="Choose people from">
           <button v-for="mode in modeOptions" :key="mode.value" type="button" role="tab" :aria-selected="recipientMode === mode.value" @click="recipientMode = mode.value">{{ mode.label }}</button>
         </div>
         <p v-if="!recipientMode" class="campaign-hint">No people chosen yet. Pick where they come from.</p>
-        <CampaignAudience v-else-if="recipientMode === 'contacts'" :key="campaign.name" :campaign="campaign" :upload-media="workspace.uploadMedia" @imported="showCampaign" />
+        <CampaignAudience v-else-if="recipientMode === 'contacts'" :key="campaign.name" :campaign="campaign" :upload-media="workspace.uploadMedia" @imported="showCampaign" @editing="audienceDirty = true" />
         <template v-else>
         <label class="campaign-drop" :class="{ 'is-busy': busy }">
-          <FeatherIcon name="upload" :size="20" /><strong>Choose a sheet</strong><small v-text="fileHint" />
-          <input type="file" accept=".xlsx,.csv,.tsv" aria-label="Recipients sheet" :disabled="busy" @change="chooseFile" />
+          <FeatherIcon name="upload" :size="20" /><strong>Choose a sheet or ZIP</strong><small v-text="fileHint" />
+          <input type="file" accept=".xlsx,.csv,.tsv,.zip" aria-label="Recipients sheet" :disabled="busy" @change="chooseFile" />
         </label>
-        <a class="v1-link campaign-sample" :href="sampleUrl" :download="`${campaign.title || 'campaign'} sample.csv`"><FeatherIcon name="download" :size="14" /> Download sample sheet</a>
+        <Button class="campaign-sample" label="Download Excel template" variant="outline" :disabled="busy" @click="workspace.download('sample_sheet')" />
+        <p class="campaign-hint">For header media, put mobile-named files beside the sheet in a ZIP, or add files below. Subfolders are flattened; hidden files are ignored. Each header file must be at most 4 MiB.</p>
         <div v-if="sheet && mapping" class="campaign-mapping">
           <p class="campaign-hint">Mobile numbers: {{ mapping.phone }} (first column)</p>
           <CampaignHeaderFiles v-for="field in sheet.fields.filter(field => field.key === 'header_media')" :key="field.key"
@@ -233,20 +241,23 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
             <TextInput v-else-if="!mapping.fields[field.key]" v-model="mapping.fixed[field.key]" :placeholder="field.media ? 'https://…' : 'Same value for every row'" :aria-label="`${field.label} fixed value`" />
           </div>
           <p v-if="missing.length" class="campaign-issue">Still needed: {{ missing.join(", ") }}</p>
-          <Button label="Check and import rows" variant="solid" :loading="busy" :disabled="missing.length > 0 || headerUploading" @click="workspace.importRows(mapping)" />
+          <Button label="Validate" variant="solid" :loading="busy" :disabled="missing.length > 0 || headerUploading" @click="validateSheet" />
         </div>
         </template>
       </FrappeFormSection>
-      <FrappeFormSection v-if="campaign.status === 'Draft' && counts.total > 0" title="When to send">
+      <FrappeFormSection title="2. Validate">
+        <CampaignValidation :campaign="campaign" :busy="busy" @download="workspace.download('error_report')" />
+      </FrappeFormSection>
+      <FrappeFormSection v-if="campaign.status === 'Draft'" title="3. Send">
         <div class="campaign-modes" role="radiogroup" aria-label="When to send">
           <label><input v-model="sendMode" type="radio" value="now" /> Send now</label>
           <label><input v-model="sendMode" type="radio" value="later" /> Schedule at</label>
         </div>
         <div v-if="sendMode === 'later'" class="campaign-schedule">
           <label class="campaign-field"><span>Start time ({{ campaign.time_zone }})</span><TextInput v-model="startAt" type="datetime-local" /></label>
-          <Button label="Schedule" variant="solid" :loading="busy" :disabled="!startAt" @click="schedule" />
+          <Button label="Schedule" variant="solid" :loading="busy" :disabled="!startAt || !canSend" @click="schedule" />
         </div>
-        <div v-else class="campaign-schedule"><Button :label="`Start sending to ${(counts.total || 0).toLocaleString()} people`" variant="solid" :loading="busy" @click="request('start')" /></div>
+        <div v-else class="campaign-schedule"><Button :label="`Start sending to ${(counts.total || 0).toLocaleString()} people`" variant="solid" :loading="busy" :disabled="!canSend" @click="request('start')" /></div>
       </FrappeFormSection>
       <FrappeFormSection v-if="campaign.issues?.length" title="Rows not sent">
         <div class="campaign-issues"><div v-for="row in campaign.issues" :key="row.reason"><span>{{ row.reason }}</span><strong>{{ row.count }}</strong></div></div>
@@ -260,6 +271,9 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           </div>
         </div>
         <div v-if="campaign.next" ref="moreSentinel" class="h-px" aria-hidden="true" />
+      </FrappeFormSection>
+      <FrappeFormSection v-if="campaign.phases?.length" title="Campaign log" collapsible>
+        <ol class="campaign-log"><li v-for="(entry, index) in campaign.phases" :key="index"><strong>{{ entry.phase }}</strong> · {{ entry.at }} · {{ entry.user }}</li></ol>
       </FrappeFormSection>
       <template #sidebar>
         <div class="frappe-field-grid">
@@ -287,6 +301,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
 </template>
 
 <style scoped>
+.campaign-log { display: grid; gap: 8px; font-size: 13px; color: var(--ink-gray-8); overflow-wrap: anywhere; }
 .campaign-field { display: grid; gap: 6px; font-size: 13px; color: var(--ink-gray-6); }
 .campaign-actions, .campaign-mapping { display: grid; gap: 12px; margin-top: 16px; }
 .campaign-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
@@ -303,7 +318,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
 .campaign-empty p { margin-top: 2px; color: var(--ink-gray-6); }
 .campaign-empty .relay-button { text-decoration: none; }
 .campaign-tabs { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); }
-.campaign-tabs button { min-width: 140px; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); }
+.campaign-tabs button { min-width: 140px; min-height: 44px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); }
 .campaign-tabs button[aria-selected=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .campaign-drop { position: relative; display: grid; justify-items: center; gap: 4px; margin-top: 12px; padding: 20px; border: 1.5px dashed var(--outline-gray-3); border-radius: 10px; text-align: center; color: var(--ink-gray-7); cursor: pointer; }
 .campaign-drop:hover, .campaign-drop:focus-within { border-color: var(--relay-accent, #0f6cbd); background: var(--surface-gray-1); }
