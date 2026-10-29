@@ -1,6 +1,8 @@
 """Private template header files, matched before a sheet row can become Pending."""
 import mimetypes
 import os
+import stat
+import zipfile
 from collections import defaultdict
 
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
@@ -10,6 +12,57 @@ from relay_core.channels import channel
 from relay_core.template_media import HEADER_KINDS, MAX_BYTES, plain_filename
 
 MAX_FILES = 100000
+ZIP_MAX_BYTES = 200 * 1024 * 1024
+ZIP_MAX_FILES = 2000
+SHEETS = ('.xlsx', '.csv', '.tsv')
+
+
+def zip_contents(path):
+    """Bounded, flat archive contents. Never extract archive paths to the filesystem."""
+    try:
+        if os.path.getsize(path) > ZIP_MAX_BYTES:
+            raise ValueError('ZIP must be at most 200 MiB, including expanded files')
+        with zipfile.ZipFile(path) as archive:
+            entries = archive.infolist()
+            if len(entries) > ZIP_MAX_FILES:
+                raise ValueError('ZIP must contain at most 2000 entries')
+            if sum(item.file_size for item in entries) > ZIP_MAX_BYTES:
+                raise ValueError('ZIP must be at most 200 MiB, including expanded files')
+            kept, names = [], set()
+            allowed = {mime for kind in HEADER_KINDS.values()
+                       for mime in channel('WhatsApp').features['media'][kind]}
+            for item in entries:
+                parts = item.filename.replace('\\', '/').split('/')
+                if (item.filename.startswith(('/', '\\')) or '..' in parts or
+                        any(':' in part or '\x00' in part for part in parts) or
+                        stat.S_ISLNK(item.external_attr >> 16)):
+                    raise ValueError('ZIP contains an unsafe path or symbolic link')
+                if item.is_dir() or any(part.startswith('.') or part == '__MACOSX' for part in parts):
+                    continue
+                name = parts[-1]
+                if not name or len(name) > 120 or any(ord(c) < 32 or c == '"' for c in name):
+                    raise ValueError('ZIP file names must be plain names of at most 120 characters')
+                if name.casefold() in names:
+                    raise ValueError('ZIP contains duplicate file names after folders are flattened')
+                names.add(name.casefold())
+                if not name.lower().endswith(SHEETS) and mimetypes.guess_type(name)[0] not in allowed:
+                    raise ValueError('ZIP may contain only a sheet and WhatsApp image, video or document files')
+                if item.flag_bits & 1:
+                    raise ValueError('Password-protected ZIP files are not supported')
+                kept.append((item, name))
+            sheets = [name for _, name in kept if name.lower().endswith(SHEETS)]
+            if len(sheets) != 1:
+                raise ValueError('ZIP must contain exactly one .xlsx, .csv or .tsv sheet')
+            result = []
+            for item, name in kept:
+                with archive.open(item) as handle:
+                    raw = handle.read(min(item.file_size, ZIP_MAX_BYTES) + 1)
+                if len(raw) != item.file_size:
+                    raise ValueError('ZIP contents do not match their declared size')
+                result.append((name, raw))
+            return sheets[0], result
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, OSError) as exc:
+        raise ValueError('This ZIP could not be read. Create a new ZIP and try again.') from exc
 
 
 def check_attachment(value, fields):
@@ -69,17 +122,22 @@ def matches_format(prefix, mime):
     return False
 
 
-def resolve(attachment, media_type, numbers, region):
+def resolve(attachment, media_type, numbers, region, issues=None):
     """Number -> (file reference, problem), using the sheet's region and mobile rules."""
     files = []
     for item in attachment['files']:
         try:
             checked_file(item, media_type)
             problem = None
-        except (ValueError, OSError) as exc:
+        except ValueError as exc:
             problem = str(exc)
-        except (DoesNotExistError, PermissionError, ValidationError):
+        except (OSError, DoesNotExistError, PermissionError, ValidationError):
             problem = 'Header attachment unavailable'
+        if issues is not None:
+            unused = (attachment['mode'] == 'dynamic' and
+                      sheet_phone(os.path.splitext(item['filename'])[0], region) not in numbers)
+            if problem or unused:
+                issues.append({'filename': item['filename'], 'reason': problem or 'No matching mobile number in the sheet'})
         files.append((item, problem))
     if attachment['mode'] == 'static':
         item, problem = files[0]

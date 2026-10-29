@@ -82,11 +82,14 @@ class MessageTests(unittest.TestCase):
 
 
 class CreateTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+
     def test_a_message_campaign_snapshots_the_message_without_a_template_or_hub_call(self):
         saved = []
         fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False),
                                       get_value=Mock(side_effect=['Essdee UK', 'United Kingdom'])),
-                               utils=frappe.utils, parse_json=frappe.parse_json,
+                               session=_dict(user='manager@example.invalid'), utils=frappe.utils, parse_json=frappe.parse_json,
                                get_doc=lambda values: _dict(values), throw=Mock(side_effect=frappe.ValidationError))
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
                 patch.object(bulk_campaigns, 'campaign_channel', return_value='WA'), \
@@ -140,9 +143,9 @@ class MediaUploadTests(unittest.TestCase):
         self.hub.execute.return_value = {'id': '555'}
         self.cache = FakeCache()
         self.cache.lock = Mock(side_effect=lambda *a, **k: MagicMock())
-        utils = SimpleNamespace(now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
+        utils = SimpleNamespace(now=lambda: '2026-10-26 10:00:00', now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
                                 add_to_date=frappe.utils.add_to_date, cint=frappe.utils.cint, flt=frappe.utils.flt)
-        self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=self.cache, utils=utils, enqueue=Mock(),
+        self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=self.cache, utils=utils, enqueue=Mock(),
                                     session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         for name in ('require_access', 'whatsapp_channel', 'read'):

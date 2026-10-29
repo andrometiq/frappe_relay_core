@@ -160,6 +160,10 @@ def recount(name):
     status = frappe.db.get_value('Relay Campaign', name, 'status')
     if status == 'Running' and counts['queued'] == 0:
         values.update(status='Completed', finished_at=frappe.utils.now_datetime())
+        from relay_core.bulk_campaigns import phase
+        doc = frappe.get_doc('Relay Campaign', name)
+        phase(doc, 'Completed')
+        values['arguments'] = doc.arguments
     frappe.db.set_value('Relay Campaign', name, values, update_modified=False)
     frappe.db.commit()
     return {'counts': counts, 'status': values.get('status', status)}
