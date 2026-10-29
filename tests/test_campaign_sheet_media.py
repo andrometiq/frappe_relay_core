@@ -28,7 +28,8 @@ class SheetContactTests(unittest.TestCase):
         self.create = self.enterContext(patch.object(contact_lifecycle, 'whatsapp_contact', return_value='RELAY-C1'))
 
     def test_length_possible_but_invalid_number_is_not_enrolled(self):
-        self.assertEqual(bulk.sheet_contact('WA', '9199999787611'), ('invalid', 'Invalid phone number'))
+        for number in ('9199999787611', '911234567890', '914423456789'):
+            self.assertEqual(bulk.sheet_contact('WA', number), ('invalid', 'Invalid phone number'))
         self.create.assert_not_called()
         self.fake.cache.lock.assert_not_called()
 
@@ -100,6 +101,14 @@ class SheetContactTests(unittest.TestCase):
         self.assertEqual(bulk_sheet.suggest(['Recipients', 'Phone'], [], first_phone=True)['phone'], 'Recipients')
         self.assertEqual(bulk_sheet.suggest(['Recipients', 'Phone'], [])['phone'], 'Phone')
 
+    def test_held_numbers_use_excel_normalisation_and_mobile_validation(self):
+        doc = _dict(name='Sheet', country='IN', column_map=json.dumps({'phone': 'Mobile'}))
+        rows = list(enumerate({'Mobile': value} for value in
+                             ('919876543210.0', '9.19876543210E+11', '9199999787611', '914423456789')))
+        self.fake.get_all = Mock(return_value=[NUMBER])
+        self.assertEqual(bulk.held_numbers(doc, rows), {NUMBER})
+        self.assertEqual(self.fake.get_all.call_args.kwargs['filters']['destination'], ['in', [NUMBER]])
+
 
 class HeaderResolutionTests(unittest.TestCase):
     def setUp(self):
@@ -117,43 +126,76 @@ class HeaderResolutionTests(unittest.TestCase):
 
     def test_static_file_is_used_for_every_number(self):
         self.file('offer.png')
-        result = campaign_media.resolve(attachment('static', 'offer.png'), 'image', {NUMBER, '919876543211'})
+        result = campaign_media.resolve(attachment('static', 'offer.png'), 'image', {NUMBER, '919876543211'}, 'IN')
         self.assertEqual(list(result.values()), [(attachment('static', 'offer.png')['files'][0], None)] * 2)
 
     def test_dynamic_full_and_national_number_matches(self):
-        for name in (NUMBER + '.png', '9876543210.png'):
-            self.file(name)
-            result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER})
+        for name in (NUMBER + '.png', '9876543210.jpg', '98765 43210.jpg', '+91 98765-43210.png',
+                     '09876543210.jpg', '(+91) 98765 43210.png', '91-9876543210.png',
+                     '919876543210.0.png', '9.19876543210E+11.png'):
+            self.file(name, b'\xff\xd8\xff' if name.endswith('.jpg') else b'\x89PNG\r\n\x1a\n')
+            result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
             self.assertEqual(result[NUMBER], (attachment('dynamic', name)['files'][0], None))
 
     def test_missing_and_duplicate_matches_are_blocked(self):
-        self.file(NUMBER + '.png'); self.file('9876543210.jpg')
-        result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png', '9876543210.jpg'), 'image', {NUMBER, '919876543211'})
+        self.file(NUMBER + '.png')
+        self.file('9876543210.jpg', b'\xff\xd8\xff')
+        result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png', '9876543210.jpg'), 'image', {NUMBER, '919876543211'}, 'IN')
         self.assertEqual(result[NUMBER][1], 'Duplicate header attachments')
         self.assertEqual(result['919876543211'][1], 'Missing header attachment')
 
-    def test_same_national_number_in_two_countries_is_ambiguous(self):
-        self.file('2079460958.png')
-        result = campaign_media.resolve(attachment('dynamic', '2079460958.png'), 'image', {'442079460958', '12079460958'})
-        self.assertEqual({row[1] for row in result.values()}, {'Ambiguous mobile filename'})
+    def test_sheet_and_json_rows_share_normalisation_with_header_files(self):
+        name = '98765 43210.jpg'
+        self.file(name, b'\xff\xd8\xff')
+        mapping = {'phone': 'Mobile', 'fields': {}, 'fixed': {}, 'header_attachment': attachment('dynamic', name)}
+        rows = list(enumerate(({'Mobile': value} for value in
+                              ('919876543210.0', '9.19876543210E+11', '9199999787611', '914423456789')), 2))
+        for source in (None, '/private/files/local-only-phones.csv'):
+            doc = _dict(name='Sheet', source_file=source, channel='WA', country='IN',
+                        arguments=json.dumps({'fields': FIELDS}), column_map=json.dumps(mapping))
+            with self.subTest(source=source), patch.object(bulk, 'insert_chunk') as insert, \
+                    patch.object(bulk, 'recipient_rows', return_value=iter(rows)), \
+                    patch.object(bulk, 'sheet_contact', return_value=('created', None)) as enroll:
+                bulk.add_rows(doc, iter(rows), set())
+            found = insert.call_args.args[1]
+            self.assertEqual([row[3] for row in found],
+                             [None, 'Duplicate number', 'Invalid phone number', 'Invalid phone number'])
+            self.assertEqual([row[1] for row in found[:2]], [NUMBER, NUMBER])
+            self.assertEqual(found[0][2]['values']['header_media'], mapping['header_attachment']['files'][0])
+            self.assertEqual(enroll.call_count, 1 if source else 0)
+
+    def test_invalid_stems_are_ignored(self):
+        for stem in ('9199999787611', '1234567890', '914423456789', 'offer', '9.198765432101E+10'):
+            with self.subTest(stem=stem):
+                name = stem + '.png'
+                self.file(name)
+                result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
+                self.assertEqual(result[NUMBER], (None, 'Missing header attachment'))
+
+    def test_national_names_use_the_campaign_region(self):
+        self.file('07911 123456.png')
+        value = attachment('dynamic', '07911 123456.png')
+        number = '447911123456'
+        self.assertIsNone(campaign_media.resolve(value, 'image', {number}, 'GB')[number][1])
+        self.assertEqual(campaign_media.resolve(value, 'image', {number}, 'IN')[number][1], 'Missing header attachment')
 
     def test_wrong_type_and_empty_or_large_files_are_blocked(self):
         for name, raw, reason in [(NUMBER + '.pdf', b'%PDF-1.4', 'Wrong file type'),
                                   (NUMBER + '.png', b'', '1 byte'),
                                   (NUMBER + '.png', b'x' * (campaign_media.MAX_BYTES + 1), '4 MiB')]:
             self.file(name, raw)
-            result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER})
+            result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
             self.assertIn(reason, result[NUMBER][1])
 
     def test_video_and_document_use_registry_types(self):
         for kind, suffix in [('video', 'mp4'), ('document', 'pdf')]:
             name = NUMBER + '.' + suffix
             self.file(name, b'\x00\x00\x00\x18ftypmp42' if kind == 'video' else b'%PDF-1.4')
-            self.assertIsNone(campaign_media.resolve(attachment('dynamic', name), kind, {NUMBER})[NUMBER][1])
+            self.assertIsNone(campaign_media.resolve(attachment('dynamic', name), kind, {NUMBER}, 'IN')[NUMBER][1])
 
     def test_renamed_file_content_is_rejected_before_send(self):
         self.file(NUMBER + '.png', b'%PDF-1.4')
-        result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png'), 'image', {NUMBER})
+        result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png'), 'image', {NUMBER}, 'IN')
         self.assertEqual(result[NUMBER][1], 'Wrong file content for image header')
 
     def test_public_file_and_disguised_extension_are_rejected(self):
@@ -166,14 +208,14 @@ class HeaderResolutionTests(unittest.TestCase):
 
     def test_permission_denial_blocks_matching_rows(self):
         with patch.object(bulk, 'uploaded_file', side_effect=frappe.PermissionError):
-            result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png'), 'image', {NUMBER})
+            result = campaign_media.resolve(attachment('dynamic', NUMBER + '.png'), 'image', {NUMBER}, 'IN')
         self.assertEqual(result[NUMBER][1], 'Header attachment unavailable')
 
     def test_large_dynamic_preview_checks_each_file_only_once(self):
-        numbers = {'1555' + str(n).zfill(7) for n in range(5000)}
+        numbers = {'919876' + str(n).zfill(6) for n in range(5000)}
         value = attachment('dynamic', *(number + '.png' for number in numbers))
         with patch.object(campaign_media, 'checked_file', return_value=(None, 'image/png')) as checked:
-            result = campaign_media.resolve(value, 'image', numbers)
+            result = campaign_media.resolve(value, 'image', numbers, 'IN')
         self.assertEqual(checked.call_count, 5000)
         self.assertEqual(len(result), 5000)
         self.assertTrue(all(problem is None for _, problem in result.values()))

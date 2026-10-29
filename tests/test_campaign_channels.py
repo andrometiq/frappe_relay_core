@@ -12,6 +12,23 @@ EXPORT = dict(SHOP, name='Export', hub_channel='wa-3', waba_id='222')
 
 
 class CampaignChannelTests(unittest.TestCase):
+    def test_region_comes_from_the_sending_company(self):
+        fake = Mock()
+        fake.db.get_value.side_effect = ['Essdee UK', 'United Kingdom']
+        with patch.object(bulk_campaigns, 'frappe', fake), \
+                patch.object(bulk_campaigns, 'default_region', return_value='IN') as fallback:
+            self.assertEqual(bulk_campaigns.channel_region('Support'), 'GB')
+        self.assertEqual([call.args for call in fake.db.get_value.call_args_list],
+                         [('Relay Channel', 'Support', 'company'), ('Company', 'Essdee UK', 'country')])
+        fallback.assert_not_called()
+
+    def test_region_falls_back_when_company_country_is_unavailable(self):
+        for values in ([None], ['Essdee', None], ['Essdee', 'Unknown country']):
+            with self.subTest(values=values), patch.object(bulk_campaigns, 'frappe') as fake, \
+                    patch.object(bulk_campaigns, 'default_region', return_value='IN'):
+                fake.db.get_value.side_effect = values
+                self.assertEqual(bulk_campaigns.channel_region('Support'), 'IN')
+
     def channel(self, channels, requested=None):
         site = FakeSite(Relay_Channel=list(channels))
         with patch.object(bulk_campaigns, 'frappe', site.frappe), patch.object(hub_channels, 'frappe', site.frappe), \

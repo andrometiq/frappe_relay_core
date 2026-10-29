@@ -12,7 +12,7 @@ from relay_core import bulk_sheet, service_window, whatsapp
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
 from relay_core.hub_channels import hub_arguments
-from relay_core.identity import default_region, phone_number
+from relay_core.identity import default_region
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
 
@@ -72,6 +72,15 @@ def campaign_channel(channel=None):
     return whatsapp_channel(channel)
 
 
+def channel_region(channel):
+    """Use the sending company's country, falling back to System Settings."""
+    from frappe.geo.country_info import get_country_info
+    company = frappe.db.get_value('Relay Channel', channel, 'company')
+    country = frappe.db.get_value('Company', company, 'country') if company else None
+    code = (get_country_info(country) or {}).get('code') if country else None
+    return code.upper() if isinstance(code, str) and len(code) == 2 else default_region()
+
+
 def approved_template(hub, name, language, channel=None):
     from relay_core.whatsapp_templates import overlay
     after = ''
@@ -120,7 +129,7 @@ def create(title, template_name=None, language=None, channel=None, reply_window_
         frappe.throw(str(exc))
     doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation=operation,
         template_name=template_name, language=language, arguments=canonical(snapshot),
-        status='Draft', account=connection_value('relay_hub_account'), country=default_region(),
+        status='Draft', account=connection_value('relay_hub_account'), country=channel_region(target),
         reply_window_hours=hours, request_key='bulk-' + hashlib.sha256(title.encode()).hexdigest()[:40]))
     internal_save(doc, new=True)
     return read(doc.name)
@@ -305,7 +314,7 @@ def append_rows(name, rows):
 def held_numbers(doc, rows):
     """Numbers of these rows the campaign already holds in a row that was not skipped."""
     column = json.loads(doc.column_map)['phone']
-    numbers = list({phone_number(row.get(column), doc.country) for _, row in rows} - {None})
+    numbers = list({bulk_sheet.sheet_phone(row.get(column), doc.country) for _, row in rows} - {None})
     if not numbers:
         return set()
     return set(frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'destination': ['in', numbers],
@@ -355,14 +364,14 @@ def add_rows(doc, rows, seen):
         from relay_core.campaign_media import resolve
         # Only the destination set is retained; the uploaded sheet remains streamed.
         if doc.source_file:
-            numbers = {phone_number(row.get(mapping['phone']), doc.country) for _, row in recipient_rows(doc)}
+            numbers = {bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country) for _, row in recipient_rows(doc)}
         else:
             rows = list(rows)
-            numbers = {phone_number(row.get(mapping['phone']), doc.country) for _, row in rows}
-        resolved = resolve(attachment, header_type(doc), numbers - {None})
+            numbers = {bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country) for _, row in rows}
+        resolved = resolve(attachment, header_type(doc), numbers - {None}, doc.country)
     chunk, enrolled = [], {}
     for number, row in rows:
-        destination = phone_number(row.get(mapping['phone']), doc.country)
+        destination = bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country)
         header_file, media_problem = resolved.get(destination, (None, None))
         destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country, header_file)
         if destination and media_problem:
@@ -398,10 +407,8 @@ def sheet_contact(channel, number):
     The indexed lookup also preserves revoked bindings and opt-outs. A fresh transaction
     inside the lock sees another campaign's committed endpoint before creating anything.
     """
-    import phonenumbers
     from relay_core.contact_lifecycle import endpoint_key, sibling_contact, whatsapp_contact
-    # Sheets are typed by hand: never enroll a number that is only length-possible.
-    if not phonenumbers.is_valid_number(phonenumbers.parse('+' + number, None)):
+    if not bulk_sheet.sheet_phone('+' + number, ''):
         return 'invalid', 'Invalid phone number'
     with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
         frappe.db.commit()

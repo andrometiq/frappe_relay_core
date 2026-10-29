@@ -3,9 +3,9 @@ import mimetypes
 import os
 from collections import defaultdict
 
-import phonenumbers
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 
+from relay_core.bulk_sheet import sheet_phone
 from relay_core.channels import channel
 from relay_core.template_media import HEADER_KINDS, MAX_BYTES, plain_filename
 
@@ -69,12 +69,8 @@ def matches_format(prefix, mime):
     return False
 
 
-def national_number(number):
-    return phonenumbers.national_significant_number(phonenumbers.parse('+' + number, None))
-
-
-def resolve(attachment, media_type, numbers):
-    """Number -> (file reference, problem). Exact and national names must identify exactly one file and person."""
+def resolve(attachment, media_type, numbers, region):
+    """Number -> (file reference, problem), using the sheet's region and mobile rules."""
     files = []
     for item in attachment['files']:
         try:
@@ -88,15 +84,11 @@ def resolve(attachment, media_type, numbers):
     if attachment['mode'] == 'static':
         item, problem = files[0]
         return {number: (item, problem) for number in numbers}
-    owners = defaultdict(set)
-    for number in numbers:
-        owners[number].add(number)
-        owners[national_number(number)].add(number)
     matches = defaultdict(list)
     for item, problem in files:
-        stem = os.path.splitext(item['filename'])[0]
-        for number in owners.get(stem, ()):
-            matches[number].append((item, 'Ambiguous mobile filename' if len(owners[stem]) > 1 else problem))
+        number = sheet_phone(os.path.splitext(item['filename'])[0], region)
+        if number in numbers:
+            matches[number].append((item, problem))
     return {number: (matches[number][0] if len(matches[number]) == 1 else
                      (None, 'Duplicate header attachments' if matches[number] else 'Missing header attachment'))
             for number in numbers}

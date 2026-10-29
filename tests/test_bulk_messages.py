@@ -84,7 +84,9 @@ class MessageTests(unittest.TestCase):
 class CreateTests(unittest.TestCase):
     def test_a_message_campaign_snapshots_the_message_without_a_template_or_hub_call(self):
         saved = []
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), utils=frappe.utils, parse_json=frappe.parse_json,
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False),
+                                      get_value=Mock(side_effect=['Essdee UK', 'United Kingdom'])),
+                               utils=frappe.utils, parse_json=frappe.parse_json,
                                get_doc=lambda values: _dict(values), throw=Mock(side_effect=frappe.ValidationError))
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
                 patch.object(bulk_campaigns, 'campaign_channel', return_value='WA'), \
@@ -98,6 +100,7 @@ class CreateTests(unittest.TestCase):
             with self.assertRaises(frappe.ValidationError):
                 bulk_campaigns.create('Stickers', message={'kind': 'sticker'})
         doc = saved[0]
+        self.assertEqual(doc.country, 'GB')
         self.assertEqual((doc.operation, doc.template_name, doc.language), ('messages.media', None, None))
         snapshot = json.loads(doc.arguments)
         self.assertEqual(snapshot['message'], PHOTO)
