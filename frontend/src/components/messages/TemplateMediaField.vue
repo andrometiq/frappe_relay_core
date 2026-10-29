@@ -118,11 +118,13 @@ onBeforeUnmount(clearPreview);
         :aria-label="field.label + ' link'" />
       <small v-if="!linkError" class="text-ink-gray-5">A public https link. WhatsApp downloads the file from it.</small>
     </template>
+    <p v-if="busy" role="status" class="text-sm">Uploading…</p>
     <ErrorMessage :message="error || linkError" />
   </div>
 </template>
 
 <style scoped>
+.template-media-field :deep(.relay-button), .template-media-field :deep(input) { min-height:44px; min-width:44px; }
 .template-media-tabs { display: flex; gap: 4px; }
 .template-media-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px; text-align: center;
