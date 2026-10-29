@@ -69,9 +69,10 @@ def create(name, phone, channel, links=None):
     return {'contact': person.name, 'relay_contact': relay, 'endpoint': endpoint.name}
 
 
-def new_person(name, number, links=(), *, ignore_permissions=False):
+def new_person(name, number, links=(), *, ignore_permissions=False, email=None):
     return frappe.get_doc({'doctype': 'Contact', 'first_name': name,
-        'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}],
+        'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}] if number else [],
+        'email_ids': [{'email_id': email, 'is_primary': 1}] if email else [],
         'links': [{'link_doctype': doctype, 'link_name': record} for doctype, record in links]
     }).insert(ignore_permissions=ignore_permissions)
 
@@ -105,6 +106,17 @@ def set_links(contact, links):
     else:
         person.save()
     return summary(person.name)
+
+
+def add_link(contact, doctype, name):
+    """Append through the existing link service, preserving inaccessible links."""
+    person = frappe.get_doc('Contact', contact)
+    wanted = [{'doctype': row.link_doctype, 'name': row.link_name} for row in person.links
+              if frappe.db.exists('Relay Contact Type', {'business_doctype': row.link_doctype, 'enabled': 1})
+              and readable(row)]
+    if {'doctype': doctype, 'name': name} not in wanted:
+        wanted.append({'doctype': doctype, 'name': name})
+    return set_links(contact, wanted)
 
 
 def readable(row):
