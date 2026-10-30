@@ -53,3 +53,10 @@ test('only real connection failures show the connection line', () => {
     assert.doesNotMatch(campaignError(Error(raw)), /could not finish/, raw);
   }
 });
+
+test('a wrong upload type, an oversized file and a damaged header file get their own copy', () => {
+  assert.equal(campaignError(Error('Upload a .xlsx, .csv or .tsv file')), 'Upload a .xlsx, .csv or .tsv sheet, or a ZIP that holds one sheet and its header files.');
+  assert.equal(campaignError(Error('File size exceeded the maximum allowed size of 10.0 MB')), 'Each file must be at most 10 MB. Upload a smaller file.');
+  assert.match(campaignError(Error('The media file could not be uploaded.')), /not damaged/);
+  assert.equal(campaignError(Error('Could not upload offer.pdf. Try again.')), 'offer.pdf could not be uploaded. Check that the file opens and is not damaged, then try again.');
+});

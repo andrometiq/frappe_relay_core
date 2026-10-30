@@ -24,7 +24,7 @@ test('one chevron opens one menu: reply first, info before the divider, team act
   assert.doesNotMatch(thread, /label="Add reaction"|label="Reply"|Close reactions/)
   const actions = thread.split('function actions(message)')[1].split('return items')[0]
   const labels = [...actions.matchAll(/label: ["']([^"']+)["']|divider: true/g)].map(match => match[1] || '---')
-  assert.deepEqual(labels, ['Reply', 'Copy text', 'Download', 'Message info', 'Resend sticker', 'Select', '---', 'Add internal note', 'Create ticket'])
+  assert.deepEqual(labels, ['Reply', 'Retry', 'Copy text', 'Download', 'Message info', 'Resend sticker', 'Select', '---', 'Add internal note', 'Create ticket'])
   assert.match(thread, /<MessageMenu v-if="menu"[^>]*:area="viewport"/)
 })
 
