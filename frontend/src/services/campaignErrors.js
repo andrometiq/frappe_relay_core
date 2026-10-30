@@ -16,6 +16,10 @@ export function campaignError(error) {
   const text = String(error?.message || error || '');
   // Size reasons are our own text and name the real limit.
   if (/^Header attachment (is empty|must be at most [0-9.]+ [KM]B)\.?$/.test(text)) return text.replace(/\.?$/, '.');
+  const tooLarge = text.match(/^File size exceeded the maximum allowed size of ([0-9.]+) MB/);
+  if (tooLarge) return `Each file must be at most ${Number(tooLarge[1])} MB. Upload a smaller file.`;
+  const notUploaded = text.match(/^Could not upload (.+)\. Try again\.$/s);
+  if (notUploaded) return `${notUploaded[1]} could not be uploaded. Check that the file opens and is not damaged, then try again.`;
   const rejection = hubReason(text.match(HUB_REJECTION)?.[1]);
   if (rejection) return `WhatsApp did not accept this: ${rejection}`;
   const reasons = [
@@ -23,6 +27,8 @@ export function campaignError(error) {
     [/^Hub connection is not authorized/, 'The Hub connection is not authorized. Update the saved Hub API credential in Relay Settings.'],
     [/^Hub account belongs to another site/, 'The Hub account belongs to another site. Check the Hub settings in Relay Settings.'],
     [/^Hub could not complete this operation|^Hub operation was rejected|^Hub rejected (this|the MCP) operation|^Hub HTTP request rejected \(4\d\d\)/, 'WhatsApp Hub did not accept this action. Check the WhatsApp account setup and template, then try again.'],
+    [/^Upload a \.xlsx, \.csv or \.tsv file/, 'Upload a .xlsx, .csv or .tsv sheet, or a ZIP that holds one sheet and its header files.'],
+    [/^The media file could not be uploaded/, 'The file could not be uploaded. Check that it opens and is not damaged, then try again.'],
     [/^Hub returned no media id/, 'The header file could not be uploaded to WhatsApp. Try again.'],
     [/^The header file could not be read/, 'The header file could not be read. Upload it again.'],
     [/^Configure an enabled WhatsApp channel/, 'Set up an enabled WhatsApp channel in Relay Settings first.'],

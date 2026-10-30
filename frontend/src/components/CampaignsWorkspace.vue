@@ -14,6 +14,7 @@ import { campaignError } from '../services/campaignErrors.js';
 import CampaignHeaderFiles from './campaigns/CampaignHeaderFiles.vue';
 import { attachmentMapping } from '../services/campaignMedia';
 import { useCampaigns } from "../composables/useCampaigns";
+import { coreApi } from "../services/coreApi";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { attachmentMaxBytes, sizeLabel } from "./messages/attachmentFormats";
@@ -67,17 +68,31 @@ const sendMode = ref("now"), startAt = ref("");
 const fileHint = "Accepted: .xlsx, .csv, .tsv or a ZIP containing exactly one sheet and media files (200 MiB / 10000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
 const canSend = computed(() => campaign.value?.validated && !sheet.value && !headerUploading.value && counts.value.total > 0);
 const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
-// Starting or cancelling asks once; the dialog names the people and the message.
+// Starting, retrying or cancelling asks once; the dialog names the people and the message.
 const confirming = ref("");
-const confirmText = computed(() => ({
-  start: `Send ${messageName.value} to ${(counts.value.total || 0).toLocaleString()} people now? You can pause sending, but sent messages cannot be taken back.`,
-  cancel: campaign.value?.status === "Draft" ? "Discard this draft? Nothing is sent. It stays in the list as Cancelled." : "Stop this campaign? Messages not sent yet are not sent.",
-}[confirming.value]));
+const canRetry = computed(() => campaign.value?.status === "Completed" && counts.value.failed > 0);
+const confirmDialog = computed(() => {
+  const draft = campaign.value?.status === "Draft";
+  return {
+    start: { title: "Start sending?", label: "Start sending", theme: "blue", done: "Sending started",
+      text: `Send ${messageName.value} to ${(counts.value.total || 0).toLocaleString()} people now? You can pause sending, but sent messages cannot be taken back.` },
+    retry: { title: "Retry failed messages?", label: "Retry failed", theme: "blue", done: "Retrying failed messages",
+      text: `Send ${messageName.value} again to the ${(counts.value.failed || 0).toLocaleString()} people whose message failed? Each failed row is sent once more.` },
+    cancel: { title: draft ? "Discard draft?" : "Cancel campaign?", label: draft ? "Discard draft" : "Cancel campaign", theme: "red", done: "Campaign cancelled",
+      text: draft ? "Discard this draft? Nothing is sent. It stays in the list as Cancelled." : "Stop this campaign? Messages not sent yet are not sent." },
+  }[confirming.value];
+});
 async function confirmAction() {
-  const action = confirming.value;
+  const action = confirming.value, done = confirmDialog.value.done;
   confirming.value = "";
-  await workspace.control(action);
-  if (!error.value) toast(action === "start" ? "Sending started" : "Campaign cancelled");
+  if (action === "retry") await retryFailed(); else await workspace.control(action);
+  if (!error.value) toast(done);
+}
+async function retryFailed() {
+  busy.value = true; error.value = "";
+  try { campaign.value = await coreApi("bulk_campaigns.retry_failed", { name: campaign.value.name }, true); }
+  catch (e) { error.value = campaignError(e); }
+  finally { busy.value = false; }
 }
 function request(action) { if (["start", "cancel"].includes(action)) confirming.value = action; else workspace.control(action); }
 async function validateSheet() {
@@ -156,11 +171,11 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
 <template>
   <div class="campaign-workspace">
     <div v-if="error" class="v1-template-feedback"><ErrorMessage :message="error" /></div>
-    <Dialog :model-value="Boolean(confirming)" :options="{ title: confirming === 'start' ? 'Start sending?' : confirming === 'cancel' && campaign?.status === 'Draft' ? 'Discard draft?' : 'Cancel campaign?', size: 'sm' }" @update:model-value="value => { if (!value) confirming = '' }">
-      <p class="campaign-confirm">{{ confirmText }}</p>
+    <Dialog :model-value="Boolean(confirming)" :options="{ title: confirmDialog?.title, size: 'sm' }" @update:model-value="value => { if (!value) confirming = '' }">
+      <p class="campaign-confirm">{{ confirmDialog?.text }}</p>
       <template #actions>
         <Button variant="outline" label="Keep editing" autofocus @click="confirming = ''" />
-        <Button variant="solid" :theme="confirming === 'cancel' ? 'red' : 'blue'" :label="confirming === 'start' ? 'Start sending' : confirming === 'cancel' && campaign?.status === 'Draft' ? 'Discard draft' : 'Cancel campaign'" :loading="busy" @click="confirmAction" />
+        <Button variant="solid" :theme="confirmDialog?.theme" :label="confirmDialog?.label" :loading="busy" @click="confirmAction" />
       </template>
     </Dialog>
 
@@ -199,6 +214,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         <Button v-for="action in headerActions" :key="action"
           :label="actionLabel(action)" :variant="action === 'start' || action === 'resume' ? 'solid' : 'outline'" :theme="action === 'cancel' ? 'red' : 'gray'"
           :loading="busy" :disabled="action === 'start' && !canSend" @click="request(action)" />
+        <Button v-if="canRetry" :label="`Retry failed (${counts.failed.toLocaleString()})`" variant="solid" icon-left="refresh-cw" :loading="busy" @click="confirming = 'retry'" />
       </template>
       <FrappeFormSection :title="campaign.status === 'Draft' ? 'Summary' : 'Progress'">
         <div class="campaign-counters">
