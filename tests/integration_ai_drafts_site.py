@@ -34,7 +34,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         'If the amount or currency is unclear, leave a ticket note for staff. '
         'For INR use bank '+bank.name+' and payable '+payable.name+'.', target='Payment screenshot'))
     event.reload()
-    assert {'create_draft', 'reply'} <= actions.definitions().keys()
+    assert {'create_draft', 'reply'} <= actions.definitions(context='ai').keys()
     from relay_core.ai.configuration import action_contracts
     assert action_contracts(event) == declared
     frappe.db.commit()
@@ -87,7 +87,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
             turns.append(run.name)
             values = dict(payment_type='Pay', posting_date='2026-10-25', paid_amount=1250,
                 received_amount=1250, paid_from=bank.name, paid_to=payable.name,
-                source_exchange_rate=1, target_exchange_rate=1, reference_no='Sim Evidence '+stamp,
+                source_exchange_rate=1, target_exchange_rate=1, reference_no='Sim Evidence '+run.name,
                 reference_date='2026-10-25')
             if fault == 'zero': values['paid_amount'] = 0
             if fault == 'foreign': values['paid_from'] = foreign.name
@@ -122,7 +122,19 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         service.process(name)
         return doc, frappe.get_doc('Relay Automation Run', name)
 
+    from relay_core.ai.service import APPROVAL_NOTICE
+    def approve(run):
+        journal = frappe.get_doc('Relay Flow Action', {'automation_run': run.name, 'status': 'Awaiting approval'})
+        assert journal.action == 'create_draft' and journal.expires_on
+        response = request('flows.actions.approve', dict(name=journal.name, input_hash=journal.input_hash,
+            scope_fingerprint=journal.scope_fingerprint))
+        assert response.status_code == 200, (response.status_code, response.json.get('exc_type'))
+        service.process(run.name); run.reload()
+
     doc, run = run_message('Payment')
+    assert run.status == 'Deciding' and frappe.db.count('Payment Entry', {'company': company.name}) == 0, (run.status, run.reason)
+    assert len(sends) == 1 and sends[0]['body'] == APPROVAL_NOTICE
+    approve(run)
     assert run.status == 'Completed', (run.status, run.reason)
     journals = frappe.get_all('Relay Flow Action', filters={'automation_run': run.name},
         fields=['name', 'action', 'status', 'target_name', 'ticket'], order_by='step asc')
@@ -130,10 +142,10 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     draft = frappe.get_doc('Payment Entry', journals[0].target_name)
     assert draft.docstatus == 0 and draft.paid_amount == draft.received_amount == 1250
     assert draft.owner == actor.name and draft.company == company.name and draft.party == supplier.name
-    assert journals[0].ticket == run.ticket and len(sends) == 1 and sends[0]['body'].startswith('Thanks.')
+    assert journals[0].ticket == run.ticket and len(sends) == 2 and sends[-1]['body'].startswith('Thanks.')
     assert len(observations) == 1 and len(turns) == 1
     message_actions = frappe.get_all('Relay Message Action', filters={'source_message': doc.name}, fields=['status', 'outbound_message'])
-    assert len(message_actions) == 1 and message_actions[0].status == 'Submitted' and message_actions[0].outbound_message
+    assert len(message_actions) == 2 and all(row.status == 'Submitted' and row.outbound_message for row in message_actions)
     assert frappe.db.count('GL Entry', {'voucher_type': 'Payment Entry', 'voucher_no': draft.name}) == 0
     detail = request('tickets.read', {'name': run.ticket}, verb='GET')
     assert detail.status_code == 200 and detail.json['message']['linked_drafts'] == [
@@ -142,19 +154,19 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     replay = request('automation.service.enqueue', {'message': doc.name})
     assert replay.status_code == 200 and replay.json['message']['name'] == run.name
     queue._process(doc.name); frappe.db.commit(); service.process(run.name)
-    assert frappe.db.count('Payment Entry', {'company': company.name}) == 1 and len(sends) == 1
-    print('PASS screenshot -> shared image/agent path -> normal INR 1250 draft -> ticket HTTP link -> journaled thanks; duplicate replay; no submission or GL entries')
+    assert frappe.db.count('Payment Entry', {'company': company.name}) == 1 and len(sends) == 2
+    print('PASS screenshot -> shared image/agent path -> approval notice -> staff approval -> normal INR 1250 draft -> ticket HTTP link -> journaled thanks; duplicate replay; no submission or GL entries')
 
     _, ticket_only = run_message('Ticket only', policy='Ticket only')
     assert ticket_only.status == 'Completed' and ticket_only.ticket
     assert not frappe.db.exists('Relay Flow Action', {'automation_run': ticket_only.name})
-    assert len(sends) == len(observations) == 1
+    assert len(sends) == 2 and len(observations) == 1
     print('PASS Ticket only creates no draft, model call, attachment fetch or acknowledgement')
 
     for fault in ('unclear', 'attachment', 'zero'):
         _, failed = run_message(fault.title())
         assert failed.status == 'Handoff' and failed.ticket, (fault, failed.status, failed.reason)
-        assert frappe.db.count('Payment Entry', {'company': company.name}) == 1 and len(sends) == 1
+        assert frappe.db.count('Payment Entry', {'company': company.name}) == 1 and len(sends) == 2
         note = frappe.db.get_value('Relay Ticket', failed.ticket, 'handoff_reason')
         assert note and ('unclear' in note if fault == 'unclear' else True)
     fault = None
@@ -165,7 +177,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     with patch('relay_core.attachments.read', side_effect=AssertionError('Vision gate must precede fetch')) as fetch:
         _, no_vision = run_message('No vision')
         assert no_vision.status == 'Handoff' and not fetch.called
-    assert len(observations) == before_observations and len(sends) == 1
+    assert len(observations) == before_observations and len(sends) == 2
     frappe.db.set_value('AI Model', vision_model.name, 'supports_vision', 1)
     print('PASS model without vision is denied before attachment fetch or provider call')
 
@@ -202,7 +214,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     for allowlist in ([], declared[:1]):
         frappe.db.set_value('Relay AI Skill', event.name, 'allowed_actions', json.dumps(allowlist))
         _, undeclared = run_message('Undeclared reply', image=False)
-        assert undeclared.status == 'Handoff' and len(sends) == 1
+        assert undeclared.status == 'Handoff' and len(sends) == 2
         assert not frappe.db.exists('Relay Flow Action', {'automation_run': undeclared.name})
     fault = None
     frappe.db.set_value('Relay AI Skill', event.name, 'allowed_actions', json.dumps(declared))
@@ -210,7 +222,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     _, shadow = run_message('Shadow action', image=False)
     assert shadow.status == 'Shadow' and shadow.ticket
     assert [row['action'] for row in json.loads(shadow.decision)['actions']] == ['create_draft', 'reply']
-    assert not frappe.db.exists('Relay Flow Action', {'automation_run': shadow.name}) and len(sends) == 1
+    assert not frappe.db.exists('Relay Flow Action', {'automation_run': shadow.name}) and len(sends) == 2
     frappe.db.set_value('Relay AI Skill', event.name, 'mode', 'Automatic')
     print('PASS undeclared final replies denied for empty/draft-only declarations; live Shadow persists proposals without writes or delivery')
 
@@ -221,7 +233,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     assert not frappe.has_permission('Payment Entry', 'create', user=actor.name)
     _, denied_run = run_message('Permission', image=False)
     assert denied_run.status == 'Handoff' and frappe.db.count('Payment Entry', {'company': company.name}) == 1
-    assert len(sends) == 1
+    assert len(sends) == 2
     print('PASS real effective-user create permission denial; no broader-user fallback')
     actor.append('roles', {'role': 'Accounts Manager'}); actor.save(); frappe.db.commit(); frappe.clear_cache(user=actor.name)
 
@@ -232,12 +244,12 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     fault = 'foreign'
     _, denied_run = run_message('Other company', image=False)
     assert denied_run.status == 'Handoff' and frappe.db.count('Payment Entry', {'company': company.name}) == 1
-    assert len(sends) == 1
+    assert len(sends) == 2
     print('PASS foreign-company account denied before insertion')
 
     fault = 'uncertain_reply_first'
     _, rejected = run_message('Reordered', image=False)
-    assert rejected.status == 'Handoff' and len(sends) == 1
+    assert rejected.status == 'Handoff' and len(sends) == 2
     assert frappe.db.count('Payment Entry', {'company': company.name}) == 1
     print('PASS model-reordered chain is rejected before any reply or draft')
     # An owner may explicitly declare reply before draft; uncertain delivery still fences the draft.
@@ -245,7 +257,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     doc, waiting = run_message('Reply first', image=False)
     assert waiting.status == 'Delivering'
     assert frappe.db.count('Payment Entry', {'company': company.name}) == 1, 'Uncertain reply must stop later steps'
-    assert len(sends) == 2
+    assert len(sends) == 3
     fault = None
     from relay_core import messaging
     from relay_core.ai import service as ai
@@ -255,12 +267,14 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         assert messaging.reconcile(reply_action)['status'] == 'Submitted'
     ai.complete_delivery(reply_action)
     service.process(waiting.name); waiting.reload()
+    assert waiting.status == 'Deciding' and len(sends) == 4 and sends[-1]['body'] == APPROVAL_NOTICE
+    approve(waiting)
     assert waiting.status == 'Completed' and frappe.db.count('Payment Entry', {'company': company.name}) == 2
-    assert len(sends) == 2
+    assert len(sends) == 4
     ai.complete_delivery(reply_action); waiting.reload()
     assert waiting.status == 'Completed'
     assert frappe.db.count('Payment Entry', {'company': company.name, 'docstatus': ['!=', 0]}) == 0
-    print('PASS reply-first chain waits for uncertain receipt, resumes draft creation, and ignores late duplicate receipts')
+    print('PASS reply-first chain waits for uncertain receipt, resumes to staff approval, creates the draft, and ignores late duplicate receipts')
 
     for method in ('ai.actions.create_draft', 'ai.actions.reply', 'ai.adapter.observe_image',
                    'ai.adapter.complete', 'ai.service.dispatch_reply', 'ai.service.context',

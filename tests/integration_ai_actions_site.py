@@ -85,9 +85,8 @@ def main(exercise=None):
                 company=company.name,triage_owner=actor.name,enabled=1)).insert(set_name=sequential_name('channel'))
             frappe.get_doc(dict(doctype='Relay Contact Endpoint',channel=channel.name,endpoint=endpoint,
                                relay_contact=contact.name,verified=1)).insert()
-            contract = dict(name='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party',
-                fields=['name','company','posting_date','debit','credit'], identity_anchor='Supplier',
-                identity_fields={'WhatsApp':'alias'}, company_field='company')
+            from relay_core.ai.capabilities import active
+            contract = active('erpnext.supplier_ledger')
             raw('GL Entry','Action Debit',company=company.name,party_type='Supplier',party=supplier.name,
                 posting_date='2026-10-01',debit=1250,credit=0,is_cancelled=0)
             raw('GL Entry','Action Credit',company=company.name,party_type='Supplier',party=supplier.name,
@@ -95,7 +94,7 @@ def main(exercise=None):
             event = raw('Relay AI Skill','Action Ledger',title='Sim Action Ledger '+stamp,enabled=1,
                 channel=channel.name,business_doctype='Supplier',run_as_user=actor.name,handoff_owner=actor.name,
                 mode='Automatic',daily_limit=100,search_confirmation='When required',target='Explain supplier ledger',instructions='Use my ledger only',
-                execution_policy='Execute',allowed_tools=json.dumps([contract]),allowed_actions='[]')
+                execution_policy='Execute',allowed_tools=json.dumps([{'capability':contract['key']}]),allowed_actions='[]')
             frappe.db.commit()
             client = Client(frappe.app.application, Response)
             def request(method, data=None, authenticated=True, verb='POST'):
@@ -142,7 +141,11 @@ def main(exercise=None):
             event.allowed_actions=json.dumps([dict(action='draft_payment',doctype='Payment Entry',fields=['paid_amount'])])
             frappe.db.set_value('Relay AI Skill', event.name, 'allowed_actions', event.allowed_actions)
             event.reload()
-            def new_run(label, amount=1250, steps=1):
+            runs=[]
+            def new_run(label, amount=None, steps=1):
+                # A distinct default amount per run; the same input for the same business is a duplicate request.
+                amount=1250+len(runs) if amount is None else amount
+                runs.append(label)
                 doc=source(label)
                 ticket=ensure_episode(doc,owner=actor.name,skill=event)
                 doc.reload()
@@ -188,6 +191,14 @@ def main(exercise=None):
             assert json.loads(journal.approval_evidence)['actor']==actor.name
             assert execute(run)==result and len(calls)==1
             print('PASS real 1250 draft, episode reference, approval HTTP status/shape, duplicate replay')
+
+            run,ticket=new_run('Duplicate',1250)
+            duplicate=execute(run)
+            assert duplicate['status']=='Rejected' and duplicate['reason']=='Duplicate request' and len(calls)==1
+            assert frappe.db.get_value('Relay Flow Action',duplicate['name'],'duplicate_of')==result['name']
+            response=approval(duplicate)
+            assert response.status_code==417, response.status_code
+            print('PASS the same draft for the same business within 7 days is a duplicate request that cannot be approved')
 
             run,ticket=new_run('Stale')
             pending=execute(run)

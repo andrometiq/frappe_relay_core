@@ -29,6 +29,7 @@ def main():
     from werkzeug.test import Client
     from werkzeug.wrappers import Response
     from relay_core.ai import adapter, service as ai
+    from relay_core.ai.render import field_names
     from relay_core.automation import service, queue
     from relay_core.automation.provenance import conversation_key
     from relay_core.permissions import sequential_name
@@ -85,9 +86,8 @@ def main():
                 company=company.name,triage_owner=actor.name,enabled=1)).insert(set_name=sequential_name('channel'))
             frappe.get_doc(dict(doctype='Relay Contact Endpoint',channel=channel.name,endpoint=endpoint,
                                relay_contact=contact.name,verified=1)).insert()
-            contract = dict(name='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party',
-                fields=['name','company','posting_date','debit','credit'], identity_anchor='Supplier',
-                identity_fields={'WhatsApp':'alias'}, company_field='company')
+            from relay_core.ai.capabilities import active
+            contract = active('erpnext.supplier_ledger')
             raw('GL Entry','Matching Debit',company=company.name,party_type='Supplier',party=supplier.name,
                 posting_date='2026-10-01',debit=1250,credit=0,is_cancelled=0)
             raw('GL Entry','Matching Credit',company=company.name,party_type='Supplier',party=supplier.name,
@@ -95,7 +95,7 @@ def main():
             event = raw('Relay AI Skill','Matching Ledger',title='Sim Matching Ledger '+stamp,enabled=1,
                 channel=channel.name,business_doctype='Supplier',run_as_user=actor.name,handoff_owner=actor.name,
                 mode='Automatic',daily_limit=100,target='Explain supplier ledger',instructions='Use my ledger only',
-                execution_policy='Execute',allowed_tools=json.dumps([contract]),allowed_actions='[]')
+                execution_policy='Execute',allowed_tools=json.dumps([{'capability':contract['key']}]),allowed_actions='[]')
             ticket_event = raw('Relay AI Skill','Matching Support',title='Sim Matching Support '+stamp,enabled=1,
                 channel=channel.name,business_doctype='Supplier',run_as_user=actor.name,handoff_owner=actor.name,
                 mode='Automatic',daily_limit=100,target='Open support ticket',instructions='Ticket only',
@@ -133,7 +133,7 @@ def main():
                 # Admission declares the search; step 6 exercises confirmed reads
                 # through the real journal in integration_ai_search_site.py.
                 return dict(reply='Confirm your ledger search',handoff=False,reason='',user=user,reads=[],
-                    search=dict(purpose='Review your ledger',reference=contract['name'],fields=contract['fields'],
+                    search=dict(purpose='Review your ledger',reference=contract['key'],fields=field_names(contract,'model'),
                         arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}}))
             with patch.object(adapter,'match',autospec=True,side_effect=classified) as model, \
                     patch.object(adapter,'complete',side_effect=answer) as complete, \

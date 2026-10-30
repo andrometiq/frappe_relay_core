@@ -7,6 +7,19 @@ from unittest.mock import patch
 from contextlib import contextmanager, ExitStack
 
 
+def approved_pack(key, manifest):
+    """Insert an approved Core read pack for this run; the caller's tracked db_insert cleanup removes it."""
+    import frappe
+    from relay_core.ai.capabilities import DOCTYPE, validate_manifest, manifest_hash
+    checked = validate_manifest('relay_core', key, {name: value for name, value in manifest.items() if name not in ('key', 'app')})
+    digest = manifest_hash(checked)
+    frappe.get_doc(dict(doctype=DOCTYPE, name=key, capability_key=key, app='relay_core', kind='Read',
+        business_doctype=checked['business_doctype'], label=checked['label'], enabled=1, status='Approved',
+        approved_version=checked['version'], approved_hash=digest, current_hash=digest, approved_by='Administrator',
+        manifest=json.dumps(checked, sort_keys=True))).db_insert()
+    return checked
+
+
 def confine_writes(event, args, root=Path(__file__).resolve().parents[1]):
     paths = []
     if event == 'open' and isinstance(args[0], (str, bytes)) and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC):
@@ -134,6 +147,7 @@ def channel_ai_cases(fixture):
     from relay_core.automation.provenance import conversation_key
     from relay_core.tickets import resume_ai
     from relay_core.flows.actions import proposal
+    from relay_core.ai.render import field_names
 
     frappe.set_user('Administrator')
     company = 'Sim Channel Company ' + fixture.stamp
@@ -148,23 +162,25 @@ def channel_ai_cases(fixture):
     unrelated = business('Channel denied ' + fixture.stamp)
     restriction = frappe.get_doc(dict(doctype='User Permission', user=partner, allow='Customer',
         for_value=fixture.customer.name, apply_to_all_doctypes=1)).insert()
-    contract = dict(name='customer', method='get_doc', doctype='Customer',
-        fields=['name', 'customer_details'], scope_field='name', identity_anchor='Customer',
-        identity_fields={'Telegram':'alias', 'Email':'alias'}, company_field='represents_company')
+    contract = approved_pack('erpnext.sim_customer_' + ''.join(c for c in fixture.stamp.lower() if c.isalnum()), dict(
+        kind='read', version=1, label='Sim customer details', business_doctype='Customer', doctype='Customer',
+        operation='get_doc', scope={'business_field': 'name', 'company': {'kind': 'company_field', 'field': 'represents_company'}},
+        fields=[{'name': 'name', 'model': True, 'customer': True}, {'name': 'customer_details', 'customer': True}],
+        filters={}, limit=1, empty_result='handoff', confirmation='Always', render='relay_core.ai.ledger.render'))
     counter = 0
     for provider, address in [('Telegram', phone(fixture.stamp)), ('Email', 'sim-ai-'+fixture.stamp.lower()+'@example.invalid')]:
         binding = endpoint(fixture, provider, address)
         frappe.db.set_value('Relay Channel', binding.channel, dict(company=company, triage_owner=fixture.actor))
-        frappe.db.set_value('Customer', fixture.customer.name, dict(alias=address, represents_company=company))
+        frappe.db.set_value('Customer', fixture.customer.name, 'represents_company', company)
         skill = frappe.get_doc(dict(doctype='Relay AI Skill', name='Sim '+provider+' Read '+fixture.stamp,
             title='Sim '+provider+' Read', enabled=1, channel=binding.channel, business_doctype='Customer',
             run_as_user=fixture.actor, handoff_owner=fixture.actor, mode='Automatic', daily_limit=100,
             target='Confirm my order quantity and amount', exact_trigger='/order', execution_policy='Execute',
             search_confirmation='Always', instructions='Read only the authenticated sender in this company.',
-            allowed_tools=json.dumps([contract]), allowed_actions='[{"action":"reply"}]'))
+            allowed_tools=json.dumps([{'capability': contract['key']}]), allowed_actions='[{"action":"reply"}]'))
         skill.db_insert(); frappe.db.commit()
         frappe.conf.relay_automation_enabled = 1
-        plan = dict(reference='customer', purpose='confirm your quantity and amount', fields=contract['fields'],
+        plan = dict(reference=contract['key'], purpose='confirm your quantity and amount', fields=field_names(contract, 'model'),
             arguments={'name':fixture.customer.name})
         reads, outbound = [], []
         revoke = False
@@ -202,18 +218,20 @@ def channel_ai_cases(fixture):
                 deny(lambda:reader(event,actor,business,scope,run_id).read(contract,**plan['arguments']))
                 return dict(reply='',handoff=False,reason='',user=actor,reads=[],search=plan)
             assert search==plan
-            assert outbound and 'I will search customer' in outbound[-1]['text' if provider=='Telegram' else 'body']
+            assert outbound and 'I will search '+contract['key'] in outbound[-1]['text' if provider=='Telegram' else 'body']
             # The declaration journal is real; it cannot authorize another name.
             deny(lambda:reader(event,actor,business,scope,run_id).read(contract,name=unrelated.name))
-            # Probe actual identity/company checks with the same authorized plan.
-            for field, wrong, original in [('alias','wrong@example.invalid',address),
-                    ('represents_company',other_company,company)]:
-                frappe.db.set_value('Customer',fixture.customer.name,field,wrong)
+            # Probe actual sender binding and company checks with the same authorized plan.
+            for doctype, name, field, wrong, original in [('Relay Contact Endpoint',binding.name,'verified',0,1),
+                    ('Customer',fixture.customer.name,'represents_company',other_company,company)]:
+                frappe.db.set_value(doctype,name,field,wrong)
                 deny(lambda:reader(event,actor,business,scope,run_id).read(contract,**plan['arguments']))
-                frappe.db.set_value('Customer',fixture.customer.name,field,original)
+                frappe.db.set_value(doctype,name,field,original)
             current=reader(event,actor,business,scope,run_id)
             result=current.read(contract,**plan['arguments'])
-            assert result=={'name':fixture.customer.name,'customer_details':'Sim Order quantity 25, amount 1250'}
+            # The Text field reaches only the renderer, never the model.
+            assert result=={'name':fixture.customer.name}
+            assert current.results[contract['key']]['rows'][0]['customer_details']=='Sim Order quantity 25, amount 1250'
             reads.append(result)
             if revoke:
                 previous=frappe.session.user
@@ -240,7 +258,7 @@ def channel_ai_cases(fixture):
                 deny(lambda:reader(skill,actor,business_ref,scope,offer.name).read(contract,**plan['arguments']))
             confirmed=source('yes'); result=run(confirmed)
             assert result.status=='Completed' and result.ticket and len(reads)==1 and len(outbound)==2, (provider,result.status,result.reason)
-            assert json.loads(result.decision)['reads'][0]['tool']=='customer'
+            assert json.loads(result.decision)['reads'][0]['tool']==contract['key']
             args=outbound[-1]
             if provider=='Telegram':
                 assert args['chat_id']==int(address) and 'message_thread_id' not in args and '1250' in args['text']
@@ -281,13 +299,19 @@ def sender_scope_cases(fixture):
     from channel_identity_fixtures import endpoint
     from relay_core.ai import service, adapter
     from relay_core.ai.tools import Reader, recheck, fingerprint
+    from relay_core.ai.capabilities import active
+    from relay_core.ai.ledger import totals
+    from relay_core.ai.render import field_names
     from relay_core.automation.provenance import conversation_key
     from frappe_tools.ai import tools as shared_tools
 
     # Probe the real permission layer independently of search delivery. The event
     # suite exercises the real declaration/confirmation journal before SEARCH.
+    contract = active('erpnext.supplier_ledger')
+    one = approved_pack('erpnext.sim_ledger_entry_' + ''.join(c for c in fixture.stamp.lower() if c.isalnum()),
+                        dict(contract, operation='get_doc', label='Sim ledger entry'))
     def authorized(reference, arguments):
-        assert reference['name'] == 'ledger'
+        assert reference['key'] in (contract['key'], one['key'])
     created = []
     stamp = fixture.stamp
     sites = os.environ['SITES_PATH']
@@ -332,9 +356,6 @@ def sender_scope_cases(fixture):
         binding = endpoint(fixture, 'Email', address)
         created.append(('Relay Contact Endpoint', binding.name))
         frappe.db.set_value('Relay Channel', binding.channel, 'company', companies[0].name)
-        contract = dict(name='ledger', method='get_list', doctype='GL Entry', scope_field='party',
-            fields=['name', 'company', 'posting_date', 'debit', 'credit'], identity_anchor='Supplier',
-            identity_fields={'Email': 'alias'}, company_field='company')
         rows = []
         for label, company, party_type, debit in [('Own Entry', companies[0], 'Supplier', 1250),
                 ('Other Company Entry', companies[1], 'Supplier', 7500), ('Customer Collision', companies[0], 'Customer', 4500)]:
@@ -343,7 +364,7 @@ def sender_scope_cases(fixture):
         skill = insert('Relay AI Skill', 'Scope Event', enabled=1, title='Sim Scope Event ' + stamp,
             channel=binding.channel, business_doctype='Supplier', run_as_user=actor.name, daily_limit=100,
             target='Read my ledger', exact_trigger='My confirmed ledger for October', execution_policy='Execute',
-            allowed_tools=json.dumps([contract]), mode='Shadow', instructions='Read only my confirmed ledger.')
+            allowed_tools=json.dumps([{'capability': contract['key']}]), mode='Shadow', instructions='Read only my confirmed ledger.')
         provenance = dict(provider='Email', message_id='<sim-scope-' + stamp.lower() + '@example.invalid>',
             authentication={'status': 'pass'}, email_thread_id='<sim-scope-thread@example.invalid>')
         message = insert('Relay Message', 'Scope Message', relay_contact=fixture.contact.name, channel=binding.channel,
@@ -355,20 +376,18 @@ def sender_scope_cases(fixture):
         denied(lambda: service.context(skill, message))
         fixture.person.user = None; fixture.person.save()
         reader = Reader(skill, user, business, scope, authorize=authorized)
-        result = reader.read(contract, limit=1)
-        assert result['totals']['debit'] == '1250.0' or result['totals']['debit'] == '1250'
+        result = reader.read(contract, filters={'posting_date': ['between', ['2026-10-01', '2026-10-31']]}, limit=1)
+        assert totals(reader.results[contract['key']]['rows'])['debit'] in ('1250', '1250.0')
         assert [row['name'] for row in result['rows']] == [rows[0].name] and not result['truncated']
-        assert set(result['rows'][0]) == set(contract['fields'])
+        assert set(result['rows'][0]) == set(field_names(contract, 'model'))
         recheck(skill, user, business, reader.evidence, scope, authorize=authorized)
-        one = contract | {'method': 'get_doc'}
-        skill.allowed_tools = json.dumps([one])
+        skill.allowed_tools = json.dumps([{'capability': one['key']}])
         for row in rows[1:]: denied(lambda: Reader(skill, user, business, scope, authorize=authorized).read(one, name=row.name))
         assert Reader(skill, user, business, scope, authorize=authorized).read(one, name=rows[0].name)['debit'] == 1250
-        skill.allowed_tools = json.dumps([contract])
+        skill.allowed_tools = json.dumps([{'capability': contract['key']}])
         denied(lambda: reader.read(contract, filters={'company': companies[1].name}))
         for dt, name, field, value, original in [
                 ('Relay Contact Endpoint', binding.name, 'verified', 0, 1),
-                ('Supplier', supplier.name, 'alias', 'different@example.invalid', address),
                 ('Relay Channel', binding.channel, 'company', companies[1].name, companies[0].name),
                 ('User', actor.name, 'enabled', 0, 1)]:
             frappe.db.set_value(dt, name, field, value)
@@ -389,7 +408,7 @@ def sender_scope_cases(fixture):
         with patch.object(frappe, 'get_hooks', side_effect=hooks), patch.object(frappe, 'get_attr',
                 side_effect=lambda name: (lambda *args, **kw: '1=0') if name == hook_name else original_attr(name)):
             denied(lambda: reader.read(contract))
-            skill.allowed_tools = json.dumps([one])
+            skill.allowed_tools = json.dumps([{'capability': one['key']}])
             denied(lambda: Reader(skill, user, business, scope, authorize=authorized).read(one, name=rows[0].name))
         def company_hooks(name=None, *args, **kwargs):
             value = original_hooks(name, *args, **kwargs)
@@ -402,7 +421,7 @@ def sender_scope_cases(fixture):
             with as_user(user):
                 assert frappe.get_doc('Company', companies[0].name).has_permission('read')
             denied(lambda: service.context(skill, message))
-        skill.allowed_tools = json.dumps([contract])
+        skill.allowed_tools = json.dumps([{'capability': contract['key']}])
         original_columns = shared_tools.get_readable_columns
         with patch.object(shared_tools, 'get_readable_columns', side_effect=lambda meta: original_columns(meta) - {'debit'}):
             denied(lambda: reader.read(contract))
@@ -436,7 +455,7 @@ def sender_scope_cases(fixture):
         def model(skill, user, business, prompt, run_id, *, scope, **kwargs):
             assert json.loads(prompt)['history'] == expected_history
             return dict(reply='Confirm October before reading', handoff=False, reason='', user=user, reads=[],
-                search=dict(purpose='Read my October ledger', reference='ledger', fields=contract['fields'],
+                search=dict(purpose='Read my October ledger', reference=contract['key'], fields=field_names(contract, 'model'),
                     arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}}))
         original_init = frappe.app.init_request
         def init_request(request):
@@ -461,7 +480,7 @@ def sender_scope_cases(fixture):
             assert result['mode'] == 'Shadow' and result['reply'] == 'Confirm October before reading'
             assert set(result) == {'reply', 'handoff', 'reason', 'identity_scope', 'match', 'reads', 'actions', 'mode', 'search'}
             assert result['identity_scope']['company'] == companies[0].name
-            assert result['reads'] == [] and result['search']['reference'] == 'ledger'
+            assert result['reads'] == [] and result['search']['reference'] == contract['key']
             with patch.object(frappe, 'get_hooks', side_effect=company_hooks), patch.object(frappe, 'get_attr',
                     side_effect=lambda name: (lambda *args, **kw: '1=0') if name == hook_name else original_attr(name)):
                 response = request()

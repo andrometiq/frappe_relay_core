@@ -30,7 +30,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     assert required==set(PAYMENT_SCHEMA['required'])
     assert {'docstatus','owner','company','party'}.isdisjoint({row['value'] for row in fields})
     assert all(row['description'] in ('string','number') for row in fields)
-    assert keys('action')=={'create_draft','reply'}
+    assert keys('action')=={'create_draft','reply','erpnext.payment_entry_draft'}
     assert options('user',selected=json.dumps([actor.name]))[0]['label'].startswith('Sim Action Operator')
     for kind in ('doctype','field','identity','company','scope','draft_doctype','draft_field','action','user','model','message'):
         response=request(prefix+'editor_options',dict(kind=kind),authenticated=False,verb='GET')
