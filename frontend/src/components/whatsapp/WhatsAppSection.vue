@@ -5,7 +5,7 @@ import { coreApi } from '../../services/coreApi'
 import { whatsappRoute, whatsappSections } from '../../services/navigation'
 import { routeTab } from '../../useViewRoute'
 import WhatsAppWorkspace from '../WhatsAppWorkspace.vue'
-import WhatsAppIdentity from '../WhatsAppIdentity.vue'
+import WhatsAppAccounts from './WhatsAppAccounts.vue'
 
 const capabilities = inject('relayCapabilities')
 const views = {
@@ -45,7 +45,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
       <ErrorMessage :message="error" />
       <div class="workflow-card">
         <h2 class="font-semibold">Your WhatsApp number</h2><p v-if="account">Account: {{ account }}</p>
-        <WhatsAppIdentity v-if="configured" /><p v-else>WhatsApp is not connected yet. Ask your administrator to set it up.</p>
+        <WhatsAppAccounts v-if="configured" /><p v-else>WhatsApp is not connected yet. Ask your administrator to set it up.</p>
       </div>
       <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Connection settings</a><a class="v1-link" href="/desk/relay-channel">Channel setup in Desk</a></div>
     </div>
