@@ -255,7 +255,12 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
     endpoint=channel_endpoint(contact,endpoint,channel)
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
     with frappe.cache.lock('relay-start:'+key,timeout=120,blocking_timeout=3):
-        return send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
+        result=send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
+        try:
+            template_media.keep_header(result,kind,messaging.object_value(data))
+        except (OSError,frappe.DoesNotExistError):
+            frappe.log_error(title='Relay template header copy failed')
+        return result
 
 
 def send_locked(contact, endpoint, kind, data, request_key, business_doctype, business_name):

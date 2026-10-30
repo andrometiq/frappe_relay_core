@@ -1,10 +1,12 @@
 """Private template header files, matched before a sheet row can become Pending."""
+import json
 import mimetypes
 import os
 import stat
 import zipfile
 from collections import defaultdict
 
+import frappe
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 
 from relay_core.bulk_sheet import sheet_phone
@@ -152,3 +154,32 @@ def resolve(attachment, media_type, numbers, region, issues=None):
     return {number: (matches[number][0] if len(matches[number]) == 1 else
                      (None, 'Duplicate header attachments' if matches[number] else 'Missing header attachment'))
             for number in numbers}
+
+
+def sent_header(source, campaign):
+    """(file name, bytes) of the header file the campaign row of `source` sent, or None when the
+    campaign sent no uploaded header. The caller has checked the source, so File sharing rules do
+    not apply; the file must be the one the row named and one of that campaign's header files."""
+    from relay_core.bulk_campaigns import RECIPIENT, header_type
+    doc = frappe.db.get_value('Relay Campaign', campaign, ['channel', 'column_map', 'arguments'], as_dict=True)
+    attachment = json.loads(doc.column_map or '{}').get('header_attachment') if doc else None
+    row = frappe.db.get_value(RECIPIENT, {'name': source.source_key, 'campaign': campaign},
+                              ['destination', 'arguments'], as_dict=True) if attachment else None
+    if not row:
+        return None
+    item = json.loads(row.arguments or '{}').get('values', {}).get('header_media')
+    files = {(entry['file_url'], entry['filename']) for entry in attachment['files']}
+    if (doc.channel != source.channel or row.destination != source.sender_endpoint
+            or not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files):
+        raise PermissionError('Attachment belongs to another campaign')
+    name = frappe.db.get_value('File', {'file_url': item['file_url'], 'is_private': 1}, 'name')
+    if not name:
+        raise DoesNotExistError('Header attachment unavailable')
+    file = frappe.get_doc('File', name)
+    path = file.get_full_path()
+    if not os.path.isfile(path):
+        raise DoesNotExistError('Header attachment unavailable')
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[header_type(doc)])
+    if error := size_error(os.path.getsize(path), limit, 'Header attachment'):
+        raise ValidationError(error)
+    return item['filename'], file.get_content()

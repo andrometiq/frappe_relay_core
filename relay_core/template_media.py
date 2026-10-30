@@ -14,6 +14,7 @@ from relay_core.channels import channel as channel_definition
 from relay_core.file_limits import encoded_length, get_media_max_bytes, size_error, size_label
 
 HEADER_KINDS = {'image': 'photo', 'video': 'video', 'document': 'document'}  # Meta header type -> channel media kind.
+UPLOADS = 'relay-template-media:'  # Hub media id -> the uploader's File and the sending channel.
 PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
 
 
@@ -98,4 +99,28 @@ def upload(channel, media_type, filename, content_base64):
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:
         frappe.throw(failure_message(error))
+    from frappe.utils.file_manager import save_file
+    from relay_core.bulk_campaigns import MEDIA_DAYS
+    file = save_file(filename, raw, None, None, is_private=1)
+    frappe.cache.set_value(UPLOADS + media_id, {'file': file.name, 'channel': sender.name}, expires_in_sec=MEDIA_DAYS * 86400)
     return {'id': media_id, 'filename': filename, 'size': len(raw)}
+
+
+def keep_header(result, kind, data):
+    """Move the uploaded header file of a sent template onto its Relay Message, so the chat serves it from the site."""
+    from relay_core.attachments import template_media
+    template = data.get('arguments') if kind == 'whatsapp' else data if kind == 'template' else None
+    media = template_media({'template': template}) if isinstance(template, dict) else None
+    key = UPLOADS + str(media.get('id')) if media and result.get('action') else None
+    upload = frappe.cache.get_value(key) if key else None
+    channel = frappe.db.get_value('Relay Message Action', result['action'], 'target_channel') if isinstance(upload, dict) else None
+    if not channel or upload['channel'] != channel:
+        return None
+    file = frappe.get_doc('File', upload['file'])
+    if not file.is_private or file.attached_to_doctype or file.owner != frappe.session.user:
+        return None
+    from relay_core.document_sends import keep_copy
+    if message := keep_copy(result, file.file_name, file.get_content()):
+        file.delete(ignore_permissions=True)
+        frappe.cache.delete_value(key)
+    return message
