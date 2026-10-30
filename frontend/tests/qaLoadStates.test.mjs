@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ref } from 'vue'
+import { pickerError } from '../src/services/pickerError.js'
 
 const source = readFileSync(new URL('../src/components/messages/StartConversation.vue', import.meta.url), 'utf8')
 const destinations = source.slice(source.indexOf('const destinationsLoaded'), source.indexOf('async function loadRecords'))
@@ -42,6 +43,11 @@ test('delivery failures suppress the successful-empty state', () => {
   assert.equal(visible([],true,''),false)
   assert.equal(visible([],false,''),true)
   assert.equal(visible([{}],false,''),false)
+  const wrapper=new Function('rows','busy','error',`return Boolean(${template.match(/<div v-if="([^"]+)" class="workflow-card"/)[1]})`)
+  assert.equal(wrapper([],false,'Offline'),false)
+  assert.equal(wrapper([],true,''),false)
+  assert.equal(wrapper([],false,''),true)
+  assert.equal(wrapper([{}],false,'Offline'),true)
 })
 
 test('network failure copy is neutral for readers as well as editors', async () => {
@@ -59,15 +65,16 @@ test('saved picker captions expose failed lookups and recover on retry', async (
   const source=readFileSync(new URL('../src/components/fields/EventPicker.vue',import.meta.url),'utf8')
   const load=source.slice(source.indexOf('async function loadCaptions'),source.indexOf('watch(['))
   let fail=true
-  const state=new Function('ref','coreApi',`
+  const state=new Function('ref','coreApi','pickerError',`
     let generation=0;
     const props={modelValue:'private-id',method:'options',multiple:false},params=ref({kind:'doctype'}),captions=ref([]),error=ref(''),loading=ref(false),caption=row=>row;
     ${load}
     return {loadCaptions,captions,error};
-  `)(ref,async()=>{if(fail)throw Error('Source DocType is not accessible');return {items:[{value:'private-id',label:'Customer'}]}})
+  `)(ref,async()=>{if(fail)throw Error('Source DocType is not accessible');return {items:[{value:'private-id',label:'Customer'}]}},pickerError)
   await state.loadCaptions()
   assert.equal(state.captions.value[0].label,'Unavailable selection')
-  assert.equal(state.error.value,'Source DocType is not accessible')
+  assert.equal(state.error.value,pickerError(undefined,true))
+  assert.doesNotMatch(state.error.value,/DocType/)
   fail=false;await state.loadCaptions()
   assert.equal(state.captions.value[0].label,'Customer')
   assert.equal(state.error.value,'')

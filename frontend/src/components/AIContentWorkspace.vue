@@ -64,11 +64,11 @@ onMounted(load)
           <FormControl v-model="draft.enabled" label="Enabled" type="checkbox" :disabled="busy" />
           <EventPicker v-model="draft.company" label="Company (blank for all)" kind="company_record" :disabled="busy" />
           <template v-if="knowledge">
-            <EventPicker v-model="draft.business_doctype" label="Business type (blank for all)" kind="doctype" :disabled="busy" />
+            <EventPicker v-model="draft.business_doctype" label="Business type (blank for all)" kind="business_doctype" :disabled="busy" />
             <FormControl v-model="draft.instructions" label="Standing instructions" type="textarea" rows="8" maxlength="8000" required :disabled="busy" />
           </template>
           <template v-else>
-            <EventPicker v-model="draft.audience" label="Audience business types" kind="doctype" multiple :disabled="busy" />
+            <EventPicker v-model="draft.audience" label="Audience business types" kind="business_doctype" multiple :disabled="busy" />
             <FormControl v-model="draft.description" label="Event facts" type="textarea" rows="8" maxlength="10000" required :disabled="busy" />
             <div class="grid gap-3 sm:grid-cols-2">
               <FormControl v-for="field in ['event_starts_on', 'event_ends_on', 'available_from', 'available_to']" :key="field" v-model="draft[field]" :label="{event_starts_on:'Event starts',event_ends_on:'Event ends',available_from:'AI may use from',available_to:'AI may use until'}[field]" type="date" :disabled="busy" />

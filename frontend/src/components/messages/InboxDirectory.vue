@@ -186,7 +186,10 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
 .directory-row-menu { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:var(--relay-layer-strong); color:var(--relay-ink-2); box-shadow:var(--relay-shadow-1); opacity:0; pointer-events:none; }
 .directory-row:hover > .directory-row-menu, .directory-row-menu:focus-visible { opacity:1; pointer-events:auto; }
 @media (hover:none) { .directory-row-menu { display:none; } }
-@media (max-width:768px) { .directory-link { right:12px; height:44px; min-width:44px; bottom:4px; } .inbox-list-head :deep(button), .v1-queues button { min-height:44px; min-width:44px; } }
+@media (max-width:768px) {
+  .directory-link { right:12px; bottom:8px; }
+  .directory-rows .directory-row:has(.directory-link) > .directory-contact { padding-bottom:36px; align-items:flex-start; }
+}
 /* The Link button sits on the context line and the row menu takes the time's place, so neither covers text. */
 .directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context) { padding-right:56px; }
 @media (hover:hover) { .directory-row:hover .directory-contact-top time { visibility:hidden; } }

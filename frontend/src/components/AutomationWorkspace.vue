@@ -125,8 +125,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
   <section class="v1-screen" :class="{ 'event-workspace': skill }"><div class="v1-content space-y-4">
     <p v-if="!allowed">A Relay Communication Manager role is required to configure automation.</p>
     <template v-else>
-      <header v-if="skill" class="event-toolbar"><strong>Skills</strong><Dropdown :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New skill" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
-      <WorkspaceHeading v-else description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
+      <header v-if="skill" class="event-toolbar"><strong>Skills</strong><Dropdown v-if="capabilities.configure" :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New skill" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
+      <p v-if="skill && !capabilities.configure" class="workspace-help">Ask a system administrator to configure AI models and the default handoff owner.</p>
+      <WorkspaceHeading v-if="!skill" description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
       <div v-if="!skill" class="workspace-toolbar"><div class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div></div>
       <ErrorMessage v-if="error" :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
       <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !draft, 'event-detail-open': skill && draft }">
@@ -145,7 +146,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
           <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'skill' : 'event rule' }}</h2><Button icon="x" aria-label="Dismiss editor" title="Dismiss editor" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="titleCaption" label="Title" required :disabled="busy" />
-          <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" :kind="skill ? 'doctype' : 'business_doctype'" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
+          <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" kind="business_doctype" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Owner instructions</legend>
               <FormControl v-model="draft.target" label="Target" type="textarea" rows="2" maxlength="2000" :required="Boolean(draft.enabled)" :disabled="busy" />
@@ -169,9 +170,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             </fieldset>
             <fieldset class="automation-section"><legend>Actions · EXECUTE</legend>
               <FormControl v-model="draft.execution_policy" label="Execution policy" type="select" :options="['Ticket only', 'Execute']" :disabled="busy" />
-              <p v-if="draft.execution_policy === 'Ticket only'" class="text-sm">Only raise the episode ticket.</p>
+              <p v-if="draft.execution_policy === 'Ticket only'" class="text-sm">Only raise the conversation ticket.</p>
               <template v-else>
-                <p class="text-sm">Follow the written steps in this order. Every created document stays a draft linked to the episode ticket. Staff open, check and submit it.</p>
+                <p class="text-sm">Follow the written steps in this order. Every created document stays a draft linked to the conversation ticket. Staff open, check and submit it.</p>
                 <div v-for="(action, index) in actions" :key="action.action" class="event-reference">
                   <strong>{{ index + 1 }}. {{ referenceName(action.action) }}</strong>
                   <template v-if="action.action === 'create_draft'">
@@ -179,7 +180,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                     <EventPicker v-model="action.fields" label="Draft fields (include required fields)" kind="draft_field" :action="action.action" :doctype="action.doctype" multiple :disabled="busy || !action.doctype" />
                     <p class="text-sm">Field types are shown in the picker. Required fields must be included. Staff review and submit the linked draft.</p>
                   </template>
-                  <p v-else class="text-sm">Reply text · Core supplies the destination. No separate approval required.</p>
+                  <p v-else class="text-sm">Reply to the sender in this conversation. No separate approval required.</p>
                   <p class="text-sm">Execution approval: {{ actionOptions.find(row => row.value === action.action)?.approval || 'Not required' }}</p>
                   <div class="event-action-buttons"><Button label="Move up" :disabled="busy || index === 0" @click="moveAction(actions, index, -1)" /><Button label="Move down" :disabled="busy || index === actions.length - 1" @click="moveAction(actions, index, 1)" /><Button label="Remove action" :disabled="busy" @click="actions.splice(index, 1)" /></div>
                 </div>
@@ -211,7 +212,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
               <p class="text-sm">The PDF goes in the template's document header, or as a document message after the template when the template has no document header. Recipient choices and PDFs need a fixed WhatsApp channel.</p>
             </fieldset>
           </template>
-          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-model="draft.run_as_user" label="Run-as user" kind="user" :method="pickerMethod" :disabled="busy" /><p v-if="skill" class="text-sm">The linked sender user takes precedence. Otherwise this user’s permissions apply; denial never falls back.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
+          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-model="draft.run_as_user" label="Run-as user" kind="user" :method="pickerMethod" :disabled="busy" /><p v-if="skill" class="text-sm">Use the sender’s linked user account when available; otherwise use this account. If that account lacks permission, the action stops.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
           <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ variant('WhatsApp') ? livePreview : '' }}</p><p v-if="variant('Telegram')" class="whitespace-pre-wrap">Telegram: {{ variantPreview(draft.telegram_body, parameters) }}</p><p v-if="variant('Email')" class="whitespace-pre-wrap">Email: {{ variantPreview(draft.email_subject, parameters) }}
 {{ variantPreview(draft.email_body, parameters) }}
 {{ draft.email_signature }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>

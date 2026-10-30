@@ -26,9 +26,11 @@ const selecting = ref(false), selectedMessages = ref([]), selectionAnchor = ref(
 const selection = computed(() => selectedMessages.value.map(message => message.name))
 let suppressTap = null
 function cancelSelection() { selecting.value = false; selectedMessages.value = []; selectionAnchor.value = ''; suppressTap = null }
-function startSelection(message) {
+async function startSelection(message) {
   if (!props.canComment || !selectableMessage(message)) return
   selecting.value = true; selectedMessages.value = [message]; selectionAnchor.value = message.name; menu.value = null
+  await nextTick()
+  if (selecting.value && selectionAnchor.value === message.name) scroll.toMessage(message.name)
 }
 function toggleSelection(message, event) {
   if (!selecting.value) return
@@ -284,19 +286,20 @@ function actions(message) {
 }
 </script>
 <template>
+  <div class="message-thread-region">
+    <div v-if="selecting" class="message-selection-bar" @keydown.esc="cancelSelection" role="toolbar" aria-label="Selected messages">
+      <span role="status">{{ selection.length }} selected</span>
+      <Button label="Create ticket" variant="solid" :disabled="!selection.length" @click="ticketFromSelection" />
+      <Button label="Cancel" variant="ghost" @click="cancelSelection" />
+    </div>
   <div
     ref="viewport"
-    class="message-thread"
+    class="message-thread" style="scroll-padding-block:20px"
     :class="{ 'has-menu-sheet': menu?.sheet }"
     aria-label="Conversation"
     @keydown.esc="cancelSelection"
     @scroll.passive="scrolled"
   >
-    <div v-if="selecting" class="message-selection-bar" role="toolbar" aria-label="Selected messages">
-      <span role="status">{{ selection.length }} selected</span>
-      <Button label="Create ticket" variant="solid" :disabled="!selection.length" @click="ticketFromSelection" />
-      <Button label="Cancel" variant="ghost" @click="cancelSelection" />
-    </div>
     <LoadingRows v-if="busy && !rows.length" label="Loading messages…" :count="3" />
     <div v-if="!rows.length && !busy" class="conversation-empty">
       <h2>No messages yet</h2>
@@ -419,6 +422,7 @@ function actions(message) {
     </div>
     <div v-if="newer" ref="later" class="h-px" aria-hidden="true" />
   </div>
+  </div>
   <MessageMenu v-if="menu" :key="menu.message.name" :trigger="menu.trigger" :area="viewport" :sheet="menu.sheet" :items="actions(menu.message)"
     :emoji="!replyClosed && canReact(menu.message) ? quickReactions : []" :current="ownReaction(menu.message.reactions)"
     @close="menu = null" @react="react(menu.message, $event)" @more="reactionTarget = menu.message.name" />
@@ -427,7 +431,8 @@ function actions(message) {
 </template>
 
 <style scoped>
-.message-selection-bar { position:sticky; top:0; z-index:5; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; background:var(--surface-modal); border:1px solid var(--outline-gray-3); border-radius:8px; }
+.message-thread-region { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; }
+.message-selection-bar { flex:none; z-index:5; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; background:var(--surface-modal); border:1px solid var(--outline-gray-3); border-radius:8px; }
 .message-selection-bar span { margin-right:auto; }
 .message-selection-bar :deep(button) { min-height:44px; }
 .message-thread .message-thread-content .conversation-bubble.is-selecting { cursor:pointer; user-select:none; min-height:44px; padding-left:40px; }

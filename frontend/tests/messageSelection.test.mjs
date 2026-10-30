@@ -28,17 +28,18 @@ const script = source.split('<script setup>')[1].split('</script>')[0].replace(/
 function thread(t, rows) {
   const props = reactive({ rows, selected: 'LOCAL-CONTACT', canComment: true, notes: [] })
   const events = [], cleanups = [], scope = effectScope()
+  const scrolledTo = []
   const globals = { ref, computed, watch, nextTick, selectMessages, selectableMessage, groupSends,
     defineProps: () => props, defineEmits: () => (...args) => events.push(args), inject: (_, fallback) => fallback,
     useMobileLayout: () => ref(true), useRealtimeRefresh() {}, useLoadMore() {},
     useMessageInfo: () => ({ close() {} }), coreApi: async () => ({ readers: [] }),
-    createScrollHold: () => ({ apply() {}, toBottom() {}, toMessage: () => false }),
+    createScrollHold: () => ({ apply() {}, toBottom() {}, toMessage: name => { scrolledTo.push(name); return true } }),
     onMounted() {}, onBeforeUnmount: fn => cleanups.push(fn),
     document: { visibilityState: 'hidden', removeEventListener() {} }, window: { removeEventListener() {} },
     navigator: { vibrate() {} } }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { selecting, selection, startSelection, toggleSelection, ticketFromSelection, cancelSelection, pressStart, pressEnd, pressMove };')(...Object.values(globals)))
   t.after(() => { scope.stop(); cleanups.forEach(fn => fn()) })
-  return { ...state, props, events }
+  return { ...state, props, events, scrolledTo }
 }
 const click = () => ({ type: 'click', preventDefault() {}, stopPropagation() {} })
 const touch = { pointerType: 'touch', clientX: 0, clientY: 0 }
@@ -97,4 +98,21 @@ test('scrolling and cancelled presses do not select; a missing release click doe
   view.pressEnd({ type: 'pointerup' })
   view.toggleSelection(message, click())
   assert.deepEqual(view.selection.value, [])
+})
+
+
+test('starting selection brings the chosen message into the reserved viewport', async t => {
+  const message = { name: 'LOCAL-FIRST', content: 'Quantity 40' }
+  const view = thread(t, [message])
+  await view.startSelection(message)
+  assert.deepEqual(view.scrolledTo, [message.name])
+})
+
+test('cancelling selection before layout does not move the reader', async t => {
+  const message = { name: 'LOCAL-CANCELLED', content: 'Quantity 40' }
+  const view = thread(t, [message])
+  const selecting = view.startSelection(message)
+  view.cancelSelection()
+  await selecting
+  assert.deepEqual(view.scrolledTo, [])
 })

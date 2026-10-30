@@ -50,7 +50,7 @@ async function search() {
     const keep = new Set([...selected.value,...options.value.map(o=>o.value)])
     for (const key of labels.keys()) if (!keep.has(key)) labels.delete(key)
     active.value=options.value.length ? 0 : -1
-  } catch(e) {if(current===generation && e.name!=='AbortError') error.value=e.message || 'Search failed. Try again.'}
+  } catch(e) {if(current===generation && e.name!=='AbortError') error.value=props.field.errorMessage || e.message || 'Search failed. Try again.'}
   finally {if(current===generation) loading.value=false}
 }
 function schedule(event) {if(composing || event?.isComposing)return;open.value=true;cancel();options.value=[];active.value=-1;timer=setTimeout(search,300)}
@@ -85,7 +85,7 @@ async function loadMore() {
     const known = new Set(options.value.map(row => row.value))
     options.value = [...options.value, ...rows.map(normalize).filter(row => !known.has(row.value))]
     for (const row of options.value) labels.set(row.value, row.label)
-  } catch(e) { if (current === generation && e.name !== 'AbortError') error.value = e.message }
+  } catch(e) { if (current === generation && e.name !== 'AbortError') error.value = props.field.errorMessage || e.message }
   finally { if (current === generation) loading.value = false }
 }
 const moreSentinel = useLoadMore({ loading: () => loading.value || props.field.loading, hasMore: () => open.value && props.field.hasMore, error: () => error.value || props.field.error, load: loadMore })

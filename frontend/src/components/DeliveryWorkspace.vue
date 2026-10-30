@@ -89,7 +89,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, error: error, l
     </section>
     <ErrorMessage :message="error" />
     <p v-if="busy" role="status">Loading / updating deliveries…</p>
-    <div class="workflow-card">
+    <div v-if="rows.length || (!busy && !error)" class="workflow-card">
       <article
         v-for="row in rows"
         :key="row.id"

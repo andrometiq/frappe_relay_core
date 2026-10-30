@@ -165,7 +165,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
 .ticket-tabs button, .ticket-status-tabs button { flex: none; height: 30px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); white-space: nowrap; }
 .ticket-tabs button[aria-selected=true], .ticket-status-tabs button[aria-selected=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .ticket-status-tabs { display: flex; width: fit-content; }
-.ticket-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ticket-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .ticket-toolbar__search { flex: 1 1 220px; min-width: 0; max-width: 360px; }
 .ticket-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-white); font-size: 13px; color: var(--ink-gray-7); white-space: nowrap; }
 .ticket-chip[aria-pressed=true] { border-color: var(--outline-blue-1, var(--relay-accent)); background: var(--surface-blue-1, var(--relay-accent-soft)); color: var(--ink-blue-3); font-weight: 600; }

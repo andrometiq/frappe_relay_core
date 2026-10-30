@@ -2,6 +2,15 @@
 .mobile-tabbar,.mobile-sheet,.mobile-sheet-backdrop{display:none}
 
 @media (max-width:768px){
+  /* One phone target floor, including controls teleported outside the app shell.
+     Important overrides compact component sizes; flex-shrink must not undo it. */
+  body :is(button,a[href],summary,input:not([type=hidden]),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only){min-height:44px!important;min-width:44px!important;flex-shrink:0}
+  .relay-checkbox{display:inline-flex;align-items:center;justify-content:center}
+  .relay-input-shell{height:auto!important}
+  .mobile-sheet-item{flex-shrink:0}
+  .reaction-pill{flex-wrap:wrap;width:max-content;max-width:calc(100vw - 88px);border-radius:16px}
+  .v1-shell.relay-shell .conversation-bubble:has(.message-readers){margin-bottom:48px}
+
   html,body{overflow:hidden;overscroll-behavior:none}
   .v1-shell.relay-shell{position:fixed;left:0;right:0;top:var(--relay-viewport-top,0px);display:flex;flex-direction:column;height:var(--relay-viewport-height,100dvh);padding:0;overflow:hidden}
   .v1-shell.relay-shell>.app-nav,.v1-shell.relay-shell>.relay-nav-backdrop{display:none!important}
@@ -56,9 +65,6 @@
   .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1;display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
   .v1-shell.relay-shell .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
 
-  /* Give compact controls real, non-overlapping phone targets. */
-  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button,.automation-chip){min-height:44px;min-width:44px}
-  .v1-shell.relay-shell :is(.frappe-page-head .relay-button,.ticket-page-head__settings){min-height:44px;min-width:44px}
   .v1-shell.relay-shell .contact-directory>.v1-queues,.v1-shell.relay-shell .v1-tabs{overflow:visible}
   .v1-shell.relay-shell .automation-chip{height:44px;padding:0 12px;border-radius:22px;font-size:13px}
   .v1-shell.relay-shell .automation-chips{gap:8px}
@@ -88,7 +94,7 @@
   .v1-shell.relay-shell .conversation-back.relay-button{width:44px;height:44px;min-height:44px;border:0;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .conversation-heading>.relay-avatar{width:36px;height:36px;font-size:12.5px}
   .v1-shell.relay-shell .conversation-title h2{font-size:15.5px}
-  .conversation-title-button{display:block;max-width:100%;min-height:0!important;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
+  .conversation-title-button{display:block;max-width:100%;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line{overflow:hidden;color:var(--relay-green);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line:has(.number-tag){display:flex;align-items:center;gap:6px;color:var(--relay-ink-3)}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}

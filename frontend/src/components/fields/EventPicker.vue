@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Button, ErrorMessage } from '@relay/ui'
 import ChoiceField from './ChoiceField.vue'
 import { coreApi } from '../../services/coreApi'
+import { pickerError } from '../../services/pickerError'
 import { readableName } from '../../services/recordTitle'
 const props = defineProps({ method: { type: String, default: 'ai.configuration.editor_options' }, modelValue: [String, Array], label: String, kind: String, doctype: String, businessDoctype: String, action: String, skill: String, multiple: Boolean, disabled: Boolean })
 defineEmits(['update:modelValue'])
@@ -23,7 +24,7 @@ async function loadCaptions() {
   } catch (e) {
     if (current === generation) {
       captions.value = selected.map(value => ({value, label: 'Unavailable selection'}))
-      error.value = e.message || 'Could not load the saved selection.'
+      error.value = pickerError(props.label, true)
     }
   } finally { if (current === generation) loading.value = false }
 }
@@ -33,7 +34,7 @@ const search = computed(() => {
   return async (query, signal) => (await coreApi(method, {...values, query}, false, {signal})).items.map(caption)
 })
 const field = computed(() => ({label: props.label, readOnly: props.disabled, initialOptions: captions.value,
-  search: search.value,
+  search: search.value, errorMessage: pickerError(props.label),
 }))
 </script>
 <template><div class="event-picker"><ChoiceField :field="field" :model-value="modelValue" :multiple="multiple" @update:model-value="$emit('update:modelValue', $event)" /><ErrorMessage :message="error" /><Button v-if="error" label="Retry saved selection" variant="ghost" :loading="loading" @click="loadCaptions" /></div></template>

@@ -124,7 +124,7 @@ onBeforeUnmount(clearPreview);
 </template>
 
 <style scoped>
-.template-media-field :deep(.relay-button), .template-media-field :deep(input) { min-height:44px; min-width:44px; }
+.template-media-tabs :deep([aria-selected="true"]) { background:var(--relay-accent-soft); color:var(--relay-accent-text); box-shadow:inset 0 -3px var(--relay-accent); font-weight:600; }
 .template-media-tabs { display: flex; gap: 4px; }
 .template-media-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px; text-align: center;

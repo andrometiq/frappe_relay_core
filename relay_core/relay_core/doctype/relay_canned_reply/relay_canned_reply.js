@@ -1,5 +1,6 @@
 frappe.ui.form.on('Relay Canned Reply', {
   async refresh(frm) {
+    frm.set_df_property('action_key', 'description', __('Enter the action ID supplied by your administrator. It runs only when staff choose the action in the saved reply picker.'));
     if (!frappe.user.has_role('System Manager')) return;
     frm.add_custom_button(__('Choose business action'), async () => {
       const {message: actions} = await frappe.call('relay_core.saved_reply_actions.catalog');
