@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FeatherIcon } from "@relay/ui";
 import { loadMedia, formatBytes } from "../services/mediaCache";
 import { attachmentKind, documentType } from "./messageContent";
@@ -52,8 +52,9 @@ async function save() {
 }
 onMounted(observe);
 onBeforeUnmount(() => { ++generation; visibility?.disconnect(); });
-watch(() => [props.message.name, props.link], () => {
+watch([() => props.message.name, () => props.link], async () => {
   ++generation; media.value = null; error.value = null; loading.value = false; shown.value = false;
+  await nextTick();
   observe();
 });
 </script>
