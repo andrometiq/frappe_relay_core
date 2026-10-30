@@ -77,14 +77,14 @@ test('catch-up across 300 rows preserves pagination and advances the ingestion c
     await fixture.state.history()
     await fixture.refresh('messages')
     assert.equal(fixture.state.connectionError.value,'')
-    assert.equal(fixture.state.more.value,true)
-    assert.deepEqual(fixture.state.rows.value.map(row=>row.name),messages.slice(-300).map(row=>row.name))
+    assert.equal(fixture.state.more.value,false)
+    assert.deepEqual(fixture.state.rows.value.map(row=>row.name),messages.map(row=>row.name))
     assert.deepEqual(cursors,[0,50,100,150,200,250,300].map(index=>messages[index].name))
     await fixture.refresh('messages')
     assert.equal(cursors.length,8)
     assert.equal(cursors.at(-1),messages.at(-1).name)
     assert.equal(fixture.state.connectionError.value,'')
-    assert.equal(fixture.state.rows.value.length,300)
+    assert.equal(fixture.state.rows.value.length,302)
   }finally{fixture.stop()}
 })
 

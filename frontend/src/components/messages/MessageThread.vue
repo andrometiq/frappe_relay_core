@@ -105,10 +105,11 @@ async function loadReaders(){
  if(!names.length){cursorReaders.value=[];return;}
  try{const result=await coreApi('message_reads.cursors',{messages:JSON.stringify(names)});if(current===readerGeneration)cursorReaders.value=result.readers||[]}catch{if(current===readerGeneration)cursorReaders.value=[];}
 }
-watch(()=>[props.selected,(props.rows||[]).map(row=>row.name).join(',')],()=>loadReaders(),{immediate:true});
+watch(()=>props.selected+'|'+(props.rows||[]).map(row=>row.name).join(','),()=>loadReaders(),{immediate:true});
 useRealtimeRefresh([],['reads'],loadReaders);
 const viewport = ref(null), content = ref(null);
-const scroll = createScrollHold(() => viewport.value);
+// Before the newest page is loaded, the reader keeps their message while newer pages append below it.
+const scroll = createScrollHold(() => viewport.value, () => !props.newer);
 const reactionTarget = ref(null);
 // One menu for the whole thread: a menu per bubble made every older page slow to draw.
 const isMobile = useMobileLayout();
@@ -186,7 +187,7 @@ function trackVisible() {
   clearTimeout(visibleTimer);
   visibleTimer = setTimeout(() => {
     const node = viewport.value;
-    if (!node || document.visibilityState !== "visible" || !document.hasFocus()) return;
+    if (!node) return;
     const bounds = node.getBoundingClientRect();
     const visible = [...node.querySelectorAll("[data-message]")].filter(
       (row) => {
@@ -194,15 +195,14 @@ function trackVisible() {
         return rect.top < bounds.bottom - 20 && rect.bottom > bounds.top + 20;
       },
     );
-    if (visible.length) {
-      emit("position", {name:visible[0].dataset.message, offset:visible[0].getBoundingClientRect().top-bounds.top,
-        atBottom:node.scrollHeight-node.scrollTop-node.clientHeight<80});
-      emit("visible", visible.at(-1).dataset.message);
-      emit(
-        "visibleMessages",
-        visible.map((row) => row.dataset.message),
-      );
-    }
+    if (!visible.length) return;
+    // The position drives "Go to latest" and arrivals, so it is kept even when the window has no focus.
+    emit("position", {name:visible[0].dataset.message, offset:visible[0].getBoundingClientRect().top-bounds.top,
+      atBottom:node.scrollHeight-node.scrollTop-node.clientHeight<80});
+    // Only a reader who can see the thread has seen these messages.
+    if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+    emit("visible", visible.at(-1).dataset.message);
+    emit("visibleMessages", visible.map((row) => row.dataset.message));
   }, 400);
 }
 onBeforeUnmount(() => clearTimeout(visibleTimer));
@@ -227,6 +227,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', trackVisible);
 });
 // Older pages load about three screens ahead, so a fast scroll does not reach the top first.
+// Newer pages load only after a jump to an older message (search, unread, quote): loaded rows are never dropped.
 const earlier = useLoadMore({ root: viewport, margin: '3000px 0px', loading: () => props.paging, error: () => props.pagingError, hasMore: () => props.more && props.rows?.length, load: () => emit('older') });
 const later = useLoadMore({ root: viewport, margin: '1500px 0px', loading: () => props.paging, error: () => props.pagingError, hasMore: () => props.newer, load: () => emit('newer') });
 watch(
@@ -234,8 +235,9 @@ watch(
   async (_rows, previous) => {
     await nextTick();
     trackVisible();
-    if (previous?.length) scroll.apply();
-    else if (!props.anchor || !scroll.toMessage(props.anchor, props.position?.offset ?? 20)) scroll.toBottom();
+    // A held row that is gone (Go to latest replaced the rows) falls back to the anchor or the end.
+    if (previous?.length && scroll.apply()) return;
+    if (!props.anchor || !scroll.toMessage(props.anchor, props.position?.offset ?? 20)) scroll.toBottom();
   },
 );
 function scrolled() {

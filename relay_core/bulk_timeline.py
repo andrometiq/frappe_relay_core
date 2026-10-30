@@ -75,7 +75,7 @@ def apply(rows):
     if not rows:
         return
     messages = frappe.get_all('Relay Message', filters={'source_key': ['in', [row['key'] for row in rows]]},
-                              fields=['name', 'source_key', 'channel', 'sender_endpoint'], limit_page_length=0)
+                              fields=['name', 'source_key', 'channel', 'sender_endpoint', 'relay_contact'], limit_page_length=0)
     by_key, groups = {message.source_key: message for message in messages}, {}
     for row in rows:
         message, status = by_key.get(row['key']), STATUS[row['status']]
@@ -93,6 +93,14 @@ def apply(rows):
             (*values, status, tuple(name for name, rank in RANK.items() if rank < RANK[status])))
     if messages:
         changed()
+    from relay_core.realtime import contact_changed
+    updated = {name for group in groups.values() for name, *_ in group}
+    contacts = {}
+    for message in messages:
+        if message.name in updated:
+            contacts.setdefault(message.relay_contact, []).append(message.name)
+    for contact, names in contacts.items():
+        contact_changed(contact, messages=names)
 
 
 def cancelled(request_key):
