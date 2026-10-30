@@ -3,10 +3,17 @@
 
 @media (max-width:768px){
   /* One phone target floor, including controls teleported outside the app shell.
-     Important overrides compact component sizes; flex-shrink must not undo it. */
-  body :is(button,a[href],summary,input:not([type=hidden]),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only){min-height:44px!important;min-width:44px!important;flex-shrink:0}
+     Minimum sizes preserve targets while prefixed inputs can shrink to fit. */
+  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only){min-height:44px!important;min-width:44px!important}
+  /* Keep compact indicators inside the full-size label/input hit area. */
+  label:has(>input:is([type=checkbox],[type=radio])){display:inline-flex;align-items:center;gap:8px}
+  label>input:is([type=checkbox],[type=radio]):not(.relay-checkbox__input){width:16px;height:16px;flex:none}
   .relay-checkbox{display:inline-flex;align-items:center;justify-content:center}
   .relay-input-shell{height:auto!important}
+  .relay-input-shell>.relay-input{flex:1 1 0%;width:0}
+  .topic-messages>div{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start}
+  .topic-messages>div>.relay-button{grid-column:2;justify-self:start}
+  .topic-messages .topic-check{justify-content:center}
   .mobile-sheet-item{flex-shrink:0}
   .reaction-pill{flex-wrap:wrap;width:max-content;max-width:calc(100vw - 88px);border-radius:16px}
   .v1-shell.relay-shell .conversation-bubble:has(.message-readers){margin-bottom:48px}

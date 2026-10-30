@@ -21,3 +21,10 @@ test('initials use the first two words', () => {
 test('initials keep whole emoji', () => {
   assert.equal(avatarInitials('😀 Smile'), '😀S')
 })
+
+test('phone-only and non-letter labels use the person icon fallback', () => {
+  for (const label of ['+91 90000 00101', '919000000101', '(800) 555-0123', '１２３', '☎', '', null]) {
+    assert.equal(avatarInitials(label), '')
+  }
+  assert.equal(avatarInitials('தமிழ் பெயர்'), 'தப')
+})
