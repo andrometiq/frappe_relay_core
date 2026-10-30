@@ -47,7 +47,7 @@ test('one link search covers every type, names the type and skips a type that fa
     if (doctype === 'Supplier') throw Error('Not permitted')
     return [{ name: 'CUST-1', label: 'Anil Garments' }, { name: 'CUST-2' }]
   })
-  assert.deepEqual(choices.map(row => [row.label, row.description]), [['Anil Garments', 'Customer'], ['CUST-2', 'Customer']])
+  assert.deepEqual(choices.map(row => [row.label, row.description]), [['Anil Garments', 'Customer · CUST-1'], ['CUST-2', 'Customer']])
   assert.deepEqual(linkFromChoice(choices[0].value), { doctype: 'Customer', name: 'CUST-1' })
   await assert.rejects(searchLinkChoices(types, async () => { throw Error('Offline') }), /Offline/)
   assert.deepEqual(await searchLinkChoices([], async () => []), [])
@@ -105,4 +105,21 @@ test('the single-type form makes no record request until the type is explicitly 
     await form.startAdding()
     assert.equal(form.recordType.value, '', 'Every new link starts with an explicit type choice')
   } finally { scope.stop() }
+})
+
+test('records that share a title show their IDs so they can be told apart', async () => {
+  const choices = await searchLinkChoices([{ value: 'Customer', label: 'Customer' }], async () => [
+    { name: 'CUST-1', label: 'Anil Garments' }, { name: 'CUST-2', label: 'Anil Garments' }, { name: 'CUST-3', label: 'CUST-3' }])
+  assert.deepEqual(choices.map(row => [row.label, row.description]), [['Anil Garments', 'CUST-1'], ['Anil Garments', 'CUST-2'], ['CUST-3', undefined]])
+  assert.equal(new Set(choices.map(row => row.label + row.description)).size, 3)
+  const runKeyed = await searchLinkChoices([{ value: 'Supplier', label: 'Supplier' }], async () => [
+    { name: 'Local C2 supplier 1792798876356435969', label: 'Local C2 supplier 1792798876356435969' }])
+  assert.deepEqual([runKeyed[0].label, runKeyed[0].description], ['Local C2 supplier', 'Local C2 supplier 1792798876356435969'])
+})
+
+test('a live refresh of the same contact keeps the open link form', async () => {
+  const source = await (await import('node:fs/promises')).readFile(new URL('../src/components/ContactDetails.vue', import.meta.url), 'utf8')
+  assert.match(source, /if \(detail\.value\?\.name !== props\.contact\) detail\.value = null/)
+  assert.doesNotMatch(source, /^\s*detail\.value = null;/m)
+  assert.match(source, /<LoadingRows v-if="busy && !detail"/, 'A refresh does not push the open form down')
 })

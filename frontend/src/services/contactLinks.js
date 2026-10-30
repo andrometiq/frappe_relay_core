@@ -1,3 +1,5 @@
+import { readableName } from './recordTitle.js'
+
 // Contact business links as contacts.set_links and contacts.set_primary expect them.
 const sameLink = (left, right) => left?.doctype === right?.doctype && left?.name === right?.name
 
@@ -47,7 +49,8 @@ export function linkedLabel(profile) {
   return `${profile?.primary ? '+' : ''}${others} linked`
 }
 
-// One search over every linkable type: each match is a choice whose value carries its type, and the type shows under its name.
+// One search over every linkable type: each match is a choice whose value carries its type.
+// Under its shown title it shows the record ID when they differ, and the type when several are searched, so records with one title stay apart.
 // A type that fails is skipped; only when every type fails is the first error raised.
 const SEPARATOR = '\u0000'
 
@@ -56,7 +59,11 @@ export async function searchLinkChoices(types, search) {
   if (results.length && results.every(result => result.status === 'rejected')) throw results[0].reason
   const limit = types.length > 1 ? 10 : 30
   return results.flatMap((result, index) => result.status === 'fulfilled'
-    ? result.value.slice(0, limit).map(row => ({ value: types[index].value + SEPARATOR + row.name, label: row.label || row.name, ...(types.length > 1 ? { description: types[index].label } : {}) }))
+    ? result.value.slice(0, limit).map(row => {
+      const label = readableName(row.label || row.name, row.name)
+      const description = [types.length > 1 && types[index].label, label !== row.name && row.name].filter(Boolean).join(' · ')
+      return { value: types[index].value + SEPARATOR + row.name, label, ...(description ? { description } : {}) }
+    })
     : [])
 }
 
