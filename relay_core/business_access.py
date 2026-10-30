@@ -220,8 +220,10 @@ def incoming_reference(contact, channel, endpoint, context, links=None):
         if target and (target.business_doctype, target.business_name) in links:
             context['business_rule'] = 'reply_context'
             return target.business_doctype, target.business_name
-        if target and not target.business_doctype and campaign_send(channel, endpoint, reply):
-            return None  # A campaign send names no business; the sender's links decide.
+        if target and not target.business_doctype:
+            # The quoted message names no business, so the reply routes like any inbound from this contact.
+            context['business_rule'] = 'quoted_conversation'
+            return None
         if target:
             context['business_rule'] = 'triage_unlinked_reference'
     return None

@@ -94,14 +94,22 @@ class RoutingTests(RoutingFixtures, unittest.TestCase):
         self.references[provider_key('channel', '15550000001', 'wamid.campaign-send')] = _dict(business_doctype=None, business_name=None)
         self.assertEqual(self.resolve('second', context={'reply_to_message_id': 'wamid.campaign-send'}), (self.links[0], 'single_link'))
 
-    def test_unlinked_reference_outside_campaigns_still_waits_for_triage(self):
+    def test_reply_quoting_a_message_without_business_routes_like_any_inbound(self):
         from relay_core.message_updates import provider_key
         self.references[provider_key('channel', '15550000001', 'outgoing')] = _dict(business_doctype=None, business_name=None)
-        self.assertEqual(self.resolve(context={'reply_to_message_id': 'outgoing'}), (None, 'triage_unlinked_reference'))
+        for links, expected in (([], (None, 'triage_no_business')), (self.links[:1], (self.links[0], 'single_link'))):
+            with self.subTest(links=links):
+                self.links = links
+                self.assertEqual(self.resolve(context={'reply_to_message_id': 'outgoing'}), expected)
+        self.db.sql.assert_not_called()
 
     def test_unknown_reply_reference_still_waits_for_triage(self):
         self.links = self.links[:1]
         self.assertEqual(self.resolve(context={'reply_to_message_id': 'wamid.unknown'}), (None, 'triage_unresolved_reference'))
+
+    def test_unknown_reply_reference_without_links_routes_like_any_inbound(self):
+        self.links = []
+        self.assertEqual(self.resolve(context={'reply_to_message_id': 'wamid.unknown'}), (None, 'triage_no_business'))
 
     def test_unverified_email_never_uses_single_link_or_reply_context(self):
         self.links = self.links[:1]
