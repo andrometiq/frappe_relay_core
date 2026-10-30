@@ -121,6 +121,12 @@ export function templateParts(data) {
   }
 }
 
+export function attachmentKind(kind) {
+  if (['photo', 'image'].includes(kind)) return 'image'
+  if (['video', 'animation'].includes(kind)) return 'video'
+  return ['audio', 'voice'].includes(kind) ? 'audio' : 'document'
+}
+
 // Short file type for a document card, from the file name or else the MIME type.
 export function documentType(media) {
   const extension = /\.([A-Za-z0-9]{1,8})$/.exec(media?.file_name || media?.filename || '')?.[1]
