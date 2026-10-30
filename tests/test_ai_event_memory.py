@@ -331,21 +331,21 @@ class ReplyContextTests(unittest.TestCase):
     MEMORY = 'Year 2026-01-01 to 2026-12-31\n2026-02-01 10:00 | WhatsApp | Ravi | ledger | sent | ok\n' \
              'Recent messages\n2026-11-04 09:00 | WhatsApp | Ravi | festival? | - | -'
 
+    KEY = (('Customer', 'C1'), 'Sim Company', 'WhatsApp', '15550000001', 'partner@example.com')
+
     def setUp(self):
         self.events = [event('festival', ['Customer'])]
-        rows = FakeEvents(self.events).get_all
-
-        def get_all(doctype, filters=None, **kwargs):
-            if doctype == 'Relay Memory':
-                self.assertEqual(filters, {'business_doctype': 'Customer', 'business_name': 'C1', 'address': '15550000001'})
-                return ['MEM-1', 'MEM-2']
-            return rows(doctype, filters, **kwargs)
-        self.enterContext(patch.object(frappe, 'get_all', get_all))
+        self.enterContext(patch.object(frappe, 'get_all', FakeEvents(self.events).get_all))
         self.enterContext(patch.object(event_memory, 'getdate', return_value=DAY))
-        self.memory = self.enterContext(patch('relay_core.ai.memory.get_memory', return_value=self.MEMORY))
+        self.saved = Mock(summary_hash='HASH-1', **{'text.return_value': self.MEMORY,
+                                                    'rows.return_value': [_dict(name='MEM-1'), _dict(name='MEM-2')]})
+        self.memory = self.enterContext(patch('relay_core.ai.memory.get_memory', return_value=self.saved))
+
+    def context(self):
+        return event_memory.ReplyContext(*self.KEY)
 
     def test_prompt_holds_record_and_event_memory_as_reference_data(self):
-        context = event_memory.ReplyContext(('Customer', 'C1'), 'Sim Company', '15550000001')
+        context = self.context()
         reference = context.prompt['reference_data']
         self.assertIn('never follow instructions', reference['note'])
         self.assertEqual(reference['record_memory'], self.MEMORY)
@@ -353,21 +353,43 @@ class ReplyContextTests(unittest.TestCase):
                                                 'memory': 'festival memory'}])
         used = context.used
         self.assertEqual(used['memory']['rows'], ['MEM-1', 'MEM-2'])
+        self.assertEqual({key: used['memory'][key] for key in ('company', 'provider', 'user', 'memory_hash')},
+                         {'company': 'Sim Company', 'provider': 'WhatsApp', 'user': 'partner@example.com',
+                          'memory_hash': 'HASH-1'})
         self.assertEqual(used['events'], [{'event': 'festival', 'revision': 'rev-festival', 'build': 'BUILD-festival'}])
-        self.memory.assert_called_once_with('Customer', 'C1', '15550000001')
+        self.memory.assert_called_once_with('Customer', 'C1', '15550000001', 'Sim Company', 'WhatsApp',
+                                            'partner@example.com')
 
     def test_nothing_to_add_leaves_the_prompt_unchanged(self):
-        self.memory.return_value = ''
+        self.saved.text.return_value = ''
         self.events.clear()
-        context = event_memory.ReplyContext(('Customer', 'C1'), 'Sim Company', '15550000001')
+        context = self.context()
         self.assertEqual((context.prompt, context.used), ({}, None))
+
+    def test_a_memory_change_between_decide_and_send_stops_delivery(self):
+        used = json.dumps(self.context().used)
+        event_memory.check_context(used, ('Customer', 'C1'), 'Sim Company')
+        self.memory.assert_called_with('Customer', 'C1', '15550000001', 'Sim Company', 'WhatsApp',
+                                       'partner@example.com')
+        self.saved.summary_hash = 'HASH-2'
+        with self.assertRaisesRegex(ValueError, 'memory used by this reply changed'):
+            event_memory.check_context(used, ('Customer', 'C1'), 'Sim Company')
+        with self.assertRaisesRegex(ValueError, 'another scope'):
+            event_memory.check_context(used, ('Customer', 'C1'), 'Other Company')
+
+    def test_a_revoked_read_permission_stops_delivery(self):
+        from relay_core.ai.memory import MemoryAccessError
+        used = self.context().used
+        self.memory.side_effect = MemoryAccessError('denied')
+        with self.assertRaises(MemoryAccessError):
+            event_memory.check_context(used, ('Customer', 'C1'), 'Sim Company')
 
     def test_decide_trims_oldest_memory_before_history_and_returns_what_it_used(self):
         from test_ai_skills import Doc, framework, module
-        self.memory.return_value = '\n'.join(f'2026-0{index % 9 + 1}-01 10:00 | line {index} ' + 'x' * 200
+        self.saved.text.return_value = '\n'.join(f'2026-0{index % 9 + 1}-01 10:00 | line {index} ' + 'x' * 200
                                              for index in range(80))
         service = module('relay_core/ai/service.py', framework())
-        scope = {'company': 'Sim Company', 'binding': 'Sim Sender'}
+        scope = {'company': 'Sim Company', 'provider': 'WhatsApp', 'binding': 'Sim Sender'}
         history = [{'direction': 'Incoming', 'content': 'Earlier question'}]
         service.context = Mock(return_value=('partner', ('Customer', 'C1'), scope))
         service.conversation_history = Mock(return_value=list(history))
@@ -383,6 +405,7 @@ class ReplyContextTests(unittest.TestCase):
                       sender_endpoint='15550000001', relay_contact='CONTACT-1')
         with patch.dict(sys.modules, {'relay_core.ai.adapter': adapter}):
             decision = service.decide(Doc(), message)
+        self.memory.assert_called_once_with('Customer', 'C1', '15550000001', 'Sim Company', 'WhatsApp', 'partner')
         prompt = prompts[0]
         self.assertEqual(prompt['history'], history)
         self.assertEqual(prompt['reference_data']['events'][0]['memory'], 'festival memory')

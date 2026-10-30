@@ -1,15 +1,20 @@
-"""AI memory: event lines, address isolation, Day to Year rollups, idempotent re-runs and the loader order."""
+"""AI memory: event lines, address, company and provider isolation, the read check, Day to Year rollups, idempotent
+re-runs and the loader order."""
+import contextlib
 import datetime
 import json
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 
 from frappe import _dict
-from pypika import Table
+from pypika import Order, Query, Table
 from relay_core.ai import memory
 
 TODAY = datetime.date(2026, 10, 28)
 RECORD = ('Customer', 'C1')
+SCOPE = ('Sim Company', 'WhatsApp')
+CHANNELS = {'CH-1': SCOPE, 'CH-2': ('Other Company', 'WhatsApp'), 'CH-3': ('Sim Company', 'Telegram')}
 
 
 def message(number, address, day, text, direction='Incoming', **values):
@@ -33,12 +38,13 @@ def matches(value, condition):
 
 
 class FakeMemory(memory.Memory):
-    """Memory rows and messages kept in lists shared by every address."""
+    """Memory rows and messages kept in lists shared by every address, company and provider."""
     is_contact_key = False
 
-    def __init__(self, store, inbox, address):
-        super().__init__(*RECORD, address, today=TODAY)
+    def __init__(self, store, inbox, address, scope=SCOPE):
+        super().__init__(*RECORD, address, *scope, today=TODAY)
         self.store, self.inbox = store, inbox
+        self.channels = [name for name, channel in CHANNELS.items() if channel == scope]
 
     def rows(self, level=None, **filters):
         filters = {**self.key, **({'level': level} if level else {}), **filters}
@@ -57,6 +63,7 @@ class FakeMemory(memory.Memory):
 
     def messages(self, since=None, until=None, after='', limit=memory.BATCH, newest_first=False):
         rows = sorted((row for row in self.inbox if row.sender_endpoint == self.address and row.name > after
+                       and row.channel in self.channels
                        and (not since or sent(row) >= since) and (not until or sent(row) < until)),
                       key=lambda row: row.name, reverse=newest_first)
         return rows[:limit]
@@ -80,8 +87,8 @@ class MemoryTests(unittest.TestCase):
         self.user = self.enterContext(patch.object(memory, 'user_name', side_effect=lambda user: user))
         self.enterContext(patch.object(memory, 'team_label', return_value='Acme team'))
 
-    def build(self, address):
-        FakeMemory(self.store, self.inbox, address).build('Summary Model', datetime.date(2026, 1, 1))
+    def build(self, address, scope=SCOPE):
+        FakeMemory(self.store, self.inbox, address, scope).build('Summary Model', datetime.date(2026, 1, 1))
 
     def summary(self, address, level, start):
         return next(row.summary for row in self.store if row.address == address and row.level == level
@@ -112,6 +119,19 @@ class MemoryTests(unittest.TestCase):
         for call in self.model.call_args_list:
             events = json.loads(call.args[1])['new_events']
             self.assertEqual(len({line.split(' | ')[2] for line in events}), 1, 'One model call reads one address')
+
+    def test_memory_of_one_company_and_provider_never_reaches_another(self):
+        texts = {'CH-1': 'Sim order', 'CH-2': 'Other company order', 'CH-3': 'Telegram order'}
+        self.inbox += [message(number, 'A', TODAY, text, channel=channel)
+                       for number, (channel, text) in enumerate(texts.items(), 1)]
+        for scope in CHANNELS.values():
+            self.build('A', scope)
+        for channel, scope in CHANNELS.items():
+            with self.subTest(scope=scope):
+                memory_text = FakeMemory(self.store, self.inbox, 'A', scope).text()
+                self.assertEqual([text for text in texts.values() if text in memory_text], [texts[channel]])
+        self.assertEqual(sorted((row.company, row.provider) for row in self.store), sorted(CHANNELS.values()),
+                         'One Day row per company and provider')
 
     def test_days_roll_into_weeks_months_and_a_year_and_covered_rows_are_pruned(self):
         days = [datetime.date(2026, 8, 10), datetime.date(2026, 9, 30), datetime.date(2026, 10, 20),
@@ -175,7 +195,7 @@ class MemoryTests(unittest.TestCase):
 
     def test_input_over_the_prompt_limit_marks_the_row_failed_without_a_call(self):
         self.store.append(_dict(name='MEM-1', **{'business_doctype': RECORD[0], 'business_name': RECORD[1]}, address='A',
-                                level='Day', period_start=TODAY, period_end=TODAY, channel='WhatsApp',
+                                company=SCOPE[0], provider=SCOPE[1], level='Day', period_start=TODAY, period_end=TODAY, channel='WhatsApp',
                                 summary='x' * memory.MAX_JSON_PROMPT_LENGTH, last_message='', message_count=0))
         self.inbox.append(message(1, 'A', TODAY, 'Order'))
         with self.assertRaises(ValueError):
@@ -286,37 +306,64 @@ class SchedulingTests(unittest.TestCase):
         fake.enqueue.assert_not_called()
         with patch.object(memory, 'frappe', fake), patch('relay_core.ai_features.is_enabled', return_value=True), \
              patch.object(memory, 'Memory') as built:
-            memory.fold(*RECORD, 'A')
+            memory.fold(*RECORD, 'A', *SCOPE)
         built.assert_not_called()
 
     def test_only_addresses_with_newer_messages_are_queued_once(self):
         fake = MagicMock()
         fake.db.get_single_value.return_value = 'Summary Model'
-        found = {(*RECORD, 'A'): 'RELAY-MSG-0000000009', (*RECORD, 'B'): 'RELAY-MSG-0000000004'}
+        found = {(*RECORD, 'A', *SCOPE): 'RELAY-MSG-0000000009', (*RECORD, 'B', *SCOPE): 'RELAY-MSG-0000000004',
+                 (*RECORD, 'B', 'Other Company', 'WhatsApp'): 'RELAY-MSG-0000000005'}
         with patch.object(memory, 'frappe', fake), patch.object(memory, 'getdate', return_value=TODAY), \
              patch.object(memory, 'targets', return_value=found), \
-             patch.object(memory, 'cursors', return_value={(*RECORD, 'B'): 'RELAY-MSG-0000000004'}):
+             patch.object(memory, 'cursors', return_value={(*RECORD, 'B', *SCOPE): 'RELAY-MSG-0000000004'}):
             memory.run()
-        fake.enqueue.assert_called_once()
+        queued = [(call.kwargs['address'], call.kwargs['company'], call.kwargs['provider'])
+                  for call in fake.enqueue.call_args_list]
+        self.assertEqual(queued, [('A', *SCOPE), ('B', 'Other Company', 'WhatsApp')],
+                         'A cursor of one company never covers another')
         call = fake.enqueue.call_args
-        self.assertEqual((call.kwargs['address'], call.kwargs['queue'], call.kwargs['deduplicate']), ('A', 'long', True))
+        self.assertEqual((call.kwargs['queue'], call.kwargs['deduplicate']), ('long', True))
 
-    def test_addresses_without_an_incoming_message_get_no_memory(self):
+    def test_targets_are_per_company_and_provider_and_need_an_incoming_message(self):
         fake = MagicMock()
         fake.qb.DocType.return_value = Table('tabRelay Message')
-        rows = [_dict(business_doctype='Customer', business_name='C1', relay_contact='R1', sender_endpoint='A',
-                      direction='Outgoing', last='RELAY-MSG-0000000002'),
-                _dict(business_doctype='Customer', business_name='C1', relay_contact='R1', sender_endpoint='A',
-                      direction='Incoming', last='RELAY-MSG-0000000001'),
-                _dict(business_doctype='Customer', business_name='C1', relay_contact='R2', sender_endpoint='B',
-                      direction='Outgoing', last='RELAY-MSG-0000000003')]
+        fake.get_all.return_value = [_dict(name=name, company=company, channel=provider)
+                                     for name, (company, provider) in CHANNELS.items()]
+
+        def row(contact, address, channel, direction, last):
+            return _dict(business_doctype='Customer', business_name='C1', relay_contact=contact, sender_endpoint=address,
+                         channel=channel, direction=direction, last=last)
+        rows = [row('R1', 'A', 'CH-1', 'Outgoing', 'RELAY-MSG-0000000002'),
+                row('R1', 'A', 'CH-1', 'Incoming', 'RELAY-MSG-0000000001'),
+                row('R1', 'A', 'CH-2', 'Incoming', 'RELAY-MSG-0000000004'),
+                row('R2', 'B', 'CH-1', 'Outgoing', 'RELAY-MSG-0000000003'),
+                row('R2', 'B', 'CH-DELETED', 'Incoming', 'RELAY-MSG-0000000005')]
         query = fake.qb.from_.return_value.select.return_value.where.return_value.where.return_value.groupby.return_value
         query.run.return_value = rows
         with patch.object(memory, 'frappe', fake), \
              patch.object(memory, 'timeline_time', return_value=Table('tabRelay Message').relay_timeline_time):
-            self.assertEqual(memory.targets(TODAY), {('Customer', 'C1', 'A'): 'RELAY-MSG-0000000002'})
+            self.assertEqual(memory.targets(TODAY), {('Customer', 'C1', 'A', *SCOPE): 'RELAY-MSG-0000000002',
+                                                     ('Customer', 'C1', 'A', 'Other Company', 'WhatsApp'):
+                                                         'RELAY-MSG-0000000004'})
         where = fake.qb.from_.return_value.select.return_value.where.call_args.args[0]
         self.assertIn('relay_timeline_time', str(where), 'Targets select by sent time, not creation')
+
+    def test_messages_are_read_only_from_the_channels_of_the_company_and_provider(self):
+        fake = MagicMock()
+        fake.qb = types.SimpleNamespace(DocType=Table, from_=Query.from_, asc=Order.asc, desc=Order.desc)
+        fake.get_all.return_value = ['CH-1']
+        target = memory.Memory(*RECORD, 'A', *SCOPE, today=TODAY)
+        target.is_contact_key = False
+        with patch.object(memory, 'frappe', fake), \
+             patch.object(memory, 'timeline_time', return_value=Table('tabRelay Message').relay_timeline_time), \
+             patch('pypika.queries.QueryBuilder.run', lambda query, **kwargs: [str(query)], create=True):
+            sql, = target.messages()
+            self.assertEqual(fake.get_all.call_args.kwargs['filters'], {'company': 'Sim Company', 'channel': 'WhatsApp'})
+            self.assertIn("\"channel\" IN ('CH-1')", sql)
+            fake.get_all.return_value = []
+            self.assertEqual(memory.Memory(*RECORD, 'A', 'No Company', 'Email', today=TODAY).messages(), [],
+                             'No channel means no messages')
 
     @patch('relay_core.ai_features.is_enabled', return_value=True)
     def test_backfill_accepts_only_a_month_before_the_nightly_window(self, enabled):
@@ -327,7 +374,7 @@ class SchedulingTests(unittest.TestCase):
             for month in ('2026-10', 'August'):
                 with self.subTest(month=month), self.assertRaises(ValueError):
                     memory.backfill(month)
-            with patch.object(memory, 'targets', return_value={(*RECORD, 'A'): 'RELAY-MSG-0000000008'}) as targets:
+            with patch.object(memory, 'targets', return_value={(*RECORD, 'A', *SCOPE): 'RELAY-MSG-0000000008'}) as targets:
                 self.assertEqual(memory.backfill('2026-08'), 1)
         targets.assert_called_once_with(datetime.date(2026, 8, 1), datetime.date(2026, 9, 1))
         fake.only_for.assert_called_with('System Manager')
@@ -337,7 +384,7 @@ class SchedulingTests(unittest.TestCase):
     def test_backfill_can_be_limited_to_one_record_or_address(self, enabled):
         fake = MagicMock()
         fake.db.get_single_value.return_value = 'Summary Model'
-        found = {(*RECORD, 'A'): 'M-1', (*RECORD, 'B'): 'M-2', ('Customer', 'C2', 'A'): 'M-3'}
+        found = {(*RECORD, 'A', *SCOPE): 'M-1', (*RECORD, 'B', *SCOPE): 'M-2', ('Customer', 'C2', 'A', *SCOPE): 'M-3'}
         with patch.object(memory, 'frappe', fake), patch.object(memory, 'targets', return_value=found), \
              patch.object(memory, 'window_start', return_value=datetime.date(2026, 10, 1)):
             self.assertEqual(memory.backfill('2026-08', *RECORD), 2)
@@ -351,3 +398,36 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(memory.period('Week', datetime.date(2026, 10, 14)), (datetime.date(2026, 10, 12), datetime.date(2026, 10, 18)))
         self.assertEqual(memory.period('Month', TODAY), (datetime.date(2026, 10, 1), datetime.date(2026, 10, 31)))
         self.assertEqual(memory.period('Year', TODAY), (datetime.date(2026, 1, 1), datetime.date(2026, 12, 31)))
+
+
+class MemoryAccessTests(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+
+        @contextlib.contextmanager
+        def as_user(user):
+            self.calls.append(('as', user))
+            yield
+            self.calls.append(('back', user))
+        self.enterContext(patch('relay_core.ai.tools.as_user', as_user))
+        self.get_all = self.enterContext(patch.object(memory.frappe, 'get_all', create=True))
+        self.enterContext(patch.object(memory, 'getdate', return_value=TODAY))
+
+    def check(self, allowed):
+        def has_permission(doctype, permission, name):
+            self.calls.append(('check', doctype, permission, name))
+            return allowed
+        with patch.object(memory.frappe, 'has_permission', has_permission, create=True):
+            return memory.get_memory(*RECORD, 'A', *SCOPE, 'partner@example.com')
+
+    def test_the_acting_user_must_read_the_business_record(self):
+        found = self.check(True)
+        self.assertEqual(self.calls, [('as', 'partner@example.com'), ('check', RECORD[0], 'read', RECORD[1]),
+                                      ('back', 'partner@example.com')])
+        self.assertEqual(found.key, {'business_doctype': RECORD[0], 'business_name': RECORD[1], 'address': 'A',
+                                     'company': SCOPE[0], 'provider': SCOPE[1]})
+
+    def test_a_user_without_read_permission_gets_no_rows(self):
+        with self.assertRaises(memory.MemoryAccessError):
+            self.check(False)
+        self.get_all.assert_not_called()

@@ -1,4 +1,5 @@
-"""AI memory of each address of each business record, kept as Day, Week, Month and Year summaries.
+"""AI memory of each address of each business record per company and provider, kept as Day, Week, Month and Year
+summaries.
 
 The nightly job folds new messages into Day rows, then rolls finished days into weeks, weeks into months and months
 into years. A row is covered by its parent when its cursor is not after the parent's cursor; only covered rows are
@@ -144,13 +145,20 @@ def event_line(row, medium: str) -> str:
     return ' | '.join(re.sub(r'[|\s]+', ' ', str(value or '-')).strip() or '-' for value in fields)
 
 
-class Memory:
-    """The memory rows and messages of one address of one business record."""
+class MemoryAccessError(frappe.PermissionError):
+    """The acting user may not read the business record of a memory."""
 
-    def __init__(self, business_doctype: str, business_name: str, address: str, today: date | None = None):
+
+class Memory:
+    """The memory rows and messages of one address of one business record, on the channels of one company and
+    provider."""
+
+    def __init__(self, business_doctype: str, business_name: str, address: str, company: str | None, provider: str,
+                 today: date | None = None):
         self.record = (business_doctype, business_name)
         self.address = address
-        self.key = {'business_doctype': business_doctype, 'business_name': business_name, 'address': address}
+        self.key = {'business_doctype': business_doctype, 'business_name': business_name, 'address': address,
+                    'company': company, 'provider': provider}
         self.today = today or getdate()
         self.owners = {}
 
@@ -186,10 +194,18 @@ class Memory:
         """Messages without a sender endpoint use their Relay Contact as the address."""
         return bool(frappe.db.exists('Relay Contact', self.address))
 
+    @cached_property
+    def channels(self) -> list[str]:
+        """The Relay Channels of this memory's company and provider."""
+        return frappe.get_all('Relay Channel', filters={'company': self.key['company'] or '',
+                                                        'channel': self.key['provider']}, pluck='name')
+
     def messages(self, since: date | None = None, until: date | None = None, after: str = '', limit: int = BATCH,
                  newest_first: bool = False) -> list:
         """Up to `limit` messages of this address that may belong to this record, sent from `since` and before
-        `until`, named after `after`."""
+        `until`, named after `after`, on this memory's channels."""
+        if not self.channels:
+            return []
         message = frappe.qb.DocType(MESSAGE)
         if self.is_contact_key:
             address = (message.relay_contact == self.address) & (IfNull(message.sender_endpoint, '') == '')
@@ -197,7 +213,8 @@ class Memory:
             address = message.sender_endpoint == self.address
         record = ((message.business_doctype == self.record[0]) & (message.business_name == self.record[1])) | (
             IfNull(message.business_name, '') == '')
-        query = frappe.qb.from_(message).select(*MESSAGE_FIELDS).where(address).where(record)
+        query = (frappe.qb.from_(message).select(*MESSAGE_FIELDS).where(address).where(record)
+                 .where(message.channel.isin(self.channels)))
         if since:
             query = query.where(timeline_time() >= since)
         if until:
@@ -295,12 +312,23 @@ class Memory:
                 if row.last_message <= (target.last_message or ''):
                     self.delete(row)
 
-    def text(self, recent: int = 10) -> str:
+    @property
+    def summaries(self) -> list[str]:
+        """Saved summaries for the AI runtime: years, the last 12 months, this month's weeks and the last 7 days."""
         month = getdate(get_first_day(self.today))
         rows = [*self.rows('Year'), *self.rows('Month', period_start=['>=', add_months(month, -11)]),
                 *self.rows('Week', period_start=['>=', month]),
                 *self.rows('Day', period_start=['>=', add_days(self.today, 1 - KEEP_DAYS)])]
-        blocks = [f'{row.level} {row.period_start} to {row.period_end}\n{row.summary}' for row in rows if row.summary]
+        return [f'{row.level} {row.period_start} to {row.period_end}\n{row.summary}' for row in rows if row.summary]
+
+    @property
+    def summary_hash(self) -> str:
+        """Hash of the saved summaries. Recent messages are left out: replies of the same run add to them."""
+        return hashlib.sha256('\n\n'.join(self.summaries).encode()).hexdigest()
+
+    def text(self, recent: int = 10) -> str:
+        """The summaries and the last `recent` messages."""
+        blocks = self.summaries
         messages = [row for row in self.messages(limit=recent * 2, newest_first=True) if self.belongs(row)][:recent]
         lines = [event_line(row, medium_of(row.channel)) for row in reversed(messages)]
         return '\n\n'.join(blocks + (['Recent messages\n' + '\n'.join(lines)] if lines else []))
@@ -326,10 +354,15 @@ def team_label(channel: str) -> str:
     return f'{company} team' if company else label or title or 'Team'
 
 
-def get_memory(business_doctype: str, business_name: str, address: str, recent: int = 10) -> str:
-    """Memory text for the AI runtime: years, the last 12 months, this month's weeks, the last 7 days and the last
-    `recent` messages. System use only: it reads without permission checks and is not whitelisted."""
-    return Memory(business_doctype, business_name, address).text(recent)
+def get_memory(business_doctype: str, business_name: str, address: str, company: str | None, provider: str,
+               user: str) -> Memory:
+    """The memory for the AI runtime, after `user` passes the read check on the business record. Not whitelisted:
+    the rows are read without permission checks."""
+    from relay_core.ai.tools import as_user
+    with as_user(user):
+        if not frappe.has_permission(business_doctype, 'read', business_name):
+            raise MemoryAccessError(f'{user} may not read {business_doctype} {business_name}')
+    return Memory(business_doctype, business_name, address, company, provider)
 
 
 def window_start() -> date:
@@ -338,18 +371,22 @@ def window_start() -> date:
 
 
 def targets(since: date, until: date | None = None) -> dict:
-    """{(doctype, name, address): last message name} of addresses with an incoming message sent from `since` and
-    before `until`. Outgoing-only addresses, such as campaign recipients, get no memory."""
+    """{(doctype, name, address, company, provider): last message name} of addresses with an incoming message sent
+    from `since` and before `until`. Outgoing-only addresses, such as campaign recipients, get no memory."""
     message = frappe.qb.DocType(MESSAGE)
     columns = [message.business_doctype, message.business_name, message.relay_contact, message.sender_endpoint,
-               message.direction]
+               message.channel, message.direction]
     query = (frappe.qb.from_(message).select(*columns, Max(message.name).as_('last'))
              .where(timeline_time() >= since).where(IfNull(message.legacy_triage, 0) == 0).groupby(*columns))
     if until:
         query = query.where(timeline_time() < until)
+    channels = {row.name: (row.company or None, row.channel)
+                for row in frappe.get_all('Relay Channel', fields=['name', 'company', 'channel'])}
     found, incoming = {}, set()
     for row in query.run(as_dict=True):
-        key = (*key_of(row), row.sender_endpoint or row.relay_contact)
+        if row.channel not in channels:
+            continue  # A deleted channel has no memory key.
+        key = (*key_of(row), row.sender_endpoint or row.relay_contact, *channels[row.channel])
         found[key] = max(found.get(key, ''), row['last'])
         if row.direction == 'Incoming':
             incoming.add(key)
@@ -358,20 +395,21 @@ def targets(since: date, until: date | None = None) -> dict:
 
 def cursors(since: date) -> dict:
     memory = frappe.qb.DocType(MEMORY)
-    columns = [memory.business_doctype, memory.business_name, memory.address]
+    columns = [memory.business_doctype, memory.business_name, memory.address, memory.company, memory.provider]
     rows = (frappe.qb.from_(memory).select(*columns, Max(memory.last_message)).where(memory.period_start >= since)
             .groupby(*columns).run())
-    return {tuple(row[:3]): row[3] or '' for row in rows}
+    return {tuple(row[:5]): row[5] or '' for row in rows}
 
 
 def queue(method: str, key: tuple, **values) -> None:
     job = hashlib.sha256(json.dumps([method, *key, *values.values()], default=str).encode()).hexdigest()[:32]
     frappe.enqueue('relay_core.ai.memory.' + method, queue='long', timeout=1800, job_id='relay-memory-' + job,
-                   deduplicate=True, business_doctype=key[0], business_name=key[1], address=key[2], **values)
+                   deduplicate=True, business_doctype=key[0], business_name=key[1], address=key[2], company=key[3],
+                   provider=key[4], **values)
 
 
 def run() -> None:
-    """Nightly: queue one long job per (record, address) with messages newer than its memory."""
+    """Nightly: queue one long job per (record, address, company, provider) with messages newer than its memory."""
     if not memory_model():
         frappe.logger('relay_core').info('Relay memory skipped: set an AI memory model in Relay Settings')
         return
@@ -383,12 +421,12 @@ def run() -> None:
 
 
 @ai_features.when_enabled
-def fold(business_doctype: str, business_name: str, address: str) -> None:
+def fold(business_doctype: str, business_name: str, address: str, company: str | None, provider: str) -> None:
     """Bring one address's memory up to date. Safe to re-run: cursors skip folded messages and covered rows."""
     model = memory_model()
     if not model:
         return
-    memory = Memory(business_doctype, business_name, address)
+    memory = Memory(business_doctype, business_name, address, company, provider)
     with memory.lock():
         memory.build(model, window_start())
 
@@ -418,11 +456,12 @@ def backfill(month: str, business_doctype: str | None = None, business_name: str
 
 
 @ai_features.when_enabled
-def backfill_address(business_doctype: str, business_name: str, address: str, month: str) -> None:
+def backfill_address(business_doctype: str, business_name: str, address: str, company: str | None, provider: str,
+                     month: str) -> None:
     model = memory_model()
     if not model:
         return
-    memory = Memory(business_doctype, business_name, address)
+    memory = Memory(business_doctype, business_name, address, company, provider)
     with memory.lock():
         memory.backfill(model, getdate(month + '-01'))
 

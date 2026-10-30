@@ -81,7 +81,7 @@ class OwnerBoundaries(unittest.TestCase):
     def test_voice_uses_transcript_and_never_audio_placeholder(self):
         message = Doc(message_type='voice', content='[audio]', transcript='कार्यक्रम कब है?')
         self.assertEqual(language.incoming(message), message.transcript)
-        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local'})), \
+        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local', 'provider':'WhatsApp'})), \
                 patch.object(service, 'conversation_history', return_value=[]), \
                 patch('relay_core.ai.event_memory.ReplyContext') as reference, \
                 patch.object(service, 'decide_text', return_value={'reply':'कार्यक्रम नवंबर में है।'}) as decide:

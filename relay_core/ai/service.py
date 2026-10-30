@@ -68,8 +68,10 @@ def decide(skill, message, run_id=None, *, deadline=None):
         return decide_text(skill, text, user, business, scope, [], run_id=run_id, deadline=deadline)
     history = conversation_history(skill, message, user, business, scope)
     from relay_core.ai.event_memory import ReplyContext
-    # The authenticated sender's own memory of this record, plus events published to its business type.
-    reference = ReplyContext(business, scope['company'], message.sender_endpoint or message.relay_contact)
+    # The authenticated sender's own memory of this record on this company and provider, plus events published to
+    # its business type.
+    reference = ReplyContext(business, scope['company'], scope['provider'],
+                             message.sender_endpoint or message.relay_contact, user)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image

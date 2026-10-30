@@ -7,10 +7,12 @@
   "naming_rule": "Expression (old style)",
   "in_create": 1,
   "read_only": 1,
-  "description": "AI memory of one address of one business record. The nightly job folds messages into Day rows and rolls them into Week, Month and Year rows.",
+  "description": "AI memory of one address of one business record on the channels of one company and provider. The nightly job folds messages into Day rows and rolls them into Week, Month and Year rows.",
   "field_order": [
     "business_doctype",
     "business_name",
+    "company",
+    "provider",
     "channel",
     "address",
     "level",
@@ -36,6 +38,20 @@
       "label": "Business record",
       "fieldtype": "Data",
       "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company",
+      "read_only": 1
+    },
+    {
+      "fieldname": "provider",
+      "label": "Provider",
+      "fieldtype": "Select",
+      "options": "WhatsApp\nTelegram\nEmail",
       "read_only": 1
     },
     {
