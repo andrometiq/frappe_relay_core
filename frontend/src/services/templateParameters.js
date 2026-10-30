@@ -95,6 +95,19 @@ export function templateParameterDescriptors(template) {
     if (componentType !== "BUTTONS") continue;
     for (const [buttonIndex, button] of (component?.buttons || []).entries()) {
       const buttonType = String(button?.type || "").toUpperCase();
+      if (buttonType === "COPY_CODE") {
+        descriptors.push({
+          key: `BUTTON:${componentIndex}:${buttonIndex}`,
+          componentType: "BUTTON",
+          componentIndex,
+          buttonIndex,
+          kind: "text",
+          subType: "copy_code",
+          label: "Offer code to copy",
+          example: String([button?.example].flat()[0] || ""),
+        });
+        continue;
+      }
       if (buttonType !== "URL" || !variableNumbers(button?.url).length)
         continue;
       descriptors.push({
@@ -120,11 +133,12 @@ export function buildTemplateComponents(descriptors, values) {
     const raw = descriptor.kind === "media" ? media : String(values?.[descriptor.key] || "").trim();
     if (!raw) throw new Error(`${descriptor.label} is required.`);
     if (descriptor.componentType === "BUTTON") {
+      const code = descriptor.subType === "copy_code";
       components.push({
         type: "button",
-        sub_type: "url",
+        sub_type: code ? "copy_code" : "url",
         index: String(descriptor.buttonIndex),
-        parameters: [{ type: "text", text: raw }],
+        parameters: [code ? { type: "coupon_code", coupon_code: raw } : { type: "text", text: raw }],
       });
       continue;
     }
@@ -156,6 +170,7 @@ function fillPlaceholders(text, descriptors, values, componentType) {
   return result;
 }
 
+const BUTTON_FALLBACK_TEXT = { OTP: "Copy code", COPY_CODE: "Copy offer code", CATALOG: "View catalog" };
 const BUTTON_ICONS = { URL: "external-link", PHONE_NUMBER: "phone", COPY_CODE: "copy", OTP: "copy" };
 
 // One WhatsApp-style rendering for the send dialog and the template editor; empty values show the example or the placeholder.
@@ -177,7 +192,7 @@ export function templateRendering(template, descriptors, values) {
         const buttonType = String(button?.type || "").toUpperCase();
         return {
           key: button?._client_key,
-          text: String(button?.text || "").trim() || (buttonType === "OTP" ? "Copy code" : buttonType),
+          text: String(button?.text || "").trim() || BUTTON_FALLBACK_TEXT[buttonType] || buttonType,
           icon: BUTTON_ICONS[buttonType] || "corner-up-left",
         };
       });
