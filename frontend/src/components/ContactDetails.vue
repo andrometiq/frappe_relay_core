@@ -24,7 +24,9 @@ const desk = (doctype, name) => '/desk/' + doctype.toLowerCase().replaceAll(' ',
 const linksChanged = summary => { detail.value = { ...detail.value, links: summary.links, primary: summary.primary }; emit('changed', summary) }
 async function load() {
   const ticket = ++generation
-  detail.value = null; error.value = ''; busy.value = true
+  // A live refresh of the same contact keeps the shown details, so an open link form keeps its input.
+  if (detail.value?.name !== props.contact) detail.value = null
+  error.value = ''; busy.value = true
   try { const data = await coreApi('api.contact_details', { contact: props.contact }); if (ticket === generation) { detail.value = { ...data, endpoints: data.endpoints.filter(row => channelEnabled(row.provider)) }; emit('loaded', detail.value) } }
   catch (e) { if (ticket === generation) error.value = e.message }
   finally { if (ticket === generation) busy.value = false }
@@ -41,7 +43,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
 </script>
 <template>
   <section class="contact-details" aria-label="Contact and business links">
-    <LoadingRows v-if="busy" :count="2" label="Loading contact details…" />
+    <LoadingRows v-if="busy && !detail" :count="2" label="Loading contact details…" />
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
       <header v-if="!compact" class="contact-detail-heading"><Button v-if="dismissible && isMobile" icon="chevron-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div class="contact-detail-name"><h3 :title="recordTitle(detail, 'Contact')">{{ recordTitle(detail, 'Contact') }}</h3><p>{{ detail.phone || 'No phone number' }}</p></div><Button v-if="dismissible && !isMobile" class="contact-detail-close" icon="x" variant="ghost" aria-label="Close" title="Close" @click="emit('close')" /></header>
