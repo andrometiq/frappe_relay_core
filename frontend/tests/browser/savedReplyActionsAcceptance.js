@@ -61,7 +61,7 @@ async (page) => {
  await p.getByRole('button',{name:'Saved replies',exact:true}).click();
  const dialog=p.getByRole('dialog');await dialog.getByText('First 19',{exact:true}).waitFor();
  await dialog.getByRole('button',{name:'Record follow-up',exact:true}).click();
- await dialog.getByText('Action was not confirmed.',{exact:false}).waitFor();
+ await dialog.getByText('did not confirm this action',{exact:false}).waitFor();
  await dialog.getByRole('button',{name:'Record follow-up',exact:true}).click();
  await dialog.getByRole('button',{name:'Action completed',exact:true}).waitFor();
  if(actionKeys.length!==2||actionKeys[0]!==actionKeys[1])throw Error('Retry changed idempotency key');
