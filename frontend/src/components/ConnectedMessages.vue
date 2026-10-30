@@ -120,9 +120,18 @@ const isMobile = useMobileLayout(), infoOpen = ref(false), linking = ref(false);
 const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
 const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactRecord.value));
 const menuActions = computed(() => [
-  ...(conversationContact.value ? [{label:'Internal notes',icon:'message-square',onClick:openNotes}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
+  ...(conversationContact.value ? [{label:'Delivery failures and retry',icon:'alert-circle',onClick:() => deliveriesOpen.value = true}, {label:'Internal notes',icon:'message-square',onClick:openNotes}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
   {label:'Search conversation',icon:'search',onClick:() => togglePanel('search')},
 ]);
+// A pending send retries through the composer queue; a sent message the provider failed is sent again by the server.
+function retryMessage(message) {
+  if (message._pending) return state.retryPending(message);
+  return run(async () => {
+    await coreApi('messaging.retry', { message: message.name }, true);
+    showToast('Sent again');
+    await history();
+  });
+}
 function togglePanel(name) { panel.value = panel.value === name ? '' : name; }
 const provider = computed(() => objectValue(source.value?.provider_context).provider || "");
 const channelLine = computed(() => {
@@ -441,7 +450,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         :selected="active" :provider="provider" :contact-name="activeContact?.label || title" :can-comment="true" :notes="threadNotes.items.value" :reply-closed="replyClosed" @note="startNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="loadOlder" @retry-page="pagingError = ''" @reply="replyTo"
-        @quote="openQuote" @reconcile="state.checkPending" @retry="state.retryPending" @discard="state.deletePending" @send="send" @toast="showToast" />
+        @quote="openQuote" @reconcile="state.checkPending" @retry="retryMessage" @discard="state.deletePending" @send="send" @toast="showToast" />
       <InternalNotes v-if="notesOpen" :key="conversationContact" :contact="conversationContact" @close="panel = ''" @open="focusMessage" @reply="startNote(null, $event)" @add="startNote()" />
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
