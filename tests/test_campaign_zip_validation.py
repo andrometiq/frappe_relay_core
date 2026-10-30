@@ -12,10 +12,16 @@ from unittest.mock import Mock, patch
 import frappe
 from frappe import _dict
 from openpyxl import load_workbook
+from pypdf.errors import PdfReadError
 from relay_core import bulk_campaigns as bulk, bulk_sheet, bulk_updates, campaign_media
+from site_file_limit import use_relay_file_limit
 
 NOW = '2026-10-30 12:00:00'
 USER = 'local-campaign-manager@example.invalid'
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 
 class ZipTests(unittest.TestCase):
@@ -98,6 +104,68 @@ class ZipTests(unittest.TestCase):
         self.assertFalse(json.loads(doc.arguments)['validated'])
         self.assertEqual(doc.source_file, '/private/files/people.csv')
         hub.assert_not_called()
+
+    def test_large_or_damaged_header_files_flag_only_their_rows(self):
+        path = self.archive([('people.csv', 'Mobile'), ('12025550101.pdf', b'%PDF-ok'),
+                             ('12025550102.pdf', b'%PDF-' + b'x' * 3000), ('12025550103.pdf', b'%PDF-broken')])
+        def save(name, raw, *args, **kwargs):
+            if name == '12025550103.pdf':
+                raise PdfReadError('startxref not found')
+            return _dict(file_url='/private/files/' + name)
+        with patch.object(campaign_media, 'get_media_max_bytes', return_value=2048), \
+                patch('frappe.utils.file_manager.save_file', side_effect=save):
+            sheet_url, value = campaign_media.unpack(path, 'Local ZIP', 'document')
+        self.assertEqual(sheet_url, '/private/files/people.csv')
+        self.assertEqual(value['files'], [{'file_url': '/private/files/12025550101.pdf', 'filename': '12025550101.pdf'}])
+        self.assertEqual(value['rejected'], [
+            {'filename': '12025550102.pdf', 'reason': 'Header attachment must be at most 2 KB'},
+            {'filename': '12025550103.pdf', 'reason': 'Wrong file content for document header'}])
+        fields = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format': 'DOCUMENT'}]})
+        self.assertIs(campaign_media.check_attachment(value, fields), value)
+        issues = []
+        with patch.object(campaign_media, 'checked_file'):
+            result = campaign_media.resolve(value, 'document', {'12025550101', '12025550102', '12025550103'}, 'US', issues)
+        self.assertEqual(result['12025550101'], (value['files'][0], None))
+        self.assertEqual(result['12025550102'], (None, 'Header attachment must be at most 2 KB'))
+        self.assertEqual(result['12025550103'], (None, 'Wrong file content for document header'))
+        self.assertEqual([issue['filename'] for issue in issues], ['12025550102.pdf', '12025550103.pdf'])
+
+    def test_rejected_files_keep_our_reasons_and_dynamic_mode(self):
+        fields = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format': 'IMAGE'}]})
+        only = {'mode': 'dynamic', 'files': [], 'rejected': [{'filename': 'a.png', 'reason': 'Wrong file content for image header'}]}
+        self.assertIs(campaign_media.check_attachment(only, fields), only)
+        for rejected, mode in [([{'filename': 'a.png', 'reason': 'Traceback: secret'}], 'dynamic'),
+                               ([{'filename': 'a.png', 'reason': ''}], 'dynamic'),
+                               ([{'filename': 'a.png', 'reason': 'Header attachment is empty'}], 'static')]:
+            with self.subTest(rejected=rejected, mode=mode), self.assertRaises(ValueError):
+                campaign_media.check_attachment({'mode': mode, 'files': [] if mode == 'dynamic' else
+                    [{'file_url': '/private/files/b.png', 'filename': 'b.png'}], 'rejected': rejected}, fields)
+
+
+class InspectErrorTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.fake = SimpleNamespace(throw=Mock(side_effect=lambda message: (_ for _ in ()).throw(frappe.ValidationError(message))),
+                                    log_error=Mock())
+        self.enterContext(patch.object(bulk, 'frappe', self.fake))
+        self.enterContext(patch.object(bulk, 'bulk', return_value=_dict(name='Local', arguments=json.dumps({'fields': []}))))
+
+    def test_wrong_file_type_keeps_its_own_message(self):
+        with self.assertRaisesRegex(frappe.ValidationError, r'^Upload a \.xlsx, \.csv or \.tsv file$'):
+            bulk.inspect('Local', '/private/files/notes.txt')
+        self.fake.log_error.assert_not_called()
+
+    def test_damaged_sheet_has_friendly_message(self):
+        broken = BytesIO()
+        with zipfile.ZipFile(broken, 'w') as archive:
+            archive.writestr('[Content_Types].xml', '<broken')
+        for name, raw in (('people.xlsx', b'not a workbook'), ('parts.xlsx', broken.getvalue()),
+                          ('people.csv', b'Mobile\n\xff\xfe\xfa')):
+            path = self.root / name
+            path.write_bytes(raw)
+            with self.subTest(name=name), patch.object(bulk, 'uploaded_file', return_value=_dict(get_full_path=lambda: str(path))), \
+                    self.assertRaisesRegex(frappe.ValidationError, 'sheet could not be read'):
+                bulk.inspect('Local', '/private/files/' + name)
 
 
 class ValidationTests(unittest.TestCase):

@@ -8,9 +8,9 @@ test('the chat header has no assignment control', async () => {
   assert.doesNotMatch(await read('components/messages/ConversationTools.vue'), /Assign|assignment|teams\.assign/)
 })
 
-test('the More menu lists notes, topics and search, and the header has no ticket button', () => {
+test('the More menu lists delivery failures, notes, topics and search, and the header has no ticket button', () => {
   const menu = connected.split('const menuActions = computed')[1].split('const channelLine')[0]
-  assert.deepEqual([...menu.matchAll(/label:'([^']+)'/g)].map(match => match[1]), ['Internal notes', 'Topics', 'Search conversation'])
+  assert.deepEqual([...menu.matchAll(/label:'([^']+)'/g)].map(match => match[1]), ['Delivery failures and retry', 'Internal notes', 'Topics', 'Search conversation'])
   assert.doesNotMatch(connected, /Create ticket from this chat|conversation-ticket/)
 })
 

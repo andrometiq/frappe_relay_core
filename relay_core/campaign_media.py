@@ -68,15 +68,42 @@ def zip_contents(path):
         raise ValueError('This ZIP could not be read. Create a new ZIP and try again.') from exc
 
 
+def unpack(path, campaign, media_type):
+    """(sheet file URL, dynamic header attachment or None) of a campaign ZIP. A header file that is too
+    large or unreadable is not stored; it is kept as rejected, so only its row fails validation."""
+    from frappe.utils.file_manager import save_file
+    from pypdf.errors import PyPdfError
+    sheet_name, contents = zip_contents(path)
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type]) if media_type else 0
+    sheet_url, files, rejected = None, [], []
+    for filename, raw in contents:
+        if filename == sheet_name:
+            sheet_url = save_file(filename, raw, 'Relay Campaign', campaign, is_private=1).file_url
+            continue
+        if not media_type:
+            continue
+        if error := size_error(len(raw), limit, 'Header attachment'):
+            rejected.append({'filename': filename, 'reason': error})
+            continue
+        try:
+            saved = save_file(filename, raw, 'Relay Campaign', campaign, is_private=1)
+        except (PyPdfError, ValidationError):  # Frappe parses every PDF; a damaged or unsafe one is refused.
+            rejected.append({'filename': filename, 'reason': f'Wrong file content for {media_type} header'})
+            continue
+        files.append({'file_url': saved.file_url, 'filename': filename})
+    attachment = {'mode': 'dynamic', 'files': files, **({'rejected': rejected} if rejected else {})}
+    return sheet_url, attachment if files or rejected else None
+
+
 def check_attachment(value, fields):
     if value is None:
         return None  # Existing API callers may still map HTTPS header URLs.
-    if (not isinstance(value, dict) or set(value) != {'mode', 'files'}
+    if (not isinstance(value, dict) or not {'mode', 'files'} <= set(value) <= {'mode', 'files', 'rejected'}
             or value.get('mode') not in ('static', 'dynamic')
             or not any(field['key'] == 'header_media' for field in fields)):
         raise ValueError('Choose a header attachment mode')
-    files = value['files']
-    if (not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES
+    files, rejected = value['files'], check_rejected(value)
+    if (not isinstance(files, list) or len(files) > MAX_FILES or not files and not rejected
             or value['mode'] == 'static' and len(files) != 1):
         raise ValueError('Choose one static file or multiple contact files')
     for item in files:
@@ -88,6 +115,20 @@ def check_attachment(value, fields):
         if item['filename'].lower().endswith('.zip'):
             raise ValueError('ZIP archives are not supported. Select the individual files.')
     return value
+
+
+def check_rejected(value):
+    """ZIP files that unpack() did not store, each with the reason its row fails."""
+    from relay_core.bulk_campaigns import friendly_reason
+    rejected = value.get('rejected', [])
+    if not isinstance(rejected, list) or len(rejected) > MAX_FILES or rejected and value['mode'] != 'dynamic':
+        raise ValueError('Header attachments must be private uploaded files')
+    for item in rejected:
+        if (not isinstance(item, dict) or set(item) != {'filename', 'reason'} or not item['reason']
+                or friendly_reason(item['reason']) != item['reason']):
+            raise ValueError('Header attachments must be private uploaded files')
+        plain_filename(item['filename'])
+    return rejected
 
 
 def checked_file(item, media_type):
@@ -137,18 +178,20 @@ def resolve(attachment, media_type, numbers, region, issues=None):
             problem = str(exc)
         except (OSError, DoesNotExistError, PermissionError, ValidationError):
             problem = 'Header attachment unavailable'
-        if issues is not None:
+        files.append((item['filename'], item, problem))
+    files += [(item['filename'], None, item['reason']) for item in attachment.get('rejected', [])]
+    if issues is not None:
+        for filename, _, problem in files:
             unused = (attachment['mode'] == 'dynamic' and
-                      sheet_phone(os.path.splitext(item['filename'])[0], region) not in numbers)
+                      sheet_phone(os.path.splitext(filename)[0], region) not in numbers)
             if problem or unused:
-                issues.append({'filename': item['filename'], 'reason': problem or 'No matching mobile number in the sheet'})
-        files.append((item, problem))
+                issues.append({'filename': filename, 'reason': problem or 'No matching mobile number in the sheet'})
     if attachment['mode'] == 'static':
-        item, problem = files[0]
+        _, item, problem = files[0]
         return {number: (item, problem) for number in numbers}
     matches = defaultdict(list)
-    for item, problem in files:
-        number = sheet_phone(os.path.splitext(item['filename'])[0], region)
+    for filename, item, problem in files:
+        number = sheet_phone(os.path.splitext(filename)[0], region)
         if number in numbers:
             matches[number].append((item, problem))
     return {number: (matches[number][0] if len(matches[number]) == 1 else

@@ -4,6 +4,7 @@ import { Dialog } from '@relay/ui'
 import ParticipantReceipts from './ParticipantReceipts.vue'
 import { objectValue } from '../messageContent'
 import { channelStatus } from '../../services/channelComposition'
+import { deliveryReason } from '../../services/deliveryReason'
 import { dateTime as when } from '../relativeTime'
 
 // Sent, Delivered and Read with time and person, then who in the team saw the message.
@@ -34,7 +35,7 @@ const waiting = computed(() => (props.coverage?.unread_by || []).map(reader => r
       <blockquote class="message-info-content">{{ info.content || 'Attachment' }}</blockquote>
       <dl class="message-info-grid">
         <div v-for="row in rows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value || '—' }}<small v-if="row.who">{{ row.who }}</small></dd></div>
-        <div v-if="failed && info.delivery_error"><dt>Reason</dt><dd>{{ info.delivery_error }}</dd></div>
+        <div v-if="failed"><dt>Reason</dt><dd>{{ deliveryReason(info.delivery_error) }}<small v-if="info.delivery_error && info.delivery_error !== deliveryReason(info.delivery_error)">{{ info.delivery_error }}</small></dd></div>
         <div v-if="info.edited_at"><dt>Edited</dt><dd>{{ when(info.edited_at) }}</dd></div>
       </dl>
       <ParticipantReceipts v-if="outgoing && groupReceipts && objectValue(info.provider_context).group_id" :message="info.name" />

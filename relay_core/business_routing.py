@@ -62,7 +62,8 @@ def resolve(contact, channel, endpoint, context, row, event, override=None, posi
                 row['message_data'] = {'kind': 'text', 'text': row['text']['body']}
             else:
                 rule = 'triage_invalid_choice'
-        elif context.get('reply_to_message_id') and not campaign_send(channel, endpoint, context['reply_to_message_id']):
+        elif (context.get('reply_to_message_id') and links and rule != 'quoted_conversation'
+                and not campaign_send(channel, endpoint, context['reply_to_message_id'])):
             rule = 'triage_unresolved_reference'
         elif len(links) == 1:
             business, rule = links[0], 'single_link'
