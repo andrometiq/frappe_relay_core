@@ -172,12 +172,14 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error: error, 
                 :key="message.name"
                 class="flex gap-3 py-2 border-b border-outline-gray-1"
               >
+                <label class="topic-check" :for="'topic-' + message.name">
                 <input
                   type="checkbox"
                   :id="'topic-' + message.name"
                   :checked="draft.messages.includes(message.name)"
                   @change="toggle(message.name, $event.target.checked)"
                 />
+                </label>
                 <label
                   :for="'topic-' + message.name"
                   class="flex-1 min-w-0 text-sm"

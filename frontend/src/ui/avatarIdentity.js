@@ -1,6 +1,7 @@
 const TONES = 7
 
 export function avatarInitials(name) {
+  if (!/\p{L}/u.test(String(name || ''))) return ''
   return String(name || '').trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase()
 }
 

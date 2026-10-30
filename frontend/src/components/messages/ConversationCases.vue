@@ -240,7 +240,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error: error, l
               load();
             " />
           <h3 class="font-medium">{{ record.title }}</h3>
-          <p class="text-sm text-ink-gray-5">
+          <p v-if="record.priority" class="text-sm text-ink-gray-5">
             {{ record.priority }} priority
           </p>
           <p v-if="!record.isNew" class="text-sm text-ink-gray-5">
