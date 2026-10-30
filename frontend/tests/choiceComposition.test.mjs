@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises'
 import {computed,ref,watch} from 'vue'
 const source=(await readFile(new URL('../src/components/fields/ChoiceField.vue',import.meta.url),'utf8'))
  .split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm,'')
-const make=new Function('recordTitle','useLoadMore','computed','ref','watch','onBeforeUnmount','useId','defineProps','defineEmits',source+'\nreturn {focus,schedule,keydown,compositionStart,compositionEnd,query,close,loadMore,options};').bind(null, recordTitle, useLoadMore)
+const make=new Function('recordTitle','useLoadMore','computed','ref','watch','onBeforeUnmount','useId','defineProps','defineEmits',source+'\nreturn {focus,schedule,keydown,compositionStart,compositionEnd,query,close,loadMore,options,onScroll,open,results};').bind(null, recordTitle, useLoadMore)
 for(const multiple of [false,true])test(`IME completion and Enter selection (${multiple?'multiple':'single'})`,async()=>{
  const queries=[],events=[]
  const props={multiple,modelValue:multiple?['existing']:'',field:{search:async q=>{queries.push(q);return [{value:'new',label:'தமிழ்'}]}}}
@@ -34,4 +34,14 @@ test('remote picker appends pages without duplicate values or losing captions', 
  await field.loadMore()
  assert.deepEqual(field.options.value.map(row => row.label), ['Asha','Ravi'])
  field.close()
+})
+
+
+test('scrolling the page closes a floating picker but scrolling its own options does not', async () => {
+ const props={modelValue:'',field:{options:['One','Two']}}
+ const field=make(computed,ref,watch,()=>{},()=> 'scrolling',()=>props,()=>()=>{})
+ field.focus();await new Promise(resolve=>setTimeout(resolve,0))
+ const popup={};field.results.value={contains:target=>target===popup}
+ field.onScroll({target:popup});assert.equal(field.open.value,true)
+ field.onScroll({target:{}});assert.equal(field.open.value,false)
 })

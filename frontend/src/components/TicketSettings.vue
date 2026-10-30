@@ -71,7 +71,7 @@ function move(kind, rows, index, step) {
 .ticket-settings__list header p { font-size: 12px; color: var(--ink-gray-6); }
 .ticket-settings__list ul { display: flex; flex-direction: column; gap: 6px; }
 .ticket-settings__list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--outline-gray-2); }
-.ticket-settings__swatches { display: flex; gap: 8px; }
+.ticket-settings__swatches { display: flex; flex-wrap:wrap; gap: 8px; }
 .ticket-swatch { width: 22px !important; height: 22px !important; min-width: 0 !important; min-height: 0 !important; padding: 0 !important; border-radius: 999px; border: 2px solid transparent; outline: 1px solid var(--outline-gray-3); }
 .ticket-swatch[aria-checked=true] { border-color: var(--surface-white); outline: 2px solid var(--ink-gray-8); }
 .ticket-swatch--gray { background: var(--ink-gray-4); }
@@ -84,4 +84,5 @@ function move(kind, rows, index, step) {
 .ticket-settings__order { display: inline-flex; margin-left: auto; }
 .ticket-settings__add { display: flex; gap: 8px; align-items: center; }
 .ticket-settings__add > :first-child { flex: 1; }
+@media (max-width:768px) { .ticket-swatch { width:44px !important; height:44px !important; } }
 </style>

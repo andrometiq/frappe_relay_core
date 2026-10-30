@@ -94,7 +94,7 @@ async function removeLink(link) {
           </span>
           <span v-if="detail.can_set_primary && links.length > 1" class="info-switch-label" aria-hidden="true">Main</span>
           <button v-if="detail.can_set_primary && links.length > 1" type="button" role="switch" class="info-switch" :aria-checked="isPrimaryLink(detail.primary, link)"
-            :aria-label="'Main record: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" title="Main record" @click="setPrimary(link, !isPrimaryLink(detail.primary, link))" />
+            :aria-label="'Main record: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" title="Main record" @click="setPrimary(link, !isPrimaryLink(detail.primary, link))"><span class="info-switch-track" aria-hidden="true" /></button>
           <Button v-if="detail.can_edit_links" class="info-remove" icon="x" variant="ghost" size="xs" :aria-label="'Remove link: ' + linkedTitle(link.doctype, link.name)" :disabled="busy" @click="removing = keyOf(link); adding = false" />
         </template>
       </li>
@@ -113,6 +113,7 @@ async function removeLink(link) {
 .contact-link-type-options button { min-height:44px; padding:0 12px; border:1px solid var(--relay-stroke); border-radius:15px; color:var(--relay-ink-2); font-size:13px; }
 .contact-link-type-options button[aria-checked="true"] { border-color:var(--relay-accent); background:var(--relay-accent-soft); color:var(--relay-accent-text); font-weight:600; }
 .contact-link-form-actions { display:flex; justify-content:flex-end; gap:8px; }
+.info-item-copy > a { max-width:100%; }
 .info-switch-label { flex:none; color:var(--relay-ink-3); font-size:11.5px; }
-@media (max-width:768px) { .info-group-action, .info-item-copy a { display:inline-flex; align-items:center; min-height:44px; } .contact-links :deep(:is(button,input)) { min-height:44px !important; min-width:44px !important; } }
+@media (max-width:768px) { .info-group-action, .info-item-copy > a { display:flex; align-items:center; min-height:44px; } .info-item-copy small a { display:inline-flex; align-items:center; min-height:44px; } .contact-links :deep(:is(button,input)) { min-height:44px !important; min-width:44px !important; } }
 </style>

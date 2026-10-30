@@ -68,3 +68,12 @@ test("a draft shows only the people count and any skipped rows; a started campai
   assert.deepEqual(shownCounters("Draft", { total: 4, skipped: 6 }).map(([key]) => key), ["total", "skipped"]);
   assert.equal(shownCounters("Running", { total: 4 }).length, 8);
 });
+
+
+test('invalid-number summary uses all validation issues and agrees with the issue breakdown', async () => {
+  const { invalidNumberLabel } = await import('../src/services/campaignProgress.js');
+  assert.equal(invalidNumberLabel({contact_counts: {invalid: 0}, issues: [{reason:'Invalid phone number',count:5}], recipients:[{}]}), '5 invalid numbers');
+  assert.equal(invalidNumberLabel({contact_counts: {invalid: 5}, issues: [{reason:'Invalid phone number',count:1}]}), '1 invalid number');
+  assert.equal(invalidNumberLabel({issues: [{reason:'Duplicate number',count:5}]}), '0 invalid numbers');
+  assert.equal(invalidNumberLabel({contact_counts:{invalid:0}}), 'Invalid number count unavailable');
+});

@@ -11,6 +11,7 @@ import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
+import { dateTime } from './relativeTime'
 
 const capabilities = inject('relayCapabilities')
 const canEdit = computed(() => Boolean(capabilities.value.manage))
@@ -163,7 +164,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             <span v-if="dirty" class="text-sm" role="status">Unsaved changes</span></div>
           <div v-if="draft.name" class="automation-section"><h3 class="font-semibold">Recent runs</h3>
             <p v-if="!runs.length" class="text-sm">No runs yet.</p>
-            <button v-for="row in runs" :key="row.name" type="button" class="flow-run" @click="showResponses(row)"><span>{{ row.display_name || row.relay_contact }}</span><Badge :label="row.status" :theme="row.status === 'Completed' ? 'green' : row.status === 'Cancelled' ? 'gray' : 'blue'" /><small>{{ row.creation }}</small></button>
+            <button v-for="row in runs" :key="row.name" type="button" class="flow-run" @click="showResponses(row)"><span>{{ row.display_name || row.relay_contact }}</span><Badge :label="row.status" :theme="row.status === 'Completed' ? 'green' : row.status === 'Cancelled' ? 'gray' : 'blue'" /><small>{{ dateTime(row.creation) }}</small></button>
             <dl v-if="responses" class="flow-responses"><template v-for="item in responses.responses" :key="item.field"><dt>{{ item.question }}</dt><dd>{{ Array.isArray(item.answer) ? item.answer.join(', ') : typeof item.answer === 'object' ? item.answer?.type + (item.answer?.text ? ': ' + item.answer.text : '') : item.answer }}</dd></template><p v-if="!responses.responses.length">No answers collected.</p></dl>
           </div>
         </form>
@@ -175,6 +176,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 <style scoped>
 .flow-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
 .flow-list { display:flex; flex-direction:column; gap:8px; }
+.flow-list > * { flex-shrink:0; }
 .flow-badges { display:flex; flex-wrap:wrap; gap:6px; margin-left:auto; }
 .flow-warning { color:var(--relay-warning-ink); background:var(--relay-warning-bg); border-radius:8px; padding:8px 12px; font-size:13px; }
 .flow-steps { display:flex; flex-direction:column; gap:12px; margin:0; padding:0; list-style:none; counter-reset:none; }

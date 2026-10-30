@@ -87,3 +87,11 @@ export function shownCounters(status, counts) {
   if (status !== "Draft") return COUNTERS;
   return COUNTERS.filter(([key]) => key === "total" || (key === "skipped" && counts?.skipped));
 }
+
+// Issues summarize all validated rows, unlike the paged recipient list or old import metadata.
+export function invalidNumberLabel(campaign) {
+  if (!Array.isArray(campaign?.issues)) return 'Invalid number count unavailable';
+  const count = campaign.issues.filter(row => row.reason === 'Invalid phone number').reduce((total, row) => total + Number(row.count), 0);
+  if (!Number.isFinite(count)) return 'Invalid number count unavailable';
+  return `${count.toLocaleString()} invalid ${count === 1 ? 'number' : 'numbers'}`;
+}

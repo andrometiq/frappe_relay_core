@@ -137,8 +137,11 @@ async function run(fn) {
     busy.value = false;
   }
 }
+const destinationsLoaded = ref(false);
 async function destinations() {
   const current = ++generation;
+  destinationsLoaded.value = false;
+  error.value = "";
   endpoint.value = "";
   endpoints.value = [];
   try {
@@ -153,6 +156,7 @@ async function destinations() {
     endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : row.channel}));
     endpoint.value = (endpoints.value.find(row => props.businessName && row.channel === props.channel) || endpoints.value[0])?.value || "";
     if (!endpoints.value.length && !props.businessName && !record.value) await loadRecords(current);
+    if (current === generation) destinationsLoaded.value = true;
   } catch (e) {
     if (current === generation) error.value = e.message;
   }
@@ -325,8 +329,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           <ChoiceField v-if="endpoints.length > 1" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
           <p v-else-if="!fixedContact" class="text-sm text-ink-gray-5">Sends through {{ destination?.label }}</p>
         </template>
-        <p v-else-if="contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
-        <p v-else-if="contact" class="text-sm text-ink-gray-5">
+        <p v-else-if="destinationsLoaded && contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
+        <p v-else-if="destinationsLoaded && contact" class="text-sm text-ink-gray-5">
           {{ props.businessName
             ? "This contact has no number we can send to. Add a mobile number to the contact."
             : "This contact has no WhatsApp number we can send to. Add a mobile number to the contact." }}
@@ -371,7 +375,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
               <span v-for="(button, index) in rendering.buttons" :key="index" class="rounded border border-outline-gray-2 px-2 py-1 text-center">{{ button.text }}</span>
             </div></template>
         </template>
-        <ErrorMessage :message="error" />
+        <ErrorMessage :message="error" /><Button v-if="error && contact && !destinationsLoaded" label="Retry contact numbers" :disabled="busy" @click="run(destinations)" />
         <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
       </div></template
     >

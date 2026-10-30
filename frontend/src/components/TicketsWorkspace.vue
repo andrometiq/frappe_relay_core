@@ -118,7 +118,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <div class="ticket-tabs" role="tablist" aria-label="Tickets view">
           <button v-for="option in views" :key="option.value" type="button" role="tab" :aria-selected="view === option.value" @click="view = option.value">{{ option.label }}</button>
         </div>
-        <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Ticket settings" class="ticket-page-head__settings" @click="view = 'settings'" />
+        <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Ticket settings" aria-label="Ticket settings" class="ticket-page-head__settings" @click="view = 'settings'" />
       </div>
       <ErrorMessage :message="error" />
       <TicketDashboard v-if="view === 'dashboard'" :settings="settings" />
@@ -173,6 +173,8 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
 .ticket-table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface-white); }
 .ticket-table th, .ticket-table td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--outline-gray-2); overflow-wrap:anywhere; }
 .ticket-table th { font-size:12px; font-weight:600; color:var(--ink-gray-6); background:var(--surface-gray-1); }
+.ticket-table th:first-child { width:38%; }
+.ticket-table th:not(:first-child), .ticket-table td:not(:first-child) { min-width:110px; overflow-wrap:normal; }
 .ticket-title { display:flex; flex-direction:column; justify-content:center; gap:4px; min-height:44px; min-width:140px; text-align:left; color:var(--ink-gray-9); }
 .ticket-title small { color:var(--ink-gray-6); font-size:12px; }
 .ticket-title:focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
