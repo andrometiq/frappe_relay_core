@@ -6,9 +6,9 @@ test('new skills and event rules are disabled; skills start in shadow', () => {
   assert.equal(newConfiguration(true).mode, 'Shadow')
   for (const skill of [true, false]) assert.equal(newConfiguration(skill).enabled, 0)
 })
-test('skill saves only editable configuration and preserves explicit read scope', () => {
+test('skill saves only editable configuration and its capability rows', () => {
   const draft = { ...newConfiguration(true), name: 'SKILL-1', owner: 'other', daily_limit: '25', enabled: true }
-  const tools = [{ name: 'ledger', method: 'get_list', doctype: 'Payment Ledger Entry', fields: ['name', 'amount', 'posting_date'], scope_field: 'party', identity_fields: {} }]
+  const tools = [{ capability: 'erpnext.supplier_ledger' }]
   const result = configurationValues(draft, true, tools, '')
   assert.equal(result.owner, undefined); assert.equal(result.name, undefined)
   assert.equal(result.daily_limit, 25); assert.equal(result.enabled, 1)
@@ -51,7 +51,7 @@ test('channel options retain an existing selection outside the current account w
 
 test('event text and identity contracts survive round trips without changing provider mappings', () => {
   const draft = {...newConfiguration(true), target:'Explain my ledger', instructions:'Only my records', reply_style:'Brief', exact_trigger:'/ledger', search_confirmation:'Always', execution_policy:'Execute'}
-  const tools = [{name:'ledger',method:'get_list',doctype:'GL Entry',fields:['debit','credit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{WhatsApp:'phone',Email:'email'},company_field:'company'}]
+  const tools = [{capability:'erpnext.supplier_ledger'}]
   const actions = [{action:'create_draft',doctype:'Payment Entry',fields:['paid_amount']},{action:'reply'}]
   const values = configurationValues(draft,true,tools,'',actions)
   assert.deepEqual(toolRows(values.allowed_tools),tools)
@@ -70,14 +70,13 @@ test('ordered actions can move only inside the sequence', async () => {
 test('save validation requires complete sender and company scope and bounded owner text', async () => {
   const {eventErrors} = await import('../src/services/automationEditor.js')
   const draft={...newConfiguration(true),title:'Ledger',business_doctype:'Supplier',instructions:'Only this sender'}
-  assert.deepEqual(eventErrors(draft,[],[],'Email'),[])
-  assert.ok(eventErrors({...draft,enabled:1},[],[],'Email').length)
-  assert.ok(eventErrors({...draft,reply_style:'x'.repeat(2001)},[],[],'Email').length)
-  const reference={name:'ledger',report:'supplier_ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
-  assert.deepEqual(eventErrors(draft,[reference],[],'Email'),[])
-  assert.ok(eventErrors(draft,[reference],[],'WhatsApp').length)
-  assert.ok(eventErrors({...draft,business_doctype:'Customer'},[reference],[],'Email').length)
-  assert.ok(eventErrors(draft,[reference,reference],[],'Email').length)
+  assert.deepEqual(eventErrors(draft,[],[]),[])
+  assert.ok(eventErrors({...draft,enabled:1},[],[]).length)
+  assert.ok(eventErrors({...draft,reply_style:'x'.repeat(2001)},[],[]).length)
+  const reference={capability:'erpnext.supplier_ledger'}
+  assert.deepEqual(eventErrors(draft,[reference],[]),[])
+  assert.ok(eventErrors(draft,[{capability:''}],[]).length)
+  assert.ok(eventErrors(draft,[reference,reference],[]).length)
 })
 test('the template picker searches by name on the chosen number and keeps the saved label', async () => {
   const { newConfiguration, templateField } = await import('../src/services/automationEditor.js')

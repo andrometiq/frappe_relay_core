@@ -24,14 +24,14 @@ export function configurationChannelOptions(channels, selected) {
     ? { ...option, label: `${option.label} · ${option.value}` } : option)
 }
 export function toolRows(value) {
-  return JSON.parse(value || '[]').map(row => ({ ...row, fields: [...row.fields], identity_fields: { ...row.identity_fields } }))
+  return JSON.parse(value || '[]').map(row => ({ capability: row.capability || '' }))
 }
 export function configurationValues(draft, skill, tools, parameters, actions = []) {
   const values = Object.fromEntries(Object.keys(newConfiguration(skill)).map(key => [key, draft[key]]))
   values.enabled = Number(Boolean(values.enabled))
   if (skill) {
     values.daily_limit = Number(values.daily_limit)
-    values.allowed_tools = JSON.stringify(tools.map(row => ({ ...row, fields: Array.isArray(row.fields) ? [...row.fields] : row.fields.split(',').map(field => field.trim()).filter(Boolean) })))
+    values.allowed_tools = JSON.stringify(tools.map(row => ({ capability: row.capability })))
     values.allowed_actions = JSON.stringify(values.execution_policy === 'Execute' ? actions : [])
   } else { values.use_preferences = Number(Boolean(values.use_preferences)); values.parameter_mapping = JSON.stringify(parameters.split('\n').map(field => field.trim()).filter(Boolean)) }
   return values
@@ -61,7 +61,7 @@ export function moveAction(actions, index, delta) {
   if (destination < 0 || destination >= actions.length) return
   ;[actions[index], actions[destination]] = [actions[destination], actions[index]]
 }
-export function eventErrors(draft, references, actions, provider) {
+export function eventErrors(draft, references, actions) {
   const errors = []
   if (!draft.title?.trim()) errors.push('Give the event a readable title.')
   if (!draft.business_doctype) errors.push('Choose a business type.')
@@ -71,12 +71,8 @@ export function eventErrors(draft, references, actions, provider) {
   }
   if (draft.enabled && (!draft.target?.trim() || !draft.channel || !draft.ai_model || !draft.run_as_user || !draft.handoff_owner)) errors.push('Enabled events need a target, channel, model, run-as user and handoff owner.')
   if (!(Number(draft.daily_limit) >= 1 && Number(draft.daily_limit) <= 1000)) errors.push('Choose a daily model limit from 1 to 1000.')
-  for (const row of references) {
-    if (!row.report) errors.push('Choose a configured report; legacy record references cannot answer data questions.')
-    if (!row.name || !row.doctype || !row.scope_field || !row.fields.length) errors.push('Complete each read reference and choose readable fields.')
-    if (!row.company_field || !row.identity_fields?.[provider] || row.identity_anchor !== draft.business_doctype) errors.push('Choose the channel, authenticated identity field and company field for every reference.')
-  }
-  if (new Set(references.map(row => row.name)).size !== references.length) errors.push('Read references must be distinct.')
+  if (references.some(row => !row.capability)) errors.push('Choose an approved capability for every read reference.')
+  if (new Set(references.map(row => row.capability)).size !== references.length) errors.push('Read references must be distinct.')
   if (draft.execution_policy === 'Execute' && actions.some(row => row.action === 'create_draft' && (!row.doctype || !row.fields.length))) errors.push('Choose a draft DocType and its required fields.')
   return [...new Set(errors)]
 }

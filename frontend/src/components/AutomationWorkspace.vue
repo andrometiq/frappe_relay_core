@@ -41,10 +41,7 @@ watch(() => draft.value?.business_doctype, async business => {
   try { const result = await coreApi('ai.configuration.editor_options', {kind:'report', business_doctype:business}); if (draft.value?.business_doctype === business) reportOptions.value = result.items }
   catch (e) { error.value = e.message }
 })
-function chooseReport(tool, value) {
-  const selected = reportOptions.value.find(row => row.value === value)
-  if (selected) Object.assign(tool, selected.contract)
-}
+const reportLabel = value => reportOptions.value.find(row => row.value === value)?.label || 'Read capability'
 const actionOptions = ref([]), actions = ref([]), validation = ref([]), validationSummary = ref(null), saved = ref('')
 const snapshot = () => JSON.stringify([draft.value, tools.value, actions.value])
 const dirty = computed(() => snapshot() !== saved.value)
@@ -74,14 +71,14 @@ async function load(append = false) {
 }
 async function edit(row) {
   draft.value = { ...newConfiguration(skill.value), ...row }; preview.value = null; message.value = ''; notice.value = ''; error.value = ''; validation.value = []
-  try { actions.value = JSON.parse(row.allowed_actions || '[]'); tools.value = skill.value ? toolRows(row.allowed_tools).map(tool => ({...tool, identity_anchor: tool.identity_anchor || row.business_doctype})) : []; parameters.value = skill.value ? '' : JSON.parse(row.parameter_mapping || '[]').join('\n') }
+  try { actions.value = JSON.parse(row.allowed_actions || '[]'); tools.value = skill.value ? toolRows(row.allowed_tools) : []; parameters.value = skill.value ? '' : JSON.parse(row.parameter_mapping || '[]').join('\n') }
   catch { error.value = 'This configuration contains invalid JSON. Repair it in Desk before editing.'; draft.value = null }
   saved.value = snapshot()
   await nextTick()
   if (window.matchMedia('(max-width: 900px)').matches) editor.value?.scrollIntoView({ block:'start' })
 }
 async function save() {
-  validation.value = skill.value ? eventErrors(draft.value, tools.value, actions.value, channelProvider.value) : []
+  validation.value = skill.value ? eventErrors(draft.value, tools.value, actions.value) : []
   if (validation.value.length) { await nextTick(); validationSummary.value?.focus(); return }
   busy.value = true; error.value = ''; preview.value = null
   try {
@@ -106,12 +103,8 @@ async function test() {
   finally { busy.value = false }
 }
 watch([draft, tools, actions, message], () => { preview.value = null }, {deep: true})
-function addReference() {
-  let number = 1
-  while (tools.value.some(row => row.name === `reference_${number}`)) number++
-  tools.value.push({name: `reference_${number}`, method: 'get_list', doctype: '', fields: [], scope_field: '', identity_anchor: draft.value.business_doctype, identity_fields: {}, company_field: ''})
-}
-function chooseBusiness(value) { draft.value.business_doctype = value; draft.value.recipient_field = ''; tools.value.forEach(tool => { tool.identity_anchor = value; tool.identity_fields = {}; tool.scope_field = '' }) }
+function addReference() { tools.value.push({capability: ''}) }
+function chooseBusiness(value) { draft.value.business_doctype = value; draft.value.recipient_field = ''; tools.value.forEach(tool => { tool.capability = '' }) }
 function chooseSource(value) { draft.value.source_doctype = value; draft.value.recipient_field = ''; draft.value.contact_field = ''; draft.value.print_format = ''; draft.value.report_name = ''; parameters.value = '' }
 function chooseActionType(row, value) { row.doctype = value; row.fields = [] }
 watch(() => props.kind, () => { draft.value = null; rows.value = []; next.value = null; load() })
@@ -154,13 +147,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             </fieldset>
             <fieldset class="automation-section"><legend>Configured reports · SEARCH</legend>
               <p class="text-sm">Only the authenticated sender’s records in this company can be searched. A number typed in a message grants no access.</p>
-              <div v-for="(tool, index) in tools" :key="tool.name" class="event-reference">
-                <div class="automation-card-heading"><strong>{{ referenceName(tool.name) }}</strong><Button label="Remove report" :disabled="busy" @click="tools.splice(index, 1)" /></div>
-                <FormControl :model-value="tool.report || ''" label="Configured report" type="select" :options="[{value:'',label:'Choose a report'}, ...reportOptions]" :disabled="busy" @update:model-value="value => chooseReport(tool, value)" />
-                <p v-if="!tool.report" class="text-sm">Choose a report. Legacy record references are unavailable to the AI.</p>
-                <EventPicker v-if="channelProvider" v-model="tool.identity_fields[channelProvider]" :label="channelProvider + ' identity field'" kind="identity" :doctype="draft.business_doctype" :disabled="busy || !draft.business_doctype" />
-                <p v-else class="text-sm">Choose a channel to map its authenticated sender identity.</p>
-                <p v-if="tool.report" class="text-sm">Report fields and company scope are fixed. Ledger date ranges require confirmation.</p>
+              <div v-for="(tool, index) in tools" :key="index" class="event-reference">
+                <div class="automation-card-heading"><strong>{{ reportLabel(tool.capability) }}</strong><Button label="Remove report" :disabled="busy" @click="tools.splice(index, 1)" /></div>
+                <FormControl v-model="tool.capability" label="Configured report" type="select" :options="[{value:'',label:'Choose a report'}, ...reportOptions]" :disabled="busy" />
+                <p v-if="!tool.capability" class="text-sm">Choose an approved capability.</p>
+                <p v-else class="text-sm">Report fields and company scope are fixed. Ledger date ranges require confirmation.</p>
               </div>
               <Button label="Add report" :disabled="busy || tools.length >= 12 || !draft.business_doctype" @click="addReference" />
               <FormControl v-model="draft.search_confirmation" label="Search confirmation" type="select" :options="['Always', 'When required']" :disabled="busy" />
