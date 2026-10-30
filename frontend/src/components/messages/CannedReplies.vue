@@ -39,11 +39,16 @@ watch(open,value=>{if(!value)emit('close')});
 onBeforeUnmount(()=>{++generation;clearTimeout(timer);controller?.abort()});
 const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: more });
 </script>
-<template><Dialog v-model="open" :options="{title:'Saved replies',size:'md'}"><template #body-content>
+<template><Dialog class="saved-replies-dialog" v-model="open" :options="{title:'Saved replies',size:'md'}"><template #body-content>
   <FormControl label="Search saved replies" v-model="query" :maxlength="80" placeholder="Search by title…" @compositionstart="compositionStart" @compositionend="compositionEnd" />
-  <ErrorMessage :message="error" /><p v-if="busy" class="p-3 text-sm text-ink-gray-5">Searching…</p>
+  <ErrorMessage :message="error" /><p v-if="busy" role="status" class="p-3 text-sm text-ink-gray-5">Searching…</p>
   <div class="saved-replies"><div v-for="item in items" :key="item.name"><button type="button" @click="emit('select',item);emit('close')">
     <strong>{{item.title}}</strong><small>{{item.language}} · {{item.reply_type || 'Text'}}</small><p>{{item.reply_type==='Location' ? item.latitude+', '+item.longitude : item.reply_type==='Contact' ? item.contact_name+' · '+item.phone : item.body}}</p>
-  </button><div v-if="item.action_label" class="px-3 pb-3"><Button :disabled="!!running || completed[item.name]" :loading="running===item.name" @click="runAction(item)">{{completed[item.name] ? 'Action completed' : item.action_label}}</Button><small>Runs for this conversation</small></div></div><p v-if="!items.length && !busy" class="p-3 text-sm text-ink-gray-5">{{ query.trim() ? 'No matching saved replies.' : 'No saved replies yet. Add them in Saved replies in the left menu.' }}</p></div>
+  </button><div v-if="item.action_label" class="px-3 pb-3"><Button :disabled="!!running || completed[item.name]" :loading="running===item.name" @click="runAction(item)">{{completed[item.name] ? 'Action completed' : item.action_label}}</Button><small>Runs for this conversation</small></div></div><p v-if="!items.length && !busy" class="p-3 text-sm text-ink-gray-5">{{ query.trim() ? 'No matching saved replies.' : 'No saved replies yet. Add them in Settings → Saved replies.' }}</p></div>
   <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
 </template><template #actions="{ close }"><Button label="Cancel" variant="ghost" @click="close" /></template></Dialog></template>
+
+<style scoped>
+.saved-replies button { min-height:44px; }
+:deep(.relay-button), :deep(.relay-field input) { min-height:44px; }
+</style>

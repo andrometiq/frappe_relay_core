@@ -1,4 +1,5 @@
 <script setup>
+import { dateTime } from '../relativeTime'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { businessScope } from "../../services/businessScope.js";
 import { ref, computed, watch, onBeforeUnmount } from "vue";
@@ -171,19 +172,21 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error: error, 
                 :key="message.name"
                 class="flex gap-3 py-2 border-b border-outline-gray-1"
               >
+                <label class="topic-check" :for="'topic-' + message.name">
                 <input
                   type="checkbox"
                   :id="'topic-' + message.name"
                   :checked="draft.messages.includes(message.name)"
                   @change="toggle(message.name, $event.target.checked)"
                 />
+                </label>
                 <label
                   :for="'topic-' + message.name"
                   class="flex-1 min-w-0 text-sm"
                   ><span class="block text-xs text-ink-gray-5"
                     >{{ message.direction || "History" }} ·
                     {{
-                      message.sent_at || message.creation || 'Message'
+                      dateTime(message.sent_at || message.creation) || 'Message'
                     }}</span
                   >{{ (message.content || "Attachment").slice(0, 250) }}</label
                 >

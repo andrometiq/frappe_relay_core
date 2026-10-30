@@ -2,6 +2,7 @@
 import hashlib
 import json
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact, can_read_contact_as
 
 MAX_BUSINESS_CHATS = 100
@@ -13,10 +14,9 @@ def can_read_message_as(doc,user):
 
 def expected_readers(doc):
     if doc.get('business_doctype') and doc.get('business_name'):
-        config=frappe.db.get_value('Relay Contact Type',{'business_doctype':doc.business_doctype,'enabled':1},
-            ['grouping_field'],as_dict=True)
-        if config is not None:
-            field=config.grouping_field or ''
+        if frappe.db.exists('Relay Contact Type', {'business_doctype':doc.business_doctype,'enabled':1}):
+            from relay_core.business_groups import configuration
+            field=next(iter(configuration(doc.business_doctype)), '')
             value=frappe.db.get_value(doc.business_doctype,doc.business_name,field) if field else ''
             from relay_core.business_groups import key
             owner=frappe.db.get_value('Relay Business Group Claim',key(doc.business_doctype,field,value or ''),'assigned_to')
@@ -37,24 +37,34 @@ def mark(contact, messages):
     if not isinstance(messages, list) or not messages or len(messages) > 50 or any(not isinstance(name, str) for name in messages):
         frappe.throw('Choose between 1 and 50 visible messages')
     names = list(dict.fromkeys(messages))
+    from relay_core.business_access import primary
+    from relay_core.relay_chats import key_of
+    owners, chats = {contact: primary(contact)}, {}
     for name in names:
+        document_name(name)
         doc = frappe.get_doc('Relay Message', name); doc.check_permission('read')
         if doc.relay_contact != contact: frappe.throw('Message belongs to another conversation', frappe.PermissionError)
         frappe.get_doc('Relay Channel', doc.channel).check_permission('read')
+        key = key_of(doc, owners)
+        if key: chats[key] = max(chats.get(key, ''), name)
     from relay_core.conversation_state import fresh_write
-    fresh_write(lambda: record_contact_reads(contact, names))
+    fresh_write(lambda: record_contact_reads(contact, names, chats))
     from relay_core import whatsapp_presence
     try: whatsapp_presence.mark_read(contact, names)
     except Exception: frappe.log_error('WhatsApp read receipt was not queued')  # Operator reads stay recorded.
     return {'marked':names}
 
 
-def record_contact_reads(contact, names):
+def record_contact_reads(contact, names, chats):
+    """Store the reads and lower the shared unread count of each chat; `chats` maps a chat key to its newest read message."""
     from relay_core.conversation_state import start_exact_reads
+    from relay_core.relay_chats import mark_read
     start_exact_reads(contact)
     if insert_reads([(contact, name) for name in names]):
         from relay_core.realtime import contact_changed
         contact_changed(contact, 'reads')
+    for key, newest in chats.items():
+        mark_read(key, newest)
     frappe.db.commit()
 
 
@@ -87,13 +97,22 @@ def mark_chat(contact=None, read=1, business_doctype=None, business_name=None):
     chats = [contact] if contact else business_chats(business_doctype, business_name)
     if str(read) not in ('0', '1'):
         frappe.throw('Invalid read flag')
+    from relay_core import relay_chats
     from relay_core.conversation_state import fresh_write
-    fresh_write(lambda: [set_chat_read(name, str(read) == '1') for name in chats])
-    from relay_core.inbox import unread_count
+    key = relay_chats.key_of({'relay_contact': contact}) if contact else (business_doctype, business_name)
+    if key[0] != relay_chats.CONTACT:
+        business_document(*key)
+
+    def write():
+        for name in chats:
+            set_chat_read(name, str(read) == '1')
+        relay_chats.mark_read(key) if str(read) == '1' else relay_chats.mark_unread(key)
+        frappe.db.commit()
+    fresh_write(write)
+    unread = frappe.db.get_value(relay_chats.CHAT, {'business_doctype': key[0], 'business_name': key[1]}, 'unread_count') or 0
     if contact:
-        return {'contact': contact, 'unread': unread_count(contact)}
-    return {'business': {'doctype': business_doctype, 'name': business_name}, 'contacts': chats,
-            'unread': sum(unread_count(name) for name in chats)}
+        return {'contact': contact, 'unread': unread}
+    return {'business': {'doctype': business_doctype, 'name': business_name}, 'contacts': chats, 'unread': unread}
 
 
 def business_chats(doctype, name):
@@ -102,7 +121,7 @@ def business_chats(doctype, name):
     check_type(doctype)
     if not isinstance(name, str) or not name or len(name) > 140:
         frappe.throw('Choose a business record')
-    frappe.get_doc(doctype, name).check_permission('read')
+    business_document(doctype, name)
     people = frappe.get_all('Dynamic Link', filters={'link_doctype': doctype, 'link_name': name, 'parenttype': 'Contact',
                             'parentfield': 'links'}, pluck='parent', limit_page_length=MAX_BUSINESS_CHATS)
     if not people:
@@ -143,6 +162,7 @@ def newest_message(filters):
 
 @frappe.whitelist(methods=['GET'])
 def coverage(message):
+    document_name(message)
     require_access()
     doc = frappe.get_doc('Relay Message', message); doc.check_permission('read'); readable_contact(doc.relay_contact)
     frappe.get_doc('Relay Channel', doc.channel).check_permission('read')

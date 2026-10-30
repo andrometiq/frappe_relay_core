@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 from .config import load_env
+from . import test_mode
+from . import file_limits
 
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 
@@ -135,11 +137,12 @@ class HubClient:
         if self.protocol:
             headers["MCP-Protocol-Version"] = self.protocol
         req = Request(self.url, data=json.dumps(body).encode(), headers=headers)
+        test_mode.ensure_allowed(self.url)
         try:
             with self.opener.open(req, timeout=30) as response:
-                limit = 6 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.attachment','email.attachment','whatsapp.attachment') else 3 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.media', 'whatsapp.media') else 2097152
+                limit = file_limits.encoded_length(file_limits.MAX_BYTES) + 65536 if method == 'tools/call' and params.get('name') in ('telegram.attachment','email.attachment','whatsapp.attachment') else 3 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.media', 'whatsapp.media') else 2097152
                 if method == 'tools/call' and params.get('name') == 'whatsapp.attachment':
-                    limit = ((MAX_WHATSAPP_DOWNLOAD_BYTES + 2) // 3) * 4 + 65536
+                    limit = file_limits.encoded_length(MAX_WHATSAPP_DOWNLOAD_BYTES) + 65536
                 raw = response.read(limit + 1)
                 if len(raw) > limit:
                     raise HubError("Hub response exceeds size limit")
@@ -179,6 +182,8 @@ class HubClient:
     def call_tool(self, name, arguments):
         if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment"}:
             raise HubError("Unsupported Hub tool")
+        if name == "email.send":
+            test_mode.ensure_email_allowed()
         if not self.protocol:
             self.initialize()
         result = self._request("tools/call", {"name": name, "arguments": arguments}, 2)

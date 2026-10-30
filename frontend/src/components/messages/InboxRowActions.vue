@@ -22,7 +22,7 @@ const options = computed(() => {
     star: { label: item.starred ? 'Remove star' : 'Star', icon: 'star', onClick: () => star(item) },
     move: { label: 'Move to folder', icon: 'folder-input', onClick: () => { moving.value = true } },
     unfile: { label: 'Remove from folder', icon: 'folder-minus', onClick: () => run(() => move(item.name, ''), 'Removed from folder') },
-    link: { label: 'Link to customer', icon: 'link', onClick: () => link(item) },
+    link: { label: 'Link to business record', icon: 'link', onClick: () => link(item) },
   }
   return rowActionKeys(item, { folders: capabilities.value.folders, manage: capabilities.value.manage }).map(key => actions[key])
 })

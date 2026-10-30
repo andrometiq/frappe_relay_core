@@ -4,11 +4,11 @@ import { Dialog } from '@relay/ui'
 import ParticipantReceipts from './ParticipantReceipts.vue'
 import { objectValue } from '../messageContent'
 import { channelStatus } from '../../services/channelComposition'
+import { dateTime as when } from '../relativeTime'
 
 // Sent, Delivered and Read with time and person, then who in the team saw the message.
 const props = defineProps({ info: Object, coverage: Object, coverageError: String, contactName: String, receipts: Boolean, groupReceipts: Boolean })
 const open = defineModel({ type: Boolean })
-const when = value => { const date = new Date(String(value || '').replace(' ', 'T')); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
 const outgoing = computed(() => props.info?.direction === 'Outgoing')
 const person = computed(() => props.contactName || 'Customer')
 const failed = computed(() => ['Failed', 'Rejected'].includes(props.info?.status))

@@ -13,7 +13,7 @@ The installed inbox has an email composer with Reply, Reply all and Forward. It 
 | Forward | Starts a new email thread for the destination contact and selected business context. It does not reuse the source reply headers. |
 | Subject and body | A single-line subject of at most 998 characters and a text body of at most 100,000 characters, including the signature. |
 | Signature | A per-user signature can be saved and included in the body. |
-| Attachments | Up to eight files and 4 MiB combined. Upload and download require source-conversation access. |
+| Attachments | Up to eight files and 10 MB combined, or less when the site file size limit is lower. Upload and download require source-conversation access. |
 | BCC | Sent in the SMTP envelope and retained in the private action audit. It is omitted from normal message history and the MIME BCC header. |
 
 `email.recipient_options` provides bounded suggestions for API callers. The current composer uses address fields, not suggestion multi-selects.

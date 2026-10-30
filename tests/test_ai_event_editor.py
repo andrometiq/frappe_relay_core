@@ -46,6 +46,27 @@ class EventEditorTests(unittest.TestCase):
         with self.assertRaises(PermissionError): self.config.editor_options('doctype')
         self.f.get_list.assert_not_called()
 
+    def test_managed_model_only_resolves_the_readable_skills_saved_caption(self):
+        self.f.has_permission.return_value = False
+        event = Doc(ai_model='saved-model')
+        self.f.get_doc.return_value = event
+        self.f.db.get_value.return_value = 'Local model'
+        self.assertEqual(self.config.editor_options('model'), {'items': [], 'read_only': True})
+        result = self.config.editor_options('model', skill='skill', selected=['saved-model', 'other-model'])
+        self.assertEqual(result, {'items': [{'value': 'saved-model', 'label': 'Local model'}], 'read_only': True})
+        self.f.get_doc.assert_called_once_with('Relay AI Skill', 'skill')
+        self.f.db.get_value.assert_called_once_with('AI Model', 'saved-model', 'model_label')
+        self.f.get_list.assert_not_called()
+        event.denied = True
+        with self.assertRaises(PermissionError):
+            self.config.editor_options('model', skill='private', selected=['saved-model'])
+
+    def test_model_readers_keep_the_permission_filtered_picker(self):
+        self.f.get_list.return_value = [Doc(name='model', model_label='Local model')]
+        self.assertEqual(self.config.editor_options('model'), {'items': [{'value': 'model', 'label': 'Local model'}]})
+        self.assertEqual(self.f.get_list.call_args.args[0], 'AI Model')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters']['enabled'], 1)
+
     def test_preview_ticket_only_and_matching_denial_never_call_decision(self):
         event=Doc(name='event', title='Receipt', execution_policy='Ticket only')
         self.f.get_doc.side_effect=[event,Doc()]

@@ -34,7 +34,7 @@ export function templateStatusTheme(status) {
   if (value === "APPROVED" || value === "ACTIVE") return "green";
   if (value === "REJECTED" || value === "PAUSED" || value === "DISABLED")
     return "red";
-  if (value === "PENDING" || value === "IN_APPEAL") return "amber";
+  if (value === "PENDING" || value === "IN_APPEAL") return "gray";
   return "gray";
 }
 

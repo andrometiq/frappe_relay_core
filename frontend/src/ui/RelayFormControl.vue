@@ -19,7 +19,7 @@ const normalizedOptions = computed(() => props.options.map(option => typeof opti
 const inputType = computed(() => ['Data', 'Small Text', 'Int'].includes(props.type) ? ({ Data: 'text', 'Small Text': 'textarea', Int: 'number' }[props.type]) : props.type)
 const id = `relay-field-${Math.random().toString(36).slice(2)}`
 const update = value => emit('update:modelValue', value)
-const selectPt = { overlay: { class: 'relay-select-overlay' }, list: { class: 'relay-select-list' }, option: { class: 'relay-select-option' }, label: { class: 'relay-select-label' }, dropdown: { class: 'relay-select-trigger' } }
+const selectPt = { overlay: { class: 'relay-select-overlay' }, listContainer: { class: 'relay-select-scroll' }, list: { class: 'relay-select-list' }, option: { class: 'relay-select-option' }, label: { class: 'relay-select-label' }, dropdown: { class: 'relay-select-trigger' } }
 const checkboxPt = { root: { class: 'relay-checkbox' }, input: { class: 'relay-checkbox__input' }, box: { class: 'relay-checkbox__box' }, icon: { class: 'relay-checkbox__icon' } }
 </script>
 
@@ -30,7 +30,7 @@ const checkboxPt = { root: { class: 'relay-checkbox' }, input: { class: 'relay-c
   </label>
   <label v-else :class="['relay-field', attrs.class]" :for="id">
     <span v-if="label" class="relay-field__label">{{ label }}<span v-if="required" aria-hidden="true"> *</span></span>
-    <PrimeSelect v-if="inputType === 'select'" :aria-label="label" :input-id="id" :model-value="modelValue" :placeholder="normalizedOptions.find(option => option.value === modelValue)?.label" :options="normalizedOptions" option-label="label" option-value="value" option-disabled="disabled" :disabled="disabled" :pt="selectPt" v-bind="inputAttrs" class="relay-control relay-select" @update:model-value="update" />
+    <PrimeSelect v-if="inputType === 'select'" :aria-label="label" :input-id="id" :model-value="modelValue ?? ''" :placeholder="normalizedOptions.find(option => option.value === (modelValue ?? ''))?.label" scroll-height="min(280px, calc(100dvh - 24px))" :options="normalizedOptions" option-label="label" option-value="value" option-disabled="disabled" :disabled="disabled" :pt="selectPt" v-bind="inputAttrs" class="relay-control relay-select" @update:model-value="update" />
     <PrimeTextarea v-else-if="inputType === 'textarea'" :id="id" :model-value="modelValue" :rows="Number(rows)" :disabled="disabled" :required="required" v-bind="inputAttrs" class="relay-control relay-textarea" @update:model-value="update" />
     <PrimeInputText v-else :id="id" :model-value="modelValue" :type="inputType" :disabled="disabled" :required="required" v-bind="inputAttrs" class="relay-control" @update:model-value="update" />
   </label>

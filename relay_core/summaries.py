@@ -2,6 +2,7 @@
 import hashlib
 import re
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core import ai_features
 from relay_core.permissions import require_access,readable_contact
 from relay_core.automation.contracts import canonical
@@ -57,7 +58,7 @@ def authorize(doc):
     if doc.get('business_name'):
         from relay_core.business_inbox import check_type
         check_type(doc.business_doctype)
-        frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+        business_document(doc.business_doctype,doc.business_name)
     else:contact,_=readable_contact(doc.relay_contact)
     if not frappe.db.get_value("User",frappe.session.user,"enabled"):raise frappe.PermissionError("User is disabled")
     policy=frappe.get_doc('Relay Automation Policy',doc.policy)
@@ -127,7 +128,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
     require_access()
     if business_name:
         from relay_core.business_inbox import check_type
-        check_type(business_doctype);frappe.get_doc(business_doctype,business_name).check_permission('read')
+        check_type(business_doctype);business_document(business_doctype,business_name)
         contact=None
     else:readable_contact(contact)
     if period not in ('7','30','90','all') or not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}',request_key):frappe.throw('Invalid summary request')
@@ -157,8 +158,9 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
 @frappe.whitelist(methods=['GET'])
 @ai_features.required
 def read(name):
+    document_name(name)
     require_access();doc=frappe.get_doc('Relay Conversation Summary',name)
-    if doc.get('business_name'):frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+    if doc.get('business_name'):business_document(doc.business_doctype,doc.business_name)
     else:readable_contact(doc.relay_contact)
     frappe.get_doc('Relay Channel',doc.channel).check_permission('read')
     rows=existing_sources(doc)
@@ -169,12 +171,57 @@ def read(name):
             'result':frappe.parse_json(doc.result) if doc.status=='Ready' and not stale else None,'reason':doc.reason}
 
 
+def business_previews(doctype, names):
+    """Read summary evidence in one batch for a directory page; never show stale or hidden evidence."""
+    if not names or not ai_features.is_enabled():
+        return {}
+    summaries = frappe.get_all('Relay Conversation Summary', filters={'business_doctype': doctype,
+        'business_name': ['in', names], 'status': 'Ready'}, fields=['business_name', 'channel', 'sources', 'input_hash', 'result'],
+        order_by='modified desc', limit_page_length=300)
+    sources = []
+    for summary in summaries:
+        try:
+            evidence = frappe.parse_json(summary.sources)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(evidence, list) and 0 < len(evidence) <= 200 and all(isinstance(name, str) for name in evidence):
+            sources.append((summary, evidence))
+    if not sources:
+        return {}
+    from relay_core.business_groups import message_scope
+    values = {'doctype': doctype, 'names': names, 'sources': tuple({name for _, evidence in sources for name in evidence})}
+    permitted = message_scope(values, 'summary_')
+    messages = frappe.db.sql(f"""SELECT m.name, m.business_name, m.channel, m.content, m.direction, m.sent_at, m.creation,
+        COALESCE(NULLIF(r.display_name, ''), r.name) AS contact_label
+        FROM `tabRelay Message` m JOIN `tabRelay Contact` r ON r.name=m.relay_contact
+        WHERE m.business_doctype=%(doctype)s AND m.business_name IN %(names)s AND m.name IN %(sources)s
+          AND COALESCE(m.legacy_triage, 0)=0 AND {permitted}
+          AND EXISTS (SELECT 1 FROM `tabDynamic Link` l WHERE l.parent=r.contact AND l.parenttype='Contact'
+              AND l.parentfield='links' AND l.link_doctype=m.business_doctype AND l.link_name=m.business_name)
+        """, values, as_dict=True)
+    by_name = {row.name: row for row in messages}
+    previews = {}
+    for summary, evidence in sources:
+        if summary.business_name in previews or any(name not in by_name for name in evidence):
+            continue
+        rows = [by_name[name] for name in evidence]
+        if any(row.business_name != summary.business_name or row.channel != summary.channel for row in rows):
+            continue
+        content = [{'message': row.name, 'time': str(row.sent_at or row.creation), 'direction': row.direction,
+                    'text': row.content or '', 'contact': row.contact_label} for row in rows]
+        if digest(content) == summary.input_hash:
+            result = frappe.parse_json(summary.result) or {}
+            if isinstance(result, dict) and isinstance(result.get('overview'), str):
+                previews[summary.business_name] = result['overview']
+    return previews
+
+
 @frappe.whitelist(methods=['GET'])
 @ai_features.required
 def latest(contact=None,business_doctype=None,business_name=None):
     require_access()
     if business_name:
-        frappe.get_doc(business_doctype,business_name).check_permission('read')
+        business_document(business_doctype,business_name)
         filters={'business_doctype':business_doctype,'business_name':business_name}
     else:readable_contact(contact);filters={'relay_contact':contact}
     rows=frappe.get_all('Relay Conversation Summary',filters=filters,pluck='name',order_by='name desc',limit_page_length=1)

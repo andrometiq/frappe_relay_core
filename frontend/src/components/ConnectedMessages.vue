@@ -10,12 +10,16 @@ import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
 import ContactDetails from "./ContactDetails.vue";
 import ChatPanel from "./messages/ChatPanel.vue";
-import { channelOffText, plainChatError } from "../services/chatErrors";
+import { canStartChat, channelOffText, noReplyText, plainChatError } from "../services/chatErrors";
 import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
 import SendChannel from "./messages/SendChannel.vue";
 import MessageComposer from "./messages/MessageComposer.vue";
+import ComposerMore from "./messages/ComposerMore.vue";
+import { composerActions } from "../services/composerActions";
+import ContactEndpoints from "./messages/ContactEndpoints.vue";
 import { useMessages } from "../composables/useMessages";
+import { useThreadNotes } from "../composables/useThreadNotes";
 import { sendNumbersKey, useSendNumbers } from "../composables/useSendNumbers";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
@@ -52,9 +56,11 @@ const activeBusiness = computed(() => ({
   businessName: businessName.value || source.value?.business_name || "",
 }));
 // The composer is in "reply" or "note" mode; a note can link one message or answer another note.
+const noteBusy = ref(false);
 const composeMode = ref('reply'), noteMessages = ref([]), noteReply = ref(null);
 const noteContact = computed(() => noteMessages.value[0]?.relay_contact || conversationContact.value);
-const ticketOpen = ref(false), ticketMessage = ref(null), ticketQuoted = ref(false);
+const ticketMessages = ref([]);
+const ticketOpen = ref(false), ticketMessage = ref(null);
 // One side panel at a time: "notes", "search" or "contact".
 const panel = ref('');
 const notesOpen = computed(() => panel.value === 'notes' && !!conversationContact.value);
@@ -62,7 +68,6 @@ const searchOpen = computed(() => panel.value === 'search');
 const noteBusiness = computed(() => noteMessages.value[0]?.business_name
   ? { businessDoctype: noteMessages.value[0].business_doctype, businessName: noteMessages.value[0].business_name }
   : activeBusiness.value);
-const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
 const frappeContact = computed(() => activeBusinessContact.value || source.value?.frappe_contact || contactRecord.value?.contact || '');
 
 provide(messagesKey, state);
@@ -76,11 +81,13 @@ const {
   busy, error, connectionError, notice, channel, history, reply,
   focusMessage, openQuote, send, run,
 } = state;
+const conversationContact = computed(() => source.value?.relay_contact || selected.value || '');
+const threadNotes = useThreadNotes(conversationContact), replyClosed = ref(false);
 
 const startOpen = ref(false), startTemplate = ref(false), startBusiness = ref(false), startContact = ref(""), startChannel = ref(""), startContactLabel = ref(""), summaryOpen = ref(false);
 const linkedContacts = ref([]), contactsBusy = ref(false), contactsError = ref("");
 const activeBusinessContact = ref("");
-let contactRequest = 0;
+let contactRequest = 0, pickSingleContact = false;
 
 const active = computed(() => selected.value || businessName.value);
 // A contact without a name is shown by its phone number.
@@ -115,7 +122,6 @@ const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactR
 const menuActions = computed(() => [
   ...(conversationContact.value ? [{label:'Internal notes',icon:'message-square',onClick:openNotes}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
   {label:'Search conversation',icon:'search',onClick:() => togglePanel('search')},
-  ...(isMobile.value && contactRows.value.length ? [{label:'Create ticket from this chat',icon:'ticket',onClick:() => openTicket()}] : []),
 ]);
 function togglePanel(name) { panel.value = panel.value === name ? '' : name; }
 const provider = computed(() => objectValue(source.value?.provider_context).provider || "");
@@ -126,11 +132,18 @@ const channelLine = computed(() => {
 });
 // Line two of the header names the person: name, phone and email, each once.
 const personName = computed(() => { const name = recordTitle(contactRecord.value, ''); return phoneCaption(name) ? '' : name; });
-const phone = computed(() => provider.value === 'Email' ? '' : phoneCaption(source.value?.sender_endpoint) || phoneCaption(contactRecord.value?.display_name));
-const email = computed(() => provider.value === 'Email' ? source.value?.sender_endpoint || '' : '');
-const who = computed(() => [personName.value, phone.value, email.value].filter(value => value && value !== title.value));
+// The chat's own address comes first; the Contact's saved mobile and email fill in the other.
+const phone = computed(() => {
+  const value = (provider.value === 'Email' ? '' : phoneCaption(source.value?.sender_endpoint)) || phoneCaption(contactRecord.value?.display_name) || contactRecord.value?.phone || '';
+  return value === title.value ? '' : value;
+});
+const email = computed(() => {
+  const value = (provider.value === 'Email' ? source.value?.sender_endpoint : '') || contactRecord.value?.email || '';
+  return value === title.value ? '' : value;
+});
+const whoName = computed(() => personName.value === title.value ? '' : personName.value);
 const channelCaption = computed(() => wroteTo.value ? `Wrote to ${wroteTo.value.label}` : channelLine.value);
-const whoLine = computed(() => [...who.value, channelCaption.value].filter(Boolean).join(' · '));
+const whoLine = computed(() => [whoName.value, phone.value, email.value, channelCaption.value].filter(Boolean).join(' · '));
 function readInfoRoute() { infoOpen.value = location.hash.split("?")[0] === "#/messages" && isContactInfoRoute(location.hash); }
 function openInfo(link = false) { linking.value = link; openRoute(contactInfoRoute(location.hash)); infoOpen.value = true; }
 const contextShown = computed(() => panel.value === 'contact');
@@ -204,6 +217,7 @@ function chooseContact(contact, updateRoute = true) {
 }
 function showAllContacts() {
   if (busy.value) return;
+  pickSingleContact = false;
   state.clearRecipient();
   closeNotes();
   activeBusinessContact.value = "";
@@ -238,11 +252,11 @@ function openContact(contact) {
   return state.open(contact);
 }
 function openTicket(message) {
-  ticketQuoted.value = !!message;
-  ticketMessage.value = message || contactRows.value.at(-1) || null;
+  ticketMessages.value = [message].flat().filter(Boolean);
+  ticketMessage.value = ticketMessages.value[0] || null;
   ticketOpen.value = !!ticketMessage.value;
 }
-function closeTicket() { ticketOpen.value = false; ticketMessage.value = null; ticketQuoted.value = false; }
+function closeTicket() { ticketOpen.value = false; ticketMessage.value = null; ticketMessages.value = []; }
 function closeNotes() { casesOpen.value = false; topicsOpen.value = false; if (panel.value === 'notes') panel.value = ''; setComposeMode('reply'); }
 function openNotes() { if (conversationContact.value) panel.value = 'notes'; }
 function setComposeMode(mode) {
@@ -269,6 +283,8 @@ const channels = ref(null);
 coreApi('api.channel_options').then(result => { channels.value = result.items; }, () => {});
 const channelOff = computed(() => !!source.value && !!channels.value && !channels.value.some(row => row.name === source.value.channel && row.enabled));
 const replyOff = computed(() => channelOff.value && !numbers.active.value ? channelOffText(provider.value) : '');
+const replyContact = computed(() => activeContact.value || (linkedContacts.value.length === 1 ? linkedContacts.value[0] : null));
+const noReplyCopy = computed(() => noReplyText({ contact: replyContact.value, choosing: chooseRecipient.value && !activeContact.value }));
 watch(source, value => {
   if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
 });
@@ -301,10 +317,18 @@ watch([businessType, businessName], () => {
   closeNotes(); closeTicket(); panel.value = ''; linking.value = false;
   summaryOpen.value = false;
   activeBusinessContact.value = "";
+  pickSingleContact = true;
   lastVisible.value = "";
   visibleMessages.value = [];
   loadBusinessContacts();
 }, { immediate: true });
+// A record with one contact opens on that contact's chat, so the composer shows without a click.
+watch([linkedContacts, messagesByContact, busy], () => {
+  const only = linkedContacts.value.length === 1 ? linkedContacts.value[0].value : "";
+  if (!pickSingleContact || busy.value || !businessName.value || !messagesByContact.value.has(only)) return;
+  pickSingleContact = false;
+  if (!source.value && [only, ""].includes(activeBusinessContact.value)) chooseContact(only);
+}, { flush: 'post' });
 function readContactRoute() {
   if (location.hash.split('?')[0] !== '#/messages' || busy.value) return;
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
@@ -345,7 +369,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 
     <aside class="contact-directory">
       <InboxDirectory :selected="selected" :business-name="businessName" :business-type="businessType" :busy="busy"
-        @business="openBusiness" @select="openContact" @start="openStart()" />
+        @business="openBusiness" @select="openContact" @start="openStart()" @navigate="state.clearSelection(false)" />
     </aside>
 
     <Teleport v-if="isMobile && !active" to="#relay-header-actions" defer>
@@ -359,9 +383,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
           <h2><button v-if="frappeContact || conversationContact" type="button" class="conversation-title-button" aria-label="Open contact info" @click="toggleInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
-          <p v-if="isMobile && whoLine" class="conversation-channel-line" :title="whoLine">{{ whoLine }}</p>
+          <p v-if="isMobile && whoLine" class="conversation-channel-line conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></p>
           <div class="conversation-meta">
-            <span v-if="!isMobile && whoLine" class="conversation-channel conversation-who" :title="whoLine">{{ whoLine }}</span>
+            <span v-if="!isMobile && whoLine" class="conversation-channel conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></span>
             <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
             <span v-if="groupLabel">{{ groupLabel }}</span>
             <span v-if="contactCount">{{ contactCount }}</span>
@@ -375,7 +399,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><Avatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
-            <Button class="conversation-ticket" icon="ticket" label="Create ticket from this chat" :title="contactRows.length ? 'Create a ticket linked to the last message' : 'No messages in this chat yet'" :disabled="busy || !contactRows.length" @click="openTicket()" />
             <Button icon="info" aria-label="Contact info" title="Contact info" :aria-pressed="isMobile ? infoOpen : contextShown" @click="toggleInfo" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
@@ -395,8 +418,8 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <button v-for="contact in linkedContacts" :key="contact.value" type="button"
           :aria-pressed="activeBusinessContact === contact.value" :class="{ active: activeBusinessContact === contact.value }"
           :disabled="busy" @click="chooseContact(contact.value)">
-          <span class="contact-chip-avatar">{{ contact.label.slice(0, 1).toUpperCase() }}</span>
-          <span class="contact-chip-copy"><strong>{{ recordTitle(contact, 'Contact') }}</strong><small>{{ contact.description || "Review channel identities" }}</small></span>
+          <Avatar class="contact-chip-avatar" size="sm" :label="contact.label" aria-hidden="true" />
+          <span class="contact-chip-copy"><strong>{{ recordTitle(contact, 'Contact') }}</strong><small v-if="contact.phone || contact.email"><ContactEndpoints :phone="contact.phone" :email="contact.email" :size="11" /></small><small v-else>Review channel identities</small></span>
         </button>
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
       </nav>
@@ -407,7 +430,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <ErrorMessage class="px-4" :message="plainChatError(loadFailed ? '' : error) || contactsError" />
       <p v-if="connectionError" role="status" class="relay-connection-state">{{ connectionError }}</p>
       <p v-if="notice" role="status" class="feedback-panel">{{ notice }}</p>
-      <CreateTicketDialog v-if="ticketMessage" :key="ticketMessage.name" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :quoted="ticketQuoted" :contact-name="title" @created="showToast('Ticket created', $event.href)" />
+      <CreateTicketDialog v-if="ticketMessage" :key="ticketMessage.name" v-model="ticketOpen" :contact="ticketMessage.relay_contact || conversationContact" :message="ticketMessage" :messages="ticketMessages" :contact-name="title" @created="showToast('Ticket created', $event.href)" />
 
       <div class="conversation-body">
       <WorkspaceState v-if="loadFailed && !visibleRows.length" class="conversation-load-failed" title="Could not load messages" :description="loadFailedReason" icon="alert-circle">
@@ -415,7 +438,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </WorkspaceState>
       <MessageThread v-else :key="active + ':' + channel + ':' + activeBusinessContact" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :paging="paging" :paging-error="pagingError" :error="state.error.value" :emoji="emoji"
-        :selected="active" :contact-name="activeContact?.label || title" :can-comment="true" @note="startNote" @ticket="openTicket"
+        :selected="active" :provider="provider" :contact-name="activeContact?.label || title" :can-comment="true" :notes="threadNotes.items.value" :reply-closed="replyClosed" @note="startNote" @ticket="openTicket"
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="loadOlder" @retry-page="pagingError = ''" @reply="replyTo"
         @quote="openQuote" @reconcile="state.checkPending" @retry="state.retryPending" @discard="state.deletePending" @send="send" @toast="showToast" />
@@ -427,7 +450,8 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <div v-if="!linking" class="contact-panel-summary">
           <Avatar :label="title" size="lg" aria-hidden="true" />
           <strong>{{ personName || title }}</strong>
-          <span v-for="line in [phone, email, channelCaption].filter(Boolean)" :key="line">{{ line }}</span>
+          <span v-if="phone || email"><ContactEndpoints :phone="phone" :email="email" /></span>
+          <span v-if="channelCaption">{{ channelCaption }}</span>
         </div>
         <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="panel = ''" />
         <p v-else class="contact-panel-empty">This chat has no linked Contact yet.</p>
@@ -436,32 +460,40 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </div>
 
       <div v-if="state.pendingCursor.value" ref="moreSentinel" class="h-px" aria-hidden="true" />
-      <Button v-if="newer || state.newArrivals.value" class="jump-latest" icon-left="arrow-down"
-        :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
+      <Button v-if="newer || state.newArrivals.value || state.viewPosition.value?.atBottom === false" class="jump-latest" icon-left="arrow-down"
+        :label="state.newArrivals.value ? `${state.newArrivals.value} new message${state.newArrivals.value === 1 ? '' : 's'}` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
-      <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" @mode="setComposeMode">
-        <template #channel><SendChannel /></template>
+      <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">
+        <template #channel><SendChannel :disabled="!!state.sending.value" /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
-        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+          @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy || !!state.sending.value || state.quoting.value" @click="clearRecipient">Change</button></div></template>
       </EmailComposer>
-      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" @mode="setComposeMode" @template="startInChat(true)">
-        <template #channel><SendChannel /></template>
+      <MessageComposer v-else-if="source && (replyOff || channelEnabled(provider))" :key="source.channel + source.sender_endpoint" :off-text="replyOff" :recipient="chooseRecipient ? recipientLabel : ''" :contact-name="activeContact?.label || title" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode" @template="startInChat(true)" @closed="replyClosed = $event">
+        <template #channel><SendChannel :disabled="!!state.sending.value" /></template>
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
-          @added="showToast('Note added')" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
-        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy" @click="clearRecipient">Change</button></div></template>
+          @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
+        <template v-if="chooseRecipient" #recipient><div class="business-recipient-bar"><span>To</span><strong>{{ recipientLabel }}</strong><button type="button" :disabled="busy || !!state.sending.value || state.quoting.value" @click="clearRecipient">Change</button></div></template>
       </MessageComposer>
-      <div v-else-if="active && !loadFailed" class="business-compose-start">
-        <Button variant="solid" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'"
-          :disabled="busy || contactsBusy" @click="startInChat()" />
+      <div v-else-if="active && !loadFailed" class="composer-dock" :class="{ 'is-note': composeMode === 'note' }">
+        <template v-if="composeMode === 'note' && noteContact">
+          <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span><Button label="Back to reply" variant="ghost" :disabled="noteBusy" @click="setComposeMode('reply')" /></div>
+          <NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
+            @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" />
+        </template>
+        <div v-else class="composer-writing composer-closed composer-start">
+          <ComposerMore v-if="noteContact" :actions="composerActions({ off: true, busy })" @action="setComposeMode('note')"><template #details>{{ noReplyCopy }}</template></ComposerMore>
+          <p class="composer-closed-copy" role="status">{{ noReplyCopy }}</p>
+          <Button v-if="canStartChat(replyContact)" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'" :disabled="busy || contactsBusy" @click="startInChat()" />
+        </div>
       </div>
 
       <ConversationSummary v-if="summaryOpen && businessName && capabilities.ai" :business-doctype="businessType" :business-name="businessName"
         @close="summaryOpen = false" @open="focusMessage" />
     </div>
     <div v-else class="connected-thread whatsapp-empty-pane" aria-label="No open conversation">
-      <WorkspaceState title="Choose a conversation" description="Select a customer on the left to view messages and reply." icon="message-circle" />
+      <WorkspaceState title="Choose a conversation" description="Select a business record on the left to view messages and reply." icon="message-circle" />
     </div>
     </Transition>
 
@@ -488,4 +520,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 .conversation-compose-context .business-recipient-bar { flex:1; flex-wrap:nowrap; min-width:0; padding:0; border:0; }
 .business-recipient-bar strong { flex:1; }
 .business-recipient-bar button { flex-shrink:0; min-height:36px; }
+.conversation-who { display:flex; align-items:center; gap:8px; min-width:0; }
+.conversation-who > :deep(*) { flex:none; margin:0; }
+.conversation-who > :deep(*:last-child) { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 </style>

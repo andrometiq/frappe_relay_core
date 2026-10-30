@@ -1,5 +1,8 @@
 # Relay product UI/UX redesign
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 Status: design for review. No implementation is included in this document.
 
 This specification covers the complete focused WhatsApp release across Relay Core and Relay Hub. The detailed inbox behavior is defined in [business-inbox-ui-ux.md](business-inbox-ui-ux.md).

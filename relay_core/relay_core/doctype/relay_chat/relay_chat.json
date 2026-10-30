@@ -1,0 +1,117 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Chat",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-CHAT-.##########",
+  "naming_rule": "Expression (old style)",
+  "title_field": "title",
+  "sort_field": "last_message_at",
+  "sort_order": "DESC",
+  "fields": [
+    {
+      "fieldname": "business_doctype",
+      "label": "Business DocType",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "permlevel": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_contact",
+      "label": "Last contact",
+      "fieldtype": "Link",
+      "options": "Relay Contact",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_message",
+      "label": "Last message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_message_preview",
+      "label": "Last message preview",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_message_at",
+      "label": "Last message at",
+      "fieldtype": "Datetime",
+      "search_index": 1,
+      "in_list_view": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_channel",
+      "label": "Last channel",
+      "fieldtype": "Link",
+      "options": "Relay Channel",
+      "read_only": 1
+    },
+    {
+      "fieldname": "unread_count",
+      "label": "Unread messages",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "is_unread",
+      "label": "Unread",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "business_doctype",
+    "business_name",
+    "title",
+    "last_contact",
+    "last_message",
+    "last_message_preview",
+    "last_message_at",
+    "last_channel",
+    "unread_count",
+    "is_unread"
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication User",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Team User",
+      "read": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "export": 1
+    }
+  ]
+}

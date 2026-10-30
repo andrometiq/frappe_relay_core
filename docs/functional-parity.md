@@ -1,5 +1,8 @@
 # Functional parity with frappe_whatsapp_core
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 User instruction, 24 September 2026: match the old app's functionality, not its UI.
 Source reference: installed frappe_whatsapp_core/core_ui/src. Implementations and
 synthetic tests are not installed-site acceptance. Do not mark a workflow complete

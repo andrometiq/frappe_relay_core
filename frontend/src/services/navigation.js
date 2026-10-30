@@ -13,7 +13,7 @@ const RAIL = [
   { name: 'Tickets', icon: 'ticket', pages: ['Tickets'] },
   { name: 'Contacts', icon: 'users', pages: ['Contacts'] },
   { name: 'WhatsApp', icon: 'message-circle', pages: ['WhatsApp'] },
-  { name: 'Automation', icon: 'zap', pages: ['Business events', 'Flows', 'Skills'] },
+  { name: 'Automation', icon: 'zap', pages: ['Channel automation', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Events'] },
   { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams', 'Activity'], bottom: true },
 ]
 

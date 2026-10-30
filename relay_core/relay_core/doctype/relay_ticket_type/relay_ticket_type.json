@@ -9,7 +9,6 @@
   "field_order": [
     "label",
     "colour",
-    "enabled",
     "sort_order"
   ],
   "fields": [
@@ -27,13 +26,6 @@
       "fieldtype": "Select",
       "options": "gray\nblue\ngreen\namber\nred",
       "default": "gray",
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "enabled",
-      "label": "Enabled",
-      "fieldtype": "Check",
-      "default": "1",
       "in_list_view": 1
     },
     {
@@ -69,5 +61,5 @@
   ],
   "sort_field": "sort_order",
   "sort_order": "ASC",
-  "modified": "2026-10-28 15:00:00.000000"
+  "modified": "2026-10-28 18:00:00.000000"
 }

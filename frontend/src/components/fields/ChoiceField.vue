@@ -1,4 +1,5 @@
 <script setup>
+import { FeatherIcon } from '@relay/ui'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { recordTitle } from '../../services/recordTitle'
 import { computed, ref, watch, onBeforeUnmount, useId, nextTick } from 'vue'
@@ -15,10 +16,14 @@ function position() {
   place.value = {left: box.left + 'px', width: box.width + 'px', maxHeight: Math.min(260, (up ? box.top : below) - 12) + 'px',
     ...(up ? {bottom: innerHeight - box.top + 4 + 'px'} : {top: box.bottom + 4 + 'px'})}
 }
+function onScroll(event) {
+  if (results.value?.contains(event.target)) return
+  close()
+}
 watch(open, value => {
   if (typeof window === 'undefined') return
   const method = value ? 'addEventListener' : 'removeEventListener'
-  window[method]('scroll', position, true); window[method]('resize', position)
+  window[method]('scroll', onScroll, true); window[method]('resize', position)
   if (value) nextTick(position)
 })
 const inside = (event, target) => event.currentTarget.contains(target) || results.value?.contains(target)
@@ -45,7 +50,7 @@ async function search() {
     const keep = new Set([...selected.value,...options.value.map(o=>o.value)])
     for (const key of labels.keys()) if (!keep.has(key)) labels.delete(key)
     active.value=options.value.length ? 0 : -1
-  } catch(e) {if(current===generation && e.name!=='AbortError') error.value=e.message || 'Search failed. Try again.'}
+  } catch(e) {if(current===generation && e.name!=='AbortError') error.value=props.field.errorMessage || e.message || 'Search failed. Try again.'}
   finally {if(current===generation) loading.value=false}
 }
 function schedule(event) {if(composing || event?.isComposing)return;open.value=true;cancel();options.value=[];active.value=-1;timer=setTimeout(search,300)}
@@ -80,15 +85,19 @@ async function loadMore() {
     const known = new Set(options.value.map(row => row.value))
     options.value = [...options.value, ...rows.map(normalize).filter(row => !known.has(row.value))]
     for (const row of options.value) labels.set(row.value, row.label)
-  } catch(e) { if (current === generation && e.name !== 'AbortError') error.value = e.message }
+  } catch(e) { if (current === generation && e.name !== 'AbortError') error.value = props.field.errorMessage || e.message }
   finally { if (current === generation) loading.value = false }
 }
 const moreSentinel = useLoadMore({ loading: () => loading.value || props.field.loading, hasMore: () => open.value && props.field.hasMore, error: () => error.value || props.field.error, load: loadMore })
-onBeforeUnmount(() => { cancel(); open.value = false })
+onBeforeUnmount(() => {
+  cancel()
+  window.removeEventListener('scroll', onScroll, true)
+  window.removeEventListener('resize', position)
+})
 </script>
 <template>
   <div class="remote-choice" @focusout="event => {if(!inside(event, event.relatedTarget))close()}">
-    <label :for="id">{{field.label}}<span v-if="field.required"> *</span></label>
+    <label v-if="field.label" :for="id">{{field.label}}<span v-if="field.required"> *</span></label>
     <div v-if="selected.length" class="choice-selected">
       <span v-for="value in selected" :key="value" class="choice-chip">{{display(value)}}<button type="button" :aria-label="'Remove '+display(value)" :disabled="field.readOnly" @click="remove(value)">×</button></span>
     </div>
@@ -98,7 +107,7 @@ onBeforeUnmount(() => { cancel(); open.value = false })
       <p v-if="loading || field.loading" role="status">Searching…</p>
       <p v-if="error" role="alert">{{error}}</p>
       <ul :id="id+'-options'" role="listbox" :aria-multiselectable="multiple || undefined">
-        <li v-for="(option,index) in options" :id="id+'-'+index" :key="option.value" role="option" :aria-selected="selected.includes(option.value)" :class="{active:index===active}" @mousedown.prevent="choose(option)">{{option.label}}<small v-if="option.description && option.description!==option.label" class="block text-xs text-ink-gray-5">{{option.description}}</small><span v-if="selected.includes(option.value)"> ✓</span></li>
+        <li v-for="(option,index) in options" :id="id+'-'+index" :key="option.value" role="option" :aria-selected="selected.includes(option.value)" :class="{active:index===active}" @mousedown.prevent="choose(option)"><FeatherIcon v-if="option.icon" :name="option.icon" :size="16" aria-hidden="true" class="choice-icon" />{{option.label}}<small v-if="option.description && option.description!==option.label" class="block text-xs text-ink-gray-5">{{option.description}}</small><span v-if="selected.includes(option.value)"> ✓</span></li>
       </ul>
       <p v-if="!loading&&!field.loading&&!error&&!options.length">No results found.</p>
       <div v-if="field.hasMore" ref="moreSentinel" class="h-px" aria-hidden="true" />
@@ -118,8 +127,10 @@ onBeforeUnmount(() => { cancel(); open.value = false })
 .choice-selected{display:flex;flex-wrap:wrap;gap:5px}
 .choice-chip{display:flex;gap:6px;align-items:center;max-width:100%;overflow-wrap:anywhere;@apply bg-surface-gray-2 text-ink-gray-8 rounded px-2 py-0.5 text-sm}
 .choice-chip button{@apply rounded text-ink-gray-5 hover:bg-surface-gray-3 hover:text-ink-gray-9 px-1 disabled:opacity-50}
+.choice-icon{display:inline-block;vertical-align:middle;margin-right:6px}
 .choice-hint{@apply text-xs text-ink-gray-5}
 .choice-results [role=alert]{@apply text-ink-red-2}
 @keyframes choice-appear{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:768px){.choice-results li{min-height:44px;min-width:44px;padding:12px 8px}.choice-chip button{min-height:44px;min-width:44px}}
 @media(prefers-reduced-motion:reduce){.choice-results{animation:none}}
 </style>

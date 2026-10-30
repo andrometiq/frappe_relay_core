@@ -63,17 +63,29 @@ class MarkChatTests(unittest.TestCase):
     def call(self, read):
         site = Mock()
         site.throw.side_effect = ValueError
+        site.db.get_value.return_value = 1
         with patch.object(message_reads, 'frappe', site), patch.object(message_reads, 'require_access'), \
                 patch.object(message_reads, 'readable_contact') as readable, \
                 patch.object(state, 'fresh_write', side_effect=lambda write: write()), \
-                patch.object(message_reads, 'set_chat_read') as write, patch('relay_core.inbox.unread_count', return_value=1):
-            return message_reads.mark_chat('C1', read), readable, write
+                patch.object(message_reads, 'set_chat_read') as write, \
+                patch('relay_core.relay_chats.mark_read') as read_chat, patch('relay_core.relay_chats.mark_unread') as unread_chat, \
+                patch('relay_core.business_access.primary', return_value=None):
+            self.chats = read_chat, unread_chat
+            return message_reads.mark_chat('C1', read), readable, write, site
 
-    def test_the_contact_is_checked_and_the_new_unread_count_returned(self):
-        result, readable, write = self.call('0')
+    def test_the_contact_is_checked_and_the_shared_unread_count_returned(self):
+        result, readable, write, site = self.call('0')
         readable.assert_called_once_with('C1')
         write.assert_called_once_with('C1', False)
+        self.chats[1].assert_called_once_with(('Relay Contact', 'C1'))
+        self.chats[0].assert_not_called()
+        self.assertEqual(site.db.get_value.call_args.args[:2], ('Relay Chat', {'business_doctype': 'Relay Contact', 'business_name': 'C1'}))
         self.assertEqual(result, {'contact': 'C1', 'unread': 1})
+
+    def test_read_clears_the_chat_row(self):
+        self.call('1')
+        self.chats[0].assert_called_once_with(('Relay Contact', 'C1'))
+        self.chats[1].assert_not_called()
 
     def test_a_bad_flag_is_rejected_before_any_write(self):
         with self.assertRaises(ValueError):

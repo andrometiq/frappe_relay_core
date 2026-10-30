@@ -1,0 +1,120 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Memory",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-MEM-.##########",
+  "naming_rule": "Expression (old style)",
+  "in_create": 1,
+  "read_only": 1,
+  "description": "AI memory of one address of one business record. The nightly job folds messages into Day rows and rolls them into Week, Month and Year rows.",
+  "field_order": [
+    "business_doctype",
+    "business_name",
+    "channel",
+    "address",
+    "level",
+    "period_start",
+    "period_end",
+    "summary",
+    "last_message",
+    "message_count",
+    "status",
+    "error"
+  ],
+  "fields": [
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "channel",
+      "label": "Channel",
+      "fieldtype": "Select",
+      "options": "WhatsApp\nTelegram\nEmail",
+      "read_only": 1
+    },
+    {
+      "fieldname": "address",
+      "label": "Address",
+      "fieldtype": "Data",
+      "length": 200,
+      "reqd": 1,
+      "read_only": 1,
+      "description": "The mobile number, Telegram ID or email address of the contact endpoint."
+    },
+    {
+      "fieldname": "level",
+      "label": "Level",
+      "fieldtype": "Select",
+      "options": "Year\nMonth\nWeek\nDay",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "period_start",
+      "label": "Period start",
+      "fieldtype": "Date",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "period_end",
+      "label": "Period end",
+      "fieldtype": "Date",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "summary",
+      "label": "Summary",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_message",
+      "label": "Last folded message",
+      "fieldtype": "Link",
+      "options": "Relay Message",
+      "read_only": 1
+    },
+    {
+      "fieldname": "message_count",
+      "label": "Message count",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Ready\nFailed",
+      "read_only": 1
+    },
+    {
+      "fieldname": "error",
+      "label": "Error",
+      "fieldtype": "Small Text",
+      "read_only": 1,
+      "description": "Why the last model call failed. The summary keeps its last good value."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1
+    }
+  ]
+}

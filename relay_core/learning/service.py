@@ -1,6 +1,7 @@
 """Reviewed, versioned instructions; evaluations never execute model actions."""
 import hashlib
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical,validate_decision
@@ -45,6 +46,7 @@ def directory(after=None):
 @frappe.whitelist(methods=['GET'])
 @ai_features.required
 def read(name):
+    document_name(name)
     require_access(configure=True)
     doc=frappe.get_doc('Relay Learned Procedure',name)
     evaluations=frappe.get_all('Relay Procedure Evaluation',filters={'procedure':name},fields=['name','status','results','reason','creation'],order_by='name desc',limit_page_length=5)
@@ -53,6 +55,11 @@ def read(name):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def save(title,policy,instructions,examples,source_message=None,name=None):
+    if source_message is not None and source_message != "":
+        document_name(source_message)
+    if name is not None and name != "":
+        document_name(name)
+    document_name(policy)
     require_access(configure=True)
     if not isinstance(title,str) or not 1<=len(title.strip())<=140 or not isinstance(instructions,str) or not 1<=len(instructions.strip())<=4000:raise ValueError('Provide a title and instructions up to 4000 characters')
     if name:frappe.db.get_value('Relay Learned Procedure',name,'name',for_update=True)
@@ -71,6 +78,8 @@ def save(title,policy,instructions,examples,source_message=None,name=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def suggest(policy,source_message):
+    document_name(policy)
+    document_name(source_message)
     require_access(configure=True)
     target=frappe.get_doc('Relay Automation Policy',policy);original=frappe.session.user
     try:
@@ -85,6 +94,7 @@ def suggest(policy,source_message):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def evaluate(name):
+    document_name(name)
     require_access(configure=True)
     doc=frappe.get_doc('Relay Learned Procedure',name);policy=frappe.get_doc('Relay Automation Policy',doc.policy)
     h,p=hashes(doc,policy)
@@ -120,6 +130,8 @@ def process(name):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def publish(name,evaluation,review_note):
+    document_name(evaluation)
+    document_name(name)
     require_access(configure=True)
     if not isinstance(review_note,str) or not 10<=len(review_note.strip())<=2000:raise ValueError('Record your review in 10–2000 characters')
     with frappe.cache.lock('relay-procedure-publish-'+name,timeout=15,blocking_timeout=3):

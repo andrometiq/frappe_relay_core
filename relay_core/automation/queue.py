@@ -73,8 +73,14 @@ class Drain:
                 while True:
                     try:
                         pipe.watch(key)
-                        if pipe.get(key):
-                            return
+                        signal = pipe.get(key)
+                        if signal:
+                            token = signal.decode() if isinstance(signal, bytes) else signal
+                            job = queue.fetch_job(create_job_id(f'{self.job}:{token}'))
+                            if job and job.get_status(refresh=False) in ('queued', 'started'):
+                                return
+                            # Recovery must replace orphaned reservations without
+                            # waiting for their TTL. WATCH still elects one wake.
                         token = uuid4().hex
                         pipe.multi()
                         pipe.set(key, token, ex=WAKE_TTL)

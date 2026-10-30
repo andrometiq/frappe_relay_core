@@ -129,7 +129,7 @@ def bindings(channel, provider, value):
         start += len(rows)
 
 
-def contacts_by_phone(number=None):
+def contacts_by_phone(number=None, *, region=None):
     """Normalized number -> its Frappe Contacts: ones with a Relay Contact first, then ones linked to a Customer, then oldest.
     With a number, only Contacts whose stored phones end in its last ten digits are read."""
     import frappe
@@ -144,7 +144,7 @@ def contacts_by_phone(number=None):
     result = {}
     for row in rows:
         for value in (row.phone, row.mobile_no, row.contact_phone):
-            found = phone_number(value) if value else None
+            found = phone_number(value, region) if value else None
             if found and row.name not in result.setdefault(found, []):
                 result[found].append(row.name)
     return result

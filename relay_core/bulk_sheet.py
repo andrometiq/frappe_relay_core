@@ -1,7 +1,9 @@
 """Recipient rows from a sheet or JSON, WhatsApp template parameters and text or media messages for bulk campaigns."""
 import csv
 import re
+from decimal import Decimal, InvalidOperation
 from urllib.parse import unquote, urlsplit
+import phonenumbers
 from relay_core.channels import channel
 from relay_core.identity import phone_number
 
@@ -13,6 +15,29 @@ MAX_ROWS = 100000
 MAX_VALUE = 1024
 MESSAGE_MEDIA = {'photo': 'image', 'video': 'video', 'document': 'document'}  # Registry kind -> Meta media type.
 PLACEHOLDER = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+
+
+def sheet_phone(value, region):
+    """Mobile E.164 digits, accepting Excel's exact integer text representations."""
+    text = str(value or '').strip()
+    if re.fullmatch(r'[0-9]+\.0+', text):
+        text = text.split('.')[0]
+    elif re.fullmatch(r'[+-]?[0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+', text):
+        try:
+            number = Decimal(text)
+        except InvalidOperation:
+            return None
+        if (len(number.as_tuple().digits) > 15 or not 0 < number < 10**15
+                or number != number.to_integral_value()):
+            return None
+        text = str(int(number))
+    destination = phone_number(text, region)
+    if destination:
+        number = phonenumbers.parse('+' + destination, None)
+        if (phonenumbers.is_valid_number(number) and phonenumbers.number_type(number) in
+                (phonenumbers.PhoneNumberType.MOBILE, phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE)):
+            return destination
+    return None
 
 
 def template_fields(template):
@@ -28,7 +53,7 @@ def template_fields(template):
         if kind == 'HEADER' and header not in (*MEDIA_FORMATS, 'TEXT'):
             raise ValueError(f'Campaigns cannot send templates with a {header.lower()} header')
         if kind == 'HEADER' and header in MEDIA_FORMATS:
-            fields.append({'key': 'header_media', 'label': 'Header ' + header.lower() + ' URL',
+            fields.append({'key': 'header_media', 'label': 'Header ' + header.lower() + ' attachment',
                            'component': 'header', 'media': header.lower()})
         elif kind in ('HEADER', 'BODY'):
             for variable in variables(text, named):
@@ -63,7 +88,7 @@ def variables(text, named):
     return found if named else sorted(found, key=int)
 
 
-def build_components(fields, values):
+def build_components(fields, values, header_media=None):
     grouped, buttons = {}, []
     for field in fields:
         value = values[field['key']]
@@ -75,7 +100,9 @@ def build_components(fields, values):
             continue
         target = grouped.setdefault(field['component'], {'type': field['component'], 'parameters': []})
         if field.get('media'):
-            target['parameters'].append({'type': field['media'], field['media']: {'link': value}})
+            if isinstance(value, dict) and not header_media:
+                raise ValueError('Upload the header attachment before sending')
+            target['parameters'].append({'type': field['media'], field['media']: header_media or {'link': value}})
         else:
             parameter = {'type': 'text', 'text': value}
             if field.get('name'):
@@ -145,11 +172,11 @@ def columns(path, sample=5):
     return header, rows
 
 
-def suggest(header, fields):
+def suggest(header, fields, *, first_phone=False):
     """Phone column by name; named values by their column name; positional template values take the
     remaining columns left to right."""
     by_name = {column.lower(): column for column in header}
-    mapping = {'phone': next((by_name[c] for c in PHONE_COLUMNS if c in by_name), ''), 'fields': {}, 'fixed': {}}
+    mapping = {'phone': header[0] if first_phone and header else next((by_name[c] for c in PHONE_COLUMNS if c in by_name), ''), 'fields': {}, 'fixed': {}}
     positional = [field for field in fields if is_positional(field)]
     for field in fields:
         if field in positional:
@@ -169,8 +196,10 @@ def is_positional(field):
 
 
 def check_mapping(mapping, header, fields):
-    if not isinstance(mapping, dict) or set(mapping) - {'phone', 'fields', 'fixed', 'extra'}:
+    if not isinstance(mapping, dict) or set(mapping) - {'phone', 'fields', 'fixed', 'extra', 'header_attachment'}:
         raise ValueError('Invalid column mapping')
+    from relay_core.campaign_media import check_attachment
+    attachment = check_attachment(mapping.get('header_attachment'), fields)
     extra = mapping.get('extra') or []
     if not isinstance(extra, list) or len(extra) > 10 or any(column not in header for column in extra):
         raise ValueError('Choose up to 10 extra columns from the file')
@@ -185,12 +214,17 @@ def check_mapping(mapping, header, fields):
     for key, column in columns_used.items():
         if column not in header:
             raise ValueError(f'Column {column} is not in the file')
+    if attachment and ('header_media' in columns_used or 'header_media' in fixed):
+        raise ValueError('Choose one header attachment source')
     for field in fields:
+        if field['key'] == 'header_media' and attachment:
+            continue
         if field['key'] not in columns_used and not str(fixed.get(field['key']) or '').strip():
             raise ValueError(f"Choose a column or fixed value for {field['label']}")
         if field['key'] in fixed and field.get('media') and not (field['component'] == 'media' and is_site_file(fixed[field['key']])):
             media_url(fixed[field['key']])
     return {'phone': mapping['phone'], 'fields': dict(columns_used), 'extra': list(dict.fromkeys(extra)),
+            **({'header_attachment': attachment} if attachment else {}),
             'fixed': {key: str(value).strip() for key, value in fixed.items() if key not in columns_used}}
 
 
@@ -206,13 +240,18 @@ def is_site_file(value):
     return isinstance(value, str) and value.startswith(('/files/', '/private/files/'))
 
 
-def prepare_row(row, mapping, fields, region):
+def prepare_row(row, mapping, fields, region, header_file=None):
     """Return (destination, values, problem). Problems are user-facing reasons."""
-    destination = phone_number(row.get(mapping['phone']), region)
+    destination = sheet_phone(row.get(mapping['phone']), region)
     if not destination:
         return None, None, 'Invalid phone number'
     values = {}
     for field in fields:
+        if field['key'] == 'header_media' and mapping.get('header_attachment'):
+            if not header_file:
+                return destination, None, 'Missing header attachment'
+            values[field['key']] = header_file
+            continue
         column = mapping['fields'].get(field['key'])
         value = row.get(column, '') if column else mapping['fixed'].get(field['key'], '')
         if not value:

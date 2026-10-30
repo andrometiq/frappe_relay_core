@@ -22,7 +22,7 @@ import { folderLabel } from '../../services/chatFolders'
 import { hasManyNumbers, numberName } from '../../services/whatsappNumbers'
 import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../../services/inboxFilters'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
-const emit = defineEmits(['select', 'business', 'start'])
+const emit = defineEmits(['select', 'business', 'start', 'navigate'])
 const isMobile = useMobileLayout()
 const capabilities = inject('relayCapabilities')
 // Only switched-on channels get a chip, and only when there is more than one to choose.
@@ -40,6 +40,7 @@ const activeFilters = computed(() => filterChips(filters.value, options.value))
 // Each readable business record is one row; chats that no readable record covers stay contact rows.
 const { counts } = useQueueCounts(medium, computed(() => ({ ...params.value, ...INBOX_ROWS })))
 const mode = ref(filters.value.tab), folder = ref(''), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
+const groupingView = computed(() => ['all', 'business'].includes(mode.value) && params.value.business_type !== 'none')
 const filtersOpen = ref(false), filterButton = ref(null), mobileFilterButton = ref(null)
 watch(mode, value => { if (value !== 'business') filters.value = { ...filters.value, tab: value } })
 watch(filters, value => saveFilters(storage, user, value))
@@ -51,7 +52,7 @@ function directoryPage(cursor) {
 }
 async function load(cursor = {}) {
   clearTimeout(searchTimer)
-  if (mode.value === 'business') return
+  if (groupingView.value) return
   const ticket = ++generation; loading.value = true; error.value = ''
   try {
     const page = await directoryPage(cursor)
@@ -109,8 +110,8 @@ async function refreshChanged() {
     rows.value = mergeChangedRows(rows.value, page.items)
   } catch { if (ticket === generation) return load() }
 }
-useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'permissions', 'contacts'],
-  ({ kinds } = {}) => mode.value !== 'business' && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
+useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'chats', 'permissions', 'contacts'],
+  ({ kinds } = {}) => !groupingView.value && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
 </script>
 <template>
   <header class="inbox-list-head">
@@ -118,10 +119,10 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
     <span ref="filterButton" class="inbox-filter-trigger"><Button icon="filter" variant="ghost" :aria-pressed="activeFilters.length > 0 || mode === 'business'" :aria-expanded="filtersOpen" aria-label="Filter chats" title="Filter chats" @click="filtersOpen = !filtersOpen" /><span v-if="activeFilters.length" class="inbox-filter-count" aria-hidden="true">{{ activeFilters.length }}</span></span>
     <Button variant="solid" icon="plus" aria-label="New chat" title="New chat" @click="emit('start')" />
   </header>
-  <form v-if="mode !== 'business'" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
-    <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search name or number" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
+  <form v-if="!groupingView" class="directory-search inbox-filters" role="search" @submit.prevent="load()">
+    <TextInput v-model="query" type="search" aria-label="Search conversations" placeholder="Search business, name or number" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
   </form>
-  <div v-if="mode !== 'business' && manyMediums" class="inbox-channel-chips" role="group" aria-label="Channel">
+  <div v-if="manyMediums" class="inbox-channel-chips" role="group" aria-label="Channel">
     <button v-for="chip in chips" :key="chip.value" type="button" class="inbox-channel-chip" :aria-pressed="medium === chip.value" @click="medium = chip.value">
       <FeatherIcon v-if="chip.value === 'WhatsApp'" name="message-circle" :size="14" />{{ chip.label }}</button>
   </div>
@@ -130,12 +131,12 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
       :aria-label="countLabel(counts[value]) ? `${label}, ${counts[value]} chats` : label" @click="mode = value">{{ label }}<span v-if="countLabel(counts[value])" class="queue-count" aria-hidden="true">{{ countLabel(counts[value]) }}</span></button>
     <span v-if="isMobile" ref="mobileFilterButton" class="inbox-filter-trigger"><Button icon="filter" :aria-pressed="activeFilters.length > 0 || mode === 'business'" :aria-expanded="filtersOpen" aria-label="Filter chats" title="Filter chats" @click="filtersOpen = !filtersOpen" /><span v-if="activeFilters.length" class="inbox-filter-count" aria-hidden="true">{{ activeFilters.length }}</span></span>
   </nav>
-  <div v-if="activeFilters.length && mode !== 'business'" class="inbox-filter-chips" role="group" aria-label="Active filters">
+  <div v-if="activeFilters.length" class="inbox-filter-chips" role="group" aria-label="Active filters">
     <span v-for="item in activeFilters" :key="item.key" class="inbox-filter-chip">{{ item.label }}<button type="button" :aria-label="'Remove filter ' + item.label" @click="filters = withoutFilter(filters, item.key)"><FeatherIcon name="x" :size="12" /></button></span>
   </div>
   <InboxFilterPanel v-model="filters" v-model:open="filtersOpen" :anchor="isMobile ? mobileFilterButton : filterButton" :options="options" @browse="browse" />
-  <InboxFolders v-if="capabilities.folders && mode !== 'business'" v-model="folder" />
-  <BusinessDirectory v-if="mode === 'business'" :selected="businessName" :selected-doctype="businessType || filters.businessType" :busy="busy" @select="(doctype, record) => emit('business', doctype, record)" />
+  <InboxFolders v-if="capabilities.folders && !groupingView" v-model="folder" />
+  <BusinessDirectory v-if="groupingView" :filters="{ ...params, medium: medium === 'all' ? undefined : medium }" :selected="businessName" :selected-doctype="businessType" :busy="busy" @navigate="emit('navigate')" @select="(doctype, record) => emit('business', doctype, record)" />
   <template v-else>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
@@ -153,10 +154,10 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
             </span>
           </span>
         </button>
-        <button v-if="rowActions?.canLink(row)" type="button" class="directory-link" :aria-label="'Link ' + rowTitle(row) + ' to a customer'" @click="rowActions.link(row)">Link</button>
+        <button v-if="rowActions?.canLink(row)" type="button" class="directory-link" :aria-label="'Link ' + rowTitle(row) + ' to a business record'" @click="rowActions.link(row)">Link</button>
         <button type="button" class="directory-row-menu" aria-label="Chat actions" title="Chat actions" @click="rowActions.open($event, $event.currentTarget, row)"><FeatherIcon name="more-horizontal" :size="16" /></button>
       </div>
-      <WorkspaceState v-if="!loading && !rows.length && !error" compact :icon="mode === 'unread' ? 'check' : 'message-square'" :title="query || activeFilters.length ? 'No chats found' : folder ? 'No chats in this folder' : mode === 'unread' ? 'You’re all caught up' : mode === 'unlinked' ? 'Every chat is linked' : 'No chats yet'" :description="query ? 'Try a different name or number.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Chats you move to this folder show here.' : mode === 'all' ? 'Press + to message a customer.' : ''"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else-if="mode === 'all' && !folder" label="New chat" variant="solid" @click="emit('start')" /></WorkspaceState>
+      <WorkspaceState v-if="!loading && !rows.length && !error" compact :icon="mode === 'unread' ? 'check' : 'message-square'" :title="query || activeFilters.length ? 'No chats found' : folder ? 'No chats in this folder' : mode === 'unread' ? 'You’re all caught up' : mode === 'unlinked' ? 'Every chat is linked' : 'No chats yet'" :description="query ? 'Try a different name or number.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Chats you move to this folder show here.' : mode === 'all' ? 'Press + to message a contact.' : ''"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else-if="mode === 'all' && !folder" label="New chat" variant="solid" @click="emit('start')" /></WorkspaceState>
       <div v-if="next" ref="more" class="directory-load-more" role="status">{{ loading ? 'Loading more chats…' : '' }}</div>
     </div>
     <InboxRowActions ref="rowActions" @changed="rowChanged" @error="message => error = message" />
@@ -178,14 +179,17 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
 .directory-rows .directory-row > .directory-contact .directory-contact-copy { display:flex; flex-direction:column; gap:4px; }
 .directory-rows .directory-row > .directory-contact .directory-contact-top strong { font-size:14px; font-weight:600; color:var(--relay-ink); }
 .directory-rows .directory-row > .directory-contact .directory-contact-bottom small { margin-top:0; font-size:13px; color:var(--relay-ink-3); }
-.directory-unlinked { color:var(--ink-amber-3, #b45309); font-weight:600; }
-.directory-star { flex:none; color:var(--ink-amber-3, #b45309); fill:currentColor; }
+.directory-unlinked { color:var(--ink-gray-6); }
+.directory-star { flex:none; color:var(--ink-gray-6); fill:currentColor; }
 .directory-link { position:absolute; bottom:14px; right:14px; height:20px; min-height:0; padding:0 8px; border:1px solid var(--relay-accent); border-radius:10px; color:var(--relay-accent-text); font-size:11.5px; font-weight:600; }
 .directory-link:hover { background:var(--relay-accent-soft); }
 .directory-row-menu { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:var(--relay-layer-strong); color:var(--relay-ink-2); box-shadow:var(--relay-shadow-1); opacity:0; pointer-events:none; }
 .directory-row:hover > .directory-row-menu, .directory-row-menu:focus-visible { opacity:1; pointer-events:auto; }
 @media (hover:none) { .directory-row-menu { display:none; } }
-@media (max-width:768px) { .directory-link { right:18px; height:24px; } }
+@media (max-width:768px) {
+  .directory-link { right:12px; bottom:8px; }
+  .directory-rows .directory-row:has(.directory-link) > .directory-contact { padding-bottom:36px; align-items:flex-start; }
+}
 /* The Link button sits on the context line and the row menu takes the time's place, so neither covers text. */
 .directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context) { padding-right:56px; }
 @media (hover:hover) { .directory-row:hover .directory-contact-top time { visibility:hidden; } }

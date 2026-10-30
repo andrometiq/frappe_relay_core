@@ -5,6 +5,8 @@ import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
+from relay_core import file_limits
+from site_file_limit import use_relay_file_limit
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
@@ -15,10 +17,15 @@ class ApiTests(unittest.TestCase):
             return decorate
         def throw(message,*args):raise ValueError(message)
         self.f=types.SimpleNamespace(whitelist=whitelist,throw=throw,get_doc=Mock(),get_list=Mock(return_value=[]))
+        self.enterContext(patch('relay_core.business_access.frappe', self.f))
         spec=importlib.util.spec_from_file_location('tested_relay_api',Path('relay_core/api.py'))
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
         self.api.require_access=Mock();self.api.readable_contact=Mock()
+        self.f.PermissionError=ValueError
+        self.person_access=self.enterContext(patch('relay_core.business_access.require_person'))
+        self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Customer'}))
+        self.people_query=self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: self.f.qb.get_query('Contact', **kwargs)))
         self.api.contact_query=Mock(return_value='independent_business_scope')
         self.f.qb=Mock()
         search=self.f.qb.get_query.return_value
@@ -35,6 +42,8 @@ class ApiTests(unittest.TestCase):
 
     def use_role(self, role):
         """Answer permission checks from the role -> DocType rights of the DocPerm matrix."""
+        self.f.session = types.SimpleNamespace(user='test@example.invalid')
+        self.f.get_roles = lambda: [role]
         rights={
             'Relay Communication User':set(),
             'Relay Communication Team User':{'all_teams'},
@@ -54,11 +63,16 @@ class ApiTests(unittest.TestCase):
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'manage':True,'teams':True,'teams_enabled':True,'folders':True,'billing':True,'multi_team':True,'configure':False,
+        self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,'flows':True,
-                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
+                                 'enabled_channels':['WhatsApp'],'max_file_bytes':file_limits.MAX_BYTES,'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
         listed.assert_called_once_with('WhatsApp')
+
+    def test_capabilities_give_the_browser_the_site_file_limit(self):
+        self.use_role('Relay Communication User')
+        with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.file_limits.get_max_bytes',return_value=3*1024*1024):
+            self.assertEqual(self.api.capabilities()['max_file_bytes'],3*1024*1024)
 
     def test_inbox_channels_list_the_site_channels_of_every_enabled_medium(self):
         self.use_role('Relay Communication User')
@@ -84,14 +98,15 @@ class ApiTests(unittest.TestCase):
         expected={
             'Relay Communication User':(False,False,False,False,False,False,False),
             'Relay Communication Team User':(False,False,False,True,False,False,False),
-            'Relay Communication Manager':(True,True,True,True,False,True,True),
-            'System Manager':(True,True,True,True,True,True,True),
+            'Relay Communication Manager':(True,False,True,True,False,True,True),
+            'System Manager':(True,False,True,True,True,True,True),
         }
         for role,values in expected.items():
             self.use_role(role)
             with patch('relay_core.channels.enabled',return_value=[]):
                 result=self.api.capabilities()
             self.assertEqual(tuple(result[flag] for flag in flags),values,role)
+            self.assertEqual(result['contact_transfer'], role in ('Relay Communication Manager', 'System Manager'))
 
     def test_folders_and_teams_switches_hide_their_capabilities(self):
         self.use_role('System Manager')
@@ -170,12 +185,12 @@ class ContactDetailsTests(unittest.TestCase):
                 ('Relay Channel', 'email'): types.SimpleNamespace(channel='Email', has_permission=lambda _: True)}
         self.f.get_doc.side_effect=lambda dt,name:docs[(dt,name)]
         self.api.business_types=Mock(return_value=['Customer'])
-        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'), exists=lambda dt,name: True)
         endpoint=types.SimpleNamespace(name='binding', channel='wa', verified=0)
         self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
         with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False):
             result=self.api.contact_details('fixture-contact')
-        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}])
+        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}, {'doctype':'Customer','name':'private'}])
         self.assertIsNone(result['primary'])
         self.assertEqual([row.channel for row in result['endpoints']],['wa','email'])
         self.assertEqual([row.provider for row in result['endpoints']],['WhatsApp','Email'])
@@ -193,7 +208,7 @@ class ContactDetailsTests(unittest.TestCase):
         person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(),links=[])
         self.f.get_doc.return_value=person
         self.api.business_types=Mock(return_value=[])
-        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'))
+        self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'), exists=lambda dt,name: True)
         self.f.get_all=Mock()
         self.api.readable_contact.side_effect=PermissionError('Not assigned')
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
@@ -203,6 +218,7 @@ class ContactDetailsTests(unittest.TestCase):
         person=types.SimpleNamespace(name='fixture-contact',check_permission=Mock(side_effect=PermissionError),links=[])
         self.f.get_doc.return_value=person
         self.f.db=types.SimpleNamespace(get_value=Mock(return_value=None))
+        self.person_access.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.api.contact_details('fixture-contact')
         self.api.readable_contact.assert_not_called()
 
@@ -215,13 +231,15 @@ class ChannelUITests(unittest.TestCase):
         result = self.api.contact_directory('a%_', 'before')
         self.assertEqual(len(result['items']), 30)
         self.assertEqual(result['next'], '29')
-        query = self.f.get_list.call_args.kwargs
-        self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before'], ['Contact', 'full_name', 'like', '%a\\%\\_%']])
-        self.assertEqual(query['page_length'], 31)
+        query = self.people_query.call_args.kwargs
+        self.assertEqual(query['filters'], [['Contact', 'name', '>', 'before']])
+        self.assertIn(['Contact', 'full_name', 'like', '%a\\%\\_%'], query['or_filters'])
+        self.assertIn(['Contact', 'mobile_no', 'like', '%a\\%\\_%'], query['or_filters'])
+        self.assertEqual(query['limit'], 31)
         self.api.business_types = Mock(return_value=['Customer'])
         self.api.contact_directory('', None, 'Customer')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], [['Dynamic Link', 'link_doctype', '=', 'Customer']])
-        self.assertTrue(self.f.get_list.call_args.kwargs['distinct'])
+        self.assertEqual(self.people_query.call_args.kwargs['filters'], [['Dynamic Link', 'link_doctype', '=', 'Customer']])
+        self.assertTrue(self.people_query.call_args.kwargs['distinct'])
         with self.assertRaises(ValueError): self.api.contact_directory('', None, 'User')
         self.api.require_access.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_directory()
@@ -230,15 +248,19 @@ class ChannelUITests(unittest.TestCase):
             with self.assertRaises(ValueError): self.api.contact_directory(value)
 
     def test_profile_returns_only_safe_identity_and_rechecks_access(self):
-        self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), None)
+        person = types.SimpleNamespace(name='person', mobile_no='', phone=' +91 98765 43210 ', email_id='')
+        self.api.readable_contact.return_value = (types.SimpleNamespace(name='relay', display_name='Local', contact='person', secret='hidden'), person)
         header = {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'}
         links = [('Customer', 'C1'), ('Supplier', 'S1')]
         self.f.has_permission = Mock(side_effect=lambda doctype, ptype, doc: doctype == 'Customer')
         with patch('relay_core.business_access.primary_record', return_value=header) as primary, \
-                patch('relay_core.business_access.candidates', return_value=links):
+                patch('relay_core.business_access.candidates', return_value=links), \
+                patch('relay_core.contacts.contact_emails', return_value={'person': 'ann@example.invalid'}) as emails:
             self.assertEqual(self.api.contact_profile('relay'), {'name':'relay','display_name':'Local','contact':'person',
-                                                                 'primary': header, 'link_count': 1})
+                                                                 'primary': header, 'link_count': 1,
+                                                                 'phone': '+91 98765 43210', 'email': 'ann@example.invalid'})
         primary.assert_called_once_with('relay', links)
+        emails.assert_called_once_with(['person'])
         self.api.readable_contact.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_profile('relay')
 
@@ -327,6 +349,7 @@ class MessageDisplayApiTests(unittest.TestCase):
 
 def setUpModule():
     """These tests cover AI, folder and team behavior, so every feature switch is on."""
+    use_relay_file_limit()
     from unittest import addModuleCleanup, mock
     for target in ('relay_core.ai_features.is_enabled', 'relay_core.features.is_enabled'):
         switch = mock.patch(target, return_value=True)

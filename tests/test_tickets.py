@@ -26,10 +26,12 @@ class TicketTests(unittest.TestCase):
         self.module.require_access = Mock()
         self.module.readable_contact = Mock()
         self.module.ticket_settings = Mock()
-        self.message = types.SimpleNamespace(name='RELAY-MSG-0000000001',relay_contact='RELAY-CON-0000000001',channel='RELAY-CH-0000000001',check_permission=Mock())
+        self.module.ticket_settings.is_closed.side_effect = lambda doc: doc.get('ticket_status') == 'Closed'
+        self.module.ticket_settings.status_of.side_effect = lambda status_type: status_type
+        self.message = types.SimpleNamespace(name='RELAY-MSG-0000000001',relay_contact='RELAY-CON-0000000001',channel='RELAY-CH-0000000001',check_permission=Mock(), apply_fieldlevel_read_permissions=Mock())
         self.contact = types.SimpleNamespace(check_permission=Mock())
         self.f.get_doc.side_effect = lambda doctype, name: self.message if doctype == 'Relay Message' else self.contact
-        self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence',category='Payment evidence',status='Open',messages=[types.SimpleNamespace(message=self.message.name)])
+        self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence', ticket_status='Open', owner='Sim Staff', messages=[types.SimpleNamespace(message=self.message.name)])
 
         self.doc.get_doc_before_save=lambda:None
         self.doc.has_permission=Mock(return_value=True)
@@ -37,6 +39,51 @@ class TicketTests(unittest.TestCase):
         self.f.PermissionError = PermissionError
         self.f.DoesNotExistError = LookupError
         self.f.get_all = Mock(return_value=[])
+        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='Sim Person'))
+        self.f.utils = types.SimpleNamespace(cint=lambda value: int(value or 0))
+
+    def test_create_stores_exactly_selected_messages(self):
+        names = [self.message.name, 'RELAY-MSG-0000000002']
+        inserted = Record(name='TKT-00002', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        with patch('relay_core.ticket_tags.message_business', return_value=('Customer', 'LOCAL-1')):
+            result = self.module.create('Delivery issue', names)
+        payload = self.f.get_doc.call_args.args[0]
+        self.assertEqual(payload['messages'], [{'message': name} for name in names])
+        self.assertEqual((payload['business_doctype'], payload['business_name']), ('Customer', 'LOCAL-1'))
+        inserted.insert.assert_called_once()
+        self.assertEqual(result['name'], 'TKT-00002')
+
+    def test_ai_evidence_appends_idempotently_and_uses_existing_decision(self):
+        message = Record(name='RELAY-MSG-0000000002', direction='Incoming', content='Please replace the damaged parcel')
+        first = Record(name=self.message.name, content='Please help')
+        ticket = Record(name='TKT-00002', subject='Please help', brief='Please help', messages=[Record(message=first.name)])
+        ticket.append = lambda field, row: ticket.messages.append(Record(**row))
+        self.f.get_doc.side_effect = lambda *args, **kw: first
+        run = Record(decision='{"reason":"Customer wants a replacement for the damaged parcel."}')
+        for _ in range(2): self.module.enrich_episode(ticket, message, run)
+        self.assertEqual([row.message for row in ticket.messages], [first.name, message.name])
+        self.assertEqual(ticket.subject, 'Customer wants a replacement for the damaged parcel.')
+        self.assertEqual(ticket.brief, ticket.subject)
+
+    def test_ai_does_not_overwrite_human_edits_even_if_restored_to_fallback(self):
+        message = Record(name=self.message.name, direction='Incoming', content='Please help')
+        ticket = Record(name='TKT-00002', subject='Please help', brief='Staff instructions', messages=[Record(message=message.name)])
+        self.f.get_doc.side_effect = lambda *args, **kw: message
+        self.f.get_all.return_value = ['{"changed":[["subject","Edited","Please help"]]}']
+        self.module.enrich_episode(ticket, message, Record(decision='{"reason":"Replace damaged parcel"}'))
+        self.assertEqual((ticket.subject, ticket.brief), ('Please help', 'Staff instructions'))
+
+    def test_ai_plain_fallback_and_evidence_beyond_manual_limit(self):
+        message = Record(name='RELAY-MSG-0000000051', direction='Incoming', content='<b>Replace</b>\n  damaged parcel')
+        ticket = Record(name='TKT-00002', subject='Human title', brief='Human brief', messages=[Record(message=str(n)) for n in range(50)])
+        ticket.append = lambda field, row: ticket.messages.append(Record(**row))
+        self.f.get_doc.side_effect = lambda *args, **kw: Record(content='Original')
+        self.module.enrich_episode(ticket, message)
+        self.assertEqual(len(ticket.messages), 51)
+        self.assertEqual(ticket.subject, 'Human title')
+        self.module.enrich_episode(ticket, message, new=True)
+        self.assertEqual((ticket.subject, ticket.brief), ('Replace damaged parcel', 'Replace damaged parcel'))
 
     def test_each_link_requires_message_and_contact_read_permission(self):
         self.module.validate_ticket(self.doc)
@@ -51,7 +98,7 @@ class TicketTests(unittest.TestCase):
         self.doc.messages *= 26
         with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
 
-    def test_status_category_and_type_are_checked_by_ticket_settings(self):
+    def test_status_is_set_by_ticket_settings(self):
         self.module.validate_ticket(self.doc)
         self.module.ticket_settings.apply.assert_called_once_with(self.doc)
         self.module.ticket_settings.apply.side_effect=ValueError
@@ -62,6 +109,22 @@ class TicketTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.module.create('subject',messages)
         self.f.get_doc.assert_not_called()
 
+    def test_create_rejects_a_selected_record_that_does_not_own_the_message(self):
+        with patch('relay_core.ticket_tags.message_business', return_value=('Supplier', 'LOCAL-1')):
+            with self.assertRaisesRegex(ValueError, 'owns the selected messages'):
+                self.module.create('Local ticket', [self.message.name], business_type='Supplier', business_record='LOCAL-2')
+        self.f.get_doc.assert_not_called()
+
+    def test_business_type_filter_and_page_enrichment_are_batched(self):
+        self.f.get_list = Mock(return_value=[Record(name='TKT-00001', business_doctype='Supplier', business_name='LOCAL-1')])
+        with patch('relay_core.business_inbox.check_type') as check_type, \
+                patch('relay_core.business_groups.ticket_values', return_value=[{'fieldname': 'region', 'label': 'Region'}]) as values:
+            result = self.module.directory(business_type='Supplier')
+        check_type.assert_called_once_with('Supplier')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'business_doctype': 'Supplier'})
+        values.assert_called_once_with(result['items'], 'Supplier')
+        self.assertEqual(result['group_fields'], [{'fieldname': 'region', 'label': 'Region'}])
+
     def test_read_rechecks_access_instead_of_exposing_stale_links(self):
         self.doc.name='TKT-00001';self.doc.check_permission=Mock()
         self.f.get_doc.side_effect=lambda doctype,name: self.doc if doctype=='Relay Ticket' else self.message if doctype=='Relay Message' else self.contact
@@ -69,35 +132,116 @@ class TicketTests(unittest.TestCase):
         result=self.module.read(self.doc.name)
         self.assertEqual(result['creation'], self.doc.creation)
         self.assertEqual(result['messages'][0]['message'],self.message.name)
+        self.assertEqual((result['owner'], result['contact'], result['contact_person']), ('Sim Staff', self.message.relay_contact, 'Sim Person'))
+        self.f.db.get_value.assert_any_call('Relay Contact', self.message.relay_contact, 'contact')
         self.doc.check_permission.assert_called_once_with('read')
         self.doc.check_permission.side_effect=PermissionError
         with self.assertRaises(PermissionError):self.module.read(self.doc.name)
 
 
-    def test_directory_applies_business_assignee_category_and_status_filters(self):
-        self.f.get_list = Mock(return_value=[])
-        self.module.directory(business_doctype='Supplier', business_name='SUP-A', assigned_to='agent', category='Support', status='Open')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(business_doctype='Supplier',
-            business_name='SUP-A', assigned_to='agent', category='Support', status='Open'))
-
-    def test_directory_pages_by_creation_so_six_digit_names_sort_after_five_digit_names(self):
-        self.f.get_list = Mock(return_value=[])
-        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='2026-10-28 10:00:00'))
-        self.module.directory(after='TKT-99999')
-        kwargs = self.f.get_list.call_args.kwargs
-        self.assertEqual(kwargs['filters']['creation'], ['>', '2026-10-28 10:00:00'])
-        self.assertEqual(kwargs['order_by'], 'creation asc')
-        with self.assertRaises(ValueError): self.module.directory(before='RELAY-TKT-0000000001')
-
-    def test_directory_filters_assigned_to_me_and_tagged_me(self):
+    def test_directory_filters_by_status_search_and_assigned_to_me(self):
         self.f.get_list = Mock(return_value=[])
         self.f.session = types.SimpleNamespace(user='agent@example.invalid')
-        self.module.directory(mine='assigned', assigned_to='someone-else')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], dict(assigned_to='agent@example.invalid'))
-        self.module.directory(mine='tagged', status='Open')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], [['status', '=', 'Open'],
-            ['Relay Ticket Watcher', 'user', '=', 'agent@example.invalid']])
-        with self.assertRaises(ValueError): self.module.directory(mine='everyone')
+        self.module.directory(query='50%', ticket_status='Closed', mine='1')
+        kwargs = self.f.get_list.call_args.kwargs
+        self.assertEqual(kwargs['filters'], dict(subject=['like', '%50\\%%'], ticket_status='Closed', assigned_to='agent@example.invalid'))
+        self.assertEqual(kwargs['fields'], self.module.LIST_FIELDS)
+        self.module.directory(mine='0')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {})
+        for bad in (dict(query='x' * 81), dict(ticket_status=['Open'])):
+            with self.subTest(bad=bad), self.assertRaises(ValueError): self.module.directory(**bad)
+
+    def test_dashboard_filters_apply_to_the_permission_checked_directory(self):
+        self.f.get_list = Mock(return_value=[])
+        self.module.directory(assigned_to='a@example.invalid', ticket_type='Delivery')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+                         {'assigned_to': 'a@example.invalid', 'ticket_type': 'Delivery'})
+        self.module.directory(assigned_to='', ticket_type='')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+                         {'assigned_to': ['is', 'not set'], 'ticket_type': ['is', 'not set']})
+        self.module.directory(exclude_assignees=['a@example.invalid'])
+        self.assertEqual(self.f.get_list.call_args.kwargs['or_filters'], [
+            ['assigned_to', 'not in', ['a@example.invalid']], ['assigned_to', 'is', 'not set']])
+        self.module.directory(exclude_assignees=['', 'a@example.invalid'])
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters']['assigned_to'],
+                         ['not in', ['a@example.invalid', '']])
+        for bad in (dict(assigned_to=['a']), dict(ticket_type='x' * 141),
+                    dict(exclude_assignees=[]), dict(exclude_assignees=['a'] * 9),
+                    dict(exclude_assignees=[None])):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.module.directory(**bad)
+
+    def test_directory_pages_newest_first_by_creation(self):
+        rows = [Record(name=f'TKT-{n:05d}') for n in range(31, 0, -1)]
+        self.f.get_list = Mock(return_value=rows)
+        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='2026-10-28 10:00:00'))
+        page = self.module.directory(after='TKT-99999')
+        kwargs = self.f.get_list.call_args.kwargs
+        self.assertEqual(kwargs['filters']['creation'], ['<', '2026-10-28 10:00:00'])
+        self.assertEqual((kwargs['order_by'], kwargs['page_length']), ('creation desc', 31))
+        self.assertEqual((len(page['items']), page['next']), (30, {'after': 'TKT-00002'}))
+        with self.assertRaises(ValueError): self.module.directory(after='RELAY-TKT-0000000001')
+
+    def statuses(self):
+        self.module.ticket_settings.STATUS_TYPES = ('Open', 'Closed')
+        self.module.ticket_settings.DOCTYPES = {'status': 'Relay Ticket Status'}
+        versions = [Record(docname='TKT-00007', data='{"changed": [["ticket_status", "Open", "Done"]]}'),
+                    Record(docname='TKT-00008', data='{"changed": [["ticket_status", "Done", "Open"]]}'),
+                    Record(docname='TKT-00002', data='{"changed": [["ticket_status", "Done", "Done"], ["subject", "a", "b"]]}')]
+
+        def get_all(doctype, filters, pluck=None, fields=None):
+            if doctype == 'Version':
+                return versions
+            if doctype == 'Relay Ticket':
+                return ['TKT-00009']
+            return {'Open': ['Open', 'Started'], 'Closed': ['Done']}[filters['state']]
+        self.f.get_all = Mock(side_effect=get_all)
+        self.f.parse_json = __import__('json').loads
+        self.f.utils.today = lambda: '2026-10-30'
+
+    def test_dashboard_sums_open_workload_from_one_permission_checked_query_set(self):
+        self.statuses()
+        groups = [Record(ticket_status='Open', assigned_to='a@example.invalid', business_doctype='Customer', tickets=4),
+                  Record(ticket_status='Started', assigned_to='a@example.invalid', business_doctype=None, tickets=2),
+                  Record(ticket_status='Open', assigned_to=None, business_doctype='Customer', tickets=3),
+                  Record(ticket_status='Done', assigned_to='b@example.invalid', business_doctype='Supplier', tickets=9)]
+        recent = [Record(name='TKT-00009')]
+        oldest = [Record(name='TKT-00001', subject='Old', creation='2026-10-01')]
+        self.f.get_list = Mock(side_effect=[groups, [Record(tickets=5)], recent, oldest])
+        result = self.module.dashboard()
+        self.module.require_access.assert_called_once_with()
+        self.assertEqual(result['totals'], {'open': 9, 'assigned': 6, 'unassigned': 3, 'resolved_today': 5})
+        self.assertEqual(result['oldest_open'].name, 'TKT-00001')
+        self.assertEqual(result['recent'], recent)
+        self.assertEqual(result['assignees'], [{'assigned_to': 'a@example.invalid', 'tickets': 6}, {'assigned_to': '', 'tickets': 3}])
+        self.assertEqual(result['business_types'], [{'business_doctype': 'Customer', 'tickets': 7}, {'business_doctype': '', 'tickets': 2}])
+        self.assertEqual(result['statuses'], [{'ticket_status': 'Done', 'tickets': 9}, {'ticket_status': 'Open', 'tickets': 7},
+                                              {'ticket_status': 'Started', 'tickets': 2}])
+        calls = self.f.get_list.call_args_list
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all(call.args == ('Relay Ticket',) for call in calls))
+        self.assertEqual(calls[1].kwargs['filters'], {'ticket_status': ['in', ['Done']], 'name': ['in', ['TKT-00007', 'TKT-00009']]})
+        self.assertEqual((calls[2].kwargs['order_by'], calls[2].kwargs['limit_page_length']), ('creation desc', 10))
+
+    def test_resolved_today_counts_only_tickets_closed_today(self):
+        self.statuses()
+        self.assertEqual(self.module._resolved_today(), ['TKT-00007', 'TKT-00009'])
+        version_call = next(c for c in self.f.get_all.call_args_list if c.args[0] == 'Version')
+        self.assertEqual(version_call.kwargs['filters'], {'ref_doctype': 'Relay Ticket', 'creation': ['>=', '2026-10-30'],
+                                                          'data': ['like', '%"ticket_status"%']})
+
+    def test_dashboard_links_filter_the_directory_by_state_owner_link_and_resolved_today(self):
+        self.statuses()
+        self.f.get_list = Mock(return_value=[])
+        self.module.directory(state='Open', assigned='1', unlinked='1')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+            'business_doctype': ['is', 'not set'], 'ticket_status': ['in', ['Open', 'Started']], 'assigned_to': ['is', 'set']})
+        self.module.directory(resolved_today='1')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+            'name': ['in', ['TKT-00007', 'TKT-00009']], 'ticket_status': ['in', ['Done']]})
+        self.module.directory(state='Open', ticket_status='Done', assigned='1', assigned_to='')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'ticket_status': 'Done', 'assigned_to': ['is', 'not set']})
+        with self.assertRaises(ValueError): self.module.directory(state='Pending')
 
     def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
         self.doc.name = 'TKT-00001'
@@ -133,7 +277,7 @@ class TicketTests(unittest.TestCase):
             active_scope_key='Sim Scope', source_action_key='Sim Source', generation=7, ai_disabled=1)
         self.doc.get_doc_before_save = lambda: original
         for changes in ({'company': None}, {'conversation_key': ''}, {'active_scope_key': None},
-                {'generation': 0}, {'ai_disabled': 0}, {'skill_version': 'Forged'},
+                {'generation': 0}, {'ai_disabled': 0}, {'ownership_actor': 'Forged'},
                 {'company': None, 'conversation_key': None, 'active_scope_key': None}):
             with self.subTest(changes=changes):
                 for key, value in (original | changes).items(): setattr(self.doc, key, value)
@@ -191,18 +335,18 @@ class EpisodeTests(unittest.TestCase):
     def test_same_source_replays_closed_released_ticket_without_reopening(self):
         ticket = self.module.ensure_episode(self.message, owner='Sim Agent')
         key = ticket.source_action_key
-        ticket.status, ticket.active_scope_key = 'Closed', None
+        ticket.ticket_status, ticket.active_scope_key = 'Closed', None
         self.module.ensure_episode(self.message, owner='Sim Agent')
         self.assertEqual(ticket.source_action_key, key)
-        self.assertEqual(ticket.status, 'Closed')
+        self.assertEqual(ticket.ticket_status, 'Closed')
         ticket.insert.assert_called_once()
 
     def test_replay_preserves_staff_assignment_even_if_automatic_owner_is_unavailable(self):
         ticket = self.module.ensure_episode(self.message, owner='Sim Agent')
-        ticket.assigned_to, ticket.status = 'Sim Staff', 'Closed'
+        ticket.assigned_to, ticket.ticket_status = 'Sim Staff', 'Closed'
         self.module.episode_owner_allowed.side_effect = lambda user, message: user == 'Sim Staff'
         self.module.ensure_episode(self.message, owner='Unavailable automatic owner')
-        self.assertEqual((ticket.assigned_to, ticket.status), ('Sim Staff', 'Closed'))
+        self.assertEqual((ticket.assigned_to, ticket.ticket_status), ('Sim Staff', 'Closed'))
         self.module.episode_owner_allowed.return_value = False
         self.module.episode_owner_allowed.side_effect = None
         with self.assertRaisesRegex(ValueError, 'authorized assignment'):
@@ -217,11 +361,11 @@ class EpisodeTests(unittest.TestCase):
 
     def test_new_message_reopens_hold_and_reuses_active_scope_without_growing_evidence(self):
         ticket = self.module.ensure_episode(self.message, owner='Sim Agent')
-        ticket.status, ticket.ai_disabled, ticket.generation = 'Closed', 1, 9
+        ticket.ticket_status, ticket.ai_disabled, ticket.generation = 'Closed', 1, 9
         self.message.update(name='RELAY-MSG-0000000002', ticket=None, provider_message_key='Second source')
         result = self.module.ensure_episode(self.message, owner='Sim Agent')
         self.assertIs(result, ticket)
-        self.assertEqual((ticket.status, ticket.ai_disabled, ticket.generation), ('Open', 1, 9))
+        self.assertEqual((ticket.ticket_status, ticket.ai_disabled, ticket.generation), ('Open', 1, 9))
         self.assertEqual(len(ticket.messages), 1)
 
     def test_released_scope_creates_new_episode_only_for_new_source(self):
@@ -480,7 +624,7 @@ class OwnershipTests(unittest.TestCase):
     def setUp(self):
         TicketTests.setUp(self)
         self.doc = Record(name='TKT-00001', ai_disabled=0, generation=4,
-            active_scope_key='Sim Scope', pending_run='Sim Run', status='Open',
+            active_scope_key='Sim Scope', ticket_status='Open',
             check_permission=Mock(), save=Mock())
         self.f.session = Record(user='Sim Staff')
         self.f.db = Mock()
@@ -493,7 +637,7 @@ class OwnershipTests(unittest.TestCase):
         self.assertEqual(result, dict(name=self.doc.name, ai_disabled=True, generation=5))
         self.f.get_doc.assert_called_with('Relay Ticket', self.doc.name, for_update=True)
         self.doc.check_permission.assert_called_with('write')
-        self.assertEqual((self.doc.ownership_actor, self.doc.ownership_at, self.doc.pending_run), ('Sim Staff','now',None))
+        self.assertEqual((self.doc.ownership_actor, self.doc.ownership_at), ('Sim Staff','now'))
         self.assertEqual(self.module.claim(self.doc.name), result)
         self.doc.save.assert_called_once()
         self.assertIsNone(self.module._episode_transition.get())
@@ -525,9 +669,16 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.module.resume_ai(self.doc.name)
         with self.assertRaises(ValueError): self.module.check_episode(Record(ticket=self.doc.name, ownership_generation=6))
 
+    def test_close_without_an_episode_only_sets_the_closed_status(self):
+        self.doc.active_scope_key = None
+        result = self.module.close_and_release(self.doc.name)
+        self.assertEqual((result['ticket_status'], self.doc.generation, self.doc.ai_disabled), ('Closed', 4, 0))
+        self.doc.save.assert_called_once_with()
+        self.doc.check_permission.assert_called_with('write')
+
     def test_explicit_release_clears_scope_and_fences_old_workers(self):
         result = self.module.close_and_release(self.doc.name)
-        self.assertEqual(result['status'], 'Closed')
+        self.assertEqual(result['ticket_status'], 'Closed')
         self.assertTrue(result['ai_disabled'])
         self.assertIsNone(self.doc.active_scope_key)
         self.assertEqual(self.doc.generation, 5)
@@ -559,18 +710,18 @@ class OwnershipTests(unittest.TestCase):
         self.assertIsNone(self.module._episode_transition.get())
 
 
-    def test_status_save_holds_closed_and_resolved_episodes(self):
-        for status in ('In progress', 'Closed', 'Resolved'):
+    def test_staff_status_change_holds_the_episode(self):
+        for status in ('Waiting', 'Closed'):
             with self.subTest(status=status):
-                previous = Record(generation=4, status='Open', conversation_key='Sim Conversation',
-                    active_scope_key='Sim Scope', ai_disabled=0, pending_run='Sim Run')
-                doc = Record(previous, name=self.doc.name, subject='Staff review', category='Support',
-                    messages=[Record(message=self.message.name)], status=status, check_permission=Mock(),
+                previous = Record(generation=4, ticket_status='Open', conversation_key='Sim Conversation',
+                    active_scope_key='Sim Scope', ai_disabled=0)
+                doc = Record(previous, name=self.doc.name, subject='Staff review',
+                    messages=[Record(message=self.message.name)], ticket_status=status, check_permission=Mock(),
                     get_doc_before_save=lambda: previous)
                 self.f.get_doc.side_effect = lambda dt, *a, **kw: previous if dt=='Relay Ticket' else self.message
                 self.module._episode_scope = Mock(return_value=({'conversation_key':'Sim Conversation'},'Sim Scope'))
                 self.module.validate_ticket(doc)
-                self.assertEqual((doc.ai_disabled, doc.generation, doc.pending_run), (1,5,None))
+                self.assertEqual((doc.ai_disabled, doc.generation), (1,5))
                 self.assertEqual(doc.active_scope_key, 'Sim Scope')
 
     def test_legacy_channel_manual_message_does_not_require_episode_configuration(self):

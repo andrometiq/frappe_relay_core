@@ -9,6 +9,8 @@ from test_document_sends import stub_framework
 class DocumentActionTests(unittest.TestCase):
     def setUp(self):
         self.f = stub_framework()
+        self.enterContext(patch('relay_core.business_access.business_document',
+                                side_effect=lambda dt, name: self.f.get_doc(dt, name)))
         self.sends = types.SimpleNamespace(contacts=Mock(return_value=['PERSON-A', 'PERSON-B']),
             targets=Mock(side_effect=lambda action, contact, channel: [(contact, 'EP-' + contact[-1])]),
             render_pdf=Mock(return_value=('Ledger.pdf', b'%PDF')),

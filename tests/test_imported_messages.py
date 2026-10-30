@@ -21,7 +21,8 @@ class WindowTests(unittest.TestCase):
         query = Mock()
         query.run.return_value = rows
         with patch.object(service_window, 'page_query', return_value=query) as page, \
-                patch.object(frappe.utils, 'now_datetime', return_value=NOW):
+                patch.object(frappe.utils, 'now_datetime', return_value=NOW), \
+                patch.object(frappe.utils, 'get_system_timezone', return_value='Asia/Kolkata'):
             return service_window.status('CON-1', 'CH-WA', '919000000001'), page.call_args.args[1]
 
     def test_an_imported_incoming_message_opens_the_window_from_its_real_time(self):
@@ -29,11 +30,17 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(result['open'])
         self.assertEqual(result['expires_at'], NOW + datetime.timedelta(hours=22))
         self.assertNotIn('legacy_source', filters)
+        self.assertEqual(result['expires_at_iso'], '2026-10-28T16:00:00+05:30')
 
     def test_old_imported_history_shows_when_the_window_closed(self):
         result, _ = self.status([imported(NOW - datetime.timedelta(days=6))])
         self.assertFalse(result['open'])
         self.assertEqual(result['expires_at'], NOW - datetime.timedelta(days=5))
+
+    def test_without_incoming_history_there_is_no_deadline(self):
+        result, _ = self.status([])
+        self.assertIsNone(result['expires_at_iso'])
+        self.assertFalse(result['open'])
 
 
 class ReplyTests(unittest.TestCase):

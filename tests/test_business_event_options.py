@@ -81,9 +81,7 @@ class BusinessEventOptionsTests(unittest.TestCase):
             self.assertEqual(filters['disabled'], 0)
             self.assertEqual(filters['name'], ['in', ['Invoice']])
 
-    def test_enabled_business_types_and_bad_arguments(self):
-        with patch.dict(sys.modules, {'relay_core.api': types.SimpleNamespace(business_types=lambda: ['Customer', 'Supplier'])}):
-            self.assertEqual(self.values('business_doctype', query='Cust'), ['Customer'])
+    def test_bad_arguments(self):
         for args in [dict(kind='sql'), dict(kind='doctype', query='x' * 81), dict(kind='field', selected='{}'),
                      dict(kind='field', selected=['x'] * 21), dict(kind='field', selected=[1])]:
             with self.assertRaises(ValueError): self.module.search(**args)

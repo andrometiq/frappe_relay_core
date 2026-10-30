@@ -1,6 +1,7 @@
 """Account-scoped observed Telegram topics; never claims to enumerate all forums."""
 import hashlib
 import frappe
+from relay_core.business_access import document_name
 from relay_core.automation.provenance import integer
 from relay_core.automation.service import internal_save
 from relay_core.permissions import require_access, readable_contact
@@ -66,6 +67,7 @@ def action(operation, arguments, result, channel):
 
 @frappe.whitelist(methods=['GET'])
 def directory(channel, chat_id, after=None):
+    document_name(channel)
     require_access(manage=True)
     doc=frappe.get_doc('Relay Channel',channel);doc.check_permission('read')
     if doc.channel!='Telegram' or not doc.enabled or doc.account!=connection_value('relay_hub_account'):frappe.throw('Unavailable Telegram channel',frappe.PermissionError)

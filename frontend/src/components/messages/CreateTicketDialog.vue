@@ -5,40 +5,35 @@ import RemoteLinkField from '../fields/RemoteLinkField.vue'
 import { coreApi } from '../../services/coreApi'
 import { useTicketSettings } from '../../composables/useTicketSettings'
 import { pickerOptions } from '../../services/ticketSettings'
-import { TICKET_PRIORITIES, ticketPayload, ticketRoute, ticketSubject } from '../../services/ticketForm'
+import { ticketPayload, ticketRoute, ticketSubject } from '../../services/ticketForm'
 
 const open = defineModel({ type: Boolean, default: false })
-const props = defineProps({ contact: String, message: Object, quoted: Boolean, contactName: String })
+const props = defineProps({ contact: String, message: Object, messages: Array, contactName: String })
 const emit = defineEmits(['created'])
 const { settings, load: loadSettings } = useTicketSettings()
-const form = ref({ subject: '', brief: '', priority: 'Medium', category: '', ticketType: '', assignedTo: '', tagged: [] })
-const categories = computed(() => pickerOptions(settings.value.categories))
-const types = computed(() => pickerOptions(settings.value.types, '', 'No type'))
+const form = ref({ subject: '', brief: '', ticketType: '', assignedTo: '' })
+const types = computed(() => pickerOptions(settings.value.types, 'No type'))
+const businessType = ref(''), businessRecord = ref('')
 const busy = ref(false), error = ref('')
+const selectedMessages = computed(() => props.messages?.length ? props.messages : [props.message].filter(Boolean))
 const colleagues = computed(() => ({ method: 'collaboration.colleagues', params: { contact: props.contact }, readOnly: busy.value }))
-const ready = computed(() => form.value.subject.trim() && form.value.category && props.message?.name)
+const ready = computed(() => form.value.subject.trim() && props.message?.name && (!businessType.value || businessRecord.value))
 
 function prepare() {
-  form.value = { subject: ticketSubject(props.message, props.contactName ? 'Follow up with ' + props.contactName : 'Follow up'), brief: '', priority: 'Medium', category: categories.value[0]?.value || '', ticketType: '', assignedTo: '', tagged: [] }
-  error.value = ''
+  form.value = { subject: ticketSubject(props.message, props.contactName ? 'Follow up with ' + props.contactName : 'Follow up'), brief: '', ticketType: '', assignedTo: '' }
+  error.value = ''; businessType.value = props.message?.business_doctype || ''; businessRecord.value = props.message?.business_name || ''
   loadSettings().then(reconcile, e => { error.value = e.message })
 }
 function reconcile() {
-  const has = (options, value) => options.some(option => option.value === value)
-  if (!has(categories.value, form.value.category)) form.value.category = categories.value[0]?.value || ''
-  if (!has(types.value, form.value.ticketType)) form.value.ticketType = ''
-}
-function tag(values) {
-  if (values.length > 20) { error.value = 'Tag at most 20 colleagues'; return }
-  form.value.tagged = values
+  if (!types.value.some(option => option.value === form.value.ticketType)) form.value.ticketType = ''
 }
 async function create() {
   busy.value = true; error.value = ''
   try {
-    const result = await coreApi('tickets.create', ticketPayload(form.value, [props.message.name]), true)
+    const result = await coreApi('tickets.create', { ...ticketPayload(form.value, selectedMessages.value.map(row => row.name)), ...(businessType.value ? { business_type: businessType.value, business_record: businessRecord.value } : {}) }, true)
     open.value = false
     emit('created', { ...result, href: ticketRoute(result.name) })
-  } catch (e) { error.value = e.message }
+  } catch { error.value = 'Could not create the ticket. Select up to 50 messages from one business record and check your permissions.' }
   finally { busy.value = false }
 }
 watch(open, value => { if (value) prepare() }, { immediate: true })
@@ -46,22 +41,20 @@ watch(settings, () => { if (open.value) reconcile() })
 </script>
 
 <template>
-  <Dialog v-model="open" :options="{ title: 'Create ticket', size: 'md' }" :disable-outside-click-to-close="busy">
+  <Dialog v-model="open" class="message-ticket-dialog" :options="{ title: 'Create ticket', size: 'md' }" :disable-outside-click-to-close="busy">
     <form id="relay-create-ticket" class="create-ticket-form" @submit.prevent="ready && create()">
-      <p v-if="message" class="create-ticket-hint">{{ quoted ? "Linked to this message" : "Linked to the last message in this chat" }}</p>
-      <blockquote v-if="message" class="create-ticket-quote">{{ ticketSubject(message, 'Attachment or message without text') }}</blockquote>
+      <p class="create-ticket-hint">{{ selectedMessages.length }} selected {{ selectedMessages.length === 1 ? 'message' : 'messages' }}</p>
+      <div class="create-ticket-evidence" aria-label="Selected messages">
+        <blockquote v-for="row in selectedMessages" :key="row.name" class="create-ticket-quote">{{ ticketSubject(row, 'Attachment or message without text') }}</blockquote>
+      </div>
+      <p class="create-ticket-hint">{{ businessType ? businessType + ' · ' + businessRecord : 'No business record' }}</p>
       <FormControl v-model="form.subject" label="Subject" required maxlength="140" :disabled="busy" />
       <FormControl v-model="form.brief" type="textarea" label="Description" maxlength="4000" rows="3" placeholder="What needs to happen?" :disabled="busy" />
       <div class="create-ticket-row">
-        <FormControl v-model="form.category" type="select" label="Category" :options="categories" :disabled="busy" />
         <FormControl v-if="settings.types.length" v-model="form.ticketType" type="select" label="Type" :options="types" :disabled="busy" />
-      </div>
-      <div class="create-ticket-row">
-        <FormControl v-model="form.priority" type="select" label="Priority" :options="TICKET_PRIORITIES" :disabled="busy" />
         <RemoteLinkField v-model="form.assignedTo" :field="{ ...colleagues, label: 'Assign to', placeholder: 'Search colleagues…' }" />
       </div>
-      <RemoteLinkField :field="{ ...colleagues, label: 'Tag colleagues (@)', placeholder: 'Search colleagues…' }" :model-value="form.tagged" multiple @update:model-value="tag" />
-      <p class="create-ticket-hint">The ticket links to this conversation. Assigned and tagged colleagues get a notification.</p>
+      <p class="create-ticket-hint">The ticket links to this conversation. The assigned colleague gets a notification.</p>
       <ErrorMessage :message="error" />
     </form>
     <template #actions="{ close }">
@@ -72,9 +65,14 @@ watch(settings, () => { if (open.value) reconcile() })
 </template>
 
 <style scoped>
+.create-ticket-evidence { max-height:240px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
 .create-ticket-form { display:flex; flex-direction:column; gap:12px; }
 .create-ticket-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:12px; }
 .create-ticket-quote { margin:0; padding:8px 10px; border-left:3px solid var(--outline-gray-3); background:var(--surface-gray-1); border-radius:4px; color:var(--ink-gray-7); font-size:13px; overflow-wrap:anywhere; }
 .create-ticket-hint { color:var(--ink-gray-6); font-size:12px; line-height:1.4; }
-@media (max-width: 640px) { .create-ticket-row { grid-template-columns:1fr; } }
+@media (max-width: 640px) { .create-ticket-row { grid-template-columns:1fr; } .create-ticket-form :deep(:is(input,select,button)) { min-height:44px !important; } }
+</style>
+
+<style>
+.relay-dialog.message-ticket-dialog :is(.relay-button,.relay-control) { min-height:44px; }
 </style>

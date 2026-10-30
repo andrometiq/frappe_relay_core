@@ -4,16 +4,14 @@ import json
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
+from relay_core.business_access import require_type, business_document, allowed_types
 from relay_core.conversation_state import fresh_write
 from relay_core.message_reads import insert_reads
 
 
 def check_type(doctype):
     require_access()
-    if not isinstance(doctype, str) or not frappe.db.exists('Relay Contact Type', {'business_doctype':doctype, 'enabled':1}):
-        frappe.throw('Choose a configured business type', frappe.PermissionError)
-    if not frappe.has_permission(doctype, 'read'):
-        frappe.throw('Business type is not readable', frappe.PermissionError)
+    require_type(doctype)
 
 
 def state_key(doctype, name, user=None):
@@ -26,7 +24,7 @@ def validate_state(doc):
     if doc.user!=frappe.session.user or doc.owner!=frappe.session.user:
         frappe.throw('Business conversation state belongs to its user',frappe.PermissionError)
     check_type(doc.business_doctype)
-    frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+    business_document(doc.business_doctype, doc.business_name)
     if doc.state_key!=state_key(doc.business_doctype,doc.business_name):
         frappe.throw('Invalid business conversation state key')
     if doc.last_read:
@@ -61,13 +59,14 @@ def _assert_messages(doctype,name,names):
     return unique,rows
 
 
-def changed(doctype,name,kind='reads'):
-    frappe.publish_realtime('relay_changed',{'kind':kind},doctype=doctype,docname=name,after_commit=True)
+def changed(doctype,name,kind='reads',messages=None):
+    from relay_core.realtime import conversation_event
+    frappe.publish_realtime('relay_changed',conversation_event(kind,messages),doctype=doctype,docname=name,after_commit=True)
 
 
 @frappe.whitelist(methods=['GET'])
 def view_state(doctype,name):
-    check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
+    check_type(doctype);business_document(doctype, name)
     state=_state(doctype,name)
     if not state:return {}
     position=_position(state.chat_view)
@@ -79,7 +78,7 @@ def view_state(doctype,name):
 
 @frappe.whitelist(methods=['POST'])
 def save_view(doctype,name,message,offset=0,at_bottom=0):
-    check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
+    check_type(doctype);business_document(doctype, name)
     validate_reference(message,'MSG');_assert_messages(doctype,name,[message])
     try:offset=float(offset)
     except (ValueError,TypeError):frappe.throw('Invalid viewport offset')
@@ -98,7 +97,7 @@ def save_view(doctype,name,message,offset=0,at_bottom=0):
 
 @frappe.whitelist(methods=['POST'])
 def mark_visible(doctype,name,messages,last_read=None):
-    check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
+    check_type(doctype);business_document(doctype, name)
     names,rows=_assert_messages(doctype,name,messages)
     if last_read is not None and last_read not in names:frappe.throw('Read cursor must be visible')
     key=state_key(doctype,name)
@@ -107,6 +106,8 @@ def mark_visible(doctype,name,messages,last_read=None):
         if last_read and (not state.last_read or last_read>state.last_read):state.last_read=last_read
         state.last_seen=frappe.utils.now_datetime();state.save(ignore_permissions=True)
         if insert_reads([(rows[message]['relay_contact'],message) for message in names]):changed(doctype,name)
+        from relay_core.relay_chats import mark_read
+        mark_read((doctype,name),max(names))
         frappe.db.commit()
         return state.last_read
     with frappe.cache.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):
@@ -116,14 +117,14 @@ def mark_visible(doctype,name,messages,last_read=None):
 
 @frappe.whitelist(methods=['GET'])
 def presence(doctype,name):
-    check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
+    check_type(doctype);business_document(doctype, name)
     cutoff=frappe.utils.add_to_date(frappe.utils.now_datetime(),seconds=-90)
     rows=frappe.get_all('Relay Business Conversation State',filters={'business_doctype':doctype,'business_name':name,
         'last_seen':['>',cutoff]},fields=['user'],order_by='last_seen desc',limit_page_length=11)
     users=[]
     for row in rows:
         if row.user==frappe.session.user or not frappe.db.get_value('User',row.user,'enabled'):continue
-        if not frappe.get_doc(doctype,name).has_permission('read',user=row.user):continue
+        if doctype not in allowed_types(row.user):continue
         users.append({'name':row.user,'full_name':frappe.db.get_value('User',row.user,'full_name'),
             'typing':bool(frappe.cache.get_value('relay-business-typing-'+state_key(doctype,name,row.user)))})
     return {'users':users[:10]}
@@ -132,7 +133,7 @@ def presence(doctype,name):
 @frappe.whitelist(methods=['POST'])
 def typing(doctype,name,contact,active=1,message=None):
     """Publish an agent typing state inside one permission-checked business room."""
-    check_type(doctype);frappe.get_doc(doctype,name).check_permission('read')
+    check_type(doctype);business_document(doctype, name)
     if str(active) not in ('0','1','True','False'):
         frappe.throw('Invalid typing state')
     readable_contact(contact)
@@ -169,20 +170,22 @@ def _linked_contacts(doctype, name, query='', limit=31):
         pattern='%'+query.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         options['or_filters']=[['Contact',field,'like',pattern]
             for field in ('name','full_name','mobile_no','phone','email_id')]
-    return frappe.get_list('Contact',filters=filters,
-        fields=['name','full_name','mobile_no','phone','email_id'],order_by='name asc',
-        page_length=limit,distinct=True,**options)
+    return frappe.get_all('Contact', filters=filters,
+        fields=['name','full_name','mobile_no','phone','email_id'], order_by='name asc',
+        page_length=limit, distinct=True, **options)
 
 
 @frappe.whitelist(methods=['GET'])
 def context(doctype,name):
-    check_type(doctype);doc=frappe.get_doc(doctype,name);doc.check_permission('read')
-    meta=frappe.get_meta(doctype)
-    title=(doc.get(meta.title_field) if meta.title_field else None) or name
+    check_type(doctype);doc=business_document(doctype, name)
+    from relay_core.business_groups import title_field
+    title=doc.get(title_field(doctype)) or name
     contacts=_linked_contacts(doctype,name,limit=101)
-    grouping_field=frappe.db.get_value('Relay Contact Type',{'business_doctype':doctype,'enabled':1},'grouping_field') or ''
+    from relay_core.business_groups import configuration
+    fields = configuration(doctype)
     return {'name':name,'title':title,'doctype':doctype,'doctype_label':frappe._(doctype),
-            'grouping_value':doc.get(grouping_field) if grouping_field else '',
+            'grouping_value':doc.get(fields[0]) if fields else '',
+            'groups': [{'fieldname': field, 'value': doc.get(field) or ''} for field in fields],
             'contact_count':min(len(contacts),100),'contact_count_limited':len(contacts)>100}
 
 
@@ -196,7 +199,7 @@ def records(doctype, query='', after=None):
     pattern='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
     filters={'name':['like',pattern]}
     if after:filters=[['name','like',pattern],['name','>',after]]
-    rows=frappe.get_list(doctype,filters=filters,fields=['name'],order_by='name asc',page_length=31)
+    rows=frappe.get_all(doctype,filters=filters,fields=['name'],order_by='name asc',page_length=31)
     return {'items':rows[:30], 'next':rows[29].name if len(rows)>30 else None}
 
 
@@ -210,7 +213,7 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     check_type(doctype)
     if not isinstance(name,str) or not name or len(name)>140:
         frappe.throw('Choose a business record')
-    frappe.get_doc(doctype,name).check_permission('read')
+    business_document(doctype, name)
     if sum(bool(value) for value in (before, after, since)) > 1:frappe.throw('Choose one message cursor')
     for value,prefix in ((before,'MSG'),(after,'MSG'),(since,'MSG'),(channel,'CH')):
         if value is not None:validate_reference(value,prefix)
@@ -299,12 +302,19 @@ def message_context(doctype,name,message,limit=25):
 @frappe.whitelist(methods=['GET'])
 def contacts(doctype, name, query=''):
     check_type(doctype)
-    frappe.get_doc(doctype,name).check_permission('read')
+    business_document(doctype, name)
     rows=_linked_contacts(doctype,name,query,31)
+    from relay_core.contacts import contact_emails
+    from relay_core.identity import phone_number
+    from relay_core.conversation_start import numbers_held_elsewhere
+    emails=contact_emails([row.name for row in rows[:30] if not row.email_id])
+    phones={row.name:(row.mobile_no or row.phone or '').strip() for row in rows[:30]}
+    elsewhere=numbers_held_elsewhere({name:{phone_number(phone)}-{None} for name,phone in phones.items() if phone})
     result=[]
     for row in rows[:30]:
-        phone=(row.mobile_no or row.phone or '').strip()
-        result.append({'value':row.name,'label':row.full_name or row.name,
-                       'description':' · '.join(value for value in (phone,row.email_id) if value),
-                       'has_phone':bool(phone)})
+        phone=phones[row.name]
+        email=row.email_id or emails.get(row.name,'')
+        result.append({'value':row.name,'label':row.full_name or row.name,'phone':phone,'email':email,
+                       'description':' · '.join(value for value in (phone,email) if value),'has_phone':bool(phone),
+                       'number_elsewhere':row.name in elsewhere})
     return {'items':result,'has_more':len(rows)>30}

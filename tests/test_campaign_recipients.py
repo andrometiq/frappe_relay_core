@@ -27,6 +27,9 @@ def campaign(**values):
 
 class FilterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+        self.enterContext(patch('frappe.session', _dict(user='manager@example.com')))
+        self.enterContext(patch('relay_core.business_access.require_type'))
         self.enterContext(patch('frappe.throw', side_effect=throw))
         self.enterContext(patch.object(campaign_audience, 'linked_types', return_value=['Customer']))
         self.enterContext(patch.object(campaign_audience, 'segment_fields',
@@ -75,14 +78,14 @@ class FilterTests(unittest.TestCase):
         fake = Mock(db=Mock(sql=Mock(side_effect=lambda *args, **kwargs: pages.pop(0))))
         fake.get_all.side_effect = lambda doctype, **kwargs: {
             'Contact': [_dict(name='Asha', first_name='Asha'), _dict(name='Ravi', first_name='Ravi')],
-            'Dynamic Link': [_dict(parent='Asha', link_name='CUST-1')]}[doctype]
+            'Dynamic Link': [_dict(parent='Asha', link_name='CUST-1')], 'Customer': [_dict(name='CUST-1', city='Chennai')]}[doctype]
         fake.get_list.return_value = [_dict(name='CUST-1', city='Chennai')]
         with patch.object(campaign_audience, 'frappe', fake):
             rows = list(campaign_audience.contact_rows(doc))
         self.assertEqual(rows, [
             (1, {'phone': '919876543210', 'contact.first_name': 'Asha', 'Customer.city': 'Chennai'}),
             (2, {'phone': '919876543211', 'contact.first_name': 'Ravi', 'Customer.city': ''})])
-        self.assertEqual(fake.get_list.call_args.kwargs['fields'], ['name', 'city'])  # Record reads keep permissions.
+        self.assertEqual(fake.get_all.call_args.kwargs['fields'], ['name', 'city'])  # Relay type access was checked first.
 
     def test_import_saves_filters_and_mapping_and_starts_the_import(self):
         doc = campaign(source_file='/private/files/old.csv')
@@ -116,6 +119,9 @@ class FilterTests(unittest.TestCase):
 
 class ScheduleTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+        self.enterContext(patch('frappe.session', _dict(user='manager@example.com')))
+        self.enterContext(patch.object(bulk_campaigns, 'check_validation'))
         self.enterContext(patch('frappe.throw', side_effect=throw))
         self.enterContext(patch('frappe.utils.now_datetime', return_value=NOW))
 
@@ -159,7 +165,7 @@ class ScheduleTests(unittest.TestCase):
             campaign_schedule.start('Winter launch')
         enqueue.assert_not_called()
         fake.db.set_value.assert_called_once_with('Relay Campaign', 'Winter launch', {
-            'status': 'Paused', 'last_error': 'The scheduled start failed: Choose an approved template'})
+            'status': 'Paused', 'arguments': doc.arguments, 'last_error': 'The scheduled start failed. Check the channel and validate again.'})
         self.assertEqual(fake.set_user.call_args_list[-1].args, ('Administrator',))
 
     def test_a_started_campaign_queues_its_first_slice(self):
@@ -227,7 +233,7 @@ class CampaignSkipTests(unittest.TestCase):
 
     def test_import_skips_opted_out_numbers_with_the_reason(self):
         db = Mock()
-        doc = _dict(name='Winter launch', channel='WA')
+        doc = _dict(name='Winter launch', channel='WA', arguments='{}')
         with patch.object(bulk_campaigns, 'frappe', SimpleNamespace(db=db, utils=SimpleNamespace(now=lambda: 'now'),
                                                                     session=_dict(user='manager@example.com'))), \
                 patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, {'911'})):

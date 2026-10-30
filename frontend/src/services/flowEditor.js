@@ -3,8 +3,10 @@ export const STEP_KINDS = [
   { value: 'input', label: 'Ask a question' },
   { value: 'reply', label: 'Send a message' },
   { value: 'condition', label: 'Branch on an answer' },
-  { value: 'action', label: 'Run a business action' },
-  { value: 'wait', label: 'Wait' },
+  { value: 'ai_skill', label: 'Run AI skill' },
+  { value: 'assign', label: 'Assign' },
+  { value: 'action', label: 'Run a business action', group: 'Advanced' },
+  { value: 'wait', label: 'Wait', group: 'Advanced' },
   { value: 'ticket', label: 'Raise a ticket' },
   { value: 'topic', label: 'Save a topic' },
   { value: 'handoff', label: 'Hand over to a person' },
@@ -40,6 +42,8 @@ export function newStep(kind, steps) {
   if (kind === 'input') Object.assign(step, { variable: 'answer_' + number, input_type: 'text' })
   if (kind === 'condition') Object.assign(step, { variable: '', operator: 'eq', value: '', then: '', otherwise: '' })
   if (kind === 'action') Object.assign(step, { action: '', arguments: {} })
+  if (kind === 'ai_skill') Object.assign(step, { ai_skill: '', on_reply: 'Continue' })
+  if (kind === 'assign') Object.assign(step, { team: '', user: '' })
   if (kind === 'wait') step.seconds = 60
   if (kind === 'topic') Object.assign(step, { title: '', status: 'Open' })
   return step
@@ -83,7 +87,7 @@ export function cleanStep(step) {
   const { _arguments, ...result } = step
   for (const key of OPTIONAL) if (result[key] === '' || result[key] === null || result[key] === undefined) delete result[key]
   for (const key of ['max_visits', 'min_length', 'max_length', 'minimum', 'maximum', 'seconds']) if (key in result) result[key] = Number(result[key])
-  if (TERMINAL.includes(result.kind) || result.kind === 'condition') delete result.next
+  if (TERMINAL.includes(result.kind) || result.kind === 'condition' || result.kind === 'ai_skill' && result.on_reply === 'Stop') delete result.next
   if (result.kind !== 'input') for (const key of ['input_type', 'choices', 'optional', 'integer_only', 'accept', 'min_length', 'max_length', 'error_text', 'button']) delete result[key]
   if (result.kind === 'input' && !['choice', 'multi_choice'].includes(result.input_type)) delete result.choices
   if (result.kind === 'input' && result.input_type !== 'content') delete result.accept
@@ -114,13 +118,16 @@ const canonical = value => JSON.stringify(value, (_key, item) => item && typeof 
 export function hasUnpublished(flow) {
   if (!flow.published_nodes) return true
   const nodes = typeof flow.nodes === 'string' ? JSON.parse(flow.nodes) : flow.nodes.map(cleanStep)
-  return canonical(nodes) !== canonical(JSON.parse(flow.published_nodes))
+  if (canonical(nodes) !== canonical(JSON.parse(flow.published_nodes))) return true
+  const settings = flow.published_settings
+  return Boolean(settings && ['channel', 'execution_user', 'business_doctype', 'command', 'keywords', 'template_button']
+    .some(key => (flow[key] || '') !== (settings[key] || '')))
 }
 
 // What the next step after this one is, in words, for the step card.
 export function nextLabel(steps, index) {
   const step = steps[index]
-  if (TERMINAL.includes(step.kind)) return 'Flow ends'
+  if (TERMINAL.includes(step.kind) || step.kind === 'ai_skill' && step.on_reply === 'Stop') return 'Flow ends'
   if (step.kind === 'condition') return 'Branches'
   if (step.next) return 'Then ' + step.next
   return index + 1 < steps.length ? 'Then ' + steps[index + 1].id : 'Flow ends'

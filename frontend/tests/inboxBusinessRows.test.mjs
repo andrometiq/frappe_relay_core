@@ -40,7 +40,7 @@ test('a business row marks every chat of its record, a chat row only itself', ()
 test('a chat with no saved name shows its number, and avatars carry no channel dot with one channel', () => {
   assert.match(inbox, /recordTitle\(row\.kind === 'business' \? row : \{ display_name: row\.display_name \|\| row\.contact \}, 'Unknown number'\)/)
   assert.match(inbox, /<span v-if="manyMediums" class="directory-channel"/)
-  assert.match(inbox, /v-if="mode !== 'business' && manyMediums" class="inbox-channel-chips"/)
+  assert.match(inbox, /v-if="manyMediums" class="inbox-channel-chips"/)
 })
 
 test('the channel row shows only switched-on channels, with no "soon" placeholders', () => {
@@ -48,4 +48,17 @@ test('the channel row shows only switched-on channels, with no "soon" placeholde
   assert.doesNotMatch(inbox, />soon</)
   const shown = mediumChips({ enabled_channels: ['WhatsApp'] }).filter(chip => chip.enabled).map(chip => chip.value)
   assert.deepEqual(shown, ['WhatsApp'])
+})
+
+test('a shared read change by any user reloads the chat list and its counts', async () => {
+  const counts = await readFile(new URL('../src/composables/useQueueCounts.js', import.meta.url), 'utf8')
+  assert.match(inbox, /useRealtimeRefresh\(\['Relay Message'\], \[[^\]]*'chats'/)
+  assert.match(counts, /watchRealtime\(\['Relay Message'\], \[[^\]]*'chats'/)
+})
+
+
+test('group browsing receives active filters and keeps filter chips available', () => {
+  assert.match(inbox, /<BusinessDirectory[^>]*:filters="\{ \.\.\.params, medium:/)
+  assert.match(inbox, /v-if="activeFilters.length" class="inbox-filter-chips"/)
+  assert.match(inbox, /params.value.business_type !== 'none'/, 'No-record filters use the unlinked chat directory')
 })

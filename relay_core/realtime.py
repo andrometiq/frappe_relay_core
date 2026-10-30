@@ -6,6 +6,7 @@ import frappe
 incoming_batch = ContextVar('relay_incoming_batch', default=None)
 
 RESOURCES = {
+    'Relay Channel': 'channel_automation',
     'Relay AI Skill': 'skills', 'Relay Business Event Rule': 'business_events',
     'Relay Business Event Delivery': 'business_events',
     'Relay Message': 'messages', 'Relay Contact': 'contacts',
@@ -15,37 +16,44 @@ RESOURCES = {
     'Relay Case': 'cases', 'Relay Flow': 'flows', 'Relay Flow Run': 'flows',
     'Relay Automation Run': 'tickets', 'Relay Flow Action': 'tickets',
     'Relay Message Action': 'tickets',
-    'Relay Ticket Status': 'tickets', 'Relay Ticket Category': 'tickets', 'Relay Ticket Type': 'tickets',
+    'Relay Ticket Status': 'tickets', 'Relay Ticket Type': 'tickets',
 }
 
-def changed(doc, method=None):
+def changed(doc, method=None, messages=None):
     if doc.doctype == 'Relay Hub Event':
         return incoming_changed()
     kind = RESOURCES.get(doc.doctype)
     if not kind:
         return
     # No document IDs, message text, addresses or identities in shared events.
+    # Conversation rooms are permission checked, so they name the changed messages for a re-read of only those.
     frappe.publish_realtime('relay_changed', {'kind': kind},
         room=frappe.realtime.get_doctype_room('Relay Ticket' if kind == 'tickets' else doc.doctype), after_commit=True)
     if doc.doctype == 'Relay Business Event Delivery' or doc.doctype == 'Relay Message' and doc.get('ticket'):
         frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
             room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
+    if doc.doctype == 'Relay Message':
+        messages = messages or [doc.name]
     contact = doc.get('relay_contact')
     if contact:
-        contact_changed(contact, kind)
+        contact_changed(contact, kind, messages)
     if doc.get('business_doctype') and doc.get('business_name'):
         from relay_core.business_inbox import changed as business_changed
-        business_changed(doc.business_doctype,doc.business_name,kind)
+        business_changed(doc.business_doctype,doc.business_name,kind,messages)
 
 
 COUNTED_KINDS = frozenset({'messages', 'reads', 'contacts', 'permissions'})
 
 
-def contact_changed(contact, kind='messages'):
+def conversation_event(kind, messages=None):
+    return {'kind': kind, 'messages': sorted(set(messages))} if messages else {'kind': kind}
+
+
+def contact_changed(contact, kind='messages', messages=None):
     if kind in COUNTED_KINDS:
         from relay_core.queue_counts import invalidate
         invalidate()
-    frappe.publish_realtime('relay_changed', {'kind': kind},
+    frappe.publish_realtime('relay_changed', conversation_event(kind, messages),
         doctype='Relay Contact', docname=contact, after_commit=True)
 
 

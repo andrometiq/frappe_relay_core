@@ -40,7 +40,8 @@ def create(source, provider, reserve=None):
     response = read(source.name)
     if reserve:
         reserve()
-    text = transcribe(provider.model, provider.get_password('api_key'), response.get_data(), response.mimetype)
+    text = transcribe(provider.model, provider.get_password('api_key'), response.get_data(), response.mimetype,
+        allow_in_test_mode=bool(provider.get('allow_in_test_mode')))
     details = {'provider': provider.provider, 'model': provider.model,
                'created_at': str(frappe.utils.now_datetime()), 'source_hash': digest}
     frappe.db.get_value('Relay Message', source.name, 'name', for_update=True)

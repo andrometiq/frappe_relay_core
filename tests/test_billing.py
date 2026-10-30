@@ -111,7 +111,7 @@ class BillingTests(unittest.TestCase):
 
     def test_only_system_manager_can_save_the_margin(self):
         settings = SimpleNamespace(hub_url='', hub_account='', transcription_provider='', whatsapp_margin_percent=40,
-                                   get=lambda field: None)
+                                   get=lambda field: None, get_doc_before_save=lambda: None)
         with self.assertRaises(frappe.PermissionError):
             RelaySettings.validate(settings)
         self.roles = ['System Manager']

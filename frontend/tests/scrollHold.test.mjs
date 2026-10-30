@@ -69,3 +69,28 @@ test('a missing message keeps the previous hold', () => {
   assert.equal(hold.toMessage('absent'), false)
   assert.equal(hold.isAtBottom, true)
 })
+
+test('before the newest page is loaded, a reader at the bottom keeps their message while a newer page appends', () => {
+  const { node, rows, gap } = thread(Array(10).fill(50))
+  const hold = createScrollHold(() => node, () => false)
+  node.scrollTop = node.scrollHeight
+  hold.scrolled()
+  assert.equal(hold.isAtBottom, false)
+  rows.push(...Array(10).fill(0).map((_, index) => ({ name: 'N' + index, height: 50 })))
+  hold.apply()
+  assert.equal(gap(), 500, 'the appended page stays below the reader')
+})
+
+test('a bottom hold never pins to the end while newer rows are not loaded', () => {
+  const { node, rows } = thread(Array(10).fill(50))
+  let end = false
+  const hold = createScrollHold(() => node, () => end)
+  node.scrollTop = 100
+  assert.equal(hold.toBottom(), false)
+  rows.push(...Array(10).fill(0).map((_, index) => ({ name: 'N' + index, height: 50 })))
+  assert.equal(hold.apply(), false, 'a rows change must not push the reader to the newer-page sentinel')
+  assert.equal(node.scrollTop, 100)
+  end = true
+  assert.equal(hold.apply(), true)
+  assert.equal(node.scrollTop, node.scrollHeight - node.clientHeight)
+})

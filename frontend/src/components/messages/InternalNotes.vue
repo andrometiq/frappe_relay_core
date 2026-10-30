@@ -5,6 +5,7 @@ import { Button, ErrorMessage } from "@relay/ui";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import ChatPanel from "./ChatPanel.vue";
 import { coreApi } from "../../services/coreApi";
+import { dateTime } from "../relativeTime";
 // The list of notes for one chat. New notes and replies are written in the composer's Internal note mode.
 const props = defineProps({ contact: String });
 const emit = defineEmits(["close", "open", "reply", "add"]);
@@ -90,7 +91,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesView
       <article v-for="row in rows" :key="row.name">
         <div class="note-author">
           <strong>{{ row.author_name }}</strong
-          ><time>{{ row.creation }}</time>
+          ><time>{{ dateTime(row.creation) }}</time>
         </div>
         <div v-if="row.assigned_to" class="note-task">
           {{ row.task_status === "Done" ? "Completed" : "Open task" }} ·

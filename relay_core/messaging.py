@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.settings import value as connection_value
 from relay_core import channels, timeline, whatsapp
@@ -18,6 +19,7 @@ from relay_core.api import validate_reference
 from relay_core.automation.provenance import context_of, integer, conversation_key
 from relay_core.automation.service import internal_save, outgoing_run
 from relay_core.hub import HubError
+from relay_core.test_mode import TestModeBlocked
 from relay_core.hub_channels import hub_arguments, is_current
 from relay_core.message_types import contacts, location, normalize, preview, text, telegram_vcard
 from relay_core.message_updates import provider_key
@@ -99,6 +101,10 @@ def delivery_fence(action, source, context):
         return
     if not automatic_delivery(payload):
         return
+    if payload.get('handoff_notice'):
+        from relay_core.ai.handoff import authorize_notice
+        authorize_notice(action, source)
+        return
     rows = delivery_episodes(source, context)
     current = [[row.name, int(row.generation or 0)] for row in rows]
     expected = payload.get('delivery_episodes')
@@ -155,7 +161,33 @@ def require_binding(source):
         frappe.throw('Conversation binding is missing or revoked', frappe.PermissionError)
 
 
+def prepare_choices(source, channel, context, data):
+    from relay_core.flows.contracts import choice_options
+    if channel.channel != 'WhatsApp' or context.get('provider') != 'WhatsApp':
+        raise ValueError('Interactive choices require WhatsApp')
+    if set(data) - {'body', 'choices', 'button'}:
+        raise ValueError('Invalid interactive choices')
+    body = text(data.get('body'), 1024, required=True)
+    choices = choice_options(data.get('choices'))
+    if len(choices) > 10:
+        raise ValueError('Interactive choices support at most 10 options')
+    buttons = len(choices) <= 3
+    if any(len(row['label']) > (20 if buttons else 24) for row in choices):
+        raise ValueError('Interactive choice labels are too long')
+    if buttons:
+        action = {'buttons': [{'type': 'reply', 'reply': {'id': row['value'], 'title': row['label']}} for row in choices]}
+    else:
+        action = {'button': text(data.get('button') or 'Choose', 20, required=True),
+                  'sections': [{'rows': [{'id': row['value'], 'title': row['label']} for row in choices]}]}
+    interactive = {'type': 'button' if buttons else 'list', 'body': {'text': body}, 'action': action}
+    arguments = {'operation': 'messages.interactive', 'to': source.sender_endpoint, 'interactive': interactive,
+                 'reply_to': text(context.get('message_id') or source.provider_id or '', 300)}
+    return 'whatsapp.execute', arguments, {'kind': 'text', 'text': body, 'choices': choices}
+
+
 def _prepare(source, channel, context, kind, data):
+    if kind=='choices':
+        return prepare_choices(source, channel, context, data)
     if kind=='flow':
         if channel.channel!='WhatsApp' or context.get('provider')!='WhatsApp' or context.get('group_id'):raise ValueError('Forms require a private WhatsApp conversation')
         if set(data)-{'id','body','cta','screen','token','initial_data'}:raise ValueError('Invalid form arguments')
@@ -174,6 +206,8 @@ def _prepare(source, channel, context, kind, data):
         if channel.channel not in ('Telegram','WhatsApp') or set(data)-{'attachment','caption'}:
             raise ValueError('Attachment sending requires a supported channel and private attachment')
         file,raw=file_content(data.get('attachment'),source)
+        from relay_core.file_limits import get_media_max_bytes, size_error
+        if error:=size_error(len(raw),get_media_max_bytes(channel.channel,kind),f'A {channel.channel} {kind}'):raise ValueError(error)
         caption=text(data.get('caption',''),1024)
         content={'kind':kind,'caption':caption,'attachment':file.name,'attachment_source':source.name,'media':{'file_name':file.file_name,'file_size':len(raw)}}
         if channel.channel=='WhatsApp':
@@ -435,6 +469,8 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
     tool, arguments, content = prepare(source, channel, context, kind, data, quote)
     payload = {'tool': tool, 'arguments': arguments, 'source': source.name, 'content': content,
         'business': [source.get('business_doctype'),source.get('business_name')], 'automation_run':outgoing_run.get(), 'flow_run': outgoing_flow.get()}
+    from relay_core.ai.handoff import outgoing_notice
+    if outgoing_notice.get(): payload['handoff_notice'] = True
     if send_group: payload['send_group'] = send_group
     delivery_snapshot(payload, source, context)
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
@@ -464,17 +500,9 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
             raise ValueError('Conversation changed before sending')
         delivery_fence(action, fresh_source, fresh_context)
         if outgoing_flow.get():
-            automation_scope(action, fresh_source)
+            automation_scope(action, fresh_source, recovery=False)
         if outgoing_run.get():
-            run = frappe.get_doc('Relay Automation Run', outgoing_run.get())
-            if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
-                raise ValueError('Automation is disabled')
-            if run.get('skill'):
-                from relay_core.ai.service import delivery_scope
-                delivery_scope(run, frappe.get_doc('Relay AI Skill', run.skill), fresh_source)
-            else:
-                from relay_core.automation.service import scope
-                scope(run, frappe.get_doc('Relay Automation Policy', run.policy))
+            automation_scope(action, fresh_source, recovery=False)
     except DeliverySuppressed:
         return suppress_delivery(action)
     except (ValueError, frappe.ValidationError, frappe.PermissionError, frappe.DoesNotExistError):
@@ -555,8 +583,12 @@ def admission_scope(action):
     return source, channel, context
 
 
-def automation_scope(action, source):
+def automation_scope(action, source, *, recovery=True):
     payload = object_value(action.payload)
+    if payload.get('handoff_notice'):
+        from relay_core.ai.handoff import authorize_notice
+        authorize_notice(action, source)
+        return
     if payload.get('flow_run'):
         from relay_core.flows.service import scope as flow_scope
         marker = payload['flow_run']
@@ -571,6 +603,10 @@ def automation_scope(action, source):
     if payload.get('automation_run'):
         from relay_core.automation.service import scope
         run = frappe.get_doc('Relay Automation Run', payload['automation_run'])
+        if run.get('stage') == 'Channel':
+            from relay_core.automation.channel import delivery_scope as channel_scope
+            channel_scope(run, source)
+            return
         if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()): raise ValueError('Automation is disabled')
         if run.get('skill'):
             from relay_core.ai.service import delivery_scope, Superseded
@@ -580,6 +616,8 @@ def automation_scope(action, source):
             except Superseded:
                 raise
             except Exception:
+                if not recovery or json.loads(run.decision or '{}').get('decline'):
+                    raise
                 from relay_core.ai.handoff import handoff
                 handoff(run, skill, 'Reply recovery authorization failed; review required')
                 frappe.db.commit()
@@ -597,7 +635,8 @@ def record_submission_error(action, exc):
     action.reload()
     if action.status == 'Submitted' or object_value(action.result or {}).get('_relay_status_id'):
         return {'action':action.name,'status':action.status,'message':action.outbound_message}
-    action.status = 'Rejected' if isinstance(exc, HubError) and exc.metadata.get('error', {}).get('outcome_unknown') is False else 'Uncertain'
+    known_unsent = isinstance(exc, TestModeBlocked) or isinstance(exc, HubError) and exc.metadata.get('error', {}).get('outcome_unknown') is False
+    action.status = 'Rejected' if known_unsent else 'Uncertain'
     action.result = json.dumps(getattr(exc, 'metadata', {}) or {})
     internal_save(action); frappe.db.commit()
     return {'action':action.name,'status':action.status,'message':None,'error':action_error(action)}
@@ -712,7 +751,8 @@ def pending_messages(contact=None, before=None, business_doctype=None, business_
         check_type(business_doctype)
         if not isinstance(business_name, str) or not business_name or len(business_name) > 140:
             frappe.throw('Choose a business record')
-        frappe.get_doc(business_doctype, business_name).check_permission('read')
+        from relay_core.business_access import business_document
+        business_document(business_doctype, business_name)
     if contact or not business:
         validate_reference(contact, 'CON')
         readable_contact(contact)
@@ -795,6 +835,7 @@ def action_snapshots(names):
 
 @frappe.whitelist(methods=['POST'])
 def reconcile(action):
+    document_name(action)
     doc = frappe.get_doc('Relay Message Action', action); doc.check_permission('read')
     source, channel, context = action_target(doc)
     if channel.channel == 'Email' and doc.operation == 'email':
@@ -926,6 +967,7 @@ def retry_key(action):
 
 @frappe.whitelist(methods=['POST'])
 def retry(action):
+    document_name(action)
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
     if doc.operation == 'business_prompt':
@@ -974,6 +1016,7 @@ def resend(doc,key,payload):
 @frappe.whitelist(methods=['POST'])
 def dismiss(action):
     """Delete a rejected send from the sender's chat. Message activity keeps the record."""
+    document_name(action)
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
     if doc.owner!=frappe.session.user or doc.status!='Rejected':

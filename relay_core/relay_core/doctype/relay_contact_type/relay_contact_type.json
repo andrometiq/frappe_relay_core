@@ -10,7 +10,9 @@
     "business_doctype",
     "enabled",
     "label",
-    "grouping_field"
+    "grouping_fields",
+    "grouping_field",
+    "users"
   ],
   "fields": [
     {
@@ -35,10 +37,25 @@
       "fieldtype": "Data"
     },
     {
+      "fieldname": "grouping_fields",
+      "label": "Grouping Fields",
+      "fieldtype": "Table",
+      "options": "Relay Business Group Field",
+      "description": "Direct business fields. Lower priorities appear first; ties follow row order."
+    },
+    {
       "fieldname": "grouping_field",
       "label": "Grouping Field",
       "fieldtype": "Autocomplete",
-      "description": "Choose a field from the business document to group the inbox. Leave blank to show all records."
+      "description": "Choose a field from the business document to group the inbox. Leave blank to show all records.",
+      "hidden": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "users",
+      "fieldtype": "Table",
+      "label": "Users",
+      "options": "Relay Contact Type User"
     }
   ],
   "permissions": [
@@ -57,7 +74,8 @@
       "read": 1,
       "report": 1,
       "export": 1,
-      "print": 1
+      "print": 1,
+      "write": 1
     },
     {
       "role": "System Manager",

@@ -67,7 +67,7 @@ def business_filter(business_type=None, business_name=None):
         return contact.contact.isnull() | contact.contact.notin(linked.where(links.link_doctype.isin(enabled)))
     from relay_core.api import business_types
     if business_type not in business_types():
-        frappe.throw('Invalid business type')
+        frappe.throw('Business type is not accessible', frappe.PermissionError)
     linked = linked.where(links.link_doctype == business_type)
     if business_name:
         linked = linked.where(links.link_name == business_name)

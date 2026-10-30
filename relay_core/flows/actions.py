@@ -17,7 +17,7 @@ def _hook_value(value, key=None):
     # Frappe merges scalar hook leaves into lists; schema arrays remain arrays.
     if isinstance(value, dict):
         return {k:_hook_value(v,k) for k,v in value.items()}
-    if isinstance(value,list) and key not in ('required','enum','contexts'):
+    if isinstance(value,list) and key not in ('required','enum','contexts','channels'):
         return _hook_value(value[-1],key) if value else None
     return value
 
@@ -188,12 +188,12 @@ def _ai_context(run_name, step):
             raise ValueError('Action is outside the event')
         definition = definitions().get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
-        # Transport binding alone does not prove business-record identity.
+        # current() verifies the sender endpoint and the Contact link to this business.
+        # A reference's legacy identity mapping restricts only actions on its doctype.
         references = read_contracts(skill, scope['provider'])
         anchors = {row['identity_fields'][scope['provider']] for row in references
-                   if row.get('identity_anchor') == business[0]}
-        if not anchors:
-            raise ValueError('An identity mapping is required for execution')
+                   if row.get('identity_anchor') == business[0]
+                   and row['doctype'] in definition['permissions']}
         for field in anchors:
             scoped_document(*business, {field: scope['endpoint']})
         for doctype, permission in definition['permissions'].items():
@@ -282,6 +282,8 @@ def execute_ai(run_name, step):
 @frappe.whitelist(methods=['POST'])
 def approve(name, input_hash, scope_fingerprint):
     """Approve an exact proposal only. Execution still rechecks all permissions."""
+    from relay_core.business_access import document_name
+    document_name(name)
     require_access(manage=True)
     try:
         journal = frappe.get_doc('Relay Flow Action', name)

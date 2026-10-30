@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
 from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates
@@ -12,11 +13,12 @@ from relay_core.message_types import text
 
 def business_contact(contact, business_doctype, business_name):
     """Resolve one permission-checked Frappe Contact linked to the business."""
+    document_name(contact)
     require_access()
     from relay_core.business_inbox import check_type
     check_type(business_doctype)
-    business=frappe.get_doc(business_doctype,business_name);business.check_permission('read')
-    person=frappe.get_doc('Contact',contact);person.check_permission('read')
+    business_document(business_doctype, business_name)
+    person=frappe.get_doc('Contact',contact)
     if not any(link.link_doctype==business_doctype and link.link_name==business_name for link in person.links):
         frappe.throw('Contact is not linked to this business',frappe.PermissionError)
     return person
@@ -35,7 +37,36 @@ def business_channels(contact, business_doctype, business_name):
 @frappe.whitelist(methods=['POST'])
 def business_options(contact, business_doctype, business_name, channel=None):
     enroll_business_contact(contact, business_doctype, business_name, channel)
-    return business_channels(contact, business_doctype, business_name)
+    rows = business_channels(contact, business_doctype, business_name)
+    if not rows:
+        from relay_core.identity import contact_identities
+        person = business_contact(contact, business_doctype, business_name)
+        if numbers_held_elsewhere({person.name: contact_identities(person)['WhatsApp']}, channel):
+            frappe.throw(NUMBER_ELSEWHERE)
+    return rows
+
+
+NUMBER_ELSEWHERE = ('This mobile number is saved on another contact too. A WhatsApp number belongs to one contact, '
+                    'so ask a manager to keep it on one contact only.')
+
+
+def numbers_held_elsewhere(numbers, channel=None):
+    """Contacts, from {contact: WhatsApp numbers}, whose number another contact already owns, so enrollment left it there."""
+    from relay_core.contact_lifecycle import endpoint_key
+    filters = {'enabled': 1, 'account': connection_value('relay_hub_account'), 'channel': 'WhatsApp'}
+    if channel:
+        filters['name'] = channel
+    channels = frappe.get_list('Relay Channel', filters=filters, pluck='name')
+    wanted = {}
+    for contact, values in numbers.items():
+        for key in {endpoint_key(name, number) for name in channels for number in values}:
+            wanted.setdefault(key, []).append(contact)
+    if not wanted:
+        return set()
+
+    relays = dict(frappe.get_all('Relay Contact', filters={'contact': ['in', list(numbers)]}, fields=['name', 'contact'], as_list=True))
+    held = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(wanted)]}, fields=['endpoint_key', 'relay_contact'])
+    return {contact for row in held for contact in wanted[row.endpoint_key] if relays.get(row.relay_contact) != contact}
 
 
 def enroll_business_contact(contact, business_doctype, business_name, channel=None):
@@ -91,6 +122,7 @@ def start_contact(contact, business_doctype=None, business_name=None):
 
 
 def target(contact, endpoint, business_doctype=None, business_name=None):
+    document_name(endpoint)
     start_contact(contact, business_doctype, business_name)
     binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
     if binding.relay_contact!=contact or not binding.verified:
@@ -121,15 +153,17 @@ def start_business(contact, business_doctype=None, business_name=None):
 def records(contact):
     """Readable records to choose from when the contact has several and none is marked primary."""
     start_contact(contact)
-    from relay_core.business_access import candidates, primary
+    from relay_core.business_access import candidates, primary, allowed_types
     links = candidates(contact)
     if primary(contact, links):
         return []
     rows = []
+    visible = allowed_types()
     for doctype, name in links:
-        doc = frappe.get_doc(doctype, name)
-        if doc.has_permission('read'):
-            title = doc.get(doc.meta.title_field) if doc.meta.title_field else None
+        if doctype in visible:
+            doc = frappe.get_doc(doctype, name)
+            from relay_core.business_groups import title_field
+            title = doc.get(title_field(doctype))
             rows.append({'doctype': doctype, 'name': name, 'title': str(title or name)})
     return rows
 
@@ -194,6 +228,9 @@ def prepared(contact, endpoint, kind, data, business_doctype=None, business_name
 def channel_endpoint(contact, endpoint, channel):
     """The contact's endpoint on the chosen channel. A WhatsApp number or email address verified on one
     business channel is enrolled on another channel of the same type; Telegram bots need the person first."""
+    document_name(endpoint)
+    if channel is not None and channel != "":
+        document_name(channel)
     if not channel:return endpoint
     binding=frappe.get_doc('Relay Contact Endpoint',endpoint)
     if channel==binding.channel:return endpoint
@@ -218,7 +255,12 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
     endpoint=channel_endpoint(contact,endpoint,channel)
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
     with frappe.cache.lock('relay-start:'+key,timeout=120,blocking_timeout=3):
-        return send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
+        result=send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
+        try:
+            template_media.keep_header(result,kind,messaging.object_value(data))
+        except (OSError,frappe.DoesNotExistError):
+            frappe.log_error(title='Relay template header copy failed')
+        return result
 
 
 def send_locked(contact, endpoint, kind, data, request_key, business_doctype, business_name):

@@ -8,7 +8,7 @@ import { defaultMedium, mediumOptions } from '../src/services/enabledChannels.js
 import { mergeChangedRows, newestActivity, onlyChangedRows } from '../src/services/inboxRows.js'
 import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
 
-test('the chat list loads the next page when its end scrolls into view, and stops at the last page', { timeout: 3000 }, async () => {
+test('the unread chat list loads the next page when its end scrolls into view, and stops at the last page', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'newestActivity', 'onlyChangedRows', 'useChatFolders',
@@ -36,7 +36,7 @@ test('the chat list loads the next page when its end scrolls into view, and stop
     state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, () => {}, computed, ref, watch, coreApi,
       () => {}, mediumOptions, () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, newestActivity, onlyChangedRows,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
-      () => false, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters))
+      () => false, TABS, channelOptions, filterChips, filterParams, (...args) => ({ ...loadFilters(...args), tab: 'unread' }), saveFilters, withoutFilter, withoutFilters))
     await mount()
     while (state.loading.value) await new Promise(resolve => setImmediate(resolve))
     state.more.value = {}

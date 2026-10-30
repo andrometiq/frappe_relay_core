@@ -1,26 +1,26 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { COLOURS, emptySettings, movedNames, pickerOptions, removalHint, statusLook } from '../src/services/ticketSettings.js'
-import { ticketPayload } from '../src/services/ticketForm.js'
+import { COLOURS, assigneeChartRows, readTicketRoute, ticketFilterRoute, ticketFiltersFromRoute, ticketRoute, chartRows, emptySettings, isClosed, movedNames, pickerOptions, removalHint, statusLook } from '../src/services/ticketSettings.js'
 
 const settings = { ...emptySettings(), statuses: [
-  { name: 'Open', label: 'Open', colour: 'amber', enabled: 1 }, { name: 'Started', label: 'Started', colour: 'red', enabled: 1 },
-  { name: 'Old', label: 'Old', colour: 'gray', enabled: 0 }] }
+  { name: 'Open', label: 'Open', colour: 'amber', state: 'Open' }, { name: 'Started', label: 'Started', colour: 'red', state: 'Open' },
+  { name: 'Done', label: 'Done', colour: 'green', state: 'Closed' }] }
 
-test('a ticket takes its badge label and colour from its configured status', () => {
-  assert.deepEqual(statusLook(settings, { ticket_status: 'Started', status: 'In progress' }), { label: 'Started', theme: 'red' })
+test('a ticket takes its badge label and colour from its status', () => {
+  assert.deepEqual(statusLook(settings, { ticket_status: 'Started' }), { label: 'Started', theme: 'red' })
+  assert.deepEqual(statusLook(settings, { ticket_status: 'Gone' }), { label: 'Gone', theme: 'gray' })
 })
 
-test('a ticket without a configured status falls back to its state', () => {
-  assert.deepEqual(statusLook(settings, { status: 'Resolved' }), { label: 'Resolved', theme: 'green' })
-  assert.deepEqual(statusLook(settings, { ticket_status: 'Gone', status: 'Closed' }), { label: 'Closed', theme: 'gray' })
+test('a ticket is closed when its status is of type Closed', () => {
+  assert.equal(isClosed(settings, { ticket_status: 'Done' }), true)
+  assert.equal(isClosed(settings, { ticket_status: 'Started' }), false)
+  assert.equal(isClosed(settings, null), false)
 })
 
-test('pickers list enabled values, the current value even when off, and an optional All entry', () => {
-  assert.deepEqual(pickerOptions(settings.statuses).map(row => row.value), ['Open', 'Started'])
-  assert.deepEqual(pickerOptions(settings.statuses, 'Old').map(row => row.value), ['Open', 'Started', 'Old'])
-  assert.deepEqual(pickerOptions(settings.statuses, '', 'All tickets')[0], { value: '', label: 'All tickets' })
+test('pickers list values in order with an optional first entry', () => {
+  assert.deepEqual(pickerOptions(settings.statuses).map(row => row.value), ['Open', 'Started', 'Done'])
+  assert.deepEqual(pickerOptions(settings.statuses, 'All')[0], { value: '', label: 'All' })
 })
 
 test('moving a row gives the new order and refuses to move past either end', () => {
@@ -31,9 +31,14 @@ test('moving a row gives the new order and refuses to move past either end', () 
   assert.equal(movedNames(rows, 2, 1), null)
 })
 
-test('a value that tickets use says to turn it off', () => {
+test('a value that tickets use says it cannot be deleted', () => {
   assert.equal(removalHint({ tickets: 0 }), '')
-  assert.match(removalHint({ tickets: 1 }), /1 ticket use this/)
+  assert.match(removalHint({ tickets: 1 }), /1 ticket use this, so it cannot be deleted/)
+})
+
+test('chart bars scale to the largest count and name empty values', () => {
+  const rows = chartRows([{ assigned_to: 'a@x.invalid', tickets: 8 }, { assigned_to: null, tickets: 2 }], 'assigned_to', user => user || 'Unassigned')
+  assert.deepEqual(rows, [{ key: 'a@x.invalid', label: 'a@x.invalid', tickets: 8, width: 100 }, { key: '', label: 'Unassigned', tickets: 2, width: 25 }])
 })
 
 test('colours are the badge themes the UI kit supports', () => {
@@ -41,13 +46,7 @@ test('colours are the badge themes the UI kit supports', () => {
   for (const colour of COLOURS) assert.ok(badge.includes(colour + ': '), colour)
 })
 
-test('the ticket form sends the chosen category and type only when set', () => {
-  const form = { subject: 'S', brief: '', priority: 'Low', assignedTo: '', tagged: [] }
-  assert.equal('category' in ticketPayload(form, []), false)
-  assert.deepEqual(ticketPayload({ ...form, category: 'Support', ticketType: 'General' }, []).ticket_type, 'General')
-})
-
-test('ticket screens read statuses, categories and types from the settings API, not from lists in the code', () => {
+test('ticket screens read statuses and types from the settings API, not from lists in the code', () => {
   for (const file of ['components/TicketsWorkspace.vue', 'components/messages/CreateTicketDialog.vue']) {
     const source = readFileSync(new URL('../src/' + file, import.meta.url), 'utf8')
     assert.ok(!/Payment evidence|'In progress', 'Resolved'/.test(source), file)
@@ -83,20 +82,70 @@ export async function resolve(specifier, context, next) {
   const { settings, load, apply } = useTicketSettings()
 
   const first = load(), second = load(true)
-  pending[1]({ categories: ['Renamed'] }); await second
-  pending[0]({ categories: ['Old'] }); await first
-  assert.deepEqual(settings.value.categories, ['Renamed'])
+  pending[1]({ types: ['Renamed'] }); await second
+  pending[0]({ types: ['Old'] }); await first
+  assert.deepEqual(settings.value.types, ['Renamed'])
   await load()
-  assert.deepEqual(settings.value.categories, ['Renamed'])
+  assert.deepEqual(settings.value.types, ['Renamed'])
 
   const third = load(true)
-  apply({ categories: ['Saved'] })
-  pending[2]({ categories: ['Renamed'] }); await third
-  assert.deepEqual(settings.value.categories, ['Saved'])
+  apply({ types: ['Saved'] })
+  pending[2]({ types: ['Renamed'] }); await third
+  assert.deepEqual(settings.value.types, ['Saved'])
 })
 
-test('only filters behind the Filters button count as active chips', async () => {
-  const { activeTicketFilters, emptyTicketFilters } = await import('../src/services/ticketSettings.js')
-  assert.deepEqual(activeTicketFilters(emptyTicketFilters()), [])
-  assert.deepEqual(activeTicketFilters({ ...emptyTicketFilters(), query: 'parcel', ticket_status: 'Open', mine: 'assigned', category: 'Support', assigned_to: 'a@x.invalid' }), ['category', 'assigned_to'])
+
+test('assignee chart keeps the top eight open-ticket owners on one line and totals the rest', () => {
+  const counts = Array.from({ length: 11 }, (_, index) => ({ assigned_to: index === 10 ? null : `user${index}@example.invalid`, tickets: 11 - index }))
+  const rows = assigneeChartRows(counts.reverse(), user => user?.startsWith('user') ? 'Same name' : 'Unassigned')
+  assert.equal(rows.length, 9)
+  assert.equal(rows[0].label, 'Same name')
+  assert.equal(rows[0].title, 'Same name (user0@example.invalid)')
+  assert.equal(rows[8].label, 'Others')
+  assert.equal(rows[8].tickets, 6)
+  assert.equal(rows.reduce((sum, row) => sum + row.tickets, 0), 66)
+  for (const row of rows) {
+    assert.equal(row.filters.state, 'Open')
+    const filters = ticketFiltersFromRoute(ticketFilterRoute(row.filters))
+    for (const [field, value] of Object.entries(row.filters)) assert.equal(filters[field], value)
+  }
+  assert.deepEqual(JSON.parse(rows[8].filters.exclude_assignees), Array.from({ length: 8 }, (_, index) => `user${index}@example.invalid`))
+  assert.equal(assigneeChartRows(counts.slice(0, 2), user => user || 'Unassigned').length, 2)
+  assert.deepEqual(assigneeChartRows([], user => user), [])
+})
+
+test('the Tickets URL holds the view, every list filter and the open ticket', () => {
+  assert.equal(ticketRoute(), '#/tickets')
+  assert.equal(ticketRoute({ view: 'settings' }), '#/tickets?view=settings')
+  assert.equal(ticketRoute({ view: 'dashboard', ticket: 'TKT-1' }), '#/tickets?view=dashboard&ticket=TKT-1')
+  const filters = { query: 'late parcel', ticket_status: 'Open', mine: 1, state: 'Open', assigned: 1, business_type: 'Customer' }
+  const route = ticketRoute({ view: 'tickets', filters, ticket: 'TKT-2' })
+  assert.deepEqual(readTicketRoute(route), { view: 'tickets', ticket: 'TKT-2', filters: { ...filters, assigned: '1' } })
+  assert.equal(ticketRoute({ view: 'tickets', filters: { query: '', ticket_status: '', mine: 0 } }), '#/tickets?view=tickets')
+  assert.equal(ticketRoute({ view: 'dashboard', filters }), '#/tickets')
+})
+
+test('a bare ticket link opens over the list and unknown views fall back to the dashboard', () => {
+  assert.equal(readTicketRoute('#/tickets?ticket=TKT-3').view, 'tickets')
+  assert.equal(readTicketRoute('#/tickets?view=other').view, 'dashboard')
+  assert.equal(readTicketRoute('#/tickets').view, 'dashboard')
+})
+
+test('empty assignee and type filters survive navigation and differ from all tickets', () => {
+  const unassigned = ticketFiltersFromRoute(ticketFilterRoute({ assigned_to: '' }))
+  const noType = ticketFiltersFromRoute(ticketFilterRoute({ ticket_type: '' }))
+  assert.equal(unassigned.assigned_to, '')
+  assert.equal(noType.ticket_type, '')
+  assert.equal(ticketFiltersFromRoute('#/tickets').assigned_to, undefined)
+  assert.equal(ticketFiltersFromRoute(ticketFilterRoute({ ticket_type: 'Orders & returns' })).ticket_type, 'Orders & returns')
+})
+
+
+test('legacy amber colours render without rewriting saved settings', () => {
+  assert.deepEqual(statusLook(settings, { ticket_status: 'Open' }), { label: 'Open', theme: 'blue' })
+  const legacy = { statuses: [{ name: 'Archived', label: 'Archived', colour: 'amber', state: 'Closed' }] }
+  assert.equal(statusLook(legacy, { ticket_status: 'Archived' }).theme, 'gray')
+  assert.equal(settings.statuses[0].colour, 'amber')
+  const pending = { statuses: [{ name: 'Pending', label: 'Pending', colour: 'amber', state: 'Open' }] }
+  assert.equal(statusLook(pending, { ticket_status: 'Pending' }).theme, 'gray')
 })

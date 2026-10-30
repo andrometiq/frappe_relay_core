@@ -3,7 +3,7 @@ USER = 'Relay Communication User'
 TEAM_USER = 'Relay Communication Team User'
 MANAGER = 'Relay Communication Manager'
 HUB_SERVICE = 'Relay Hub Service'
-# These roles see every team's conversations; a User sees only its own teams.
+# Legacy team endpoints retain these roles; business access is owned by business_access.
 ALL_TEAMS_ROLES = frozenset({TEAM_USER, MANAGER, 'System Manager'})
 
 
@@ -16,6 +16,8 @@ def sees_all_teams(user=None):
 def readable_contact(name):
     """Relay roles decide who sees a conversation; the Frappe Contact is read for its name only."""
     import frappe
+    from relay_core.business_access import document_name
+    document_name(name)
     relay = frappe.get_doc('Relay Contact', name); relay.check_permission('read')
     return relay, frappe.get_doc('Contact', relay.contact)
 
@@ -28,7 +30,8 @@ def require_administrator():
 
 def can_manage(user=None):
     import frappe
-    return frappe.has_permission('Relay Team', 'write', user=user)
+    user = user or frappe.session.user
+    return user == 'Administrator' or bool({MANAGER, 'System Manager'}.intersection(frappe.get_roles(user)))
 
 
 def can_configure(user=None):
@@ -45,6 +48,8 @@ def require_access(doctype='Relay Contact', ptype='read', *, configure=False, ma
         doctype, ptype = 'Relay Team', 'write'
     if not frappe.has_permission(doctype, ptype):
         frappe.throw('Not permitted', frappe.PermissionError)
+    if (manage or doctype in ('Relay Campaign', 'Relay Campaign Recipient')) and not can_manage():
+        frappe.throw('Only communication managers can perform this action', frappe.PermissionError)
 
 
 def install_roles():
@@ -65,11 +70,16 @@ def sequential_name(kind):
 def after_migrate():
     import frappe
     install_roles()
+    from relay_core.ai.skills import ensure_default
+    ensure_default()
     from relay_core.timeline import install_indexes
     install_indexes()
+    from relay_core.ai.memory import install_indexes as install_memory_indexes
+    install_memory_indexes()
     frappe.db.add_index('Relay Message', ['relay_contact', 'name'], 'relay_contact_history')
     frappe.db.add_index('Relay Message', ['relay_contact', 'channel', 'name'], 'relay_channel_history')
     frappe.db.add_index('Relay Message', ['conversation_key', 'name'], 'relay_conversation_history')
+    frappe.db.add_index('Relay Message', ['sender_endpoint', 'name'], 'relay_endpoint_history')
     frappe.db.add_index('Relay Flow Event', ['status','name'], 'relay_flow_pending')
     frappe.db.add_index('Relay Flow Event', ['conversation_key','status','name'], 'relay_flow_order')
     frappe.db.add_index('Relay Flow Run', ['conversation_key','status','name'], 'relay_flow_active')
@@ -91,24 +101,18 @@ def after_migrate():
     frappe.db.add_index('Relay Campaign Recipient', ['campaign','status','name'], 'relay_campaign_pending')
     frappe.db.add_index('Relay Ticket Notification', ['status','next_attempt'], 'relay_ticket_pending')
     frappe.db.add_index('Relay Hub Event', ['projection_status','name'], 'relay_event_projection')
+    from relay_core.relay_chats import install_index as install_chat_index
+    install_chat_index()
     from relay_core.ticket_settings import seed_defaults
     seed_defaults()
 
 
 def assignment_allowed(contact, user=None):
-    """The conversation row rule: all teams, or assigned to me, my team, or my claimed business group."""
+    """A conversation follows its Contact's configured business types."""
     import frappe
-    user = user or frappe.session.user
-    if sees_all_teams(user):
-        return True
-    if not frappe.has_permission('Relay Contact', 'read', user=user):
-        return False
-    from relay_core.business_groups import responsible
-    if responsible(contact, user): return True
-    row = frappe.db.get_value('Relay Conversation Assignment', {'relay_contact':contact}, ['team','assigned_to'], as_dict=True)
-    if not row: return False
-    if row.assigned_to == user: return True
-    return bool(row.team and frappe.db.exists('Relay Team Member', {'parent':row.team, 'parenttype':'Relay Team','user':user}))
+    from relay_core.business_access import person_allowed
+    person = frappe.db.get_value('Relay Contact', contact, 'contact')
+    return bool(person and person_allowed(person, user))
 
 
 def contact_permission(doc, user=None, permission_type=None):
@@ -121,18 +125,12 @@ def message_permission(doc, user=None, permission_type=None):
 
 
 def assignment_condition(user=None, *, message=False):
-    """SQL twin of assignment_allowed."""
-    import frappe
-    user = user or frappe.session.user
-    if sees_all_teams(user): return ''
-    if not frappe.has_permission('Relay Contact', 'read', user=user): return '1=0'
-    contact='`tabRelay Message`.relay_contact' if message else '`tabRelay Contact`.name'
-    quoted=frappe.db.escape(user)
-    direct=f"""{contact} IN (SELECT a.relay_contact FROM `tabRelay Conversation Assignment` a
-        WHERE a.assigned_to={quoted} OR a.team IN
-        (SELECT m.parent FROM `tabRelay Team Member` m WHERE m.parenttype='Relay Team' AND m.user={quoted}))"""
-    from relay_core.business_groups import responsibility_condition
-    return '('+direct+' OR '+responsibility_condition(user,contact)+')'
+    """SQL twin of assignment_allowed, shared by inbox and message queries."""
+    from relay_core.business_access import person_condition
+    if message:
+        return ('`tabRelay Message`.relay_contact IN (SELECT name FROM `tabRelay Contact` WHERE '
+                + person_condition('`tabRelay Contact`.contact', user) + ')')
+    return person_condition('`tabRelay Contact`.contact', user)
 
 
 def contact_query(user=None):
@@ -143,14 +141,14 @@ def message_query(user=None):
     """Messages of visible conversations. Triage messages stay hidden from everyone but Administrator."""
     import frappe
     if (user or frappe.session.user) == 'Administrator': return ''
+    from relay_core.business_access import message_condition
     assignment = assignment_condition(user, message=True)
-    visible = 'COALESCE(`tabRelay Message`.legacy_triage,0)=0'
-    return f'({assignment}) AND {visible}' if assignment else visible
+    business = message_condition(user)
+    return f"({assignment}) AND COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND ({business})"
 
 
 def require_business_assignment(contact):
     import frappe
-    if sees_all_teams(): return
     relay=frappe.db.get_value('Relay Contact',{'contact':contact},'name')
     if not relay or not assignment_allowed(relay):
         frappe.throw('This business contact is not assigned to you',frappe.PermissionError)

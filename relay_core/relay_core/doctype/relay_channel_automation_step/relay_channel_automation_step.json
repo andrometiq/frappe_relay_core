@@ -1,0 +1,79 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Channel Automation Step",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "step",
+    "enabled",
+    "ai_skill",
+    "team",
+    "user",
+    "ticket_rule",
+    "message",
+    "on_reply"
+  ],
+  "fields": [
+    {
+      "fieldname": "step",
+      "fieldtype": "Select",
+      "label": "Step",
+      "options": "Flow\nAI skill\nAssign\nTicket\nOut of hours reply",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "fieldtype": "Check",
+      "label": "Enabled",
+      "default": "1",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "ai_skill",
+      "fieldtype": "Link",
+      "label": "AI skill",
+      "options": "Relay AI Skill",
+      "depends_on": "eval:doc.step=='AI skill'"
+    },
+    {
+      "fieldname": "team",
+      "fieldtype": "Link",
+      "label": "Team",
+      "options": "Relay Team",
+      "depends_on": "eval:doc.step=='Assign'"
+    },
+    {
+      "fieldname": "user",
+      "fieldtype": "Link",
+      "label": "User",
+      "options": "User",
+      "depends_on": "eval:doc.step=='Assign'"
+    },
+    {
+      "fieldname": "ticket_rule",
+      "fieldtype": "Select",
+      "label": "Ticket rule",
+      "options": "Create if not resolved\nAlways\nNever",
+      "default": "Create if not resolved",
+      "depends_on": "eval:doc.step=='Ticket'"
+    },
+    {
+      "fieldname": "message",
+      "fieldtype": "Small Text",
+      "label": "Message",
+      "depends_on": "eval:doc.step=='Out of hours reply'"
+    },
+    {
+      "fieldname": "on_reply",
+      "fieldtype": "Select",
+      "label": "After handling",
+      "options": "Stop\nContinue",
+      "default": "Stop"
+    }
+  ],
+  "permissions": [],
+  "autoname": "RELAY-CAS-.##########",
+  "naming_rule": "Expression (old style)"
+}

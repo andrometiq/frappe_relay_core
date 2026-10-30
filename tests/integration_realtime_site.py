@@ -14,8 +14,12 @@ try:
  with patch.object(frappe,'publish_realtime') as publish:
   changed(doc)
   assert publish.call_count==2
+  shared,conversation=publish.call_args_list
+  assert shared.args==('relay_changed',{'kind':'messages'})
+  # Only the permission-checked conversation room names the changed message.
+  assert conversation.args==('relay_changed',{'kind':'messages','messages':['private-message']})
+  assert conversation.kwargs['docname']=='private-contact'
   for call in publish.call_args_list:
-   assert call.args==('relay_changed',{'kind':'messages'})
    assert call.kwargs['after_commit'] is True
    assert 'private body' not in repr(call)
   publish.reset_mock();changed(frappe._dict(doctype='User',name='private-user'));assert not publish.called

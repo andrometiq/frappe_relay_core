@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
 from relay_core.automation.service import internal_save
@@ -200,11 +201,13 @@ def upload_recording(provider_id):
 
 @frappe.whitelist(methods=['GET'])
 def recordings(call):
+    document_name(call)
     require_access();readable(frappe.get_doc('Relay Call',call))
     return frappe.get_all('Relay Call Recording',filters={'call':call},fields=['name','creation','uploaded_by','file_size','content_type'],order_by='creation desc',limit_page_length=30)
 
 
 def recording_content(name):
+    document_name(name)
     require_access();record=frappe.get_doc('Relay Call Recording',name);readable(frappe.get_doc('Relay Call',record.call))
     file=frappe.get_doc('File',record.file)
     if not file.is_private or file.attached_to_doctype!='Relay Call Recording' or file.attached_to_name!=record.name:
@@ -322,6 +325,7 @@ def uncertain_attempts(contact=None, before=None):
 
 def resolve_attempt(name, outcome, evidence, provider_id=None):
     """Record verified operator evidence without issuing any provider request."""
+    document_name(name)
     require_access(manage=True)
     if outcome not in {'Not started', 'Existing call'}:
         frappe.throw('Choose a verified call outcome')

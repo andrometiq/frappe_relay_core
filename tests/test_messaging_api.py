@@ -88,7 +88,7 @@ class SendTests(unittest.TestCase):
         self.window.assert_not_called()  # Templates open the conversation.
 
     def test_template_values_must_match_the_template(self):
-        cases = [(NAMED, {'customer_name': 'Asha', 'order': 'SO-25', 'button:0': 'x'}, None, 'Missing Header image URL'),
+        cases = [(NAMED, {'customer_name': 'Asha', 'order': 'SO-25', 'button:0': 'x'}, None, 'Missing Header image attachment'),
                  (POSITIONAL, ['SO-25'], None, 'Missing Body value 2'), (POSITIONAL, ['a', 'b', 'c'], None, 'more values'),
                  (POSITIONAL, 'not json', None, '')]
         for template, params, header, message in cases:

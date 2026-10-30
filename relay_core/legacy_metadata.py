@@ -3,6 +3,7 @@ import hashlib
 import json
 
 import frappe
+from relay_core.business_access import business_document
 from relay_core import legacy_bundle as bundles
 from relay_core.permissions import require_access, sequential_name
 
@@ -29,7 +30,7 @@ def validate_mapping(job, manifest):
         from relay_core.business_access import candidates
         if (job.business_doctype, job.business_name) not in candidates(job.relay_contact):
             frappe.throw('Explicit business mapping must be configured and linked to this Contact')
-        frappe.get_doc(job.business_doctype, job.business_name).check_permission('read')
+        business_document(job.business_doctype, job.business_name)
     # A different source sending number must not accidentally merge into this channel.
     for other in frappe.get_all('Relay Legacy Import', filters={'channel': job.channel, 'status': ['!=', 'Draft']},
                                 fields=['source_site', 'source_channel', 'source_metadata'], limit_page_length=1):
@@ -68,7 +69,7 @@ def prepare_import(manifest, channel, *, source_bundle=None, business=None, user
             'display_name': identity.get('display_value') or manifest['endpoint'], 'automation_paused': 1}, sequential_name('contact')).name
     if business:
         doctype, name = business
-        frappe.get_doc(doctype, name).check_permission('read')
+        business_document(doctype, name)
         if not frappe.db.exists('Dynamic Link', {'parent': contact_name, 'parenttype': 'Contact', 'link_doctype': doctype, 'link_name': name}):
             direct_document('Dynamic Link', {'parent': contact_name, 'parenttype': 'Contact', 'parentfield': 'links',
                 'link_doctype': doctype, 'link_name': name, 'idx': 1}, frappe.generate_hash(length=10))

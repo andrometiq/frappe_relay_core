@@ -33,8 +33,8 @@ def is_plain(field) -> bool:
 def segment_fields(doctype: str) -> list:
     """The type's grouping field, then the customer or supplier group and territory when the DocType has them."""
     meta = frappe.get_meta(doctype)
-    grouping = frappe.db.get_value('Relay Contact Type', {'business_doctype': doctype}, 'grouping_field')
-    names = dict.fromkeys(filter(None, (grouping, *SEGMENT_FIELDS)))
+    from relay_core.business_groups import configuration
+    names = dict.fromkeys((*configuration(doctype), *SEGMENT_FIELDS))
     return [field for field in map(meta.get_field, names)
             if is_plain(field) and field.fieldtype in ('Link', 'Select', 'Data')]
 
@@ -244,14 +244,16 @@ def source_values(rows: list, used: set):
     persons = {row.name: row for row in frappe.get_all('Contact', filters={'name': ['in', people]},
                fields=['name', *contact_fields], limit_page_length=0)} if contact_fields else {}
     records = {}
+    from relay_core.business_access import require_type
     for doctype, fields in record_fields(used).items():
+        require_type(doctype)
         links = frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links',
                                'parent': ['in', people], 'link_doctype': doctype},
                                fields=['parent', 'link_name'], order_by='idx asc', limit_page_length=0)
         first = {}
         for link in links:
             first.setdefault(link.parent, link.link_name)
-        readable = {row.name: row for row in frappe.get_list(doctype, filters={'name': ['in', list(set(first.values()))]},
+        readable = {row.name: row for row in frappe.get_all(doctype, filters={'name': ['in', list(set(first.values()))]},
                     fields=['name', *fields], limit_page_length=0)} if first else {}
         records[doctype] = {person: readable.get(record) for person, record in first.items()}
 

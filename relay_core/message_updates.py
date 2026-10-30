@@ -148,7 +148,7 @@ def apply_updates(payload, channel, event):
             if doc.direction!='Outgoing' or context.get('group_id')!=destination:
                 unresolved=True;continue
             from relay_core.delivery_receipts import record
-            if record(doc,update):delivery_contacts[doc.relay_contact]=doc
+            if record(doc,update):delivery_contacts.setdefault(doc.relay_contact,[]).append(doc)
         history = doc.get('message_updates') or {}
         if isinstance(history, str): history = json.loads(history)
         key = update['kind'] if update['kind'] in ('edit','delivery') else 'reaction:' + update['actor']
@@ -191,7 +191,7 @@ def apply_updates(payload, channel, event):
                             update_modified=update['kind'] != 'delivery')
         from relay_core.realtime import changed
         if update['kind'] == 'delivery':
-            delivery_contacts[doc.relay_contact] = doc
+            delivery_contacts.setdefault(doc.relay_contact, []).append(doc)
         else:
             changed(frappe.get_doc('Relay Message', name))
         if update['kind'] == 'edit':
@@ -202,7 +202,7 @@ def apply_updates(payload, channel, event):
     if delivery_contacts:
         from relay_core.realtime import changed, contact_changed
         first, *remaining = delivery_contacts.values()
-        changed(first)
-        for doc in remaining:
-            contact_changed(doc.relay_contact)
+        changed(first[0], messages=[doc.name for doc in first])
+        for docs in remaining:
+            contact_changed(docs[0].relay_contact, messages=[doc.name for doc in docs])
     return 'Uncategorized' if unresolved else 'Projected'

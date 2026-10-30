@@ -26,3 +26,22 @@ export function listTime(value, now = Date.now()) {
   if (days < 7) return date.toLocaleDateString([], { weekday: 'short' })
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) })
 }
+
+// A full date and clock time, such as "28 Oct, 17:31".
+export function dateTime(value) {
+  const date = new Date(String(value || '').replace(' ', 'T'))
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+// Offset-aware server deadlines are displayed in the reader's local timezone.
+export function deadlineTime(value, now = Date.now()) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const minutes = Math.ceil(Math.abs(date.getTime() - now) / 60000)
+  const amount = minutes >= 1440 ? Math.ceil(minutes / 1440) : minutes >= 60 ? Math.ceil(minutes / 60) : minutes
+  const unit = minutes >= 1440 ? 'day' : minutes >= 60 ? 'hour' : 'minute'
+  const span = `${amount} ${unit}${amount === 1 ? '' : 's'}`
+  const relative = minutes < 1 ? 'now' : date.getTime() > now ? `in ${span}` : `${span} ago`
+  return `${date.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })} · ${relative}`
+}

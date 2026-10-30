@@ -2,6 +2,7 @@
 import hashlib
 from contextvars import ContextVar
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core import tickets
 
@@ -14,6 +15,7 @@ def digest(*parts):
 
 
 def destination(name):
+    document_name(name)
     endpoint = frappe.get_doc('Relay Contact Endpoint', name)
     # Endpoint configuration is administrator-only. This facade exposes only
     # verified endpoints belonging to the current user's readable Contact.
@@ -110,7 +112,7 @@ def destinations(query='', after=None):
 
 def on_update(doc, method=None):
     previous = doc.get_doc_before_save()
-    if not previous or (previous.status == doc.status and previous.get('assigned_to') == doc.get('assigned_to')):
+    if not previous or (previous.get('ticket_status') == doc.get('ticket_status') and previous.get('assigned_to') == doc.get('assigned_to')):
         return
     # Ticket changes are transactionally journaled. Recovery submits with the same
     # provider request key after crashes, including a crash after provider acceptance.
@@ -118,7 +120,7 @@ def on_update(doc, method=None):
                                    fields=['name'], limit_page_length=101)
     if len(subscriptions)>100:
         frappe.throw('Ticket notification subscriber limit exceeded')
-    body = f'{doc.name}: {doc.subject}\nStatus: {doc.status}\nAssigned to: {doc.get("assigned_to") or "Unassigned"}'
+    body = f'{doc.name}: {doc.subject}\nStatus: {doc.get("ticket_status")}\nAssigned to: {doc.get("assigned_to") or "Unassigned"}'
     body += '\n'+frappe.utils.get_url('/relay#/tickets?ticket='+doc.name)
     old = getattr(frappe.flags, 'relay_automation_internal', False)
     frappe.flags.relay_automation_internal = True
@@ -155,7 +157,7 @@ def business_context(row):
         raise frappe.PermissionError('Ticket must have one business for notifications')
     business = next(iter(businesses))
     if not all(business):raise frappe.PermissionError('Ticket business is incomplete')
-    frappe.get_doc(*business).check_permission('read')
+    business_document(*business)
     return business
 
 
@@ -171,7 +173,7 @@ def recipient_business(contact, channel, address, doctype=None, name=None, notif
         sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)
         if sub.user != frappe.session.user:
             raise frappe.PermissionError('Notification owner changed')
-        frappe.get_doc(doctype, name).check_permission('read')
+        business_document(doctype, name)
         return doctype, name
     if row.status != 'Pending':raise frappe.PermissionError('Notification is no longer pending')
     endpoint, target, business = authorized(row)

@@ -1,6 +1,6 @@
 # Image and voice automation
 
-Image analysis and voice transcription are off by default. In installed Settings → Automation policies, explicitly enable the required modality. Choose a vision-capable AI Model for the policy. Voice requires a separate OpenAI provider entry whose model is a transcription model available to that account, then select it as the policy's voice transcription provider.
+Enable AI features in Relay Settings first. Received voice messages use the configured transcription provider and keep text/status on the message. The skill reply path uses an existing transcript in its original language; if none is available it hands off with a clear explanation. It does not transcribe again or guess from audio. Image observations require a vision-capable AI Model. Legacy policy media flags still apply to the older multimodal context helper. See [AI skills and business events](ai-skills-and-business-events.md) for language and script checks.
 
 Inputs are taken only from the authenticated source message through the same private attachment boundary used by the inbox. No model-authored URL, filename or recipient is accepted. Source business access, assignment, channel/account, verified endpoint, policy version and human takeover state remain checked before inference and before effects.
 

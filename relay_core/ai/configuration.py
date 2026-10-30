@@ -1,7 +1,7 @@
 """Permission-checked event configuration and non-sending previews."""
 import json
-from types import SimpleNamespace
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.ai.tools import contracts, as_user
@@ -26,11 +26,10 @@ def read_contracts(doc, provider=None):
     """Validate declarations only; tools.py owns runtime identity enforcement."""
     rows = _list(doc.allowed_tools or '[]', 'read references')
     for row in rows:
-        if not isinstance(row, dict) or not READ_FIELDS <= row.keys() or row.keys() - READ_FIELDS - SCOPE_FIELDS:
+        if not isinstance(row, dict) or not READ_FIELDS <= row.keys() or row.keys() - READ_FIELDS - SCOPE_FIELDS - {'report'}:
             raise ValueError('Invalid read reference fields')
     # Reuse the existing scalar-field and direct business Link validation.
-    contracts(SimpleNamespace(business_doctype=doc.business_doctype,
-        allowed_tools=json.dumps([{key: row[key] for key in READ_FIELDS} for row in rows])))
+    contracts(doc)
     from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
     for row in rows:
         declared = SCOPE_FIELDS.intersection(row)
@@ -157,13 +156,15 @@ def validate_skill(doc):
 def directory(after=None):
     require_access('Relay AI Skill')
     rows = frappe.get_list('Relay AI Skill', filters={'name': ['>', after]} if after else {},
-        fields=['name', *FIELDS], order_by='name asc', page_length=31)
+        fields=['name', 'sample_key', *FIELDS], order_by='name asc', page_length=31)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 
 
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def save(values, name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access('Relay AI Skill', 'write')
     if isinstance(values, str): values = frappe.parse_json(values)
     if not isinstance(values, dict) or set(values) - set(FIELDS):
@@ -176,6 +177,8 @@ def save(values, name=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def test_skill(name, message):
+    document_name(message)
+    document_name(name)
     require_access('Relay AI Skill', 'write')
     skill = frappe.get_doc('Relay AI Skill', name); skill.check_permission('read')
     source = frappe.get_doc('Relay Message', message); source.check_permission('read')
@@ -214,8 +217,13 @@ def test_skill(name, message):
 @ai_features.required
 def editor_options(kind, query='', doctype=None, business_doctype=None, action=None, selected=None, skill=None):
     """Bounded, permission-checked captions; identifiers are values, never labels."""
-    require_access('Relay AI Skill', 'write')
-    from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
+    if skill is not None and skill != "":
+        document_name(skill)
+    if kind == 'business_doctype':
+        require_access()
+    else:
+        require_access('Relay AI Skill', 'write')
+        from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
     if not isinstance(query, str) or len(query) > 80:
         raise ValueError('Use at most 80 search characters')
     selected = frappe.parse_json(selected) if isinstance(selected, str) else selected
@@ -223,7 +231,23 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
             or any(not isinstance(value, str) or len(value) > 140 for value in selected)):
         raise ValueError('Invalid selected options')
     items = []
-    if kind in ('field', 'identity', 'company', 'scope', 'draft_field', 'draft_doctype', 'action'):
+    if kind == 'model' and not frappe.has_permission('AI Model', 'read'):
+        # A skill editor may see the caption of its saved model, not browse the
+        # administrator's model/provider configuration or arbitrary identifiers.
+        if skill and selected:
+            event = frappe.get_doc('Relay AI Skill', skill)
+            event.check_permission('read')
+            if event.ai_model and event.ai_model in selected:
+                label = frappe.db.get_value('AI Model', event.ai_model, 'model_label')
+                items.append(dict(value=event.ai_model, label=label or 'Saved AI model'))
+        return {'items': items, 'read_only': True}
+    if kind == 'report':
+        from relay_core.ai.reports import options
+        return {'items': options(business_doctype)}
+    if kind == 'business_doctype':
+        from relay_core.business_types import picker_options
+        items = picker_options()
+    elif kind in ('field', 'identity', 'company', 'scope', 'draft_field', 'draft_doctype', 'action'):
         if kind in ('action', 'draft_doctype', 'draft_field'):
             from relay_core.flows.actions import definitions
             from relay_core.flows.action_contracts import ai_contract
@@ -272,8 +296,8 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
                     items.append(dict(value=key, label=field.label or key.replace('_', ' ').title(),
                         description=schema['properties'][key]['type'] if schema else field.fieldtype,
                         required=bool(schema and key in schema.get('required', []))))
-    elif kind in ('doctype', 'user', 'model', 'message'):
-        target, caption = {'doctype': ('DocType', 'name'), 'user': ('User', 'full_name'),
+    elif kind in ('doctype', 'user', 'model', 'message', 'company_record'):
+        target, caption = {'company_record': ('Company', 'name'), 'doctype': ('DocType', 'name'), 'user': ('User', 'full_name'),
             'model': ('AI Model', 'model_label'), 'message': ('Relay Message', 'content')}[kind]
         filters = {}
         if kind == 'doctype': filters.update(issingle=0, istable=0, is_virtual=0)

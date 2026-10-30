@@ -6,7 +6,8 @@ from relay_core import hooks, operations, scheduled_jobs
 
 def scheduled_methods():
     events = hooks.scheduler_events
-    return [*events['cron']['* * * * *'], *events['cron']['*/10 * * * *'], *events['daily']]
+    return [*events['cron']['* * * * *'], *events['cron']['*/10 * * * *'], *events['cron']['30 1 * * *'],
+            *events['daily']]
 
 
 class ScheduledJobTests(unittest.TestCase):

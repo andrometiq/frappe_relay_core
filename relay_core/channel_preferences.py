@@ -60,18 +60,10 @@ def recheck(contact, business_doctype, business_name, selection):
 
 
 def permission(doc, user=None, permission_type=None):
-    from relay_core.business_access import allowed
-    return allowed(doc, user)
+    from relay_core.business_access import allowed_types
+    return doc.business_doctype in allowed_types(user) and bool(frappe.db.exists(doc.business_doctype, doc.business_name))
 
 
 def query(user=None):
-    user = user or frappe.session.user
-    if user == 'Administrator':
-        return ''
-    clauses = []
-    for dt in frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'):
-        if not frappe.has_permission(dt, 'read', user=user):
-            continue
-        readable = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=False, user=user, order_by='').get_sql()
-        clauses.append(f"(`tabRelay Channel Preference`.business_doctype={frappe.db.escape(dt)} AND `tabRelay Channel Preference`.business_name IN ({readable}))")
-    return '(' + ' OR '.join(clauses) + ')' if clauses else '1=0'
+    from relay_core.business_access import explicit_condition
+    return explicit_condition('Relay Channel Preference', user)

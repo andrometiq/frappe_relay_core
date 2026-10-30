@@ -13,6 +13,10 @@ class ContactApiTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe(flags=SimpleNamespace(), parse_json=Mock(side_effect=json.loads))
         self.enterContext(patch.object(contacts, 'frappe', self.fake))
+        self.enterContext(patch.object(access, 'frappe', self.fake))
+        self.types = self.enterContext(patch.object(access, 'allowed_types', return_value={'Customer', 'Supplier'}))
+        self.enterContext(patch.object(contacts, 'allowed_types', self.types))
+        self.enterContext(patch.object(contacts, 'require_person'))
         self.enterContext(patch.object(contact_lifecycle, 'frappe', self.fake))
         self.enterContext(patch.object(contact_lifecycle, 'bindings', return_value=iter(())))
         self.enterContext(patch.object(contacts, 'can_manage_links', return_value=False))
@@ -52,7 +56,7 @@ class ContactApiTests(unittest.TestCase):
         self.assertEqual(self.inserted[0][1], {'ignore_permissions': False}, 'Contact creation keeps Frappe permission checks')
         self.assertEqual((relay['contact'], relay['display_name']), ('Contact-new', 'Ravi'))
         self.assertEqual((endpoint['endpoint'], endpoint['verified']), ('919876543210', 1))
-        self.records[('Customer', 'C1')].check_permission.assert_called_once_with('read')
+        self.records[('Customer', 'C1')].check_permission.assert_not_called()
         self.assertFalse(self.fake.flags.relay_contact_sync)
 
     def test_create_denies_users_unreadable_records_and_known_numbers(self):
@@ -60,7 +64,7 @@ class ContactApiTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.create()
         self.access.side_effect = None
-        self.fake.get_doc('Customer', 'private').check_permission.side_effect = PermissionError
+        self.types.return_value = {'Supplier'}
         with self.assertRaises(PermissionError):
             self.create([{'doctype': 'Customer', 'name': 'private'}])
         with patch('relay_core.identity.bindings', return_value=iter([_dict(name='existing')])), self.assertRaises(KeyError):
@@ -73,7 +77,7 @@ class ContactApiTests(unittest.TestCase):
     def test_set_links_replaces_readable_links_and_keeps_the_rest(self):
         person = self.fake.get_doc('Contact', 'P1')
         person.name = 'P1'
-        person.links = [_dict(link_doctype='Customer', link_name='old'), _dict(link_doctype='Customer', link_name='private'),
+        person.links = [_dict(link_doctype='Customer', link_name='old'), _dict(link_doctype='Lead', link_name='private'),
                         _dict(link_doctype='Address', link_name='A1')]
         self.fake.get_all.return_value = ['Customer', 'Supplier']
         self.fake.get_doc('Customer', 'private').has_permission.return_value = False
@@ -83,7 +87,7 @@ class ContactApiTests(unittest.TestCase):
         self.fake.parse_json.assert_called_once()
         rows = person.set.call_args.args[1]
         self.assertEqual({(row['link_doctype'], row['link_name']) for row in rows},
-                         {('Customer', 'private'), ('Address', 'A1'), ('Supplier', 'S1')})
+                         {('Lead', 'private'), ('Address', 'A1'), ('Supplier', 'S1')})
         person.save.assert_called_once_with()
 
     def test_set_links_denies_without_contact_write_or_record_read(self):
@@ -92,7 +96,7 @@ class ContactApiTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             contacts.set_links('P1', [{'doctype': 'Supplier', 'name': 'S1'}])
         person.check_permission.side_effect = None
-        self.fake.get_doc('Supplier', 'S1').check_permission.side_effect = PermissionError
+        self.types.return_value = {'Customer'}
         with self.assertRaises(PermissionError):
             contacts.set_links('P1', [{'doctype': 'Supplier', 'name': 'S1'}])
         person.save.assert_not_called()
@@ -101,17 +105,20 @@ class ContactApiTests(unittest.TestCase):
         self.fake.db.get_value.return_value = 'RELAY-CON-0000000001'
         relay = self.fake.get_doc('Relay Contact', 'RELAY-CON-0000000001')
         with patch.object(contacts, 'summary', return_value='summary'), \
-                patch.object(access, 'candidates', return_value=[('Customer', 'C1'), ('Supplier', 'S1')]):
+                patch.object(access, 'candidates', return_value=[('Customer', 'C1'), ('Supplier', 'S1')]), \
+                patch('relay_core.relay_chats.merge') as merge:
             self.assertEqual(contacts.set_primary('P1', 'Supplier', 'S1'), 'summary')
             self.assertEqual((relay.primary_doctype, relay.primary_name), ('Supplier', 'S1'))
             relay.save.assert_called_once_with(ignore_permissions=True)
+            merge.assert_called_once_with('RELAY-CON-0000000001', ('Supplier', 'S1'))
             with self.assertRaises(ValueError):
                 contacts.set_primary('P1', 'Customer', 'C2')
-            self.fake.get_doc('Customer', 'C1').check_permission.side_effect = PermissionError
+            self.types.return_value = {'Supplier'}
             with self.assertRaises(PermissionError):
                 contacts.set_primary('P1', 'Customer', 'C1')
             contacts.set_primary('P1')
             self.assertEqual((relay.primary_doctype, relay.primary_name), (None, None))
+            merge.assert_called_once()
 
     def test_set_primary_denies_without_contact_write(self):
         self.fake.get_doc('Contact', 'P1').check_permission.side_effect = PermissionError
@@ -132,15 +139,19 @@ class ContactApiTests(unittest.TestCase):
 class BusinessTypeApiTests(unittest.TestCase):
     def setUp(self):
         self.fake = fake_frappe()
+        self.fake._dict = _dict
         self.enterContext(patch.object(business_types, 'frappe', self.fake))
+        self.enterContext(patch.object(access, 'allowed_types', return_value={'Customer'}))
+        self.fake.get_doc.return_value.get.return_value = []
+        self.groups = self.enterContext(patch('relay_core.business_groups.configuration', return_value=[]))
         self.access = self.enterContext(patch.object(business_types, 'require_access'))
-        self.enterContext(patch.object(business_types, 'can_configure', lambda: 'System Manager' in self.fake.get_roles()))
+        self.enterContext(patch.object(business_types, 'can_manage', lambda: bool({'System Manager', 'Relay Communication Manager'} & set(self.fake.get_roles()))))
 
     def test_list_shows_readable_types_and_disabled_only_to_system_managers(self):
         self.fake.get_all.return_value = [_dict(business_doctype='Customer'), _dict(business_doctype='Supplier')]
         self.fake.has_permission.side_effect = lambda doctype, ptype: doctype == 'Customer'
         self.fake.get_roles.return_value = ['Relay Communication User']
-        self.assertEqual(business_types.list_types(), [_dict(business_doctype='Customer')])
+        self.assertEqual(business_types.list_types(), [_dict(business_doctype='Customer', grouping_field='', grouping_fields=[])])
         self.assertEqual(self.fake.get_all.call_args.kwargs['filters'], {'enabled': 1})
         self.fake.get_roles.return_value = ['System Manager']
         business_types.list_types()
@@ -150,12 +161,11 @@ class BusinessTypeApiTests(unittest.TestCase):
         self.access.side_effect = PermissionError
         with self.assertRaises(PermissionError):
             business_types.save('Customer')
-        self.access.assert_called_with(configure=True)
+        self.access.assert_called_with(manage=True)
         self.access.side_effect = None
         self.fake.get_meta.return_value = _dict(istable=0, issingle=0)
         self.fake.has_permission.return_value = False
-        with self.assertRaises(PermissionError):
-            business_types.save('Customer')
+        business_types.save('Customer')
         self.fake.get_meta.return_value = _dict(istable=1, issingle=0)
         with self.assertRaises(ValueError):
             business_types.save('Sales Invoice Item')
@@ -166,10 +176,11 @@ class BusinessTypeApiTests(unittest.TestCase):
         self.fake.has_permission.return_value = True
         self.fake.db.exists.side_effect = lambda doctype, name: doctype == 'DocType'
         doc = self.fake.new_doc.return_value
-        doc.get.side_effect = lambda field: getattr(doc, field)
+        doc.get.side_effect = lambda field: [] if field == 'users' else getattr(doc, field)
         result = business_types.save('Customer', '0', ' Customers ', 'customer_group')
         self.assertEqual((doc.business_doctype, doc.enabled, doc.label, doc.grouping_field),
-                         ('Customer', 0, 'Customers', 'customer_group'))
+                         ('Customer', 0, 'Customers', ''))
+        doc.set.assert_called_once_with('grouping_fields', [{'fieldname': 'customer_group', 'priority': 1}])
         doc.save.assert_called_once_with()
         self.assertEqual(result['business_doctype'], 'Customer')
         with self.assertRaises(ValueError):

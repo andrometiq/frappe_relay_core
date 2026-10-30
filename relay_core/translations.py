@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.automation import providers
@@ -187,6 +188,7 @@ def recover():
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def retry(name):
+    document_name(name)
     from relay_core.permissions import require_access,readable_contact
     require_access(configure=True)
     frappe.db.get_value('Relay Message Translation',name,'name',for_update=True)

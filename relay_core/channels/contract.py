@@ -1,13 +1,14 @@
 """Channel contract: shared code asks a channel what it supports instead of comparing names."""
 
 FEATURES = (
-    'text', 'max_text_length', 'max_caption_length', 'media', 'location', 'contacts',
+    'text', 'max_text_length', 'max_caption_length', 'media', 'max_media_bytes', 'location', 'contacts',
     'reply_quote', 'reactions', 'edits',
     'read_receipts', 'group_receipts',
     'templates', 'reply_window_hours', 'bulk_campaigns', 'forms', 'voice_calls',
     'groups', 'topics', 'email_threading', 'ai_automation', 'saved_replies',
 )
 ANY_FILE = '*/*'
+MEGABYTE = 1024 * 1024
 
 
 class Channel:

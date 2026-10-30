@@ -28,3 +28,19 @@ export function attachmentFormatError(capabilities, provider, kind, filename) {
   const extension = '.' + filename.toLowerCase().split('.').at(-1);
   return allowed.includes(extension) ? '' : `Choose ${allowed.join(', ')} for this attachment.`;
 }
+
+// Largest file of this kind: the Relay limit from api.capabilities, lowered where the channel accepts less.
+export function attachmentMaxBytes(capabilities, provider, kind) {
+  const largest = capabilities?.max_file_bytes || 0;
+  const channelLimit = channelFeature(capabilities, provider, 'max_media_bytes.' + kind);
+  return channelLimit && largest ? Math.min(largest, channelLimit) : largest;
+}
+export function sizeLabel(size) {
+  if (size >= 1024 * 1024) return `${Math.round(size / 1024 / 1024 * 10) / 10} MB`;
+  return size >= 1024 ? `${Math.round(size / 1024)} KB` : `${size} bytes`;
+}
+// The reason a size is outside 1 byte to limit. Without a known limit the backend decides.
+export function sizeError(size, limit, subject = 'The file') {
+  if (size < 1) return `${subject} is empty.`;
+  return limit && size > limit ? `${subject} must be at most ${sizeLabel(limit)}.` : '';
+}

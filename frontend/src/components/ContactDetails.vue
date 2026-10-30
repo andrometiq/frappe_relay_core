@@ -30,7 +30,7 @@ async function load() {
   finally { if (ticket === generation) busy.value = false }
 }
 async function revoke(endpoint) {
-  if (!window.confirm('Stop sending to this number? Relay will not use it until the customer messages again and it is checked.')) return
+  if (!window.confirm('Stop sending to this number? Relay will not use it until the contact messages again and it is checked.')) return
   busy.value = true; error.value = ''
   try { await coreApi('enrollment.revoke', { endpoint }, true); await load() }
   catch (e) { error.value = e.message }
@@ -45,13 +45,13 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
     <ErrorMessage :message="error" /><Button v-if="error" label="Retry contact details" @click="load" />
     <template v-if="detail">
       <header v-if="!compact" class="contact-detail-heading"><Button v-if="dismissible && isMobile" icon="chevron-left" aria-label="Back to contacts" @click="emit('close')" /><Avatar :label="recordTitle(detail, 'Contact')" /><div class="contact-detail-name"><h3 :title="recordTitle(detail, 'Contact')">{{ recordTitle(detail, 'Contact') }}</h3><p>{{ detail.phone || 'No phone number' }}</p></div><Button v-if="dismissible && !isMobile" class="contact-detail-close" icon="x" variant="ghost" aria-label="Close" title="Close" @click="emit('close')" /></header>
-      <p v-if="link" class="info-hint">{{ detail.can_edit_links ? 'Choose the record type, then find the record. The chat then shows its name.' : 'Not linked to a customer yet. A manager can link it.' }}</p>
+      <p v-if="link && !detail.can_edit_links" class="info-hint">Not linked to a business record yet. A manager can link it.</p>
       <ContactLinks :contact="detail.name" :detail="detail" :start="link" @changed="linksChanged" @cancel="link && emit('close')" />
       <template v-if="!link">
       <h4 class="info-group-title">Details</h4>
       <dl class="info-card">
         <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
-        <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Add country code" theme="amber" /></dd></div>
+        <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Add country code" theme="orange" /></dd></div>
       </dl>
       <details v-if="capabilities.manage" class="info-section">
         <summary class="info-group-title"><span>Advanced</span><FeatherIcon name="chevron-down" :size="14" /></summary>
@@ -65,7 +65,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
         </ul>
         <p v-else class="info-hint">No saved numbers yet. A number is saved when this person messages you.</p>
         <a class="info-link" href="#/contacts?tab=unlinked">Review new senders</a>
-        <h4 class="info-group-title">Number to use per customer</h4>
+        <h4 class="info-group-title">Number to use per business record</h4>
         <div class="info-card info-card-body"><ChannelPreferences :key="detail.name + JSON.stringify(detail.endpoints)" :contact="detail.name" :links="detail.links" :endpoints="detail.endpoints" :editable="capabilities.configure" /></div>
         <a class="info-link" :href="desk('Contact', detail.name)">Open in Frappe Desk</a>
       </details>
@@ -76,6 +76,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
 
 <style scoped>
 .contact-details { display:flex; flex-direction:column; min-width:0; overflow-wrap:anywhere; }
+.contact-details > * { flex-shrink:0; }
 .contact-detail-heading { margin-bottom:4px; }
 .contact-detail-name { flex:1; min-width:0; }
 .contact-detail-heading h3 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

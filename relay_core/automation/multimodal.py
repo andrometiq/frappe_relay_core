@@ -73,7 +73,7 @@ def ogg_duration(raw):
     return (granule-skip)/rate
 
 
-def transcribe(model,key,raw,mime):
+def transcribe(model,key,raw,mime,*,allow_in_test_mode=False):
     if not isinstance(model,str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,160}',model) or not isinstance(key,str) or not key.strip():
         raise ProviderError('Choose a transcription model and key')
     extension=audio_extension(raw,mime)
@@ -81,7 +81,10 @@ def transcribe(model,key,raw,mime):
     prefix=(f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n{model}\r\n'
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="voice.{extension}"\r\n'
             f'Content-Type: {mime}\r\n\r\n').encode()
-    request=urllib.request.Request('https://api.openai.com/v1/audio/transcriptions',
+    url='https://api.openai.com/v1/audio/transcriptions'
+    from relay_core.test_mode import ensure_allowed
+    ensure_allowed(url,allowed=allow_in_test_mode)
+    request=urllib.request.Request(url,
         data=prefix+raw+f'\r\n--{boundary}--\r\n'.encode(),
         headers={'Authorization':'Bearer '+key,'Content-Type':'multipart/form-data; boundary='+boundary})
     try:

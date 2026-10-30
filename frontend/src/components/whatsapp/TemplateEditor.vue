@@ -1,11 +1,13 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { Button, Dialog, ErrorMessage, FormControl, toast } from "@relay/ui";
 import FrappeFormSection from "../frappe/FrappeFormSection.vue";
 import FrappeFormView from "../frappe/FrappeFormView.vue";
 import RelaySelect from "../RelaySelect.vue";
 import { coreApi } from "../../services/coreApi";
 import { sentenceCase } from "../../services/textCase";
+import { headerChannelKind } from "../../services/templateMedia";
+import { attachmentMaxBytes, sizeError, sizeLabel } from "../messages/attachmentFormats";
 import {
   TEMPLATE_BUTTON_TYPES,
   addTemplateButton,
@@ -54,6 +56,8 @@ const error = ref("");
 const sampleName = ref("");
 const samples = computed(() => templateSampleFields(form.value));
 const headerFileHint = { IMAGE: "JPEG or PNG", VIDEO: "MP4", DOCUMENT: "PDF" };
+const capabilities = inject("relayCapabilities", ref({}));
+const sampleLimit = computed(() => attachmentMaxBytes(capabilities.value, "WhatsApp", headerChannelKind(String(form.value.header_type).toLowerCase())));
 const sampleAccept = computed(
   () =>
     ({
@@ -78,12 +82,10 @@ async function uploadSample(event) {
   busy.value = true;
   error.value = "";
   try {
-    if (
-      !file.size ||
-      file.size > 4 * 1024 * 1024 ||
-      !sampleAccept.value.split(",").includes(file.type)
-    )
-      throw Error(`Choose a ${headerFileHint[form.header_type]} file up to 4 MiB.`);
+    if (!sampleAccept.value.split(",").includes(file.type))
+      throw Error(`Choose a ${headerFileHint[form.value.header_type]} file.`);
+    const sizeIssue = sizeError(file.size, sampleLimit.value);
+    if (sizeIssue) throw Error(sizeIssue);
     const content = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -185,7 +187,7 @@ async function save() {
           <RelaySelect label="Category" v-model="form.category" :options="[{ value: 'UTILITY', label: 'Utility' }, { value: 'MARKETING', label: 'Marketing' }, { value: 'AUTHENTICATION', label: 'Authentication' }]" :disabled="busy || !!template?.id" />
           <div>
             <RelaySelect label="How to write variables" v-model="form.parameter_format" :options="[{ value: 'NAMED', label: 'Names, like {{customer_name}}' }, { value: 'POSITIONAL', label: 'Numbers, like {{1}}' }]" :disabled="busy || !!template?.id" />
-            <small class="template-field-hint" v-text="'Variables are filled in for each person when you send, for example: Hi {{customer_name}}.'" />
+            <small class="template-field-hint" v-text="'Variables are filled in for each person when you send, for example: Hi ' + (form.parameter_format === 'NAMED' ? '{{customer_name}}' : '{{1}}') + '.'" />
           </div>
         </div>
       </FrappeFormSection>
@@ -196,7 +198,7 @@ async function save() {
           <FormControl v-if="form.header_type === 'TEXT'" label="Header text" v-model="form.header_text" maxlength="60" :disabled="busy" />
           <div v-if="['IMAGE', 'VIDEO', 'DOCUMENT'].includes(form.header_type)" class="frappe-file-field">
             <label>Header sample<input type="file" :accept="sampleAccept" :disabled="busy || !enabled" @change="uploadSample" /></label>
-            <small>{{ headerFileHint[form.header_type] }} file, up to 4 MiB. Do not include customer information.</small>
+            <small>{{ headerFileHint[form.header_type] }} file<template v-if="sampleLimit">, up to {{ sizeLabel(sampleLimit) }}</template>. Do not include customer information.</small>
             <p v-if="sampleName || form.header_media_example" role="status">{{ sampleName ? `Uploaded: ${sampleName}` : "A sample is attached." }}</p>
           </div>
           <FormControl class="frappe-grid-wide" label="Message body" type="textarea" :rows="6" v-model="form.body_text" :disabled="busy" maxlength="1024" required />

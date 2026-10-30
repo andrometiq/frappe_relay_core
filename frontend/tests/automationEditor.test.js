@@ -73,7 +73,7 @@ test('save validation requires complete sender and company scope and bounded own
   assert.deepEqual(eventErrors(draft,[],[],'Email'),[])
   assert.ok(eventErrors({...draft,enabled:1},[],[],'Email').length)
   assert.ok(eventErrors({...draft,reply_style:'x'.repeat(2001)},[],[],'Email').length)
-  const reference={name:'ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
+  const reference={name:'ledger',report:'supplier_ledger',doctype:'GL Entry',fields:['debit'],scope_field:'party',identity_anchor:'Supplier',identity_fields:{Email:'alias'},company_field:'company'}
   assert.deepEqual(eventErrors(draft,[reference],[],'Email'),[])
   assert.ok(eventErrors(draft,[reference],[],'WhatsApp').length)
   assert.ok(eventErrors({...draft,business_doctype:'Customer'},[reference],[],'Email').length)
@@ -90,4 +90,28 @@ test('the template picker searches by name on the chosen number and keeps the sa
   assert.deepEqual(preferred.params, {})
   assert.equal(preferred.required, false); assert.equal(preferred.readOnly, true)
   assert.deepEqual(preferred.initialOptions, [])
+})
+
+test('channel choices distinguish accounts and unavailable saved selections', async () => {
+  const { configurationChannelOptions } = await import('../src/services/automationEditor.js')
+  const options = configurationChannelOptions([
+    {name:'channel-a',channel:'WhatsApp',label:'Sales',address:'+91 80000 00001'},
+    {name:'channel-b',channel:'WhatsApp',address:'+91 80000 00002'},
+    {name:'channel-c',channel:'WhatsApp'},
+  ], 'missing')
+  assert.equal(new Set(options.map(row => row.label)).size, 4)
+  assert.equal(options[0].label, 'WhatsApp · Sales · +91 80000 00001')
+  assert.equal(options[2].label, 'WhatsApp · channel-c')
+  assert.equal(options[3].label, 'Saved channel (unavailable)')
+  assert.equal(options[3].value, 'missing')
+})
+
+
+test('duplicate configured channel captions still identify distinct selections', async () => {
+  const { configurationChannelOptions } = await import('../src/services/automationEditor.js')
+  const options = configurationChannelOptions([
+    { name: 'sales-a', channel: 'WhatsApp', label: 'Sales' },
+    { name: 'sales-b', channel: 'WhatsApp', label: 'Sales' },
+  ])
+  assert.deepEqual(options.map(row => row.label), ['WhatsApp · Sales · sales-a', 'WhatsApp · Sales · sales-b'])
 })
