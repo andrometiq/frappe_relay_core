@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns as bulk, bulk_updates, test_mode, whatsapp, settings, inbound
+from relay_core import bulk_campaigns as bulk, bulk_sheet, bulk_updates, campaign_media, test_mode, whatsapp, settings, inbound
 from relay_core.automation.service import internal_save
 from relay_core.contact_lifecycle import endpoint_key
 
@@ -105,7 +105,7 @@ try:
         frappe.db.set_value('Relay Contact Endpoint', endpoint, 'marketing_opt_out', 1)
         frappe.db.commit()
         image = fixture('offer.png', b'\x89PNG\r\n\x1a\nlocal-only-header')
-        source = sheet('static.csv', [(number, '25 percent') for number in numbers] + [(numbers[1], 'Duplicate'), ('bad', 'Invalid')])
+        source = sheet('static.csv', [(number, '25 percent') for number in numbers] + [(numbers[1], '25 percent'), ('bad', 'Invalid')])
         doc, result = campaign('static', source, {'mode': 'static', 'files': [image]})
         assert result['contact_counts'] == {'created': 59, 'existing': 2, 'invalid': 1}, result['contact_counts']
         assert frappe.db.count(bulk.RECIPIENT, {'campaign': doc.name, 'status': 'Pending'}) == 59
@@ -131,9 +131,10 @@ try:
         # A ZIP takes the same sheet validation and send path; File bytes stay in this repository.
         bundle = BytesIO()
         with zipfile.ZipFile(bundle, 'w') as archive:
-            archive.writestr('sheet/people.csv', 'Recipients,Offer\n' + numbers[6] + ',25 percent\n' + numbers[7] + ',50 percent\n' + numbers[8] + ',75 percent\nbad,Invalid')
-            archive.writestr('media/' + numbers[6] + '.png', b'\x89PNG\r\n\x1a\n')
-            archive.writestr('media/' + numbers[8] + '.png', b'\x89PNG\r\n\x1a\n')
+            column = bulk_sheet.header_column({'media': 'image'})
+            archive.writestr('sheet/people.csv', f'Recipients,{column},Offer\n{numbers[6]},offer.png,25 percent\n'
+                             f'{numbers[7]},missing.png,50 percent\n{numbers[8]},media/OFFER.PNG,75 percent\nbad,offer.png,Invalid')
+            archive.writestr('media/offer.png', b'\x89PNG\r\n\x1a\nzip-offer')
             archive.writestr('__MACOSX/._people.csv', 'ignored')
         source = fixture('people.zip', bundle.getvalue())['file_url']
         template = {'name': 'local_offer', 'language': 'en', 'components': [
@@ -142,10 +143,9 @@ try:
             'channel': channel.name, 'operation': 'templates.send', 'template_name': 'local_offer', 'language': 'en',
             'arguments': json.dumps(bulk.template_snapshot(template)), 'status': 'Draft', 'account': account,
             'country': 'US', 'reply_window_hours': 72, 'request_key': account + '-zip'}), new=True)
-        def save_zip_file(filename, raw, *args, **kwargs):
-            assert kwargs['is_private'] == 1
+        def save_zip_file(filename, raw, campaign):
             return _dict(file_url=fixture(filename, raw)['file_url'])
-        with patch('frappe.utils.file_manager.save_file', side_effect=save_zip_file):
+        with patch.object(campaign_media, 'save_private', side_effect=save_zip_file):
             inspected = bulk.inspect(zipdoc.name, source)
         bulk.import_rows(zipdoc.name, inspected['mapping'])
         frappe.db.commit()
@@ -163,8 +163,9 @@ try:
         with patch.object(whatsapp, 'checked_client', return_value=(hub, {})), patch.object(bulk, 'approved_template', return_value=template):
             bulk.control(zipdoc.name, 'start')
         frappe.db.commit()
+        uploads = len(hub.uploads)
         bulk.send_job(zipdoc.name)
-        assert len(hub.messages) == before + 2
+        assert len(hub.messages) == before + 2 and len(hub.uploads) == uploads + 1  # Two rows reuse one ZIP file.
         recipients = frappe.get_all(bulk.RECIPIENT, filters={'campaign': zipdoc.name, 'status': 'Queued'},
             fields=['name', 'request_key', 'arguments'], order_by='sheet_row')
         assert all(json.loads(row.arguments)['validation']['status'] == 'Validated' for row in recipients)

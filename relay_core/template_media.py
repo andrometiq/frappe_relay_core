@@ -1,39 +1,25 @@
 """Header media of a WhatsApp template send: an uploaded file's Hub media id, or a public HTTPS link."""
 import base64
 import binascii
-import ipaddress
 import mimetypes
 import re
-from urllib.parse import urlsplit
 
 import frappe
 from relay_core.business_access import document_name
 
-from relay_core.bulk_sheet import media_url
+from relay_core.bulk_sheet import HEADER_KINDS, public_media_url
 from relay_core.channels import channel as channel_definition
 from relay_core.file_limits import encoded_length, get_media_max_bytes, size_error, size_label
 
-HEADER_KINDS = {'image': 'photo', 'video': 'video', 'document': 'document'}  # Meta header type -> channel media kind.
 UPLOADS = 'relay-template-media:'  # Hub media id -> the uploader's File and the sending channel.
-PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
 
 
 def public_link(value):
     """The link when it is HTTPS on a public host. Meta fetches it, so internal names and addresses are refused."""
     try:
-        media_url(value if isinstance(value, str) else '')
-    except ValueError:
-        frappe.throw('Media needs an HTTPS link without credentials')
-    host = urlsplit(value).hostname.rstrip('.').lower()
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    last = host.rsplit('.', 1)[-1]
-    if address and not address.is_global or not address and (
-            '.' not in host or host.endswith(PRIVATE_SUFFIXES) or last.isdigit() or last.startswith('0x')):
-        frappe.throw('Media link must point to a public host')
-    return value
+        return public_media_url(value if isinstance(value, str) else '')
+    except ValueError as exc:
+        frappe.throw(str(exc))
 
 
 def plain_filename(value):

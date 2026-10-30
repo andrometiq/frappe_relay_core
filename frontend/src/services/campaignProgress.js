@@ -45,8 +45,16 @@ export function statusTheme(status) {
 
 export function missingMapping(fields, mapping) {
   if (!mapping?.phone) return ["Phone number"];
-  return fields.filter((field) => !(field.key === 'header_media' && mapping.header_attachment?.files?.length) && !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
+  return fields.filter((field) => !mapping.fields?.[field.key] && !String(mapping.fixed?.[field.key] || "").trim())
     .map((field) => field.label);
+}
+
+// What the header column can name: the files of the uploaded ZIP, or only https links for a plain sheet.
+export function headerFilesNotice(attachment, media) {
+  const files = attachment?.files?.length || 0, rejected = attachment?.rejected?.length || 0;
+  if (!files && !rejected) return `No ZIP uploaded, so each row needs an https link to its ${media}.`;
+  const found = `${files.toLocaleString()} ${media} ${files === 1 ? "file" : "files"} in the ZIP`;
+  return `${found}${rejected ? `, ${rejected.toLocaleString()} rejected` : ""}. Each row names one of them or gives an https link.`;
 }
 
 // Message types a campaign can send: a template, text, or a media kind the WhatsApp channel registry offers.
