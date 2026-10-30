@@ -30,12 +30,15 @@ class InboxRecordTests(unittest.TestCase):
         self.fake.get_all.return_value = []
         self.chats = []
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
+        self.enterContext(patch('relay_core.inbox.frappe', self.fake))
         self.enterContext(patch('relay_core.relay_chats.title', side_effect=lambda key:
             next((row.title for row in self.chats if (row.business_doctype, row.business_name) == key), key[1])))
 
     def get_list(self, doctype, **kwargs):
         if doctype == 'Relay Channel':
             return [('CH-1', 'WhatsApp')]
+        if kwargs.get('fields') == [{'COUNT': '*', 'as': 'total'}]:
+            return [_dict(total=1)]
         return self.chats
 
     def chat_call(self):
@@ -86,8 +89,15 @@ class InboxRecordTests(unittest.TestCase):
 
     def test_tabs_and_record_filters(self):
         self.assertEqual(inbox_records.scope_filters('read'), [[CHAT, 'is_unread', '=', 0]])
-        self.assertEqual(inbox_records.scope_filters('unlinked'), [[CHAT, 'business_doctype', '=', 'Relay Contact']])
-        self.assertEqual(inbox_records.scope_filters('all', business_type='none'), [[CHAT, 'business_doctype', '=', 'Relay Contact']])
+        for mode, business_type in [('unlinked', None), ('all', 'none')]:
+            filters = inbox_records.scope_filters(mode, business_type=business_type)
+            self.assertEqual(filters[0], [CHAT, 'business_doctype', '=', 'Relay Contact'])
+            sql = filters[1].get_sql(quote_char='`')
+            self.assertIn('`business_name` IN (SELECT', sql)
+            self.assertIn('`tabDynamic Link`', sql)
+            self.assertIn("`parentfield`='links'", sql)
+            self.assertIn('`enabled`=1', sql)
+            self.assertNotIn('primary', sql)
         self.assertEqual(inbox_records.scope_filters('all'), [])
 
     def test_the_cursor_neither_repeats_nor_skips_rows_that_share_a_time(self):
@@ -113,11 +123,13 @@ class InboxRecordTests(unittest.TestCase):
         self.assertEqual((row['kind'], row['name'], row['contact'], row['display_name']), ('contact', 'R9', 'CONTACT-9', '+91 98765'))
         self.assertEqual((row['unlinked'], row['starred'], row['folder'], row['provider']), (True, 1, 'F1', 'WhatsApp'))
 
-    def test_counts_come_from_one_grouped_statement(self):
+    def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),
                       _dict(business_doctype='Relay Contact', total=3, unread=1, messages=1)]
-        self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 3, 'unread_messages': 8})
-        call = self.chat_call()
+        self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 1, 'unread_messages': 8})
+        calls = [call for call in self.fake.get_list.call_args_list if call.args[0] == CHAT]
+        self.assertEqual(calls[1].kwargs['filters'][-1].get_sql(), inbox_records.scope_filters('unlinked')[-1].get_sql())
+        call = calls[0]
         self.assertEqual(call.kwargs['group_by'], 'business_doctype')
         self.assertEqual(call.kwargs['filters'], [[CHAT, 'last_channel', 'in', ['CH-1']]])
 

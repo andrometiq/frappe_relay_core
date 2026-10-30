@@ -49,6 +49,7 @@ def scope_filters(mode='all', channels=None, business_type=None, business_name=N
     filters = [[CHAT, 'is_unread', '=', 1]] if mode == 'unread' else [[CHAT, 'is_unread', '=', 0]] if mode == 'read' else []
     if mode == 'unlinked' or business_type == 'none':
         filters.append([CHAT, 'business_doctype', '=', CONTACT])
+        filters.append(unlinked_condition())
     elif business_type:
         filters.append([CHAT, 'business_doctype', '=', business_type])
         if business_name:
@@ -58,6 +59,18 @@ def scope_filters(mode='all', channels=None, business_type=None, business_name=N
     if contacts is not None:
         filters.append([CHAT, 'last_contact', 'in', contacts])
     return filters
+
+
+def unlinked_condition():
+    """A contact row is unlinked only when its person has no enabled business links.
+
+    A legacy message without business context does not make a linked person unlinked.
+    Keep this in SQL so linked rows cannot consume a page or inflate its queue count.
+    """
+    from relay_core.inbox import filtered_contacts
+    contact = frappe.qb.DocType('Relay Contact')
+    people = filtered_contacts(frappe.qb.from_(contact).select(contact.name), mode='unlinked')
+    return frappe.qb.DocType(CHAT).business_name.isin(people)
 
 
 def search_filters(query):
@@ -118,13 +131,15 @@ def page(*, query='', mode='all', after=None, since=None, channels=None, busines
 
 
 def counts(channels=None, business_type=None, business_name=None):
-    """Row counts for the All, Unread, Read and Unlinked tabs and the unread message total, in one statement."""
+    """Row counts for the All, Unread, Read and Unlinked tabs and the unread message total, with the same business-link predicate as the queue."""
     rows = frappe.get_list(CHAT, filters=scope_filters('all', channels, business_type, business_name), group_by='business_doctype',
                            fields=['business_doctype', {'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'},
                                    {'SUM': 'unread_count', 'as': 'messages'}], order_by='business_doctype')
     total, unread = (sum(int(row[field] or 0) for row in rows) for field in ('total', 'unread'))
+    unlinked = frappe.get_list(CHAT, filters=[*scope_filters('all', channels, business_type, business_name),
+        [CHAT, 'business_doctype', '=', CONTACT], unlinked_condition()], fields=[{'COUNT': '*', 'as': 'total'}])
     return {'all': total, 'unread': unread, 'read': total - unread,
-            'unlinked': sum(int(row.total) for row in rows if row.business_doctype == CONTACT),
+            'unlinked': int(unlinked[0].total or 0) if unlinked else 0,
             'unread_messages': sum(int(row.messages or 0) for row in rows)}
 
 
