@@ -1,4 +1,6 @@
 <script setup>
+import { deliveryDetails } from '../services/deliveryDetails'
+import { dateTime } from './relativeTime'
 import { useLoadMore } from '../composables/useLoadMore'
 import { ref, onMounted } from "vue";
 import { Button, Badge, ErrorMessage, FormControl } from "@relay/ui";
@@ -27,7 +29,7 @@ async function load(next = false) {
     { channel: channel.value, after },
     true,
   );
-  rows.value = [...(next ? rows.value : []), ...(page.deliveries || [])];
+  rows.value = [...(next ? rows.value : []), ...(page.deliveries || []).map(row => ({ ...row, details: deliveryDetails(row) }))];
   cursor.value = after;
   more.value = page.more ?? page.deliveries?.length === 50;
 }
@@ -95,8 +97,15 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, error: error, l
         :key="row.id"
         class="flex flex-wrap items-center gap-3 border-b py-3"
       >
+        <div class="min-w-0 w-full sm:flex-1 space-y-1 break-words">
+          <p class="text-sm font-medium">Delivery {{ row.id }}</p>
+          <p v-if="row.details.recipient" class="text-sm">To: {{ row.details.recipient }}</p>
+          <p v-if="row.details.message" class="text-xs text-ink-gray-5">Message: {{ row.details.message }}</p>
+          <p v-if="row.details.time" class="text-xs text-ink-gray-5">{{ row.details.timeLabel }}: {{ dateTime(row.details.time) }}</p>
+        </div>
         <span class="text-sm">{{ row.operation || "WhatsApp" }}</span
         ><Badge :label="row.delivery_status || row.state" /><span
+          v-if="row.error"
           class="text-xs text-ink-gray-5 flex-1"
           >{{ row.error }}</span
         ><Button
