@@ -43,3 +43,15 @@ test('failed refresh does not start a retry poll; reconnect retries once', async
  const q=realtimeRefreshQueue(async()=>{count++;throw Error('offline')},()=>true,5)
  try{q.schedule('messages');await wait(25);await wait(25);assert.equal(count,1);q.schedule('reconnect');await wait(25);assert.equal(count,2)}finally{q.dispose()}
 })
+
+test('a burst passes the union of the changed message names once', async () => {
+  const batches=[]
+  const q=realtimeRefreshQueue(async ({kinds,messages})=>batches.push([[...kinds],[...messages]]),()=>true,5)
+  try {
+    q.schedule('messages',['M2']);q.schedule('messages');q.schedule('messages',['M1','M2'])
+    await wait(25)
+    assert.deepEqual(batches,[[['messages'],['M2','M1']]])
+    q.schedule('reconnect');await wait(25)
+    assert.deepEqual(batches[1],[['reconnect'],[]],'names do not leak into the next batch')
+  } finally { q.dispose() }
+})

@@ -90,16 +90,16 @@ def apply_batch(updates, channel):
         values = receipt_values(doc, update)
         if values:
             writes[doc.name] = values
-            notifications[(doc.relay_contact, doc.business_doctype, doc.business_name)] = doc
+            notifications.setdefault((doc.relay_contact, doc.business_doctype, doc.business_name), []).append(doc)
     if inserts:
         frappe.db.bulk_insert('Relay Pending Receipt',
             ['name','record_key','channel','endpoint','status','provider_timestamp','event_id','creation','modified','owner','modified_by','docstatus','idx'], inserts)
     if retained: frappe.db.bulk_update('Relay Pending Receipt', retained, update_modified=False)
     if writes: frappe.db.bulk_update('Relay Message', writes, update_modified=False)
     from relay_core.realtime import changed
-    for doc in notifications.values():
-        doc.doctype = 'Relay Message'
-        changed(doc)
+    for docs in notifications.values():
+        docs[0].doctype = 'Relay Message'
+        changed(docs[0], messages=[doc.name for doc in docs])
     return 'Uncategorized' if unresolved else 'Projected'
 
 

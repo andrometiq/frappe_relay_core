@@ -6,7 +6,7 @@ import { realtimeRefreshQueue } from '../services/realtimeRefreshQueue'
 export function watchRealtime(doctypes, kinds, refresh, delay) {
   const queue = realtimeRefreshQueue(refresh, () => document.visibilityState === 'visible', delay)
   function changed(event) {
-    if (event?.kind === 'reconnect' || event?.kind === 'permissions' || kinds.includes(event?.kind)) queue.schedule(event.kind)
+    if (event?.kind === 'reconnect' || event?.kind === 'permissions' || kinds.includes(event?.kind)) queue.schedule(event.kind, Array.isArray(event.messages) ? event.messages : [])
   }
   function visible() {
     if (document.visibilityState === 'visible') queue.schedule('visible')

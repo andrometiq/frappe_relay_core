@@ -823,11 +823,11 @@ class TimelineTests(unittest.TestCase):
         from relay_core import bulk_timeline
         from relay_core.message_updates import provider_key
         db = Mock()
-        messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210'),
-                    _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211')]
+        messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210', relay_contact='CON-A'),
+                    _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211', relay_contact='CON-A')]
         fake = SimpleNamespace(db=db, get_all=Mock(return_value=messages), publish_realtime=Mock(),
                                realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
-        with patch.object(bulk_timeline, 'frappe', fake):
+        with patch.object(bulk_timeline, 'frappe', fake), patch('relay_core.realtime.contact_changed') as contact_changed:
             bulk_timeline.apply([{'key': 'a', 'status': 'Read', 'message_id': 'wamid.a', 'reason': ''},
                                  {'key': 'b', 'status': 'Cancelled', 'message_id': '', 'reason': ''},
                                  {'key': 'c', 'status': 'Queued', 'message_id': '', 'reason': ''}])
@@ -838,6 +838,8 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('m.delivery_error=u.error', failed[0])
         self.assertIn("m.delivery_error=''", read[0])
         fake.publish_realtime.assert_called_once()
+        # An open thread re-reads only the messages whose status moved.
+        contact_changed.assert_called_once_with('CON-A', messages=['MSG-A', 'MSG-B'])
 
 
 if __name__ == '__main__':

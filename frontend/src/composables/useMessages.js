@@ -45,7 +45,7 @@ export function useMessages() {
   async function finishEmail(pending,result) {
     if(!result?.message){pending.status='Unconfirmed';return;}
     pending.status='Sent';
-    if(pending.scope===(selected.value||businessType.value+':'+businessName.value))await refreshVisible();
+    if(pending.scope===(selected.value||businessType.value+':'+businessName.value))await refreshNew();
     // Retain the acknowledged bubble until its persisted message appears in history.
     pending.persistedMessage=result.message;
     if(rows.value.some(row=>row.name===result.message))pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
@@ -164,7 +164,7 @@ export function useMessages() {
     firstUnread = ref("");
   const windows = new Map(), preferredChannels = new Map();
   let restoredRefreshPending = false;
-  const viewPosition = ref(null), newArrivals = ref(0), UNREAD_OFFSET = 56;
+  const viewPosition = ref(null), newArrivals = ref(0), UNREAD_OFFSET = 56, SNAPSHOT_ROWS = 300;
   let bufferedArrivals = new Map();
   function clearArrivals() { bufferedArrivals.clear(); newArrivals.value=0; }
   const windowKey = () => businessName.value
@@ -242,8 +242,7 @@ export function useMessages() {
   function appendRows(items) {
     const combined = [...new Map([...rows.value, ...items].map(row=>[row.name,row])).values()]
       .sort((a,b)=>String(a.sent_at||a.creation).localeCompare(String(b.sent_at||b.creation))||a.name.localeCompare(b.name));
-    rows.value = combined.slice(-300);
-    if (combined.length > 300) more.value = true;
+    rows.value = combined;
     before.value = rows.value[0]?.name;
     last.value = rows.value.at(-1)?.name || last.value;
     updateChannels();
@@ -256,8 +255,11 @@ export function useMessages() {
   async function latest() {
     await run(async()=>{
       restored.value=''; viewPosition.value=null;
-      if(bufferedArrivals.size && !newer.value) showArrivals();
+      // Every row up to the newest is loaded: show the buffered arrivals and scroll, without loading again.
+      if(!newer.value) showArrivals();
       else {
+        // Newer pages stop at once: a page landing after the latest page would add rows out of order.
+        newer.value=false;
         const arrivals=[...bufferedArrivals.values()], identity=conversationIdentity();
         const loading=history(), generation=requestSequence;
         await loading;
@@ -267,7 +269,8 @@ export function useMessages() {
   }
   let requestSequence = 0;
   const connectionError = ref('');
-  let refreshing = false, snapshotting = false, snapshotAgain = false;
+  let refreshing = false, snapshotting = false, sweepQueued = false;
+  const changedQueued = new Set();
   function refreshError(err) {
     connectionError.value = err.message || 'Live updates unavailable.';
     if([401,403].includes(err.status)){rows.value=[];pendingMessages.value=[];clearArrivals();clearRecipient();windows.clear();}
@@ -285,7 +288,8 @@ export function useMessages() {
         if (generation !== requestSequence || identity !== conversationIdentity()) return;
         if (batch.items.length) {
           const known = new Set(rows.value.map(row=>row.name));
-          for (const row of batch.items) if (!known.has(row.name)) bufferedArrivals.set(row.name,row);
+          // A row this read just brought is current, so a change event naming it needs no second read.
+          for (const row of batch.items) { changedQueued.delete(row.name); if (!known.has(row.name)) bufferedArrivals.set(row.name,row); }
           newArrivals.value=bufferedArrivals.size;
           if(!newer.value && (!viewPosition.value || viewPosition.value.atBottom)) showArrivals();
         }
@@ -300,16 +304,21 @@ export function useMessages() {
       if (restoredRefreshPending) await refreshVisible();
     }
   }
-  async function refreshSnapshots() {
-    if (snapshotting) { snapshotAgain=true; return; }
+  // A reconnect or a return to the tab re-reads the newest loaded rows once. A live event re-reads only the loaded
+  // messages it names; its new messages come from the ingestion cursor instead.
+  async function drainSnapshots() {
+    if (snapshotting) return;
     if (busy.value || sending.value) { actionRefreshPending=true; return; }
     if (!conversationIdentity() || document.visibilityState !== 'visible') return;
     const generation = requestSequence, identity = conversationIdentity();
     const current = () => generation === requestSequence && identity === conversationIdentity();
+    const candidates = [...(sweepQueued ? [...rows.value.slice(-SNAPSHOT_ROWS), ...bufferedArrivals.values()] : []),
+      ...[...rows.value, ...bufferedArrivals.values()].filter(row=>changedQueued.has(row.name))];
+    const allNames = [...new Set(candidates.filter(row=>!row._pending).map(row=>row.name))];
+    sweepQueued=false; changedQueued.clear();
+    if (!allNames.length) return;
     snapshotting=true;
-    snapshotAgain=false;
     try {
-      const allNames = [...new Set([...rows.value, ...bufferedArrivals.values()].filter(row=>!row._pending).map(row=>row.name))];
       const snapshots = [];
       for(let offset=0;offset<allNames.length;offset+=150){
         if(!current())return;
@@ -340,12 +349,16 @@ export function useMessages() {
       if(current())refreshError(err);
     } finally {
       snapshotting=false;
-      if(snapshotAgain) { snapshotAgain=false; void refreshSnapshots(); }
+      if(sweepQueued || changedQueued.size) void drainSnapshots();
     }
   }
-  async function refreshVisible() {
+  async function refreshLive() {
     await refreshNew();
-    void refreshSnapshots();
+    void drainSnapshots();
+  }
+  async function refreshVisible() {
+    sweepQueued=true;
+    await refreshLive();
   }
   async function refreshDetails(kinds) {
     if(busy.value || sending.value){actionRefreshPending=true;return;}
@@ -359,12 +372,15 @@ export function useMessages() {
     }
     if(current() && (kinds.has('reconnect') || kinds.has('visible') || kinds.has('contacts'))) await refreshMetadata();
   }
-  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds})=>{
+  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds,messages})=>{
     if(document.visibilityState !== 'visible')return;
     if(kinds.has('reconnect'))pagingError.value='';
     if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearArrivals();clearRecipient();}
+    // Queued before a busy return, so the refresh after the action still re-reads them.
+    if(kinds.has('reconnect') || kinds.has('visible'))sweepQueued=true;
+    for(const name of messages||[])changedQueued.add(name);
     if(busy.value){actionRefreshPending=true;return;}
-    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('permissions') || kinds.has('message_actions')) await refreshVisible();
+    if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('permissions') || kinds.has('message_actions')) await refreshLive();
     // Recovery and metadata must not hold up the queue's next incoming message.
     void refreshDetails(kinds).catch(()=>{});
   },40);
@@ -372,7 +388,7 @@ export function useMessages() {
   async function refreshActionState() {
     if (busy.value || sending.value) { actionRefreshPending = true; return; }
     actionRefreshPending = false;
-    await refreshVisible();
+    await refreshLive();
     await refreshDetails(new Set(['visible']));
   }
   watch(() => busy.value || sending.value > 0, value => {
@@ -460,17 +476,12 @@ export function useMessages() {
       ...(older && before.value ? { before: before.value } : {}),
     });
     if (generation !== requestSequence || identity !== conversationIdentity()) return;
+    // An older page only adds rows above: loaded rows stay, so nothing below needs loading again.
     const seen = new Set((older ? rows.value : []).map((row) => row.name));
-    rows.value = older
-      ? [
-          ...page.items.filter((row) => !seen.has(row.name)),
-          ...rows.value,
-        ].slice(0, 300)
-      : page.items;
+    rows.value = older ? [...page.items.filter((row) => !seen.has(row.name)), ...rows.value] : page.items;
     if(!older){clearArrivals();ingestionCursor.value=page.ingestion_cursor||'RELAY-MSG-0000000000';}
     before.value = page.first;
-    last.value = older ? rows.value.at(-1)?.name : page.last;
-    newer.value = older && (rows.value.length >= 300 || newer.value);
+    if (!older) { last.value = page.last; newer.value = false; }
     more.value = page.has_more;
     updateChannels();
     if (!older && !source.value && !businessName.value) source.value = defaultSendSource(rows.value, capabilities.value);
@@ -590,17 +601,12 @@ export function useMessages() {
       // A page for a chat the user has left must not land in the open chat.
       if (generation !== requestSequence || identity !== conversationIdentity()) return;
       const seen = new Set(rows.value.map((row) => row.name));
-      rows.value = [
-        ...rows.value,
-        ...page.items.filter((row) => !seen.has(row.name)),
-      ].slice(-300);
+      rows.value = [...rows.value, ...page.items.filter((row) => !seen.has(row.name))];
       last.value = page.last || last.value;
       newer.value = page.has_more;
       for(const row of rows.value)bufferedArrivals.delete(row.name);
       newArrivals.value=bufferedArrivals.size;
       if(!newer.value && viewPosition.value?.atBottom)showArrivals();
-      before.value = rows.value[0]?.name;
-      more.value = true;
     });
   }
   function reply(message) {
@@ -644,6 +650,12 @@ export function useMessages() {
       restored.value = message;
       if (!quoting.value) source.value = page.items.find(row => row.name === message);
       updateChannels();
+      // A chat opened at a message starts its live updates from now, not from the first message ever.
+      if (changed) {
+        const identity = conversationIdentity(), checkpoint = await historyRequest({ limit: 1 });
+        if (identity !== conversationIdentity()) return;
+        ingestionCursor.value = checkpoint.ingestion_cursor || 'RELAY-MSG-0000000000';
+      }
     });
   }
   async function openQuote(message) {

@@ -23,7 +23,7 @@ const deferred = () => {
   return { promise, resolve, reject }
 }
 
-async function fixture(t, count=300) {
+async function fixture(t, count=300, options={}) {
   const previous={}
   for(const key of ['document','window','sessionStorage','location'])previous[key]=globalThis[key]
   globalThis.document={visibilityState:'visible'}
@@ -32,7 +32,7 @@ async function fixture(t, count=300) {
   globalThis.sessionStorage={getItem(){},setItem(){},removeItem(){}}
   const calls=[], snapshots=[], unmount=[], scope=effectScope()
   const records=new Map([['A',Array.from({length:count},(_,i)=>row(i+1))],['B',[row(900)]]])
-  const controls={holdSnapshots:true, holdPending:null, failSnapshots:false, active:0, maxActive:0}
+  const controls={holdSnapshots:true, holdPending:null, failSnapshots:false, active:0, maxActive:0, latestPage:options.latestPage}
   let realtime, delay
   const api=async(method, values)=>{
     calls.push({method, values})
@@ -43,6 +43,10 @@ async function fixture(t, count=300) {
     if(method.endsWith('save_view'))return {}
     if(method==='messaging.pending_messages')return controls.holdPending?.promise || {items:[]}
     if(method==='messaging.action_snapshots')return {items:[]}
+    if(method==='api.message_context'){
+      const [contact,items]=[...records].find(([,items])=>items.some(row=>row.name===values.message))
+      return {contact,items:items.map(row=>({...row})),first:items[0].name,last:items.at(-1).name,has_more:false,has_newer:false}
+    }
     if(method==='api.message_snapshots' || values.names){
       const names=JSON.parse(values.names)
       const result={items:all.filter(row=>names.includes(row.name)).map(row=>({...row}))}
@@ -54,10 +58,15 @@ async function fixture(t, count=300) {
       try{return await pending.promise}finally{controls.active--}
     }
     if(method==='api.messages' || method==='business_inbox.messages'){
-      const items=values.since ? all.filter(row=>row.name>values.since).slice(0,values.limit) : all.map(row=>({...row}))
+      if(values.before){
+        const older=all.filter(row=>row.name<values.before), items=older.slice(-values.limit).map(row=>({...row}))
+        return {items, first:items[0]?.name, last:items.at(-1)?.name, has_more:older.length>items.length}
+      }
+      const latest=controls.latestPage ? all.slice(-controls.latestPage) : all
+      const items=values.since ? all.filter(row=>row.name>values.since).slice(0,values.limit) : latest.map(row=>({...row}))
       return {items, first:items[0]?.name, last:items.at(-1)?.name,
         ingestion_cursor:items.at(-1)?.name || values.since || name(0),
-        has_more:!!values.since && all.some(row=>row.name>(items.at(-1)?.name || values.since))}
+        has_more:values.since ? all.some(row=>row.name>(items.at(-1)?.name || values.since)) : latest.length<all.length}
     }
     throw Error('Unexpected method: '+method)
   }
@@ -80,29 +89,29 @@ async function fixture(t, count=300) {
   await state.open('A')
   calls.length=0
   return {state,calls,records,controls,snapshots,releaseWave,settle,delay,
-    realtime:kind=>realtime({kinds:new Set([kind])})}
+    realtime:(kind,messages=[])=>realtime({kinds:new Set([kind]),messages:new Set(messages)})}
 }
 
 test('new rows and cursor advance before held snapshots; thread opts into 40 ms', async t=>{
   const f=await fixture(t)
   f.records.get('A').push(row(301))
-  await f.realtime('messages')
+  await f.realtime('reconnect')
   assert.equal(f.delay,40)
   assert.equal(f.state.rows.value.at(-1).name,name(301))
-  assert.equal(f.state.rows.value.length,300)
+  assert.equal(f.state.rows.value.length,301)
   assert.equal(f.state.last.value,name(301))
   assert.equal(f.snapshots.length,3)
   assert.equal(f.snapshots.every(item=>!item.done),true)
   await f.realtime('messages')
   assert.equal(f.calls.filter(call=>call.values.since).at(-1).values.since,name(301))
-  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,300)
+  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,301)
 })
 
 test('300 rows use six batches with at most three in flight; changed ticks merge and unchanged rows retain identity', async t=>{
   const f=await fixture(t)
   const unchanged=f.state.rows.value[0], changed=f.state.rows.value[10]
   f.records.get('A')[10]={...row(11),status:'Delivered'}
-  await f.realtime('messages')
+  await f.realtime('reconnect')
   assert.equal(f.controls.active,3)
   await f.releaseWave()
   assert.equal(f.snapshots.length,6)
@@ -115,26 +124,27 @@ test('300 rows use six batches with at most three in flight; changed ticks merge
   assert.equal(f.state.rows.value[10].status,'Delivered')
 })
 
-test('events during a sweep coalesce into one more sweep and preserve arrivals added meanwhile', async t=>{
+test('events during a sweep re-read only the loaded rows they name and preserve arrivals added meanwhile', async t=>{
   const f=await fixture(t)
-  await f.realtime('messages')
+  await f.realtime('reconnect')
   for(let i=301;i<=305;i++){
     f.records.get('A').push(row(i))
-    await f.realtime('messages')
+    await f.realtime('messages',[name(i),name(3)])
   }
   assert.equal(f.state.rows.value.at(-1).name,name(305))
   assert.equal(f.snapshots.length,3)
   await f.settle()
-  assert.equal(f.snapshots.length,12)
+  assert.equal(f.snapshots.length,7,'one sweep of six batches, then one read of the changed loaded row')
+  assert.deepEqual(f.snapshots.at(-1).names,[name(3)],'new rows from the cursor are not read again')
   assert.equal(f.controls.maxActive,3)
-  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,300)
+  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,305)
   assert.equal(f.state.rows.value.at(-1).name,name(305))
 })
 
 for(const business of [false,true])test(`stale ${business?'business':'contact'} sweeps are dropped after conversation changes`,async t=>{
   const f=await fixture(t)
   if(business)await f.state.openBusiness('Customer','A',false)
-  await f.realtime('messages')
+  await f.realtime('reconnect')
   if(business)await f.state.openBusiness('Supplier','B',false)
   else await f.state.open('B')
   const rows=f.state.rows.value
@@ -230,28 +240,29 @@ test('snapshot failures leave the new message visible and permit subsequent reco
   const f=await fixture(t,30)
   f.controls.failSnapshots=true
   f.records.get('A').push(row(31))
-  await f.realtime('messages');await tick()
+  await f.realtime('messages',[name(31),name(5)]);await tick()
   assert.equal(f.state.rows.value.at(-1).name,name(31))
   assert.equal(f.state.connectionError.value,'Snapshot unavailable')
   f.controls.failSnapshots=false;f.controls.holdSnapshots=false
-  await f.realtime('messages');await tick()
+  await f.realtime('messages',[name(5)]);await tick()
   assert.equal(f.state.connectionError.value,'')
   assert.equal(f.state.rows.value.length,31)
 })
 
-test('multi-page arrivals appear after each fetch and keep a bounded unique window',async t=>{
+test('multi-page arrivals appear after each fetch and keep every loaded row once',async t=>{
   const f=await fixture(t)
   f.records.get('A').push(...Array.from({length:120},(_,i)=>row(301+i)))
   await f.realtime('messages')
   assert.deepEqual(f.calls.filter(call=>call.values.since).map(call=>call.values.since),[name(300),name(350),name(400)])
-  assert.equal(f.state.rows.value.length,300)
-  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,300)
+  assert.equal(f.state.rows.value.length,420)
+  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,420)
+  assert.equal(f.state.rows.value[0].name,name(1))
   assert.equal(f.state.last.value,name(420))
 })
 
 test('reloading the same conversation invalidates its outstanding sweep',async t=>{
   const f=await fixture(t,30)
-  await f.realtime('messages')
+  await f.realtime('reconnect')
   f.records.set('A',[{...row(1),status:'Read'}])
   await f.state.history()
   const rows=f.state.rows.value
@@ -262,8 +273,8 @@ test('reloading the same conversation invalidates its outstanding sweep',async t
 
 test('a failed snapshot waits for its siblings before starting a coalesced sweep',async t=>{
   const f=await fixture(t)
-  await f.realtime('messages')
-  await f.realtime('messages')
+  await f.realtime('reconnect')
+  await f.realtime('reconnect')
   f.snapshots[0].done=true;f.snapshots[0].pending.reject(Error('Disconnected'))
   await tick()
   assert.equal(f.snapshots.length,3)
@@ -317,4 +328,119 @@ test('Go to latest releases the actual thread scroll hold after clearing its sav
   await nextTick();await nextTick()
   assert.equal(thread.scroll.isAtBottom,true)
   assert.equal(node.scrollTop,800)
+})
+
+test('older pages only add rows above: loaded rows stay and nothing below loads again',async t=>{
+  const f=await fixture(t,500,{latestPage:50})
+  assert.equal(f.state.more.value,true)
+  for(let page=0;page<9;page++)await f.state.loadOlder()
+  const names=f.state.rows.value.map(row=>row.name)
+  assert.deepEqual(names,Array.from({length:500},(_,i)=>name(i+1)))
+  assert.equal(f.state.newer.value,false,'no newer page is offered after scrolling up')
+  assert.equal(f.state.more.value,false)
+  assert.equal(f.calls.filter(call=>call.values.after).length,0)
+  assert.equal(f.calls.filter(call=>call.values.before).length,9)
+})
+
+test('the reconnect sweep checks only the newest loaded rows',async t=>{
+  const f=await fixture(t,500,{latestPage:50})
+  for(let page=0;page<9;page++)await f.state.loadOlder()
+  f.controls.holdSnapshots=false
+  await f.realtime('reconnect');await tick()
+  const checked=f.calls.filter(call=>call.method==='api.message_snapshots').flatMap(call=>JSON.parse(call.values.names))
+  assert.deepEqual(checked,Array.from({length:300},(_,i)=>name(i+201)))
+  assert.equal(f.state.rows.value.length,500)
+})
+
+test('a live event never reads loaded messages again unless it names them',async t=>{
+  const f=await fixture(t,500,{latestPage:50})
+  for(let page=0;page<9;page++)await f.state.loadOlder()
+  f.controls.holdSnapshots=false
+  const loaded=f.state.rows.value.slice()
+  f.records.get('A').push(row(501))
+  f.records.get('A')[9]={...row(10),status:'Read'}
+  await f.realtime('messages',[name(501)]);await tick()
+  await f.realtime('messages');await tick()
+  assert.equal(f.calls.filter(call=>call.method==='api.message_snapshots').length,0,'new and unnamed events use only the ingestion cursor')
+  await f.realtime('messages',[name(10),name(777)]);await tick()
+  const checked=f.calls.filter(call=>call.method==='api.message_snapshots').map(call=>JSON.parse(call.values.names))
+  assert.deepEqual(checked,[[name(10)]],'only the named loaded message is read')
+  assert.equal(f.state.rows.value[9].status,'Read')
+  assert.equal(f.state.rows.value[0],loaded[0],'unchanged rows keep their identity, so nothing re-renders')
+  assert.equal(new Set(f.state.rows.value.map(row=>row.name)).size,501)
+})
+
+test('Go to latest on a fully loaded thread shows the arrivals without loading the thread again',async t=>{
+  const f=await fixture(t,30)
+  f.state.rememberPosition({name:name(5),offset:42,atBottom:false})
+  f.records.get('A').push(row(31))
+  await f.realtime('messages')
+  assert.equal(f.state.newArrivals.value,1)
+  const original=f.state.rows.value.slice()
+  f.calls.length=0
+  await f.state.latest()
+  assert.equal(f.calls.filter(call=>call.method==='api.messages').length,0)
+  assert.equal(f.state.viewPosition.value,null)
+  assert.deepEqual(f.state.rows.value.slice(0,30),original,'loaded rows keep their identity')
+  assert.equal(f.state.rows.value.at(-1).name,name(31))
+  assert.equal(f.state.newArrivals.value,0)
+})
+
+test('the thread reports its scroll position without focus but marks messages seen only with focus',async t=>{
+  const {reactive}=await import('vue')
+  const {createScrollHold}=await import('../src/components/messages/scrollHold.js')
+  const component=(await readFile(new URL('../src/components/messages/MessageThread.vue',import.meta.url),'utf8'))
+    .match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm,'')
+  const props=reactive({rows:[],position:null}), events=[], scope=effectScope(), unmount=[]
+  const page={visibilityState:'visible',focused:false,hasFocus(){return this.focused},removeEventListener(){}}
+  const bindings={ref,computed,watch,nextTick,onMounted(){},onBeforeUnmount:fn=>unmount.push(fn),
+    inject:injectCapabilities,defineProps:()=>props,defineEmits:()=>(name,value)=>events.push([name,value]),useRealtimeRefresh(){},
+    useMessageInfo:()=>({close(){}}),useMobileLayout:()=>false,useLoadMore(){},createScrollHold,
+    coreApi:async()=>({readers:[]}),window:{removeEventListener(){}},document:page}
+  const thread=scope.run(()=>new Function(...Object.keys(bindings),component+'\nreturn {viewport,trackVisible};')(...Object.values(bindings)))
+  t.after(()=>{scope.stop();unmount.forEach(fn=>fn())})
+  thread.viewport.value={scrollHeight:2000,scrollTop:200,clientHeight:500,getBoundingClientRect:()=>({top:0,bottom:500}),
+    querySelectorAll:()=>[{dataset:{message:'M1'},getBoundingClientRect:()=>({top:40,bottom:200})}]}
+  const settle=()=>new Promise(resolve=>setTimeout(resolve,450))
+  thread.trackVisible();await settle()
+  assert.deepEqual(events.map(([name])=>name),['position'])
+  assert.deepEqual(events[0][1],{name:'M1',offset:40,atBottom:false})
+  page.focused=true;events.length=0
+  thread.trackVisible();await settle()
+  assert.deepEqual(events.map(([name])=>name),['position','visible','visibleMessages'])
+})
+
+test('Go to latest shows whenever the reader is above the newest message',async()=>{
+  const view=await readFile(new URL('../src/components/ConnectedMessages.vue',import.meta.url),'utf8')
+  assert.match(view,/class="jump-latest"/)
+  assert.match(view.match(/<Button v-if="([^"]+)" class="jump-latest"/)[1],/viewPosition\.value\?\.atBottom === false/)
+})
+
+test('a chat opened at a message takes live updates from now, not from its first message',async t=>{
+  const f=await fixture(t,30)
+  f.records.get('B').unshift(row(800))
+  await f.state.focusMessage(name(900))
+  assert.equal(f.state.selected.value,'B')
+  f.records.get('B').push(row(901))
+  await f.realtime('messages')
+  assert.deepEqual(f.calls.filter(call=>call.values.since).map(call=>call.values.since),[name(900)])
+  assert.deepEqual(f.state.rows.value.map(row=>row.name),[name(800),name(900),name(901)])
+})
+
+test('Go to latest stops newer pages before the latest page lands',async t=>{
+  const f=await fixture(t,30)
+  f.state.newer.value=true
+  const going=f.state.latest()
+  assert.equal(f.state.newer.value,false)
+  await going
+  assert.equal(f.state.newer.value,false)
+  assert.equal(f.state.rows.value.at(-1).name,name(30))
+})
+
+test('Go to latest names one waiting message in the singular',async()=>{
+  const view=await readFile(new URL('../src/components/ConnectedMessages.vue',import.meta.url),'utf8')
+  const label=view.match(/:label="state\.newArrivals\.value \? (`[^`]*`)/)[1]
+  const text=count=>new Function('state','return '+label)({newArrivals:{value:count}})
+  assert.equal(text(1),'1 new message')
+  assert.equal(text(3),'3 new messages')
 })
