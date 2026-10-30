@@ -52,7 +52,7 @@ test('channel options retain an existing selection outside the current account w
 test('event text and identity contracts survive round trips without changing provider mappings', () => {
   const draft = {...newConfiguration(true), target:'Explain my ledger', instructions:'Only my records', reply_style:'Brief', exact_trigger:'/ledger', search_confirmation:'Always', execution_policy:'Execute'}
   const tools = [{capability:'erpnext.supplier_ledger'}]
-  const actions = [{action:'create_draft',doctype:'Payment Entry',fields:['paid_amount']},{action:'reply'}]
+  const actions = [{action:'erpnext.payment_entry_draft',doctype:'Payment Entry',fields:['paid_amount']},{action:'reply'}]
   const values = configurationValues(draft,true,tools,'',actions)
   assert.deepEqual(toolRows(values.allowed_tools),tools)
   assert.deepEqual(JSON.parse(values.allowed_actions),actions)
@@ -62,10 +62,10 @@ test('event text and identity contracts survive round trips without changing pro
 })
 test('ordered actions can move only inside the sequence', async () => {
   const {moveAction} = await import('../src/services/automationEditor.js')
-  const actions=[{action:'create_draft'},{action:'reply'}]
-  moveAction(actions,0,-1);assert.equal(actions[0].action,'create_draft')
+  const actions=[{action:'erpnext.payment_entry_draft'},{action:'reply'}]
+  moveAction(actions,0,-1);assert.equal(actions[0].action,'erpnext.payment_entry_draft')
   moveAction(actions,1,-1);assert.equal(actions[0].action,'reply')
-  moveAction(actions,1,1);assert.equal(actions[1].action,'create_draft')
+  moveAction(actions,1,1);assert.equal(actions[1].action,'erpnext.payment_entry_draft')
 })
 test('save validation requires complete sender and company scope and bounded owner text', async () => {
   const {eventErrors} = await import('../src/services/automationEditor.js')
@@ -113,4 +113,22 @@ test('duplicate configured channel captions still identify distinct selections',
     { name: 'sales-b', channel: 'WhatsApp', label: 'Sales' },
   ])
   assert.deepEqual(options.map(row => row.label), ['WhatsApp · Sales · sales-a', 'WhatsApp · Sales · sales-b'])
+})
+
+test('skill daily spend cap saves as a number and must not be negative', async () => {
+  const {eventErrors} = await import('../src/services/automationEditor.js')
+  assert.equal(newConfiguration(true).daily_spend_cap_usd, 2)
+  assert.equal(newConfiguration(false).daily_spend_cap_usd, undefined)
+  const draft = {...newConfiguration(true), title:'Ledger', business_doctype:'Supplier', instructions:'Only this sender', daily_spend_cap_usd:'0.5'}
+  assert.equal(configurationValues(draft, true, [], '').daily_spend_cap_usd, 0.5)
+  assert.deepEqual(eventErrors(draft, [], []), [])
+  assert.deepEqual(eventErrors({...draft, daily_spend_cap_usd:'-1'}, [], []), ['Choose a daily spend cap of 0 or more.'])
+})
+test('every action except the Core reply needs a draft DocType and fields', async () => {
+  const {eventErrors, isDraftAction} = await import('../src/services/automationEditor.js')
+  assert.equal(isDraftAction({action:'erpnext.payment_entry_draft'}), true)
+  assert.equal(isDraftAction({action:'reply'}), false)
+  const draft = {...newConfiguration(true), title:'Ledger', business_doctype:'Supplier', instructions:'Only this sender', execution_policy:'Execute'}
+  assert.deepEqual(eventErrors(draft, [], [{action:'erpnext.payment_entry_draft', doctype:'', fields:[]}]), ['Choose a draft DocType and its required fields.'])
+  assert.deepEqual(eventErrors(draft, [], [{action:'erpnext.payment_entry_draft', doctype:'Payment Entry', fields:['paid_amount']}, {action:'reply'}]), [])
 })

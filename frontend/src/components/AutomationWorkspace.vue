@@ -7,7 +7,7 @@ import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } fr
 import { Badge, Button, Dropdown, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { configurationChannelOptions, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
+import { configurationChannelOptions, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, isDraftAction, moveAction, eventErrors, templateField } from '../services/automationEditor'
 import EventPicker from './fields/EventPicker.vue'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
@@ -83,7 +83,7 @@ async function save() {
   busy.value = true; error.value = ''; preview.value = null
   try {
     if (skill.value && draft.value.execution_policy === 'Execute') {
-      for (const action of actions.value.filter(row => row.action === 'create_draft')) {
+      for (const action of actions.value.filter(isDraftAction)) {
         const options = await coreApi('ai.configuration.editor_options', {kind:'draft_field', action:action.action, doctype:action.doctype})
         const missing = options.items.filter(field => field.required && !action.fields.includes(field.value))
         if (missing.length) validation.value.push('Include required draft fields: ' + missing.map(field => field.label).join(', '))
@@ -164,7 +164,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                 <p class="text-sm">Follow the written steps in this order. Every created document stays a draft linked to the conversation ticket. Staff open, check and submit it.</p>
                 <div v-for="(action, index) in actions" :key="action.action" class="event-reference">
                   <strong>{{ index + 1 }}. {{ referenceName(action.action) }}</strong>
-                  <template v-if="action.action === 'create_draft'">
+                  <template v-if="isDraftAction(action)">
                     <EventPicker :model-value="action.doctype" label="Draft DocType" kind="draft_doctype" :action="action.action" :disabled="busy" @update:model-value="value => chooseActionType(action, value)" />
                     <EventPicker v-model="action.fields" label="Draft fields (include required fields)" kind="draft_field" :action="action.action" :doctype="action.doctype" multiple :disabled="busy || !action.doctype" />
                     <p class="text-sm">Field types are shown in the picker. Required fields must be included. Staff review and submit the linked draft.</p>
@@ -179,7 +179,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             <fieldset class="automation-section"><legend>Operation</legend>
               <EventPicker v-model="draft.handoff_owner" label="Handoff owner" kind="user" :disabled="busy" />
               <EventPicker v-model="draft.ai_model" label="AI Model" kind="model" :skill="draft.name" :disabled="busy" />
-              <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.mode" label="Mode" type="select" :options="['Shadow', 'Automatic']" :disabled="busy" /><FormControl v-model="draft.daily_limit" label="Daily model limit" type="number" min="1" max="1000" :disabled="busy" /></div>
+              <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.mode" label="Mode" type="select" :options="['Shadow', 'Automatic']" :disabled="busy" /><FormControl v-model="draft.daily_limit" label="Daily model limit" type="number" min="1" max="1000" :disabled="busy" /><FormControl v-model="draft.daily_spend_cap_usd" label="Daily spend cap (USD)" type="number" min="0" step="0.01" :disabled="busy" /></div>
               <p class="text-sm">Shadow creates the live ticket and records proposals, without automatic replies or business writes.</p>
             </fieldset>
           </template>

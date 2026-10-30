@@ -1,6 +1,6 @@
 export function newConfiguration(skill) {
   const common = { title: '', enabled: 0, channel: '', business_doctype: '', run_as_user: '' }
-  return skill ? { ...common, ai_model: '', handoff_owner: '', mode: 'Shadow', daily_limit: 100, target: '', instructions: '', reply_style: '', search_confirmation: 'Always', exact_trigger: '', execution_policy: 'Ticket only', allowed_tools: '[]', allowed_actions: '[]' }
+  return skill ? { ...common, ai_model: '', handoff_owner: '', mode: 'Shadow', daily_limit: 100, daily_spend_cap_usd: 2, target: '', instructions: '', reply_style: '', search_confirmation: 'Always', exact_trigger: '', execution_policy: 'Ticket only', allowed_tools: '[]', allowed_actions: '[]' }
     : { ...common, source_doctype: '', event: 'on_submit', recipient_field: '', template: '', parameter_mapping: '[]', contact: '', use_preferences: 0, telegram_body: '', email_subject: '', email_body: '', email_signature: '',
       condition: '', recipients: '', contact_field: '', attachment_type: '', print_format: '', report_name: '', report_filters: '', file_name: '' }
 }
@@ -31,6 +31,7 @@ export function configurationValues(draft, skill, tools, parameters, actions = [
   values.enabled = Number(Boolean(values.enabled))
   if (skill) {
     values.daily_limit = Number(values.daily_limit)
+    values.daily_spend_cap_usd = Number(values.daily_spend_cap_usd)
     values.allowed_tools = JSON.stringify(tools.map(row => ({ capability: row.capability })))
     values.allowed_actions = JSON.stringify(values.execution_policy === 'Execute' ? actions : [])
   } else { values.use_preferences = Number(Boolean(values.use_preferences)); values.parameter_mapping = JSON.stringify(parameters.split('\n').map(field => field.trim()).filter(Boolean)) }
@@ -56,6 +57,10 @@ export function variantPreview(body, parameters) {
 export function referenceName(value) {
   return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
+// Every action except the Core reply creates a draft and needs a DocType and fields.
+export function isDraftAction(row) {
+  return row.action !== 'reply'
+}
 export function moveAction(actions, index, delta) {
   const destination = index + delta
   if (destination < 0 || destination >= actions.length) return
@@ -71,9 +76,10 @@ export function eventErrors(draft, references, actions) {
   }
   if (draft.enabled && (!draft.target?.trim() || !draft.channel || !draft.ai_model || !draft.run_as_user || !draft.handoff_owner)) errors.push('Enabled events need a target, channel, model, run-as user and handoff owner.')
   if (!(Number(draft.daily_limit) >= 1 && Number(draft.daily_limit) <= 1000)) errors.push('Choose a daily model limit from 1 to 1000.')
+  if (!(Number(draft.daily_spend_cap_usd) >= 0)) errors.push('Choose a daily spend cap of 0 or more.')
   if (references.some(row => !row.capability)) errors.push('Choose an approved capability for every read reference.')
   if (new Set(references.map(row => row.capability)).size !== references.length) errors.push('Read references must be distinct.')
-  if (draft.execution_policy === 'Execute' && actions.some(row => row.action === 'create_draft' && (!row.doctype || !row.fields.length))) errors.push('Choose a draft DocType and its required fields.')
+  if (draft.execution_policy === 'Execute' && actions.some(row => isDraftAction(row) && (!row.doctype || !row.fields.length))) errors.push('Choose a draft DocType and its required fields.')
   return [...new Set(errors)]
 }
 // Templates are searched on the server by name; a fixed number limits them to its WABA.
