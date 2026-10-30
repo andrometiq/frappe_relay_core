@@ -6,6 +6,16 @@ from relay_core.permissions import require_access, can_manage
 FIELDS = ['business_doctype', 'label', 'enabled']
 
 
+def picker_options():
+    """Enabled Relay-visible types and captions, independent of Desk permissions."""
+    from relay_core.business_access import allowed_types
+    visible = allowed_types()
+    rows = frappe.get_all('Relay Contact Type', filters={'enabled': 1},
+                          fields=['business_doctype', 'label'], order_by='business_doctype asc')
+    return [dict(value=row.business_doctype, label=row.label or row.business_doctype)
+            for row in rows if row.business_doctype in visible]
+
+
 def with_groups(row, config=None):
     from relay_core.business_groups import configuration
     fields = configuration(row['business_doctype'], config=config)

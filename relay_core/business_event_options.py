@@ -6,19 +6,22 @@ from relay_core.business_references import RELAY_DOCTYPES
 
 @frappe.whitelist(methods=['GET'])
 def search(kind, query='', doctype=None, business_doctype=None, selected=None):
-    require_access('Relay Business Event Rule', 'write')
+    if kind == 'business_doctype':
+        require_access()
+    else:
+        require_access('Relay Business Event Rule', 'write')
     if not isinstance(query, str) or len(query) > 80:
         raise ValueError('Use at most 80 search characters')
     selected = frappe.parse_json(selected) if isinstance(selected, str) else selected
     if selected is not None and (not isinstance(selected, list) or len(selected) > 20
             or any(not isinstance(value, str) or len(value) > 140 for value in selected)):
         raise ValueError('Invalid selected options')
-    if doctype and (not isinstance(doctype, str) or doctype in RELAY_DOCTYPES
+    if kind != 'business_doctype' and doctype and (not isinstance(doctype, str) or doctype in RELAY_DOCTYPES
             or not frappe.has_permission(doctype, 'read')):
         raise frappe.PermissionError('Source DocType is not accessible')
     if kind == 'business_doctype':
-        from relay_core.api import business_types
-        items = [dict(value=name, label=name) for name in business_types()]
+        from relay_core.business_types import picker_options
+        items = picker_options()
     elif kind in ('recipient_field', 'contact_field', 'field'):
         items = []
         if doctype:

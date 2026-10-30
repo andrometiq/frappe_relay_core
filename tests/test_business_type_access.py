@@ -1,7 +1,9 @@
 """Business type access against representative local-only SQL rows, without a site or provider."""
 import json
 import sqlite3
+import sys
 import unittest
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -16,12 +18,13 @@ class BusinessTypeAccessTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.executescript('''
             CREATE TABLE `tabContact` (name TEXT PRIMARY KEY);
-            CREATE TABLE `tabRelay Contact Type` (name TEXT, business_doctype TEXT, enabled INTEGER);
+            CREATE TABLE `tabRelay Contact Type` (name TEXT, business_doctype TEXT, enabled INTEGER, label TEXT);
             CREATE TABLE `tabRelay Contact Type User` (parent TEXT, parenttype TEXT, parentfield TEXT, user TEXT);
             CREATE TABLE `tabDynamic Link` (parent TEXT, parenttype TEXT, parentfield TEXT, link_doctype TEXT, link_name TEXT);
             CREATE TABLE `tabCustomer` (name TEXT, customer_name TEXT);
             CREATE TABLE `tabSupplier` (name TEXT);
-            INSERT INTO `tabRelay Contact Type` VALUES ('Customer','Customer',1), ('Supplier','Supplier',1), ('Lead','Lead',0);
+            INSERT INTO `tabRelay Contact Type` VALUES
+                ('Customer','Customer',1,'Clients'), ('Supplier','Supplier',1,''), ('Lead','Lead',0,'Prospects');
             INSERT INTO `tabRelay Contact Type User` VALUES ('Customer','Relay Contact Type','users','listed');
             INSERT INTO `tabContact` VALUES ('customer'), ('supplier'), ('shared'), ('unlinked'), ('disabled');
             INSERT INTO `tabCustomer` VALUES ('LOCAL-C1', 'Local test customer');
@@ -51,9 +54,12 @@ class BusinessTypeAccessTests(unittest.TestCase):
         self.enterContext(patch.object(business_inbox, 'frappe', self.fake))
         self.enterContext(patch.object(business_inbox, 'require_access'))
 
-    def get_all(self, doctype, filters, pluck):
+    def get_all(self, doctype, filters, pluck=None, fields=None, order_by=None):
         columns = ' AND '.join(f'`{key}`=?' for key in filters)
-        return [row[0] for row in self.db.execute(f'SELECT `{pluck}` FROM `tab{doctype}` WHERE {columns}', tuple(filters.values()))]
+        selected = ', '.join(f'`{key}`' for key in ([pluck] if pluck else fields))
+        order = f' ORDER BY {order_by}' if order_by else ''
+        rows = self.db.execute(f'SELECT {selected} FROM `tab{doctype}` WHERE {columns}{order}', tuple(filters.values()))
+        return [row[0] if pluck else _dict(zip(fields, row)) for row in rows]
 
     def sql(self, sql, values=()):
         return self.db.execute(sql.replace('%s', '?'), (values,) if isinstance(values, str) else values).fetchall()
@@ -63,6 +69,70 @@ class BusinessTypeAccessTests(unittest.TestCase):
                                ('system', {'Customer', 'Supplier'}), ('outsider', set()), ('old-team', set())]:
             with self.subTest(user=user): self.assertEqual(access.allowed_types(user), expected)
         self.fake.has_permission.assert_not_called()
+
+    @contextmanager
+    def business_pickers(self, user):
+        from relay_core import ai_features, business_event_options, business_types
+        from relay_core.ai import configuration
+        self.fake.session.user = user
+        self.fake.has_permission.side_effect = lambda dt, mode, **kw: (
+            dt == 'Relay Contact' and mode == 'read' and user in ('listed', 'unlisted', 'manager')
+            or user == 'manager' and dt in ('Relay AI Skill', 'Relay Business Event Rule'))
+        self.fake.get_list = Mock(side_effect=frappe.PermissionError('Insufficient Permission for DocType'))
+        with patch.dict(sys.modules, {'frappe': self.fake}), \
+                patch.object(configuration, 'frappe', self.fake), \
+                patch.object(business_event_options, 'frappe', self.fake), \
+                patch.object(business_types, 'frappe', self.fake), \
+                patch.object(ai_features, 'is_enabled', return_value=True):
+            yield (configuration.editor_options, business_event_options.search)
+        self.fake.get_list.assert_not_called()
+        self.fake.get_meta.assert_not_called()
+
+    def test_business_pickers_manager_without_doctype_read_gets_enabled_types_and_labels(self):
+        with self.business_pickers('manager') as pickers:
+            self.assertFalse(self.fake.has_permission('DocType', 'read'))
+            for picker in pickers:
+                with self.subTest(picker=picker.__name__):
+                    self.assertEqual(picker('business_doctype', doctype='Sales Invoice'), {'items': [
+                        {'value': 'Customer', 'label': 'Clients'}, {'value': 'Supplier', 'label': 'Supplier'}]})
+                    self.assertEqual(picker('business_doctype', query='cLiEn'), {
+                        'items': [{'value': 'Customer', 'label': 'Clients'}]})
+                    self.assertEqual(picker('business_doctype', query='SUPP'), {
+                        'items': [{'value': 'Supplier', 'label': 'Supplier'}]})
+
+    def test_business_pickers_user_gets_only_assigned_types(self):
+        for user, expected in [('listed', [{'value': 'Customer', 'label': 'Clients'}]), ('unlisted', [])]:
+            with self.business_pickers(user) as pickers:
+                for picker in pickers:
+                    with self.subTest(user=user, picker=picker.__name__):
+                        self.assertEqual(picker('business_doctype'), {'items': expected})
+                        self.assertEqual(picker('business_doctype', query='Supplier'), {'items': []})
+
+    def test_business_pickers_selected_never_discloses_unassigned_disabled_or_unknown_types(self):
+        for user, expected in [('manager', ['Customer', 'Supplier']), ('listed', ['Customer'])]:
+            with self.business_pickers(user) as pickers:
+                for picker in pickers:
+                    for selected in (['Customer', 'Supplier', 'Lead', 'Unknown'],
+                                     '["Customer","Supplier","Lead","Unknown"]'):
+                        with self.subTest(user=user, picker=picker.__name__, selected=selected):
+                            result = picker('business_doctype', selected=selected, query='no match')
+                            self.assertEqual([row['value'] for row in result['items']], expected)
+                    self.assertEqual(picker('business_doctype', selected=[]), {'items': []})
+                    self.assertEqual(picker('business_doctype', selected=['Lead', 'Unknown']), {'items': []})
+
+    def test_business_pickers_validate_input_and_keep_other_kinds_restricted(self):
+        with self.business_pickers('listed') as pickers:
+            for picker in pickers:
+                for args in ({'query': 'x' * 81}, {'query': None}, {'selected': '{}'},
+                             {'selected': ['x'] * 21}, {'selected': [1]}, {'selected': ['x' * 141]}):
+                    with self.subTest(picker=picker.__name__, args=args), self.assertRaises(ValueError):
+                        picker('business_doctype', **args)
+                with self.assertRaises(frappe.PermissionError):
+                    picker('doctype')
+        with self.business_pickers('outsider') as pickers:
+            for picker in pickers:
+                with self.assertRaises(frappe.PermissionError):
+                    picker('business_doctype')
 
     def test_contact_lists_and_document_checks_share_scope_and_nonzero_counts(self):
         expected = {'listed': ['customer', 'shared', 'unlinked'], 'unlisted': ['unlinked'],
