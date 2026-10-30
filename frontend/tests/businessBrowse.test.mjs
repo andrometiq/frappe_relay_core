@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileUnread } from '../src/services/businessBrowse.js'
+import { appendTiles, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
@@ -12,7 +12,7 @@ async function component(t, props = {}, api) {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh() {}, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
@@ -108,6 +108,19 @@ test('a no-group type goes straight to records; paging and failed requests can r
   assert.deepEqual(JSON.parse(calls.at(-1).path), [])
 })
 
+test('a record that moved to the next page between requests is shown once', async t => {
+  browser(t, '#/messages')
+  const view = await component(t, {}, async (method, values) => {
+    if (!values.doctype) return { items: [type], next: null }
+    const names = values.start ? ['local-2', 'local-3'] : ['local-1', 'local-2']
+    return { items: names.map(name => ({ ...record, name })), next: values.start ? null : 30 }
+  })
+  view.choose(type); await settle()
+  await view.load(true)
+  assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2', 'local-3'])
+  assert.deepEqual(appendTiles([type], [type, { ...type, doctype: 'Other' }]).map(row => row.doctype), ['Local Supplier', 'Other'])
+})
+
 test('an older request cannot replace results after navigating to another type', async t => {
   browser(t, '#/messages'); let finish
   const view = await component(t, {}, async (method, values) => {
@@ -186,7 +199,7 @@ test('rendered root has one Business types label and Contacts tiles have contact
       { kind: 'type', label: 'Local', record_count: 1, contact_count: 2, unread: 4278, unread_records: 121 },
     ], fields: [], next: null }))
     const app = Vue.createSSRApp({ render, setup: () => ({ ...view, contacts, busy: false,
-      selected: '', selectedDoctype: '', heading: null, levelLabel, searchLabel, tileCount, tileUnread, listTime: () => '' }) })
+      selected: '', selectedDoctype: '', heading: null, levelLabel, searchLabel, tileCount, tileKey, tileUnread, listTime: () => '' }) })
     for (const name of ['Avatar', 'Button', 'ErrorMessage', 'FeatherIcon', 'TextInput', 'LoadingRows']) {
       app.component(name, { setup: () => () => Vue.h('span') })
     }

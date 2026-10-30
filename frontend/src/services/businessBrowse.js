@@ -43,6 +43,14 @@ export function browseCrumbs(state, fields = []) {
   return crumbs
 }
 
+export const tileKey = tile => JSON.stringify([tile.kind, tile.doctype, tile.name, tile.value])
+
+// Tiles are ordered by newest activity, so a record can move to a later page between requests.
+export function appendTiles(items, rows) {
+  const shown = new Set(items.map(tileKey))
+  return [...items, ...rows.filter(row => !shown.has(tileKey(row)))]
+}
+
 export function tileCount(count, noun) {
   return `${count || 0} ${noun}${Number(count) === 1 ? '' : 's'}`
 }

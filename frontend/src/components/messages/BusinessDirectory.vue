@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread } from '../../services/businessBrowse'
+import { appendTiles, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { useLoadMore } from '../../composables/useLoadMore'
@@ -36,7 +36,7 @@ async function load(append = false) {
       return window.history.replaceState(window.history.state, '', browseRoute(base, { ...state.value, query: query.value }))
     }
     const rows = people.value ? page.items.map(row => ({ ...row, kind: 'contact', label: row.full_name || row.name })) : page.items
-    items.value = append ? [...items.value, ...rows] : rows
+    items.value = append ? appendTiles(items.value, rows) : rows
     if (!people.value) fields.value = page.fields || []
     next.value = page.next
   } catch (e) { if (request === sequence) error.value = e.message }
@@ -98,7 +98,7 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
     <ErrorMessage :message="error" />
     <div class="business-tiles">
       <LoadingRows v-if="loading && !items.length" label="Loading records…" />
-      <button v-for="tile in items" :key="JSON.stringify([tile.kind, tile.doctype, tile.name, tile.value])" type="button" class="business-tile"
+      <button v-for="tile in items" :key="tileKey(tile)" type="button" class="business-tile"
         :disabled="busy" :aria-pressed="tile.kind === 'record' && selectedDoctype === tile.doctype && selected === tile.name" @click="choose(tile)">
         <Avatar v-if="tile.kind === 'contact' || tile.kind === 'record'" :label="tile.label" />
         <span v-else class="business-tile-icon" aria-hidden="true"><FeatherIcon :name="tile.kind === 'unlinked' ? 'users' : 'folder'" :size="20" /></span>
