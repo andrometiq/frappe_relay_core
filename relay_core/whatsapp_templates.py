@@ -8,6 +8,8 @@ from relay_core.hub import safe_text
 from relay_core.settings import value as connection_value
 
 EVENT_STATUSES = {'APPROVED','REJECTED','PENDING','PAUSED','DISABLED','IN_APPEAL','DELETED','PENDING_DELETION','REINSTATED','FLAGGED'}
+QUALITY_SCORES = {'GREEN','YELLOW','RED','UNKNOWN'}
+TEMPLATE_FIELDS = {'message_template_status_update', 'message_template_quality_update'}
 SYNC_PAGES = 20  # Hub pages hold 50 templates.
 FIELDS = ('template_name', 'language', 'category', 'status', 'quality', 'reason')
 DEFINITIONS = 'relay-template-definitions:'
@@ -43,32 +45,44 @@ def event_reason(value):
 
 
 def template_event(payload):
-    """True when every change of a Meta envelope is a template status update."""
+    """True when every change of a Meta envelope is a template status or quality update."""
     try:
         changes = [change for entry in payload['entry'] for change in entry['changes']]
-        return bool(changes) and all(change.get('field') == 'message_template_status_update' for change in changes)
+        return bool(changes) and all(change.get('field') in TEMPLATE_FIELDS for change in changes)
     except (KeyError, TypeError, AttributeError):
         return False
 
 
+def event_values(field, value):
+    """The template fields a status or quality webhook sets."""
+    if field == 'message_template_quality_update':
+        quality = value.get('new_quality_score')
+        if quality not in QUALITY_SCORES:
+            raise ValueError('Invalid template quality')
+        return {'quality':quality}
+    if value.get('event') not in EVENT_STATUSES:
+        raise ValueError('Invalid template status')
+    return {'status':value['event'], 'reason':event_reason(value)}
+
+
 def project(payload, event):
-    """Apply Meta template status updates; the envelope's entry id is the WABA of the template."""
+    """Apply Meta template status and quality updates; the envelope's entry id is the WABA of the template."""
     applied = False
     for entry in payload.get('entry', []):
         for change in entry.get('changes', []):
-            if change.get('field') != 'message_template_status_update': continue
+            if change.get('field') not in TEMPLATE_FIELDS: continue
             value = change.get('value') or {}
-            identifier, status = value.get('message_template_id'), value.get('event')
+            identifier = value.get('message_template_id')
             if type(identifier) not in (str, int) or not str(identifier).isdigit() or len(str(identifier)) > 100:
                 raise ValueError('Invalid template identity')
-            if status not in EVENT_STATUSES:
-                raise ValueError('Invalid template status')
+            values = event_values(change['field'], value)
             lock_account(event.account)
             doc, new = record(event.account, identifier)
+            if new and 'status' not in values: continue  # The next list sync brings the unknown template with its quality.
             applied = True
             if not new and int(doc.hub_event_id) >= int(event.hub_event_id): continue
             doc.update({'template_name':value.get('message_template_name'), 'language':value.get('message_template_language'),
-                        'status':status, 'reason':event_reason(value), 'hub_event_id':event.hub_event_id,
+                        **values, 'hub_event_id':event.hub_event_id,
                         'waba_id':waba_of(entry.get('id')) or doc.get('waba_id')})
             internal_save(doc, new=new)
             publish()
@@ -242,7 +256,10 @@ def render(template, sent):
         elif kind == 'FOOTER' and component.get('text'):
             result['footer'] = component['text']
         elif kind == 'BUTTONS':
-            result['buttons'] = [button['text'] for button in component.get('buttons') or [] if button.get('text')]
+            # Meta sets the copy code label itself, so the definition can leave text out.
+            labels = [button.get('text') or ('Copy offer code' if button.get('type') == 'COPY_CODE' else '')
+                      for button in component.get('buttons') or []]
+            result['buttons'] = [label for label in labels if label]
     return {key: value for key, value in result.items() if value}
 
 

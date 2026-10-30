@@ -165,6 +165,21 @@ class TemplateSyncTests(unittest.TestCase):
         row = next(iter(self.store.rows.values()))
         self.assertEqual(row.reason, "INVALID_FORMAT · Format issue · Variables can't be at the start or end of the template.")
 
+    def test_quality_webhook_updates_quality_and_keeps_status(self):
+        def deliver(field, value, event_id):
+            payload = {'entry': [{'id': '222', 'changes': [{'field': field, 'value': value}]}]}
+            self.assertTrue(whatsapp_templates.template_event(payload))
+            return whatsapp_templates.project(payload, _dict(account='essdee', hub_event_id=event_id))
+        identity = {'message_template_id': 101, 'message_template_name': 'order_update', 'message_template_language': 'en_US'}
+        self.assertFalse(deliver('message_template_quality_update', dict(identity, new_quality_score='RED'), '8'))
+        self.assertEqual(self.store.rows, {})
+        deliver('message_template_status_update', dict(identity, event='APPROVED'), '9')
+        deliver('message_template_quality_update', dict(identity, previous_quality_score='GREEN', new_quality_score='YELLOW'), '10')
+        row = next(iter(self.store.rows.values()))
+        self.assertEqual((row.status, row.quality, row.waba_id), ('APPROVED', 'YELLOW', '222'))
+        with self.assertRaises(ValueError):
+            deliver('message_template_quality_update', dict(identity, new_quality_score='BLUE'), '11')
+
     def test_overlay_keeps_live_status_and_adds_local_reason(self):
         self.store.frappe.get_all = lambda *args, **kwargs: [_dict(template_id='101', reason='INVALID_FORMAT')]
         result = whatsapp_templates.overlay({'data': [dict(ROW, status='REJECTED')]})
@@ -209,6 +224,11 @@ class TemplateRenderTests(unittest.TestCase):
     def test_media_header_is_not_rendered_as_text(self):
         template = {'components': [{'type': 'HEADER', 'format': 'IMAGE'}, {'type': 'BODY', 'text': 'New stock'}]}
         self.assertEqual(whatsapp_templates.render(template, []), {'body': 'New stock'})
+
+    def test_copy_code_button_without_text_gets_its_meta_label(self):
+        buttons = [{'type': 'QUICK_REPLY', 'text': 'Stop'}, {'type': 'COPY_CODE', 'example': 'SAVE20'}]
+        template = {'components': [{'type': 'BODY', 'text': 'Offer'}, {'type': 'BUTTONS', 'buttons': buttons}]}
+        self.assertEqual(whatsapp_templates.render(template, [])['buttons'], ['Stop', 'Copy offer code'])
 
     def test_sync_caches_definitions_so_sends_skip_the_hub(self):
         self.hub.execute.return_value = page([dict(ROW, **MARKETING, id='103', status='APPROVED')])
