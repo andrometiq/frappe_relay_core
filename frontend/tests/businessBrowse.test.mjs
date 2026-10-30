@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
 import { rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, tileCount, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
+import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
 
 const settle = async () => { await nextTick(); await new Promise(resolve => setImmediate(resolve)) }
@@ -11,10 +12,10 @@ async function component(t, props = {}, api) {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh() {}, coreApi: api }
-  const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search };')(...Object.values(globals)))
+  const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
   t.after(() => scope.stop())
   for (const callback of mounted) callback()
   await settle()
@@ -96,7 +97,11 @@ test('a no-group type goes straight to records; paging and failed requests can r
   assert.equal(view.error.value, 'Temporary failure')
   fail = false; await view.load()
   assert.equal(view.items.value[0].kind, 'record')
-  await view.load(true)
+  const observers = [], originalObserver = globalThis.IntersectionObserver
+  globalThis.IntersectionObserver = class { constructor(callback) { this.callback = callback; observers.push(this) } observe() {} disconnect() {} }
+  t.after(() => { globalThis.IntersectionObserver = originalObserver })
+  view.moreSentinel.value = {}; await settle()
+  await observers.at(-1).callback([{ isIntersecting: true }]); await settle()
   assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2'])
   assert.equal(view.next.value, null)
   assert.deepEqual(JSON.parse(calls.at(-1).path), [])

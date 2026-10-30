@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
+import { useLoadMore } from '../composables/useLoadMore'
 import EventPicker from './fields/EventPicker.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 
@@ -28,6 +29,7 @@ async function load(append = false) {
   } catch (e) { if (current === generation) error.value = e.message }
   finally { if (current === generation) busy.value = false }
 }
+const moreSentinel = useLoadMore({ loading: busy, hasMore: () => !!next.value, error, load: () => load(true) })
 async function save() {
   if (!allowed.value || busy.value) return
   busy.value = true; error.value = ''; notice.value = ''
@@ -57,7 +59,7 @@ onMounted(load)
             <strong>{{ row.title }}</strong><span>{{ row.enabled ? 'Enabled' : 'Disabled' }}{{ row.memory_status ? ' · ' + row.memory_status : '' }}</span>
           </button>
           <p v-if="busy" role="status">Loading…</p><p v-else-if="!rows.length">No records yet.</p>
-          <Button v-if="next" label="Load more" :disabled="busy" @click="load(true)" />
+          <span v-if="next" ref="moreSentinel" aria-hidden="true" />
         </div>
         <form v-if="draft" class="workflow-card space-y-3" @submit.prevent="save">
           <FormControl v-model="draft.title" label="Title" required :disabled="busy" />
