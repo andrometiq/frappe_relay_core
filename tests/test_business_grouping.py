@@ -161,6 +161,7 @@ class GroupAggregateTests(unittest.TestCase):
         self.enterContext(patch('relay_core.inbox_filters.channel_names', side_effect=lambda medium, channel, channels: channels))
         self.enterContext(patch('relay_core.inbox_filters.business_filter'))
         self.enterContext(patch('relay_core.timeline.has_timeline_column', return_value=True))
+        self.enterContext(patch('relay_core.timeline.index_hint', return_value=''))
 
     def query(self, sql, values=None):
         return SimpleNamespace(walk=lambda: (sql, values or {}))
@@ -229,7 +230,7 @@ class GroupAggregateTests(unittest.TestCase):
             self.assertEqual((root['items'][0]['record_count'], root['items'][0]['unread']), (5, 15))
             directory = groups.directory('Local Business')
             tiles = groups.browse('Local Business')
-            self.assertEqual([row['unread'] for row in directory['items']], [row['unread'] for row in tiles['items']])
+            self.assertEqual({row['value']: row['unread'] for row in directory['items']}, {row['value']: row['unread'] for row in tiles['items']})
             records = groups.records('Local Business', group='')
             self.assertEqual([row['name'] for row in records['items']], ['a', 'b'])
             self.assertEqual(sum(row['unread'] for row in records['items']), 8)
@@ -309,7 +310,7 @@ class GroupAggregateTests(unittest.TestCase):
             self.assertEqual(groups.browse(channels=[])['items'], [])
             self.assertEqual(groups.browse(business_type='Other')['items'], [])
             self.assertEqual(groups.browse('Local Business', business_type='Other')['items'], [])
-            self.assertEqual(groups.browse('Local Business', channels=['ch2'])['items'][0]['record_count'], 1)
+            self.assertEqual({row['value']: row['record_count'] for row in groups.browse('Local Business', channels=['ch2'])['items']}, {'': 1, 'North': 2})
             self.chat_query.return_value = 'restricted'
             filtered = groups.browse('Local Business', channels=['ch1'])['items'][0]
             self.assertEqual((filtered['record_count'], filtered['unread']), (1, 1))
@@ -435,15 +436,53 @@ class GroupAggregateTests(unittest.TestCase):
     def test_restricted_totals_and_groups_filter_by_newest_channel(self):
         self.chat_query.return_value = 'restricted'
         self.db.execute("UPDATE `tabRelay Message` SET allowed=1 WHERE name='m2'")
-        self.fake.db.sql.reset_mock()
         total = groups.aggregate('Local Business', [], [], totals=True)[0]
         self.assertEqual((total.record_count, total.unread, total.unread_records, total.last_activity), (5, 2, 2, '2026-10-02'))
-        self.assertIn('SELECT MAX(message_at)', self.fake.db.sql.call_args.args[0])
         rows = groups.aggregate('Local Business', ['region'], [])
         self.assertEqual([(row.value, row.unread, row.last_activity) for row in rows],
                          [('', 2, '2026-10-02'), ('North', 0, None)])
         rows = groups.aggregate('Local Business', ['region'], [], channels=['ch1'])
         self.assertEqual([(row.value, row.record_count, row.unread) for row in rows], [('', 1, 1)])
+
+    def test_browse_orders_records_by_newest_readable_activity_then_title(self):
+        with patch.object(groups, 'configuration', return_value=[]):
+            def names(**kwargs):
+                return [row['name'] for row in groups.browse('Local Business', **kwargs)['items']]
+
+            self.assertEqual(names(), ['f', 'c', 'b', 'a', 'e'], 'Unrestricted viewers use Relay Chat times')
+            self.unstamped(('Local Business', 'e'))
+            self.assertEqual(names(), ['e', 'b', 'a', 'f', 'c'], 'A hidden newer message does not lift a; no activity sorts by title')
+            self.assertEqual(names(query='a'), ['b', 'a', 'f', 'c'], 'Search keeps the order')
+            self.assertEqual(names(channels=['ch2']), ['e', 'b'])
+            self.assertEqual([row['name'] for row in groups.records('Local Business')['items']], ['a', 'b', 'c', 'e', 'f'],
+                             'Legacy pickers keep name order')
+
+    def test_record_pages_follow_activity_order_without_duplicates(self):
+        self.chat_query.return_value = 'restricted'
+        for index in range(70):
+            self.db.execute('INSERT INTO `tabLocal Business` VALUES (?, ?, ?, ?, ?)', (f'z{index:03}', f'Record {index % 7}', '', '', 1))
+            if index % 3 == 0:
+                self.db.execute("INSERT INTO `tabRelay Message` (name, business_doctype, business_name, relay_contact, channel, direction, "
+                                "sent_at, creation, legacy_triage, allowed, unread) VALUES (?, 'Local Business', ?, 'r1', 'ch1', 'Incoming', ?, ?, 0, 1, 0)",
+                                (f'mz{index}', f'z{index:03}', f'2026-09-{index % 28 + 1:02}', '2026-09-01'))
+        with patch.object(groups, 'configuration', return_value=[]):
+            pages, start = [], 0
+            while start is not None:
+                page = groups.browse('Local Business', start=start)
+                pages += page['items']
+                start = page['next']
+        self.assertEqual(len(pages), len({row['name'] for row in pages}))
+        self.assertEqual(len(pages), 75)
+        dated = [row['last_activity'] for row in pages if row['last_activity']]
+        self.assertEqual(dated, sorted(dated, reverse=True))
+        undated = pages[len(dated):]
+        self.assertFalse(any(row['last_activity'] for row in undated))
+        self.assertEqual([(row['label'], row['name']) for row in undated], sorted((row['label'], row['name']) for row in undated))
+
+    def test_browse_orders_group_tiles_by_newest_activity_and_directory_by_value(self):
+        with patch.object(groups, 'configuration', return_value=['region']):
+            self.assertEqual([row['value'] for row in groups.browse('Local Business')['items']], ['North', ''])
+            self.assertEqual([row.value for row in groups.directory('Local Business')['items']], ['', 'North'])
 
     def test_empty_record_page_skips_activity(self):
         self.chat_query.return_value = 'restricted'
@@ -479,8 +518,13 @@ class BusinessTimeIndexTests(unittest.TestCase):
         fake, time = self.run_install('mariadb')
         fake.db.add_index.assert_any_call('Relay Message', ['business_doctype', 'business_name', 'relay_timeline_time', 'name'], 'relay_business_time')
         self.assertEqual(time, 'm.relay_timeline_time')
+        from relay_core import timeline
+        with patch.object(timeline, 'frappe', fake):
+            self.assertEqual(timeline.index_hint('relay_business_time'), ' FORCE INDEX (`relay_business_time`)')
         fake, time = self.run_install('postgres')
         statements = [call.args[0] for call in fake.db.sql.call_args_list]
         self.assertIn('CREATE INDEX IF NOT EXISTS "relay_business_time" ON "tabRelay Message" '
                       '(business_doctype, business_name, (COALESCE(sent_at, creation)), name)', statements)
         self.assertEqual(time, 'COALESCE(m.sent_at, m.creation)')
+        with patch.object(timeline, 'frappe', fake):
+            self.assertEqual(timeline.index_hint('relay_business_time'), '')

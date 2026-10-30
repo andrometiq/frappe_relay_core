@@ -109,7 +109,8 @@ def message_scope(values, prefix='message_'):
 
 
 def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals=False, after=None,
-              group_search=False, contact_search=False, channels=None, business_name=None, contacts=False):
+              group_search=False, contact_search=False, channels=None, business_name=None, contacts=False, newest_first=False):
+    """Group or record tiles with counts. `newest_first` orders tiles by newest readable activity, then by label."""
     validate_text(query)
     offset = page_start(start)
     title = 'b.' + identifier(title_field(doctype))
@@ -147,15 +148,22 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
     table = identifier('tab' + doctype)
     matching = f"SELECT b.name FROM {table} b WHERE {' AND '.join(conditions)}"
     limit = '' if totals else ' LIMIT 31 OFFSET %(start)s'
+    newest_first = newest_first and not contacts and not totals
+    label = f"COALESCE(NULLIF({title}, ''), b.name)"
     if not field and not totals and (contacts or channels is None):
-        # Record order does not depend on activity here, so only one page of records needs it.
-        page = frappe.db.sql(matching + ' ORDER BY b.name ASC' + limit, values, as_dict=True)
+        # Only one page of records needs counts: find it first, by the newest time alone when ordered by activity.
+        if newest_first:
+            page = frappe.db.sql(f"""SELECT b.name FROM {table} b LEFT JOIN ({newest_activity(values, f'({matching})')}) newest
+                ON newest.business_name=b.name WHERE {' AND '.join(conditions)}
+                ORDER BY newest.last_message_at IS NULL, newest.last_message_at DESC, {label}, b.name{limit}""", values, as_dict=True)
+        else:
+            page = frappe.db.sql(matching + ' ORDER BY b.name ASC' + limit, values, as_dict=True)
         if not page:
             return []
         values['page'] = tuple(row['name'] for row in page)
         conditions.append('b.name IN %(page)s')
         limit = ''
-    selection = '' if totals else (f'{bucket} AS value, ' if field else f"b.name, COALESCE(NULLIF({title}, ''), b.name) AS label, ")
+    selection = '' if totals else (f'{bucket} AS value, ' if field else f"b.name, {label} AS label, ")
     grouping = '' if totals else (' GROUP BY ' + bucket + (', ' + title if not field and title != 'b.`name`' else ''))
     order = '' if totals else (' ORDER BY value ASC' if field else ' ORDER BY b.name ASC')
     if contacts:
@@ -165,11 +173,13 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
             LEFT JOIN `tabContact` p ON p.name=l.parent AND p.name IN ({people})"""
         metrics = 'COUNT(DISTINCT p.name) AS contact_count, 0 AS unread, 0 AS unread_records, NULL AS last_activity'
     else:
-        joins, last_activity = activity(values, matching if totals and channels is None else None, channels)
+        joins, last_activity = activity(values)
         if channels is not None:
             # Match Inbox's channel filter: the channel of the newest readable activity.
             values['channels'] = tuple(channels) or ('',)
             conditions.append('activity.last_channel IN %(channels)s')
+        if newest_first:
+            order = f' ORDER BY {last_activity} IS NULL, {last_activity} DESC, ' + ('value ASC' if field else 'label ASC, b.name ASC')
         metrics = f"""COALESCE(SUM(activity.unread_count), 0) AS unread,
             COUNT(DISTINCT CASE WHEN activity.unread_count>0 THEN b.name END) AS unread_records,
             {last_activity} AS last_activity"""
@@ -185,12 +195,8 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
     return rows
 
 
-def activity(values, matching=None, channels=None):
-    """Join and newest-time expression for per-record unread counts and newest readable activity.
-
-    With `matching` (a record query), the newest time is one lookup over those records instead of a per-record join.
-    The newest channel is found only when a channel filter needs it.
-    """
+def activity(values):
+    """Join and newest-time expression for per-record unread counts and newest readable activity and its channel."""
     from relay_core.relay_chats import query as chat_query
     if not chat_query():
         # Only an unrestricted viewer can use counters that include every contact.
@@ -198,36 +204,58 @@ def activity(values, matching=None, channels=None):
                 'MAX(activity.last_message_at)')
     from relay_core.inbox import _unread_query
     unread_names = bound_query(_unread_query(['name']), values, 'unread_')
-    readable = f"COALESCE(m.legacy_triage, 0)=0 AND {message_scope(values)}"
+    readable = readable_condition(values)
     records = '%(page)s' if 'page' in values else None
     unread = f"""SELECT business_name, COUNT(*) AS unread_count
         FROM ({owned_messages(readable + f' AND m.name IN ({unread_names})', records)}) owned GROUP BY business_name"""
-    if matching:
-        newest = f'(SELECT MAX(message_at) FROM ({owned_messages(readable, f"({matching})")}) owned)'
-        return f'LEFT JOIN ({unread}) activity ON activity.business_name=b.name', newest
-    latest = f'SELECT business_name, MAX(message_at) AS last_message_at FROM ({owned_messages(readable, records)}) owned GROUP BY business_name'
-    if channels is not None:
-        latest = f"""SELECT newest.*, MAX(owned.channel) AS last_channel FROM ({latest}) newest
-            JOIN ({owned_messages(readable, records)}) owned ON owned.business_name=newest.business_name AND owned.message_at=newest.last_message_at
-            GROUP BY newest.business_name, newest.last_message_at"""
-    return f"""LEFT JOIN (SELECT latest.*, unread.unread_count FROM ({latest}) latest
+    return f"""LEFT JOIN (SELECT latest.*, unread.unread_count FROM ({newest_activity(values, records, readable)}) latest
         LEFT JOIN ({unread}) unread ON unread.business_name=latest.business_name) activity ON activity.business_name=b.name""", 'MAX(activity.last_message_at)'
+
+
+def readable_condition(values):
+    return f"COALESCE(m.legacy_triage, 0)=0 AND {message_scope(values)}"
+
+
+def newest_activity(values, records=None, readable=None):
+    """(business_name, last_message_at, last_channel) of each %(doctype)s record's newest readable message, by message time
+    then name, among the messages `owned_messages` gives it. `records` (SQL) limits the records. Each record reads its
+    stamped messages newest first and stops at the first readable one, instead of grouping its whole history."""
+    from relay_core.relay_chats import query as chat_query
+    if not chat_query():
+        return 'SELECT business_name, last_message_at, last_channel FROM `tabRelay Chat` WHERE business_doctype=%(doctype)s'
+    from relay_core.timeline import index_hint, timeline_sql
+    readable = readable or readable_condition(values)
+    time = timeline_sql('m')
+    only = f' WHERE b.name IN {records}' if records else ''
+    stamped = f"""SELECT b.name AS business_name, (SELECT m.name FROM `tabRelay Message` m{index_hint('relay_business_time')}
+            WHERE m.business_doctype=%(doctype)s AND m.business_name=b.name AND {readable}
+            ORDER BY {time} DESC, m.name DESC LIMIT 1) AS message FROM {identifier('tab' + values['doctype'])} b{only}"""
+    return f"""SELECT business_name, message_at AS last_message_at, channel AS last_channel FROM (
+        SELECT owned.*, ROW_NUMBER() OVER (PARTITION BY business_name ORDER BY message_at DESC, name DESC) AS position FROM (
+            SELECT stamped.business_name, {timeline_sql('n')} AS message_at, n.channel, n.name
+                FROM ({stamped}) stamped JOIN `tabRelay Message` n ON n.name=stamped.message
+            UNION ALL {contact_messages(readable, records)}) owned) ranked WHERE position=1"""
 
 
 def owned_messages(condition, records=None):
     """Messages of %(doctype)s records that match `condition`, with their record: the named one, else the record that
     owns the contact's messages without one, as in the record's thread and Relay Chat. `records` (SQL) limits the records;
     each half applies it to its own column, as a filter over the union is not pushed down."""
+    from relay_core.timeline import timeline_sql
+    only = f' AND m.business_name IN {records}' if records else ''
+    return f"""SELECT m.business_name, {timeline_sql('m')} AS message_at, m.channel, m.name FROM `tabRelay Message` m
+            WHERE m.business_doctype=%(doctype)s AND COALESCE(m.business_name, '')<>'' AND {condition}{only}
+        UNION ALL {contact_messages(condition, records)}"""
+
+
+def contact_messages(condition, records=None):
+    """The messages without a record that `owned_messages` gives to the record that owns their contact."""
     from relay_core.business_access import primary_sql
     from relay_core.timeline import timeline_sql
-    only = f' AND {{}} IN {records}' if records else ''
-    columns = f"{timeline_sql('m')} AS message_at, m.channel, m.name"
-    return f"""SELECT m.business_name, {columns} FROM `tabRelay Message` m
-            WHERE m.business_doctype=%(doctype)s AND COALESCE(m.business_name, '')<>'' AND {condition}{only.format('m.business_name')}
-        UNION ALL
-        SELECT linked.business_name, {columns} FROM `tabRelay Message` m
+    only = f' AND linked.business_name IN {records}' if records else ''
+    return f"""SELECT linked.business_name, {timeline_sql('m')} AS message_at, m.channel, m.name FROM `tabRelay Message` m
             JOIN ({primary_sql('%(doctype)s')}) linked ON linked.relay_contact=m.relay_contact
-            WHERE (COALESCE(m.business_doctype, '')='' OR COALESCE(m.business_name, '')='') AND {condition}{only.format('linked.business_name')}"""
+            WHERE (COALESCE(m.business_doctype, '')='' OR COALESCE(m.business_name, '')='') AND {condition}{only}"""
 
 
 @frappe.whitelist(methods=['GET'])
@@ -272,7 +300,7 @@ def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None
     path = current_path(path, path_fields, fields)
     level = fields[len(path)] if len(path) < len(fields) else None
     kind = 'group' if level else 'record'
-    rows = aggregate(doctype, fields, path, query, offset, group_search=bool(level), **options)
+    rows = aggregate(doctype, fields, path, query, offset, group_search=bool(level), newest_first=True, **options)
     return {'items': [dict(row, kind=kind, doctype=doctype, field=level) for row in rows[:PAGE]],
             'next': offset + PAGE if len(rows) > PAGE else None, 'kind': kind,
             'path': path, 'path_fields': fields[:len(path)],
