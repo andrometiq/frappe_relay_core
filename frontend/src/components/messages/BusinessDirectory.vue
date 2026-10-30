@@ -5,6 +5,7 @@ import { coreApi } from '../../services/coreApi'
 import { browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
+import { useLoadMore } from '../../composables/useLoadMore'
 import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 
@@ -37,6 +38,7 @@ async function load(append = false) {
   } catch (e) { if (request === sequence) error.value = e.message }
   finally { if (request === sequence) loading.value = false }
 }
+const moreSentinel = useLoadMore({ loading, hasMore: () => next.value != null, error, load: () => load(true) })
 const search = useDebouncedSearch(query, () => load(), () => { ++sequence; items.value = []; next.value = null; loading.value = true })
 let changingLevel = false
 function saveSearch() {
@@ -107,7 +109,8 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
       </button>
       <p v-if="!loading && !error && !items.length" class="business-empty">No matching {{ people ? 'contacts' : 'records' }}.</p>
       <Button v-if="error" label="Retry" @click="load()" />
-      <Button v-if="next != null" label="Load more" :loading="loading" @click="load(true)" />
+      <LoadingRows v-if="loading && items.length" label="Loading more…" />
+      <span v-if="next != null" ref="moreSentinel" class="business-more" aria-hidden="true" />
     </div>
   </section>
 </template>
@@ -126,6 +129,7 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
 .business-tile-icon { display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:10px; background:var(--relay-accent-soft); color:var(--relay-accent-text); }
 .business-tile-copy { display:flex; flex:1; flex-direction:column; min-width:0; gap:4px; overflow-wrap:anywhere; }
 .business-tile-copy strong { font-size:14px; font-weight:600; }
+.business-more { grid-column:1 / -1; height:1px; }
 .business-tile-copy small, .business-empty { font-size:12px; color:var(--relay-ink-3); }
 .business-tile:focus-visible, .business-crumbs button:focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
 @media (max-width:768px) {
