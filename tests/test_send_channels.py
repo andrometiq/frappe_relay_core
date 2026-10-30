@@ -148,7 +148,7 @@ class RebindAttachmentTests(Patched):
 
     def rebind(self, site):
         with self.patched(site), patch('relay_core.attachments.file_content', return_value=(self.file, b'pdf')) as content, \
-                patch('frappe.utils.file_manager.save_file', return_value=_dict(name='F2')) as save:
+                patch('frappe.utils.file_manager.save_file', return_value=_dict(name='F2', file_name='bill.pdf')) as save:
             result = messaging.rebind_attachment({'attachment': 'F1', 'caption': 'Bill'}, 'M1', 'M2')
         return result, content, save
 

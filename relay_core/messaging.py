@@ -395,14 +395,13 @@ def rebind_attachment(data, original, target):
     """The send data with its attachment copied onto the source message of the sending channel.
 
     The composer uploads to the message it shows; a retry reuses the copy made on the first try."""
-    from frappe.utils.file_manager import save_file
-    from relay_core.attachments import file_content
+    from relay_core.attachments import file_content, save_attachment
     data = object_value(data)
     file, raw = file_content(data.get('attachment'), readable_source(original)[0])
     copy = frappe.db.get_value('File', {'attached_to_doctype': 'Relay Message', 'attached_to_name': target, 'is_private': 1,
                                         'file_name': file.file_name, 'content_hash': file.content_hash}, 'name')
     if not copy:
-        copy = save_file(file.file_name, raw, 'Relay Message', target, is_private=1).name
+        copy = save_attachment(file.file_name, raw, target).name
     return dict(data, attachment=copy)
 
 
