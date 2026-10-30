@@ -59,7 +59,7 @@ const actionLabel = (action) => action === "cancel" && campaign.value.status ===
 const headerActions = computed(() => campaignActions(campaign.value?.status).filter((action) => !(action === "start" && campaign.value.status === "Draft")));
 // Draft recipients come from contacts or from a sheet; nothing is picked until the user chooses one.
 const sendMode = ref("now"), startAt = ref("");
-const fileHint = "Accepted: .xlsx, .csv, .tsv or a ZIP containing exactly one sheet and media files (200 MiB / 2000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
+const fileHint = "Accepted: .xlsx, .csv, .tsv or a ZIP containing exactly one sheet and media files (200 MiB / 10000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
 const canSend = computed(() => campaign.value?.validated && !sheet.value && !headerUploading.value && counts.value.total > 0);
 const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
 // Starting or cancelling asks once; the dialog names the people and the message.

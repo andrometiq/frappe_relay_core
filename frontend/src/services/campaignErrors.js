@@ -7,7 +7,7 @@ export function campaignError(error) {
   const reasons = [
     [/exactly one.*sheet/i, 'The ZIP must contain exactly one Excel or CSV sheet.'],
     [/200 MiB|expanded files/i, 'The ZIP and its expanded files must fit within 200 MiB.'],
-    [/2000 entries/i, 'The ZIP must contain at most 2000 files and folders.'],
+    [/10000 entries/i, 'The ZIP must contain at most 10000 files and folders.'],
     [/unsafe path|symbolic link/i, 'The ZIP contains an unsafe path or link. Create a new ZIP with regular files.'],
     [/duplicate file names/i, 'Two ZIP files have the same name. Give each file a unique name.'],
     [/password.protected/i, 'Use a ZIP without password protection.'],

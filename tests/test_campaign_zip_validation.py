@@ -60,7 +60,7 @@ class ZipTests(unittest.TestCase):
 
     def test_archive_size_and_file_count_are_bounded(self):
         path = self.archive([('a.csv', 'Mobile'), ('b.png', b'x')])
-        with patch.object(campaign_media, 'ZIP_MAX_FILES', 1), self.assertRaisesRegex(ValueError, '2000'):
+        with patch.object(campaign_media, 'ZIP_MAX_FILES', 1), self.assertRaisesRegex(ValueError, '10000'):
             campaign_media.zip_contents(path)
         with patch.object(campaign_media, 'ZIP_MAX_BYTES', 1), self.assertRaisesRegex(ValueError, '200 MiB'):
             campaign_media.zip_contents(path)
