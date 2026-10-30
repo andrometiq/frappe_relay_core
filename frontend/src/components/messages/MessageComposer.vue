@@ -1,4 +1,5 @@
 <script setup>
+import { deadlineTime } from "../relativeTime";
 import { inject, computed, watch, ref, onBeforeUnmount, nextTick } from "vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import { coreApi } from "../../services/coreApi";
@@ -317,7 +318,7 @@ function keydown(event) {
             <p v-if="manyNumbers">From {{ numbers.chosen.value?.label }} · {{ numbers.chosen.value?.address }}</p>
             <p v-if="offReason">{{ offReason }}</p>
             <p v-else-if="windowError">Could not check the reply window.</p>
-            <p v-else-if="can('reply_window_hours') && !sourceContext.group_id">{{ windowState.open ? 'Reply window open' : 'Reply window closed' }}<template v-if="windowState.expires_at"> · Expires {{ windowState.expires_at }}</template><template v-if="windowState.open && Number.isFinite(windowState.remaining_seconds)"> · {{ Math.ceil(remainingSeconds / 60) }} minutes remaining</template></p>
+            <p v-else-if="can('reply_window_hours') && !sourceContext.group_id">{{ windowState.open ? 'Reply window open' : 'Reply window closed' }}<template v-if="windowState.expires_at_iso"> · {{ windowState.open ? 'Expires' : 'Expired' }} {{ deadlineTime(windowState.expires_at_iso, now) }}</template><template v-else-if="windowState.open && Number.isFinite(windowState.remaining_seconds)"> · {{ Math.ceil(remainingSeconds / 60) }} minutes remaining</template></p>
           </template>
         </ComposerMore>
         <template v-if="closed">
