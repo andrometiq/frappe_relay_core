@@ -27,6 +27,7 @@ const variables = computed(() => [...new Set((draft.value?.nodes || []).filter(s
 const stepReference = (kind, value) => ({ label: { ai_skill: 'AI skill', team: 'Team', user: 'User' }[kind], method: 'flows.service.references', kind, readOnly: busy.value || !canEdit.value, initialOptions: value ? [{ value, label: value }] : [] })
 const reference = kind => ({ label: { channel: 'Channel', execution_user: 'Run as user', business_doctype: 'Business type' }[kind],
   method: 'flows.service.references', kind, required: true, readOnly: busy.value,
+  errorMessage: 'Could not load permitted choices. Try again or ask your administrator to check access.',
   initialOptions: draft.value?.[kind] ? [{ value: draft.value[kind], label: kind === 'business_doctype' ? draft.value[kind] : linkedTitle(kind === 'channel' ? 'Relay Channel' : 'User', draft.value[kind]) }] : [] })
 let generation = 0
 

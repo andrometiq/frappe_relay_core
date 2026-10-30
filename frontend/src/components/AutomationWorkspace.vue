@@ -7,7 +7,7 @@ import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } fr
 import { Badge, Button, Dropdown, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { configurationChannels, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
+import { configurationChannelOptions, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
 import EventPicker from './fields/EventPicker.vue'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
@@ -26,9 +26,7 @@ const allowed = computed(() => Boolean(skill.value ? capabilities.value.ai && ca
 const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
 const channels = ref([]), editor = ref(null)
 const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
-  ...configurationChannels(channels.value, draft.value?.channel).map(row => ({
-    value: row.name, label: linkedTitle('Relay Channel', row.name, row.channel || 'Saved channel'),
-  }))])
+  ...configurationChannelOptions(channels.value, draft.value?.channel)])
 const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
 const channelEnabled = useEnabledChannels()
 const variant = provider => channelEnabled(provider) && (!!draft.value?.use_preferences || channelProvider.value === provider)
@@ -189,7 +187,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             </fieldset>
             <fieldset class="automation-section"><legend>Operation</legend>
               <EventPicker v-model="draft.handoff_owner" label="Handoff owner" kind="user" :disabled="busy" />
-              <EventPicker v-model="draft.ai_model" label="AI Model" kind="model" :disabled="busy" />
+              <EventPicker v-model="draft.ai_model" label="AI Model" kind="model" :skill="draft.name" :disabled="busy" />
               <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.mode" label="Mode" type="select" :options="['Shadow', 'Automatic']" :disabled="busy" /><FormControl v-model="draft.daily_limit" label="Daily model limit" type="number" min="1" max="1000" :disabled="busy" /></div>
               <p class="text-sm">Shadow creates the live ticket and records proposals, without automatic replies or business writes.</p>
             </fieldset>

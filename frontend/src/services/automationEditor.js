@@ -12,6 +12,17 @@ export function configurationChannels(channels, selected) {
     ? [...channels, { name: selected }]
     : channels
 }
+export function configurationChannelOptions(channels, selected) {
+  const options = configurationChannels(channels, selected).map(row => ({
+    value: row.name,
+    label: row.channel
+      ? [...new Set([row.channel, row.label, row.address].filter(Boolean))].join(' · ') +
+        (!row.label && !row.address ? ` · ${row.name}` : '')
+      : 'Saved channel (unavailable)',
+  }))
+  return options.map(option => options.filter(row => row.label === option.label).length > 1
+    ? { ...option, label: `${option.label} · ${option.value}` } : option)
+}
 export function toolRows(value) {
   return JSON.parse(value || '[]').map(row => ({ ...row, fields: [...row.fields], identity_fields: { ...row.identity_fields } }))
 }

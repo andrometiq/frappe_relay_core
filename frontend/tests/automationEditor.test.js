@@ -91,3 +91,27 @@ test('the template picker searches by name on the chosen number and keeps the sa
   assert.equal(preferred.required, false); assert.equal(preferred.readOnly, true)
   assert.deepEqual(preferred.initialOptions, [])
 })
+
+test('channel choices distinguish accounts and unavailable saved selections', async () => {
+  const { configurationChannelOptions } = await import('../src/services/automationEditor.js')
+  const options = configurationChannelOptions([
+    {name:'channel-a',channel:'WhatsApp',label:'Sales',address:'+91 80000 00001'},
+    {name:'channel-b',channel:'WhatsApp',address:'+91 80000 00002'},
+    {name:'channel-c',channel:'WhatsApp'},
+  ], 'missing')
+  assert.equal(new Set(options.map(row => row.label)).size, 4)
+  assert.equal(options[0].label, 'WhatsApp · Sales · +91 80000 00001')
+  assert.equal(options[2].label, 'WhatsApp · channel-c')
+  assert.equal(options[3].label, 'Saved channel (unavailable)')
+  assert.equal(options[3].value, 'missing')
+})
+
+
+test('duplicate configured channel captions still identify distinct selections', async () => {
+  const { configurationChannelOptions } = await import('../src/services/automationEditor.js')
+  const options = configurationChannelOptions([
+    { name: 'sales-a', channel: 'WhatsApp', label: 'Sales' },
+    { name: 'sales-b', channel: 'WhatsApp', label: 'Sales' },
+  ])
+  assert.deepEqual(options.map(row => row.label), ['WhatsApp · Sales · sales-a', 'WhatsApp · Sales · sales-b'])
+})
