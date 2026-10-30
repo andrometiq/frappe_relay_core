@@ -3,7 +3,7 @@ import { deadlineTime } from "../relativeTime";
 import { inject, computed, watch, ref, onBeforeUnmount, nextTick } from "vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import { coreApi } from "../../services/coreApi";
-import { attachmentAccept, attachmentFormatError } from "./attachmentFormats";
+import { attachmentAccept, attachmentFormatError, attachmentMaxBytes, sizeError, sizeLabel } from "./attachmentFormats";
 import { channelCan } from "../../services/enabledChannels";
 import { channelOffText } from "../../services/chatErrors";
 import { Button, FormControl, FeatherIcon } from "@relay/ui";
@@ -73,6 +73,7 @@ const limit = computed(() => sourceContext.value.provider === 'Telegram' && ['te
 watch(() => sourceContext.value.provider, provider => { if(provider === 'WhatsApp' && !identity.value) loadIdentity(); }, {immediate:true});
 const draftInput = ref(null);
 const requestedAttachmentKind = ref("document");
+const attachmentLimit = computed(() => attachmentMaxBytes(capabilities.value, sourceContext.value.provider, kind.value));
 function applySavedReply(item) {
   const type=(item.reply_type||'Text').toLowerCase();
   if(!kinds.value.includes(type))return;
@@ -120,7 +121,9 @@ async function attachFile(event) {
   const file=event.target.files?.[0];
   event.target.value='';
   if (!file) return;
-  const formatError = attachmentFormatError(capabilities.value, sourceContext.value.provider, requestedAttachmentKind.value, file.name);
+  const provider = sourceContext.value.provider;
+  const formatError = attachmentFormatError(capabilities.value, provider, requestedAttachmentKind.value, file.name)
+    || sizeError(file.size, attachmentMaxBytes(capabilities.value, provider, requestedAttachmentKind.value), `A ${provider} ${requestedAttachmentKind.value}`);
   if (formatError) { error.value = formatError; if (!attachment.value) kind.value = requestedAttachmentKind.value; return; }
   const previous = attachment.value;
   uploading.value = true;
@@ -296,7 +299,7 @@ function keydown(event) {
           <img v-if="preview && kind === 'photo'" :src="preview" alt="Selected attachment" />
           <video v-else-if="preview && kind === 'video'" :src="preview" muted preload="metadata" />
           <FeatherIcon v-else :name="attachmentKinds[kind]?.[1] || 'file'" />
-          <span><strong>{{ attachment?.filename || 'Choose ' + attachmentKinds[kind]?.[0].toLowerCase() }}</strong><small>{{ attachment ? formatBytes(attachment.size) : 'Up to 4 MiB' }}</small></span>
+          <span><strong>{{ attachment?.filename || 'Choose ' + attachmentKinds[kind]?.[0].toLowerCase() }}</strong><small>{{ attachment ? formatBytes(attachment.size) : attachmentLimit ? 'Up to ' + sizeLabel(attachmentLimit) : '' }}</small></span>
           <Button :label="attachment ? 'Replace' : 'Choose file'" variant="ghost" :disabled="busy" @click="chooseAttachment(kind)" />
           <Button icon="x" aria-label="Remove attachment" title="Remove attachment" variant="ghost" :disabled="busy" @click="clearAttachment" />
         </div>

@@ -11,7 +11,6 @@ import frappe
 
 ATTACHMENT_TYPES = ('Print Format', 'Report')
 RECIPIENTS = ('Primary contact', 'All business contacts', 'Document contact field')
-MAX_BYTES = 4 * 1024 * 1024
 MAX_CONTACTS = 20
 MAX_REPORT_ROWS = 2000
 PLACEHOLDER = re.compile(r'\{\{\s*doc\.([A-Za-z0-9_]+)\s*\}\}')
@@ -79,8 +78,9 @@ def render_pdf(config, doc):
         raw = frappe.get_print(doc.doctype, doc.name, config.print_format, doc=doc, as_pdf=True)
     else:
         raw = report_pdf(config.report_name, report_filters(config, doc))
-    if not 1 <= len(raw) <= MAX_BYTES:
-        raise ValueError('The PDF must be at most 4 MiB')
+    from relay_core.file_limits import get_media_max_bytes, size_error
+    if error := size_error(len(raw), get_media_max_bytes('WhatsApp', 'document'), 'The PDF'):
+        raise ValueError(error)
     return file_name(config, doc), raw
 
 

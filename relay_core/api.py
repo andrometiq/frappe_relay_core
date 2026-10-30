@@ -215,6 +215,7 @@ def capabilities():
     numbers={medium:site_numbers(medium) for medium in enabled_names}
     teams=False
     from relay_core.contact_import import allowed as contact_transfer_allowed
+    from relay_core.file_limits import get_max_bytes
     return {'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
@@ -222,7 +223,7 @@ def capabilities():
             'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
             'flows':manage and features.is_enabled('flows'),
-            'enabled_channels':enabled_names,
+            'enabled_channels':enabled_names, 'max_file_bytes':get_max_bytes(),
             'channels':{item.name:item.get_features() for item in channels},
             'whatsapp_numbers':numbers.get('WhatsApp',[]),
             'inbox_channels':[dict(row,medium=medium) for medium,rows in numbers.items() for row in rows]}

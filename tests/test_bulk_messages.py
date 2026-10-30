@@ -9,9 +9,11 @@ import frappe
 from frappe import _dict
 from relay_core import bulk_campaigns, bulk_sheet, service_window
 from test_bulk_campaigns import NAMED, POSITIONAL, UTILS, FakeCache
+from site_file_limit import use_relay_file_limit
 
 
 def setUpModule():
+    use_relay_file_limit()
     # One-number sites name no Hub channel; the channel choice has its own tests.
     patcher = patch('relay_core.bulk_campaigns.hub_arguments', side_effect=lambda channel, arguments: arguments)
     patcher.start()

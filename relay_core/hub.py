@@ -9,6 +9,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 from .config import load_env
 from . import test_mode
+from . import file_limits
 
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 
@@ -139,9 +140,9 @@ class HubClient:
         test_mode.ensure_allowed(self.url)
         try:
             with self.opener.open(req, timeout=30) as response:
-                limit = 6 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.attachment','email.attachment','whatsapp.attachment') else 3 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.media', 'whatsapp.media') else 2097152
+                limit = file_limits.encoded_length(file_limits.MAX_BYTES) + 65536 if method == 'tools/call' and params.get('name') in ('telegram.attachment','email.attachment','whatsapp.attachment') else 3 * 1024 * 1024 if method == 'tools/call' and params.get('name') in ('telegram.media', 'whatsapp.media') else 2097152
                 if method == 'tools/call' and params.get('name') == 'whatsapp.attachment':
-                    limit = ((MAX_WHATSAPP_DOWNLOAD_BYTES + 2) // 3) * 4 + 65536
+                    limit = file_limits.encoded_length(MAX_WHATSAPP_DOWNLOAD_BYTES) + 65536
                 raw = response.read(limit + 1)
                 if len(raw) > limit:
                     raise HubError("Hub response exceeds size limit")

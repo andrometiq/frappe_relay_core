@@ -10,6 +10,7 @@ import { messageData } from '../src/components/messageContent.js'
 import { compositionScope, telegramLimit } from '../src/services/channelComposition.js'
 import { useStoredDraft } from '../src/composables/useStoredDraft.js'
 import { whatsappCapabilities } from './channelCapabilities.js'
+import { attachmentMaxBytes, sizeError, sizeLabel } from '../src/components/messages/attachmentFormats.js'
 
 const setup = async name => (await readFile(new URL(`../src/components/messages/${name}.vue`, import.meta.url), 'utf8'))
   .split('<script setup>')[1].split('</script>')[0].replace(/^import .*\n/gm, '')
@@ -32,7 +33,7 @@ function fixture(t, { provider = 'WhatsApp', window = {open:true,remaining_secon
     useWhatsAppIdentity:()=>({identity:ref(null),load:()=>{}}), channelCan, channelOffText:provider=>`${provider} is switched off`,
     compositionScope, telegramLimit, composerActions, attachmentKinds, messageData, sha256Hex, useSendChannel:()=>({choices:ref(new Map())}), sendNumbersKey:'numbers',messagesKey:'messages',
     inject:(key, fallback)=>key==='messages'?state:key==='relayCapabilities'?ref(whatsappCapabilities):fallback,
-    setInterval:()=>0, clearInterval:()=>{},setTimeout:()=>0,clearTimeout:()=>{},attachmentFormatError:()=>'',formatBytes:()=>'' }
+    setInterval:()=>0, clearInterval:()=>{},setTimeout:()=>0,clearTimeout:()=>{},attachmentFormatError:()=>'',formatBytes:()=>'',attachmentMaxBytes,sizeError,sizeLabel }
   function mount(code, values, exposed) { const scope=effectScope();scopes.push(scope);return scope.run(()=>evaluate(code,{...base,...values},exposed)) }
   const view = mount(composer, {}, 'actions,canSend,closed,windowError,windowHint,checkWindow,keydown,clearQuote,draftInput,moreAction,showCount,editing,characterCount,attachFile,requestedAttachmentKind')
   view.draftInput.value = {style:{},scrollHeight:44,focus:()=>focused++}
@@ -101,6 +102,20 @@ test('a failed first upload keeps an attachment composer; failed replacement kee
   state.attachment.value={name:'local-attachment',filename:'original.png'}
   await view.attachFile({target:{files:[{name:'replacement.png'}],value:'replacement.png'}})
   assert.equal(state.attachment.value.filename,'original.png')
+})
+
+
+test('a chat attachment may be as large as its WhatsApp kind allows and is refused before upload one byte above', async t => {
+  // The fixture upload always fails with 'Upload failed', so that error shows the file reached the upload.
+  const {state,view}=fixture(t);await settle()
+  const relay=whatsappCapabilities.max_file_bytes, photo=whatsappCapabilities.channels.WhatsApp.max_media_bytes.photo
+  for (const [kind,limit] of [['photo',photo],['document',relay]]) {
+    view.requestedAttachmentKind.value=kind;state.error.value=''
+    await view.attachFile({target:{files:[{name:'file.png',size:limit}],value:''}})
+    assert.equal(state.error.value,'Upload failed')
+    await view.attachFile({target:{files:[{name:'file.png',size:limit+1}],value:''}})
+    assert.equal(state.error.value,`A WhatsApp ${kind} must be at most ${sizeLabel(limit)}.`)
+  }
 })
 
 

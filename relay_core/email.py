@@ -320,11 +320,12 @@ def prepare(to, subject, body, cc=None, bcc=None, message=None, html=None, attac
                 extra['in_reply_to']=parent
                 refs=[ref for ref in context.get('references',[]) if email_message_id(ref)]
                 extra['references']=(refs+[parent])[-20:]
-        files=[];total=0
+        from relay_core.file_limits import get_max_bytes, size_label
+        files=[];total=0;limit=get_max_bytes()
         import base64,mimetypes
         for file_id in attachment_ids:
             file,raw=attachments.file_content(file_id,source);total+=len(raw)
-            if total>attachments.MAX_BYTES:raise ValueError('Combined attachments exceed 4 MiB')
+            if total>limit:raise ValueError(f'Combined attachments must be at most {size_label(limit)}')
             files.append({'filename':file.file_name,'content_type':mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream','content_base64':base64.b64encode(raw).decode()})
         if files:extra['attachments']=files
     return {'to':to,'cc':cc,'bcc':bcc,'subject':subject,'body':body,**extra}

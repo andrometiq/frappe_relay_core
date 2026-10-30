@@ -1,7 +1,6 @@
 // Header media of a template send: an uploaded file (Hub media id) or a public HTTPS link that Meta fetches.
-import { attachmentFormatError } from "../components/messages/attachmentFormats.js";
+import { attachmentFormatError, attachmentMaxBytes, sizeError } from "../components/messages/attachmentFormats.js";
 
-export const HEADER_MAX_BYTES = 4 * 1024 * 1024;
 const CHANNEL_KIND = { image: "photo", video: "video", document: "document" };
 const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".intranet", ".lan", ".home.arpa"];
 
@@ -49,8 +48,7 @@ export function linkFileName(value) {
 export function headerFileError(capabilities, format, file) {
   const formatError = attachmentFormatError(capabilities, "WhatsApp", CHANNEL_KIND[format], file.name);
   if (formatError) return formatError;
-  if (!file.size || file.size > HEADER_MAX_BYTES) return "Choose a file up to 4 MB.";
-  return "";
+  return sizeError(file.size, attachmentMaxBytes(capabilities, "WhatsApp", CHANNEL_KIND[format]));
 }
 
 export function readBase64(file) {

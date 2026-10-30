@@ -7,7 +7,7 @@ const read = path => readFile(new URL('../src/components/' + path, import.meta.u
 
 test('a switched-off channel error reads as a plain sentence', () => {
   assert.equal(plainChatError('Conversation channel is disabled or belongs to another account'), 'This WhatsApp number is switched off. Ask your manager.')
-  assert.equal(plainChatError('Choose a file up to 4 MiB.'), 'Choose a file up to 4 MiB.')
+  assert.equal(plainChatError('The attachment must be at most 10 MB'), 'The attachment must be at most 10 MB')
   assert.equal(plainChatError(undefined), '')
   assert.equal(channelOffText('Telegram'), 'This Telegram channel is switched off. Ask your manager.')
 })

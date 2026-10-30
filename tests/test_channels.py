@@ -7,6 +7,11 @@ from unittest.mock import Mock, patch
 from relay_core.channels import CHANNELS, channel, enabled
 from relay_core.channels.contract import FEATURES, Channel
 from relay_core.hub import HubError
+from site_file_limit import use_relay_file_limit
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 
 class ChannelRegistryTests(unittest.TestCase):
@@ -68,12 +73,12 @@ class AccountFlagTests(unittest.TestCase):
 
 
 class WhatsAppSendFormatTests(unittest.TestCase):
-    def prepare(self, kind, file_name):
+    def prepare(self, kind, file_name, raw=b'bytes'):
         from frappe import _dict
         from relay_core import messaging
         source = _dict(name='source', sender_endpoint='919800000001', provider_id='wamid.1')
         file = _dict(name='file', file_name=file_name)
-        with patch('relay_core.attachments.file_content', return_value=(file, b'bytes')):
+        with patch('relay_core.attachments.file_content', return_value=(file, raw)):
             return messaging._prepare(source, _dict(channel='WhatsApp'), {'provider': 'WhatsApp'}, kind, {'attachment': 'file'})
 
     def test_send_accepts_only_the_declared_media_types(self):
@@ -83,6 +88,14 @@ class WhatsAppSendFormatTests(unittest.TestCase):
         for kind, file_name in (('photo', 'sticker.webp'), ('document', 'archive.zip')):
             with self.assertRaisesRegex(ValueError, 'supported WhatsApp attachment format'):
                 self.prepare(kind, file_name)
+
+    def test_send_applies_the_lower_whatsapp_limit_of_the_kind(self):
+        photo = channel('WhatsApp').features['max_media_bytes']['photo']
+        with patch('relay_core.file_limits.get_max_bytes', return_value=photo + 10):
+            self.prepare('photo', 'offer.png', b'x' * photo)
+            with self.assertRaisesRegex(ValueError, 'A WhatsApp photo must be at most 5 MB'):
+                self.prepare('photo', 'offer.png', b'x' * (photo + 1))
+            self.prepare('document', 'invoice.pdf', b'x' * (photo + 10))
 
 
 if __name__ == '__main__':

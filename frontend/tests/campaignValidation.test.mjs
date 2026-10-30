@@ -17,3 +17,10 @@ test('known ZIP and validation errors provide useful fixed copy without echoing 
   assert.match(campaignError(Error('Validate recipients before sending')), /At least one row/);
   assert.match(campaignError(Error('Hub returned private payload xyz')), /connection is unavailable/);
 });
+
+test('header size reasons keep the real limit, other header file reasons get fixed copy', () => {
+  assert.equal(campaignError(Error('Header attachment must be at most 10 MB')), 'Header attachment must be at most 10 MB.');
+  assert.equal(campaignError(Error('Header attachment is empty')), 'Header attachment is empty.');
+  assert.match(campaignError(Error('Header attachment must be at most 10 MB /private/files/x')), /could not finish/);
+  assert.match(campaignError(Error('Wrong file type for image header')), /correct header file type/);
+});

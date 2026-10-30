@@ -4,6 +4,12 @@ import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
+from relay_core import file_limits
+from site_file_limit import use_relay_file_limit
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 class WhatsAppTests(unittest.TestCase):
     def setUp(self):
@@ -94,7 +100,7 @@ class WhatsAppTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.api.prepare('messages.media_upload',dict(args,media_url='https://cdn.example/a.png'))
 
     def test_template_sample_upload_rejects_oversized_bytes_and_wrong_site(self):
-        with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'x'*(6*1024*1024)})
+        with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'x'*(file_limits.encoded_length(file_limits.MAX_BYTES)+4)})
         self.hub.execute.assert_not_called()
         self.hub.execute.return_value={'site':'https://other.site'}
         with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'JVBERi0xLjc=','mime_type':'application/pdf'})
