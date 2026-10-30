@@ -217,6 +217,61 @@ class ExecutionAdapter(unittest.TestCase):
     setUp = SharedAdapterTests.setUp
     outcome = SharedAdapterTests.outcome
 
+    def allow_reply(self):
+        from relay_core.ai.actions import REPLY
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+
+    def test_empty_answer_retries_once_and_recovers_reply(self):
+        self.allow_reply()
+        prompts = []
+        responses = iter([self.outcome(dict(reply='  ', handoff=False, reason='')),
+                          self.outcome(dict(reply='Thanks, noted.', handoff=False, reason=''))])
+        def attempt(account, model, build, *args):
+            provider = Mock()
+            build(provider, {}, model)
+            prompts.append(provider.build_turn.call_args.args[2])
+            return next(responses)
+        self.attempt.side_effect = attempt
+        result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Thanks', 'RUN-1')
+        self.assertEqual(result['actions'], [dict(action='reply', parameters={'text': 'Thanks, noted.'})])
+        self.assertEqual(self.attempt.call_count, 2)
+        self.assertIn('ONLY when actions are proposed', prompts[0])
+        self.assertIn('Your previous answer was empty', prompts[1])
+        self.assertEqual(self.attempt.call_args_list[0].args[5], self.attempt.call_args_list[1].args[5])
+        self.assertEqual(self.attempt.call_args.args[4]['reference_name'], 'RUN-1')
+
+    def test_two_empty_answers_fail_for_safe_handoff(self):
+        self.attempt.side_effect = lambda *args: self.outcome(dict(reply='', handoff=False, reason=''))
+        with self.assertRaisesRegex(ValueError, 'Empty skill decision'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Thanks')
+        self.assertEqual(self.attempt.call_count, 2)
+
+    def test_explicit_handoff_and_invalid_answers_are_not_retried(self):
+        for value in (dict(reply='', handoff=True, reason='Staff needed'), dict(reply=None, handoff=False, reason='')):
+            self.attempt.reset_mock()
+            self.attempt.return_value = self.outcome(value)
+            if value['handoff']:
+                self.assertTrue(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Help')['handoff'])
+            else:
+                with self.assertRaisesRegex(ValueError, 'Invalid skill decision'):
+                    self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Help')
+            self.attempt.assert_called_once()
+
+    def test_takeover_or_deadline_prevents_empty_answer_retry(self):
+        self.attempt.side_effect = lambda *args: self.outcome(dict(reply='', handoff=False, reason=''))
+        self.continuation.side_effect = [None, ValueError('Taken over')]
+        with self.assertRaisesRegex(ValueError, 'Taken over'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Thanks')
+        self.attempt.assert_called_once()
+        self.continuation.side_effect = None
+        self.attempt.reset_mock()
+        with patch.object(self.adapter.time, 'monotonic', side_effect=[0, 0, 0, 0, 21]):
+            with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Thanks', deadline=20)
+        self.attempt.assert_called_once()
+
     def test_inline_image_observation_uses_shared_client_and_bounds(self):
         import io
         from PIL import Image
@@ -291,7 +346,7 @@ class ExecutionAdapter(unittest.TestCase):
         self.skill.execution_policy = 'Execute'
         self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
         ledger = summarize([dict(company='Sim Company', debit='100.10', credit='40.05')], True)
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
         self.attempt.side_effect = [self.outcome(calls=[dict(id='reply', name='EXECUTE',
             arguments=dict(action='reply', parameters={'text': 'Closing balance 999999'}))]),
             self.outcome(dict(reply='', handoff=False, reason=''))]
@@ -372,3 +427,190 @@ class OrderedReplyDelivery(unittest.TestCase):
             self.service.process(self.run.name)
         self.assertEqual(self.run.status, 'Completed')
         self.send.assert_not_called()
+
+
+class VerifiedContactExecution(unittest.TestCase):
+    """Run context, execution, journal and dispatch together with a local transport fake."""
+    def setUp(self):
+        self.enterContext(patch('relay_core.ai.reply_guard.check_delivery'))
+        from test_ai_skills import ConversationIdentityTests
+        from relay_core.ai.actions import REPLY, reply
+        from relay_core import business_access
+        ConversationIdentityTests.setUp(self)
+        self.skill.update(name='Sim Skill', mode='Automatic', enabled=1, modified='v1',
+            execution_policy='Execute', allowed_tools='[]', allowed_actions='[{"action":"reply"}]',
+            business_doctype='Customer')
+        self.person.update(mobile_no=self.message.sender_endpoint)
+        self.business.update(name='Sim Customer', modified='v1')  # No phone field on Customer.
+        self.message.update(business_doctype='Customer', business_name=self.business.name)
+        self.run = Doc(name='Sim Run', status='Pending', skill=self.skill.name, skill_version='v1',
+            execution_user='partner', message=self.message.name, attempts=0, generation=0,
+            ticket='Sim Ticket', stage='Event', message_hash='hash')
+        self.contact = Doc(name='CONTACT-1', contact=self.person.name, automation_generation=0, automation_paused=0)
+        self.ticket = Doc(name='Sim Ticket', ai_disabled=0, company='Sim Company',
+            conversation_key=self.message.conversation_key, business_doctype='Customer',
+            business_name=self.business.name, generation=0)
+        original = self.f.get_doc.side_effect
+        docs = {'Relay AI Skill': self.skill, 'Relay Automation Run': self.run, 'Relay Contact': self.contact,
+                'Relay Ticket': self.ticket, 'Customer': self.business}
+        self.f.get_doc.side_effect = lambda dt, name: docs[dt] if dt in docs else original(dt, name)
+        self.linked = True
+        self.f.get_all.side_effect = lambda dt, **kw: ['Customer'] if dt == 'Relay Contact Type' else (
+            [Doc(link_doctype='Customer', link_name=self.business.name)] if self.linked else [])
+        self.f.db.get_value.side_effect = lambda dt, *args, **kw: (self.binding if dt == 'Relay Contact Endpoint'
+            else self.person.name if dt == 'Relay Contact' else 1)
+        self.f.db.exists.return_value = True
+        self.f.has_permission = Mock(return_value=True)
+        self.f.get_attr = Mock(return_value=reply)
+        self.enterContext(patch.object(business_access, 'frappe', self.f))
+        self.service.lock_run = lambda name: self.run
+        self.service.lock_contact = lambda name: self.contact
+        self.service.message_hash = lambda message: 'hash'
+        self.service.latest_message = lambda message: True
+        self.enterContext(patch('relay_core.tickets.check_episode'))
+        self.actions = module('relay_core/flows/actions.py', self.f)
+        self.actions.definitions = lambda **kw: {'reply': REPLY}
+        self.journal = Doc(action_key='a' * 64, status='Pending')
+        def journal(key, input_hash, **values):
+            self.journal.update(name='Sim Action', action_key=key, input_hash=input_hash, **values)
+            return self.journal
+        self.actions._journal = journal
+        self.send, self.handoff = Mock(return_value={'status': 'Submitted'}), Mock()
+        automation = types.SimpleNamespace(lock_run=self.service.lock_run, reserve_attempt=Mock())
+        self.enterContext(patch.dict(sys.modules, {'relay_core.business_access': business_access,
+            'relay_core.ai.service': self.service, 'relay_core.ai.tools': self.tools,
+            'relay_core.flows.actions': self.actions, 'relay_core.automation.service': automation,
+            'relay_core.messaging': types.SimpleNamespace(send=self.send),
+            'relay_core.ai.handoff': types.SimpleNamespace(handoff=self.handoff)}))
+        scope = self.service.context(self.skill, self.message)[2]
+        self.run.decision = json.dumps(dict(reply='', handoff=False, reason='', user='partner', reads=[],
+            scope=self.tools.fingerprint(scope), actions=[dict(action='reply', parameters={'text': 'Noted: 1250 received.'})]))
+
+    def test_contact_only_number_reaches_reply_without_customer_mapping(self):
+        self.service.process(self.run.name)
+        self.assertEqual(self.run.status, 'Completed')
+        self.assertEqual(self.journal.status, 'Completed')
+        self.send.assert_called_once()
+        self.assertEqual(self.send.call_args.args[2], {'text': 'Noted: 1250 received.'})
+        self.handoff.assert_not_called()
+
+    def test_unlinked_contact_or_revoked_endpoint_never_executes_or_replies(self):
+        for linked, verified in ((False, 1), (True, 0)):
+            with self.subTest(linked=linked, verified=verified):
+                self.linked, self.binding.verified = linked, verified
+                self.service.process(self.run.name)
+                self.send.assert_not_called()
+                self.f.get_attr.assert_not_called()
+        self.assertEqual(self.handoff.call_count, 2)
+
+    def test_unrelated_read_identity_mapping_does_not_block_reply(self):
+        with patch('relay_core.ai.configuration.read_contracts', return_value=[
+                dict(doctype='Sales Order', identity_anchor='Customer',
+                     identity_fields={'WhatsApp': 'customer_pos_id'})]), \
+             patch('relay_core.business_access.scoped_document', side_effect=ValueError('Identity does not match')) as scoped:
+            self.service.process(self.run.name)
+        scoped.assert_not_called()
+        self.assertEqual(self.run.status, 'Completed')
+        self.send.assert_called_once()
+        self.handoff.assert_not_called()
+
+    def test_only_action_target_identity_mappings_are_enforced(self):
+        action = definition('None')
+        self.actions.definitions = lambda **kw: {'draft_payment': action}
+        self.skill.allowed_actions = json.dumps([dict(action='draft_payment', doctype='Payment Entry', fields=['paid_amount'])])
+        plan = json.loads(self.run.decision)
+        plan['actions'] = [dict(action='draft_payment', parameters={'paid_amount': 1250})]
+        self.run.decision = json.dumps(plan)
+        self.f.get_meta.return_value = Doc(get_field=lambda key: Doc(fieldtype='Currency'))
+        self.enterContext(patch('relay_core.ai.configuration.frappe', self.f))
+        refs = [dict(doctype='Sales Order', identity_anchor='Customer', identity_fields={'WhatsApp': 'customer_pos_id'})]
+        with patch('relay_core.ai.configuration.read_contracts', return_value=refs), \
+             patch('relay_core.business_access.scoped_document', side_effect=ValueError('Identity does not match')) as scoped:
+            self.assertEqual(self.actions._ai_context(self.run.name, 0)[3], {'paid_amount': 1250})
+            scoped.assert_not_called()
+            refs.append(dict(doctype='Payment Entry', identity_anchor='Customer', identity_fields={'WhatsApp': 'phone'}))
+            with self.assertRaisesRegex(ValueError, 'Identity does not match'):
+                self.actions._ai_context(self.run.name, 0)
+            scoped.assert_called_once_with('Customer', self.business.name, {'phone': self.message.sender_endpoint})
+
+    def test_execution_failure_logs_traceback_and_hands_off_specific_reason(self):
+        self.f.get_attr.return_value = Mock(side_effect=ValueError('Local reply handler failed'))
+        self.service.process(self.run.name)
+        self.send.assert_not_called()
+        self.assertEqual(self.handoff.call_args.args[2], 'Local reply handler failed')
+        log = self.f.log_error.call_args.kwargs
+        self.assertEqual(log['reference_name'], self.run.name)
+        self.assertEqual(log['reference_doctype'], 'Relay Automation Run')
+        self.assertIn('ValueError: Local reply handler failed', log['message'])
+
+
+    def test_disabled_contact_user_is_logged_during_matching_and_saved_on_run(self):
+        automation = sys.modules['relay_core.automation.service']
+        automation.episode = Mock(return_value=self.ticket)
+        automation.triage = lambda run, message, reason: run.update(reason=reason, status='Handoff')
+        self.f.QueryDeadlockError = type('QueryDeadlockError', (Exception,), {})
+        self.f.db.get_value.side_effect = lambda dt, *args, **kw: (self.binding if dt == 'Relay Contact Endpoint'
+            else self.person.name if dt == 'Relay Contact' else 0 if dt == 'User' else 1)
+        with patch.object(self.service, 'continue_search', return_value=False), \
+             patch('relay_core.ai.matching.candidates', return_value=[self.skill]):
+            self.service.admit(self.run)
+        self.assertEqual(self.run.reason, 'Contact is linked to a disabled portal user')
+        self.assertEqual(json.loads(self.run.match_result)['reason'], self.run.reason)
+        self.assertIn(self.run.reason, self.f.log_error.call_args.kwargs['message'])
+        self.assertEqual(self.f.log_error.call_args.kwargs['reference_name'], self.run.name)
+        self.send.assert_not_called()
+
+    def test_failed_decision_and_matching_preserve_call_logs_and_failure_record(self):
+        for phase in ('decision', 'matching'):
+            with self.subTest(phase=phase):
+                pending, durable = [], []
+                self.f.db.commit.side_effect = lambda: (durable.extend(pending), pending.clear())
+                self.f.db.rollback.side_effect = lambda **kw: pending.clear()
+                self.f.log_error.side_effect = lambda **kw: pending.append(('traceback', kw['message']))
+                def fail(*args, **kwargs):
+                    pending.append(('Document AI Call Log', phase))
+                    raise ValueError('Provider returned no answer')
+                def handoff(run, skill, reason):
+                    run.update(status='Handoff', reason=reason)
+                    pending.append(('failure', reason))
+                self.run.update(status='Pending', decision=None, attempts=0)
+                self.handoff.side_effect = handoff
+                if phase == 'decision':
+                    with patch.object(self.service, 'decide', side_effect=fail):
+                        self.service.process(self.run.name)
+                else:
+                    automation = sys.modules['relay_core.automation.service']
+                    automation.episode = Mock(return_value=self.ticket)
+                    automation.triage = handoff
+                    self.f.QueryDeadlockError = type('QueryDeadlockError', (Exception,), {})
+                    with patch.object(self.service, 'continue_search', return_value=False), \
+                         patch('relay_core.ai.matching.candidates', return_value=[self.skill]), \
+                         patch.object(self.service, 'conversation_history', return_value=[]), \
+                         patch('relay_core.ai.matching.select', side_effect=fail):
+                        self.service.admit(self.run)
+                self.assertIn(('Document AI Call Log', phase), durable)
+                self.assertIn(('failure', 'Provider returned no answer'), durable)
+                self.assertTrue(any(kind == 'traceback' and 'ValueError: Provider returned no answer' in value
+                                    for kind, value in durable))
+                self.assertEqual(self.run.status, 'Handoff')
+                self.send.assert_not_called()
+
+    def test_failure_logging_rolls_back_only_if_commit_fails(self):
+        self.f.db.commit.side_effect = RuntimeError('Transaction unavailable')
+        try:
+            raise ValueError('Original provider failure')
+        except ValueError as exc:
+            reason = self.service.log_failure(self.run, exc)
+        self.assertEqual(reason, 'Original provider failure')
+        self.f.db.rollback.assert_called_once_with()
+        self.assertIn('ValueError: Original provider failure', self.f.log_error.call_args.kwargs['message'])
+
+    def test_link_removed_during_handler_prevents_delivery(self):
+        def reply(**kwargs):
+            self.linked = False
+            return {'reply': 'Noted.'}
+        self.f.get_attr.return_value = reply
+        self.service.process(self.run.name)
+        self.send.assert_not_called()
+        self.f.db.rollback.assert_any_call(save_point='relay_action_' + self.journal.action_key[:16])
+        self.handoff.assert_called_once()

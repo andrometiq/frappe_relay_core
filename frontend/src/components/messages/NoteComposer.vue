@@ -1,12 +1,11 @@
 <script setup>
-import { computed, ref, nextTick, onMounted } from "vue";
-import { Button, FeatherIcon } from "@relay/ui";
+import { computed, ref, nextTick, onMounted, watch } from "vue";
+import { Button } from "@relay/ui";
 import RemoteLinkField from "../fields/RemoteLinkField.vue";
 import { businessScope } from "../../services/businessScope.js";
 import { coreApi } from "../../services/coreApi";
 import { stableSubmission } from "../../services/submission";
 import { useStoredDraft } from "../../composables/useStoredDraft";
-import { useMobileLayout } from "../../composables/useMobileLayout";
 
 /** Internal note mode of the chat composer. Notes go to the team only and never to the customer. */
 const props = defineProps({
@@ -16,22 +15,26 @@ const props = defineProps({
   messages: { type: Array, default: () => [] },
   replyTo: Object,
 });
-const emit = defineEmits(["added", "clear-messages", "clear-reply"]);
-const isMobile = useMobileLayout();
+const emit = defineEmits(["added", "clear-messages", "clear-reply", "busy"]);
 const body = ref(""), busy = ref(false), error = ref(""), optionsOpen = ref(false);
 const assignedTo = ref(""), mentions = ref([]), input = ref(null);
+watch(busy, value => emit("busy", value));
 const colleagueField = computed(() => ({ method: "collaboration.colleagues", params: { contact: props.contact }, readOnly: busy.value }));
 const optionCount = computed(() => mentions.value.length + (assignedTo.value ? 1 : 0));
 useStoredDraft(() => props.contact ? JSON.stringify(["note", document.getElementById("app")?.dataset.user, props.contact]) : "",
-  () => body.value, saved => { body.value = typeof saved === "string" ? saved : ""; });
-onMounted(() => nextTick(() => input.value?.focus()));
+  () => ({ body: body.value, mentions: mentions.value, assignedTo: assignedTo.value }), saved => {
+    body.value = typeof saved === 'string' ? saved : saved.body || '';
+    mentions.value = saved.mentions || []; assignedTo.value = saved.assignedTo || '';
+  });
+onMounted(() => nextTick(() => { resize(); input.value?.focus(); }));
+watch(body, () => nextTick(resize));
 
 function selectMentions(values) {
   if (values.length > 10) { error.value = "Choose at most 10 colleagues"; return; }
   mentions.value = values;
 }
 async function submit() {
-  if (busy.value || !body.value.trim()) return;
+  if (busy.value || !body.value.trim() || body.value.length > 4000) return;
   busy.value = true;
   error.value = "";
   try {
@@ -84,37 +87,35 @@ function resize() {
       <RemoteLinkField :field="{ ...colleagueField, label: 'Assign a task to (optional)' }" v-model="assignedTo" />
       <RemoteLinkField :field="{ ...colleagueField, label: 'Mention colleagues (up to 10)' }" :model-value="mentions" multiple @update:model-value="selectMentions" />
     </div>
-    <label class="note-input">
-      <FeatherIcon name="lock" :size="15" />
-      <textarea ref="input" v-model="body" aria-label="Internal note" placeholder="Note for your team. The customer will not see this."
-        :rows="isMobile ? 2 : 1" maxlength="4000" :readonly="busy" @keydown="keydown" @input="resize" />
-    </label>
+    <p v-if="optionCount" class="note-summary">{{ mentions.length ? 'Mentioning ' + mentions.join(', ') : '' }}{{ assignedTo ? ' · Assigned to ' + assignedTo : '' }} ({{ optionCount }})</p>
     <p v-if="error" role="alert" class="note-error">{{ error }}</p>
-    <div class="note-bar">
-      <Button icon-left="at-sign" :label="isMobile ? '' : optionCount ? `Mention or assign (${optionCount})` : 'Mention or assign'"
-        aria-label="Mention or assign a colleague" title="Mention or assign a colleague" :aria-pressed="optionsOpen" :disabled="busy" @click="optionsOpen = !optionsOpen" />
-      <span class="note-hint">Only your team sees this</span>
-      <Button class="note-add" icon-left="lock" label="Add note" variant="solid" :loading="busy" :disabled="!body.trim()"
+    <p v-if="busy" role="status">Adding note…</p>
+    <div class="note-input">
+      <Button icon="at-sign" variant="ghost" aria-label="Mention or assign a colleague" title="Mention or assign a colleague" :aria-expanded="optionsOpen" :disabled="busy" @click="optionsOpen = !optionsOpen" />
+      <textarea ref="input" v-model="body" aria-label="Internal note" placeholder="Write an internal note…"
+        rows="1" maxlength="4000" :readonly="busy" @keydown="keydown" @input="resize" />
+      <Button class="note-add" icon-left="lock" label="Add note" variant="solid" :loading="busy" :disabled="!body.trim() || body.length > 4000"
         :title="body.trim() ? 'Add note · Enter' : 'Type a note first'" @click="submit" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.note-composer { grid-area:note; display:flex; flex-direction:column; gap:6px; padding:6px 8px 8px; }
-.note-context, .note-options { display:flex; align-items:center; gap:8px; padding:0 6px; font-size:12px; color:var(--relay-amber); }
+.note-composer { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.note-context, .note-options { display:flex; align-items:center; gap:8px; padding:0 6px; font-size:12px; color:var(--relay-note-ink); }
 .note-context span { flex:1; }
 .note-options { flex-direction:column; align-items:stretch; }
-.note-input { display:flex; align-items:flex-start; gap:8px; padding:9px 12px; border:1px solid color-mix(in srgb, var(--relay-amber) 45%, transparent); border-radius:8px; background:var(--surface-white); color:var(--relay-amber); cursor:text; }
-.note-input textarea { flex:1; min-width:0; min-height:22px; max-height:130px; padding:0; border:0; outline:0; background:none; color:var(--relay-ink, var(--ink-gray-8)); font:inherit; font-size:13.5px; line-height:1.45; resize:none; }
-.note-input textarea::placeholder { color:var(--relay-amber); opacity:.75; }
-.note-error { padding:0 6px; font-size:12px; color:var(--ink-red-3); }
-.note-bar { display:flex; align-items:center; gap:8px; }
-.note-hint { flex:1; text-align:right; font-size:11px; color:var(--relay-amber); }
-.note-add.relay-button { background:var(--relay-amber); border-color:var(--relay-amber); color:var(--surface-white); }
+.note-input { display:flex; align-items:flex-end; gap:8px; padding:6px; border:1px solid var(--relay-note-ink); border-radius:10px; background:var(--relay-layer); color:var(--relay-note-ink); }
+.note-input textarea { flex:1; min-width:0; min-height:44px; max-height:130px; padding:10px 4px; border:0; border-radius:6px; background:none; color:var(--relay-ink); font:inherit; font-size:14px; line-height:24px; resize:none; }
+.note-input textarea::placeholder { color:var(--relay-ink-3); opacity:1; }
+.note-error { font-size:13px; color:var(--relay-red); }
+.note-summary { font-size:12px; overflow-wrap:anywhere; }
+.note-add.relay-button, .note-add.relay-button:hover:not(:disabled) { flex:none; background:var(--relay-note-ink); border-color:var(--relay-note-ink); color:var(--relay-note-on-solid); }
 .note-add.relay-button:disabled { opacity:.55; }
-@media (max-width: 768px) {
-  .note-composer { padding:0; }
+@media (max-width:768px) {
+  .note-input { padding:5px; }
   .note-input textarea { font-size:16px; }
+  .note-add :deep(svg) { display:none; }
+  .note-add.relay-button { padding:0 10px; font-size:12px; }
 }
 </style>

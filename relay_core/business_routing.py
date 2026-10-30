@@ -115,7 +115,8 @@ def prompt(state, links, context, row, event):
     choices = []
     for dt, name in links:
         doc = frappe.get_doc(dt, name)
-        label = str((doc.get(doc.meta.title_field) if doc.meta.title_field else None) or name)
+        from relay_core.business_groups import title_field
+        label = str(doc.get(title_field(dt)) or name)
         choices.append({'id': 'relay-business:' + secrets.token_hex(16), 'doctype': dt, 'name': name,
                         'title': label[:24], 'description': (dt + ': ' + name)[:72]})
     state.choices = json.dumps(choices)

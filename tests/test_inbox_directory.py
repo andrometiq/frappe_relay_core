@@ -157,7 +157,7 @@ class DirectoryQueryTests(unittest.TestCase):
             inbox.directory(business_type='none')
             for values in ({'business_type': 'Employee'}, {'business_name': 'CUST-1'}, {'business_type': 'none', 'business_name': 'CUST-1'},
                            {'business_type': 'Customer', 'business_name': 'x' * 141}):
-                with self.subTest(values=values), self.assertRaises(ValueError):
+                with self.subTest(values=values), self.assertRaises((ValueError, PermissionError)):
                     inbox.directory(**values)
         one_type, one_record, none = self.statements
         self.assertIn("`contact` IN (SELECT `parent` FROM `tabDynamic Link` WHERE `parenttype`='Contact' AND NOT `parent` IS NULL AND `link_doctype`='Customer')", one_type)

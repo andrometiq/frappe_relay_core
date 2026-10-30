@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkedLabel, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../src/services/contactLinks.js'
+import { businessTypeOptions, isPrimaryLink, linkFromChoice, linkHint, linkedLabel, linksHeading, linksWith, linksWithout, primaryRequest, recordIcon, searchLinkChoices } from '../src/services/contactLinks.js'
 
 const customer = { doctype: 'Customer', name: 'C1' }, order = { doctype: 'Sales Order', name: 'SO-1' }
 
@@ -61,10 +61,48 @@ test('linking asks for the record type before searching records of that type', a
   assert.match(source, /searchLinkChoices\(\[pickedType\.value\]/)
 })
 
-test('browsing records shows every record type as a choice and starts on the filtered type', async () => {
+test('the links heading says "Not linked yet" instead of a zero count', () => {
+  assert.equal(linksHeading(0), 'Not linked yet')
+  assert.equal(linksHeading(2), 'Linked to · 2')
+})
+
+test('linking asks for the type even when only one record type can be linked', async () => {
+  assert.match(linkHint([{ value: 'Supplier', label: 'Supplier' }]), /^Choose the record type, then find the record/)
+  const source = await (await import('node:fs/promises')).readFile(new URL('../src/components/ContactLinks.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /types.value.length === 1/)
+  assert.match(source, /v-if="types.length" class="contact-link-types"/)
+  assert.match(linkHint([{ value: 'Customer', label: 'Customer' }, { value: 'Supplier', label: 'Supplier' }]), /^Choose the record type, then find the record/)
   const { readFile } = await import('node:fs/promises')
-  const directory = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
-  const inbox = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
-  assert.match(directory, /v-if="types\.length > 1" class="business-type-options" role="radiogroup"/)
-  assert.match(inbox, /:selected-doctype="businessType \|\| filters\.businessType"/)
+  const links = await readFile(new URL('../src/components/ContactLinks.vue', import.meta.url), 'utf8')
+  const details = await readFile(new URL('../src/components/ContactDetails.vue', import.meta.url), 'utf8')
+  assert.match(links, /v-if="start && adding && types\.length" class="info-hint">\{\{ linkHint\(types\) \}\}/)
+  assert.match(links, /\{\{ linksHeading\(links\.length\) \}\}/)
+  assert.doesNotMatch(details, /Choose the record type/)
+})
+
+test('the single-type form makes no record request until the type is explicitly chosen', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { computed, effectScope, nextTick, ref } = await import('vue')
+  const source = await readFile(new URL('../src/components/ContactLinks.vue', import.meta.url), 'utf8')
+  const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
+  const calls = [], scope = effectScope()
+  const globals = { computed, ref, nextTick, onMounted() {}, defineProps: () => ({ contact: 'local-person', detail: { links: [], can_edit_links: true } }),
+    defineEmits: () => () => {}, inject: () => ref({}), businessTypeOptions, searchLinkChoices,
+    coreApi: async (method, values) => { calls.push([method, values]); return method === 'business_types.list_types'
+      ? [{ business_doctype: 'Supplier', enabled: 1 }] : [{ name: 'LOCAL-1', label: 'Local supplier' }] } }
+  try {
+    const form = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { startAdding, recordType, recordField, pickType };')(...Object.values(globals)))
+    await form.startAdding()
+    assert.equal(form.recordType.value, '')
+    assert.equal(form.recordField.value.readOnly, true)
+    assert.deepEqual(await form.recordField.value.search('local'), [])
+    assert.equal(calls.length, 1)
+    form.pickType('Supplier')
+    assert.equal(form.recordField.value.readOnly, false)
+    const matches = await form.recordField.value.search('local')
+    assert.deepEqual(calls.at(-1), ['api.business_records', { doctype: 'Supplier', query: 'local' }])
+    assert.deepEqual(linkFromChoice(matches[0].value), { doctype: 'Supplier', name: 'LOCAL-1' })
+    await form.startAdding()
+    assert.equal(form.recordType.value, '', 'Every new link starts with an explicit type choice')
+  } finally { scope.stop() }
 })

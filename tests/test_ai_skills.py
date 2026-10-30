@@ -149,6 +149,18 @@ class ScopedToolTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.reader.read(self.contract)
         self.f.get_all.assert_not_called()
 
+    def test_reference_requires_present_matching_identity_before_business_read(self):
+        for phone in (None, '', '15550000002'):
+            with self.subTest(phone=phone):
+                self.anchor.phone = phone
+                self.f.get_list.reset_mock()
+                with self.assertRaises(ValueError):
+                    self.reader.read(self.contract)
+                self.assertEqual(self.reader.evidence, [])
+                self.assertTrue(all(call.args[0] == 'Supplier' for call in self.f.get_list.call_args_list))
+        self.anchor.phone = self.scope['endpoint']
+        self.assertEqual(self.reader.read(self.contract)[0]['amount'], 1250)
+
     def test_missing_scope_or_legacy_contract_never_grants_access(self):
         with self.assertRaises(ValueError):
             self.tools.Reader(self.skill, 'partner', ('Supplier', 'SUP-A')).read(self.contract)
@@ -333,28 +345,48 @@ class HandoffTests(unittest.TestCase):
         self.contact = Doc(automation_paused=0, automation_generation=0)
         self.message = Doc(name='MSG-1', relay_contact='CONTACT-1', conversation_key='CHAT-1')
         automation = types.SimpleNamespace(lock_contact=lambda name: self.contact, internal_save=lambda doc: self.saved.append(doc))
-        self.ticket = Doc(name='TKT-1')
+        self.ticket = Doc(name='TKT-1', generation=1)
         self.ensure = Mock(return_value=self.ticket)
-        self.hold = Mock()
+        self.hold = Mock(return_value=self.ticket)
         tickets = types.SimpleNamespace(ensure_episode=self.ensure, hold_episode=self.hold, episode_owner_allowed=lambda user, message: user == 'fallback')
         self.service = module('relay_core/ai/handoff.py', self.f,
             {'relay_core.tickets': tickets, 'relay_core.automation.service': automation})
         self.f.get_single = lambda dt: Doc(ai_handoff_owner='fallback')
         self.f.get_doc.return_value = self.message
-        self.run = Doc(name='RUN-1', message='MSG-1', generation=0)
+        self.run = Doc(name='RUN-1', message='MSG-1', generation=0, execution_user='operator')
         self.skill = Doc(handoff_owner='disabled')
 
     def test_retries_hold_only_the_shared_episode(self):
         for _ in range(2): self.service.handoff(self.run, self.skill, 'Permission denied')
         self.assertEqual(self.ensure.call_count, 2)
-        self.ensure.assert_called_with(self.message, owner='fallback', skill=self.skill, run=self.run,
-            subject='Conversation needs a person', reason='Permission denied')
+        self.ensure.assert_called_with(self.message, owner='fallback', run=self.run,
+            reason='Permission denied')
         self.assertEqual(self.run.ticket, 'TKT-1')
         self.assertEqual(self.run.status, 'Handoff')
         self.assertEqual(self.contact.automation_generation, 0)
         self.assertEqual(self.contact.automation_paused, 0)
         self.hold.assert_called_with('TKT-1')
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_handoff_keeps_triggering_messages_and_human_wording(self):
+        from relay_core import tickets
+        self.ticket.messages = []
+        self.ticket.append = lambda field, values: self.ticket.messages.append(Doc(values))
+        self.message.update(direction='Incoming', content='Please replace two damaged shirts.')
+        self.run.decision = json.dumps({'reason': 'Customer requests replacement of damaged shirts.'})
+        def admission(message, **kwargs):
+            tickets.enrich_episode(self.ticket, message, kwargs['run'], new=not self.ticket.messages)
+            return self.ticket
+        self.ensure.side_effect = admission
+        with patch.object(tickets, 'frappe', self.f):
+            self.service.handoff(self.run, self.skill, 'Outside skill')
+            self.assertEqual(self.ticket.subject, 'Customer requests replacement of damaged shirts.')
+            self.assertEqual(self.ticket.brief, self.ticket.subject)
+            self.ticket.subject, self.ticket.brief = 'Human subject', 'Human explanation'
+            self.message.name = 'MSG-2'; self.run.message = 'MSG-2'
+            for _ in range(2): self.service.handoff(self.run, self.skill, 'Outside skill')
+        self.assertEqual([row.message for row in self.ticket.messages], ['MSG-1', 'MSG-2'])
+        self.assertEqual((self.ticket.subject, self.ticket.brief), ('Human subject', 'Human explanation'))
 
     def test_no_owner_leaves_work_recoverable_without_unassigned_ticket(self):
         self.service.eligible = lambda *args: False
@@ -365,6 +397,7 @@ class HandoffTests(unittest.TestCase):
 
 class SkillDeliveryTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.reply_guard.check_delivery'))
         from contextvars import ContextVar
         self.f = framework()
         self.run = Doc(name='RUN-1', status='Pending', skill='SKILL-1', execution_user='service', message='MSG-1', attempts=0)
@@ -403,6 +436,26 @@ class SkillDeliveryTests(unittest.TestCase):
         self.assertEqual(self.run.status, 'Completed')
         self.assertIsNone(self.automation.outgoing_run.get())
 
+    def test_run_records_ai_context_and_rechecks_events_before_delivery(self):
+        used = {'memory': {'rows': ['MEM-1'], 'sha256': 'abc'}, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
+        self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
+        check = Mock()
+        with patch.dict(sys.modules, {'relay_core.ai.event_memory': types.SimpleNamespace(check_context=check)}):
+            self.service.process('RUN-1')
+        self.assertEqual(json.loads(self.run.ai_context), used)
+        self.assertNotIn('context', json.loads(self.run.decision))
+        check.assert_called_with(self.run.ai_context, ('Supplier', 'SUP-A'), 'Sim Company')
+        self.send.assert_called_once()
+
+    def test_changed_event_blocks_delivery_and_hands_off(self):
+        used = {'memory': None, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
+        self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
+        check = Mock(side_effect=ValueError('An event used by this reply changed or is no longer available'))
+        with patch.dict(sys.modules, {'relay_core.ai.event_memory': types.SimpleNamespace(check_context=check)}):
+            self.service.process('RUN-1')
+        self.send.assert_not_called()
+        self.handoff.assert_called_once()
+
     def test_recovery_reuses_persisted_decision_and_stable_key(self):
         self.run.decision = json.dumps(self.service.decide.return_value)
         self.service.process('RUN-1')
@@ -420,18 +473,57 @@ class SkillDeliveryTests(unittest.TestCase):
         self.send.assert_not_called(); self.handoff.assert_not_called()
         self.assertEqual(self.run.status, 'Shadow')
 
-    def test_permission_and_model_failure_share_handoff(self):
-        for failure in (PermissionError, TimeoutError):
-            self.run.status = 'Pending'; self.run.decision = None; self.run.attempts = 0
-            self.service.decide.side_effect = failure
-            self.service.process('RUN-1')
-        self.assertEqual(self.handoff.call_count, 2)
+    def test_permission_and_timeout_have_distinct_run_reasons(self):
+        from frappe_tools.ai.client import DeadlineReached
+        for mode in ('Automatic', 'Shadow'):
+            for failure, reason in (
+                    (PermissionError('Contact is not linked to this record'), 'Contact is not linked to this record'),
+                    (TimeoutError('Read timed out'), 'AI model did not answer in time'),
+                    (DeadlineReached('The AI time budget is used up'), 'AI model did not answer in time'),
+                    (ValueError('AI provider error: Service unavailable'), 'AI provider error: Service unavailable')):
+                with self.subTest(mode=mode, failure=failure):
+                    self.run.update(status='Pending', decision=None, attempts=0)
+                    self.skill.mode = mode
+                    self.handoff.reset_mock()
+                    self.handoff.side_effect = lambda run, skill, why: run.update(status='Handoff', reason=why)
+                    self.service.decide.side_effect = failure
+                    self.service.process('RUN-1')
+                    self.assertEqual(self.run.reason, reason)
+                    self.assertEqual(self.run.status, 'Shadow' if mode == 'Shadow' else 'Handoff')
+                    self.assertIn(str(failure), self.f.log_error.call_args.kwargs['message'])
+                    if mode == 'Shadow':
+                        self.handoff.assert_not_called()
         self.send.assert_not_called()
 
     def test_takeover_prevents_delivery(self):
         self.service.current.side_effect = self.service.Superseded('Conversation changed')
         self.service.process('RUN-1')
         self.send.assert_not_called()
+
+    def test_matching_and_search_continuation_do_not_shorten_reply_budget(self):
+        self.automation.episode = Mock(return_value=Doc(ai_disabled=0))
+        self.automation.triage = Mock()
+        self.automation.lock_contact.return_value = Doc(automation_paused=0, automation_generation=0)
+        self.automation.message_hash.return_value = 'hash'
+        self.automation.latest_message.return_value = True
+        self.f.db.get_value.return_value = 0
+        self.f.QueryDeadlockError = type('QueryDeadlockError', (Exception,), {})
+        for continued in (False, True):
+            with self.subTest(continued=continued):
+                self.run.update(status='Pending', stage='Matching', generation=0, message_hash='hash', attempts=0)
+                with patch('relay_core.tickets.check_episode'), \
+                     patch.object(self.service, 'continue_search', return_value=continued), \
+                     patch.object(self.service, 'context', return_value=('partner', ('Supplier', 'SUP-A'), self.scope)), \
+                     patch.object(self.service, 'conversation_history', return_value=[]), \
+                     patch('relay_core.ai.matching.candidates', return_value=[self.skill]), \
+                     patch('relay_core.ai.matching.select', return_value={'selected': self.skill.name}) as select, \
+                     patch.object(self.service, 'select_skill', side_effect=lambda *args: self.run.update(stage='Event', status='Pending')), \
+                     patch.object(self.service.time, 'monotonic', return_value=100), \
+                     patch.object(self.service, 'process') as process:
+                    self.service.admit(self.run)
+                process.assert_called_once_with(self.run.name)
+                if not continued:
+                    self.assertEqual(select.call_args.args[3], 140)
 
 
     def test_revoked_tool_permission_after_inference_hands_off_without_sending(self):
@@ -462,6 +554,11 @@ class SkillDeliveryTests(unittest.TestCase):
 
 class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
+        # Privacy lookup data is supplied by the dedicated reply guard tests.
+        guard_db = framework()
+        guard_db.db.exists.return_value = False
+        self.enterContext(patch('relay_core.ai.reply_guard.frappe', guard_db))
         try:
             from frappe_tools.ai import agent, client
             from frappe_tools.utils import llm
@@ -485,6 +582,8 @@ class SharedAdapterTests(unittest.TestCase):
             if isinstance(value, Mock): self.attempt = value
 
     def outcome(self, data=None, calls=None):
+        if isinstance(data, dict) and {'reply', 'handoff', 'reason'} <= data.keys():
+            data = {'data_question': False, **data}
         return {'ok': True, 'result': {'data': data, 'tool_calls': calls or [], 'response': {}}}
 
     def test_uses_shared_engine_with_model_deadline_no_extraction_task_alias(self):
@@ -493,13 +592,62 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertTrue(result['handoff'])
         args = self.attempt.call_args.args
         self.assertEqual(args[1], 'test-model')
-        self.assertLessEqual(args[3]['timeout'], 20)
-        self.assertGreater(args[3]['timeout'], 0)
+        self.assertLessEqual(args[3]['timeout'], 60)
+        self.assertGreater(args[3]['timeout'], 59)
         self.assertEqual(args[3]['attempts'], 1)
         self.assertIsNone(args[4]['phase'])
         self.assertEqual(args[4]['reference_doctype'], 'Relay Automation Run')
         self.assertEqual(args[4]['reference_name'], 'RUN-1')
         self.assertIsInstance(args[5], float)
+
+    def test_reply_can_finish_after_twenty_seconds_but_respects_explicit_deadline(self):
+        result = self.outcome({'reply': '', 'handoff': True, 'reason': 'Staff assistance required'})
+        with patch.object(self.adapter.time, 'monotonic', return_value=100) as clock:
+            def slow_reply(*args):
+                clock.return_value = 130
+                return result
+            self.attempt.side_effect = slow_reply
+            self.assertTrue(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')['handoff'])
+            self.assertEqual(self.attempt.call_args.args[3]['timeout'], 60)
+            self.assertEqual(self.attempt.call_args.args[5], 160)
+            clock.return_value = 100
+            with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question', deadline=125)
+
+    def test_provider_failure_reason_is_short_redacted_and_distinct_from_timeout(self):
+        cases = (
+            ('Service unavailable\n Please retry', ValueError, 'AI provider error: Service unavailable Please retry'),
+            ('Read timed out (read timeout=20)', TimeoutError, 'AI model did not answer in time'),
+            ('Connection timeout', TimeoutError, 'AI model did not answer in time'),
+            ('The AI time budget is used up', TimeoutError, 'AI model did not answer in time'),
+            ('DeadlineReached', TimeoutError, 'AI model did not answer in time'),
+            ('', ValueError, 'AI provider error: No error details returned'),
+        )
+        for error, exception, reason in cases:
+            with self.subTest(error=error):
+                self.attempt.return_value = {'ok': False, 'error': error, 'retryable': False}
+                with self.assertRaises(exception) as raised:
+                    self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+                self.assertEqual(str(raised.exception), reason)
+        self.attempt.return_value = {'ok': False, 'error': 'local-test-secret ' + 'detail ' * 200}
+        with patch.object(self.agent, 'get_known_secrets', return_value=['local-test-secret']):
+            with self.assertRaises(ValueError) as raised:
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+        self.assertNotIn('local-test-secret', str(raised.exception))
+        self.assertEqual(len(str(raised.exception)), 500)
+
+    def test_failed_authorization_takes_precedence_over_provider_failure(self):
+        reader = types.SimpleNamespace(private=False, failed=True)
+        self.attempt.return_value = {'ok': False, 'error': 'Service unavailable'}
+        with patch.object(self.adapter, 'Reader', return_value=reader):
+            with self.assertRaisesRegex(ValueError, '^Business data authorization failed; review required$'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
+
+    def test_classifier_keeps_twenty_second_timeout(self):
+        self.attempt.return_value = self.outcome({'human_request': False, 'scores': []})
+        with patch.object(self.adapter.time, 'monotonic', return_value=100):
+            self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 140)
+        self.assertEqual(self.attempt.call_args.args[3]['timeout'], 20)
 
     def test_matching_shared_engine_has_no_tools_and_rejects_tool_calls(self):
         import time
@@ -519,11 +667,10 @@ class SharedAdapterTests(unittest.TestCase):
         self.f.db.sql.assert_not_called()
 
     def test_expired_turn_cannot_start_matching_or_response(self):
-        for call in (lambda: self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 1),
-                     lambda: self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'),
-                                                   'Question', deadline=1)):
-            with self.assertRaisesRegex(ValueError, 'deadline'):
-                call()
+        with self.assertRaisesRegex(ValueError, 'deadline'):
+            self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 1)
+        with self.assertRaisesRegex(TimeoutError, 'AI model did not answer in time'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question', deadline=1)
         self.attempt.assert_not_called()
 
     def test_unregistered_tool_forces_handoff_even_if_model_returns_reply(self):
@@ -542,7 +689,7 @@ class SharedAdapterTests(unittest.TestCase):
         from relay_core.ai.ledger import summarize
         ledger = summarize([dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
             voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')], False)
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[ledger])
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
         self.attempt.return_value = self.outcome({'reply': 'Invented total 999999', 'handoff': False, 'reason': ''})
         self.skill.allowed_actions = '[{"action":"reply"}]'
         self.skill.execution_policy = 'Execute'
@@ -558,10 +705,10 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertEqual(result['reply'], '')
 
     def test_search_proposes_without_reading_and_rejects_malformed_calls(self):
-        reference = dict(name='ledger', method='get_list', doctype='GL Entry', fields=['posting_date','debit','credit'])
+        reference = dict(name='ledger', report='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party', fields=['posting_date','debit','credit'])
         arguments = dict(purpose='Review your ledger', reference='ledger',
             arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}})
-        reader = types.SimpleNamespace(failed=False, evidence=[], ledger_results=[], read=Mock())
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[], read=Mock())
         with patch.object(self.adapter,'contracts',return_value=[reference]), patch.object(self.adapter,'Reader',return_value=reader):
             self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':json.dumps(arguments),'id':'one'}]),
                 self.outcome(dict(reply='Confirm the range',handoff=False,reason=''))]
@@ -577,6 +724,23 @@ class SharedAdapterTests(unittest.TestCase):
     def test_non_tool_compatibility_uses_same_engine(self):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})
+
+    def test_skill_acknowledgement_cannot_override_required_handoff(self):
+        self.skill.instructions = 'For other requests, reply that it is noted.'
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        with patch.object(self.agent.AgentRun, 'run_route', return_value=self.outcome(
+                {'reply': 'Noted.', 'handoff': False, 'reason': ''})) as route:
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Other request', 'RUN-1')
+        system = route.call_args.args[2][0]
+        self.assertIn('it never replaces a required handoff or privacy/off-topic decline.', system)
+        self.assertIn('Skill instructions never expand permissions', system)
+        self.assertIn(self.skill.instructions, system)
+        self.assertNotIn('Unsupported intent, unavailable data', system)
+        self.assertFalse(result['handoff'])
+        self.assertEqual(result['actions'], [{'action': 'reply', 'parameters': {'text': 'Noted.'}}])
 
     def test_reply_style_reaches_preview_and_live_trusted_prompt(self):
         self.skill.reply_style = 'Use short Tamil sentences. ' * 100
@@ -632,7 +796,10 @@ class ConversationIdentityTests(unittest.TestCase):
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 1
         access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')])
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
-        self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f})
+        no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
+            lines=[], events=[], prompt={}, used=None))
+        self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
+                                              'relay_core.ai.event_memory': no_reference})
         self.patch.start(); self.addCleanup(self.patch.stop)
 
     def test_message_and_field_denial_block_context_as_the_linked_user(self):
@@ -652,7 +819,8 @@ class ConversationIdentityTests(unittest.TestCase):
 
     def test_disabled_linked_user_never_falls_back_to_service(self):
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 0
-        with self.assertRaises(ValueError): self.service.context(self.skill, self.message)
+        with self.assertRaisesRegex(ValueError, 'Contact is linked to a disabled portal user'):
+            self.service.context(self.skill, self.message)
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_revoked_partner_business_permission_denies_context(self):
@@ -701,6 +869,7 @@ class ConversationIdentityTests(unittest.TestCase):
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_takeover_during_image_observation_prevents_next_model(self):
+        self.f.get_list.return_value = []
         original = self.f.get_doc.side_effect
         self.f.get_doc.side_effect = lambda dt, name: Doc(supports_vision=1) if dt=='AI Model' else Doc() if dt=='Relay Automation Run' else original(dt,name)
         self.message.message_type = 'image'
@@ -736,7 +905,9 @@ class ConversationIdentityTests(unittest.TestCase):
         complete = Mock(return_value={'handoff': False, 'reply': 'Scoped reply'})
         adapter = types.SimpleNamespace(complete=complete, MAX_PROMPT_LENGTH=12000)
         with patch.dict(sys.modules, {'relay_core.ai.adapter': adapter}):
-            self.service.decide(self.skill, self.message)
+            with patch.object(self.service.time, 'monotonic', return_value=100):
+                self.service.decide(self.skill, self.message)
+            self.assertEqual(complete.call_args.kwargs['deadline'], 160)
             self.assertEqual(json.loads(complete.call_args.args[3]),
                 {'history': [], 'incoming': self.message.content})
             complete.reset_mock()

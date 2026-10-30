@@ -150,18 +150,18 @@ class LinkedBusinessAccessTests(unittest.TestCase):
     def test_removed_contact_link_ends_message_access(self):
         record = Mock(); record.has_permission.return_value = True
         fake = SimpleNamespace(session=SimpleNamespace(user='reader'), get_doc=Mock(return_value=record),
-                               DoesNotExistError=LookupError, permissions=SimpleNamespace(has_permission=Mock(
+                               DoesNotExistError=LookupError, db=Mock(exists=Mock(return_value=True)), permissions=SimpleNamespace(has_permission=Mock(
                                    side_effect=lambda doctype, ptype, doc, user=None, print_logs=True: doc.has_permission(ptype, user=user))))
         message = _dict(relay_contact='RELAY-CON-A', business_doctype='Customer', business_name='Sim Customer')
-        with patch.object(business_access, 'frappe', fake), \
+        with patch.object(business_access, 'allowed_types', return_value={'Customer'}), patch.object(business_access, 'frappe', fake), \
                 patch.object(business_access, 'candidates', return_value=[('Customer', 'Sim Customer')]) as links:
             self.assertTrue(business_access.allowed(message))
-            record.has_permission.assert_called_with('read', user=None)
+            record.has_permission.assert_not_called()
             links.return_value = [('Supplier', 'Sim Supplier')]
             self.assertFalse(business_access.allowed(message))
             # A marked ticket notification reaches the subscriber's own contact across its links.
             self.assertTrue(business_access.allowed(_dict(message, ticket_notification='Ticket update')))
-            record.has_permission.return_value = False
+            fake.db.exists.return_value = False
             self.assertFalse(business_access.allowed(_dict(message, ticket_notification='Ticket update')))
 
     def test_only_the_notification_path_may_store_the_marker(self):
@@ -169,7 +169,7 @@ class LinkedBusinessAccessTests(unittest.TestCase):
         doc = _dict(direction='Outgoing', relay_contact='RELAY-CON-A', channel='CH', sender_endpoint='a@example.invalid',
                     business_doctype='Customer', business_name='Sim Customer', ticket_notification='Ticket update')
         fake = SimpleNamespace(throw=Mock(side_effect=ValueError))
-        with patch.object(business_access, 'frappe', fake), patch.object(business_access, 'candidates', return_value=[]):
+        with patch.object(business_access, 'allowed_types', return_value={'Customer'}), patch.object(business_access, 'frappe', fake), patch.object(business_access, 'candidates', return_value=[]):
             with self.assertRaises(ValueError):
                 business_access.associate(doc)
             token = message_ownership.set(('RELAY-CON-A', 'CH', 'a@example.invalid', 'Customer', 'Sim Customer', 'Ticket update'))

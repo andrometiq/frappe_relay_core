@@ -7,12 +7,14 @@ import re
 from urllib.parse import urlsplit
 
 import frappe
+from relay_core.business_access import document_name
 
 from relay_core.bulk_sheet import media_url
 from relay_core.channels import channel as channel_definition
+from relay_core.file_limits import encoded_length, get_media_max_bytes, size_error, size_label
 
-MAX_BYTES = 4 * 1024 * 1024
 HEADER_KINDS = {'image': 'photo', 'video': 'video', 'document': 'document'}  # Meta header type -> channel media kind.
+UPLOADS = 'relay-template-media:'  # Hub media id -> the uploader's File and the sending channel.
 PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
 
 
@@ -66,6 +68,7 @@ def check_header(components):
 @frappe.whitelist(methods=['POST'])
 def upload(channel, media_type, filename, content_base64):
     """Hub media id of a header file, uploaded through the WhatsApp number that sends the template."""
+    document_name(channel)
     from relay_core.document_sends import upload as hub_upload
     from relay_core.hub import HubError
     from relay_core.hub_channels import is_current
@@ -83,16 +86,41 @@ def upload(channel, media_type, filename, content_base64):
     mime_type = mimetypes.guess_type(filename)[0]
     if mime_type not in channel_definition('WhatsApp').features['media'][HEADER_KINDS[media_type]]:
         frappe.throw(f'This file type is not accepted for this {media_type} header')
-    if not isinstance(content_base64, str) or len(content_base64) > ((MAX_BYTES + 2) // 3) * 4:
-        frappe.throw('The file must be at most 4 MiB')
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type])
+    if not isinstance(content_base64, str) or len(content_base64) > encoded_length(limit):
+        frappe.throw(f'The file must be at most {size_label(limit)}')
     try:
         raw = base64.b64decode(content_base64, validate=True)
     except (ValueError, binascii.Error):
         frappe.throw('Invalid file data')
-    if not 1 <= len(raw) <= MAX_BYTES:
-        frappe.throw('The file must hold 1 byte to 4 MiB')
+    if error := size_error(len(raw), limit):
+        frappe.throw(error)
     try:
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:
         frappe.throw(failure_message(error))
+    from frappe.utils.file_manager import save_file
+    from relay_core.bulk_campaigns import MEDIA_DAYS
+    file = save_file(filename, raw, None, None, is_private=1)
+    frappe.cache.set_value(UPLOADS + media_id, {'file': file.name, 'channel': sender.name}, expires_in_sec=MEDIA_DAYS * 86400)
     return {'id': media_id, 'filename': filename, 'size': len(raw)}
+
+
+def keep_header(result, kind, data):
+    """Move the uploaded header file of a sent template onto its Relay Message, so the chat serves it from the site."""
+    from relay_core.attachments import template_media
+    template = data.get('arguments') if kind == 'whatsapp' else data if kind == 'template' else None
+    media = template_media({'template': template}) if isinstance(template, dict) else None
+    key = UPLOADS + str(media.get('id')) if media and result.get('action') else None
+    upload = frappe.cache.get_value(key) if key else None
+    channel = frappe.db.get_value('Relay Message Action', result['action'], 'target_channel') if isinstance(upload, dict) else None
+    if not channel or upload['channel'] != channel:
+        return None
+    file = frappe.get_doc('File', upload['file'])
+    if not file.is_private or file.attached_to_doctype or file.owner != frappe.session.user:
+        return None
+    from relay_core.document_sends import keep_copy
+    if message := keep_copy(result, file.file_name, file.get_content()):
+        file.delete(ignore_permissions=True)
+        frappe.cache.delete_value(key)
+    return message

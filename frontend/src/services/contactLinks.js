@@ -23,6 +23,16 @@ export function businessTypeOptions(types) {
   return (types || []).filter(row => row.enabled).map(row => ({ value: row.business_doctype, label: row.label || row.business_doctype }))
 }
 
+// The links heading counts the records, or says there are none.
+export function linksHeading(count) {
+  return count ? `Linked to · ${count}` : 'Not linked yet'
+}
+
+// Always confirm the business type, including when only one is enabled.
+export function linkHint() {
+  return 'Choose the record type, then find the record. The chat then shows its name.'
+}
+
 // Icon tile for a linked record: parties are green buildings, deliveries purple trucks, other documents blue.
 export function recordIcon(doctype) {
   if (/customer|supplier|company|lead|partner|party/i.test(doctype || '')) return { icon: 'building', tone: 'green' }

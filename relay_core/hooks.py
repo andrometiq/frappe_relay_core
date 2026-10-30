@@ -10,7 +10,7 @@ after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
 
 # Off until explicitly configured on an isolated/validated site.
-doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
+doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
 # Every job returns at once while no Relay Hub is configured.
 scheduler_events = {
     "cron": {
@@ -19,6 +19,7 @@ scheduler_events = {
             "recover_messages", "recover_learning", "recover_summaries", "recover_campaigns",
             "recover_translations", "recover_voice_transcripts", "recover_business_events")],
         "*/10 * * * *": ["relay_core.scheduled_jobs.sync_whatsapp_templates"],
+        "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels"],
 }
@@ -70,6 +71,8 @@ has_permission['Relay Channel Preference'] = 'relay_core.channel_preferences.per
 permission_query_conditions['Relay Channel Preference'] = 'relay_core.channel_preferences.query'
 has_permission['Relay Chat Folder'] = 'relay_core.chat_folders.permission'
 permission_query_conditions['Relay Chat Folder'] = 'relay_core.chat_folders.query'
+has_permission['Relay Chat'] = 'relay_core.relay_chats.permission'
+permission_query_conditions['Relay Chat'] = 'relay_core.relay_chats.query'
 
 # Configured Relay Document Actions add a "Send on WhatsApp" button to their desk forms.
 boot_session = ["relay_core.document_actions.boot_session", "relay_core.whatsapp_redirects.boot_session"]
@@ -77,3 +80,14 @@ app_include_js = ["/assets/relay_core/js/document_actions.js", "/assets/relay_co
 
 # Old /whatsapp links open /relay once WhatsApp Core is switched off or removed.
 page_renderer = ["relay_core.whatsapp_redirects.WhatsAppRedirectPage"]
+
+# A Relay AI Event rebuilds its memory when one of its attachments is added, changed or removed.
+doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for event in ('on_update', 'after_delete')}
+
+# Cover generic Desk/REST access as well as the dedicated AI APIs.
+for _doctype in ('Relay AI Skill', 'Relay AI Knowledge', 'Relay AI Event', 'Relay AI Event Build',
+                 'Relay Memory', 'Relay AI Provider', 'Relay Learned Procedure', 'Relay Automation Policy',
+                 'Relay Conversation Summary', 'Relay Message Translation'):
+    has_permission[_doctype] = 'relay_core.ai_features.document_permission'
+    permission_query_conditions[_doctype] = 'relay_core.ai_features.query_condition'
+    doc_events.setdefault(_doctype, {})['validate'] = 'relay_core.ai_features.validate_document'

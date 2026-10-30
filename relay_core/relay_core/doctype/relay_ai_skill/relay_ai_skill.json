@@ -90,18 +90,18 @@
     },
     {
       "fieldname": "instructions",
-      "label": "Memory and rules",
+      "label": "Skill instructions",
       "fieldtype": "Long Text",
       "reqd": 1,
       "ignore_xss_filter": 1
     },
     {
       "fieldname": "allowed_tools",
-      "label": "Read references",
+      "label": "Configured reports",
       "fieldtype": "JSON",
       "default": "[]",
       "reqd": 1,
-      "description": "One contract store: get_doc/get_list, fields, business scope_field, identity_anchor, provider identity_fields and company_field."
+      "description": "Choose an installed report ID and its fixed fields/scope, with authenticated provider identity fields. Legacy record references are not exposed to AI."
     },
     {
       "fieldname": "sample_key",

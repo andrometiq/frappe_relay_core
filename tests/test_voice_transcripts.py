@@ -85,7 +85,7 @@ class VoiceTranscriptTests(unittest.TestCase):
         row = self.rows['voice']
         self.assertEqual((row.transcript, row.transcript_status), ('Please send the invoice', 'Completed'))
         self.assertEqual(json.loads(row.transcript_details)['model'], 'fixture-transcribe')
-        self.transcribe.assert_called_once_with('fixture-transcribe', 'synthetic-secret', b'OggS-audio', 'audio/ogg')
+        self.transcribe.assert_called_once_with('fixture-transcribe', 'synthetic-secret', b'OggS-audio', 'audio/ogg', allow_in_test_mode=False)
         self.frappe.set_user.assert_called_with('Guest')
 
     def test_provider_failure_is_recorded_without_secret(self):
@@ -98,7 +98,7 @@ class VoiceTranscriptTests(unittest.TestCase):
         self.assertNotIn('synthetic-secret', row.transcript_details)
 
     def test_edit_during_transcription_discards_old_audio_text(self):
-        def edited(*args):
+        def edited(*args, **kwargs):
             self.rows['voice'].content = 'Message deleted by sender'
             return 'Old words'
         self.transcribe.side_effect = edited

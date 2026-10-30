@@ -6,6 +6,10 @@ from relay_core import business_inbox, inbox
 
 
 class ChannelQueryTests(unittest.TestCase):
+    def setUp(self):
+        self.inbox_document = self.enterContext(patch('relay_core.business_inbox.business_document'))
+        self.business_document = self.enterContext(patch('relay_core.business_access.business_document'))
+
     def test_directory_preview_uses_original_text_and_decodes_legacy_html_once(self):
         import json
         text = 'Local & team <img src=x onerror=alert(1)> &amp; literal'
@@ -29,7 +33,7 @@ class ChannelQueryTests(unittest.TestCase):
                 self.assertEqual(result['ingestion_cursor'],'RELAY-MSG-0000000000')
             fake.throw.side_effect=ValueError
             with self.assertRaises(ValueError):business_inbox.messages('Customer','local',medium='SMS')
-            fake.get_doc.return_value.check_permission.side_effect=PermissionError
+            self.inbox_document.side_effect=PermissionError
             with self.assertRaises(PermissionError):business_inbox.messages('Supplier','hidden',medium='Email')
 
     def test_directory_channel_filter_rejects_unknown_before_execution(self):
@@ -54,6 +58,6 @@ class ChannelQueryTests(unittest.TestCase):
             self.assertIn('JSON_EXTRACT',statements[0])
             self.assertIn("'local-user'",statements[0]);self.assertIn("'local'",statements[0])
             self.assertTrue(statements[0].endswith('LIMIT 51'))
-            fake.get_doc.return_value.check_permission.side_effect=PermissionError
+            self.business_document.side_effect=PermissionError
             with self.assertRaises(PermissionError):messaging.pending_messages(business_doctype='Supplier',business_name='hidden')
             self.assertEqual(len(statements),1)

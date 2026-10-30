@@ -1,0 +1,68 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Knowledge",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-KB-.##########",
+  "title_field": "title",
+  "track_changes": 1,
+  "field_order": [
+    "title",
+    "enabled",
+    "company",
+    "business_doctype",
+    "instructions"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "company",
+      "label": "Company (blank for all)",
+      "fieldtype": "Link",
+      "options": "Company"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type (blank for all)",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Standing instructions",
+      "fieldtype": "Long Text",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    }
+  ]
+}

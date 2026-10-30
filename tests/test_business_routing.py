@@ -10,6 +10,7 @@ from relay_core import business_access, business_routing as routing, business_ro
 
 class RoutingFixtures:
     def setUp(self):
+        self.enterContext(patch('relay_core.business_groups.title_field', return_value='title'))
         self.now = datetime(2026, 10, 24, 12)
         self.links = [('Customer', 'customer-one'), ('Supplier', 'supplier-two')]
         self.states, self.actions, self.references = {}, {}, {}
@@ -476,7 +477,6 @@ class TriageEpisodeTests(unittest.TestCase):
         self.enterContext(patch('frappe.utils.now_datetime', return_value='Sim time'))
         self.enterContext(patch('relay_core.permissions.require_administrator'))
         self.enterContext(patch('relay_core.ticket_settings.apply'))  # Configured statuses are covered in test_ticket_settings.
-        self.enterContext(patch('relay_core.ticket_settings.preferred', side_effect=lambda kind, label: label))
         from contextlib import nullcontext
         self.enterContext(patch('relay_core.ai.tools.as_user', side_effect=lambda user:nullcontext()))
 
@@ -532,7 +532,7 @@ class TriageEpisodeTests(unittest.TestCase):
         self.assertNotEqual(self.tickets.source_episode('other-channel', self.row), first)
 
     def test_empty_evidence_requires_a_complete_source_and_company(self):
-        doc = _dict(subject='Triage', brief='', category='Support', status='Open', messages=[],
+        doc = _dict(subject='Triage', brief='', ticket_status='Open', messages=[],
                     get_doc_before_save=lambda:None)
         self.fake.throw = Mock(side_effect=ValueError('Invalid ticket'))
         self.fake.session = _dict(user='Administrator')
@@ -550,6 +550,7 @@ class TriageEpisodeTests(unittest.TestCase):
 
 class TriageEnrollmentTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.relay_user', return_value=True))
         from relay_core import enrollment
         self.api = enrollment
         self.event = _dict(name='event', account='account', creation='today', payload=json.dumps({
@@ -615,4 +616,4 @@ class TriageEnrollmentTests(unittest.TestCase):
             self.assertFalse(tickets.permission(doc), 'Partial business scope must deny before contact fallback')
             doc.business_doctype = None
         with patch.object(tickets, 'frappe', fake), patch('relay_core.permissions.company_allowed', return_value=False):
-            self.assertFalse(tickets.permission(doc))
+            self.assertTrue(tickets.permission(doc), 'Unlinked triage uses Relay access, not Company Desk read')

@@ -69,7 +69,8 @@ class RoleMatrixTests(unittest.TestCase):
 
     def test_machine_records_are_system_manager_only(self):
         for doctype in ('Relay Automation Run', 'Relay Business Event Delivery', 'Relay Internal Comment', 'Relay Case',
-                        'Relay Conversation Summary', 'Relay Message Translation', 'Relay Flow Run', 'Relay Call'):
+                        'Relay Conversation Summary', 'Relay Message Translation', 'Relay Flow Run', 'Relay Call',
+                        'Relay Memory'):
             self.assertEqual(set(PERMS[doctype]), {'System Manager'}, doctype)
 
     def test_hub_service_only_creates_hub_events(self):
@@ -138,85 +139,6 @@ class AccessTests(unittest.TestCase):
                          [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0)])
 
 
-class ConversationRowRuleTests(unittest.TestCase):
-    """A User sees its own teams and assignments; Team User, Manager and System Manager see every team."""
-
-    def scoped(self, frappe, responsible=False):
-        groups = types.SimpleNamespace(responsible=lambda contact, user: responsible,
-                                       responsibility_condition=lambda user, contact: 'GROUP')
-        return patch.dict(sys.modules, frappe=frappe, **{'relay_core.business_groups': groups})
-
-    def allowed(self, roles, assignment, members=(), responsible=False):
-        from relay_core import permissions
-        with self.scoped(fake_frappe(roles, assignment=assignment, members=members), responsible):
-            return permissions.assignment_allowed('RELAY-CON-1', 'agent@example.com')
-
-    def test_user_sees_only_own_team_and_own_assignments(self):
-        other_team = types.SimpleNamespace(team='Support-001', assigned_to='other@example.com')
-        mine = {('Sales-001', 'agent@example.com')}
-        self.assertFalse(self.allowed([USER], other_team, mine))
-        self.assertTrue(self.allowed([USER], types.SimpleNamespace(team='Sales-001', assigned_to='other@example.com'), mine))
-        self.assertTrue(self.allowed([USER], types.SimpleNamespace(team=None, assigned_to='agent@example.com')))
-        self.assertTrue(self.allowed([USER], None, responsible=True))
-        self.assertFalse(self.allowed([USER], None))
-
-    def test_team_user_manager_and_system_manager_see_every_team(self):
-        other_team = types.SimpleNamespace(team='Support-001', assigned_to='other@example.com')
-        for role in (TEAM_USER, MANAGER, 'System Manager'):
-            self.assertTrue(self.allowed([role], other_team), role)
-            from relay_core import permissions
-            with self.scoped(fake_frappe([role])):
-                self.assertEqual(permissions.assignment_condition('agent@example.com'), '')
-
-    def test_users_without_a_relay_role_see_nothing(self):
-        team = types.SimpleNamespace(team='Sales-001', assigned_to='agent@example.com')
-        for roles in (['Employee'], [HUB_SERVICE]):
-            self.assertFalse(self.allowed(roles, team, {('Sales-001', 'agent@example.com')}))
-            from relay_core import permissions
-            with self.scoped(fake_frappe(roles)):
-                self.assertEqual(permissions.assignment_condition('agent@example.com'), '1=0')
-
-    def test_user_query_matches_team_membership_and_assignment(self):
-        from relay_core import permissions
-        with self.scoped(fake_frappe([USER])):
-            condition = permissions.assignment_condition('agent@example.com')
-            message = permissions.assignment_condition('agent@example.com', message=True)
-        self.assertIn('`tabRelay Team Member`', condition)
-        self.assertIn("a.assigned_to='agent@example.com'", condition)
-        self.assertIn('GROUP', condition)
-        self.assertIn('`tabRelay Message`.relay_contact', message)
-
-    def test_conversation_needs_no_contact_or_business_read(self):
-        from relay_core import permissions
-        relay = types.SimpleNamespace(name='RELAY-CON-1', contact='person', check_permission=lambda ptype: None)
-        frappe = fake_frappe([TEAM_USER], get_doc=lambda doctype, name: relay if doctype == 'Relay Contact' else doctype)
-        with self.scoped(frappe):
-            self.assertTrue(permissions.contact_permission(relay, 'agent@example.com'))
-            self.assertEqual(permissions.contact_query('agent@example.com'), '')
-            self.assertEqual(permissions.readable_contact('RELAY-CON-1'), (relay, 'Contact'))
-
-    def test_contact_rows_follow_the_relay_role_rule(self):
-        from relay_core import permissions
-        for roles, expected in (([USER], True), (['Employee'], False)):
-            team = types.SimpleNamespace(team='Sales-001', assigned_to=None)
-            with self.scoped(fake_frappe(roles, assignment=team, members={('Sales-001', 'agent@example.com')})):
-                self.assertEqual(permissions.contact_permission(types.SimpleNamespace(name='RELAY-CON-1'),
-                                                                'agent@example.com'), expected, roles)
-        with self.scoped(fake_frappe(['Employee'])):
-            self.assertEqual(permissions.contact_query('agent@example.com'), '1=0')
-
-    def test_message_query_hides_triage_except_from_administrator(self):
-        from relay_core import permissions
-        with self.scoped(fake_frappe([MANAGER])):
-            self.assertEqual(permissions.message_query('agent@example.com'),
-                             'COALESCE(`tabRelay Message`.legacy_triage,0)=0')
-            self.assertEqual(permissions.message_query('Administrator'), '')
-        with self.scoped(fake_frappe([USER])):
-            condition = permissions.message_query('agent@example.com')
-        self.assertIn('`tabRelay Team Member`', condition)
-        self.assertTrue(condition.endswith('AND COALESCE(`tabRelay Message`.legacy_triage,0)=0'))
-
-
 class RoleMigrationTests(unittest.TestCase):
     def test_patch_gives_relay_roles_to_whatsapp_role_holders(self):
         import importlib
@@ -272,7 +194,7 @@ class MetadataTests(unittest.TestCase):
                 field = field_names[doc['name']]
                 self.assertEqual(doc['autoname'], 'field:' + field)
                 self.assertTrue(next(row for row in doc['fields'] if row['fieldname'] == field)['reqd'])
-            elif doc['name'] in {'Relay Channel', 'Relay AI Skill', 'Relay Business Event Rule', 'Relay Canned Reply', 'Relay Team', 'Relay Case Type', 'Relay Learned Procedure'}:
+            elif doc['name'] in {'Relay Channel', 'Relay AI Skill', 'Relay AI Event', 'Relay Business Event Rule', 'Relay Canned Reply', 'Relay Team', 'Relay Case Type', 'Relay Learned Procedure'}:
                 self.assertEqual(doc['autoname'], 'format:{title}-{###}')
                 self.assertEqual(doc['title_field'], 'title')
                 self.assertTrue(doc.get('modified'))

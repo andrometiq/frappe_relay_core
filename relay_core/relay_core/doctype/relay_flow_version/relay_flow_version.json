@@ -13,7 +13,9 @@
     "business_doctype",
     "channel",
     "template_button",
-    "legacy_version"
+    "legacy_version",
+    "command",
+    "keywords"
   ],
   "fields": [
     {
@@ -68,6 +70,16 @@
       "fieldtype": "Data",
       "unique": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "command",
+      "fieldtype": "Data",
+      "label": "Slash command"
+    },
+    {
+      "fieldname": "keywords",
+      "fieldtype": "Small Text",
+      "label": "Keywords"
     }
   ],
   "permissions": [

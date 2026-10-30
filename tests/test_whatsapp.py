@@ -4,13 +4,22 @@ import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
+from relay_core import file_limits
+from site_file_limit import use_relay_file_limit
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 class WhatsAppTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.business_access.require_type'))
         def throw(message,*args):raise ValueError(message)
         self.f=types.SimpleNamespace(whitelist=lambda **kw:lambda fn:fn,throw=throw,get_doc=Mock(),db=Mock(),get_roles=Mock(return_value=['Relay Communication Manager']),get_list=Mock(return_value=[]),parse_json=__import__('json').loads,utils=types.SimpleNamespace(get_url=lambda:'http://yrp.site:8002'),cache=types.SimpleNamespace(get_value=lambda key:None,set_value=Mock()))
         spec=importlib.util.spec_from_file_location('wa_test',Path('relay_core/whatsapp.py'));self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
+        self.api.business_document=lambda dt,name: self.f.get_doc(dt,name)
+        self.f.get_all=self.f.get_list
         self.api.require_business_assignment=Mock();self.api.connection_value=lambda key:'';self.api.require_access=Mock();self.api.can_manage=lambda:'Relay Communication Manager' in self.f.get_roles();self.hub=Mock();self.hub.execute.return_value={'site':'http://yrp.site:8002'};self.api.client=lambda:self.hub
         self.audit=patch.multiple('relay_core.whatsapp_templates',record_request=Mock(),apply_request=Mock(),overlay=Mock(side_effect=lambda page:page))
         self.audit.start();self.addCleanup(self.audit.stop)
@@ -21,7 +30,7 @@ class WhatsAppTests(unittest.TestCase):
         self.f.get_list.return_value=[{'name':'Contact-A'},{'name':'Contact-B'}]
         result=self.api.business_contacts('Customer','CUST-1')
         self.assertEqual(len(result['contacts']),2)
-        self.f.get_doc.return_value.check_permission.assert_called_with('read')
+        self.f.get_doc.return_value.check_permission.assert_not_called()
         self.assertIn(['Dynamic Link','link_name','=','CUST-1'],self.f.get_list.call_args.kwargs['filters'])
     def test_contact_must_belong_to_business_record(self):
         doc=types.SimpleNamespace(check_permission=Mock(),links=[types.SimpleNamespace(link_doctype='Supplier',link_name='SUP-1')],mobile_no='919999999999')
@@ -91,7 +100,7 @@ class WhatsAppTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.api.prepare('messages.media_upload',dict(args,media_url='https://cdn.example/a.png'))
 
     def test_template_sample_upload_rejects_oversized_bytes_and_wrong_site(self):
-        with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'x'*(6*1024*1024)})
+        with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'x'*(file_limits.encoded_length(file_limits.MAX_BYTES)+4)})
         self.hub.execute.assert_not_called()
         self.hub.execute.return_value={'site':'https://other.site'}
         with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'JVBERi0xLjc=','mime_type':'application/pdf'})

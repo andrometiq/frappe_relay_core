@@ -3,7 +3,9 @@ links; Relay Contact keeps only which link is primary."""
 import hashlib
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import can_manage, readable_contact, require_access
+from relay_core.business_access import business_document, allowed_types, require_person
 
 
 def business_links(links):
@@ -18,7 +20,7 @@ def business_links(links):
             frappe.throw('Choose a business type and record')
         if not frappe.db.exists('Relay Contact Type', {'business_doctype': doctype, 'enabled': 1}):
             frappe.throw('Choose a configured business type', frappe.PermissionError)
-        frappe.get_doc(doctype, name).check_permission('read')
+        business_document(doctype, name)
         result.append((doctype, name))
     return list(dict.fromkeys(result))
 
@@ -69,9 +71,10 @@ def create(name, phone, channel, links=None):
     return {'contact': person.name, 'relay_contact': relay, 'endpoint': endpoint.name}
 
 
-def new_person(name, number, links=(), *, ignore_permissions=False):
+def new_person(name, number, links=(), *, ignore_permissions=False, email=None):
     return frappe.get_doc({'doctype': 'Contact', 'first_name': name,
-        'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}],
+        'phone_nos': [{'phone': '+' + number, 'is_primary_mobile_no': 1}] if number else [],
+        'email_ids': [{'email_id': email, 'is_primary': 1}] if email else [],
         'links': [{'link_doctype': doctype, 'link_name': record} for doctype, record in links]
     }).insert(ignore_permissions=ignore_permissions)
 
@@ -91,6 +94,7 @@ def ensure_relay(person):
 def set_links(contact, links):
     """Replace the business links the user can read; other links stay as they are."""
     require_access()
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     manager = can_manage_links(person.name)
     if not manager:
@@ -98,6 +102,10 @@ def set_links(contact, links):
     wanted = business_links(links)
     configured = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     kept = [row for row in person.links if row.link_doctype not in configured or not readable(row)]
+    relay = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
+    if relay:
+        from relay_core.business_access import preserve_primary_history
+        preserve_primary_history(relay)
     person.set('links', [{'link_doctype': row.link_doctype, 'link_name': row.link_name} for row in kept]
                + [{'link_doctype': doctype, 'link_name': name} for doctype, name in wanted])
     if manager:
@@ -107,9 +115,21 @@ def set_links(contact, links):
     return summary(person.name)
 
 
+def add_link(contact, doctype, name):
+    """Append through the existing link service, preserving inaccessible links."""
+    document_name(contact)
+    person = frappe.get_doc('Contact', contact)
+    wanted = [{'doctype': row.link_doctype, 'name': row.link_name} for row in person.links
+              if frappe.db.exists('Relay Contact Type', {'business_doctype': row.link_doctype, 'enabled': 1})
+              and readable(row)]
+    if {'doctype': doctype, 'name': name} not in wanted:
+        wanted.append({'doctype': doctype, 'name': name})
+    return set_links(contact, wanted)
+
+
 def readable(row):
     try:
-        return frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')
+        return row.link_doctype in allowed_types() and bool(frappe.db.exists(row.link_doctype, row.link_name))
     except frappe.DoesNotExistError:
         return False
 
@@ -118,6 +138,7 @@ def readable(row):
 def set_primary(contact, doctype=None, name=None):
     """Mark one linked record as primary; no record clears the mark."""
     require_access()
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     if not can_manage_links(person.name):
         person.check_permission('write')
@@ -131,9 +152,14 @@ def set_primary(contact, doctype=None, name=None):
         target = business_links([{'doctype': doctype, 'name': name}])[0]
         if target not in candidates(relay):
             frappe.throw('Link the record to this contact first')
+    from relay_core.business_access import preserve_primary_history
+    preserve_primary_history(relay, authorize=True)
     doc = frappe.get_doc('Relay Contact', relay)
     doc.primary_doctype, doc.primary_name = target
     doc.save(ignore_permissions=True)
+    if target[0]:
+        from relay_core.relay_chats import merge
+        merge(relay, target)
     return summary(person.name)
 
 
@@ -154,6 +180,16 @@ def can_manage_links(contact):
     return can_manage() and bool(frappe.db.get_value('Relay Contact', {'contact': contact}, 'name'))
 
 
+def contact_emails(people):
+    """A verified email address of each Frappe Contact's chat, for Contacts that have no email_id."""
+    if not people:
+        return {}
+    return dict(frappe.db.sql("""SELECT r.contact, MIN(e.endpoint) FROM `tabRelay Contact` r
+        JOIN `tabRelay Contact Endpoint` e ON e.relay_contact=r.name AND e.verified=1
+        JOIN `tabRelay Channel` c ON c.name=e.channel AND c.channel='Email'
+        WHERE r.contact IN %(people)s GROUP BY r.contact""", {'people': people}))
+
+
 def linked_contacts(names):
     """Business membership for a page, independent of the viewer's business permissions."""
     if not names:
@@ -165,10 +201,20 @@ def linked_contacts(names):
     return {row[0] for row in rows}
 
 
+def unlinked_people():
+    """A query-builder filter for people with no configured business links."""
+    person = frappe.qb.DocType('Contact')
+    link = frappe.qb.DocType('Dynamic Link')
+    types = frappe.qb.DocType('Relay Contact Type')
+    linked = (frappe.qb.from_(link).join(types).on(types.business_doctype == link.link_doctype)
+              .select(link.parent).where((link.parenttype == 'Contact') & (link.parentfield == 'links')))
+    return person.name.notin(linked)
+
+
 @frappe.whitelist(methods=['GET'])
 def unlinked(query='', after=None, before=None):
-    """Manager contact queue, newest activity first, with stable keyset pagination."""
-    require_access(manage=True)
+    """Shared unlinked contact queue, newest activity first, with stable keyset pagination."""
+    require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Search must be at most 80 characters')
     values = {'query': '%' + query.strip() + '%'}
@@ -178,11 +224,13 @@ def unlinked(query='', after=None, before=None):
         validate_reference(after, 'CON')
         values.update(after=after, before=frappe.utils.get_datetime(before))
         cursor = 'AND (COALESCE(r.last_message_at,r.creation),r.name) < (%(before)s,%(after)s)'
+    from relay_core.business_access import person_condition
+    scope = person_condition('r.contact')
     rows = frappe.db.sql("""SELECT r.name, r.contact, r.display_name, r.last_message_at, r.creation,
             COALESCE(NULLIF(c.mobile_no,''),c.phone) phone
         FROM `tabRelay Contact` r LEFT JOIN `tabContact` c ON c.name=r.contact
-        WHERE NOT EXISTS (SELECT 1 FROM `tabDynamic Link` l
-            JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1
+        WHERE """ + scope + """ AND NOT EXISTS (SELECT 1 FROM `tabDynamic Link` l
+            JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype
             WHERE l.parent=r.contact AND l.parenttype='Contact' AND l.parentfield='links')
         AND (r.display_name LIKE %(query)s OR c.full_name LIKE %(query)s OR c.mobile_no LIKE %(query)s
             OR c.phone LIKE %(query)s OR EXISTS (SELECT 1 FROM `tabContact Phone` p

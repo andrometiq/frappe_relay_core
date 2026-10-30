@@ -1,5 +1,6 @@
 """Personal chat folders: each user names their own folders and files conversations into them."""
 import frappe
+from relay_core.business_access import document_name
 from frappe.query_builder.functions import Count, Max
 from relay_core import features
 from relay_core.permissions import require_access
@@ -26,7 +27,8 @@ def validate_folder(doc):
 
 def own_folder(folder):
     """The current user's folder document; another user's folder is reported as missing."""
-    if not isinstance(folder, str) or len(folder) > 140 or frappe.db.get_value(FOLDER, folder, 'user') != frappe.session.user:
+    document_name(folder)
+    if frappe.db.get_value(FOLDER, folder, 'user') != frappe.session.user:
         frappe.throw('Folder not found', frappe.DoesNotExistError)
     return frappe.get_doc(FOLDER, folder)
 

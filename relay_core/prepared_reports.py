@@ -1,6 +1,7 @@
 """Date-scoped, permission-filtered Frappe prepared communication reports."""
 from datetime import date, datetime, time, timedelta
 import frappe
+from relay_core.business_access import document_name
 from relay_core.business_inbox import messages, check_type
 from relay_core.permissions import require_access
 
@@ -30,7 +31,7 @@ def validated_filters(filters):
     if not isinstance(names,list) or not 1<=len(names)<=20 or any(not isinstance(name,str) or not name or len(name)>140 for name in names):
         frappe.throw('Choose between 1 and 20 business records')
     if len(set(names))!=len(names):frappe.throw('Choose each business record only once')
-    for name in names:frappe.get_doc(doctype,name).check_permission('read')
+    for name in names:frappe.get_doc(doctype,document_name(name)).check_permission('read')
     include_images=values.get('include_images',0)
     if type(include_images) not in (bool,int) or include_images not in (0,1):frappe.throw('Invalid image option')
     mode=values.get('report_mode','Full messages')
@@ -101,6 +102,7 @@ def request(filters):
 
 @frappe.whitelist(methods=['GET'])
 def status(name):
+    document_name(name)
     require_access()
     doc=frappe.get_doc('Prepared Report',name)
     if doc.report_name!=REPORT or doc.owner!=frappe.session.user:

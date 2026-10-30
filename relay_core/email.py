@@ -122,6 +122,8 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
             'destination':[source.relay_contact,source.channel,source.sender_endpoint],
             'notification':notification, 'automation_run':outgoing_run.get(), 'flow_run':messaging.outgoing_flow.get(),
             'business_event':outgoing_event.get()}
+        from relay_core.ai.handoff import outgoing_notice
+        if outgoing_notice.get(): payload['handoff_notice'] = True
         messaging.delivery_snapshot(payload, source, context)
         action=frappe.get_doc({'doctype':'Relay Message Action','request_key':key,
             'source_message':message,'start_contact':None if message else source.relay_contact,
@@ -318,11 +320,12 @@ def prepare(to, subject, body, cc=None, bcc=None, message=None, html=None, attac
                 extra['in_reply_to']=parent
                 refs=[ref for ref in context.get('references',[]) if email_message_id(ref)]
                 extra['references']=(refs+[parent])[-20:]
-        files=[];total=0
+        from relay_core.file_limits import get_max_bytes, size_label
+        files=[];total=0;limit=get_max_bytes()
         import base64,mimetypes
         for file_id in attachment_ids:
             file,raw=attachments.file_content(file_id,source);total+=len(raw)
-            if total>attachments.MAX_BYTES:raise ValueError('Combined attachments exceed 4 MiB')
+            if total>limit:raise ValueError(f'Combined attachments must be at most {size_label(limit)}')
             files.append({'filename':file.file_name,'content_type':mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream','content_base64':base64.b64encode(raw).decode()})
         if files:extra['attachments']=files
     return {'to':to,'cc':cc,'bcc':bcc,'subject':subject,'body':body,**extra}

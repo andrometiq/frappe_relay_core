@@ -1,6 +1,7 @@
 """Frappe boundary for the account-scoped Hub adapter."""
 import re
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core.settings import value as connection_value
 from relay_core.hub import HubClient, HubError
 from relay_core.permissions import require_access, require_business_assignment, can_manage
@@ -33,14 +34,14 @@ def business_contacts(doctype, name, after=None):
     require_access()
     if not isinstance(doctype,str) or not isinstance(name,str) or not doctype or not name or len(doctype)>140 or len(name)>140:
         frappe.throw('Business record is required')
-    frappe.get_doc(doctype, name).check_permission('read')
+    business_document(doctype, name)
     if not configured_business_type(doctype):
         frappe.throw('Configure this business DocType under Relay Contact Type first')
     filters=[['Dynamic Link','link_doctype','=',doctype],['Dynamic Link','link_name','=',name]]
     if after is not None:
         if not isinstance(after,str) or len(after)>140:frappe.throw('Invalid contact cursor')
         filters.append(['Contact','name','>',after])
-    rows=frappe.get_list('Contact',filters=filters,fields=['name','full_name','mobile_no','email_id'],order_by='name asc',page_length=51,distinct=True)
+    rows=frappe.get_all('Contact',filters=filters,fields=['name','full_name','mobile_no','email_id'],order_by='name asc',page_length=51,distinct=True)
     return {'contacts':rows[:50], 'has_more':len(rows)>50}
 
 
@@ -59,8 +60,9 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
     if set(arguments)-allowed:frappe.throw('Unsupported operation arguments')
     if {'content_base64','mime_type'}.intersection(arguments):
         if operation not in {'messages.media','templates.media_upload','messages.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
-        content = arguments.get('content_base64')
-        if not isinstance(content,str) or not 1 <= len(content) <= ((4*1024*1024+2)//3)*4:frappe.throw('Attachment must be at most 4 MiB')
+        from relay_core.file_limits import encoded_length, get_max_bytes, size_label
+        content = arguments.get('content_base64');limit=get_max_bytes()
+        if not isinstance(content,str) or not 1 <= len(content) <= encoded_length(limit):frappe.throw(f'The attachment must be at most {size_label(limit)}')
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
     if 'request_key' in arguments:frappe.throw('Request keys are managed by the message submission endpoint')
     payload={**arguments,'operation':operation}
@@ -68,12 +70,12 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
         from relay_core.template_media import check_header
         check_header(arguments.get('components') or [])
     if operation in {'messages.media','messages.send','messages.react','messages.location','messages.contacts','templates.send'}:
-        if not isinstance(contact,str) or not contact:frappe.throw('Select one contact')
+        document_name(contact)
         if not isinstance(business_doctype,str) or not isinstance(business_name,str) or not business_doctype or not business_name:frappe.throw('Select a business record')
-        frappe.get_doc(business_doctype,business_name).check_permission('read')
+        business_document(business_doctype,business_name)
         if not configured_business_type(business_doctype):
             frappe.throw('Configure this business DocType under Relay Contact Type first')
-        doc=frappe.get_doc('Contact',contact);doc.check_permission('read')
+        doc=frappe.get_doc('Contact',contact)
         require_business_assignment(contact)
         if not any(link.link_doctype==business_doctype and link.link_name==business_name for link in doc.links):frappe.throw('Contact is not linked to this business record')
         from relay_core.identity import phone_number

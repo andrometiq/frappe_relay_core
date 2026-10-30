@@ -1,0 +1,33 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Event Link",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIEL-.##########",
+  "naming_rule": "Expression (old style)",
+  "istable": 1,
+  "field_order": [
+    "url",
+    "note"
+  ],
+  "fields": [
+    {
+      "fieldname": "url",
+      "label": "URL",
+      "fieldtype": "Data",
+      "options": "URL",
+      "length": 1000,
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "note",
+      "label": "Note",
+      "fieldtype": "Data",
+      "length": 200,
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [],
+  "modified": "2026-10-28 12:00:00.000000"
+}

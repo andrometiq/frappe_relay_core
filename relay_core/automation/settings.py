@@ -1,5 +1,6 @@
 """Installed automation configuration; API secrets are write-only."""
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access, can_manage
 
@@ -42,6 +43,8 @@ def policies(after=None):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def save_policy(values,name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access(configure=True)
     if isinstance(values,str):values=frappe.parse_json(values)
     if not isinstance(values,dict) or set(values)-set(POLICY_FIELDS):frappe.throw('Invalid policy fields')
@@ -55,12 +58,16 @@ def save_policy(values,name=None):
 def references(kind, query=''):
     """Bounded, permission-checked choices for the installed policy editor."""
     require_access(configure=True)
+    return reference_options(kind, query)
+
+
+def reference_options(kind, query=''):
     choices = {
         'policy': ('Relay Automation Policy', ['name','channel'], {}),
         'source_message': ('Relay Message', ['name'], {'direction':'Incoming'}),
         'channel': ('Relay Channel', ['name', 'channel'], {}),
         'provider': ('AI Model', ['name', 'model_id'], {'enabled': 1}),
-        'execution_user': ('User', ['name', 'full_name'], [['User', 'enabled', '=', 1], ['Has Role', 'role', 'in', manager_roles()]]),
+        'execution_user': ('User', ['name', 'full_name'], {'enabled': 1}),
         'reply': ('Relay Canned Reply', ['name', 'language'], {'published': 1, 'ai_enabled': 1}),
     }
     if not isinstance(query, str) or len(query) > 80:
@@ -71,6 +78,12 @@ def references(kind, query=''):
     if kind not in choices or not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid reference search')
     doctype, fields, filters = choices[kind]
+    if kind == 'execution_user':
+        # Resolve eligible role membership internally; User listing still applies
+        # the caller's permissions without exposing the Has Role child table.
+        members = frappe.get_all('Has Role', filters={'parenttype': 'User', 'parentfield': 'roles',
+            'role': ['in', manager_roles()]}, pluck='parent')
+        filters['name'] = ['in', members]
     pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
     rows = frappe.get_list(doctype, filters=filters, or_filters=[[field, 'like', pattern] for field in fields],
                            fields=fields, order_by='name asc', page_length=30)

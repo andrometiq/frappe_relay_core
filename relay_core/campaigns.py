@@ -2,6 +2,7 @@
 import hashlib
 import time
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
@@ -14,9 +15,10 @@ def digest(value):return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
 def campaign(name,active=False):
+    document_name(name)
     require_access('Relay Campaign');doc=frappe.get_doc('Relay Campaign',name);doc.check_permission('read')
     if doc.business_doctype:
-        frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+        business_document(doc.business_doctype,doc.business_name)
     channel=frappe.get_doc('Relay Channel',doc.channel);channel.check_permission('read')
     if channel.channel not in ('WhatsApp','Telegram','Email') or active and (not channel.enabled or channel.account!=connection_value('relay_hub_account') or doc.account!=channel.account):
         frappe.throw('Campaign channel is disabled or belongs to another Hub account')
@@ -70,8 +72,9 @@ def read(name,after=None,status=None):
     from pypika.functions import Count
     recipient=frappe.qb.DocType('Relay Campaign Recipient')
     counts=frappe.qb.from_(recipient).select(recipient.status,Count(recipient.name).as_('count')).where(recipient.campaign==name).groupby(recipient.status).run(as_dict=True)
+    from relay_core.business_access import person_allowed
     return {**{key:doc.get(key) for key in ('name','title','channel','business_doctype','business_name','operation','status','execution_user','last_error')},
-            'arguments':frappe.parse_json(doc.arguments),'recipients':[row for row in rows[:50] if frappe.get_doc('Contact',row.contact).has_permission('read')],'next':rows[49].name if len(rows)>50 else None,'counts':{row.status:row.count for row in counts}}
+            'arguments':frappe.parse_json(doc.arguments),'recipients':[row for row in rows[:50] if person_allowed(row.contact)],'next':rows[49].name if len(rows)>50 else None,'counts':{row.status:row.count for row in counts}}
 
 
 def process(name,refresh_only=False):
@@ -119,7 +122,9 @@ def record_message(row):
         rank={'Pending':0,'Sent':1,'Delivered':2,'Read':3,'Failed':0}
         if state and rank[state]>rank.get(existing.status,0):frappe.db.set_value('Relay Message',existing.name,'status',state)
         return
-    person=frappe.get_doc('Contact',row.contact);person.check_permission('read')
+    from relay_core.business_access import require_person
+    require_person(row.contact)
+    person=frappe.get_doc('Contact',row.contact)
     contact=frappe.db.get_value('Relay Contact',{'contact':person.name},'name')
     if not contact:
         contact=frappe.get_doc(dict(doctype='Relay Contact',contact=person.name,display_name=person.full_name or person.name,automation_paused=1)).insert(ignore_permissions=True).name

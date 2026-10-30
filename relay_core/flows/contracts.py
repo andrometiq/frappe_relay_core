@@ -4,12 +4,12 @@ import json
 import math
 import re
 
-KINDS={'input','reply','ticket','handoff','condition','wait','end','topic','action'}
+KINDS={'input','reply','ticket','handoff','condition','wait','end','topic','action','ai_skill','assign'}
 TYPES={'text','number','email','date','choice','multi_choice','content'}
 CONTENT_TYPES={'text','image','video','audio','voice','document','sticker','location','contact','contacts'}
 FIELDS={'id','kind','text','variable','input_type','choices','category','operator','value','then','otherwise','seconds',
         'minimum','maximum','integer_only','optional','title','status','action','arguments','next',
-        'min_length','max_length','error_text','accept','button','max_visits'}
+        'min_length','max_length','error_text','accept','button','max_visits','ai_skill','team','user','on_reply'}
 NAME=r'[a-z][a-z0-9_]{0,39}'
 # A reference is a collected input or an action result, optionally followed by result keys.
 PATH=NAME+r'(?:\.[a-z0-9_]{1,40}){0,5}'
@@ -38,7 +38,7 @@ def produced(node):
 
 
 def successors(node,index,positions):
-    if node['kind'] in ('end','handoff'):return []
+    if node['kind'] in ('end','handoff') or node['kind']=='ai_skill' and node.get('on_reply')=='Stop':return []
     if node['kind']=='condition':return [positions[node['then']],positions[node['otherwise']]]
     return [positions[node['next']] if node.get('next') else index+1]
 
@@ -55,12 +55,19 @@ def check_node(node,seen):
     if not isinstance(node.get('id'),str) or not re.fullmatch(NAME,node['id']) or node['id'] in seen:
         raise ValueError('Every step needs a unique identifier')
     if node.get('kind') not in KINDS:raise ValueError('Unsupported flow step')
-    if node['kind'] in ('condition','wait','end','action'):node.setdefault('text','')
-    if not isinstance(node.get('text'),str) or len(node['text'])>2000 or (node['kind'] not in ('condition','wait','end','action') and not node['text'].strip()):
+    optional_text=('condition','wait','end','action','ai_skill','assign')
+    if node['kind'] in optional_text:node.setdefault('text','')
+    if not isinstance(node.get('text'),str) or len(node['text'])>2000 or (node['kind'] not in optional_text and not node['text'].strip()):
         raise ValueError('Step text must contain 1–2000 characters')
     if 'max_visits' in node and (type(node['max_visits']) is not int or not 1<=node['max_visits']<=100):
         raise ValueError('A step can repeat 1–100 times')
     if node['kind']=='input':check_input(node)
+    if node['kind']=='ai_skill':
+        if not isinstance(node.get('ai_skill'),str) or not 1<=len(node['ai_skill'])<=140:raise ValueError('Choose an AI skill')
+        if node.get('on_reply','Continue') not in ('Stop','Continue'):raise ValueError('Choose Stop or Continue')
+    if node['kind']=='assign':
+        if not (node.get('team') or node.get('user')):raise ValueError('Choose a team or user')
+        if any(not isinstance(node.get(key,''),str) or len(node.get(key,''))>140 for key in ('team','user')):raise ValueError('Invalid assignment')
     if node['kind']=='condition':
         if not isinstance(node.get('variable'),str) or not re.fullmatch(PATH,node['variable']) or node.get('operator') not in ('eq','ne','contains','gt','gte','lt','lte','is_set'):
             raise ValueError('Choose a collected input and condition operator')

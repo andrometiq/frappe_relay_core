@@ -1,4 +1,4 @@
-import { serverError } from './serverError.js';
+import { requestFailure, serverError } from './serverError.js';
 import { invalidateReads } from './realtime.js';
 export async function frappeRequest(
   method,
@@ -34,7 +34,7 @@ export async function frappeRequest(
   } catch (error) {
     if (error.name === "AbortError") throw error;
     throw Error(
-      "Connection lost. Your draft is preserved. Check the connection before retrying.",
+      "Connection lost. Check the connection and try again.",
     );
   }
   const body = await response.json().catch(() => null);
@@ -45,11 +45,7 @@ export async function frappeRequest(
     body.exception ||
     !("message" in body)
   ) {
-    const message = response.status === 401
-      ? "Your session has expired. Sign in again to continue."
-      : serverError(body, response.status === 403
-        ? "You do not have permission for this action."
-        : "Action was not confirmed. Check the channel configuration and permissions before retrying.");
+    const message = response.status === 401 ? requestFailure(401) : serverError(body, requestFailure(response.status, write));
     throw Object.assign(Error(message), {
       status: response.status,
       exceptionType: typeof body?.exc_type === 'string' ? body.exc_type : '',

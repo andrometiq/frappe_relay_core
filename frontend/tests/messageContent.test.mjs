@@ -38,19 +38,26 @@ test('unsupported messages show the WhatsApp reason and order lines stay readabl
 test('sent templates show rendered parts with a template or campaign caption', async () => {
   const { templateParts } = await import('../src/components/messageContent.js')
   const data = { kind: 'text', text: 'Hi Ravi', template: { name: 'relay_test_marketing', header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'] } }
-  assert.deepEqual(templateParts(data), { header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'], document: '', caption: 'Template · relay_test_marketing' })
-  assert.equal(templateParts({ ...data, template: { ...data.template, document: { file_name: 'Order_ORD-1.pdf' } } }).document, 'Order_ORD-1.pdf')
+  assert.deepEqual(templateParts(data), { header: 'New stock', footer: 'Essdee', buttons: ['Send catalogue'], caption: 'Template · relay_test_marketing' })
   assert.equal(templateParts({ ...data, campaign: 'Winter launch' }).caption, 'Campaign: Winter launch')
   assert.deepEqual(templateParts({ kind: 'text', text: 'Hi', template: { name: 'plain', buttons: 'bad' } }).buttons, [])
   assert.equal(templateParts({ kind: 'text', text: 'Hello' }), null)
 })
 
-test('template document link needs a kept PDF copy', async () => {
-  const { templateDocumentURL } = await import('../src/components/messageContent.js')
-  const message = { name: 'RELAY-MSG-0000000001', message_data: JSON.stringify({ kind: 'text', template: { name: 'order', document: { file_name: 'Order.pdf' } } }) }
-  assert.equal(templateDocumentURL(message), null)
-  message.message_data = JSON.stringify({ kind: 'text', attachment: 'FILE-1', template: { name: 'order' } })
-  assert.equal(templateDocumentURL(message), '/api/method/relay_core.attachments.read?message=RELAY-MSG-0000000001&download=1')
+test('template header media shows from the kept copy or an https link only', async () => {
+  const { templateHeaderView } = await import('../src/components/messageContent.js')
+  const message = data => ({ name: 'RELAY-MSG-0000000001', message_data: JSON.stringify({ kind: 'text', text: 'Hi', ...data }) })
+  const header = (parameter, extra = {}) => message({ ...extra, template: { name: 'offer', components: [{ type: 'header', parameters: [parameter] }] } })
+  assert.deepEqual(templateHeaderView(header({ type: 'image', image: { link: 'https://cdn.example.com/offer.png' } })),
+    { type: 'image', fileName: '', kept: false, link: 'https://cdn.example.com/offer.png' })
+  assert.deepEqual(templateHeaderView(header({ type: 'video', video: { id: '456' } })), { type: 'video', fileName: '', kept: true, link: '' })
+  assert.deepEqual(templateHeaderView(header({ type: 'document', document: { link: 'https://cdn.example.com/March%20bill.pdf', filename: 'March bill.pdf' } }, { attachment: 'FILE-1' })),
+    { type: 'document', fileName: 'March bill.pdf', kept: true, link: 'https://cdn.example.com/March%20bill.pdf' })
+  for (const link of ['http://cdn.example.com/a.png', 'javascript:alert(1)', 'data:image/png;base64,AA'])
+    assert.equal(templateHeaderView(header({ type: 'image', image: { link } })).link, '')
+  assert.deepEqual(templateHeaderView(message({ template: { name: 'order', document: { file_name: 'Order.pdf' } } })), { type: 'document', fileName: 'Order.pdf', kept: false, link: '' })
+  assert.equal(templateHeaderView({ ...header({ type: 'image', image: { id: '1' } }), _pending: true }).kept, false)
+  assert.equal(templateHeaderView(message({ template: { name: 'plain' } })), null)
 })
 
 test('every message with a file offers a download, template headers included', async () => {

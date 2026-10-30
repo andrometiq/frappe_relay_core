@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { headerFileError, headerLinkError, headerMediaParameter, linkFileName } from '../src/services/templateMedia.js'
 import { buildTemplateComponents, templateParameterDescriptors, templateRendering } from '../src/services/templateParameters.js'
 import { whatsappCapabilities } from './channelCapabilities.js'
+import { attachmentMaxBytes, sizeLabel } from '../src/components/messages/attachmentFormats.js'
 
 const capabilities = whatsappCapabilities
 const file = (name, size = 1024) => ({ name, size })
@@ -18,14 +19,39 @@ test('header link must be public https', () => {
 		assert.notEqual(headerLinkError(link), '', link)
 })
 
-test('header file must match the header format and the 4 MB limit', () => {
+test('header file must match the header format', () => {
 	assert.equal(headerFileError(capabilities, 'image', file('offer.png')), '')
 	assert.equal(headerFileError(capabilities, 'document', file('bill.pdf')), '')
 	assert.equal(headerFileError(capabilities, 'video', file('clip.mp4')), '')
 	assert.match(headerFileError(capabilities, 'image', file('offer.gif')), /Choose/)
 	assert.match(headerFileError(capabilities, 'video', file('offer.png')), /Choose/)
-	assert.match(headerFileError(capabilities, 'image', file('offer.png', 5 * 1024 * 1024)), /4 MB/)
-	assert.match(headerFileError(capabilities, 'image', file('offer.png', 0)), /4 MB/)
+	assert.match(headerFileError(capabilities, 'image', file('offer.png', 0)), /empty/)
+})
+
+test('header file size follows the Relay limit, lowered by the WhatsApp limit of its kind', () => {
+	const relay = capabilities.max_file_bytes, image = capabilities.channels.WhatsApp.max_media_bytes.photo
+	assert.ok(image < relay)
+	assert.equal(headerFileError(capabilities, 'video', file('clip.mp4', relay)), '')
+	assert.equal(headerFileError(capabilities, 'video', file('clip.mp4', relay + 1)), `The file must be at most ${sizeLabel(relay)}.`)
+	assert.equal(headerFileError(capabilities, 'image', file('offer.png', image)), '')
+	assert.equal(headerFileError(capabilities, 'image', file('offer.png', image + 1)), `The file must be at most ${sizeLabel(image)}.`)
+	const smallSite = { ...capabilities, max_file_bytes: image - 1 }
+	assert.equal(headerFileError(smallSite, 'image', file('offer.png', image - 1)), '')
+	assert.match(headerFileError(smallSite, 'image', file('offer.png', image)), /at most/)
+})
+
+test('size labels name whole and fractional megabytes and small kilobyte limits', () => {
+	assert.equal(sizeLabel(10 * 1024 * 1024), '10 MB')
+	assert.equal(sizeLabel(2.5 * 1024 * 1024), '2.5 MB')
+	assert.equal(sizeLabel(500 * 1024), '500 KB')
+	assert.equal(sizeLabel(12), '12 bytes')
+})
+
+test('without a known limit only empty files are refused in the browser', () => {
+	const unknown = { channels: capabilities.channels }
+	assert.equal(attachmentMaxBytes(unknown, 'WhatsApp', 'photo'), 0)
+	assert.equal(headerFileError(unknown, 'video', file('clip.mp4', 50 * 1024 * 1024)), '')
+	assert.match(headerFileError(unknown, 'video', file('clip.mp4', 0)), /empty/)
 })
 
 test('upload and link values become provider header parameters', () => {

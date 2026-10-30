@@ -19,7 +19,14 @@
     "triage_owner",
     "configuration",
     "mailbox_address",
-    "mailbox_aliases"
+    "mailbox_aliases",
+    "automation_section",
+    "automation_enabled",
+    "automation_steps",
+    "timezone",
+    "open_time",
+    "close_time",
+    "working_days"
   ],
   "fields": [
     {
@@ -115,6 +122,45 @@
       "fieldtype": "Link",
       "options": "User",
       "description": "Enabled Relay staff responsible for unmatched or unresolved messages."
+    },
+    {
+      "fieldname": "automation_section",
+      "fieldtype": "Section Break",
+      "label": "Channel automation"
+    },
+    {
+      "fieldname": "automation_enabled",
+      "fieldtype": "Check",
+      "label": "Automation enabled",
+      "default": "1"
+    },
+    {
+      "fieldname": "automation_steps",
+      "fieldtype": "Table",
+      "label": "On incoming message",
+      "options": "Relay Channel Automation Step"
+    },
+    {
+      "fieldname": "timezone",
+      "fieldtype": "Data",
+      "label": "Business timezone",
+      "description": "IANA timezone, for example Asia/Kolkata."
+    },
+    {
+      "fieldname": "open_time",
+      "fieldtype": "Time",
+      "label": "Opens at"
+    },
+    {
+      "fieldname": "close_time",
+      "fieldtype": "Time",
+      "label": "Closes at"
+    },
+    {
+      "fieldname": "working_days",
+      "fieldtype": "Small Text",
+      "label": "Working days",
+      "description": "Monday through Sunday, one per line. Overnight hours belong to the opening day."
     }
   ],
   "permissions": [

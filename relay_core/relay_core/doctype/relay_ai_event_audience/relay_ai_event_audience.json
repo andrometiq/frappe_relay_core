@@ -1,0 +1,25 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Event Audience",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIEA-.##########",
+  "naming_rule": "Expression (old style)",
+  "istable": 1,
+  "field_order": [
+    "business_doctype"
+  ],
+  "fields": [
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "Relay Contact Type",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "Contacts linked to a record of this type can ask about the event."
+    }
+  ],
+  "permissions": [],
+  "modified": "2026-10-28 12:00:00.000000"
+}

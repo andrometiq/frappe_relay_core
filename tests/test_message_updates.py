@@ -111,7 +111,7 @@ class DeliveryReceiptTests(unittest.TestCase):
         self.apply('sent', 10)
         self.assertEqual(self.frappe.db.bulk_update.call_count, 1)
         self.assertFalse(self.frappe.db.bulk_update.call_args.kwargs['update_modified'])
-        self.notifications.assert_called_once_with(self.doc)
+        self.notifications.assert_called_once_with(self.doc, messages=['message'])
 
     def test_incoming_message_is_not_changed_by_receipt(self):
         self.doc.direction = 'Incoming'

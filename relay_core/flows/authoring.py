@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
 from relay_core.flows.contracts import definition
@@ -10,6 +11,7 @@ from relay_core.flows.contracts import definition
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def draft(requirement, provider):
+    document_name(provider)
     require_access(configure=True)
     if not isinstance(requirement,str) or not 10<=len(requirement.strip())<=6000:
         frappe.throw('Describe the flow in 10–6,000 characters')

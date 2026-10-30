@@ -13,7 +13,7 @@ frappe.init(site='relay-ai-test.local');assert frappe.conf.db_name=='relay_ai_te
 frappe.connect();frappe.set_user('Administrator');frappe.flags.mute_emails=True
 stamp = run_label();phone=fixture_phone(stamp);dt='Relay Inbox Simulation Business';user='relay-agent-a@example.invalid'
 try:
- config=frappe.get_doc('Relay Contact Type',{'business_doctype':dt});config.grouping_field='title';config.save()
+ config=frappe.get_doc('Relay Contact Type',{'business_doctype':dt});config.set('grouping_fields',[{'fieldname':'title','priority':1}]);config.save()
  a=frappe.get_doc({'doctype':dt,'title':'Group A '+stamp}).insert();b=frappe.get_doc({'doctype':dt,'title':'Group B '+stamp}).insert()
  person=frappe.get_doc({'doctype':'Contact','first_name':'Grouped '+stamp,
   'phone_nos':[{'phone':phone,'is_primary_mobile_no':1}],

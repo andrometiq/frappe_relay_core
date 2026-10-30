@@ -8,6 +8,7 @@ import hashlib
 import json
 from contextvars import ContextVar
 import frappe
+from relay_core.business_access import document_name, business_document
 from relay_core import ai_features
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
@@ -61,7 +62,8 @@ def message_hash(message):
 def business_scope(policy, contact, message=None):
     """Recheck business and channel access at decision and delivery time."""
     business_contact = frappe.get_doc('Contact', contact.contact)
-    business_contact.check_permission('read')
+    from relay_core.business_access import require_person
+    require_person(contact.contact)
     from relay_core.business_access import reference,candidates
     target=reference(message) if message else None
     if not target:
@@ -72,7 +74,7 @@ def business_scope(policy, contact, message=None):
         raise ValueError('Business identity is missing or ambiguous')
     doctype,name=target
     if doctype!=policy.business_doctype:raise ValueError('Message does not match the policy business type')
-    frappe.get_doc(doctype, name).check_permission('read')
+    business_document(doctype, name)
     channel = frappe.get_doc('Relay Channel', policy.channel)
     channel.check_permission('read')
     if not channel.enabled or channel.channel!='WhatsApp':
@@ -138,13 +140,14 @@ def replies(policy, channel):
 @frappe.whitelist(methods=['POST'])
 @ai_features.required
 def enqueue(message):
+    document_name(message)
     require_access(manage=True)
     doc = frappe.get_doc('Relay Message', message)
     doc.check_permission('read')
     return create_run(doc)
 
 
-def episode(run, message, skill=None, *, hold=False):
+def episode(run, message, *, hold=False):
     """Create the assigned episode before either flows or event tools execute."""
     from relay_core.tickets import ensure_episode, triage_owner, hold_episode
     actor = frappe.session.user
@@ -152,7 +155,7 @@ def episode(run, message, skill=None, *, hold=False):
         frappe.set_user('Administrator')
         channel = frappe.get_doc('Relay Channel', message.channel)
         owner = triage_owner(channel, message)
-        ticket = ensure_episode(message, owner=owner, skill=skill, run=run)
+        ticket = ensure_episode(message, owner=owner, run=run)
         return hold_episode(ticket.name) if hold else ticket
     finally:
         frappe.set_user(actor)
@@ -161,13 +164,15 @@ def episode(run, message, skill=None, *, hold=False):
 def triage(run, message, reason):
     run.reason = reason[:500]
     try:
-        episode(run, message, hold=True)
+        ticket = episode(run, message, hold=True)
     except (ValueError, frappe.PermissionError, frappe.ValidationError):
         # The run is the durable intent when the configured owner loses access.
         run.stage, run.status = 'Triage', 'Pending'
         run.reason = 'Triage owner unavailable; review required'
     else:
         run.stage, run.status = 'Triage', 'Handoff'
+        from relay_core.ai.handoff import queue_acknowledgement
+        queue_acknowledgement(run, ticket, user=ticket.assigned_to)
     internal_save(run)
 
 
@@ -185,13 +190,24 @@ def configuration_failure(message, error):
     triage(run, doc, 'Automation configuration requires review')
 
 
+def staff_owned(contact, *, ticket=None, message=None):
+    """Preview a new message against the active episode, not its historical ticket."""
+    if contact.automation_paused:
+        return True
+    if ticket is not None:
+        return bool(ticket.ai_disabled)
+    from relay_core.tickets import _episode_scope
+    _, key = _episode_scope(message)
+    return bool(frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, 'ai_disabled'))
+
+
 def create_run(doc):
     """The sole admission transaction for automatic inbound handlers and APIs."""
     from relay_core.opt_out import is_keyword
     if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc):
         return {'status': 'Ignored'}  # An opt-out or opt-in keyword gets no automatic reply.
     from relay_core.flows.service import claims, create_event
-    from relay_core.ai.matching import human_request
+    from relay_core.ai.matching import human_request, human_reason
     from relay_core.email_preferences import automatic_allowed, automatic_reply_exists
     from relay_core.automation.provenance import context_of
     # A shared source lock serializes flow/API/drain replay and email rules.
@@ -202,8 +218,15 @@ def create_run(doc):
     provenance = context_of(doc)
     if not automatic_allowed(provenance) or provenance.get('provider') == 'Email' and automatic_reply_exists(doc):
         return {'status': 'Ignored'}
+    from relay_core.automation import channel as channel_automation
+    channel = frappe.get_doc('Relay Channel', doc.channel)
+    if not channel.enabled or not channel_automation.enabled(channel):
+        return {'status': 'Disabled'}
+    pipeline = channel_automation.steps(channel)
+    if pipeline:
+        channel_automation.identity(doc, channel)
     flow = claims(doc) and not human_request(doc.content)
-    if not flow and not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
+    if not pipeline and not flow and not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return {'status': 'Disabled'}
     contact = lock_contact(doc.relay_contact)
     run = frappe.get_doc({'doctype': 'Relay Automation Run', 'event_key': event_key(doc.name),
@@ -216,21 +239,28 @@ def create_run(doc):
         triage(run, doc, 'Episode admission requires review')
         return {'name': run.name, 'status': run.status}
     run.ownership_generation = int(ticket.generation or 0)
-    if flow and not contact.automation_paused and not ticket.ai_disabled and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
+    owned = staff_owned(contact, ticket=ticket)
+    waiting = flow and channel_automation.owns_reply(doc)
+    if not pipeline and flow and not waiting and not owned and frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled():
         from relay_core.ai.service import continue_search
         try:
             flow = not continue_search(run, doc)
         except (ValueError, frappe.PermissionError, frappe.ValidationError):
             triage(run, doc, 'Search confirmation or authorization failed; review required')
             return {'name': run.name, 'status': run.status}
-    if contact.automation_paused or ticket.ai_disabled:
+    if owned:
         run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
     elif human_request(doc.content):
-        triage(run, doc, 'Sender requested a person')
-    elif flow:
+        triage(run, doc, human_reason(doc.content))
+    elif waiting or flow and not pipeline:
         create_event(doc)
         run.stage, run.status = 'Flow', 'Completed'
     else:
+        if pipeline:
+            run.stage = 'Channel'
+            # Routing is internal coordination; flow/skill execution keeps its own actor.
+            run.execution_user = 'Administrator'
+            run.pipeline_state = json.dumps({'steps': pipeline, 'index': 0})
         frappe.enqueue('relay_core.automation.service.process', name=run.name, queue=QUEUE,
                        timeout=90, enqueue_after_commit=True)
     internal_save(run)
@@ -259,14 +289,17 @@ def complete_with_fallback(policy, prompt, images=None):
 
 
 def _process(name):
-    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
-        return
     run = lock_run(name)
     if run.status not in ('Pending', 'Deciding'):
         return
+    if run.get('stage') == 'Channel':
+        from relay_core.automation.channel import process as process_channel
+        return process_channel(run)
     if run.get('stage') == 'Triage':
         triage(run, frappe.get_doc('Relay Message', run.message), run.reason)
         frappe.db.commit()
+        return
+    if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     if run.get('stage') == 'Matching':
         from relay_core.ai.service import admit
@@ -355,6 +388,10 @@ def recover():
     recover_messages()
     from relay_core.ai.service import recover_deliveries
     recover_deliveries()
+    for name in frappe.get_all('Relay Automation Run', filters={'stage': ['in', ['Channel', 'Triage']], 'status': 'Pending'},
+                               pluck='name', limit_page_length=30, order_by='modified asc'):
+        frappe.enqueue('relay_core.automation.service.process', name=name, queue=QUEUE,
+                       job_id='relay-channel-'+name, deduplicate=True)
     if not (frappe.conf.get('relay_automation_enabled') and ai_features.is_enabled()):
         return
     # Core owns delivery recovery; the outbox follows its action without resending.

@@ -1,6 +1,7 @@
 """Provider-specific campaign preparation and durable Telegram/email receipts."""
 import time
 import frappe
+from relay_core.business_access import business_document, document_name
 from relay_core import whatsapp
 from relay_core.permissions import require_business_assignment, readable_contact
 from relay_core.automation.service import internal_save
@@ -8,9 +9,10 @@ from relay_core.automation.provenance import integer
 
 
 def prepare(doc, contact, args):
-    person=frappe.get_doc('Contact',contact);person.check_permission('read')
+    document_name(contact)
+    person=frappe.get_doc('Contact',contact)
     require_business_assignment(contact)
-    frappe.get_doc(doc.business_doctype,doc.business_name).check_permission('read')
+    business_document(doc.business_doctype,doc.business_name)
     if not whatsapp.configured_business_type(doc.business_doctype) or not any(link.link_doctype==doc.business_doctype and link.link_name==doc.business_name for link in person.links):
         frappe.throw('Contact is not linked to the selected configured business record')
     relay=frappe.db.get_value('Relay Contact',{'contact':contact},'name')

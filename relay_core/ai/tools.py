@@ -25,11 +25,14 @@ def contracts(skill):
     names = set()
     for row in value:
         required = {'name', 'method', 'doctype', 'fields', 'scope_field'}
-        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field'}:
+        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field', 'report'}:
             raise ValueError('Each tool needs name, method, doctype, fields and scope_field')
         if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', row['name']) or row['name'] in names:
             raise ValueError('Tool names must be distinct lowercase identifiers')
         names.add(row['name'])
+        if row.get('report'):
+            from relay_core.ai.reports import validate
+            validate(row, skill.business_doctype)
         if row['method'] not in ('get_doc', 'get_list'):
             raise ValueError('Only get_doc and get_list are allowed')
         from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
@@ -52,17 +55,41 @@ def contracts(skill):
     return value
 
 
+class PrivacyDenied(ValueError):
+    """A requested identity contradicts the authenticated business scope."""
+
+
+def check_identity_arguments(contract, arguments, business, scope):
+    """Reject another party before even announcing a search; reads still enforce all fixed filters."""
+    fixed = {contract['scope_field']: business[1]}
+    if scope:
+        fixed[contract.get('company_field', 'company')] = scope['company']
+        if contract['doctype'] == business[0]:
+            identity = contract.get('identity_fields', {}).get(scope['provider'])
+            if identity:
+                fixed[identity] = scope['endpoint']
+    if contract['method'] == 'get_doc':
+        if contract['scope_field'] == 'name' and arguments.get('name') != business[1]:
+            raise PrivacyDenied('Another business record was requested')
+    else:
+        for key, value in (arguments.get('filters') or {}).items():
+            if key in fixed and value != fixed[key]:
+                raise PrivacyDenied('Another business identity was requested')
+
+
 class Reader:
     def __init__(self, skill, user, business, scope=None, *, authorize=None):
         self.skill, self.user, self.business = skill, user, business
         self.scope = dict(scope) if scope else None
         self.failed = False
+        self.private = False
         self.evidence = []
         self.ledger_results = []
         self.authorize = authorize
 
     def read(self, contract, **arguments):
         try:
+            check_identity_arguments(contract, arguments, self.business, self.scope)
             if not self.authorize:
                 raise ValueError('A delivered search declaration is required')
             self.authorize(contract, arguments)
@@ -72,6 +99,9 @@ class Reader:
                 self.evidence.append({'tool': contract['name'], 'arguments': arguments,
                     'scope': fingerprint(self.scope), 'digest': fingerprint(result)})
                 return result
+        except PrivacyDenied:
+            self.private = True
+            raise ValueError('Business data is private') from None
         except Exception:
             self.failed = True
             # Never expose permission errors containing inaccessible document names.

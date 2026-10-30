@@ -2,14 +2,27 @@
 .mobile-tabbar,.mobile-sheet,.mobile-sheet-backdrop{display:none}
 
 @media (max-width:768px){
+  /* One phone target floor, including controls teleported outside the app shell.
+     Minimum sizes preserve targets while prefixed inputs can shrink to fit. */
+  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only){min-height:44px!important;min-width:44px!important}
+  /* Keep compact indicators inside the full-size label/input hit area. */
+  label:has(>input:is([type=checkbox],[type=radio])){display:inline-flex;align-items:center;gap:8px}
+  label>input:is([type=checkbox],[type=radio]):not(.relay-checkbox__input){width:16px;height:16px;flex:none}
+  .relay-checkbox{display:inline-flex;align-items:center;justify-content:center}
+  .relay-input-shell{height:auto!important}
+  .relay-input-shell>.relay-input{flex:1 1 0%;width:0}
+  .topic-messages>div{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start}
+  .topic-messages>div>.relay-button{grid-column:2;justify-self:start}
+  .topic-messages .topic-check{justify-content:center}
+  .mobile-sheet-item{flex-shrink:0}
+  .reaction-pill{flex-wrap:wrap;width:max-content;max-width:calc(100vw - 88px);border-radius:16px}
+  .v1-shell.relay-shell .conversation-bubble:has(.message-readers){margin-bottom:48px}
+
   html,body{overflow:hidden;overscroll-behavior:none}
   .v1-shell.relay-shell{position:fixed;left:0;right:0;top:var(--relay-viewport-top,0px);display:flex;flex-direction:column;height:var(--relay-viewport-height,100dvh);padding:0;overflow:hidden}
   .v1-shell.relay-shell>.app-nav,.v1-shell.relay-shell>.relay-nav-backdrop{display:none!important}
   .v1-shell.relay-shell .workspace{position:relative;flex:1;min-height:0;border:0;border-radius:0;box-shadow:none;overflow:hidden}
 
-  /* Phone layers from the mobile mockup */
-  :root,[data-theme="light"]{--relay-mica:rgba(243,245,250,.86);--relay-layer:rgba(255,255,255,.7);--relay-layer-strong:rgba(255,255,255,.92);--relay-hover:rgba(0,0,0,.04);--relay-bubble-in:rgba(255,255,255,.95);--relay-chat:rgba(246,247,250,.6)}
-  [data-theme="dark"]{--relay-mica:rgba(32,33,38,.9);--relay-layer:rgba(255,255,255,.05);--relay-layer-strong:rgba(48,49,55,.95);--relay-hover:rgba(255,255,255,.06);--relay-bubble-in:rgba(56,57,64,.95);--relay-chat:rgba(20,21,25,.4)}
   body{font-size:14px}
   .v1-shell.relay-shell .workspace-title,.v1-shell.relay-shell .v1-header>.relay-brand,.relay-titlebar-search,.inbox-list-head{display:none}
 
@@ -19,9 +32,9 @@
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
   .v1-shell.relay-shell .v1-connection.is-connected{display:none}
-  .v1-shell.relay-shell .v1-header .notification-toggle{width:40px;height:40px;border-radius:8px;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .v1-header .notification-toggle{width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
   .relay-header-actions{display:flex;align-items:center}
-  .relay-header-new.relay-button{width:38px;min-width:38px;height:38px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
+  .relay-header-new.relay-button{width:44px;min-width:44px;height:44px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
 
   /* Detail pages own the whole screen: no app bar, no tab bar */
   .v1-shell.relay-shell:has(.connected-inbox.has-conversation,.ticket-detail,.frappe-form-view,.team-workspace.has-selection,.workflow-viewer.has-selection) :is(.v1-header,.mobile-tabbar){display:none}
@@ -29,7 +42,7 @@
 
   /* Bottom tab bar */
   .mobile-tabbar{display:flex;flex:none;justify-content:space-around;padding:8px 8px calc(2px + env(safe-area-inset-bottom));border-top:1px solid var(--relay-stroke);background:var(--relay-layer);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5)}
-  .mobile-tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:0;min-width:0;padding:2px 10px;color:var(--relay-ink-3);font-size:11px;transition:color var(--relay-fast) ease,transform var(--relay-fast) ease}
+  .v1-shell .mobile-tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:44px;min-width:44px;padding:2px 10px;color:var(--relay-ink-3);font-size:11px;transition:color var(--relay-fast) ease,transform var(--relay-fast) ease}
   .mobile-tab:active{transform:scale(.94)}
   .mobile-tab.active{color:var(--relay-accent-text);font-weight:600}
   .mobile-tab-icon{position:relative;display:grid;place-items:center}
@@ -59,21 +72,18 @@
   .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1;display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
   .v1-shell.relay-shell .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
 
-  /* Small controls keep the mockup size; an invisible band makes each touch target 40px tall */
-  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button,.automation-chip){position:relative}
-  .v1-shell.relay-shell :is(.inbox-channel-chip,.contact-directory>.v1-queues button,.mobile-linked-chip,.info-switch,.info-group-action,.info-remove,.v1-tabs .relay-button,.automation-chip)::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
   .v1-shell.relay-shell .contact-directory>.v1-queues,.v1-shell.relay-shell .v1-tabs{overflow:visible}
-  .v1-shell.relay-shell .automation-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
-  .v1-shell.relay-shell .automation-chips{gap:6px;padding-block:5px;margin-block:-5px}
+  .v1-shell.relay-shell .automation-chip{height:44px;padding:0 12px;border-radius:22px;font-size:13px}
+  .v1-shell.relay-shell .automation-chips{gap:8px}
   .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
   .number-sheet h3{padding:0 8px 2px;color:var(--relay-ink);font-size:16px;font-weight:600;letter-spacing:0;text-transform:none}
   .number-sheet-hint{padding:0 8px 8px;color:var(--relay-ink-3);font-size:12.5px}
   .number-sheet .number-option{min-height:48px;padding:10px 8px;font-size:14px}
   .number-sheet .number-option svg{width:18px;height:18px}
   .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
-  .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:28px;min-height:28px;min-width:0;padding:0 4px;border-radius:6px;font-size:13px}
+  .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:44px;min-height:44px;min-width:44px;padding:0 4px;border-radius:6px;font-size:13px}
   .v1-shell.relay-shell .contact-directory>.v1-queues>:last-child{flex:0 0 auto}
-  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{width:28px;height:28px;min-height:28px;min-width:0;padding:0}
+  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{width:44px;height:44px;min-height:44px;min-width:44px;padding:0}
   .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button__label{display:none}
   .v1-shell.relay-shell .directory-rows{padding:2px 8px}
   .v1-shell.relay-shell .directory-contact{gap:12px;margin:0;padding:11px 10px;border-radius:8px;transition:background-color var(--relay-fast) ease,transform 120ms ease}
@@ -88,21 +98,15 @@
   /* Chat page */
   .v1-shell.relay-shell .connected-thread{position:relative;flex:1;min-width:0;border:0;background:var(--relay-mica)}
   .v1-shell.relay-shell .conversation-heading{gap:8px;padding:calc(4px + env(safe-area-inset-top)) 8px 8px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
-  .v1-shell.relay-shell .conversation-back.relay-button{width:38px;height:38px;min-height:38px;border:0;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .conversation-back.relay-button{width:44px;height:44px;min-height:44px;border:0;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .conversation-heading>.relay-avatar{width:36px;height:36px;font-size:12.5px}
   .v1-shell.relay-shell .conversation-title h2{font-size:15.5px}
-  .conversation-title-button{display:block;max-width:100%;min-height:0!important;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
+  .conversation-title-button{display:block;max-width:100%;overflow:hidden;font:inherit;text-align:left;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line{overflow:hidden;color:var(--relay-green);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .conversation-channel-line:has(.number-tag){display:flex;align-items:center;gap:6px;color:var(--relay-ink-3)}
-  .composer-via-row .send-number{display:flex;align-items:center;gap:6px;width:100%}
-  .composer-via-row .send-number-button{position:relative;height:28px;padding:0;border:0;background:none;font-size:12px}
-  .composer-via-row .send-number-button::before{content:"";position:absolute;left:0;right:0;top:calc(50% - 20px);height:40px}
-  .composer-via-row .send-number-pill{height:26px;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:13px;background:var(--relay-layer-strong);color:var(--relay-ink-2)}
-  .send-number-hint{margin-left:auto;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}
   .v1-shell.relay-shell .conversation-heading-actions{gap:0}
-  .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-assign,.conversation-ticket){display:none}
-  .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:38px;height:38px;min-height:38px;border-radius:8px}
+  .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:44px;height:44px;min-height:44px;border-radius:8px}
   .mobile-record-bar{display:flex;flex:none;align-items:center;gap:6px;padding:8px 12px;overflow-x:auto;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);scrollbar-width:none}
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
   .mobile-record-chip small{font-weight:500;opacity:.8}
@@ -112,22 +116,12 @@
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble{border-radius:8px}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:8px}
 
-  /* Composer: "+" menu, a rounded input pill with the attach button inside, and a round Send button */
-  .v1-shell.relay-shell .compact-composer:not(.email-composer){grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"extras extras extras" "plus input send";align-items:end;gap:0 6px;max-height:45%;margin:0;padding:8px 10px calc(6px + env(safe-area-inset-bottom));border:0;border-top:1px solid var(--relay-stroke);border-radius:0;background:var(--relay-layer);box-shadow:none}
-  .compact-composer>.composer-extras{padding:0 0 6px;font-size:12px}
-  .compact-composer>.composer-plus{grid-area:plus}
-  .compact-composer>.composer-plus .relay-button{width:38px;height:40px;min-height:40px;color:var(--relay-ink-2)}
-  .compact-composer>.composer-input.is-text{min-height:40px;padding:0 6px 0 14px;border:1px solid var(--relay-stroke);border-radius:20px;background:var(--relay-layer-strong)}
-  .compact-composer>.composer-input:not(.is-text){padding:0}
-  .v1-shell.relay-shell .compact-composer .chat-draft{min-height:38px;padding:9px 0;font-size:16px;line-height:20px}
-  .compact-composer .composer-input .relay-button{width:30px;height:30px;min-height:30px;min-width:0;color:var(--relay-ink-2)}
-  .v1-shell.relay-shell .compact-composer>.composer-send{width:40px;height:40px;min-height:40px;margin:0;padding:0;border-radius:50%;box-shadow:var(--relay-shadow-2)}
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
 
   /* Contact info page */
   .contact-info-page{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;background:linear-gradient(var(--relay-mica),var(--relay-mica)),var(--relay-wall)}
   .contact-info-bar{display:flex;flex:none;align-items:center;gap:8px;padding:calc(6px + env(safe-area-inset-top)) 12px 10px}
-  .contact-info-bar .relay-button{width:38px;height:38px;min-height:38px;border-radius:8px;color:var(--relay-ink-2)}
+  .contact-info-bar .relay-button{width:44px;height:44px;min-height:44px;border-radius:8px;color:var(--relay-ink-2)}
   .contact-info-bar h2{flex:1;color:var(--relay-ink);font-size:16px;font-weight:600}
   .contact-info-scroll{flex:1;min-height:0;overflow:auto;padding:0 16px calc(24px + env(safe-area-inset-bottom))}
   .contact-info-hero{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 0 16px;text-align:center}
@@ -138,6 +132,9 @@
   .contact-info-action{display:flex;flex-direction:column;align-items:center;gap:4px;width:76px;min-height:0!important;padding:9px 0 7px;border-radius:8px;background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1);color:var(--relay-accent-text);font-size:11.5px;text-decoration:none;transition:transform 120ms ease}
   .contact-info-action:active{transform:scale(.95)}
   .contact-info-page .info-group-title:first-child,.contact-info-page .contact-links>.info-group-title:first-child{margin-top:14px}
+
+  .workspace-heading{flex-wrap:wrap;max-width:100%}
+  .workspace-heading-actions{flex:1 1 100%;min-width:0;max-width:100%;margin-left:0}
 
   /* Contacts: the list and the open contact are separate pages */
   .v1-screen:has(.v1-detail-grid>.contact-details) :is(.v1-tabs,.workspace-heading,.workspace-search){display:none}
@@ -164,10 +161,13 @@
   .v1-shell.relay-shell .frappe-page-head{flex-wrap:wrap;gap:8px;padding-top:calc(8px + env(safe-area-inset-top))}
   .v1-shell.relay-shell .frappe-page-actions{flex-wrap:wrap}
 
-  /* Dialogs become full-height sheets */
+  /* Dialogs become bottom sheets: as tall as their content, up to the screen less a strip of the page */
   .relay-dialog-mask{align-items:flex-end;padding:0}
-  .relay-dialog,.relay-dialog--sm,.relay-dialog--lg,.relay-dialog--xl{width:100%;max-width:100%;height:calc(var(--relay-viewport-height,100dvh) - 24px);max-height:none;border-width:0;border-radius:16px 16px 0 0;animation:relay-sheet-up 260ms var(--relay-ease)}
-  .relay-dialog__content{flex:1}
+  .relay-dialog,.relay-dialog--sm,.relay-dialog--lg,.relay-dialog--xl{width:100%;max-width:100%;height:auto;max-height:calc(var(--relay-viewport-height,100dvh) - 24px);border-width:0;border-radius:16px 16px 0 0;animation:relay-sheet-up 260ms var(--relay-ease)}
+  .relay-dialog::before{content:'';flex:none;align-self:center;width:36px;height:4px;margin-top:8px;border-radius:2px;background:var(--outline-gray-3,#ccc)}
+  .relay-dialog__header{min-height:44px;padding-top:4px;border-bottom:0}
+  .relay-dialog__content{flex:1 1 auto;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  .relay-dialog:has(.relay-dialog__footer) .relay-dialog__content{padding-bottom:16px}
   .relay-dialog__footer{flex-wrap:wrap;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
 }
 

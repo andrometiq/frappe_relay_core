@@ -32,7 +32,7 @@ Composers store drafts in tab-local session storage under the signed-in user and
 source scope. Switching to a scope without a draft clears the old composition.
 
 Email supports reply, reply-all, forward, To/CC/BCC, subject, signature and up to
-8 attachments/4 MiB combined. Unknown attempts keep their immutable payload and
+8 attachments and 10 MB combined. Unknown attempts keep their immutable payload and
 request key; recovery uses the same key. BCC remains outside history. CC/BCC and signature details use progressive
 disclosure. The bottom composer starts with a small growing message box and is
 bounded to keep the thread readable; channel and recipient controls share one row.

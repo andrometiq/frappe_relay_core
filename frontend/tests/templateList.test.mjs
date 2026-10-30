@@ -39,7 +39,7 @@ test("normalizes preview content and approval colors", () => {
   assert.equal(templateBody(rows[0]), "Order {{1}} is ready");
   assert.equal(templateButtons(rows[1])[0].text, "Shop");
   assert.equal(templateStatusTheme("APPROVED"), "green");
-  assert.equal(templateStatusTheme("PENDING"), "amber");
+  assert.equal(templateStatusTheme("PENDING"), "gray");
   assert.equal(templateStatusTheme("REJECTED"), "red");
 });
 

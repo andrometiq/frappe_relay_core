@@ -1,5 +1,8 @@
 # Link and multiselect search
 
+Current access: [business type assignments](business-access.md). Team controls and group claims are hidden; team-related descriptions below refer to retained legacy implementation.
+
+
 Record-backed fields use the Fusion interaction pattern: focus loads a bounded suggestion page, typing waits 300 ms before an API request, and choosing a result commits its ID. There is no record-directory preload. New input, blur, changed field context, and unmount cancel pending work; generation checks prevent stale responses from replacing newer results. Keyboard arrows/Enter select, Escape dismisses, and chips preserve selected values across searches.
 
 The shared `ChoiceField` accepts a `field.search(query, signal)` callback. Core `RemoteLinkField` adapts a permission-scoped `field.method`, optional `field.kind`, and `field.params`; Link and MultiSelect fields automatically use that adapter when a method is provided. Results contain `{value, label}`, with a maximum of 30 displayed suggestions. Narrow the query for additional matches. Selected existing IDs remain visible even when absent from the current results. Fixed enums such as channel types remain local.

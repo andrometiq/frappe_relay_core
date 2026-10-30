@@ -44,16 +44,38 @@ export function ownReaction(value) {
   return Array.isArray(own) ? own[0]?.emoji || '' : ''
 }
 
-// The image, video or document a template header sent, as its send parameter.
-export function templateHeaderMedia(data) {
+// The image, video or document parameter a template header sent.
+function templateHeaderParameter(data) {
   for (const component of data?.template?.components || []) {
     if (String(component?.type).toLowerCase() !== 'header') continue
     for (const parameter of component.parameters || []) {
       const media = parameter?.[parameter?.type]
-      if (['image', 'video', 'document'].includes(parameter?.type) && media && typeof media === 'object') return media
+      if (['image', 'video', 'document'].includes(parameter?.type) && media && typeof media === 'object') return parameter
     }
   }
   return null
+}
+
+// The image, video or document a template header sent, as its send parameter.
+export function templateHeaderMedia(data) {
+  const parameter = templateHeaderParameter(data)
+  return parameter ? parameter[parameter.type] : null
+}
+
+const httpsLink = value => typeof value === 'string' && /^https:\/\//i.test(value) ? value : ''
+
+// The header media a sent template shows: Core serves a kept copy or a media ID, else its https link loads.
+export function templateHeaderView(message) {
+  const data = messageData(message), parameter = templateHeaderParameter(data)
+  const fileName = typeof data.template?.document?.file_name === 'string' ? data.template.document.file_name : ''
+  const type = parameter?.type || (fileName ? 'document' : '')
+  if (!type) return null
+  const media = parameter?.[type] || {}
+  return {
+    type, fileName: media.filename || fileName,
+    kept: Boolean(!message._pending && message.name && (data.attachment || media.id)),
+    link: httpsLink(media.link),
+  }
 }
 
 // Core serves received media, kept copies and template headers sent by media ID; a header sent by link downloads from it.
@@ -62,13 +84,7 @@ export function attachmentDownloadURL(message) {
   const data = messageData(message), header = templateHeaderMedia(data);
   if (['photo','image','video','audio','voice','document','animation'].includes(data.kind) || data.attachment || header?.id)
     return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
-  return typeof header?.link === 'string' && /^https:\/\//i.test(header.link) ? header.link : null;
-}
-
-// The PDF sent as a template's document header, kept on the message by Core.
-export function templateDocumentURL(message) {
-  if (message._pending || !message.name || !messageData(message).attachment) return null;
-  return '/api/method/relay_core.attachments.read?message=' + encodeURIComponent(message.name) + '&download=1';
+  return httpsLink(header?.link) || null;
 }
 
 export function transcriptState(message) {
@@ -101,9 +117,14 @@ export function templateParts(data) {
     header: template.header || '',
     footer: template.footer || '',
     buttons: Array.isArray(template.buttons) ? template.buttons : [],
-    document: typeof template.document?.file_name === 'string' ? template.document.file_name : '',
     caption: typeof data.campaign === 'string' && data.campaign ? `Campaign: ${data.campaign}` : `Template · ${template.name}`,
   }
+}
+
+export function attachmentKind(kind) {
+  if (['photo', 'image'].includes(kind)) return 'image'
+  if (['video', 'animation'].includes(kind)) return 'video'
+  return ['audio', 'voice'].includes(kind) ? 'audio' : 'document'
 }
 
 // Short file type for a document card, from the file name or else the MIME type.

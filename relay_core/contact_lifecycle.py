@@ -64,14 +64,14 @@ def enroll(relay, channel, provider, value, *, locked=False):
         return endpoint
 
 
-def whatsapp_contact(channel, number, profile_name=None):
+def whatsapp_contact(channel, number, profile_name=None, *, locked=False):
     """Enroll an authenticated private number, without overriding revoked or ambiguous bindings."""
     from relay_core.identity import contacts_by_phone, phone_number
     from relay_core.contacts import ensure_relay, new_person
     if not number.isdigit() or phone_number('+' + number) != number:
         return None
     # Serialize first messages across channels before finding/creating the Frappe Contact.
-    with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
+    with nullcontext() if locked else frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
         with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, number), timeout=30):
             existing = list(bindings(channel, 'WhatsApp', number))
             if existing:
@@ -103,6 +103,8 @@ def associate_unlinked_messages(relay):
     frappe.db.sql("""UPDATE `tabRelay Message` SET business_doctype=%s, business_name=%s
         WHERE relay_contact=%s AND COALESCE(business_doctype, '')='' AND COALESCE(business_name, '')=''
         AND COALESCE(legacy_source, '')='' AND COALESCE(legacy_triage, 0)=0""", (*links[0], relay))
+    from relay_core.relay_chats import merge
+    merge(relay, links[0])
 
 
 def sibling_contact(channel: str, endpoint: str) -> str | None:

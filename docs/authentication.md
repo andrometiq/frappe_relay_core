@@ -7,30 +7,32 @@ token as a Frappe login.
 
 ## Roles
 
-Relay has four roles. Each role gets its access from the DocType permissions (DocPerm) that Relay ships. Relay code checks `frappe.has_permission` on the DocType that an API reads or writes. It does not check role names.
+Relay uses its DocType permissions for Relay operations and the shared
+[business type access rule](business-access.md) for conversations.
 
-| Role | What the user can do | Which conversations the user sees |
-| --- | --- | --- |
-| Relay Communication User | Works the inbox, tickets and contacts. Sends messages. | Conversations of the teams the user is a member of, conversations assigned to the user, and the user's claimed business groups. |
-| Relay Communication Team User | Same work as a User. | All conversations of all teams. The user does not need to be in a team. |
-| Relay Communication Manager | Same as a Team User. Also bulk campaigns, business events, WhatsApp templates, AI skills, saved replies, billing, teams and conversation assignment. | All conversations of all teams. |
-| System Manager | Everything. Also settings, setup, channels, AI providers, health and activity, and all internal records. | All conversations of all teams. |
-| Relay Hub Service | API user for Hub callbacks only. It can only create Relay Hub Event records. No desk access. | None. |
+| Role | Access |
+| --- | --- |
+| Relay Communication User | Assigned enabled business types and shared unlinked chats/contacts. |
+| Relay Communication Manager | Every enabled business type, user assignments and bulk campaigns. |
+| System Manager | Everything above, plus setup. |
+| Relay Hub Service | Hub callback ingestion only. |
 
-The Relay role alone decides which conversations a user sees. The user does not need read permission on the Frappe Contact or on the linked business record. The inbox shows the contact's name and phone from the conversation. A linked business record (for example the Customer name, its ledger links and its data) shows only when the user can read that record.
+Settings > Business types and users edits the channel-independent Users table on
+Relay Contact Type. Customer and Contact Desk read permissions are not required
+inside Relay. Desk permissions and business write services remain unchanged.
 
-A conversation without a team or an assigned user is visible only to Team Users, Managers and System Managers. Imported WhatsApp Core conversations have no team. Use `relay-assign-imported-chats` or the `--team` option of the import to give them a team.
+Team membership, individual assignment and group claims do not grant visibility.
+Team controls are hidden; legacy team data and endpoints remain. The old Relay
+Communication Team User role alone no longer grants conversation access.
 
-The conversation rule is in one place: `relay_core/permissions.py` (`assignment_allowed` and its SQL twin `assignment_condition`). Relay Contact and Relay Message use it, and tickets use it through their messages.
+`business_access.allowed_types` owns the business scope. Its contact and business
+predicates apply before pagination and counts. Explicit messages remain scoped to
+their business type even when their Contact links to multiple types. Unlinked
+contacts are shared so new senders can be triaged.
 
-The UI capability flags in `api.capabilities` come from DocType permissions: `manage` and `teams` = write on Relay Team, `billing` = read on Relay WhatsApp Billing Month, `skills` = write on Relay AI Skill, `business_events` = write on Relay Business Event Rule, `configure` = write on Relay Settings, `multi_team` = the user sees all teams.
-
-The WhatsApp User, WhatsApp Manager and WhatsApp Multi-Channel User roles belong to frappe_whatsapp_core. Relay does not use them. The patch `use_four_relay_roles` gave their holders the matching Relay role: WhatsApp User to Relay Communication User, WhatsApp Manager to Relay Communication Manager, and WhatsApp Multi-Channel User to Relay Communication Team User. The patch does not remove roles from users.
-
-For typed replies and sticker reads, Core checks the source Relay Message,
-Relay Contact, Frappe Contact, readable business links, channel/account binding,
-and verified endpoint. The recipient/group/topic is derived from the stored
-source; the browser cannot override it.
+For sending, Relay additionally checks the selected Contact link, channel/account
+binding and verified endpoint. Bulk campaign endpoints require a Manager or System
+Manager. The browser cannot supply an arbitrary recipient.
 
 ## Hub access
 

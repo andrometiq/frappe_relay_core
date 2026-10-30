@@ -1,5 +1,6 @@
 """Team membership and assignment enforce the same boundary in Desk and APIs."""
 import frappe
+from relay_core.business_access import document_name
 from relay_core import features
 from relay_core.permissions import require_access, readable_contact, sees_all_teams, ALL_TEAMS_ROLES
 
@@ -90,6 +91,8 @@ def _agent_options(query, contact=None):
 
 @frappe.whitelist(methods=['POST'])
 def save(title, members, name=None):
+    if name is not None and name != "":
+        document_name(name)
     require_access(manage=True)
     members=user_list(members,'Invalid team members')
     doc=frappe.get_doc('Relay Team',name) if name else frappe.new_doc('Relay Team')
@@ -110,6 +113,7 @@ def team_payload(doc):
 
 @frappe.whitelist(methods=['GET'])
 def read(name):
+    document_name(name)
     require_access(manage=True)
     doc=frappe.get_doc('Relay Team',name);doc.check_permission('read')
     return team_payload(doc)
@@ -133,6 +137,7 @@ def assign(contact, team=None, assigned_to=None):
 
 
 def readable_filter_team(name):
+    document_name(name)
     require_access()
     doc = frappe.get_doc('Relay Team', name)
     user = frappe.session.user

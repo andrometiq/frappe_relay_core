@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.api import validate_reference
 
@@ -37,8 +38,8 @@ def references(contact, values):
 
 def business_scope(contact, messages, doctype=None, name=None):
     """The note's business. A contact without business links keeps notes on the conversation itself.
-    The business only scopes the note: a conversation reader may note on it without reading the business record."""
-    from relay_core.business_access import candidates, linked_business, reference
+    Linked content requires access to its business type."""
+    from relay_core.business_access import choose_business, reference, unlinked_contact
     targets = {reference(frappe.get_doc('Relay Message', value)) for value in messages}
     if targets:
         if len(targets) != 1:
@@ -48,14 +49,14 @@ def business_scope(contact, messages, doctype=None, name=None):
             frappe.throw('Messages belong to another business', frappe.PermissionError)
         if target:
             doctype, name = target
-    if not (doctype or name) and not candidates(contact):
+    if not (doctype or name) and unlinked_contact(contact):
         return None, None
-    return linked_business(contact, doctype, name)
+    return choose_business(contact, doctype, name)
 
 
 def authorize(doc, user=None):
     """A note follows its conversation's read rule, like the conversation's messages."""
-    from relay_core.business_access import reference
+    from relay_core.business_access import reference, business_document, unlinked_contact
     names = frappe.parse_json(doc.messages) or []
     if not doc.get('business_name') and names:
         targets = {reference(frappe.get_doc('Relay Message', name)) for name in names}
@@ -66,6 +67,10 @@ def authorize(doc, user=None):
         target = reference(doc)
         if target:
             doc.business_doctype, doc.business_name = target
+    if doc.get('business_doctype') or doc.get('business_name'):
+        business_document(doc.get('business_doctype'), doc.get('business_name'), user)
+    elif not unlinked_contact(doc.relay_contact):
+        frappe.throw('Choose an accessible business for this comment', frappe.PermissionError)
     for name in names:
         message = frappe.get_doc('Relay Message', name)
         if message.relay_contact != doc.relay_contact or not message.has_permission('read', user=user):
@@ -117,6 +122,8 @@ def comments(contact, before=None):
 
 @frappe.whitelist(methods=['POST'])
 def add(contact, body, request_key, messages=None, reply_to=None, assigned_to=None, mentions=None, business_doctype=None, business_name=None):
+    if reply_to is not None and reply_to != "":
+        document_name(reply_to)
     require_access(); readable_contact(contact)
     if not isinstance(body,str) or not 1<=len(body.strip())<=4000:
         frappe.throw('Comment must contain 1–4000 characters')
@@ -154,6 +161,7 @@ def add(contact, body, request_key, messages=None, reply_to=None, assigned_to=No
 
 @frappe.whitelist(methods=['POST'])
 def edit(name, body=None, remove=0):
+    document_name(name)
     require_access()
     if str(remove) not in ('0','1','False','True'):frappe.throw('Invalid removal flag')
     frappe.db.get_value('Relay Internal Comment',name,'name',for_update=True)
@@ -212,6 +220,7 @@ def notify(doc):
 
 @frappe.whitelist(methods=['POST'])
 def task_status(name,status):
+    document_name(name)
     require_access()
     if status not in ('Open','Done'):frappe.throw('Invalid task status')
     frappe.db.get_value('Relay Internal Comment',name,'name',for_update=True)
@@ -244,6 +253,7 @@ def notifications(before=None):
 
 @frappe.whitelist(methods=['POST'])
 def mark_notification(name):
+    document_name(name)
     require_access();doc=frappe.get_doc('Relay Notification',name)
     if doc.user!=frappe.session.user:frappe.throw('Notification belongs to another user',frappe.PermissionError)
     frappe.db.set_value('Relay Notification',doc.name,'is_read',1)

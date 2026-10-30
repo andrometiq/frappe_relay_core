@@ -9,7 +9,7 @@ import {
   unsupportedNotice,
   orderLines,
   templateParts,
-  templateDocumentURL,
+  templateHeaderView,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
 import { deliveryError } from '../services/serverError';
@@ -26,6 +26,8 @@ const props = defineProps({ message: { type: Object, required: true }, showReply
 watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
 const template = computed(() => templateParts(data.value));
+const header = computed(() => template.value && templateHeaderView(props.message));
+const headerData = computed(() => header.value && { kind: header.value.type, media: { file_name: header.value.fileName } });
 const context = computed(() => objectValue(props.message.provider_context));
 const mediaError = ref(false);
 watch(() => props.message.name, () => { mediaError.value = false; });
@@ -50,8 +52,8 @@ const video = computed(
     <template v-if="!translationOpen || !['text','email'].includes(data.kind)">
     <EmailContent v-if="data.email" :message="message" :email="data.email" />
     <div v-if="data.kind === 'text' && template" class="message-template">
-      <a v-if="template.document && templateDocumentURL(message)" class="message-template-document underline" :href="templateDocumentURL(message)" target="_blank" rel="noopener noreferrer">{{ template.document }}</a>
-      <span v-else-if="template.document" class="message-template-document">{{ template.document }}</span>
+      <AttachmentViewer v-if="header && (header.kept || header.link || header.type === 'document')" :message="message" :data="headerData"
+        :link="header.kept ? '' : header.link" :downloadable="header.kept || !!header.link" />
       <strong v-if="template.header">{{ template.header }}</strong>
       <p class="whitespace-pre-wrap break-words">{{ data.text }}</p>
       <small v-if="template.footer" class="message-template-footer">{{ template.footer }}</small>

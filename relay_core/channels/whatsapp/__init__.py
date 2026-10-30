@@ -1,5 +1,5 @@
 """WhatsApp channel."""
-from relay_core.channels.contract import Channel
+from relay_core.channels.contract import MEGABYTE, Channel
 
 AUDIO = ['audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/aac']
 DOCUMENTS = [
@@ -16,6 +16,9 @@ class WhatsApp(Channel):
         'text': True, 'max_text_length': 4096, 'max_caption_length': 1024,
         'media': {'photo': ['image/jpeg', 'image/png'], 'video': ['video/mp4'], 'audio': AUDIO,
                   'voice': AUDIO, 'document': DOCUMENTS, 'sticker': ['image/webp']},
+        # Meta's upload limit per media kind.
+        'max_media_bytes': {'photo': 5 * MEGABYTE, 'video': 16 * MEGABYTE, 'audio': 16 * MEGABYTE, 'voice': 16 * MEGABYTE,
+                            'document': 100 * MEGABYTE, 'sticker': 500 * 1024},
         'location': True, 'contacts': True, 'reply_quote': True, 'reactions': True, 'edits': False,
         'read_receipts': True, 'group_receipts': True,
         'templates': True, 'reply_window_hours': 24, 'bulk_campaigns': True, 'forms': True, 'voice_calls': True,

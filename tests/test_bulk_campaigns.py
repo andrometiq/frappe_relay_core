@@ -76,11 +76,26 @@ class SheetTests(unittest.TestCase):
                 bulk_campaigns.create('Login codes', 'login_code', 'en')
 
     def test_sheet_numbers_use_the_shared_phone_helper(self):
-        self.assertEqual(bulk_sheet.phone_number('98765 43210', 'IN'), '919876543210')
-        self.assertEqual(bulk_sheet.phone_number('+91 98765-43210', ''), '919876543210')
-        self.assertEqual(bulk_sheet.phone_number('0091 9876543210', ''), '919876543210')
+        for value in ('98765 43210', '+91 98765-43210', '09876543210', '(+91) 98765 43210',
+                      '91-9876543210', '9876543210', '919876543210.0', '919876543210.000',
+                      '9.19876543210E+11', '9.19876543210000e+11', 9876543210, 919876543210.0):
+            with self.subTest(value=value):
+                self.assertEqual(bulk_sheet.sheet_phone(value, 'IN'), '919876543210')
+        self.assertEqual(bulk_sheet.sheet_phone('+91 98765-43210', ''), '919876543210')
+        self.assertEqual(bulk_sheet.sheet_phone('0091 9876543210', ''), '919876543210')
+        self.assertEqual(bulk_sheet.sheet_phone('2025550123', 'US'), '12025550123')  # Fixed line or mobile.
         for bad in ('', '12345', 'call me', '9876543210'):
-            self.assertIsNone(bulk_sheet.phone_number(bad, ''))
+            self.assertIsNone(bulk_sheet.sheet_phone(bad, ''))
+
+    def test_sheet_rejects_invalid_landline_and_inexact_excel_numbers(self):
+        mapping = {'phone': 'Mobile', 'fields': {}, 'fixed': {}}
+        for value in ('9199999787611', '1234567890', '914423456789', '+44 20 7946 0958',
+                      '9.198765432101E+10', '9.198765432100000E+11', '9.19876543210E+999999',
+                      '9.19876543210E-999999', '-9.19876543210E+11', 'NaN', 'Infinity'):
+            with self.subTest(value=value):
+                self.assertIsNone(bulk_sheet.sheet_phone(value, 'IN'))
+                self.assertEqual(bulk_sheet.prepare_row({'Mobile': value}, mapping, [], 'IN'),
+                                 (None, None, 'Invalid phone number'))
 
     def write(self, suffix, rows):
         handle, path = tempfile.mkstemp(suffix=suffix)
@@ -322,7 +337,7 @@ class FakeCache:
         return MagicMock()
 
 
-UTILS = SimpleNamespace(cint=frappe.utils.cint, flt=frappe.utils.flt, now_datetime=lambda: '2026-10-26 10:00:00')
+UTILS = SimpleNamespace(now=lambda: '2026-10-26 10:00:00', cint=frappe.utils.cint, flt=frappe.utils.flt, now_datetime=lambda: '2026-10-26 10:00:00')
 FAILURE_MESSAGE = bulk_campaigns.whatsapp.failure_message
 
 
@@ -334,9 +349,9 @@ def manager_text(error):
 class SenderTests(unittest.TestCase):
     def setUp(self):
         self.cache = FakeCache()
-        self.db = Mock()
+        self.db = Mock(count=Mock(return_value=60))
         self.db.get_value.return_value = 'Running'
-        self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock())
+        self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock(), session=_dict(user='manager@example.invalid'))
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         self.enterContext(patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
@@ -532,7 +547,7 @@ class ControlTests(unittest.TestCase):
     def test_start_checks_the_template_before_taking_the_lock_and_rechecks_status_inside(self):
         order = []
         cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()), delete_value=Mock())
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=cache, utils=UTILS, enqueue=Mock(),
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=cache, utils=UTILS, enqueue=Mock(),
                                session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Draft', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72)
@@ -553,7 +568,7 @@ class ControlTests(unittest.TestCase):
 
 
     def test_resume_works_when_every_row_is_already_in_hub(self):
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), cache=FakeCache(), utils=UTILS,
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False), count=Mock(return_value=0)), cache=FakeCache(), utils=UTILS,
                                enqueue=Mock(), session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Paused', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72, started_at='2026-10-26 09:00:00')
@@ -574,7 +589,51 @@ class ControlTests(unittest.TestCase):
             self.assertIn('at least one valid row', fake.throw.call_args.args[0])
 
 
+class StartFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.doc = _dict(name='Winter launch', status='Scheduled', channel='WA', operation='templates.send',
+                         template_name='notice', language='en', arguments='{}', last_error='')
+        self.log = self.enterContext(patch('frappe.log_error'))
+        self.enterContext(patch('frappe.throw', side_effect=lambda message: (_ for _ in ()).throw(frappe.ValidationError(message))))
+        self.enterContext(patch.object(bulk_campaigns, 'whatsapp_channel'))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(Mock(), {})))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'can_manage', return_value=True))
+
+    def assert_logged(self, step, detail):
+        title, message, doctype, name = self.log.call_args.args
+        self.assertEqual((title, message, doctype, name),
+                         (f'Campaign Winter launch could not start at the {step} step', detail, 'Relay Campaign', 'Winter launch'))
+        self.assertTrue(self.log.call_args.kwargs['defer_insert'])
+
+    def test_hub_rejection_is_logged_with_its_step_and_shown_with_its_reason(self):
+        error = HubError('Hub operation was rejected', detail='Template notice is paused')
+        with patch.object(bulk_campaigns, 'approved_template', side_effect=error), \
+                self.assertRaisesRegex(frappe.ValidationError, '^Hub rejected this operation: Template notice is paused$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('template', 'Template notice is paused')
+
+    def test_unreachable_hub_keeps_the_connection_reason(self):
+        with patch.object(bulk_campaigns.whatsapp, 'checked_client', side_effect=HubError('Hub returned an invalid response or is unavailable')), \
+                self.assertRaisesRegex(frappe.ValidationError, 'is unavailable$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('Hub', 'Hub returned an invalid response or is unavailable')
+
+    def test_media_and_channel_failures_are_logged_before_the_readable_error(self):
+        with patch.object(bulk_campaigns, 'approved_template'), \
+                patch.object(bulk_campaigns, 'media_upload', side_effect=FileNotFoundError('/private/files/a.png')), \
+                self.assertRaisesRegex(frappe.ValidationError, '^The header file could not be read. Upload it again$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('media upload', '/private/files/a.png')
+        with patch.object(bulk_campaigns, 'whatsapp_channel', side_effect=frappe.ValidationError('Configure an enabled WhatsApp channel')), \
+                self.assertRaisesRegex(frappe.ValidationError, 'Configure an enabled WhatsApp channel'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('channel', 'Configure an enabled WhatsApp channel')
+
+
 class ImportTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(bulk_campaigns, 'sheet_contact', return_value=('existing', None)))
+
     def test_import_marks_duplicates_and_opt_outs_and_inserts_in_chunks(self):
         fields = bulk_sheet.template_fields(POSITIONAL)
         doc = _dict(name='Winter launch', status='Importing', channel='WhatsApp-001', country='IN', source_file='/private/files/a.csv',
@@ -593,7 +652,7 @@ class ImportTests(unittest.TestCase):
                 patch.object(bulk_campaigns, 'internal_save'), patch('relay_core.bulk_updates.changed') as changed:
             bulk_campaigns.import_job('Winter launch')
         values = db.bulk_insert.call_args.args[2]
-        self.assertEqual([(v[10], v[14]) for v in values], [('Pending', ''), ('Skipped', 'Duplicate number'),
+        self.assertEqual([(v[10], v[14]) for v in values], [('Pending', ''), ('Skipped', 'Duplicate row'),
                          ('Skipped', 'Invalid phone number'), ('Skipped', 'Missing Body value 2'), ('Skipped', 'Opted out')])
         self.assertEqual(values[0][7], 'Contact Asha')
         self.assertEqual(values[0][0], bulk_campaigns.recipient_key('Winter launch', 2))
@@ -605,7 +664,7 @@ class ImportTests(unittest.TestCase):
                     column_map=json.dumps({'phone': 'Mobile', 'fields': {}, 'fixed': {}}), arguments=json.dumps({'fields': []}))
         order = []
         db = Mock(rollback=Mock(side_effect=lambda: order.append('rollback')))
-        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc))
+        fake = SimpleNamespace(db=db, get_doc=Mock(return_value=doc), log_error=Mock(), utils=UTILS, session=_dict(user='manager@example.invalid'))
 
         def rows(path):
             yield 2, {'Mobile': '9876543210'}
@@ -636,6 +695,10 @@ class ImportTests(unittest.TestCase):
 
 
 class JsonRowTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(bulk_campaigns.service_window, 'open_numbers', side_effect=lambda channel, numbers: set(numbers)))
+        self.enterContext(patch.object(bulk_campaigns, 'internal_save'))
+
     message = {'kind': 'photo', 'caption': 'Hi {{name}}'}
 
     def doc(self, **values):
@@ -659,7 +722,7 @@ class JsonRowTests(unittest.TestCase):
     def test_json_rows_follow_the_sheet_path_with_per_row_links(self):
         rows = [{'phone': '+91 98765 43210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'http://cdn.example/b.jpg'},
-                {'phone': '919876543210', 'name': 'Asha again', 'media_url': 'https://cdn.example/c.jpg'},
+                {'phone': '919876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '123', 'name': 'Nobody', 'media_url': 'https://cdn.example/d.jpg'}]
         result, doc, db, create, control, _ = self.create(rows)
         self.assertEqual(result, 'read')
@@ -668,7 +731,7 @@ class JsonRowTests(unittest.TestCase):
         values = db.bulk_insert.call_args.args[2]
         self.assertEqual([(v[13], v[10], v[14]) for v in values], [
             (1, 'Pending', ''), (2, 'Skipped', 'Photo link must be an HTTPS link'),
-            (3, 'Skipped', 'Duplicate number'), (4, 'Skipped', 'Invalid phone number')])
+            (3, 'Skipped', 'Duplicate row'), (4, 'Skipped', 'Invalid phone number')])
         self.assertEqual(json.loads(values[0][12])['values'], {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'})
 
     def test_start_sends_at_once_and_a_mapping_names_other_columns(self):
@@ -708,7 +771,7 @@ class JsonRowTests(unittest.TestCase):
         db = Mock(sql=Mock(return_value=[(40, 40)]))
         fake = SimpleNamespace(db=db, parse_json=frappe.parse_json, cache=FakeCache(), session=_dict(user='manager@example.invalid'),
                                utils=SimpleNamespace(now=lambda: '2026-10-26 10:00:00'), throw=Mock(side_effect=frappe.ValidationError),
-                               get_all=Mock(return_value=['919876543210']))
+                               get_all=Mock(return_value=[_dict(destination='919876543210', arguments=json.dumps({'values': {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'}}))]))
         rows = [{'phone': '9876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'https://cdn.example/b.jpg'}]
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, \
@@ -717,7 +780,7 @@ class JsonRowTests(unittest.TestCase):
             self.assertEqual(bulk_campaigns.append_rows('Promo', rows), 'read')
             bulk.assert_called_once_with('Promo', ('Draft',))
             values = db.bulk_insert.call_args.args[2]
-            self.assertEqual([(v[13], v[10], v[14]) for v in values], [(41, 'Skipped', 'Duplicate number'), (42, 'Pending', '')])
+            self.assertEqual([(v[13], v[10], v[14]) for v in values], [(41, 'Skipped', 'Duplicate row'), (42, 'Pending', '')])
             self.assertEqual(fake.get_all.call_args.kwargs['filters']['status'], ['!=', 'Skipped'])
             db.sql.return_value = [(41, bulk_sheet.MAX_ROWS - 1)]
             with self.assertRaises(frappe.ValidationError):
@@ -801,11 +864,11 @@ class TimelineTests(unittest.TestCase):
         from relay_core import bulk_timeline
         from relay_core.message_updates import provider_key
         db = Mock()
-        messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210'),
-                    _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211')]
+        messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210', relay_contact='CON-A'),
+                    _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211', relay_contact='CON-A')]
         fake = SimpleNamespace(db=db, get_all=Mock(return_value=messages), publish_realtime=Mock(),
                                realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
-        with patch.object(bulk_timeline, 'frappe', fake):
+        with patch.object(bulk_timeline, 'frappe', fake), patch('relay_core.realtime.contact_changed') as contact_changed:
             bulk_timeline.apply([{'key': 'a', 'status': 'Read', 'message_id': 'wamid.a', 'reason': ''},
                                  {'key': 'b', 'status': 'Cancelled', 'message_id': '', 'reason': ''},
                                  {'key': 'c', 'status': 'Queued', 'message_id': '', 'reason': ''}])
@@ -816,6 +879,8 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('m.delivery_error=u.error', failed[0])
         self.assertIn("m.delivery_error=''", read[0])
         fake.publish_realtime.assert_called_once()
+        # An open thread re-reads only the messages whose status moved.
+        contact_changed.assert_called_once_with('CON-A', messages=['MSG-A', 'MSG-B'])
 
 
 if __name__ == '__main__':

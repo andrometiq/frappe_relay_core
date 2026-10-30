@@ -11,7 +11,6 @@ import frappe
 
 ATTACHMENT_TYPES = ('Print Format', 'Report')
 RECIPIENTS = ('Primary contact', 'All business contacts', 'Document contact field')
-MAX_BYTES = 4 * 1024 * 1024
 MAX_CONTACTS = 20
 MAX_REPORT_ROWS = 2000
 PLACEHOLDER = re.compile(r'\{\{\s*doc\.([A-Za-z0-9_]+)\s*\}\}')
@@ -79,8 +78,9 @@ def render_pdf(config, doc):
         raw = frappe.get_print(doc.doctype, doc.name, config.print_format, doc=doc, as_pdf=True)
     else:
         raw = report_pdf(config.report_name, report_filters(config, doc))
-    if not 1 <= len(raw) <= MAX_BYTES:
-        raise ValueError('The PDF must be at most 4 MiB')
+    from relay_core.file_limits import get_media_max_bytes, size_error
+    if error := size_error(len(raw), get_media_max_bytes('WhatsApp', 'document'), 'The PDF'):
+        raise ValueError(error)
     return file_name(config, doc), raw
 
 
@@ -153,11 +153,11 @@ def keep_copy(result, name, raw):
     """Attach the sent PDF to the Relay Message of `result`, so the chat can open it."""
     request_key = frappe.db.get_value('Relay Message Action', result.get('action'), 'request_key') if result.get('action') else None
     message = frappe.db.get_value('Relay Message', {'source_key': request_key}, 'name') if request_key else None
-    if not message:
-        return None
+    data = json.loads(frappe.db.get_value('Relay Message', message, 'message_data') or '{}') if message else {}
+    if not message or data.get('attachment'):
+        return message
     from frappe.utils.file_manager import save_file
     file = save_file(name, raw, 'Relay Message', message, is_private=1)
-    data = json.loads(frappe.db.get_value('Relay Message', message, 'message_data') or '{}')
     data.update(attachment=file.name, attachment_source=message)
     frappe.db.set_value('Relay Message', message, 'message_data', json.dumps(data, ensure_ascii=False), update_modified=False)
     return message

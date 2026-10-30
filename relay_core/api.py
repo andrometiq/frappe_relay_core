@@ -1,18 +1,18 @@
 """Permission-checked Core endpoints. Provider sends remain a Hub concern."""
 import re
 import frappe
+from relay_core.business_access import document_name
 from relay_core import ai_features, features
 from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
                                     can_configure, sees_all_teams)
 
 
 def validate_reference(value, prefix):
+    document_name(value)
     if prefix == 'CH':
-        if not isinstance(value, str) or not value.strip() or len(value) > 140 or any(ord(c) < 32 for c in value):
-            frappe.throw('Invalid Relay channel reference')
         return
     pattern = r'TKT-[0-9]{5,12}' if prefix == 'TKT' else r'RELAY-' + prefix + r'-[0-9]{10}'
-    if not isinstance(value, str) or not re.fullmatch(pattern, value):
+    if not re.fullmatch(pattern, value):
         frappe.throw('Invalid Relay record reference')
 
 
@@ -130,9 +130,8 @@ def contacts(query='', before=None, after=None, limit=50):
 @frappe.whitelist(methods=['GET'])
 def business_types():
     require_access()
-    types = frappe.get_all('Relay Contact Type', filters={'enabled': 1},
-        pluck='business_doctype', limit_page_length=200)
-    return sorted({name for name in types if frappe.has_permission(name, 'read')})
+    from relay_core.business_access import allowed_types
+    return sorted(allowed_types())
 
 
 @frappe.whitelist(methods=['GET'])
@@ -143,14 +142,13 @@ def business_records(doctype, query=''):
     if not frappe.db.exists('Relay Contact Type', {'business_doctype': doctype, 'enabled': 1}):
         frappe.throw('Business type is not configured', frappe.PermissionError)
     from relay_core.business_inbox import check_type
-    from frappe.desk.search import search_link
-    from frappe.utils import strip_html
-    from html import unescape
+    from relay_core.business_groups import title_field
     check_type(doctype)
-    rows = search_link(doctype=doctype, txt=query, page_length=30, ignore_user_permissions=False)
-    return [frappe._dict({'name': row['value'], 'value': row['value'],
-             'label': unescape(strip_html(row.get('label') or row['value'])),
-             'description': unescape(strip_html(row.get('description') or ''))}) for row in rows[:30]]
+    field = title_field(doctype)
+    pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    rows = frappe.get_all(doctype, fields=list(dict.fromkeys(['name', field])),
+        or_filters=[['name', 'like', pattern], [field, 'like', pattern]], order_by='name asc', page_length=30)
+    return [frappe._dict(name=row.name, value=row.name, label=row.get(field) or row.name, description='') for row in rows]
 
 
 @frappe.whitelist(methods=['GET'])
@@ -215,15 +213,17 @@ def capabilities():
     from relay_core.hub_channels import site_numbers
     enabled_names=[item.name for item in channels]
     numbers={medium:site_numbers(medium) for medium in enabled_names}
-    teams=features.is_enabled('teams')
-    return {'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
+    teams=False
+    from relay_core.contact_import import allowed as contact_transfer_allowed
+    from relay_core.file_limits import get_max_bytes
+    return {'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
             'ai':ai_features.is_enabled(),
             'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
             'flows':manage and features.is_enabled('flows'),
-            'enabled_channels':enabled_names,
+            'enabled_channels':enabled_names, 'max_file_bytes':get_max_bytes(),
             'channels':{item.name:item.get_features() for item in channels},
             'whatsapp_numbers':numbers.get('WhatsApp',[]),
             'inbox_channels':[dict(row,medium=medium) for medium,rows in numbers.items() for row in rows]}
@@ -251,18 +251,17 @@ def conversation_channels(contact):
 def contact_details(contact):
     """Read permitted business links and channel endpoint provenance for a Contact."""
     require_access()
+    from relay_core.business_access import require_person
+    require_person(contact)
     person = frappe.get_doc('Contact', contact)
     relay = frappe.db.get_value('Relay Contact', {'contact': contact}, 'name')
     # A visible conversation shows its contact's name and phone without Contact read.
     if relay:
         readable_contact(relay)
-    else:
-        person.check_permission('read')
     configured = set(business_types())
     links = [{'doctype': row.link_doctype, 'name': row.link_name}
              for row in person.links
-             if row.link_doctype in configured
-             and frappe.get_doc(row.link_doctype, row.link_name).has_permission('read')]
+             if row.link_doctype in configured and frappe.db.exists(row.link_doctype, row.link_name)]
     endpoints, primary = [], None
     if relay:
         from relay_core.business_access import primary_record
@@ -294,32 +293,54 @@ def channel_options():
 
 
 @frappe.whitelist(methods=['GET'])
-def contact_directory(query='', after=None, business_type=None):
+def contact_directory(query='', after=None, business_type=None, business_name=None, unlinked=0):
     """Contacts by name; `business_type` keeps the contacts linked to a record of that type."""
     require_access()
     if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
         frappe.throw('Invalid contact search')
     if business_type and business_type not in business_types():
-        frappe.throw('Choose a configured business type')
+        frappe.throw('Business type is not accessible', frappe.PermissionError)
+    if str(unlinked) not in ('0', '1'):
+        frappe.throw('Invalid contact filter')
+    if business_name:
+        if not isinstance(business_name, str) or len(business_name) > 140:
+            frappe.throw('Invalid business record')
+        if not business_type:
+            frappe.throw('Choose a business type first')
+        from relay_core.business_access import business_document
+        business_document(business_type, business_name)
     filters = [['Contact', 'name', '>', after]] if after else []
+    or_filters = []
     if query.strip():
-        filters.append(['Contact', 'full_name', 'like', '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'])
+        pattern = '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        or_filters = [['Contact', field, 'like', pattern] for field in ('name', 'full_name', 'mobile_no', 'phone', 'email_id')]
     if business_type:
         filters.append(['Dynamic Link', 'link_doctype', '=', business_type])
-    rows = frappe.get_list('Contact', filters=filters, fields=['name', 'full_name', 'mobile_no'],
-        order_by='name asc', page_length=31, distinct=True)
+    if business_name:
+        filters.append(['Dynamic Link', 'link_name', '=', business_name])
+    if str(unlinked) == '1':
+        from relay_core.contacts import unlinked_people
+        filters.append(unlinked_people())
+    from relay_core.business_access import people_query
+    rows = people_query(filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
+        order_by='name asc', limit=31, distinct=True).run(as_dict=True)
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 
 
 @frappe.whitelist(methods=['GET'])
 def contact_profile(contact):
     require_access()
-    doc, _ = readable_contact(contact)
+    doc, person = readable_contact(contact)
     from relay_core.business_access import candidates, primary_record
+    from relay_core.contacts import contact_emails
     links = candidates(doc.name)
-    readable = [link for link in links if frappe.has_permission(link[0], 'read', doc=link[1])]
+    from relay_core.business_access import allowed_types
+    visible = allowed_types()
+    readable = [link for link in links if link[0] in visible]
+    email = person.email_id or contact_emails([person.name]).get(person.name, '')
     return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
-            'primary': primary_record(doc.name, links), 'link_count': len(readable)}
+            'primary': primary_record(doc.name, links), 'link_count': len(readable),
+            'phone': (person.mobile_no or person.phone or '').strip(), 'email': email}
 
 
 @frappe.whitelist(methods=['GET'])
@@ -334,6 +355,7 @@ def contact_preferences(contact, business_doctype, business_name):
 
 @frappe.whitelist(methods=['POST'])
 def save_contact_preference(contact, business_doctype, business_name, endpoint, consent, priority=10):
+    document_name(endpoint)
     require_access(configure=True)
     from relay_core.conversation_start import business_contact
     from relay_core.channel_preferences import scope_key

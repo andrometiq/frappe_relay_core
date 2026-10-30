@@ -36,7 +36,7 @@ def validate_decision(value, allowed_replies, *, allow_ticket, allow_report=Fals
 
 
 def action_key(message, slot):
-    if slot not in ('ticket', 'reply', 'search', 'event_reply_0', 'event_reply_1', 'event_reply_2', 'event_reply_3'):
+    if slot not in ('ticket', 'reply', 'search', 'handoff', 'event_reply_0', 'event_reply_1', 'event_reply_2', 'event_reply_3'):
         raise ValueError('Unknown action slot')
     return 'relay_ai_' + event_key(message) + '_' + slot
 

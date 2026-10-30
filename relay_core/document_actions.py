@@ -5,6 +5,7 @@ import re
 import uuid
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core import document_sends
 from relay_core.permissions import require_access
 
@@ -80,9 +81,10 @@ def boot_session(bootinfo):
 
 def load(doctype, name, action_name):
     """(action, document, business record name) after the Relay, role and document checks."""
+    document_name(doctype)
+    document_name(name)
+    document_name(action_name)
     require_access()
-    if not all(isinstance(value, str) and 0 < len(value) <= 140 for value in (doctype, name, action_name)):
-        frappe.throw('Choose a document and an action')
     action = frappe.get_doc('Relay Document Action', action_name)
     roles = [row.role for row in action.roles]
     if not action.enabled or action.document_type != doctype or roles and not set(roles).intersection(frappe.get_roles()):
@@ -92,7 +94,8 @@ def load(doctype, name, action_name):
     business = doc.name if action.business_field == 'name' else doc.get(action.business_field)
     if not business:
         frappe.throw('The document has no business record to send to')
-    frappe.get_doc(action.business_doctype, business).check_permission('read')
+    from relay_core.business_access import business_document
+    business_document(action.business_doctype, business).check_permission('read')
     return action, doc, business
 
 

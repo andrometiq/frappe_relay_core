@@ -144,7 +144,7 @@ class EnrollmentTests(BoundaryTests):
     def test_legacy_phone_matching_deduplicates_child_rows_and_checks_primary_fields(self):
         # Use the actual shared mapping function, with normalization isolated at its dependency.
         identity = self.load('relay_core.identity')
-        identity.phone_number = lambda value: ''.join(c for c in value if c.isdigit()).removeprefix('00')
+        identity.phone_number = lambda value, region=None: ''.join(c for c in value if c.isdigit()).removeprefix('00')
         self.frappe.db.sql.return_value = [
             Row(name='P1', creation=1, relay='R1', customer=1, phone='+' + NUMBER, mobile_no=NUMBER),
             Row(name='P1', creation=1, relay='R1', customer=1, contact_phone='00' + NUMBER),
@@ -279,6 +279,8 @@ class StartDestinationTests(BoundaryTests):
         self.module('relay_core.business_inbox', check_type=Mock())
         self.start = self.load('relay_core.conversation_start')
         self.start.require_access = Mock()
+        self.type_check = self.enterContext(patch.object(self.access, 'require_type'))
+        self.start.business_document = lambda dt,name: (self.type_check(dt), self.frappe.get_doc(dt,name))[1]
         self.person = Row(name='Person', links=[Row(link_doctype='Sales Partner', link_name='Partner')],
             phone_nos=[Row(phone='7976376832')], email_ids=[Row(email_id='LOCAL@EXAMPLE.INVALID')],
             check_permission=Mock())
@@ -307,8 +309,8 @@ class StartDestinationTests(BoundaryTests):
                                        ('Relay', 'Mail', 'Email', 'local@example.invalid')])
         self.phone.parse.assert_called_with('7976376832', 'IN')
         self.frappe.db.get_single_value.assert_called_with('System Settings', 'country')
-        self.person.check_permission.assert_called_once_with('read')
-        self.business.check_permission.assert_called_once_with('read')
+        self.person.check_permission.assert_not_called()
+        self.business.check_permission.assert_not_called()
         self.assertEqual(self.frappe.get_list.call_args.kwargs['filters']['name'], 'WA')
 
     def test_bound_number_stays_with_its_contact_and_start_continues(self):
@@ -318,11 +320,10 @@ class StartDestinationTests(BoundaryTests):
         self.frappe.db.set_value.assert_not_called()
 
     def test_unreadable_contact_business_or_channel_refused_before_enrollment(self):
-        for doc in (self.person, self.business):
-            doc.check_permission.side_effect = PermissionError
-            with self.assertRaises(PermissionError):
-                self.enroll()
-            doc.check_permission.side_effect = None
+        self.type_check.side_effect = PermissionError
+        with self.assertRaises(PermissionError):
+            self.enroll()
+        self.type_check.side_effect = None
         self.frappe.get_list.return_value = []
         with self.assertRaises(PermissionError):
             self.enroll()
@@ -339,6 +340,32 @@ class StartDestinationTests(BoundaryTests):
         self.start.business_channels = Mock(side_effect=lambda *a: list(self.enrolled))
         result = self.start.business_options('Person', 'Sales Partner', 'Partner', channel='WA')
         self.assertEqual(len(result), 2)
+
+    def test_business_picker_explains_a_number_another_contact_owns(self):
+        self.start.business_channels = Mock(return_value=[])
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA'] if kw.get('pluck') else [Row(name='WA', channel='WhatsApp')]
+        key = self.lifecycle.endpoint_key('WA', NUMBER)
+        self.frappe.get_all.side_effect = lambda doctype, **kw: (
+            [('Relay', 'Person')] if doctype == 'Relay Contact' else [Row(endpoint_key=key, relay_contact='Other relay')])
+        with self.assertRaisesRegex(ValueError, 'saved on another contact too'):
+            self.start.business_options('Person', 'Sales Partner', 'Partner')
+
+    def test_held_numbers_name_only_contacts_another_contact_owns(self):
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA']
+        own, shared = self.lifecycle.endpoint_key('WA', '911'), self.lifecycle.endpoint_key('WA', '912')
+        self.frappe.get_all.side_effect = lambda doctype, **kw: (
+            [('Relay A', 'A'), ('Relay B', 'B')] if doctype == 'Relay Contact'
+            else [Row(endpoint_key=own, relay_contact='Relay A'), Row(endpoint_key=shared, relay_contact='Relay Z')])
+        held = self.start.numbers_held_elsewhere({'A': {'911'}, 'B': {'912'}, 'C': {'912'}})
+        self.assertEqual(held, {'B', 'C'})
+        self.assertEqual(self.start.numbers_held_elsewhere({}), set())
+
+    def test_business_picker_without_any_number_returns_no_destinations(self):
+        self.start.business_channels = Mock(return_value=[])
+        self.person.phone_nos = []
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA'] if kw.get('pluck') else [Row(name='WA', channel='WhatsApp')]
+        self.assertEqual(self.start.business_options('Person', 'Sales Partner', 'Partner'), [])
+        self.frappe.get_all.assert_not_called()
 
     def test_start_binding_enrolls_on_the_selected_channel_without_sending(self):
         self.frappe.db.get_value.return_value = 'WhatsApp'
@@ -361,7 +388,7 @@ class StartDestinationTests(BoundaryTests):
 
     def business_access(self, links, marked=None):
         return self.module('relay_core.business_access', candidates=Mock(return_value=links),
-            primary=Mock(return_value=marked), choose_business=Mock(return_value=('Customer', 'C1')))
+            primary=Mock(return_value=marked), allowed_types=lambda: {'Customer'}, choose_business=Mock(return_value=('Customer', 'C1')))
 
     def test_contact_without_records_starts_an_unlinked_chat(self):
         access = self.business_access([])
@@ -373,13 +400,14 @@ class StartDestinationTests(BoundaryTests):
         self.assertEqual(self.start.start_business('Relay'), ('Customer', 'C1'))
         access.choose_business.assert_called_once_with('Relay', None, None)
 
-    def test_records_lists_readable_choices_only_without_a_primary(self):
+    @patch('relay_core.business_groups.title_field', return_value='customer_name')
+    def test_records_lists_readable_choices_only_without_a_primary(self, title_field):
         self.start.readable_contact = Mock()
         docs = {'C1': Row(meta=Row(title_field='customer_name'), customer_name='Shop One', has_permission=lambda p: True),
                 'C2': Row(meta=Row(title_field=None), has_permission=lambda p: False)}
         self.frappe.get_doc.side_effect = lambda dt, name: docs[name]
         self.business_access([('Customer', 'C1'), ('Customer', 'C2')])
-        self.assertEqual(self.start.records('Relay'), [{'doctype': 'Customer', 'name': 'C1', 'title': 'Shop One'}])
+        self.assertEqual(self.start.records('Relay'), [{'doctype': 'Customer', 'name': 'C1', 'title': 'Shop One'}, {'doctype': 'Customer', 'name': 'C2', 'title': 'C2'}])
         self.business_access([('Customer', 'C1')], marked=('Customer', 'C1'))
         self.assertEqual(self.start.records('Relay'), [])
 
@@ -387,6 +415,7 @@ class StartDestinationTests(BoundaryTests):
 class ContactQueueTests(BoundaryTests):
     def setUp(self):
         super().setUp()
+        self.access.person_condition = Mock(return_value='1=1')
         self.contacts.require_access = Mock()
         self.module('relay_core.api', validate_reference=Mock())
         self.module('relay_core.inbox', directory_items=lambda rows: rows)
@@ -437,16 +466,16 @@ class ContactQueueTests(BoundaryTests):
         self.assertEqual(len(names), 65)
         self.assertEqual(len(set(names)), 65)
         self.assertEqual(names, sorted(names, reverse=True))
-        self.contacts.require_access.assert_called_with(manage=True)
+        self.contacts.require_access.assert_called_with()
 
     def test_queue_excludes_enabled_links_keeps_disabled_and_searches_names_numbers(self):
         self.db.executemany('INSERT INTO `tabRelay Contact Type` VALUES (?,?)', [('Customer', 1), ('Supplier', 0)])
         enabled = self.add_person(1, 'Customer')
         disabled = self.add_person(2, 'Supplier')
         unlinked = self.add_person(3)
-        self.assertEqual([row.name for row in self.contacts.unlinked()['items']], [unlinked, disabled])
-        self.assertEqual([row.name for row in self.contacts.unlinked(query='Test 2')['items']], [disabled])
-        self.assertEqual(len(self.contacts.unlinked(query='797637')['items']), 2)
+        self.assertEqual([row.name for row in self.contacts.unlinked()['items']], [unlinked])
+        self.assertEqual([row.name for row in self.contacts.unlinked(query='Test 2')['items']], [])
+        self.assertEqual(len(self.contacts.unlinked(query='797637')['items']), 1)
         self.assertEqual(self.contacts.unlinked(query="' OR 1=1 --")['items'], [])
         self.assertNotIn(enabled, [row.name for row in self.contacts.unlinked()['items']])
 
@@ -462,9 +491,10 @@ class ContactQueueTests(BoundaryTests):
             ('legacy', 'R', None, None, 'old-message', 0), ('owned', 'R', 'Supplier', 'S1', '', 0),
             ('triage', 'R', None, None, '', 1), ('other-person', 'Other', None, None, '', 0)]
         self.db.executemany('INSERT INTO `tabRelay Message` VALUES (?,?,?,?,?,?)', fixtures)
-        with patch.object(self.access, 'candidates', return_value=[('Customer', 'C1')]):
+        with patch.object(self.access, 'candidates', return_value=[('Customer', 'C1')]), patch('relay_core.relay_chats.merge') as merge:
             self.lifecycle.associate_unlinked_messages('R')
             self.lifecycle.associate_unlinked_messages('R')
+        merge.assert_called_with('R', ('Customer', 'C1'))
         rows = {row[0]: tuple(row) for row in self.db.execute('SELECT * FROM `tabRelay Message`')}
         for row in fixtures:
             expected = (*row[:2], 'Customer', 'C1', *row[4:]) if row[0] in ('live', 'live-empty') else row
@@ -555,8 +585,10 @@ class BusinesslessAccessTests(BoundaryTests):
         self.frappe.get_roles = lambda user=None: [self.role]
         self.frappe.has_permission = lambda dt, *a, **kw: dt in ('Relay Contact', 'Relay Message', 'Relay Channel')
         self.access.candidates = lambda contact: []
-        self.frappe.db.get_value.side_effect = lambda dt, *a, **kw: (
-            Row(team='Sales', assigned_to='someone') if dt == 'Relay Conversation Assignment' else None)
+        self.access.person_allowed = lambda name,user=None: self.access.relay_user(user)
+        self.access.person_condition = lambda expression,user=None: '1=1' if self.access.relay_user(user) else '1=0'
+        self.access.message_condition = lambda *a,**kw: '1=1'
+        self.frappe.db.get_value.side_effect = lambda dt, *a, **kw: 'Person' if dt == 'Relay Contact' else None
         self.frappe.db.exists.side_effect = lambda dt, filters: filters.get('parent') == 'Sales'
         self.frappe.db.escape = lambda value: literal(value)
         self.frappe.get_doc.side_effect = lambda dt, name: Row(name=name, has_permission=lambda *a, **kw:
@@ -564,6 +596,8 @@ class BusinesslessAccessTests(BoundaryTests):
         self.db = sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
         self.db.executescript('''
+            CREATE TABLE `tabRelay Contact` (name TEXT, contact TEXT);
+            INSERT INTO `tabRelay Contact` VALUES ('R','Person'), ('Other','Other Person');
             CREATE TABLE `tabRelay Message` (name TEXT, relay_contact TEXT, channel TEXT, direction TEXT,
                 legacy_source TEXT, legacy_triage INTEGER);
             CREATE TABLE `tabRelay Message Read` (name TEXT, message TEXT, user TEXT);
@@ -593,26 +627,25 @@ class BusinesslessAccessTests(BoundaryTests):
         return query.where(Expression(self.permissions.message_query()))
 
     def test_team_and_communication_users_read_live_and_imported_businessless_messages(self):
-        for role in (self.permissions.USER, self.permissions.TEAM_USER):
+        for role in (self.permissions.USER, self.permissions.MANAGER):
             self.role = role
             for legacy in ('', 'imported'):
                 message = Row(relay_contact='R', business_doctype=None, business_name=None, legacy_source=legacy)
                 self.assertTrue(self.permissions.message_permission(message, 'agent'), (role, legacy))
             self.assertFalse(self.permissions.message_permission(Row(relay_contact='R', legacy_triage=1), 'agent'))
         self.role = self.permissions.USER
-        self.frappe.db.exists.return_value = False
-        self.frappe.db.exists.side_effect = None
+        self.role = 'Employee'
         self.assertFalse(self.permissions.message_permission(Row(relay_contact='R'), 'agent'))
 
     def test_live_unowned_messages_count_unread_with_team_channel_and_read_filters(self):
-        for role in (self.permissions.USER, self.permissions.TEAM_USER):
+        for role in (self.permissions.USER, self.permissions.MANAGER):
             self.role = role
             self.assertEqual(self.inbox.unread_count('R', channels=['WA']), 2)
             self.assertEqual(self.inbox.unread_count('R', channels=['WA', 'Mail']), 3)
             self.assertEqual(self.inbox.unread_count('R', channels=[]), 0)
         self.role = self.permissions.USER
-        self.assertEqual(self.inbox.unread_count('Other', channels=['WA']), 0)
-        self.role = self.permissions.TEAM_USER
+        self.assertEqual(self.inbox.unread_count('Other', channels=['WA']), 1)
+        self.role = self.permissions.MANAGER
         self.assertEqual(self.inbox.unread_count('Other', channels=['WA']), 1)
         self.db.execute("INSERT INTO `tabRelay Message Read` VALUES ('Read1','M1','agent'),('Read2','M2','agent')")
         self.assertEqual(self.inbox.unread_count('R', channels=['WA']), 0)
@@ -623,6 +656,9 @@ class ManagerLinkTests(BoundaryTests):
         super().setUp()
         self.contacts.require_access = Mock()
         self.contacts.can_manage = Mock(return_value=True)
+        self.contacts.require_person = Mock()
+        self.contacts.business_document = Mock()
+        self.contacts.allowed_types = Mock(return_value={'Customer'})
         self.contacts.linked_contacts = Mock(return_value=set())
         self.frappe.db.get_value.return_value = 'Relay'
         self.frappe.db.exists.return_value = True
@@ -632,21 +668,23 @@ class ManagerLinkTests(BoundaryTests):
         self.frappe.get_doc.side_effect = lambda dt, name: self.person if dt == 'Contact' else self.business
         self.frappe.get_all.return_value = ['Customer']
         self.contacts.summary = Mock(return_value={'contact': 'Person'})
+        self.access.candidates = Mock(side_effect=lambda relay: [
+            (row.link_doctype, row.link_name) for row in self.person.links if row.link_doctype == 'Customer'])
 
     def test_manager_links_unlinked_contact_without_general_contact_write(self):
         self.contacts.set_links('Person', [{'doctype': 'Customer', 'name': 'Local Customer'}])
         self.person.check_permission.assert_not_called()
         self.person.save.assert_called_once_with(ignore_permissions=True)
-        self.business.check_permission.assert_called_once_with('read')
+        self.business.check_permission.assert_not_called()
         self.person.set.assert_called_once_with('links', [{'link_doctype': 'Customer', 'link_name': 'Local Customer'}])
 
     def test_manager_removes_a_link_of_a_linked_contact_and_keeps_unreadable_links(self):
-        self.person.links = [Row(link_doctype='Customer', link_name='Old'), Row(link_doctype='Customer', link_name='Private')]
+        self.person.links = [Row(link_doctype='Customer', link_name='Old'), Row(link_doctype='Supplier', link_name='Private')]
         self.frappe.get_doc.side_effect = lambda dt, name: self.person if dt == 'Contact' else Row(
             check_permission=Mock(), has_permission=Mock(return_value=name != 'Private'))
         self.contacts.set_links('Person', [])
         self.person.check_permission.assert_not_called()
-        self.person.set.assert_called_once_with('links', [{'link_doctype': 'Customer', 'link_name': 'Private'}])
+        self.person.set.assert_called_once_with('links', [{'link_doctype': 'Supplier', 'link_name': 'Private'}])
         self.person.save.assert_called_once_with(ignore_permissions=True)
 
     def test_manager_exception_needs_a_relay_conversation(self):
@@ -660,7 +698,7 @@ class ManagerLinkTests(BoundaryTests):
         with self.assertRaises(PermissionError):
             self.contacts.set_links('Person', [{'doctype': 'Customer', 'name': 'Local Customer'}])
         self.contacts.can_manage.return_value = True
-        self.business.check_permission.side_effect = PermissionError
+        self.contacts.business_document.side_effect = PermissionError
         with self.assertRaises(PermissionError):
             self.contacts.set_links('Person', [{'doctype': 'Customer', 'name': 'Local Customer'}])
         self.person.save.assert_not_called()

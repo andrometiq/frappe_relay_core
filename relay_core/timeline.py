@@ -21,11 +21,19 @@ def provider_time(payload, row=None):
         return None
 
 
+def has_timeline_column():
+    return frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message', 'relay_timeline_time')
+
+
 def timeline_time():
     """Effective message time that orders every thread."""
     message = frappe.qb.DocType('Relay Message')
-    return (message.relay_timeline_time if frappe.conf.db_type != 'postgres' and frappe.db.has_column('Relay Message','relay_timeline_time')
-            else Coalesce(message.sent_at, message.creation))
+    return message.relay_timeline_time if has_timeline_column() else Coalesce(message.sent_at, message.creation)
+
+
+def timeline_sql(alias):
+    """timeline_time() for raw SQL over an aliased Relay Message."""
+    return f'{alias}.relay_timeline_time' if has_timeline_column() else f'COALESCE({alias}.sent_at, {alias}.creation)'
 
 
 def latest(filters, fields=('name',), since=None, limit=1):
@@ -79,6 +87,7 @@ def install_indexes():
             ('relay_contact_time',['relay_contact']),
             ('relay_channel_time',['relay_contact','channel']),
             ('relay_endpoint_time',['relay_contact','channel','sender_endpoint']),
+            ('relay_business_time',['business_doctype','business_name']),
         ):
             frappe.db.add_index('Relay Message',scope+['relay_timeline_time','name'],name)
         frappe.clear_cache(doctype='Relay Message')
@@ -87,5 +96,6 @@ def install_indexes():
         ('relay_contact_time', 'relay_contact'),
         ('relay_channel_time', 'relay_contact, channel'),
         ('relay_endpoint_time', 'relay_contact, channel, sender_endpoint'),
+        ('relay_business_time', 'business_doctype, business_name'),
     ):
         frappe.db.sql(f'CREATE INDEX IF NOT EXISTS "{name}" ON "tabRelay Message" ({scope}, (COALESCE(sent_at, creation)), name)')

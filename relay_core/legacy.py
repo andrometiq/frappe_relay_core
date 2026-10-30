@@ -3,6 +3,7 @@ import hashlib
 import json
 
 import frappe
+from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 from relay_core.message_updates import provider_key
 from relay_core.message_types import normalize
@@ -81,6 +82,7 @@ def converted(row):
 
 
 def mapping(name):
+    document_name(name)
     require_access(configure=True)
     job = frappe.get_doc('Relay Legacy Import', name); job.check_permission('write')
     channel = frappe.get_doc('Relay Channel', job.channel); channel.check_permission('read')

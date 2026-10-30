@@ -32,3 +32,4 @@ recover_business_events = when_hub_configured('relay_core.business_events.recove
 sync_whatsapp_templates = when_hub_configured('relay_core.whatsapp_templates.sync')
 refresh_whatsapp_billing = when_hub_configured('relay_core.billing.refresh_configured')
 sync_channels = when_hub_configured('relay_core.channel_sync.sync')
+build_ai_memory = when_hub_configured('relay_core.ai.memory.run', ai=True)

@@ -1,15 +1,17 @@
 <script setup>
 import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from "vue";
-import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
+import { Avatar, Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
 import ChoiceField from "../fields/ChoiceField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import TemplateMediaField from "./TemplateMediaField.vue";
+import ContactEndpoints from "./ContactEndpoints.vue";
 import { coreApi } from "../../services/coreApi";
 import { useStoredDraft } from '../../composables/useStoredDraft';
 import { useEnabledChannels } from "../../composables/useEnabledChannels";
 import { channelCan } from "../../services/enabledChannels";
 import { sha256Hex, randomUUID } from "../../services/crypto";
 import { readableName } from "../../services/recordTitle";
+import { approvedTemplates } from "../../services/campaignProgress";
 import { phoneCaption } from "../../services/phoneNumber";
 import {
   templateParameterDescriptors,
@@ -51,7 +53,6 @@ const templates = ref([]),
   templateId = ref(""),
   templateLabel = ref(""),
   parameters = ref({}),
-  cursor = ref(""),
   pending = ref(null),
   renewRequestKey = ref(false);
 const destination = computed(() =>
@@ -136,8 +137,11 @@ async function run(fn) {
     busy.value = false;
   }
 }
+const destinationsLoaded = ref(false);
 async function destinations() {
   const current = ++generation;
+  destinationsLoaded.value = false;
+  error.value = "";
   endpoint.value = "";
   endpoints.value = [];
   try {
@@ -152,6 +156,7 @@ async function destinations() {
     endpoints.value = result.filter(row => channelEnabled(row.provider) && (!props.channel || row.provider === 'WhatsApp')).map(row => ({...row, value: props.businessName ? row.endpoint : row.value, channel: props.businessName ? row.value : row.channel}));
     endpoint.value = (endpoints.value.find(row => props.businessName && row.channel === props.channel) || endpoints.value[0])?.value || "";
     if (!endpoints.value.length && !props.businessName && !record.value) await loadRecords(current);
+    if (current === generation) destinationsLoaded.value = true;
   } catch (e) {
     if (current === generation) error.value = e.message;
   }
@@ -184,38 +189,28 @@ const clearDraft = useStoredDraft(
   saved => { body.value=saved.body || ''; subject.value=saved.subject || ''; kind.value=props.template ? 'template' : saved.kind || 'text'; templateId.value=saved.templateId || ''; templateLabel.value=saved.templateLabel || ''; parameters.value=saved.parameters || {}; pending.value=saved.pending || null; renewRequestKey.value=!!saved.renewRequestKey; },
   () => ({body:'',subject:'',templateLabel:'',kind:props.template ? 'template' : can('email_threading') ? 'email' : can('reply_window_hours') && !destination.value.window.open ? 'template' : 'text',templateId:'',parameters:{},pending:null}));
 let templateRequest;
-function loadTemplates(next = false) {
+function loadTemplates() {
   if (templatesBusy.value) return templateRequest;
-  templateRequest = fetchTemplates(next);
+  templateRequest = fetchTemplates();
   return templateRequest;
 }
-async function fetchTemplates(next) {
+// Every approved template of the number, across Hub pages, as the campaign form lists them.
+async function fetchTemplates() {
   const current = ++templatesGeneration, channel = sendChannel.value;
   templatesBusy.value = true; templatesError.value = "";
   try {
-    const result = await coreApi("whatsapp.execute", {
-      operation: "templates.list", arguments: next && cursor.value ? {after: cursor.value} : {},
-      ...(channel ? {channel} : {}),
-    }, true);
+    const rows = await approvedTemplates(after => coreApi("whatsapp.execute", {
+      operation: "templates.list", arguments: after ? {after} : {}, ...(channel ? {channel} : {}),
+    }, true));
     if (current !== templatesGeneration) return;
-    templates.value = [...(next ? templates.value : []), ...(result.data || []).filter(row => row.status === "APPROVED")];
-    cursor.value = result.paging?.has_more ? result.paging?.cursors?.after || "" : "";
-    if (!templateId.value) templateId.value = templates.value[0]?.id || "";
-    else if (!next) await loadSavedTemplate(current);
+    templates.value = rows;
+    if (!rows.some(row => row.id === templateId.value)) templateId.value = rows[0]?.id || "";
   } catch (e) { if (current === templatesGeneration) templatesError.value = e.message; }
   finally { if (current === templatesGeneration) templatesBusy.value = false; }
 }
-// A restored template may sit past the first page, so the local template copy finds it by its id.
-async function loadSavedTemplate(current) {
-  const id = templateId.value;
-  if (templates.value.some(row => row.id === id)) return;
-  const result = await coreApi("whatsapp_templates.directory", sendChannel.value ? { channel: sendChannel.value } : {});
-  const row = (result.data || []).find(item => item.id === id && item.status === "APPROVED");
-  if (current === templatesGeneration && row) templates.value = [...templates.value, row];
-}
 watch(() => kind.value === 'template' && destination.value?.provider === 'WhatsApp' ? sendChannel.value || 'default' : '', scope => {
   ++templatesGeneration; templatesBusy.value = false; templatesError.value = "";
-  templates.value = []; cursor.value = "";
+  templates.value = [];
   if (scope) loadTemplates();
 }, {immediate: true, flush: 'sync'});
 onBeforeUnmount(() => { ++templatesGeneration; });
@@ -303,7 +298,7 @@ onMounted(async () => {
 onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contactController?.abort(); });
 </script>
 <template>
-  <Dialog v-model="shown" :options="{ title: props.template ? 'Send template' : 'New conversation', size: 'lg' }" :disable-outside-click-to-close="busy"
+  <Dialog class="composer-template-dialog" v-model="shown" :options="{ title: props.template ? 'Send template' : 'New conversation', size: 'lg' }" :disable-outside-click-to-close="busy"
     ><template #body-content
       ><div class="space-y-4">
         <div v-if="props.businessName" class="start-contact-picker">
@@ -316,9 +311,10 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <button v-for="row in contactOptions" :key="row.value" type="button" role="option"
               :aria-selected="contact === row.value" :disabled="busy || !!pending"
               :class="{ selected: contact === row.value }" @click="chooseContact(row)">
-              <span class="contact-chip-avatar" aria-hidden="true">{{ row.label.slice(0, 1).toUpperCase() }}</span>
+              <Avatar class="contact-chip-avatar" size="sm" :label="row.label" aria-hidden="true" />
               <span class="start-contact-copy"><strong>{{ row.label }}</strong>
-                <small>{{ row.description || "Review verified channels" }}</small></span>
+                <small v-if="row.phone || row.email"><ContactEndpoints :phone="row.phone" :email="row.email" :size="11" /></small>
+                <small v-else>{{ row.description || "Review verified channels" }}</small></span>
               <FeatherIcon v-if="contact === row.value" name="check" class="h-4 w-4" />
             </button>
             <p v-if="contactsBusy" role="status">Searching contacts…</p>
@@ -333,8 +329,8 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
           <ChoiceField v-if="endpoints.length > 1" v-model="endpoint" :field="{ label: 'Send through', options: endpoints, readOnly: busy || !!pending }" />
           <p v-else-if="!fixedContact" class="text-sm text-ink-gray-5">Sends through {{ destination?.label }}</p>
         </template>
-        <p v-else-if="contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
-        <p v-else-if="contact" class="text-sm text-ink-gray-5">
+        <p v-else-if="destinationsLoaded && contact && records.length && !record" class="text-sm text-ink-gray-5">This contact has several records. Choose the one this chat is for.</p>
+        <p v-else-if="destinationsLoaded && contact" class="text-sm text-ink-gray-5">
           {{ props.businessName
             ? "This contact has no number we can send to. Add a mobile number to the contact."
             : "This contact has no WhatsApp number we can send to. Add a mobile number to the contact." }}
@@ -364,7 +360,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <ErrorMessage :message="templatesError" />
             <Button v-if="templatesError" label="Retry templates" @click="loadTemplates()" />
             <p v-else-if="!templatesBusy && !templates.length" class="text-sm text-ink-gray-5">No approved templates yet. Ask a manager to add one in Templates.</p>
-            <ChoiceField v-if="templates.length || templateId" v-model="templateId" :field="{ label: 'Template', placeholder: 'Search templates…', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), initialOptions: templateId && templateLabel ? [{ value: templateId, label: templateLabel }] : [], readOnly: busy || !!pending, loading: templatesBusy, error: templatesError, hasMore: !!cursor, loadMore: () => loadTemplates(true) }"
+            <ChoiceField v-if="templates.length || templateId" v-model="templateId" :field="{ label: 'Template', placeholder: 'Search templates…', options: templates.map(row => ({ value: row.id, label: row.name + ' · ' + row.language })), initialOptions: templateId && templateLabel ? [{ value: templateId, label: templateLabel }] : [], readOnly: busy || !!pending, loading: templatesBusy, error: templatesError }"
               /><template v-for="field in descriptors" :key="field.key">
               <TemplateMediaField v-if="field.kind === 'media'" v-model="parameters[field.key]" :field="field"
                 :channel="mediaChannel" :disabled="busy || !!pending" />
@@ -379,7 +375,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
               <span v-for="(button, index) in rendering.buttons" :key="index" class="rounded border border-outline-gray-2 px-2 py-1 text-center">{{ button.text }}</span>
             </div></template>
         </template>
-        <ErrorMessage :message="error" />
+        <ErrorMessage :message="error" /><Button v-if="error && contact && !destinationsLoaded" label="Retry contact numbers" :disabled="busy" @click="run(destinations)" />
         <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
       </div></template
     >
@@ -399,3 +395,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
     </template>
   </Dialog>
 </template>
+
+<style scoped>
+:deep(.relay-button), :deep(input), :deep(select), :deep([role=combobox]) { min-height:44px; }
+</style>

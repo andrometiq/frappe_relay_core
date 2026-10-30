@@ -2,7 +2,8 @@
 // while bubbles above or below change size (media, transcripts, async parts, paging).
 const BOTTOM_SLACK = 80
 
-export function createScrollHold(viewport) {
+// `isEnd` says whether the loaded rows reach the newest message; only then does the bottom follow new rows.
+export function createScrollHold(viewport, isEnd = () => true) {
   let hold = 'bottom', expectedTop = null
 
   const rows = () => [...(viewport()?.querySelectorAll('[data-message]') || [])]
@@ -12,6 +13,8 @@ export function createScrollHold(viewport) {
   function apply() {
     const node = viewport()
     if (!node || !hold) return false
+    // With newer rows not loaded, pinning to the bottom would page newer rows in again and again.
+    if (hold === 'bottom' && !isEnd()) return false
     if (hold === 'bottom') node.scrollTop = node.scrollHeight
     else {
       const row = rows().find(item => item.dataset.message === hold.name)
@@ -40,7 +43,7 @@ export function createScrollHold(viewport) {
       const node = viewport()
       if (!node || (expectedTop !== null && Math.abs(node.scrollTop - expectedTop) <= 1)) return
       expectedTop = null
-      if (isNearBottom(node)) { hold = 'bottom'; return }
+      if (isEnd() && isNearBottom(node)) { hold = 'bottom'; return }
       const top = node.getBoundingClientRect().top
       const row = rows().find(item => item.getBoundingClientRect().bottom > top + 20)
       hold = row ? { name: row.dataset.message, offset: offsetOf(node, row) } : null

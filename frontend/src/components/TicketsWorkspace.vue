@@ -1,57 +1,52 @@
 <script setup>
 import { useLoadMore } from '../composables/useLoadMore'
-import ChoiceField from './fields/ChoiceField.vue'
 import { useDebouncedSearch } from '../composables/useDebouncedSearch'
 import { recordTitle } from '../services/recordTitle'
-import { referenceName } from '../services/automationEditor'
 import { linkedTitle } from '../services/linkedTitle'
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Badge, Button, ErrorMessage, toast } from '@relay/ui'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Badge, Button, ErrorMessage, FeatherIcon, TextInput, toast } from '@relay/ui'
 import TicketSettings from './TicketSettings.vue'
-import TicketFilters from './tickets/TicketFilters.vue'
+import RelaySelect from './RelaySelect.vue'
+import TicketDashboard from './tickets/TicketDashboard.vue'
+import TicketDialog from './tickets/TicketDialog.vue'
 import { useTicketSettings } from '../composables/useTicketSettings'
-import { emptyTicketFilters, pickerOptions, statusLook } from '../services/ticketSettings'
-import { distinctPeople } from '../services/ticketForm'
+import { emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketRoute } from '../services/ticketSettings'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import TicketDiscussion from './TicketDiscussion.vue'
 import WorkspaceState from './WorkspaceState.vue'
 import LoadingRows from './LoadingRows.vue'
-import { relativeTime } from './relativeTime'
+import { dateTime } from './relativeTime'
 import { closeRoute, openRoute } from '../useViewRoute'
 const capabilities = inject('relayCapabilities', ref({}))
 const aiEnabled = computed(() => Boolean(capabilities.value?.ai))
-const businessTypes = ref([])
 const { settings, load: loadSettings } = useTicketSettings()
-const tab = ref('tickets')
+const view = ref('dashboard')
+const views = [{ value: 'dashboard', label: 'Dashboard' }, { value: 'tickets', label: 'Tickets' }]
+const businessTypes = ref([])
+const businessOptions = computed(() => [{ value: '', label: 'All business types' }, ...businessTypes.value.filter(row => row.enabled).map(row => ({ value: row.business_doctype, label: row.label || row.business_doctype }))])
 const filters = ref(emptyTicketFilters())
-const page = ref({ items: [] }), selected = ref(null), changingOwner = ref(false), error = ref('')
-const history = ref({ items: [] }), transcript = ref({ items: [] }), deliveries = ref({ items: [] })
+const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref('')
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
-const staffTookOver = computed(() => selected.value?.ai_disabled && selected.value?.ownership_actor && selected.value.ownership_actor !== 'Administrator')
+const statusTabs = computed(() => pickerOptions(settings.value.statuses, 'All'))
+const look = ticket => statusLook(settings.value, ticket)
+const hasFilters = computed(() => Object.entries(filters.value).some(([key, value]) => ['assigned_to', 'ticket_type'].includes(key) || Boolean(value)))
+// Dashboard filters that have no control of their own on the list.
+const filterLabel = computed(() => {
+  const { state, assigned, resolved_today, assigned_to, ticket_type, exclude_assignees, unlinked } = filters.value
+  return [resolved_today && 'Resolved today', !resolved_today && state && state + ' tickets', assigned && 'With an owner',
+    exclude_assignees && 'Other assignees', assigned_to === '' ? 'Unassigned' : assigned_to && 'Assigned to: ' + linkedTitle('User', assigned_to),
+    ticket_type !== undefined && 'Type: ' + (ticket_type || 'No type'), unlinked && 'Not linked to a business record'].filter(Boolean).join(' · ')
+})
+const resetFilters = () => { filters.value = emptyTicketFilters() }
+const listRoute = () => ticketRoute({ view: view.value, filters: filters.value })
+watch(listRoute, route => { if (location.hash.startsWith('#/tickets') && !selected.value) openRoute(route, true) })
 let generation = 0, detailGeneration = 0
-async function refreshWindow(method, loaded, name, request) {
-  const boundary = loaded.items.at(-1)?.name
-  const items = []
-  let cursor = {}, result
-  do {
-    result = await coreApi('tickets.' + method, { name, ...cursor })
-    if (request !== detailGeneration) return null
-    items.push(...result.items)
-    cursor = result.next
-  } while (cursor && boundary && !items.some(row => row.name === boundary))
-  return { items, next: result.next }
-}
 async function detail(name) {
   const request = ++detailGeneration; detailBusy.value = true
   try {
-    const [ticket, messages, ai, sent] = await Promise.all([
-      coreApi('tickets.read', { name }), refreshWindow('transcript', transcript.value, name, request),
-      aiEnabled.value ? refreshWindow('ai_history', history.value, name, request) : { items: [] }, refreshWindow('deliveries', deliveries.value, name, request),
-    ])
-    if (request !== detailGeneration || selected.value?.name !== name) return
-    selected.value = ticket; transcript.value = messages; history.value = ai; deliveries.value = sent
+    const ticket = await coreApi('tickets.read', { name })
+    if (request === detailGeneration && selected.value?.name === name) selected.value = ticket
   } catch (e) {
     if (request === detailGeneration) { close(); error.value = e.message }
   } finally { if (request === detailGeneration) detailBusy.value = false }
@@ -67,231 +62,143 @@ async function load(cursor = {}) {
   } catch (e) { if (request === generation) error.value = e.message }
   finally { if (request === generation) listBusy.value = false }
 }
-const statusOptions = computed(() => pickerOptions(settings.value.statuses, '', 'All'))
-const categoryOptions = computed(() => pickerOptions(settings.value.categories, '', 'Any'))
-const typeOptions = computed(() => pickerOptions(settings.value.types, '', 'Any'))
-function reset() { filters.value = emptyTicketFilters() }
-const detailStatusOptions = computed(() => pickerOptions(settings.value.statuses, selected.value?.ticket_status || '')
-  .map(option => ({ ...option, theme: statusLook(settings.value, { ticket_status: option.value }).theme })))
-const ownerField = computed(() => ({ label: 'New owner', placeholder: 'Search colleagues…', readOnly: busy.value,
-  search: async (query, signal) => distinctPeople(await coreApi('collaboration.colleagues', { contact: selected.value.messages[0].contact, query }, false, { signal })) }))
-const facts = computed(() => [
-  ['Customer', selected.value.business_name ? linkedTitle(selected.value.business_doctype, selected.value.business_name) : ''],
-  ['Category', [selected.value.category, selected.value.ticket_type].filter(Boolean).join(' · ')],
-  ['Created', selected.value.creation ? relativeTime(selected.value.creation) : ''],
-].filter(([, value]) => value))
-const shownText = (text, ...others) => text && !others.includes(text) ? text : ''
-const look = ticket => statusLook(settings.value, ticket)
-const priorityTheme = value => ({ Urgent: 'red', High: 'amber' })[value] || 'gray'
-function dismiss() {
-  ++detailGeneration; selected.value = null; detailBusy.value = false
-  history.value = { items: [] }; transcript.value = { items: [] }; deliveries.value = { items: [] }; changingOwner.value = false
+const setFilter = values => { filters.value = { ...filters.value, ...values } }
+function pickStatus(ticket_status) {
+  const { state, resolved_today, ...rest } = filters.value
+  filters.value = { ...rest, ticket_status }
 }
+function dismiss() { ++detailGeneration; selected.value = null; detailBusy.value = false; saveError.value = '' }
 function select(row) {
-  openRoute('#/tickets?ticket=' + encodeURIComponent(row.name), !!selected.value)
+  openRoute(ticketRoute({ view: view.value, filters: filters.value, ticket: row.name }), !!selected.value)
   show(row)
 }
 function show(row) {
   dismiss(); selected.value = row; error.value = ''
   detail(row.name)
 }
-function close() { closeRoute('#/tickets'); dismiss() }
+function close() { closeRoute(listRoute()); dismiss() }
 function readRoute() {
   if (location.hash.split('?')[0] !== '#/tickets') return
-  const name = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket')
+  const route = readTicketRoute(location.hash)
+  view.value = route.view
+  if (JSON.stringify(route.filters) !== JSON.stringify(filters.value)) filters.value = route.filters
+  const name = route.ticket
   if (!name) { if (selected.value) dismiss() }
   else if (name !== selected.value?.name) show(page.value.items.find(row => row.name === name) || { name })
 }
-async function more(method) {
-  const target = method === 'ai_history' ? history : method === 'deliveries' ? deliveries : transcript
-  const name = selected.value.name, request = ++detailGeneration
-  detailBusy.value = true; error.value = ''
-  try {
-    const result = await coreApi('tickets.' + method, { name, ...target.value.next })
-    if (request === detailGeneration && selected.value?.name === name)
-      target.value = { items: [...target.value.items, ...result.items], next: result.next }
-  } catch (e) {
-    if (request === detailGeneration) { close(); error.value = e.message }
-  } finally { if (request === detailGeneration) detailBusy.value = false }
-}
 const updated = {
   claim: () => 'You took over. AI is stopped for this conversation.',
-  update_status: values => 'Status changed to ' + (detailStatusOptions.value.find(option => option.value === values.status)?.label || values.status),
+  resume_ai: () => 'AI resumed',
+  close_and_release: () => 'Ticket closed',
+  update_status: values => 'Status changed to ' + (settings.value.statuses.find(row => row.name === values.status)?.label || values.status),
   assign: values => values.user ? 'Assigned to ' + linkedTitle('User', values.user) : 'Owner removed',
 }
 async function update(method, values = {}) {
   const name = selected.value.name
-  saving.value = true; error.value = ''
+  saving.value = true; saveError.value = ''
   try {
-    const result = await coreApi('tickets.' + method, { name, ...values }, true)
-    if (selected.value?.name === name) {
-      if (method === 'claim') selected.value = { ...selected.value, ...result }
-      changingOwner.value = false
-      await load()
-    }
-    toast(updated[method]?.(values) || 'Saved')
-  } catch (e) { error.value = e.message }
-  finally { saving.value = false }
+    await coreApi('tickets.' + method, { name, ...values }, true)
+    if (selected.value?.name === name) await load()
+    toast(updated[method](values))
+  } catch (e) {
+    if (selected.value?.name === name) saveError.value = e.message
+    else error.value = e.message
+  } finally { saving.value = false }
 }
 useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
-onMounted(() => { loadSettings().catch(e => { error.value = e.message }) })
-onMounted(async () => { try { businessTypes.value = await coreApi('api.business_types') } catch (e) { error.value = e.message } })
-onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute) })
-onBeforeUnmount(() => window.removeEventListener('popstate', readRoute))
+onMounted(() => {
+  loadSettings().catch(e => { error.value = e.message })
+  coreApi('business_types.list_types').then(rows => { businessTypes.value = rows }, e => { error.value = e.message })
+})
+onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
+onBeforeUnmount(() => { window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
 useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
 const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.next, error, load: () => load(page.value.next) })
-const historySentinel = useLoadMore({ loading: busy, hasMore: () => history.value.next, error, load: () => more('ai_history') })
-const deliverySentinel = useLoadMore({ loading: busy, hasMore: () => deliveries.value.next, error, load: () => more('deliveries') })
-const transcriptSentinel = useLoadMore({ loading: busy, hasMore: () => transcript.value.next, error, load: () => more('transcript') })
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
-    <template v-if="tab === 'settings' && settings.can_manage">
-      <div class="ticket-page-head"><Button variant="outline" icon-left="chevron-left" label="Back to tickets" @click="tab = 'tickets'" /><h2>Categories and statuses</h2></div>
+    <template v-if="view === 'settings' && settings.can_manage">
+      <div class="ticket-page-head"><Button variant="outline" icon-left="chevron-left" label="Back to tickets" @click="view = 'tickets'" /><h2>Ticket settings</h2></div>
       <TicketSettings />
     </template>
     <template v-else>
-    <div class="ticket-page-head">
-      <TicketFilters v-model="filters" class="ticket-page-head__filters" :status-options="statusOptions" :category-options="categoryOptions" :type-options="typeOptions" :business-types="businessTypes" :busy="busy">
-        <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Categories and statuses" aria-label="Categories and statuses" title="Categories and statuses" class="ticket-page-head__settings" @click="tab = 'settings'" />
-      </TicketFilters>
-    </div>
-    <ErrorMessage :message="error" />
-    <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !selected }">
-      <div class="space-y-3">
-        <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
-        <button v-for="row in page.items" :key="row.name" type="button" :aria-label="'Open ticket: ' + recordTitle(row, 'Ticket')" :title="recordTitle(row, 'Ticket')" class="v1-list-card ticket-card" :aria-pressed="selected?.name === row.name" @click="select(row)">
-          <div class="automation-card-heading"><strong>{{ row.business_name ? linkedTitle(row.business_doctype, row.business_name) : recordTitle(row, 'Ticket') }}</strong><span class="flex gap-1"><Badge v-if="['High', 'Urgent'].includes(row.priority)" :label="row.priority" :theme="priorityTheme(row.priority)" /><Badge :label="look(row).label" :theme="look(row).theme" /></span></div>
-          <span v-if="row.business_name" class="ticket-card__subject">{{ recordTitle(row, 'Ticket') }}</span>
-          <span class="ticket-card__meta">{{ row.category }} · <span :class="{ 'ticket-unassigned': !row.assigned_to }">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</span> · {{ relativeTime(row.creation) }}</span>
-        </button>
-        <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No matching tickets" description="Try another status or clear the filters to see all tickets." icon="bookmark"><Button variant="outline" label="Clear filters" @click="reset" /></WorkspaceState>
-        <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
+      <div class="ticket-page-head">
+        <div class="ticket-tabs" role="tablist" aria-label="Tickets view">
+          <button v-for="option in views" :key="option.value" type="button" role="tab" :aria-selected="view === option.value" @click="view = option.value">{{ option.label }}</button>
+        </div>
+        <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Ticket settings" aria-label="Ticket settings" class="ticket-page-head__settings" @click="view = 'settings'" />
       </div>
-      <article v-if="selected" class="workflow-card ticket-detail" :aria-busy="detailBusy">
-        <header class="ticket-detail__head"><Button class="mobile-only" icon="chevron-left" variant="ghost" aria-label="Back to tickets" title="Back to tickets" @click="close" /><h2>{{ recordTitle(selected, 'Ticket') }}</h2><Button class="desktop-only" icon="x" variant="ghost" aria-label="Close" title="Close" @click="close" /></header>
-        <div class="ticket-detail__fields">
-          <span class="ticket-detail__label">Status</span>
-          <div v-if="selected.can_edit" class="ticket-status-switch" role="radiogroup" aria-label="Status">
-            <button v-for="option in detailStatusOptions" :key="option.value" type="button" role="radio" :class="'ticket-status--' + option.theme" :aria-checked="selected.ticket_status === option.value" :disabled="busy" @click="option.value !== selected.ticket_status && update('update_status', { status: option.value })"><span aria-hidden="true" />{{ option.label }}</button>
-          </div>
-          <span v-else><Badge :label="look(selected).label" :theme="look(selected).theme" /></span>
-          <span class="ticket-detail__label">Owner</span>
-          <div class="ticket-owner">
-            <strong :class="{ 'ticket-unassigned': !selected.assigned_to }">{{ linkedTitle('User', selected.assigned_to, 'Unassigned') }}</strong>
-            <Button v-if="selected.can_assign && selected.messages?.length && !changingOwner" variant="outline" size="xs" :label="selected.assigned_to ? 'Change owner' : 'Assign'" :disabled="busy" @click="changingOwner = true" />
-            <div v-if="changingOwner" class="ticket-owner__picker">
-              <ChoiceField :model-value="''" :field="ownerField" @update:model-value="user => user && update('assign', { user })" />
-              <div class="flex gap-2"><Button v-if="selected.assigned_to" variant="outline" label="Remove owner" :disabled="busy" @click="update('assign', { user: '' })" /><Button variant="outline" label="Cancel" @click="changingOwner = false" /></div>
-            </div>
-          </div>
-          <template v-if="selected.priority"><span class="ticket-detail__label">Priority</span><span><Badge :label="selected.priority" :theme="priorityTheme(selected.priority)" /></span></template>
-          <template v-for="[label, value] in facts" :key="label"><span class="ticket-detail__label">{{ label }}</span><span>{{ value }}</span></template>
+      <ErrorMessage :message="error" />
+      <TicketDashboard v-if="view === 'dashboard'" :settings="settings" @open="select" />
+      <template v-else>
+        <div class="ticket-toolbar">
+          <TextInput v-model="filters.query" class="ticket-toolbar__search" type="search" placeholder="Search tickets" aria-label="Search tickets" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
+          <RelaySelect v-model="filters.business_type" label="Business type" :options="businessOptions" />
+          <button type="button" class="ticket-chip" :aria-pressed="!!filters.mine" @click="setFilter({ mine: filters.mine ? 0 : 1 })"><FeatherIcon name="user" :size="14" />Assigned to me</button>
         </div>
-        <p v-if="shownText(selected.brief, recordTitle(selected, 'Ticket'))" class="whitespace-pre-wrap">{{ selected.brief }}</p>
-        <p v-if="shownText(selected.handoff_reason, selected.brief, recordTitle(selected, 'Ticket'))">{{ selected.handoff_reason }}</p>
-        <div v-if="aiEnabled && selected.conversation_key && selected.company" class="space-y-2">
-          <div class="flex flex-wrap items-center gap-3">
-            <Badge :label="selected.ai_disabled ? (staffTookOver ? 'Staff took over' : 'AI stopped') : 'AI active'" :theme="selected.ai_disabled ? 'gray' : 'green'" />
-            <Button v-if="selected.can_take_over && !staffTookOver" variant="outline" label="Take over" :loading="saving" :disabled="busy" @click="update('claim')" />
-            <Button v-if="selected.can_resume" variant="outline" label="Resume AI" :disabled="busy" @click="update('resume_ai')" />
-            <Button v-if="selected.can_release" variant="outline" label="Close and release" :disabled="busy" @click="update('close_and_release')" />
-          </div>
-          <p v-if="staffTookOver">{{ linkedTitle('User', selected.ownership_actor, 'Staff') }} · {{ relativeTime(selected.ownership_at) }}</p>
-          <p v-else-if="selected.ai_disabled">AI is stopped. Take over to handle this conversation.</p>
-          <p v-else>Take over to stop AI for this conversation and reply yourself.</p>
+        <div class="ticket-status-tabs" role="tablist" aria-label="Ticket status">
+          <button v-for="option in statusTabs" :key="option.value" type="button" role="tab" :aria-selected="filters.ticket_status === option.value" @click="pickStatus(option.value)">{{ option.label }}</button>
         </div>
-        <LoadingRows v-if="detailBusy && !transcript.items.length" label="Loading conversation…" />
-        <div v-if="selected.linked_drafts?.length" class="space-y-2">
-          <h3 class="font-semibold">Documents for review</h3>
-          <a v-for="draft in selected.linked_drafts" :key="draft.doctype + ':' + draft.name" class="v1-link block"
-            :href="'/app/' + encodeURIComponent(draft.doctype.toLowerCase().replaceAll(' ', '-')) + '/' + encodeURIComponent(draft.name)">
-            {{ draft.doctype }} · {{ linkedTitle(draft.doctype, draft.name) }} · {{ ['Draft', 'Submitted', 'Cancelled'][draft.docstatus] }}
-          </a>
-          <p>Open each draft, check the details and submit when ready.</p>
+        <div v-if="filterLabel" class="ticket-toolbar ticket-toolbar--filter">
+          <span>{{ filterLabel }}</span>
+          <Button label="Clear filter" variant="ghost" @click="resetFilters" />
         </div>
-        <a v-for="message in selected.messages" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open conversation · {{ linkedTitle('Relay Channel', message.channel, 'Conversation') }}</a>
-        <section v-if="aiEnabled" aria-label="AI history" class="space-y-3">
-          <h3 class="font-semibold">AI history</h3>
-          <p v-if="!detailBusy && !history.items.length">No AI activity recorded.</p>
-          <ol class="space-y-3">
-            <li v-for="run in history.items" :key="run.name" class="ticket-history-entry space-y-2">
-              <div class="flex flex-wrap items-center gap-2"><strong>{{ recordTitle(run.event, 'Triage · no matched event') }}</strong><Badge :label="run.status" /></div>
-              <p>{{ relativeTime(run.creation) }}<span v-if="run.event_version"> · Event version {{ run.event_version }}</span></p>
-              <div v-if="run.search">
-                <p><strong>Search announcement:</strong> {{ run.search.purpose }} · {{ referenceName(run.search.reference) }}</p>
-                <p>{{ run.search.confirmed ? 'Search confirmed' : 'Confirmation not recorded' }}</p>
-              </div>
-              <p>{{ run.read_count }} {{ run.read_count === 1 ? 'read' : 'reads' }} completed. Raw results are kept private.</p>
-              <ol v-if="run.actions.length" class="space-y-2" aria-label="Ordered actions">
-                <li v-for="action in run.actions" :key="action.name">
-                  {{ action.step }}. {{ action.action === 'create_draft' ? 'Create draft' : action.action === 'reply' ? 'Reply' : action.action }} · {{ action.status }}
-                  <span v-if="action.approval"> · Approval {{ action.approval.toLowerCase() }}</span>
-                </li>
-              </ol>
-              <p v-for="delivery in run.deliveries" :key="delivery.name">Reply delivery · {{ delivery.status }}<span v-if="['Dispatching', 'Queued', 'Uncertain'].includes(delivery.status)">. Delivery is outstanding; a message already accepted by the provider may still arrive after takeover.</span></p>
-            </li>
-          </ol>
-          <div v-if="history.next" ref="historySentinel" class="h-px" aria-hidden="true" />
-        </section>
-        <section v-if="deliveries.items.length" aria-label="Messages sent about this ticket" class="space-y-3">
-          <h3 class="font-semibold">Messages sent about this ticket</h3>
-          <p v-for="delivery in deliveries.items" :key="delivery.name">
-            {{ delivery.kind }} · {{ delivery.status }}
-            <span v-if="['Dispatching', 'Queued', 'Uncertain'].includes(delivery.status)">. Delivery is outstanding; an accepted message may still arrive after takeover.</span>
-            <span v-if="delivery.status === 'Suppressed'">. Automatic delivery stopped; staff review required.</span>
-          </p>
-          <div v-if="deliveries.next" ref="deliverySentinel" class="h-px" aria-hidden="true" />
-        </section>
-        <section aria-label="Episode transcript" class="space-y-3">
-          <h3 class="font-semibold">Conversation</h3>
-          <p v-if="!detailBusy && !transcript.items.length">No messages in this conversation yet.</p>
-          <ol class="space-y-3">
-            <li v-for="message in transcript.items" :key="message.name" class="ticket-history-entry">
-              <p>{{ message.direction }} · {{ message.status }} · {{ relativeTime(message.sent_at || message.creation) }}</p>
-              <p class="whitespace-pre-wrap">{{ message.content || 'Attachment or message content unavailable' }}</p>
-              <a class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.name)">Open message</a>
-            </li>
-          </ol>
-          <div v-if="transcript.next" ref="transcriptSentinel" class="h-px" aria-hidden="true" />
-        </section>
-        <TicketDiscussion v-if="selected.messages" :ticket="selected" @changed="load()" />
-      </article>
-    </div>
+        <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
+        <div v-if="page.items.length" class="ticket-table-wrap">
+          <table class="ticket-table">
+            <thead><tr><th>Ticket</th><th>Business type</th><th>Business record</th><th v-for="field in page.group_fields" :key="field.fieldname">{{ field.label }}</th><th>Assigned to</th><th>Status</th></tr></thead>
+            <tbody><tr v-for="row in page.items" :key="row.name">
+              <td data-label="Ticket"><button type="button" class="ticket-title" @click="select(row)"><strong>{{ recordTitle(row, 'Ticket') }}</strong><small>{{ row.name }} · {{ dateTime(row.creation) }}</small></button></td>
+              <td data-label="Business type">{{ row.business_doctype || 'Not linked' }}</td>
+              <td data-label="Business record">{{ row.business_title || '—' }}</td>
+              <td v-for="field in page.group_fields" :key="field.fieldname" :data-label="field.label">{{ row.group_values?.[field.fieldname] || 'Not set' }}</td>
+              <td data-label="Assigned to">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</td>
+              <td data-label="Status"><Badge :label="look(row).label" :theme="look(row).theme" /></td>
+            </tr></tbody>
+          </table>
+        </div>
+        <WorkspaceState v-if="!busy && !error && !page.items.length" class="ticket-empty" title="No tickets here" :description="hasFilters ? 'Try clearing the search and filters.' : 'Tickets will appear here when they are created.'" icon="bookmark"><Button v-if="hasFilters" label="Clear all filters" variant="outline" @click="resetFilters" /></WorkspaceState>
+        <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
+      </template>
     </template>
+    <TicketDialog v-if="selected" :ticket="selected" :settings="settings" :error="saveError" :busy="busy" :ai-enabled="aiEnabled" @update="update" @close="close" />
   </div></section>
 </template>
 
 <style scoped>
-.ticket-page-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
-.ticket-page-head h2 { align-self: center; font-size: 15px; font-weight: 600; }
-.ticket-page-head__filters { flex: 1 1 auto; min-width: 0; }
-.ticket-page-head__settings { flex: none; margin-left: auto; }
-.ticket-empty { grid-column: 1 / -1; min-height: min(60vh, 440px); }
-.ticket-card__subject { display: block; font-size: 13px; color: var(--ink-gray-8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ticket-card__meta { display: block; font-size: 12.5px; color: var(--ink-gray-6); }
-.ticket-unassigned { color: var(--relay-amber, #b86e00); }
-.ticket-detail { min-width: 0; overflow-wrap: anywhere; }
-.ticket-detail__head { display: flex; align-items: center; gap: 8px; }
-.ticket-detail__head h2 { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; }
-.ticket-detail__fields { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 10px 12px; font-size: 13px; }
-.ticket-detail__label { color: var(--ink-gray-5); font-size: 12.5px; }
-.ticket-status-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); justify-self: start; max-width: 100%; }
-.ticket-status-switch button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); white-space: nowrap; }
-.ticket-status-switch button > span { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--ink-gray-4); }
-.ticket-status-switch button[aria-checked=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-.ticket-status--blue > span { background: var(--relay-accent, #0f6cbd) !important; }
-.ticket-status--green > span { background: var(--relay-green, #107c10) !important; }
-.ticket-status--amber > span { background: var(--relay-amber, #b86e00) !important; }
-.ticket-status--red > span { background: var(--relay-red, #c42b1c) !important; }
-.ticket-owner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.ticket-owner__picker { display: grid; gap: 8px; flex-basis: 100%; }
-.ticket-history-entry { border-top: 1px solid var(--outline-gray-2); padding-top: 0.75rem; }
+.ticket-page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ticket-page-head h2 { font-size: 15px; font-weight: 600; }
+.ticket-page-head__settings { margin-left: auto; }
+.ticket-tabs, .ticket-status-tabs { display: inline-flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; padding: 2px; border-radius: 8px; background: var(--surface-gray-2); }
+.ticket-tabs button, .ticket-status-tabs button { flex: none; height: 30px; padding: 0 14px; border-radius: 6px; font-size: 13px; color: var(--ink-gray-6); white-space: nowrap; }
+.ticket-tabs button[aria-selected=true], .ticket-status-tabs button[aria-selected=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+.ticket-status-tabs { display: flex; width: fit-content; }
+.ticket-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.ticket-toolbar--filter { align-items: center; font-size: 13px; color: var(--ink-gray-7); }
+.ticket-toolbar__search { flex: 1 1 220px; min-width: 0; max-width: 360px; }
+.ticket-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-white); font-size: 13px; color: var(--ink-gray-7); white-space: nowrap; }
+.ticket-chip[aria-pressed=true] { border-color: var(--outline-blue-1, var(--relay-accent)); background: var(--surface-blue-1, var(--relay-accent-soft)); color: var(--ink-blue-3); font-weight: 600; }
+.ticket-table-wrap { overflow:auto; border:1px solid var(--outline-gray-2); border-radius:10px; }
+.ticket-table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface-white); }
+.ticket-table th, .ticket-table td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--outline-gray-2); overflow-wrap:anywhere; }
+.ticket-table th { font-size:12px; font-weight:600; color:var(--ink-gray-6); background:var(--surface-gray-1); }
+.ticket-table th:first-child { width:38%; }
+.ticket-table th:not(:first-child), .ticket-table td:not(:first-child) { min-width:110px; overflow-wrap:normal; }
+.ticket-title { display:flex; flex-direction:column; justify-content:center; gap:4px; min-height:44px; min-width:140px; text-align:left; color:var(--ink-gray-9); }
+.ticket-title small { color:var(--ink-gray-6); font-size:12px; }
+.ticket-title:focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
+.ticket-empty { min-height: min(50vh, 360px); }
 @media (max-width: 768px) {
   .ticket-page-head__settings :deep(.relay-button__label) { display: none; }
-  .ticket-detail__fields { grid-template-columns: 1fr; gap: 4px; }
-  .ticket-detail__fields > :not(.ticket-detail__label) { margin-bottom: 8px; }
-  .ticket-status-switch { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  :global(.v1-screen:has(.ticket-detail) .ticket-page-head) { display: none; }
+  .ticket-toolbar--filter { align-items: center; font-size: 13px; color: var(--ink-gray-7); }
+.ticket-toolbar__search { flex-basis: 100%; max-width: none; }
+  .ticket-toolbar :deep(:is(input,select)) { min-height:44px !important; }
+  .ticket-table, .ticket-table tbody { display:block; }
+  .ticket-table thead { display:none; }
+  .ticket-table tr { display:block; padding:12px; border-bottom:1px solid var(--outline-gray-2); }
+  .ticket-table td { display:grid; grid-template-columns:minmax(90px, 35%) minmax(0,1fr); gap:12px; padding:6px 0; border:0; }
+  .ticket-table td::before { content:attr(data-label); color:var(--ink-gray-6); font-size:12px; }
+  .ticket-title { min-width:0; }
+  .ticket-tabs button, .ticket-status-tabs button, .ticket-chip { min-height:44px; }
 }
 </style>

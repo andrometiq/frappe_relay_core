@@ -6,12 +6,13 @@ export default {
         surface: {
           white: 'var(--surface-white)', modal: 'var(--surface-modal)', selected: 'var(--surface-selected)',
           gray: { 1: 'var(--surface-gray-1)', 2: 'var(--surface-gray-2)', 3: 'var(--surface-gray-3)', 4: 'var(--surface-gray-4)', 5: 'var(--surface-gray-5)', 6: 'var(--surface-gray-6)', 7: 'var(--surface-gray-7)' },
-          blue: { 1: 'var(--surface-blue-1)' }, amber: { 1: 'var(--surface-amber-1)' }, red: { 1: 'var(--surface-red-1)' }, green: { 1: 'var(--surface-green-1)' },
+          blue: { 1: 'var(--surface-blue-1)' }, amber: { 1: 'var(--surface-amber-1)' }, orange: { 1: 'var(--surface-orange-1)' }, red: { 1: 'var(--surface-red-1)' }, green: { 1: 'var(--surface-green-1)' },
         },
         ink: {
           white: 'var(--ink-white)',
           gray: { 1: 'var(--ink-gray-1)', 2: 'var(--ink-gray-2)', 3: 'var(--ink-gray-3)', 4: 'var(--ink-gray-4)', 5: 'var(--ink-gray-5)', 6: 'var(--ink-gray-6)', 7: 'var(--ink-gray-7)', 8: 'var(--ink-gray-8)', 9: 'var(--ink-gray-9)' },
           blue: { 1: 'var(--ink-blue-1)', 2: 'var(--ink-blue-2)', 3: 'var(--ink-blue-3)' },
+          orange: { 2: 'var(--ink-orange-2)' },
           red: { 1: 'var(--ink-red-1)', 2: 'var(--ink-red-2)', 3: 'var(--ink-red-3)' },
           green: { 1: 'var(--ink-green-1)', 2: 'var(--ink-green-2)' },
         },
@@ -20,7 +21,7 @@ export default {
           blue: { 1: 'var(--outline-blue-1)', 2: 'var(--outline-blue-2)' }, red: { 1: 'var(--outline-red-1)' },
         },
       },
-      fontFamily: { sans: ['"Segoe UI Variable Text"', '"Segoe UI Variable"', '"Segoe UI"', 'Inter', 'system-ui', 'sans-serif'] },
+      fontFamily: { sans: ['Inter', '"Segoe UI"', 'system-ui', 'sans-serif'] },
       fontSize: { xs: ['12px', { lineHeight: '16px' }], sm: ['13px', { lineHeight: '18px' }], base: ['13.5px', { lineHeight: '1.45' }], lg: ['15px', { lineHeight: '20px' }] },
     },
   },

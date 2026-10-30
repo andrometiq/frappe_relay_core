@@ -58,7 +58,7 @@ const selectedPreview = computed(() => {
 const renderedBody = (row) => templateBody(row) ? templateRendering(row, templateParameterDescriptors(row), {}).body : "";
 const shortBody = (row) => { const body = renderedBody(row).replace(/\s+/g, " "); return body.length > 80 ? body.slice(0, 79) + "…" : body; };
 const statusHint = (status) => ({ PENDING: "Waiting for Meta to approve. This usually takes under a day.", REJECTED: "Meta did not approve this template.",
-  APPROVED: "Approved by Meta. Ready to send.", PAUSED: "Meta paused this template because of low quality.", DISABLED: "Meta turned this template off." })[String(status || "").toUpperCase()] || "";
+  APPROVED: "Ready to send.", PAUSED: "Meta flagged low quality.", DISABLED: "Meta turned this template off." })[String(status || "").toUpperCase()] || "";
 const rejection = (row) => row.rejected_reason || row.rejection_reason || "";
 const columns = [
   { key: "name", label: "Template name", width: "minmax(210px,1.2fr)" },

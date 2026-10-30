@@ -7,7 +7,7 @@ import { computed, inject, onBeforeUnmount, onMounted, nextTick, ref, watch } fr
 import { Badge, Button, Dropdown, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
-import { configurationChannels, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
+import { configurationChannelOptions, configurationValues, newConfiguration, toolRows, eventDescription, messagePreview, variantPreview, toolCount, referenceName, moveAction, eventErrors, templateField } from '../services/automationEditor'
 import EventPicker from './fields/EventPicker.vue'
 import RemoteLinkField from './fields/RemoteLinkField.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
@@ -22,13 +22,11 @@ const configurationLinks = [
 ]
 const skill = computed(() => props.kind === 'skills')
 const pickerMethod = computed(() => skill.value ? 'ai.configuration.editor_options' : 'business_event_options.search')
-const allowed = computed(() => Boolean(skill.value ? capabilities.value.skills : capabilities.value.business_events))
+const allowed = computed(() => Boolean(skill.value ? capabilities.value.ai && capabilities.value.skills : capabilities.value.business_events))
 const api = computed(() => skill.value ? 'ai.configuration' : 'business_events')
 const channels = ref([]), editor = ref(null)
 const channelOptions = computed(() => [{ value: '', label: 'Choose a channel' },
-  ...configurationChannels(channels.value, draft.value?.channel).map(row => ({
-    value: row.name, label: linkedTitle('Relay Channel', row.name, row.channel || 'Saved channel'),
-  }))])
+  ...configurationChannelOptions(channels.value, draft.value?.channel)])
 const channelProvider = computed(() => channels.value.find(row => row.name === draft.value?.channel)?.channel)
 const channelEnabled = useEnabledChannels()
 const variant = provider => channelEnabled(provider) && (!!draft.value?.use_preferences || channelProvider.value === provider)
@@ -36,6 +34,17 @@ const rows = ref([]), next = ref(null), draft = ref(null), tools = ref([]), para
 // Display fixture captions without rewriting the stored title on unrelated saves.
 const titleCaption = computed({ get: () => recordTitle(draft.value?.title, ''), set: value => { draft.value.title = value } })
 const busy = ref(false), error = ref(''), notice = ref(''), message = ref(''), preview = ref(null)
+const reportOptions = ref([])
+watch(() => draft.value?.business_doctype, async business => {
+  reportOptions.value = []
+  if (!skill.value || !business || !allowed.value) return
+  try { const result = await coreApi('ai.configuration.editor_options', {kind:'report', business_doctype:business}); if (draft.value?.business_doctype === business) reportOptions.value = result.items }
+  catch (e) { error.value = e.message }
+})
+function chooseReport(tool, value) {
+  const selected = reportOptions.value.find(row => row.value === value)
+  if (selected) Object.assign(tool, selected.contract)
+}
 const actionOptions = ref([]), actions = ref([]), validation = ref([]), validationSummary = ref(null), saved = ref('')
 const snapshot = () => JSON.stringify([draft.value, tools.value, actions.value])
 const dirty = computed(() => snapshot() !== saved.value)
@@ -102,7 +111,6 @@ function addReference() {
   while (tools.value.some(row => row.name === `reference_${number}`)) number++
   tools.value.push({name: `reference_${number}`, method: 'get_list', doctype: '', fields: [], scope_field: '', identity_anchor: draft.value.business_doctype, identity_fields: {}, company_field: ''})
 }
-function chooseReferenceType(tool, value) { tool.doctype = value; tool.fields = []; tool.scope_field = ''; tool.company_field = '' }
 function chooseBusiness(value) { draft.value.business_doctype = value; draft.value.recipient_field = ''; tools.value.forEach(tool => { tool.identity_anchor = value; tool.identity_fields = {}; tool.scope_field = '' }) }
 function chooseSource(value) { draft.value.source_doctype = value; draft.value.recipient_field = ''; draft.value.contact_field = ''; draft.value.print_format = ''; draft.value.report_name = ''; parameters.value = '' }
 function chooseActionType(row, value) { row.doctype = value; row.fields = [] }
@@ -115,54 +123,54 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
   <section class="v1-screen" :class="{ 'event-workspace': skill }"><div class="v1-content space-y-4">
     <p v-if="!allowed">A Relay Communication Manager role is required to configure automation.</p>
     <template v-else>
-      <header v-if="skill" class="event-toolbar"><strong>Events</strong><Dropdown :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New event" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
-      <WorkspaceHeading v-else description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
+      <header v-if="skill" class="event-toolbar"><strong>Skills</strong><Dropdown v-if="capabilities.configure" :options="configurationLinks"><Button label="Configure" icon-right="chevron-down" /></Dropdown><Button label="New skill" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(true))" /></header>
+      <p v-if="skill && !capabilities.configure" class="workspace-help">Ask a system administrator to configure AI models and the default handoff owner.</p>
+      <WorkspaceHeading v-if="!skill" description="Keep customers informed when business documents change."><Button label="New event rule" variant="solid" icon-left="plus" :disabled="busy" @click="edit(newConfiguration(false))" /></WorkspaceHeading>
       <div v-if="!skill" class="workspace-toolbar"><div class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div></div>
       <ErrorMessage v-if="error" :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
       <div class="v1-detail-grid" :class="{ 'v1-detail-grid--browse': !draft, 'event-detail-open': skill && draft }">
         <div class="space-y-3 event-list">
           <div v-if="skill" class="automation-chips" role="group" aria-label="Enabled state"><button v-for="value in ['all', 'enabled', 'disabled']" :key="value" type="button" class="automation-chip" :aria-pressed="enabledFilter === value" @click="enabledFilter = value">{{ value === 'all' ? 'All' : value === 'enabled' ? 'Enabled' : 'Disabled' }}</button></div>
-          <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading events…' : 'Loading event rules…'" />
-          <button v-for="row in visibleRows" :key="row.name" type="button" :aria-label="(skill ? 'Open event: ' : 'Open event rule: ') + recordTitle(row, skill ? 'Event' : 'Event rule')" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
-            <div class="automation-card-heading"><strong>{{ recordTitle(row, skill ? 'Event' : 'Event rule') }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
+          <LoadingRows v-if="busy && !rows.length" :label="skill ? 'Loading skills…' : 'Loading event rules…'" />
+          <button v-for="row in visibleRows" :key="row.name" type="button" :aria-label="(skill ? 'Open skill: ' : 'Open event rule: ') + recordTitle(row, skill ? 'Skill' : 'Event rule')" class="v1-list-card" :aria-pressed="draft?.name === row.name" :disabled="busy" @click="edit(row)">
+            <div class="automation-card-heading"><strong>{{ recordTitle(row, skill ? 'Skill' : 'Event rule') }}</strong><Badge :label="row.enabled ? 'Enabled' : 'Disabled'" :theme="row.enabled ? 'green' : 'gray'" /></div>
+            <span v-if="skill && row.sample_key === 'relay-default-skill'">Default fallback for this channel and business type</span>
             <span v-if="skill">{{ row.business_doctype }} · {{ row.mode }} · {{ linkedTitle('Relay Channel', row.channel, 'Choose a channel') }} · {{ toolCount(row.allowed_tools) }} {{ toolCount(row.allowed_tools) === 1 ? 'reference' : 'references' }}</span>
             <span v-else>{{ eventDescription(row) }}</span>
           </button>
-          <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="(rows.length ? 'No matching ' : 'No ') + (skill ? 'events' : 'event rules') + (rows.length ? '' : ' yet')" :description="rows.length ? 'Change the filter to see other configurations.' : 'Create one when you need it. It starts disabled until you enable it.'" :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New event' : 'New event rule'" variant="solid" icon-left="plus" @click="edit(newConfiguration(skill))" /></WorkspaceState>
+          <WorkspaceState v-if="!visibleRows.length && !busy && !error" :title="(rows.length ? 'No matching ' : 'No ') + (skill ? 'skills' : 'event rules') + (rows.length ? '' : ' yet')" :description="rows.length ? 'Change the filter to see other configurations.' : 'Create one when you need it. It starts disabled until you enable it.'" :icon="skill ? 'bot' : 'zap'"><Button :label="skill ? 'New skill' : 'New event rule'" variant="solid" icon-left="plus" @click="edit(newConfiguration(skill))" /></WorkspaceState>
           <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
         </div>
         <form v-if="draft" ref="editor" class="workflow-card min-w-0" @submit.prevent="save">
-          <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'event' : 'event rule' }}</h2><Button icon="x" aria-label="Dismiss editor" title="Dismiss editor" :disabled="busy" @click="draft = null" /></div>
+          <div class="automation-card-heading"><h2 class="font-semibold">{{ draft.name ? 'Edit' : 'New' }} {{ skill ? 'skill' : 'event rule' }}</h2><Button icon="x" aria-label="Dismiss editor" title="Dismiss editor" :disabled="busy" @click="draft = null" /></div>
           <FormControl v-model="titleCaption" label="Title" required :disabled="busy" />
-          <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" :kind="skill ? 'doctype' : 'business_doctype'" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
+          <div class="grid gap-3 sm:grid-cols-2"><EventPicker :model-value="draft.business_doctype" label="Business type" kind="business_doctype" :method="pickerMethod" :disabled="busy" @update:model-value="chooseBusiness" /><ChoiceField v-model="draft.channel" :field="{ label: 'Channel', options: channelOptions, readOnly: busy || !!draft.use_preferences }" /><FormControl v-model="draft.enabled" type="checkbox" label="Enabled" :disabled="busy" /></div>
           <template v-if="skill">
             <fieldset class="automation-section"><legend>Owner instructions</legend>
               <FormControl v-model="draft.target" label="Target" type="textarea" rows="2" maxlength="2000" :required="Boolean(draft.enabled)" :disabled="busy" />
-              <FormControl v-model="draft.instructions" label="Memory and rules" type="textarea" rows="4" maxlength="8000" required :disabled="busy" />
+              <FormControl v-model="draft.instructions" label="Skill instructions" type="textarea" rows="4" maxlength="8000" required :disabled="busy" />
               <FormControl v-model="draft.reply_style" label="Reply style" type="textarea" rows="2" maxlength="2000" :disabled="busy" />
               <FormControl v-model="draft.exact_trigger" label="Exact trigger (optional)" maxlength="140" :disabled="busy" />
             </fieldset>
-            <fieldset class="automation-section"><legend>Read references · SEARCH</legend>
+            <fieldset class="automation-section"><legend>Configured reports · SEARCH</legend>
               <p class="text-sm">Only the authenticated sender’s records in this company can be searched. A number typed in a message grants no access.</p>
               <div v-for="(tool, index) in tools" :key="tool.name" class="event-reference">
-                <div class="automation-card-heading"><strong>{{ referenceName(tool.name) }}</strong><Button label="Remove reference" :disabled="busy" @click="tools.splice(index, 1)" /></div>
-                <EventPicker :model-value="tool.doctype" label="Read DocType" kind="doctype" :disabled="busy" @update:model-value="value => chooseReferenceType(tool, value)" />
-                <FormControl v-model="tool.method" label="Allowed search" type="select" :options="[{label:'Find records',value:'get_list'},{label:'Open one record',value:'get_doc'}]" :disabled="busy" />
-                <EventPicker v-model="tool.scope_field" label="Business link field" kind="scope" :doctype="tool.doctype" :business-doctype="draft.business_doctype" :disabled="busy || !tool.doctype" />
+                <div class="automation-card-heading"><strong>{{ referenceName(tool.name) }}</strong><Button label="Remove report" :disabled="busy" @click="tools.splice(index, 1)" /></div>
+                <FormControl :model-value="tool.report || ''" label="Configured report" type="select" :options="[{value:'',label:'Choose a report'}, ...reportOptions]" :disabled="busy" @update:model-value="value => chooseReport(tool, value)" />
+                <p v-if="!tool.report" class="text-sm">Choose a report. Legacy record references are unavailable to the AI.</p>
                 <EventPicker v-if="channelProvider" v-model="tool.identity_fields[channelProvider]" :label="channelProvider + ' identity field'" kind="identity" :doctype="draft.business_doctype" :disabled="busy || !draft.business_doctype" />
                 <p v-else class="text-sm">Choose a channel to map its authenticated sender identity.</p>
-                <EventPicker v-model="tool.company_field" label="Company field" kind="company" :doctype="tool.doctype" :disabled="busy || !tool.doctype" />
-                <EventPicker v-model="tool.fields" label="Readable fields" kind="field" :doctype="tool.doctype" multiple :disabled="busy || !tool.doctype" />
+                <p v-if="tool.report" class="text-sm">Report fields and company scope are fixed. Ledger date ranges require confirmation.</p>
               </div>
-              <Button label="Add read reference" :disabled="busy || tools.length >= 12 || !draft.business_doctype" @click="addReference" />
+              <Button label="Add report" :disabled="busy || tools.length >= 12 || !draft.business_doctype" @click="addReference" />
               <FormControl v-model="draft.search_confirmation" label="Search confirmation" type="select" :options="['Always', 'When required']" :disabled="busy" />
               <p class="text-sm">Searches are announced first. Ledger searches always require date-range confirmation.</p>
             </fieldset>
             <fieldset class="automation-section"><legend>Actions · EXECUTE</legend>
               <FormControl v-model="draft.execution_policy" label="Execution policy" type="select" :options="['Ticket only', 'Execute']" :disabled="busy" />
-              <p v-if="draft.execution_policy === 'Ticket only'" class="text-sm">Only raise the episode ticket.</p>
+              <p v-if="draft.execution_policy === 'Ticket only'" class="text-sm">Only raise the conversation ticket.</p>
               <template v-else>
-                <p class="text-sm">Follow the written steps in this order. Every created document stays a draft linked to the episode ticket. Staff open, check and submit it.</p>
+                <p class="text-sm">Follow the written steps in this order. Every created document stays a draft linked to the conversation ticket. Staff open, check and submit it.</p>
                 <div v-for="(action, index) in actions" :key="action.action" class="event-reference">
                   <strong>{{ index + 1 }}. {{ referenceName(action.action) }}</strong>
                   <template v-if="action.action === 'create_draft'">
@@ -170,7 +178,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
                     <EventPicker v-model="action.fields" label="Draft fields (include required fields)" kind="draft_field" :action="action.action" :doctype="action.doctype" multiple :disabled="busy || !action.doctype" />
                     <p class="text-sm">Field types are shown in the picker. Required fields must be included. Staff review and submit the linked draft.</p>
                   </template>
-                  <p v-else class="text-sm">Reply text · Core supplies the destination. No separate approval required.</p>
+                  <p v-else class="text-sm">Reply to the sender in this conversation. No separate approval required.</p>
                   <p class="text-sm">Execution approval: {{ actionOptions.find(row => row.value === action.action)?.approval || 'Not required' }}</p>
                   <div class="event-action-buttons"><Button label="Move up" :disabled="busy || index === 0" @click="moveAction(actions, index, -1)" /><Button label="Move down" :disabled="busy || index === actions.length - 1" @click="moveAction(actions, index, 1)" /><Button label="Remove action" :disabled="busy" @click="actions.splice(index, 1)" /></div>
                 </div>
@@ -179,7 +187,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             </fieldset>
             <fieldset class="automation-section"><legend>Operation</legend>
               <EventPicker v-model="draft.handoff_owner" label="Handoff owner" kind="user" :disabled="busy" />
-              <EventPicker v-model="draft.ai_model" label="AI Model" kind="model" :disabled="busy" />
+              <EventPicker v-model="draft.ai_model" label="AI Model" kind="model" :skill="draft.name" :disabled="busy" />
               <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="draft.mode" label="Mode" type="select" :options="['Shadow', 'Automatic']" :disabled="busy" /><FormControl v-model="draft.daily_limit" label="Daily model limit" type="number" min="1" max="1000" :disabled="busy" /></div>
               <p class="text-sm">Shadow creates the live ticket and records proposals, without automatic replies or business writes.</p>
             </fieldset>
@@ -202,13 +210,13 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
               <p class="text-sm">The PDF goes in the template's document header, or as a document message after the template when the template has no document header. Recipient choices and PDFs need a fixed WhatsApp channel.</p>
             </fieldset>
           </template>
-          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-model="draft.run_as_user" label="Run-as user" kind="user" :method="pickerMethod" :disabled="busy" /><p v-if="skill" class="text-sm">The linked sender user takes precedence. Otherwise this user’s permissions apply; denial never falls back.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
+          <fieldset class="automation-section"><legend>Run-as user</legend><EventPicker v-model="draft.run_as_user" label="Run-as user" kind="user" :method="pickerMethod" :disabled="busy" /><p v-if="skill" class="text-sm">Use the sender’s linked user account when available; otherwise use this account. If that account lacks permission, the action stops.</p><p v-else class="text-sm">Reads and delivery follow this user’s permissions.</p></fieldset>
           <aside v-if="!skill" class="automation-preview space-y-3" aria-label="Message preview"><h3 class="font-semibold">Live message preview</h3><p class="text-sm">{{ eventDescription(draft) }}</p><ErrorMessage :message="previewError" /><p class="whitespace-pre-wrap">{{ variant('WhatsApp') ? livePreview : '' }}</p><p v-if="variant('Telegram')" class="whitespace-pre-wrap">Telegram: {{ variantPreview(draft.telegram_body, parameters) }}</p><p v-if="variant('Email')" class="whitespace-pre-wrap">Email: {{ variantPreview(draft.email_subject, parameters) }}
 {{ variantPreview(draft.email_body, parameters) }}
 {{ draft.email_signature }}</p><p class="text-sm">Bracketed fields are replaced with the submitted document’s values.</p></aside>
           <ul v-if="validation.length" ref="validationSummary" tabindex="-1" role="alert" class="event-validation"><li v-for="issue in validation" :key="issue">{{ issue }}</li></ul>
           <Button type="submit" label="Save" variant="solid" :loading="busy" />
-          <div v-if="skill && draft.name" class="automation-section"><h3 class="font-semibold">Test event</h3><p class="text-sm">Tests the saved event. Sends nothing and creates no ticket, approval or business document.</p>
+          <div v-if="skill && draft.name" class="automation-section"><h3 class="font-semibold">Test skill</h3><p class="text-sm">Tests the saved skill. Sends nothing and creates no ticket, approval or business document.</p>
             <p v-if="dirty" role="status">Save your changes before testing.</p>
             <EventPicker v-model="message" label="Incoming message" kind="message" :skill="draft.name" :disabled="busy || dirty" />
             <Button label="Run preview" :disabled="busy || dirty || !message" @click="test" />

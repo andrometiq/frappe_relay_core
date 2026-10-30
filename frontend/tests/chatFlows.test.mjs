@@ -24,33 +24,22 @@ test('"Link record" opens the link form, not the full contact details', async ()
   assert.match(links, /onMounted\(\(\) => \{ if \(props\.start && props\.detail\.can_edit_links\) startAdding\(\) \}\)/)
 })
 
-test('composer has two modes, Reply and Internal note, and Template is a button', () => {
-  assert.match(composer, /@focusin="expandOn"/)
-  assert.match(composer, /event\.target\.matches\("textarea, input:not\(\[type=file\]\), select"\)/)
-  assert.match(composer, /:aria-pressed="!noting" @click="emit\('mode', 'reply'\)/)
-  assert.match(composer, /:aria-pressed="noting" @click="emit\('mode', 'note'\)"><FeatherIcon name="lock"/)
-  assert.doesNotMatch(composer.split('class="composer-tabs"')[1].split('</div>')[0], /aria-pressed="false"/)
-  assert.match(composer, /class="composer-chip" icon-left="file-text" label="Template"/)
-  assert.match(connected, /:mode="composeMode" @mode="setComposeMode" @template="startInChat\(true\)"/)
+test('composer uses one stable row with mode and template actions in More', () => {
+  assert.doesNotMatch(composer, /composer-tabs|composer-toolbar|expanded|focusin=/)
+  assert.match(composer, /<ComposerMore :actions="actions"/)
+  assert.match(composer, /Only your team sees this/)
+  assert.match(composer, /label="Back to reply"/)
+  assert.match(connected, /@template="startInChat\(true\)"/)
 })
 
-test('note mode swaps the whole composer for the note form, so a note cannot reach the customer', async () => {
-  assert.match(composer, /<slot v-if="noting" name="note" \/>/)
+test('note mode uses the private note endpoint and blocks the customer submit', async () => {
+  assert.match(composer, /<template v-if="noting">/)
   assert.match(composer, /@submit\.prevent="!noting && canSend && send\(\)"/)
   const note = await read('components/messages/NoteComposer.vue')
-  assert.match(note, /placeholder="Note for your team\. The customer will not see this\."/)
-  assert.match(note, /icon-left="lock" label="Add note"/)
+  assert.match(note, /label="Add note"/)
   assert.match(note, /coreApi\("collaboration\.add"/)
   assert.doesNotMatch(note, /messaging\.|send\(/)
-  assert.match(connected, /<template #note><NoteComposer /)
   assert.match(connected, /@note="startNote"/)
-  const notes = await read('components/messages/InternalNotes.vue')
-  assert.doesNotMatch(notes, /collaboration\.add|Add internal note/)
-})
-
-test('the phone "+" holds only attach options', () => {
-  assert.match(composer, /<div v-if="isMobile" class="composer-plus"><Dropdown v-if="attachmentOptions\.length" :options="attachmentOptions">/)
-  assert.doesNotMatch(composer, /plusOptions/)
 })
 
 test('the inbox "+" starts an empty new conversation', () => {
@@ -59,10 +48,10 @@ test('the inbox "+" starts an empty new conversation', () => {
   assert.match(connected, /:business-name="startBusiness \? businessName : ''"/)
 })
 
-test('a closed reply window replaces the text box with a banner and one Send template button', async () => {
-  assert.match(composer, /More than 24 hours since the customer wrote\. You can only send a template\./)
-  assert.match(composer, /<div v-else-if="closed" class="composer-closed">/)
-  assert.match(composer, /class="composer-closed-send" label="Send template"[^>]*variant="solid" @click="emit\('template'\)"/)
+test('a closed reply window keeps More and opens the existing template flow', async () => {
+  assert.match(composer, /24-hour reply window closed/)
+  assert.match(composer, /<template v-if="closed">/)
+  assert.match(composer, /label="Choose template"[^>]*@click="emit\('template'\)"/)
   assert.match(composer, /:title="sendTitle"/)
   const start = await read('components/messages/StartConversation.vue')
   assert.match(start, /kind = ref\(props\.channel \|\| props\.template \? "template" : "text"\)/)
@@ -76,7 +65,7 @@ test('the new message dialog asks only what it needs and has a Cancel button', a
   assert.match(start, /<Button label="Cancel" variant="ghost" :disabled="busy" @click="close" \/>/)
   assert.match(start, /contactCaption\(row\.display_name \|\| row\.contact, "Unknown number"\)/)
   assert.match(start, /initialOptions: templateId && templateLabel/)
-  assert.match(start, /coreApi\("whatsapp_templates\.directory"/)
+  assert.match(start, /approvedTemplates\(after => coreApi\("whatsapp\.execute"/)
 })
 
 test('a chat that fails to load stays open with a retry; only 403 or 404 leaves', () => {
@@ -87,9 +76,9 @@ test('a chat that fails to load stays open with a retry; only 403 or 404 leaves'
 
 test('internal notes work in every chat: email chats and switched-off channels too', async () => {
   const email = await read('components/messages/EmailComposer.vue')
-  assert.match(email, /<slot v-if="noting" name="note" \/>/)
+  assert.match(email, /<slot name="note" \/>/)
   assert.match(email, /@submit\.prevent="!noting && send\(\)"/)
-  assert.match(connected, /<EmailComposer v-if="[^"]*" :key="source\.name" :mode="composeMode" @mode="setComposeMode">/)
+  assert.match(connected, /<EmailComposer v-if="[^"]*" :key="source\.name" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">/)
   assert.equal(connected.match(/<template #note><NoteComposer /g)?.length, 2)
   assert.match(connected, /<MessageComposer v-else-if="source && \(replyOff \|\| channelEnabled\([^"]*" [^>]*:off-text="replyOff"/)
   assert.doesNotMatch(connected, /class="chat-channel-off"/)
@@ -98,7 +87,7 @@ test('internal notes work in every chat: email chats and switched-off channels t
 test('a switched-off channel shows the plain banner in reply mode and never offers a template', () => {
   assert.match(composer, /offText: String/)
   assert.match(composer, /windowState\.value\.channel_disabled \? channelOffText\(sourceContext\.value\.provider\)/)
-  assert.match(composer, /const closed = computed\(\(\) => !!offReason\.value \|\| !windowState\.value\.open\)/)
-  assert.match(composer, /<Button v-if="can\('templates'\) && !offReason" class="composer-closed-send"/)
-  assert.match(composer, /draftScope = computed\(\(\) => props\.offText \? '' :/)
+  assert.match(composer, /const closed = computed\(\(\) => !!offReason\.value/ )
+  assert.match(composer, /<Button v-if="can\('templates'\) && !offReason" label="Choose template"/)
+  assert.match(composer, /draftScope = computed\(\(\) => compositionScope/)
 })

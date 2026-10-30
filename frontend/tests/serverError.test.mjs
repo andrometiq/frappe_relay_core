@@ -20,3 +20,12 @@ test('escaped angle brackets are shown as characters', async () => {
   const { serverError } = await import('../src/services/serverError.js')
   assert.equal(serverError({ message: 'Name cannot contain &lt; or &gt;' }, 'x'), 'Name cannot contain < or >')
 })
+
+test('a failed request without a message gets a plain reason for its status', async () => {
+  const { requestFailure } = await import('../src/services/serverError.js')
+  assert.match(requestFailure(413, true), /too large/)
+  assert.match(requestFailure(503, true), /did not confirm this action/)
+  assert.match(requestFailure(503, false), /busy/)
+  assert.match(requestFailure(500, true), /could not finish this action/)
+  assert.match(requestFailure(500, false), /could not load this/)
+})

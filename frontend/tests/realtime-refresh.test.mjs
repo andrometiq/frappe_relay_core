@@ -3,6 +3,22 @@ import assert from 'node:assert/strict'
 import { setTimeout as wait } from 'node:timers/promises'
 import { realtimeRefreshQueue } from '../src/services/realtimeRefreshQueue.js'
 
+for (const delay of [undefined, 40]) test(`bursts respect the ${delay ?? 150} ms delay`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const batches=[]
+  const q=realtimeRefreshQueue(async ({kinds})=>batches.push([...kinds]),()=>true,delay)
+  try {
+    for(let i=0;i<30;i++)q.schedule('messages')
+    t.mock.timers.tick((delay ?? 150)-1)
+    assert.equal(batches.length,0)
+    t.mock.timers.tick(1)
+    assert.deepEqual(batches,[['messages']])
+    await Promise.resolve()
+    t.mock.timers.tick(1000)
+    assert.equal(batches.length,1)
+  } finally { q.dispose() }
+})
+
 test('bursts batch, idle never polls, hidden events survive, in-flight events run once more', async () => {
   let visible=true, release
   const batches=[]
@@ -26,4 +42,16 @@ test('failed refresh does not start a retry poll; reconnect retries once', async
  let count=0
  const q=realtimeRefreshQueue(async()=>{count++;throw Error('offline')},()=>true,5)
  try{q.schedule('messages');await wait(25);await wait(25);assert.equal(count,1);q.schedule('reconnect');await wait(25);assert.equal(count,2)}finally{q.dispose()}
+})
+
+test('a burst passes the union of the changed message names once', async () => {
+  const batches=[]
+  const q=realtimeRefreshQueue(async ({kinds,messages})=>batches.push([[...kinds],[...messages]]),()=>true,5)
+  try {
+    q.schedule('messages',['M2']);q.schedule('messages');q.schedule('messages',['M1','M2'])
+    await wait(25)
+    assert.deepEqual(batches,[[['messages'],['M2','M1']]])
+    q.schedule('reconnect');await wait(25)
+    assert.deepEqual(batches[1],[['reconnect'],[]],'names do not leak into the next batch')
+  } finally { q.dispose() }
 })

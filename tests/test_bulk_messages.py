@@ -9,9 +9,11 @@ import frappe
 from frappe import _dict
 from relay_core import bulk_campaigns, bulk_sheet, service_window
 from test_bulk_campaigns import NAMED, POSITIONAL, UTILS, FakeCache
+from site_file_limit import use_relay_file_limit
 
 
 def setUpModule():
+    use_relay_file_limit()
     # One-number sites name no Hub channel; the channel choice has its own tests.
     patcher = patch('relay_core.bulk_campaigns.hub_arguments', side_effect=lambda channel, arguments: arguments)
     patcher.start()
@@ -82,9 +84,14 @@ class MessageTests(unittest.TestCase):
 
 
 class CreateTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch('frappe.utils.now', return_value='2026-10-26 10:00:00'))
+
     def test_a_message_campaign_snapshots_the_message_without_a_template_or_hub_call(self):
         saved = []
-        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False)), utils=frappe.utils, parse_json=frappe.parse_json,
+        fake = SimpleNamespace(db=Mock(exists=Mock(return_value=False),
+                                      get_value=Mock(side_effect=['Essdee UK', 'United Kingdom'])),
+                               session=_dict(user='manager@example.invalid'), utils=frappe.utils, parse_json=frappe.parse_json,
                                get_doc=lambda values: _dict(values), throw=Mock(side_effect=frappe.ValidationError))
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
                 patch.object(bulk_campaigns, 'campaign_channel', return_value='WA'), \
@@ -98,6 +105,7 @@ class CreateTests(unittest.TestCase):
             with self.assertRaises(frappe.ValidationError):
                 bulk_campaigns.create('Stickers', message={'kind': 'sticker'})
         doc = saved[0]
+        self.assertEqual(doc.country, 'GB')
         self.assertEqual((doc.operation, doc.template_name, doc.language), ('messages.media', None, None))
         snapshot = json.loads(doc.arguments)
         self.assertEqual(snapshot['message'], PHOTO)
@@ -137,10 +145,11 @@ class MediaUploadTests(unittest.TestCase):
         self.hub.execute.return_value = {'id': '555'}
         self.cache = FakeCache()
         self.cache.lock = Mock(side_effect=lambda *a, **k: MagicMock())
-        utils = SimpleNamespace(now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
+        utils = SimpleNamespace(now=lambda: '2026-10-26 10:00:00', now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
                                 add_to_date=frappe.utils.add_to_date, cint=frappe.utils.cint, flt=frappe.utils.flt)
-        self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True)), cache=self.cache, utils=utils, enqueue=Mock(),
-                                    session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
+        self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=self.cache, utils=utils, enqueue=Mock(),
+                                    session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError),
+                                    log_error=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         for name in ('require_access', 'whatsapp_channel', 'read'):
             self.enterContext(patch.object(bulk_campaigns, name))
@@ -186,6 +195,7 @@ class MediaUploadTests(unittest.TestCase):
                 bulk_campaigns.control('Offer', 'start')
         self.assertEqual(self.doc.status, 'Draft')
         self.assertIsNone(self.doc.media_id)
+        self.assertEqual(self.fake.log_error.call_args_list[0].args[:2], ('Campaign Offer could not start at the media upload step', 'mime type mismatch'))
         self.save.assert_not_called()
         self.cache.lock.assert_not_called()
         self.fake.enqueue.assert_not_called()

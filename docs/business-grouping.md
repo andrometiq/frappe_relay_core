@@ -1,0 +1,49 @@
+# Business grouping
+
+Business grouping puts business records into groups in Inbox and Contacts.
+
+Each business type can have up to six group levels.
+
+## Configure groups
+
+Open the Relay Contact Type for the business type.
+
+Enable the type and add rows to Grouping fields.
+
+For each row, enter a direct Link, Select, or Data field from the business DocType.
+
+Use only visible fields at permission level zero, and use each field once.
+
+Set a positive priority for each row.
+
+The lowest priority comes first; rows with the same priority follow table order.
+
+Save the Relay Contact Type.
+
+## Use groups
+
+Open a business type, then open each group level to see its records.
+
+A type without group fields shows its records directly.
+
+Empty field values appear as Not set.
+
+Inbox type and group badges count records with unread messages; record badges count unread messages.
+
+Inbox filters apply to the records and counts in each group.
+
+Contacts tiles show contact counts; open a record to see its linked contacts.
+
+The Not linked tile contains contacts without a link to a configured business type.
+
+Search filters the shown level: business types, the values of the shown group field, or record titles and names. Inside a record and in Not linked, Contacts search matches contact names, numbers and email addresses.
+
+Use the breadcrumbs or Back to return; Back restores the search that opened a contact or thread.
+
+Team and group claim controls are hidden.
+
+Tickets show the business type and record; a business type filter also shows its group fields.
+
+To link a contact, select the business type, then select the record.
+
+Counts and results use the shared [business type access rule](business-access.md), independently of Contact/Customer Desk read permissions.

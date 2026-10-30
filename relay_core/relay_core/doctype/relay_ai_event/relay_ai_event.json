@@ -1,0 +1,184 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Event",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "format:{title}-{###}",
+  "naming_rule": "Expression",
+  "track_changes": 1,
+  "title_field": "title",
+  "show_title_field_in_link": 1,
+  "search_fields": "title",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "description": "An event that the AI can answer questions about. The AI reads the description, the attachments and the links and keeps the result as event memory.",
+  "field_order": [
+    "title",
+    "enabled",
+    "company",
+    "column_break_dates",
+    "available_from",
+    "available_to",
+    "event_starts_on",
+    "event_ends_on",
+    "details_section",
+    "description",
+    "links",
+    "audience",
+    "memory_section",
+    "memory_status",
+    "memory_built_at",
+    "memory_build",
+    "memory_revision",
+    "memory_error",
+    "memory"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1,
+      "length": 140
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1,
+      "description": "Uncheck to archive the event. The AI then stops using it."
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company",
+      "description": "When set, only conversations of this company use the event."
+    },
+    {
+      "fieldname": "column_break_dates",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "available_from",
+      "label": "AI uses it from",
+      "fieldtype": "Date",
+      "description": "First day the AI answers about the event. Empty means now."
+    },
+    {
+      "fieldname": "available_to",
+      "label": "AI uses it until",
+      "fieldtype": "Date",
+      "description": "Last day the AI answers about the event. Empty means no end."
+    },
+    {
+      "fieldname": "event_starts_on",
+      "label": "Event starts on",
+      "fieldtype": "Date"
+    },
+    {
+      "fieldname": "event_ends_on",
+      "label": "Event ends on",
+      "fieldtype": "Date"
+    },
+    {
+      "fieldname": "details_section",
+      "label": "Details",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Long Text",
+      "reqd": 1,
+      "description": "What the AI must know about the event. Attach files to the event for more detail."
+    },
+    {
+      "fieldname": "links",
+      "label": "Links",
+      "fieldtype": "Table",
+      "options": "Relay AI Event Link",
+      "description": "Public http or https pages the AI reads. At most 10."
+    },
+    {
+      "fieldname": "audience",
+      "label": "Audience",
+      "fieldtype": "Table",
+      "options": "Relay AI Event Audience",
+      "reqd": 1
+    },
+    {
+      "fieldname": "memory_section",
+      "label": "AI memory",
+      "fieldtype": "Section Break",
+      "collapsible": 1
+    },
+    {
+      "fieldname": "memory_status",
+      "label": "Memory status",
+      "fieldtype": "Select",
+      "options": "Pending\nBuilding\nReady\nPartial\nFailed",
+      "default": "Pending",
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "description": "The AI uses the event only when the status is Ready or Partial."
+    },
+    {
+      "fieldname": "memory_built_at",
+      "label": "Built at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "memory_build",
+      "label": "Build",
+      "fieldtype": "Link",
+      "options": "Relay AI Event Build",
+      "read_only": 1
+    },
+    {
+      "fieldname": "memory_revision",
+      "label": "Revision",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Hash of the inputs that the memory was built from."
+    },
+    {
+      "fieldname": "memory_error",
+      "label": "Problems",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "memory",
+      "label": "Memory",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    }
+  ],
+  "modified": "2026-10-28 12:00:00.000000"
+}
