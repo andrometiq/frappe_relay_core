@@ -82,3 +82,43 @@ test('media fits inside the bubble without cropping', async () => {
   assert.match(picture, /max-height:360px/)
   assert.doesNotMatch(css, /\.media-[a-z-]+\{[^}]*object-fit:cover/)
 })
+
+async function viewer(props) {
+  const source = await read('../src/components/AttachmentViewer.vue')
+  const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
+  const observed = [], loads = []
+  globalThis.IntersectionObserver = class { constructor(callback) { this.callback = callback } observe(node) { observed.push(node); this.callback([{ isIntersecting: true }]) } disconnect() {} }
+  const loadMedia = async name => { loads.push(name); if (name === 'RELAY-MSG-BAD') throw Object.assign(Error('Media could not be loaded.'), { retry: true }); return { url: 'blob:' + name } }
+  const scope = Vue.effectScope(), mounted = []
+  const state = scope.run(() => new Function('defineProps', 'onMounted', 'onBeforeUnmount', 'computed', 'nextTick', 'ref', 'watch', 'loadMedia', 'formatBytes', 'attachmentKind', 'documentType',
+    script + '\nreturn { frame, media, error, observe }')(() => props, callback => mounted.push(callback), () => {}, Vue.computed, Vue.nextTick, Vue.ref, Vue.watch, loadMedia, () => '', attachmentKind, documentType))
+  state.frame.value = { node: 'frame' }
+  mounted.forEach(callback => callback())
+  return { state, observed, loads, scope }
+}
+
+test('a refreshed message keeps its media and a new message after an error loads again', async () => {
+  const props = Vue.reactive({ message: { name: 'RELAY-MSG-BAD' }, data: { kind: 'video' }, link: '', downloadable: true })
+  const { state, observed, loads, scope } = await viewer(props)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(state.error.value.message, 'Media could not be loaded.')
+
+  props.message = { name: 'RELAY-MSG-BAD' }
+  await Vue.nextTick()
+  assert.equal(loads.length, 1)
+  assert.ok(state.error.value)
+
+  props.message = { name: 'RELAY-MSG-GOOD' }
+  await Vue.nextTick(); await Vue.nextTick(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(observed.length, 2)
+  assert.deepEqual(state.media.value, { url: 'blob:RELAY-MSG-GOOD' })
+  scope.stop()
+})
+
+test('a template header sent by link shows without a core download', async () => {
+  const props = Vue.reactive({ message: { name: 'RELAY-MSG-1' }, data: { kind: 'image' }, link: 'https://cdn.example.com/logo.png', downloadable: true })
+  const { state, loads, scope } = await viewer(props)
+  assert.deepEqual(state.media.value, { url: 'https://cdn.example.com/logo.png' })
+  assert.equal(loads.length, 0)
+  scope.stop()
+})
