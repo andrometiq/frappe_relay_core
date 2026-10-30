@@ -559,12 +559,22 @@ def dispatch_reply(run, skill, message, reply, *, slot):
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
     try:
+        disclose(run, message)
         result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
     finally:
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
         raise ValueError('Reply delivery requires review')
     return result
+
+
+def disclose(run, message):
+    """Send the assistant notice before the ticket's first AI reply; `current` holds the ticket lock."""
+    from relay_core.ai.disclosure import due, send
+    if not run.get('ticket'):
+        return  # Pre-episode runs have no ticket to record the notice on.
+    if due(frappe.db.get_value('Relay Ticket', run.ticket, ['name', 'ai_disclosed'], as_dict=True)):
+        send(run, message)
 
 
 def complete(action):
@@ -584,13 +594,14 @@ def complete_delivery(action):
     if (not run.get('skill') or run.message != action.source_message
             or run.status not in ('Pending', 'Deciding', 'Delivering', 'Completed')):
         return
+    prefix = 'email:' if action.operation == 'email' else ''
+    if action.request_key == journal_key(run, 'disclosure', prefix):
+        return  # The notice receipt never decides the run; its reply has its own receipt.
     if action.status == 'Submitted':
         steps = json.loads(run.decision or '{}').get('actions', [])
-        prefix = 'email:' if action.operation == 'email' else ''
         # Explicit replies resume the persisted chain after receipt recovery.
         # A delayed receipt cannot reopen an already completed chain.
-        if any(action.request_key == hashlib.sha256((prefix + run.execution_user + ':' +
-                reply_key(run.message, f'event_reply_{step}', run)).encode()).hexdigest() for step in range(len(steps))):
+        if any(action.request_key == journal_key(run, f'event_reply_{step}', prefix) for step in range(len(steps))):
             if run.status != 'Completed':
                 run.status = 'Pending'
                 internal_save(run)
@@ -617,6 +628,11 @@ def complete_delivery(action):
             defer_handoff(run.name)
             return
     frappe.db.commit()
+
+
+def journal_key(run, slot, prefix):
+    """The stored request key of a run's reply slot, as `messaging.request_hash` writes it."""
+    return hashlib.sha256((prefix + run.execution_user + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
 
 
 def recover_deliveries():

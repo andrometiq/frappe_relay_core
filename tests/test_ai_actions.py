@@ -449,7 +449,7 @@ class VerifiedContactExecution(unittest.TestCase):
         self.contact = Doc(name='CONTACT-1', contact=self.person.name, automation_generation=0, automation_paused=0)
         self.ticket = Doc(name='Sim Ticket', ai_disabled=0, company='Sim Company',
             conversation_key=self.message.conversation_key, business_doctype='Customer',
-            business_name=self.business.name, generation=0)
+            business_name=self.business.name, generation=0, ai_disclosed=1)
         original = self.f.get_doc.side_effect
         docs = {'Relay AI Skill': self.skill, 'Relay Automation Run': self.run, 'Relay Contact': self.contact,
                 'Relay Ticket': self.ticket, 'Customer': self.business}
@@ -458,7 +458,7 @@ class VerifiedContactExecution(unittest.TestCase):
         self.f.get_all.side_effect = lambda dt, **kw: ['Customer'] if dt == 'Relay Contact Type' else (
             [Doc(link_doctype='Customer', link_name=self.business.name)] if self.linked else [])
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: (self.binding if dt == 'Relay Contact Endpoint'
-            else self.person.name if dt == 'Relay Contact' else 1)
+            else self.person.name if dt == 'Relay Contact' else self.ticket if dt == 'Relay Ticket' else 1)
         self.f.db.exists.return_value = True
         self.f.has_permission = Mock(return_value=True)
         self.f.get_attr = Mock(return_value=reply)

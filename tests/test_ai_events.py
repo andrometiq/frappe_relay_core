@@ -23,12 +23,12 @@ class MatchingTests(unittest.TestCase):
 
     def test_human_request_requires_explicit_intent(self):
         for text in ('Person in charge listed on invoice', 'agent commission 1250', 'staff payment',
-                     'human resources balance', 'I want a human resources balance', 'Who is the agent?', 'person', 'staff',
+                     'human resources balance', 'I want a human resources balance', 'Who is the agent?', 'person please call',
                      "I don't want to talk to a human", 'No need to speak with staff'):
             with self.subTest(text=text): self.assertFalse(matching.human_request(text))
         for text in ('Talk to a human', 'Please connect me with an agent', 'I want a human',
                      'Transfer me to your staff', 'Speak with a real person', 'Human please',
-                     'Please hand this to a person', 'I need an operator'):
+                     'Please hand this to a person', 'I need an operator', 'person', 'Staff.'):
             with self.subTest(text=text): self.assertTrue(matching.human_request(text))
 
     def test_malformed_and_untrusted_output(self):

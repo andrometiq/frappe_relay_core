@@ -35,6 +35,7 @@ def human_request(text):
                 or re.search(r'\bi (?:want|need|would like) (?:to (?:talk|speak) to )?' + person
                              + r'(?=\s*(?:[.!?]|$)|\s+please\b)', value)
                 or re.fullmatch(r'(?:please ' + person + '|' + person + r' please)[.!?]*', value)
+                or re.fullmatch(r'(?:person|human|staff|agent|ആള്|ആൾ|व्यक्ति|ஆள்)[.!?]*', value)
                 or re.search(r'\b(?:please escalate|escalate (?:this|my|the issue)|i (?:want|need|would like) to escalate)\b', value)
                 or re.search(r'\b(?:i (?:want|need|would like) to (?:complain|(?:raise|file|make|lodge) a complaint)'
                              r'|i (?:have a complaint|am (?:unhappy|dissatisfied) with)|this is (?:a complaint|unacceptable))\b', value)
