@@ -946,18 +946,27 @@ def actions(contact, before=None):
     query=query.where((action.start_contact==contact)|action.source_message.isin(sources))
     if before:query=query.where(action.name<before)
     rows=query.run(as_dict=True)
+    undelivered=undelivered_reasons([row.outbound_message for row in rows[:20] if row.status=='Submitted' and row.outbound_message])
     items=[]
     for row in rows[:20]:
         channel=row.target_channel or frappe.db.get_value('Relay Message',row.source_message or row.outbound_message,'channel')
         if not channel or not frappe.get_doc('Relay Channel',channel).has_permission('read'):continue
-        retryable=row.status=='Rejected' and row.owner==frappe.session.user and row.operation!='business_prompt'
+        failed=row.status=='Submitted' and row.outbound_message in undelivered
+        retryable=(row.status=='Rejected' or failed) and row.owner==frappe.session.user and row.operation!='business_prompt'
         if retryable:
             payload=object_value(frappe.get_doc('Relay Message Action',row.name).payload)
             retryable=not automatic_delivery(payload) and (row.operation!='email' or isinstance(payload.get('email_values'),dict))
-        items.append({'name':row.name,'operation':row.operation,'status':row.status,'creation':row.creation,
+        items.append({'name':row.name,'operation':row.operation,'status':'Undelivered' if failed else row.status,'creation':row.creation,
                       'preview':(row.preview or '')[:300], 'message':row.outbound_message,
-                      'can_retry':retryable, 'error':action_error(row)})
+                      'can_retry':retryable, 'error':action_error(row) or (undelivered[row.outbound_message] if failed else None)})
     return {'items':items,'before':rows[19].name if len(rows)>20 else None}
+
+
+def undelivered_reasons(messages):
+    """Provider failure reason by message, for sends the Hub accepted that WhatsApp later reported as failed."""
+    if not messages: return {}
+    rows=frappe.get_all('Relay Message',filters={'name':['in',messages],'status':'Failed'},fields=['name','delivery_error'])
+    return {row.name:row.delivery_error or 'Not delivered' for row in rows}
 
 
 def retry_key(action):
@@ -965,14 +974,20 @@ def retry_key(action):
 
 
 @frappe.whitelist(methods=['POST'])
-def retry(action):
+def retry(action=None, message=None):
+    """Send a rejected or undelivered message again; a chat bubble names its message, Message activity its action."""
+    if message:
+        readable_message(message)
+        action=frappe.db.get_value('Relay Message Action',{'outbound_message':message},'name',order_by='creation desc')
+        if not action: frappe.throw('This message has no send record to retry',frappe.DoesNotExistError)
     document_name(action)
     require_access()
     doc=frappe.get_doc('Relay Message Action',action);doc.check_permission('read')
     if doc.operation == 'business_prompt':
         frappe.throw('Business prompts are sent once. Assign the business in manager triage.')
-    if doc.owner!=frappe.session.user or doc.status!='Rejected':
-        frappe.throw('Only the original sender can retry a confirmed rejected action',frappe.PermissionError)
+    undelivered=doc.status=='Submitted' and bool(undelivered_reasons([doc.outbound_message] if doc.outbound_message else []))
+    if doc.owner!=frappe.session.user or not (doc.status=='Rejected' or undelivered):
+        frappe.throw('Only the original sender can retry a rejected or undelivered message',frappe.PermissionError)
     # One immutable retry identity per rejected action. If it too is rejected,
     # that child is a separate reviewed action with its own retry identity.
     payload=object_value(doc.payload)

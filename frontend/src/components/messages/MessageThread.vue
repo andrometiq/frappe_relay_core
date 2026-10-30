@@ -2,6 +2,7 @@
 import { useLoadMore } from '../../composables/useLoadMore';
 import { readableName } from '../../services/recordTitle'
 import { channelStatus } from '../../services/channelComposition';
+import { deliveryReason } from '../../services/deliveryReason';
 import { useMessageInfo } from "../../composables/useMessageInfo";
 import LoadingRows from "../LoadingRows.vue";
 import ReadByBubble from "./ReadByBubble.vue";
@@ -96,6 +97,9 @@ const dividers = computed(() => dayDividers(threadRows.value));
 const deliveries = message => message.sends || [message];
 // A chat send the server rejected, or one that never reached the server, offers Retry and Delete.
 const isUnsent = message => !message.emailRequest && (message.action ? message.status === 'Failed' : message.status === 'Unconfirmed' && !!message.request);
+// A send the provider later reported as failed shows its reason on tap or hover and offers Retry in its menu.
+const isUndelivered = message => !message._pending && message.direction === 'Outgoing' && message.status === 'Failed';
+const reasonShown = ref(null);
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
@@ -262,6 +266,7 @@ async function copyText(text) {
 function actions(message) {
   const sends = onPickedChannel(message, props.provider);
   const items = props.replyClosed || !sends ? [] : [{ label: "Reply", icon: "corner-up-left", onClick: () => emit("reply", message) }];
+  if (isUndelivered(message)) items.unshift({ label: "Retry", icon: "refresh-cw", onClick: () => emit("retry", message) });
   if (message.content) items.push({ label: "Copy text", icon: "copy", onClick: () => copyText(message.content) });
   const download = attachmentDownloadURL(message);
   if (download) items.push({label: 'Download', icon: 'download', onClick: () => {
@@ -403,7 +408,9 @@ function actions(message) {
                 class="h-3 w-3"
             /></span>
           </span>
-          <span v-if="!message._pending && !message.sends && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
+          <button v-if="isUndelivered(message)" type="button" class="pending-status is-unsent delivery-reason" :title="deliveryReason(message.delivery_error)"
+            :aria-expanded="reasonShown === message.name" @pointerdown.stop @click.stop="reasonShown = reasonShown === message.name ? null : message.name">Not delivered</button>
+          <span v-else-if="!message._pending && !message.sends && message.direction === 'Outgoing' && !can(message, 'read_receipts')" class="pending-status">{{ channelStatus(message) }}</span>
           <span v-if="message._pending && isUnsent(message)" class="pending-status is-unsent">Not sent
             <Button label="Retry" :disabled="busy" @click="emit('retry', message)" /><Button label="Delete" :disabled="busy" @click="emit('discard', message)" />
           </span>
@@ -411,6 +418,7 @@ function actions(message) {
             <Button v-if="(message.action && message.status !== 'Failed') || (message.emailRequest && message.status === 'Unconfirmed')" label="Check status" :disabled="busy" @click="emit('reconcile', message)" />
           </span>
         </footer>
+        <p v-if="reasonShown === message.name" class="delivery-reason-text" role="status">{{ deliveryReason(message.delivery_error) }}</p>
         <button v-if="!message._pending && !selecting" type="button" class="message-menu-trigger" aria-label="Message actions" title="Message actions"
           aria-haspopup="menu" :aria-expanded="menu?.message.name === message.name" @pointerdown.stop @click="openMenu(message, $event)"><FeatherIcon name="chevron-down" :size="16" /></button>
         <ReactionPicker v-if="reactionTarget === message.name" :choices="reactionChoices" :current="ownReaction(message.reactions)" :busy="busy"
@@ -459,4 +467,6 @@ function actions(message) {
 .note-bubble p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .note-bubble small{font-size:12px;color:var(--relay-note-ink)}
 .conversation-bubble.menu-target{box-shadow:0 0 0 2px var(--relay-accent,#2f6fdb)}
+.delivery-reason{padding:0;border:0;background:none;font:inherit;font-size:12px;text-decoration:underline dotted;cursor:pointer}
+.delivery-reason-text{margin:4px 0 0;font-size:12px;color:var(--ink-red-4);overflow-wrap:anywhere}
 </style>

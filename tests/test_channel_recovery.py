@@ -157,6 +157,46 @@ class UnsentMessageTests(unittest.TestCase):
         self.assertEqual(resend.call_args.args[1], messaging.retry_key('action'))
         hide.assert_called_once_with('action')
 
+    def test_retry_resends_a_sent_message_the_provider_reported_failed(self):
+        action = self.action(status='Submitted', outbound_message='RELAY-MSG-0000000001')
+        with patch.object(messaging, 'require_access'), patch.object(messaging, 'readable_message') as readable, \
+                patch.object(frappe, 'db', Mock(get_value=Mock(return_value='action'))), patch.object(frappe, 'get_doc', return_value=action), \
+                patch.object(frappe, 'get_all', return_value=[_dict(name='RELAY-MSG-0000000001', delivery_error='')]), \
+                patch.object(frappe, 'session', _dict(user='sender')), \
+                patch.object(messaging, 'resend', return_value={'status': 'Submitted'}) as resend, \
+                patch.object(messaging, 'hide_pending'):
+            self.assertEqual(messaging.retry(message='RELAY-MSG-0000000001'), {'status': 'Submitted'})
+        readable.assert_called_once_with('RELAY-MSG-0000000001')
+        self.assertEqual(resend.call_args.args[1], messaging.retry_key('action'))
+
+    def test_a_delivered_or_other_senders_message_cannot_be_retried(self):
+        for values, failed in (({'status': 'Submitted', 'outbound_message': 'message'}, []),
+                               ({'status': 'Submitted', 'outbound_message': 'message', 'owner': 'other'}, [_dict(name='message', delivery_error='')])):
+            with self.subTest(**values), patch.object(messaging, 'require_access'), \
+                    patch.object(frappe, 'get_doc', return_value=self.action(**values)), \
+                    patch.object(frappe, 'get_all', return_value=failed), \
+                    patch.object(frappe, 'session', _dict(user='sender')), \
+                    patch.object(frappe, 'throw', side_effect=frappe.PermissionError), \
+                    patch.object(messaging, 'resend') as resend:
+                with self.assertRaises(frappe.PermissionError):
+                    messaging.retry('action')
+                resend.assert_not_called()
+
+    def test_a_message_without_a_send_record_cannot_be_retried(self):
+        with patch.object(messaging, 'readable_message'), patch.object(frappe, 'db', Mock(get_value=Mock(return_value=None))), \
+                patch.object(frappe, 'throw', side_effect=frappe.DoesNotExistError), patch.object(messaging, 'resend') as resend:
+            with self.assertRaises(frappe.DoesNotExistError):
+                messaging.retry(message='RELAY-MSG-0000000001')
+        resend.assert_not_called()
+
+    def test_undelivered_reasons_name_only_failed_messages(self):
+        self.assertEqual(messaging.undelivered_reasons([]), {})
+        rows = [_dict(name='a', delivery_error='Message undeliverable (code 131026)'), _dict(name='b', delivery_error=None)]
+        with patch.object(frappe, 'get_all', return_value=rows) as get_all:
+            self.assertEqual(messaging.undelivered_reasons(['a', 'b', 'c']),
+                             {'a': 'Message undeliverable (code 131026)', 'b': 'Not delivered'})
+        self.assertEqual(get_all.call_args.kwargs['filters'], {'name': ['in', ['a', 'b', 'c']], 'status': 'Failed'})
+
     def test_failed_retry_keeps_the_rejected_send(self):
         with patch.object(messaging, 'require_access'), patch.object(frappe, 'get_doc', return_value=self.action()), \
                 patch.object(frappe, 'session', _dict(user='sender')), \
