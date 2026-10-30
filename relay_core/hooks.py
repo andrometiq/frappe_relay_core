@@ -22,7 +22,8 @@ scheduler_events = {
         "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
     "hourly": ["relay_core.scheduled_jobs.expire_approvals"],
-    "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels"],
+    "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels",
+              "relay_core.scheduled_jobs.purge_ai_payloads"],
 }
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}

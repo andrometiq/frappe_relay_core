@@ -45,7 +45,8 @@ class OwnerBoundaries(unittest.TestCase):
         default = Doc(name='DEFAULT', sample_key=skills.DEFAULT_KEY, daily_limit=10, ai_model='MOCK')
         specific = Doc(name='EVENT', target='Event overview', daily_limit=10, ai_model='MOCK')
         message = Doc(content='സിഹ്മ പരിപാടി എവിടെ?', channel='WA')
-        with patch('relay_core.automation.service.reserve_attempt'), patch('relay_core.ai.adapter.match') as model:
+        with patch('relay_core.automation.service.reserve_attempt'), patch('relay_core.ai.adapter.match') as model, \
+                patch.object(matching.frappe, 'db', Mock(**{'get_value.return_value': None})):
             self.assertEqual(matching.select(message, [default], None, time.monotonic()+20)['selected'], 'DEFAULT')
             model.assert_not_called()
             model.return_value = dict(human_request=False, scores=[dict(id='EVENT', score=.2)])
@@ -81,7 +82,7 @@ class OwnerBoundaries(unittest.TestCase):
     def test_voice_uses_transcript_and_never_audio_placeholder(self):
         message = Doc(message_type='voice', content='[audio]', transcript='कार्यक्रम कब है?')
         self.assertEqual(language.incoming(message), message.transcript)
-        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local'})), \
+        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local', 'provider':'WhatsApp'})), \
                 patch.object(service, 'conversation_history', return_value=[]), \
                 patch('relay_core.ai.event_memory.ReplyContext') as reference, \
                 patch.object(service, 'decide_text', return_value={'reply':'कार्यक्रम नवंबर में है।'}) as decide:

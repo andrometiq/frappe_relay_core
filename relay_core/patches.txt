@@ -16,3 +16,4 @@ relay_core.patches.v1_0.use_open_and_closed_ticket_statuses
 relay_core.patches.v1_0.build_relay_chats
 relay_core.patches.v1_0.add_business_group_fields
 relay_core.patches.v1_0.capability_contracts
+relay_core.patches.v1_0.add_memory_company_and_provider

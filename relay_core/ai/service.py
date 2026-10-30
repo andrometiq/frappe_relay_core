@@ -84,8 +84,10 @@ def decide(skill, message, run_id=None, *, deadline=None):
         return decide_text(skill, text, user, business, scope, [], run_id=run_id, deadline=deadline)
     history = conversation_history(skill, message, user, business, scope)
     from relay_core.ai.event_memory import ReplyContext
-    # The authenticated sender's own memory of this record, plus events published to its business type.
-    reference = ReplyContext(business, scope['company'], message.sender_endpoint or message.relay_contact)
+    # The authenticated sender's own memory of this record on this company and provider, plus events published to
+    # its business type.
+    reference = ReplyContext(business, scope['company'], scope['provider'],
+                             message.sender_endpoint or message.relay_contact, user)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image
@@ -105,17 +107,20 @@ def decide(skill, message, run_id=None, *, deadline=None):
 
 def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None,
                 language_context=''):
-    """Shared text decision; a missing reference means no saved memory or event notes."""
+    """Shared text decision; a missing reference means no saved memory or event notes. The model sees the sender's
+    contact details only as placeholders; the decision carries their table as `minimise_table`."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
+    from relay_core.ai.minimise import Minimiser
     from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     from relay_core.ai.matching import human_request, human_reason
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
+    minimiser = Minimiser(scope)
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text,
+        prompt = json.dumps(minimiser.mask({'history': history, 'incoming': text,
             **({'language_context': language_context} if language_context else {}),
-            **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
+            **(reference.prompt if reference else {})}), default=str, ensure_ascii=False)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -124,8 +129,9 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
-            decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope), context=reference.used if reference and not decision.get('decline') else None)
+            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
+            return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
+                        context=reference.used if reference and not decision.get('decline') else None)
         if reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
@@ -279,10 +285,10 @@ def declare_search(run, skill, message, decision):
     decision.update(reply=statement, search=plan)
 
 
-def search_request_key(message, user, run=None, slot='search'):
+def search_request_key(message, user, run=None):
     from relay_core.automation.provenance import context_of
     prefix = 'email:' if context_of(message).get('provider') == 'Email' else ''
-    return hashlib.sha256((prefix + user + ':' + reply_key(message.name, slot, run)).encode()).hexdigest()
+    return hashlib.sha256((prefix + user + ':' + reply_key(message.name, 'search', run)).encode()).hexdigest()
 
 
 def check_search(run, skill, record):
@@ -459,6 +465,7 @@ def process(name, *, deadline=None):
                 internal_save(run); frappe.db.commit()
                 decision = decide(skill, message, run.name, deadline=deadline)
                 used = decision.pop('context', None)
+                table = decision.pop('minimise_table', None)
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -468,6 +475,7 @@ def process(name, *, deadline=None):
                 declare_search(run, skill, message, decision)
                 run.decision = json.dumps(decision)
                 run.ai_context = json.dumps(used) if used else None
+                run.minimise_table = json.dumps(table) if table else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
@@ -593,12 +601,22 @@ def dispatch_reply(run, skill, message, reply, *, slot):
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
     try:
+        disclose(run, message)
         result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
     finally:
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
         raise ValueError('Reply delivery requires review')
     return result
+
+
+def disclose(run, message):
+    """Send the assistant notice before the ticket's first AI reply; `current` holds the ticket lock."""
+    from relay_core.ai.disclosure import due, send
+    if not run.get('ticket'):
+        return  # Pre-episode runs have no ticket to record the notice on.
+    if due(frappe.db.get_value('Relay Ticket', run.ticket, ['name', 'ai_disclosed'], as_dict=True)):
+        send(run, message)
 
 
 def complete(action):
@@ -618,13 +636,14 @@ def complete_delivery(action):
     if (not run.get('skill') or run.message != action.source_message
             or run.status not in ('Pending', 'Deciding', 'Delivering', 'Completed')):
         return
+    prefix = 'email:' if action.operation == 'email' else ''
+    if action.request_key == journal_key(run, 'disclosure', prefix):
+        return  # The notice receipt never decides the run; its reply has its own receipt.
     if action.status == 'Submitted':
         steps = json.loads(run.decision or '{}').get('actions', [])
-        prefix = 'email:' if action.operation == 'email' else ''
         # Explicit replies resume the persisted chain after receipt recovery.
         # A delayed receipt cannot reopen an already completed chain.
-        if any(action.request_key == hashlib.sha256((prefix + run.execution_user + ':' +
-                reply_key(run.message, f'event_reply_{step}', run)).encode()).hexdigest() for step in range(len(steps))):
+        if any(action.request_key == journal_key(run, f'event_reply_{step}', prefix) for step in range(len(steps))):
             if run.status != 'Completed':
                 run.status = 'Pending'
                 internal_save(run)
@@ -636,7 +655,7 @@ def complete_delivery(action):
         if action.request_key == search_request_key(source, run.execution_user, run) and run.stage != 'Search':
             return
         # The run waits for staff approval; its notice receipt does not complete it.
-        if action.request_key == search_request_key(source, run.execution_user, run, 'approval_notice'):
+        if action.request_key == journal_key(run, 'approval_notice', prefix):
             return
         run.status = 'Completed'
         if run.stage == 'Search':
@@ -655,6 +674,11 @@ def complete_delivery(action):
             defer_handoff(run.name)
             return
     frappe.db.commit()
+
+
+def journal_key(run, slot, prefix):
+    """The stored request key of a run's reply slot, as `messaging.request_hash` writes it."""
+    return hashlib.sha256((prefix + run.execution_user + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
 
 
 def recover_deliveries():

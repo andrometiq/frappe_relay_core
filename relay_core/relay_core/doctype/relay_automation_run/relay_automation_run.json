@@ -33,6 +33,7 @@
     "search_plan",
     "ownership_generation",
     "ai_context",
+    "minimise_table",
     "pipeline_state",
     "flow_run"
   ],
@@ -199,6 +200,13 @@
       "fieldtype": "JSON",
       "read_only": 1,
       "description": "The record memory rows and the event memory revisions that the reply prompt used."
+    },
+    {
+      "fieldname": "minimise_table",
+      "label": "Minimise table",
+      "fieldtype": "JSON",
+      "read_only": 1,
+      "description": "The placeholders that replaced the sender's phones, emails and name in the model prompt, and their values."
     },
     {
       "fieldname": "pipeline_state",

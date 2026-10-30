@@ -34,3 +34,4 @@ refresh_whatsapp_billing = when_hub_configured('relay_core.billing.refresh_confi
 sync_channels = when_hub_configured('relay_core.channel_sync.sync')
 build_ai_memory = when_hub_configured('relay_core.ai.memory.run', ai=True)
 expire_approvals = when_hub_configured('relay_core.flows.actions.expire_approvals', ai=True)
+purge_ai_payloads = when_hub_configured('relay_core.ai.minimise.purge_ai_payloads')
