@@ -42,6 +42,8 @@ export function createScrollHold(viewport, isEnd = () => true) {
     scrolled() {
       const node = viewport()
       if (!node || (expectedTop !== null && Math.abs(node.scrollTop - expectedTop) <= 1)) return
+      // Scroll anchoring moves the view down when a bubble grows; only an upward scroll leaves the end.
+      if (hold === 'bottom' && isEnd() && expectedTop !== null && node.scrollTop > expectedTop) { apply(); return }
       expectedTop = null
       if (isEnd() && isNearBottom(node)) { hold = 'bottom'; return }
       const top = node.getBoundingClientRect().top

@@ -673,7 +673,7 @@ export function useMessages() {
     data = null,
   ) {
     if (!message) return;
-    const submitted = {scope:windowKey(), body:body.value, attachment:attachment.value,
+    const submitted = {scope:windowKey(), body:body.value, kind:kind.value, attachment:attachment.value,
       quoting:quoting.value, source:source.value};
     if (!data) {
       if (["photo", "video", "audio", "voice", "document"].includes(action)) {
@@ -761,6 +761,10 @@ export function useMessages() {
       quoting.value = false;
       body.value = "";
       attachment.value = null;
+      kind.value = "text";
+      // A send from an older message jumps to the newest one, where the sent bubble appears.
+      restored.value = ""; viewPosition.value = null;
+      if (!newer.value) showArrivals();
     }
     await queueSend(() => deliver(request, storage, pending, submitted))
       .finally(() => sendingKeys.delete(key));
@@ -777,6 +781,7 @@ export function useMessages() {
   function restoreDraft(submitted) {
     if (windowKey() !== submitted.scope || body.value || attachment.value) return;
     body.value = submitted.body;
+    kind.value = submitted.kind;
     attachment.value = submitted.attachment;
     if (source.value === submitted.source) quoting.value = submitted.quoting;
   }
