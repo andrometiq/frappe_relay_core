@@ -69,9 +69,18 @@ def upload(message,filename,content_base64):
     try:raw=base64.b64decode(content_base64,validate=True)
     except (ValueError,binascii.Error):frappe.throw('Invalid attachment data')
     if error:=file_limits.size_error(len(raw),limit,'The attachment'):frappe.throw(error)
-    from frappe.utils.file_manager import save_file
-    file=save_file(filename,raw,'Relay Message',source.name,is_private=1)
+    file=save_attachment(filename,raw,source.name)
     return {'name':file.name,'filename':file.file_name,'size':len(raw)}
+
+
+def save_attachment(filename,raw,message):
+    """A private File on the message that keeps the chosen name. Frappe adds a hash suffix to a reused
+    name on disk; only file_url carries it, so the name sent and downloaded stays the original."""
+    from frappe.utils.file_manager import save_file
+    file=save_file(filename,raw,'Relay Message',message,is_private=1)
+    if file.file_name!=filename:
+        file.db_set('file_name',filename,update_modified=False)
+    return file
 
 
 def response(raw,mime,filename,download):
