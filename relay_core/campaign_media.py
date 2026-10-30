@@ -13,7 +13,7 @@ from relay_core.template_media import HEADER_KINDS, MAX_BYTES, plain_filename
 
 MAX_FILES = 100000
 ZIP_MAX_BYTES = 200 * 1024 * 1024
-ZIP_MAX_FILES = 2000
+ZIP_MAX_FILES = 10000
 SHEETS = ('.xlsx', '.csv', '.tsv')
 
 
@@ -25,7 +25,7 @@ def zip_contents(path):
         with zipfile.ZipFile(path) as archive:
             entries = archive.infolist()
             if len(entries) > ZIP_MAX_FILES:
-                raise ValueError('ZIP must contain at most 2000 entries')
+                raise ValueError('ZIP must contain at most 10000 entries')
             if sum(item.file_size for item in entries) > ZIP_MAX_BYTES:
                 raise ValueError('ZIP must be at most 200 MiB, including expanded files')
             kept, names = [], set()
