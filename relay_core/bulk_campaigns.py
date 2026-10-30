@@ -1,10 +1,12 @@
 """WhatsApp template, text and media campaigns from an uploaded sheet or JSON rows, pushed to Hub 50 rows at a time."""
 import base64
+import csv
 import hashlib
 import json
 import mimetypes
 import re
 import time
+import zipfile
 from io import BytesIO
 import frappe
 from relay_core.business_access import document_name
@@ -39,6 +41,24 @@ OPERATIONS = ('templates.send', 'messages.send', 'messages.media')
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window'
 OPTED_OUT = 'Opted out'
 MEDIA_DAYS = 29  # Meta keeps an uploaded media id for 30 days.
+UNDELIVERED = 'WhatsApp could not deliver this message'
+# Meta error codes of a failed send -> our reason; Meta's own text stays in the stored outcome.
+DELIVERY_REASONS = {
+    130472: f'{UNDELIVERED} because Meta holds this number in a test group',
+    131021: 'The recipient is the WhatsApp number that sends this campaign',
+    131026: f'{UNDELIVERED} to this number. It may not use WhatsApp, or its app may need an update',
+    131047: 'This person last wrote more than 24 hours ago. Send an approved template instead',
+    131048: 'WhatsApp limited this number because people reported its messages as spam',
+    131049: 'WhatsApp held back this marketing message to keep engagement healthy. Try again later',
+    131050: 'This person stopped marketing messages from your business',
+    131053: 'WhatsApp could not process the header file',
+    131056: 'Too many messages went to this number in a short time. Try again later',
+    132000: 'The values do not match the template variables',
+    132001: 'The template does not exist in this language',
+    132012: 'The values do not match the template variable formats',
+    132015: 'The template is paused because of low quality',
+    132016: 'The template is disabled because of low quality',
+}
 ADMISSION = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Queued', 'rejected': 'Failed',
              'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 
@@ -113,6 +133,8 @@ def friendly_reason(reason, fields=()):
     if text in exact or re.fullmatch(r'Header attachment must be at most [0-9.]+ [KM]B', text) or any(
             text == f'Wrong file {part} for {kind} header' for part in ('type', 'content') for kind in ('image', 'video', 'document')):
         return text
+    if code := re.match(r'Meta error ([0-9]+)', text):
+        return DELIVERY_REASONS.get(int(code[1]), f'{UNDELIVERED} (WhatsApp error {code[1]})')
     return 'This row could not be processed. Check its values and attachment, then validate again.' if text else ''
 
 
@@ -291,26 +313,23 @@ def inspect(name, file_url):
     doc = bulk(name, ('Draft',))
     fields = json.loads(doc.arguments)['fields']
     attachment = None
+    if isinstance(file_url, str) and file_url.lower().endswith('.zip'):
+        from relay_core.campaign_media import unpack
+        media_type = next((field['media'] for field in fields if field['key'] == 'header_media'), None)
+        try:
+            file_url, attachment = unpack(uploaded_file(file_url).get_full_path(), name, media_type)
+        except ValueError as exc:
+            frappe.throw(str(exc))
+    path = source_path(file_url)
+    from openpyxl.utils.exceptions import InvalidFileException
     try:
-        if isinstance(file_url, str) and file_url.lower().endswith('.zip'):
-            from relay_core.campaign_media import zip_contents
-            from frappe.utils.file_manager import save_file
-            sheet_name, contents = zip_contents(uploaded_file(file_url).get_full_path())
-            files = []
-            for filename, raw in contents:
-                saved = save_file(filename, raw, 'Relay Campaign', name, is_private=1)
-                if filename == sheet_name:
-                    file_url = saved.file_url
-                else:
-                    files.append({'file_url': saved.file_url, 'filename': filename})
-            if files and any(field['key'] == 'header_media' for field in fields):
-                attachment = {'mode': 'dynamic', 'files': files}
-        header, sample = bulk_sheet.columns(source_path(file_url))
-    except ValueError as exc:
-        frappe.throw(str(exc))
-    except Exception:
+        header, sample = bulk_sheet.columns(path)
+    except (UnicodeDecodeError, csv.Error, zipfile.BadZipFile, KeyError, SyntaxError, OSError, InvalidFileException):
+        # A damaged workbook fails in its ZIP, its part list or its XML.
         frappe.log_error(title='Campaign upload failed')
         frappe.throw('The sheet could not be read. Save it as a new Excel or CSV file and upload it again.')
+    except ValueError as exc:
+        frappe.throw(str(exc))
     if not header:
         frappe.throw('The file has no recipient rows')
     doc.source_file, doc.recipient_filters = file_url, None
@@ -718,6 +737,42 @@ def control(name, action, scheduled_at=None):
         frappe.cache.delete_value(WAIT + name)  # A manager's action tries Hub now, not after a backoff.
         enqueue('send_job', name, slot='control')
     return read(name)
+
+
+@frappe.whitelist(methods=['POST'])
+def retry_failed(name):
+    """Send the Failed rows of a Completed campaign again, under new request keys so Hub sends them again.
+    A repeated call, or one without Failed rows, changes nothing."""
+    doc = bulk(name)
+    if not retry_needed(doc):
+        return read(name)
+    media = check_ready(doc)  # Hub calls stay outside the lock.
+    with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
+        frappe.db.commit()  # A fresh snapshot sees a retry that another request committed.
+        doc = bulk(name)
+        if not retry_needed(doc):
+            return read(name)
+        attempt = 1 + sum(entry['phase'] == 'Retrying failed' for entry in json.loads(doc.arguments).get('phases', []))
+        frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` SET status='Pending', reason='', error_code=0, delivery_id='',
+            provider_id=NULL, attempted=0, request_key=CONCAT(recipient_key, %s), modified=NOW(6)
+            WHERE campaign=%s AND status='Failed' ''', (f'-retry{attempt}', name))
+        from relay_core.bulk_updates import open_reply_window
+        open_reply_window(doc.reply_window_hours)
+        doc.update(media)
+        doc.execution_user, doc.finished_at = frappe.session.user, None
+        doc.status, doc.last_error = 'Running', ''
+        phase(doc, 'Retrying failed')
+        internal_save(doc)
+        frappe.db.commit()  # Before the lock is released, so a waiting request sees this retry.
+    frappe.cache.delete_value(WAIT + name)
+    enqueue('send_job', name, slot='control')
+    from relay_core.bulk_updates import changed
+    changed(name)
+    return read(name)
+
+
+def retry_needed(doc):
+    return doc.status == 'Completed' and bool(frappe.db.exists(RECIPIENT, {'campaign': doc.name, 'status': 'Failed'}))
 
 
 def check_ready(doc):
