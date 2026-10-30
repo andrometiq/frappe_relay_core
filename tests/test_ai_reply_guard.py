@@ -1,5 +1,6 @@
 """Deterministic privacy boundaries, including actual adapter and delivery wiring."""
 import json
+import types
 import unittest
 from unittest.mock import patch
 
@@ -176,15 +177,20 @@ class GuardWiringTests(unittest.TestCase):
 
     def test_adapter_search_contacts_survive_saved_decision_and_delivery(self):
         case = self.adapter_case()
-        reference = dict(name='supplier', report='configured_test_report', method='get_doc', doctype='Supplier', scope_field='name',
-                         fields=['name', 'phone', 'email'])
-        plan = dict(purpose='Read your contact details', reference='supplier', fields=reference['fields'],
+        reference = fixtures.capability(key='erpnext.supplier', operation='get_doc', doctype='Supplier',
+            fields=('name', 'phone', 'email'), filters={}, scope=dict(business_field='name', company={'kind': 'company_neutral'}))
+        plan = dict(purpose='Read your contact details', reference='erpnext.supplier', fields=['name', 'phone', 'email'],
                     arguments={'name': 'SELF'})
         call = dict(id='1', name='SEARCH', arguments={key: value for key, value in plan.items() if key != 'fields'})
         reply = 'Call +1 (555) 123-4567 or OWN@example.test.'
+        row = {'name': 'SELF', 'phone': '+1 555 123 4567', 'email': 'own@example.test'}
+        def read(reader, contract, arguments):
+            reader.results[contract['key']] = {'rows': [row], 'truncated': False}
+            return row
+        renderer = types.SimpleNamespace(get_attr=lambda path: lambda rows, language, truncated: reply)
         with patch.object(case.adapter, 'contracts', return_value=[reference]), \
-                patch.object(case.tools.Reader, '_read', return_value={
-                    'name': 'SELF', 'phone': '+1 555 123 4567', 'email': 'own@example.test'}), \
+                patch.object(case.tools.Reader, '_read', autospec=True, side_effect=read), \
+                patch('relay_core.ai.render.frappe', renderer), \
                 patch('relay_core.ai.service.authorize_search') as authorize:
             case.attempt.side_effect = [case.outcome(calls=[call]),
                 case.outcome(dict(reply=reply, handoff=False, reason=''))]

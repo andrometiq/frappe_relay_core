@@ -150,9 +150,8 @@ def validate_sequence(skill, steps):
 
 def _ai_context(run_name, step):
     from relay_core.ai.service import current, delivery_scope
-    from relay_core.ai.configuration import action_contracts, read_contracts
+    from relay_core.ai.configuration import action_contracts
     from relay_core.ai.tools import as_user
-    from relay_core.business_access import scoped_document
     from relay_core.automation.service import lock_run
     run = lock_run(run_name)
     skill = frappe.get_doc('Relay AI Skill', run.skill)
@@ -189,13 +188,6 @@ def _ai_context(run_name, step):
         definition = definitions().get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
         # current() verifies the sender endpoint and the Contact link to this business.
-        # A reference's legacy identity mapping restricts only actions on its doctype.
-        references = read_contracts(skill, scope['provider'])
-        anchors = {row['identity_fields'][scope['provider']] for row in references
-                   if row.get('identity_anchor') == business[0]
-                   and row['doctype'] in definition['permissions']}
-        for field in anchors:
-            scoped_document(*business, {field: scope['endpoint']})
         for doctype, permission in definition['permissions'].items():
             if not frappe.has_permission(doctype, permission):
                 raise frappe.PermissionError('Action permission denied')

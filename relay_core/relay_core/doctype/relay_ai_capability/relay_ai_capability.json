@@ -1,0 +1,47 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Capability",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:capability_key",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "title_field": "label",
+  "field_order": [
+    "capability_key",
+    "app",
+    "kind",
+    "business_doctype",
+    "label",
+    "enabled",
+    "status",
+    "approved_version",
+    "approved_hash",
+    "current_hash",
+    "approved_by",
+    "approved_on",
+    "manifest"
+  ],
+  "fields": [
+    {"fieldname": "capability_key", "label": "Capability key", "fieldtype": "Data", "reqd": 1, "unique": 1, "read_only": 1, "in_list_view": 1},
+    {"fieldname": "app", "label": "App", "fieldtype": "Data", "read_only": 1, "in_list_view": 1},
+    {"fieldname": "kind", "label": "Kind", "fieldtype": "Select", "options": "Read\nAction", "read_only": 1},
+    {"fieldname": "business_doctype", "label": "Business type", "fieldtype": "Link", "options": "DocType", "read_only": 1},
+    {"fieldname": "label", "label": "Label", "fieldtype": "Data", "read_only": 1},
+    {"fieldname": "enabled", "label": "Enabled", "fieldtype": "Check", "default": "1", "description": "Turn off to stop the AI from using this capability."},
+    {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Pending approval\nApproved\nChanged\nMissing", "default": "Pending approval", "read_only": 1, "in_list_view": 1},
+    {"fieldname": "approved_version", "label": "Approved version", "fieldtype": "Int", "read_only": 1},
+    {"fieldname": "approved_hash", "label": "Approved hash", "fieldtype": "Data", "read_only": 1},
+    {"fieldname": "current_hash", "label": "Current hash", "fieldtype": "Data", "read_only": 1},
+    {"fieldname": "approved_by", "label": "Approved by", "fieldtype": "Link", "options": "User", "read_only": 1},
+    {"fieldname": "approved_on", "label": "Approved on", "fieldtype": "Datetime", "read_only": 1},
+    {"fieldname": "manifest", "label": "Manifest", "fieldtype": "JSON", "read_only": 1}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "print": 1},
+    {"role": "Relay Communication Manager", "read": 1, "write": 1, "report": 1, "print": 1}
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-10-30 12:00:00.000000"
+}

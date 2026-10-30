@@ -220,9 +220,9 @@ def search_scope(scope):
 
 def confirmation_required(skill, plan):
     from relay_core.ai.tools import contracts
-    reference = next(row for row in contracts(skill) if row['name'] == plan['reference'])
-    return (skill.get('search_confirmation') != 'When required'
-            or reference['doctype'] == 'GL Entry' or 'Ledger' in reference['doctype'])
+    reference = next(row for row in contracts(skill) if row['key'] == plan['reference'])
+    return (skill.get('search_confirmation') != 'When required' or reference['confirmation'] == 'Always'
+            or any(spec.get('required') for spec in reference['filters'].values()))
 
 
 def declare_search(run, skill, message, decision):
@@ -301,6 +301,7 @@ def check_search(run, skill, record):
 
 
 def authorize_search(run_id, skill, contract, arguments):
+    from relay_core.ai.render import field_names
     if not run_id:
         raise ValueError('Preview cannot read undeclared business data')
     run = lock_run(run_id)
@@ -312,10 +313,12 @@ def authorize_search(run_id, skill, contract, arguments):
             record['confirmed_by'] != run.message or original['consumed_by'] != run.name):
         raise ValueError('Confirm the exact search before reading')
     expected = record['plan']['arguments']
-    if contract['method'] == 'get_list':
-        expected = dict(filters=expected.get('filters', {}), limit=expected.get('limit', 20))
-        arguments = dict(filters=arguments.get('filters', {}), limit=arguments.get('limit', 20)) if not set(arguments) - {'filters', 'limit'} else arguments
-    if contract['name'] != record['plan']['reference'] or contract['fields'] != record['plan']['fields'] or arguments != expected:
+    if contract['operation'] == 'get_list':
+        limit = contract['limit']
+        expected = dict(filters=expected.get('filters', {}), limit=expected.get('limit', limit))
+        arguments = dict(filters=arguments.get('filters', {}), limit=arguments.get('limit', limit)) if not set(arguments) - {'filters', 'limit'} else arguments
+    if (contract['key'] != record['plan']['reference'] or field_names(contract, 'model') != record['plan']['fields']
+            or arguments != expected):
         raise ValueError('Search differs from the declared plan')
 
 

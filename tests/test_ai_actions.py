@@ -341,12 +341,16 @@ class ExecutionAdapter(unittest.TestCase):
 
     def test_execute_reply_uses_code_owned_partial_ledger_totals(self):
         from relay_core.ai.actions import REPLY
-        from relay_core.ai.ledger import summarize
+        from relay_core.ai import ledger
+        from test_ai_skills import capability
         self.skill.allowed_actions = '[{"action":"reply"}]'
         self.skill.execution_policy = 'Execute'
         self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
-        ledger = summarize([dict(company='Sim Company', debit='100.10', credit='40.05')], True)
-        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability(fields=('debit', 'credit'))]))
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: ledger.supplier)))
+        rows = [dict(company='Sim Company', debit='100.10', credit='40.05')]
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[],
+            results={'erpnext.ledger': {'rows': rows, 'truncated': True}})
         self.attempt.side_effect = [self.outcome(calls=[dict(id='reply', name='EXECUTE',
             arguments=dict(action='reply', parameters={'text': 'Closing balance 999999'}))]),
             self.outcome(dict(reply='', handoff=False, reason=''))]
@@ -502,36 +506,6 @@ class VerifiedContactExecution(unittest.TestCase):
                 self.send.assert_not_called()
                 self.f.get_attr.assert_not_called()
         self.assertEqual(self.handoff.call_count, 2)
-
-    def test_unrelated_read_identity_mapping_does_not_block_reply(self):
-        with patch('relay_core.ai.configuration.read_contracts', return_value=[
-                dict(doctype='Sales Order', identity_anchor='Customer',
-                     identity_fields={'WhatsApp': 'customer_pos_id'})]), \
-             patch('relay_core.business_access.scoped_document', side_effect=ValueError('Identity does not match')) as scoped:
-            self.service.process(self.run.name)
-        scoped.assert_not_called()
-        self.assertEqual(self.run.status, 'Completed')
-        self.send.assert_called_once()
-        self.handoff.assert_not_called()
-
-    def test_only_action_target_identity_mappings_are_enforced(self):
-        action = definition('None')
-        self.actions.definitions = lambda **kw: {'draft_payment': action}
-        self.skill.allowed_actions = json.dumps([dict(action='draft_payment', doctype='Payment Entry', fields=['paid_amount'])])
-        plan = json.loads(self.run.decision)
-        plan['actions'] = [dict(action='draft_payment', parameters={'paid_amount': 1250})]
-        self.run.decision = json.dumps(plan)
-        self.f.get_meta.return_value = Doc(get_field=lambda key: Doc(fieldtype='Currency'))
-        self.enterContext(patch('relay_core.ai.configuration.frappe', self.f))
-        refs = [dict(doctype='Sales Order', identity_anchor='Customer', identity_fields={'WhatsApp': 'customer_pos_id'})]
-        with patch('relay_core.ai.configuration.read_contracts', return_value=refs), \
-             patch('relay_core.business_access.scoped_document', side_effect=ValueError('Identity does not match')) as scoped:
-            self.assertEqual(self.actions._ai_context(self.run.name, 0)[3], {'paid_amount': 1250})
-            scoped.assert_not_called()
-            refs.append(dict(doctype='Payment Entry', identity_anchor='Customer', identity_fields={'WhatsApp': 'phone'}))
-            with self.assertRaisesRegex(ValueError, 'Identity does not match'):
-                self.actions._ai_context(self.run.name, 0)
-            scoped.assert_called_once_with('Customer', self.business.name, {'phone': self.message.sender_endpoint})
 
     def test_execution_failure_logs_traceback_and_hands_off_specific_reason(self):
         self.f.get_attr.return_value = Mock(side_effect=ValueError('Local reply handler failed'))

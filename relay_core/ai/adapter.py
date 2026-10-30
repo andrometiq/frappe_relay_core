@@ -5,6 +5,7 @@ import re
 import frappe
 from relay_core.ai.tools import Reader, contracts, PrivacyDenied, check_identity_arguments
 from relay_core.automation.contracts import validate_search
+from relay_core.ai.render import field_names
 
 MAX_PROMPT_LENGTH = 12000
 MAX_JSON_PROMPT_LENGTH = 48000
@@ -89,7 +90,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     options['timeout'] = min(options.get('timeout', REPLY_TIMEOUT), deadline - time.monotonic())
     reader = Reader(skill, user, business, scope,
         authorize=lambda contract, arguments: authorize_search(run_id, skill, contract, arguments))
-    references = [row for row in contracts(skill) if row.get('report')]
+    references = contracts(skill)
     proposed = []
     read_results = []
     actions = []
@@ -117,10 +118,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             raise ValueError('Action is unavailable') from None
     def search_data(purpose, reference, arguments):
         try:
-            contract = next(row for row in references if row['name'] == reference)
-            plan = validate_search(dict(purpose=purpose, reference=reference,
-                fields=contract['fields'], arguments=arguments), references)
+            contract = next(row for row in references if row['key'] == reference)
             check_identity_arguments(contract, arguments, business, scope)
+            plan = validate_search(dict(purpose=purpose, reference=reference,
+                fields=field_names(contract, 'model'), arguments=arguments), references)
             if search is None:
                 if proposed and proposed[0] != plan:
                     raise ValueError('Only one declared search per turn')
@@ -140,7 +141,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     tools = [agent.Tool('SEARCH', 'Declare a search before reading. Only the authorized exact plan may read.',
         {'type': 'object', 'additionalProperties': False, 'required': ['purpose', 'reference', 'arguments'],
          'properties': {'purpose': {'type': 'string', 'maxLength': 300},
-                        'reference': {'type': 'string', 'enum': [r['name'] for r in references]},
+                        'reference': {'type': 'string', 'enum': [r['key'] for r in references]},
                         'arguments': {'type': 'object'}}}, search_data)] if references else []
     if declarations:
         tools.append(agent.Tool('EXECUTE', 'Propose an allowed action in event order. Core executes after validating the complete turn.',
@@ -161,7 +162,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             # Normalize it through SEARCH; it never bypasses the declaration gate.
             try:
                 arguments = json.loads(call['arguments']) if isinstance(call['arguments'], str) else call['arguments']
-                if call['name'] in {row['name'] for row in references}:
+                if call['name'] in {row['key'] for row in references}:
                     arguments = dict(purpose=skill.get('target') or 'Requested search',
                         reference=call['name'], arguments=arguments)
                     call = dict(call, name='SEARCH')
@@ -187,9 +188,12 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         language_history = []
     language = resolve(incoming_text, language_history)
     knowledge = knowledge_prompt(business, (scope or {}).get('company'))
+    # The model sees each pack's key, model fields and filters, never its renderer or identity paths.
+    catalogue = [dict(reference=row['key'], label=row['label'], operation=row['operation'], fields=field_names(row, 'model'),
+        filters=row['filters'], limit=row['limit'], notes=row.get('data_notes', '')) for row in references]
     system = (SYSTEM_RULES + '\nReply language:\n' + instruction(incoming_text, language_history)
         + '\nKnowledge base — standing instructions:\n' + (knowledge or '(none)')
-        + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(references) +
+        + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(catalogue) +
         '\nAllowed actions:\n' + json.dumps(action_schemas) +
         '\nAuthorized search:\n' + json.dumps(search) + '\nSkill:\n' + skill.instructions +
         '\nOwner reply style:\n' + str(skill.get('reply_style') or '')[:2000])
@@ -235,9 +239,11 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     if value.get('data_question') and not value['handoff'] and not (reader.evidence or proposed or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)
     value.pop('data_question', None)
-    if reader.ledger_results and not value['handoff']:
-        from relay_core.ai.ledger import reply
-        rendered = reply(reader.ledger_results[-1], language=language['language'], business_type=business[0])
+    if reader.results and not value['handoff']:
+        from relay_core.ai.render import render, empty_text
+        packs = {row['key']: row for row in references}
+        rendered = '\n\n'.join(render(packs[key], result['rows'], language['language'], result['truncated'])
+            if result['rows'] else empty_text(language['language']) for key, result in reader.results.items())
         replies = [row for row in actions if registered[row['action']]['effect'] == 'reply']
         for row in replies:
             row['parameters']['text'] = rendered
@@ -273,15 +279,17 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         dates = re.findall(r'\b\d{4}-\d{2}-\d{2}\b', value['reply'])
         if references[0]['doctype'] == 'GL Entry' and len(dates) == 2:
             row = references[0]
-            declaration = dict(purpose=skill.get('target') or 'Review your ledger', reference=row['name'],
-                fields=row['fields'], arguments={'filters': {'posting_date': ['between', dates]}})
+            declaration = dict(purpose=skill.get('target') or 'Review your ledger', reference=row['key'],
+                fields=field_names(row, 'model'), arguments={'filters': {'posting_date': ['between', dates]}})
     if declaration is not None:
-        declaration = validate_search(declaration, references)
-        contract = next(row for row in references if row['name'] == declaration['reference'])
+        plan = declaration if isinstance(declaration, dict) else {}
+        contract = next((row for row in references if row['key'] == plan.get('reference')), None)
         try:
-            check_identity_arguments(contract, declaration['arguments'], business, scope)
+            if contract:
+                check_identity_arguments(contract, plan.get('arguments'), business, scope)
         except PrivacyDenied:
             return decline_decision(user, incoming_text)
+        declaration = validate_search(declaration, references)
         if search is not None and declaration != search:
             raise ValueError('Search changed after confirmation')
     if declaration and search is None and not value['handoff']:

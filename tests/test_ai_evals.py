@@ -121,9 +121,10 @@ class EvalTests(unittest.TestCase):
         self.assertIsNone(log_context['reference_doctype'])
 
     def test_search_tool_can_only_declare_and_cannot_read(self):
-        contract = dict(name='orders', report='configured_test_report', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
-                        scope_field='customer', identity_anchor='Customer')
-        arguments = dict(purpose='Read orders', reference='orders', arguments={'filters': {}})
+        contract = fixtures.capability(key='erpnext.orders', business_doctype='Customer', doctype='Sales Order',
+            fields=('name', 'customer'), filters={}, confirmation='When required',
+            scope=dict(business_field='customer', company={'kind': 'company_field', 'field': 'company'}))
+        arguments = dict(purpose='Read orders', reference='erpnext.orders', arguments={'filters': {}})
         self.case.attempt.side_effect = [self.case.outcome(calls=[dict(id='1', name='SEARCH', arguments=arguments)]),
             self.case.outcome(dict(reply='', handoff=False, reason=''))]
         with patch.object(self.case.adapter, 'contracts', return_value=[contract]), \

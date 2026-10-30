@@ -104,11 +104,12 @@ class ReplyDecisionTests(unittest.TestCase):
 
     def test_foreign_search_is_declined_before_declaration_or_read(self):
         case = self.case
-        contract = dict(name='orders', report='configured_test_report', method='get_list', doctype='Sales Order', fields=['name', 'customer'],
-            scope_field='customer', identity_anchor='Customer', identity_fields={'WhatsApp': 'phone'}, company_field='company')
+        contract = fixtures.capability(key='erpnext.orders', business_doctype='Customer', doctype='Sales Order',
+            fields=('name', 'customer'), filters={}, confirmation='When required',
+            scope=dict(business_field='customer', company={'kind': 'company_field', 'field': 'company'}))
         scope = dict(provider='WhatsApp', endpoint='15550000001', company='Local Company')
         for via_tool in (False, True):
-            plan = dict(purpose='Look up an order', reference='orders', fields=contract['fields'],
+            plan = dict(purpose='Look up an order', reference='erpnext.orders', fields=['name', 'customer'],
                         arguments={'filters': {'customer': 'OTHER'}})
             outcomes = ([case.outcome(calls=[dict(id='1', name='SEARCH', arguments={
                 key: value for key, value in plan.items() if key != 'fields'})])] if via_tool else [])

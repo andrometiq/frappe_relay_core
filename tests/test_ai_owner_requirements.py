@@ -8,7 +8,7 @@ import frappe
 import test_ai_skills as fixtures
 from test_ai_skills import Doc
 from relay_core import ai_features
-from relay_core.ai import events, evals, knowledge, language, matching, reports, reply_guard, service, skills
+from relay_core.ai import events, evals, knowledge, language, matching, reply_guard, service, skills
 
 
 class OwnerBoundaries(unittest.TestCase):
@@ -104,21 +104,6 @@ class OwnerBoundaries(unittest.TestCase):
                 self.assertFalse(evals.grade(case, dict(reply='The event is in Sampleville.'))['passed'])
 
 
-class ReportContracts(unittest.TestCase):
-    def setUp(self):
-        fixtures.ScopedToolTests.setUp(self)
-
-    # Use populated scoped rows and the real Reader, with framework I/O mocked.
-    def test_registered_report_cannot_change_code_fields_or_business_scope(self):
-        contract = dict(self.contract, report='supplier_ledger', doctype='GL Entry', fields=reports.LEDGER_FIELDS)
-        reports.validate(contract, 'Supplier')
-        for changes in ({'report':'sql'}, {'method':'python'}, {'fields':['password']}, {'scope_field':'name'}):
-            with self.assertRaises(ValueError):
-                reports.validate(dict(contract, **changes), 'Supplier')
-        with self.assertRaises(ValueError):
-            reports.validate(contract, 'Customer')
-
-
 class DecisionPath(unittest.TestCase):
     def setUp(self):
         self.case = fixtures.SharedAdapterTests()
@@ -161,8 +146,8 @@ class DecisionPath(unittest.TestCase):
             self.assertNotIn('actions', wrong)
 
     def test_no_sql_code_or_legacy_read_tool_reachable(self):
-        legacy = dict(name='records', method='get_list', doctype='Customer', fields=['name'], scope_field='name')
-        with patch.object(self.case.adapter, 'contracts', return_value=[legacy]), \
+        # Legacy rows fail capability validation, so the skill has no read tool at all.
+        with patch.object(self.case.adapter, 'contracts', return_value=[]), \
                 patch.object(self.case.tools.Reader, 'read') as read:
             for name in ('sql', 'python', 'run_code', 'get_list', 'records', 'SEARCH'):
                 self.case.attempt.return_value = self.case.outcome(calls=[dict(id='1', name=name, arguments={})])

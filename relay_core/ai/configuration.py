@@ -9,8 +9,6 @@ from relay_core.ai.tools import contracts, as_user
 FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as_user',
           'handoff_owner', 'mode', 'daily_limit', 'target', 'instructions', 'reply_style',
           'search_confirmation', 'exact_trigger', 'execution_policy', 'allowed_tools', 'allowed_actions')
-READ_FIELDS = {'name', 'method', 'doctype', 'fields', 'scope_field'}
-SCOPE_FIELDS = {'identity_anchor', 'identity_fields', 'company_field'}
 
 
 def _list(value, label):
@@ -19,41 +17,6 @@ def _list(value, label):
     rows = json.loads(value)
     if not isinstance(rows, list) or len(rows) > 12:
         raise ValueError(f'Choose at most 12 {label}')
-    return rows
-
-
-def read_contracts(doc, provider=None):
-    """Validate declarations only; tools.py owns runtime identity enforcement."""
-    rows = _list(doc.allowed_tools or '[]', 'read references')
-    for row in rows:
-        if not isinstance(row, dict) or not READ_FIELDS <= row.keys() or row.keys() - READ_FIELDS - SCOPE_FIELDS - {'report'}:
-            raise ValueError('Invalid read reference fields')
-    # Reuse the existing scalar-field and direct business Link validation.
-    contracts(doc)
-    from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
-    for row in rows:
-        declared = SCOPE_FIELDS.intersection(row)
-        if not declared and not doc.enabled:
-            continue  # Legacy, disabled starter drafts can still be edited.
-        if declared != SCOPE_FIELDS or row['identity_anchor'] != doc.business_doctype:
-            raise ValueError('Identity must anchor to the selected business DocType')
-        identities = row['identity_fields']
-        if (not isinstance(identities, dict) or not identities
-                or identities.keys() - {'WhatsApp', 'Telegram', 'Email'}
-                or provider and provider not in identities):
-            raise ValueError('Declare the authenticated provider identity field')
-        anchor = get_readable_meta(row['identity_anchor'])
-        for fieldname in identities.values():
-            if not isinstance(fieldname, str):
-                raise ValueError('Invalid provider identity field')
-            field = anchor.get_field(fieldname)
-            if not field or field.fieldtype != 'Data' or is_sensitive_field(fieldname):
-                raise ValueError('Identity fields must be non-sensitive Data fields on the business record')
-        if not isinstance(row['company_field'], str):
-            raise ValueError('Invalid company field')
-        field = get_readable_meta(row['doctype']).get_field(row['company_field'])
-        if not field or field.fieldtype != 'Link' or field.options != 'Company':
-            raise ValueError('Every read reference needs a direct Company link')
     return rows
 
 
@@ -132,7 +95,6 @@ def validate_skill(doc):
     if doc.enabled or doc.handoff_owner:
         with as_user(doc.handoff_owner):
             require_access()
-    channel = None
     if doc.enabled:
         if not doc.channel or not doc.ai_model:
             raise ValueError('Choose a channel and AI Model before enabling the event')
@@ -147,7 +109,7 @@ def validate_skill(doc):
         model = frappe.get_doc('AI Model', doc.ai_model)
         if not model.enabled or not frappe.get_doc('AI Provider Account', model.account).enabled:
             raise ValueError('Choose an enabled AI Model and provider account')
-    read_contracts(doc, channel.channel if channel else None)
+    contracts(doc)
     action_contracts(doc)
 
 
@@ -242,7 +204,7 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
                 items.append(dict(value=event.ai_model, label=label or 'Saved AI model'))
         return {'items': items, 'read_only': True}
     if kind == 'report':
-        from relay_core.ai.reports import options
+        from relay_core.ai.capabilities import options
         return {'items': options(business_doctype)}
     if kind == 'business_doctype':
         from relay_core.business_types import picker_options

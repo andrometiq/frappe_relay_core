@@ -19,6 +19,8 @@
     "memory_model",
     "event_memory_model",
     "max_ai_file_size_mb",
+    "trusted_adapter_apps",
+    "company_neutral_types",
     "send_whatsapp_read_receipts",
     "send_whatsapp_typing",
     "whatsapp_margin_percent",
@@ -123,6 +125,18 @@
       "depends_on": "enable_ai_features"
     },
     {
+      "fieldname": "trusted_adapter_apps",
+      "label": "Trusted AI adapter apps",
+      "fieldtype": "Small Text",
+      "description": "One app per line. The AI uses approved capabilities only from Relay Core and these apps."
+    },
+    {
+      "fieldname": "company_neutral_types",
+      "label": "Company-neutral business types",
+      "fieldtype": "Small Text",
+      "description": "One DocType per line. A capability without a company field can read these types only while the site has one Company."
+    },
+    {
       "fieldname": "send_whatsapp_read_receipts",
       "label": "Send WhatsApp read receipts",
       "fieldtype": "Check",
@@ -172,5 +186,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-28 12:00:00.000000"
+  "modified": "2026-10-30 12:00:00.000000"
 }
