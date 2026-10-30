@@ -189,7 +189,7 @@ def activity(values, matching=None, channels=None):
     """Join and newest-time expression for per-record unread counts and newest readable activity.
 
     With `matching` (a record query), the newest time is one lookup over those records instead of a per-record join.
-    The newest channel is ranked only when a channel filter needs it.
+    The newest channel is found only when a channel filter needs it.
     """
     from relay_core.relay_chats import query as chat_query
     if not chat_query():
@@ -197,25 +197,37 @@ def activity(values, matching=None, channels=None):
         return ('LEFT JOIN `tabRelay Chat` activity ON activity.business_doctype=%(doctype)s AND activity.business_name=b.name',
                 'MAX(activity.last_message_at)')
     from relay_core.inbox import _unread_query
-    from relay_core.timeline import timeline_sql
-    time = timeline_sql('m')
-    readable = f"m.business_doctype=%(doctype)s AND COALESCE(m.legacy_triage, 0)=0 AND {message_scope(values)}"
-    if 'page' in values:
-        readable += ' AND m.business_name IN %(page)s'
-    unread = f"""SELECT m.business_name, COUNT(*) AS unread_count FROM `tabRelay Message` m
-        WHERE m.name IN ({bound_query(_unread_query(['name']), values, 'unread_')}) AND {readable} GROUP BY m.business_name"""
+    unread_names = bound_query(_unread_query(['name']), values, 'unread_')
+    readable = f"COALESCE(m.legacy_triage, 0)=0 AND {message_scope(values)}"
+    records = '%(page)s' if 'page' in values else None
+    unread = f"""SELECT business_name, COUNT(*) AS unread_count
+        FROM ({owned_messages(readable + f' AND m.name IN ({unread_names})', records)}) owned GROUP BY business_name"""
     if matching:
-        newest = f"""(SELECT {time} FROM `tabRelay Message` m WHERE {readable} AND m.business_name IN ({matching})
-            ORDER BY {time} DESC, m.name DESC LIMIT 1)"""
+        newest = f'(SELECT MAX(message_at) FROM ({owned_messages(readable, f"({matching})")}) owned)'
         return f'LEFT JOIN ({unread}) activity ON activity.business_name=b.name', newest
-    latest = f"SELECT m.business_name, MAX({time}) AS last_message_at FROM `tabRelay Message` m WHERE {readable} GROUP BY m.business_name"
+    latest = f'SELECT business_name, MAX(message_at) AS last_message_at FROM ({owned_messages(readable, records)}) owned GROUP BY business_name'
     if channels is not None:
-        # One newest-row lookup per record on relay_business_time instead of ranking every message.
-        latest = f"""SELECT newest.*, (SELECT m.channel FROM `tabRelay Message` m WHERE {readable}
-            AND m.business_name=newest.business_name ORDER BY {time} DESC, m.name DESC LIMIT 1) AS last_channel
-            FROM ({latest}) newest"""
+        latest = f"""SELECT newest.*, MAX(owned.channel) AS last_channel FROM ({latest}) newest
+            JOIN ({owned_messages(readable, records)}) owned ON owned.business_name=newest.business_name AND owned.message_at=newest.last_message_at
+            GROUP BY newest.business_name, newest.last_message_at"""
     return f"""LEFT JOIN (SELECT latest.*, unread.unread_count FROM ({latest}) latest
         LEFT JOIN ({unread}) unread ON unread.business_name=latest.business_name) activity ON activity.business_name=b.name""", 'MAX(activity.last_message_at)'
+
+
+def owned_messages(condition, records=None):
+    """Messages of %(doctype)s records that match `condition`, with their record: the named one, else the record that
+    owns the contact's messages without one, as in the record's thread and Relay Chat. `records` (SQL) limits the records;
+    each half applies it to its own column, as a filter over the union is not pushed down."""
+    from relay_core.business_access import primary_sql
+    from relay_core.timeline import timeline_sql
+    only = f' AND {{}} IN {records}' if records else ''
+    columns = f"{timeline_sql('m')} AS message_at, m.channel, m.name"
+    return f"""SELECT m.business_name, {columns} FROM `tabRelay Message` m
+            WHERE m.business_doctype=%(doctype)s AND COALESCE(m.business_name, '')<>'' AND {condition}{only.format('m.business_name')}
+        UNION ALL
+        SELECT linked.business_name, {columns} FROM `tabRelay Message` m
+            JOIN ({primary_sql('%(doctype)s')}) linked ON linked.relay_contact=m.relay_contact
+            WHERE (COALESCE(m.business_doctype, '')='' OR COALESCE(m.business_name, '')='') AND {condition}{only.format('linked.business_name')}"""
 
 
 @frappe.whitelist(methods=['GET'])
