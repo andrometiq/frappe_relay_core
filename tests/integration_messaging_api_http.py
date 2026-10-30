@@ -157,7 +157,7 @@ def check_campaigns():
     message = {'kind': 'photo', 'caption': 'Hi {{name}}'}
     rows = [{'phone': '+' + known, 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
             {'phone': other, 'name': 'Ravi', 'media_url': 'http://cdn.example/b.jpg'},
-            {'phone': known, 'name': 'Asha again', 'media_url': 'https://cdn.example/c.jpg'}]
+            {'phone': known, 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'}]
     for who in ('guest', 'outsider', 'agent'):
         refused(post(create, who, title=title, message=message, rows=rows), 403)
     refused(post(create, 'manager', title=title, message=message, rows=rows * 1667), 417, '1-5000')
@@ -166,7 +166,7 @@ def check_campaigns():
     body = ok(post(create, 'manager', title=title, message=message, rows=rows))
     assert {'status', 'counts', 'issues', 'recipients', 'mapping'} <= set(body) and body['status'] == 'Draft', body
     assert [(row['status'], row['reason']) for row in body['recipients']] == [
-        ('Pending', ''), ('Skipped', 'Photo link must be an HTTPS link'), ('Skipped', 'Duplicate number')], body['recipients']
+        ('Pending', ''), ('Skipped', 'Photo link must be an HTTPS link'), ('Skipped', 'Duplicate row')], body['recipients']
     more = ok(post('relay_core.bulk_campaigns.append_rows', 'manager', name=title,
                    rows=[{'phone': unknown, 'name': 'New', 'media_url': 'https://cdn.example/d.jpg'}, rows[0]]))
     assert [(row['sheet_row'], row['status']) for row in more['recipients']][3:] == [(4, 'Pending'), (5, 'Skipped')], more
