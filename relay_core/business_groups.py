@@ -144,10 +144,20 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
         validate_text(after)
         conditions.append(f'{bucket}>%(after)s')
         values['after'] = after
+    table = identifier('tab' + doctype)
+    matching = f"SELECT b.name FROM {table} b WHERE {' AND '.join(conditions)}"
+    limit = '' if totals else ' LIMIT 31 OFFSET %(start)s'
+    if not field and not totals and (contacts or channels is None):
+        # Record order does not depend on activity here, so only one page of records needs it.
+        page = frappe.db.sql(matching + ' ORDER BY b.name ASC' + limit, values, as_dict=True)
+        if not page:
+            return []
+        values['page'] = tuple(row['name'] for row in page)
+        conditions.append('b.name IN %(page)s')
+        limit = ''
     selection = '' if totals else (f'{bucket} AS value, ' if field else f"b.name, COALESCE(NULLIF({title}, ''), b.name) AS label, ")
     grouping = '' if totals else (' GROUP BY ' + bucket + (', ' + title if not field and title != 'b.`name`' else ''))
     order = '' if totals else (' ORDER BY value ASC' if field else ' ORDER BY b.name ASC')
-    limit = '' if totals else ' LIMIT 31 OFFSET %(start)s'
     if contacts:
         people = record_scope('Contact', values, 'count_contact_')
         joins = f"""LEFT JOIN `tabDynamic Link` l ON l.link_doctype=%(doctype)s AND l.link_name=b.name
@@ -155,33 +165,16 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
             LEFT JOIN `tabContact` p ON p.name=l.parent AND p.name IN ({people})"""
         metrics = 'COUNT(DISTINCT p.name) AS contact_count, 0 AS unread, 0 AS unread_records, NULL AS last_activity'
     else:
-        from relay_core.relay_chats import query as chat_query
-        if not chat_query():
-            # Only an unrestricted viewer can use counters that include every contact.
-            activity = '`tabRelay Chat`'
-        else:
-            from relay_core.inbox import _unread_query
-            permitted = message_scope(values)
-            unread = bound_query(_unread_query(['name']), values, 'unread_')
-            activity = f"""(SELECT m.business_doctype, m.business_name,
-                SUM(CASE WHEN m.name IN ({unread}) THEN 1 ELSE 0 END) AS unread_count,
-                MAX(COALESCE(m.sent_at, m.creation)) AS last_message_at,
-                MAX(CASE WHEN m.position=1 THEN m.channel END) AS last_channel
-                FROM (SELECT m.name, m.business_doctype, m.business_name, m.sent_at, m.creation, m.channel,
-                    ROW_NUMBER() OVER (PARTITION BY m.business_name ORDER BY COALESCE(m.sent_at, m.creation) DESC, m.name DESC) AS position
-                    FROM `tabRelay Message` m WHERE m.business_doctype=%(doctype)s
-                      AND COALESCE(m.legacy_triage, 0)=0 AND {permitted}) m
-                GROUP BY m.business_doctype, m.business_name)"""
-        joins = f'LEFT JOIN {activity} activity ON activity.business_doctype=%(doctype)s AND activity.business_name=b.name'
+        joins, last_activity = activity(values, matching if totals and channels is None else None, channels)
         if channels is not None:
             # Match Inbox's channel filter: the channel of the newest readable activity.
             values['channels'] = tuple(channels) or ('',)
             conditions.append('activity.last_channel IN %(channels)s')
-        metrics = """COALESCE(SUM(activity.unread_count), 0) AS unread,
+        metrics = f"""COALESCE(SUM(activity.unread_count), 0) AS unread,
             COUNT(DISTINCT CASE WHEN activity.unread_count>0 THEN b.name END) AS unread_records,
-            MAX(activity.last_message_at) AS last_activity"""
+            {last_activity} AS last_activity"""
     rows = frappe.db.sql(f"""SELECT {selection}COUNT(DISTINCT b.name) AS record_count, {metrics}
-        FROM {identifier('tab' + doctype)} b {joins}
+        FROM {table} b {joins}
         WHERE {' AND '.join(conditions)}{grouping}{order}{limit}""", values, as_dict=True)
     for row in rows:
         for metric in ('unread', 'unread_records', 'record_count', 'contact_count'):
@@ -192,10 +185,46 @@ def aggregate(doctype, fields, path, query='', start=0, *, records=False, totals
     return rows
 
 
+def activity(values, matching=None, channels=None):
+    """Join and newest-time expression for per-record unread counts and newest readable activity.
+
+    With `matching` (a record query), the newest time is one lookup over those records instead of a per-record join.
+    The newest channel is ranked only when a channel filter needs it.
+    """
+    from relay_core.relay_chats import query as chat_query
+    if not chat_query():
+        # Only an unrestricted viewer can use counters that include every contact.
+        return ('LEFT JOIN `tabRelay Chat` activity ON activity.business_doctype=%(doctype)s AND activity.business_name=b.name',
+                'MAX(activity.last_message_at)')
+    from relay_core.inbox import _unread_query
+    from relay_core.timeline import timeline_sql
+    time = timeline_sql('m')
+    readable = f"m.business_doctype=%(doctype)s AND COALESCE(m.legacy_triage, 0)=0 AND {message_scope(values)}"
+    if 'page' in values:
+        readable += ' AND m.business_name IN %(page)s'
+    unread = f"""SELECT m.business_name, COUNT(*) AS unread_count FROM `tabRelay Message` m
+        WHERE m.name IN ({bound_query(_unread_query(['name']), values, 'unread_')}) AND {readable} GROUP BY m.business_name"""
+    if matching:
+        newest = f"""(SELECT {time} FROM `tabRelay Message` m WHERE {readable} AND m.business_name IN ({matching})
+            ORDER BY {time} DESC, m.name DESC LIMIT 1)"""
+        return f'LEFT JOIN ({unread}) activity ON activity.business_name=b.name', newest
+    latest = f"SELECT m.business_name, MAX({time}) AS last_message_at FROM `tabRelay Message` m WHERE {readable} GROUP BY m.business_name"
+    if channels is not None:
+        # One newest-row lookup per record on relay_business_time instead of ranking every message.
+        latest = f"""SELECT newest.*, (SELECT m.channel FROM `tabRelay Message` m WHERE {readable}
+            AND m.business_name=newest.business_name ORDER BY {time} DESC, m.name DESC LIMIT 1) AS last_channel
+            FROM ({latest}) newest"""
+    return f"""LEFT JOIN (SELECT latest.*, unread.unread_count FROM ({latest}) latest
+        LEFT JOIN ({unread}) unread ON unread.business_name=latest.business_name) activity ON activity.business_name=b.name""", 'MAX(activity.last_message_at)'
+
+
 @frappe.whitelist(methods=['GET'])
 def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None, channels=None,
-           business_type=None, business_name=None, contacts=0):
-    """Type tiles, then one configured level at a time, then paginated record tiles."""
+           business_type=None, business_name=None, contacts=0, path_fields=None):
+    """Type tiles, then one configured level at a time, then paginated record tiles.
+
+    The query searches the shown level: type labels, group values or record titles.
+    """
     require_access()
     validate_text(query)
     offset = page_start(start)
@@ -213,14 +242,14 @@ def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None
         for config in list_types():
             if not config.enabled:
                 continue
-            dt = config.business_doctype
-            if business_type and dt != business_type:
+            dt, label = config.business_doctype, config.label or config.business_doctype
+            if (business_type and dt != business_type) or not matches(query, label, dt):
                 continue
-            counts = aggregate(dt, configuration(dt), [], query, totals=True, **options)[0]
-            if (query or business_name or channels is not None) and not counts['record_count']:
+            counts = aggregate(dt, configuration(dt), [], totals=True, **options)[0]
+            if (business_name or channels is not None) and not counts['record_count']:
                 continue
-            items.append(dict(counts, kind='type', doctype=dt, label=config.label or dt))
-        if options['contacts']:
+            items.append(dict(counts, kind='type', doctype=dt, label=label))
+        if options['contacts'] and matches(query, 'Not linked'):
             from relay_core.contacts import unlinked_people
             from relay_core.business_access import people_query
             count = people_query(fields=[{'COUNT': 'name', 'as': 'total'}], filters=[unlinked_people()]).run(as_dict=True)[0]['total']
@@ -228,12 +257,31 @@ def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None
         return {'items': items, 'next': None, 'kind': 'type', 'fields': []}
     check_type(doctype)
     fields = configuration(doctype)
-    path = path_values(path, fields)
-    kind = 'group' if len(path) < len(fields) else 'record'
-    rows = aggregate(doctype, fields, path, query, offset, **options)
-    return {'items': [dict(row, kind=kind, doctype=doctype) for row in rows[:PAGE]],
+    path = current_path(path, path_fields, fields)
+    level = fields[len(path)] if len(path) < len(fields) else None
+    kind = 'group' if level else 'record'
+    rows = aggregate(doctype, fields, path, query, offset, group_search=bool(level), **options)
+    return {'items': [dict(row, kind=kind, doctype=doctype, field=level) for row in rows[:PAGE]],
             'next': offset + PAGE if len(rows) > PAGE else None, 'kind': kind,
+            'path': path, 'path_fields': fields[:len(path)],
             'fields': [{'fieldname': field, 'label': frappe.get_meta(doctype).get_field(field).label or field} for field in fields]}
+
+
+def matches(query, *labels):
+    return any(query.strip().lower() in label.lower() for label in labels)
+
+
+def current_path(path, path_fields, fields):
+    """A path saved under other grouping fields restarts at the type level instead of filtering the wrong field."""
+    if path_fields is None:
+        return path_values(path, fields)
+    path_fields = frappe.parse_json(path_fields) if isinstance(path_fields, str) else path_fields
+    if not isinstance(path_fields, list) or not all(isinstance(field, str) for field in path_fields):
+        frappe.throw('Invalid grouping path')
+    path = frappe.parse_json(path) if isinstance(path, str) else (path or [])
+    if not isinstance(path, list) or len(path) != len(path_fields) or path_fields != fields[:len(path)]:
+        return []
+    return path_values(path, fields)
 
 
 @frappe.whitelist(methods=['GET'])

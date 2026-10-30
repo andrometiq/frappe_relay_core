@@ -40,48 +40,64 @@ export function removalHint(row) {
 
 export const emptyTicketFilters = () => ({ query: '', ticket_status: '', mine: 0 })
 
-// Open and closed totals from the per-status counts, by the type of each status.
-export function ticketTotals(settings, rows) {
-  const totals = { open: 0, closed: 0 }
-  for (const row of rows) totals[isClosed(settings, row) ? 'closed' : 'open'] += row.tickets
-  return totals
-}
-
 // Bar rows for one count list: each bar's width is its share of the largest count.
 export function chartRows(rows, field, label) {
   const largest = Math.max(1, ...rows.map(row => row.tickets))
   return rows.map(row => ({ key: row[field] || '', label: label(row[field]), tickets: row.tickets, width: Math.round(row.tickets / largest * 100) }))
 }
 
-// Keep every count represented; Others filters out the eight visible assignees.
-export function assigneeChartRows(rows, label, expanded = false) {
+// Open tickets of the eight busiest assignees; Others filters out those eight.
+export function assigneeChartRows(rows, label) {
   const sorted = [...rows].sort((a, b) => b.tickets - a.tickets)
-  const visible = expanded ? sorted : sorted.slice(0, 8)
-  const labels = new Map()
-  for (const row of sorted) {
-    const name = label(row.assigned_to)
-    labels.set(name, (labels.get(name) || 0) + 1)
-  }
-  const result = chartRows(visible, 'assigned_to', user => {
-    const name = label(user)
-    return user && labels.get(name) > 1 ? `${name} (${user})` : name
-  }).map(row => ({ ...row, filters: { assigned_to: row.key } }))
-  if (!expanded && sorted.length > 8) result.push({ key: 'others', label: 'Others',
+  const visible = sorted.slice(0, 8)
+  const result = chartRows(visible, 'assigned_to', label).map(row => ({ ...row,
+    title: row.key ? `${row.label} (${row.key})` : row.label, filters: { state: 'Open', assigned_to: row.key } }))
+  if (sorted.length > 8) result.push({ key: 'others', label: 'Others', title: 'Others',
     tickets: sorted.slice(8).reduce((sum, row) => sum + row.tickets, 0),
-    filters: { exclude_assignees: JSON.stringify(visible.map(row => row.assigned_to || '')) } })
+    filters: { state: 'Open', exclude_assignees: JSON.stringify(visible.map(row => row.assigned_to || '')) } })
   const largest = Math.max(1, ...result.map(row => row.tickets))
   return result.map(row => ({ ...row, width: Math.round(row.tickets / largest * 100) }))
 }
 
+const VIEWS = ['dashboard', 'tickets', 'settings']
+const ROUTE_FILTERS = ['query', 'ticket_status', 'mine', 'state', 'assigned', 'resolved_today', 'assigned_to',
+  'ticket_type', 'exclude_assignees', 'business_type', 'unlinked']
+// An empty value of these is itself a filter: no owner, no type.
+const EMPTY_FILTERS = ['assigned_to', 'ticket_type']
+
+// The Tickets URL: the dashboard is #/tickets, the list carries its filters, and an open ticket is added on top.
+export function ticketRoute({ view = 'dashboard', filters = {}, ticket = '' } = {}) {
+  const params = new URLSearchParams()
+  if (view !== 'dashboard' || ticket) params.set('view', view)
+  if (view === 'tickets') {
+    for (const key of ROUTE_FILTERS) {
+      const value = filters[key]
+      if ((value && value !== '0') || (value === '' && EMPTY_FILTERS.includes(key))) params.set(key, value)
+    }
+  }
+  if (ticket) params.set('ticket', ticket)
+  const query = params.toString()
+  return '#/tickets' + (query ? '?' + query : '')
+}
+
 export function ticketFilterRoute(filters) {
-  return '#/tickets?' + new URLSearchParams({ view: 'tickets', ...filters }).toString()
+  return ticketRoute({ view: 'tickets', filters })
+}
+
+// View, list filters and open ticket of a Tickets URL; a bare ticket link opens over the list.
+export function readTicketRoute(hash) {
+  const params = new URLSearchParams(hash.split('?')[1] || '')
+  const ticket = params.get('ticket') || ''
+  const view = VIEWS.includes(params.get('view')) ? params.get('view') : ticket ? 'tickets' : 'dashboard'
+  return { view, ticket, filters: ticketFiltersFromRoute(hash) }
 }
 
 export function ticketFiltersFromRoute(hash) {
   const params = new URLSearchParams(hash.split('?')[1] || '')
   const filters = emptyTicketFilters()
-  for (const field of ['assigned_to', 'ticket_type', 'exclude_assignees', 'business_type']) {
+  for (const field of ROUTE_FILTERS) {
     if (params.has(field)) filters[field] = params.get(field)
   }
+  filters.mine = Number(filters.mine) ? 1 : 0
   return filters
 }

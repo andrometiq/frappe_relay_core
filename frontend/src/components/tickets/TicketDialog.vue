@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
 import ChoiceField from '../fields/ChoiceField.vue'
 import TicketDiscussion from '../TicketDiscussion.vue'
@@ -21,6 +21,10 @@ const closed = computed(() => isClosed(props.settings, props.ticket))
 const staffTookOver = computed(() => props.ticket.ai_disabled && props.ticket.ownership_actor && props.ticket.ownership_actor !== 'Administrator')
 const ownerField = computed(() => ({ label: '', placeholder: linkedTitle('User', props.ticket.assigned_to, 'Search colleagues…'), readOnly: props.busy,
   search: async (query, signal) => distinctPeople(await coreApi('collaboration.colleagues', { contact: props.ticket.contact, query }, false, { signal })) }))
+// The second press of the double-click that opened the ticket lands on the mask; it must not close it.
+const keepOpenOnDoubleClick = event => { if (event.detail > 1 && event.target.classList?.contains('relay-dialog-mask')) event.stopPropagation() }
+onMounted(() => document.addEventListener('mousedown', keepOpenOnDoubleClick, true))
+onBeforeUnmount(() => document.removeEventListener('mousedown', keepOpenOnDoubleClick, true))
 const deskRoute = (doctype, name) => '/app/' + encodeURIComponent(doctype.toLowerCase().replaceAll(' ', '-')) + '/' + encodeURIComponent(name)
 
 // The contact's linked business records; a contact the user cannot read shows none.

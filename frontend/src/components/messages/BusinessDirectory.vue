@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread } from '../../services/businessBrowse'
+import { browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { useLoadMore } from '../../composables/useLoadMore'
@@ -14,7 +14,8 @@ const emit = defineEmits(['select', 'contact', 'navigate'])
 const base = props.contacts ? '#/contacts' : '#/messages'
 const state = ref(readBrowse(location.hash)), query = ref(state.value.query), items = ref([]), fields = ref([])
 const loading = ref(false), error = ref(''), next = ref(null), heading = ref(null)
-const people = computed(() => props.contacts && (query.value.trim() || state.value.record || state.value.unlinked))
+// Search filters the shown level; contacts are searched only inside a record and in Not linked.
+const people = computed(() => props.contacts && !!(state.value.record || state.value.unlinked))
 const crumbs = computed(() => browseCrumbs(state.value, fields.value))
 let sequence = 0
 async function load(append = false) {
@@ -24,17 +25,20 @@ async function load(append = false) {
   try {
     const page = people.value
       ? await coreApi('api.contact_directory', { query: query.value, after: append ? next.value : null,
-        // Searching at any depth finds contacts directly, without restricting the business path.
-        business_type: query.value.trim() ? null : state.value.doctype || null,
-        business_name: query.value.trim() ? null : state.value.record || null,
-        unlinked: !query.value.trim() && state.value.unlinked ? 1 : 0 })
+        business_type: state.value.doctype || null, business_name: state.value.record || null, unlinked: state.value.unlinked ? 1 : 0 })
       : await coreApi('business_groups.browse', { doctype: state.value.doctype || null,
-        path: JSON.stringify(state.value.path), query: query.value, start: append ? next.value : 0,
-        contacts: props.contacts ? 1 : 0, ...props.filters })
+        path: JSON.stringify(state.value.path), path_fields: JSON.stringify(state.value.pathFields), query: query.value,
+        start: append ? next.value : 0, contacts: props.contacts ? 1 : 0, ...props.filters })
     if (request !== sequence) return
+    if (page.path && JSON.stringify(page.path) !== JSON.stringify(state.value.path)) {
+      // The grouping changed since this URL was saved: show the type level the server answered.
+      state.value = { ...state.value, path: page.path, pathFields: page.path_fields, record: '', recordLabel: '' }
+      return window.history.replaceState(window.history.state, '', browseRoute(base, { ...state.value, query: query.value }))
+    }
     const rows = people.value ? page.items.map(row => ({ ...row, kind: 'contact', label: row.full_name || row.name })) : page.items
     items.value = append ? [...items.value, ...rows] : rows
-    fields.value = page.fields || fields.value; next.value = page.next
+    if (!people.value) fields.value = page.fields || []
+    next.value = page.next
   } catch (e) { if (request === sequence) error.value = e.message }
   finally { if (request === sequence) loading.value = false }
 }
@@ -85,9 +89,9 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
         <FeatherIcon v-if="index" name="chevron-right" :size="14" aria-hidden="true" />{{ crumb.label }}
       </button>
     </nav>
-    <h3 ref="heading" tabindex="-1" class="business-level">{{ people ? (query.trim() ? 'Contact search' : 'Contacts') : fields[state.path.length]?.label || (state.doctype ? 'Business records' : 'Business types') }}</h3>
+    <h3 ref="heading" tabindex="-1" class="business-level">{{ levelLabel(state, fields) }}</h3>
     <form class="business-search" role="search" @submit.prevent="search">
-      <TextInput v-model="query" type="search" maxlength="80" :aria-label="contacts ? 'Search contacts' : 'Search business records'" :placeholder="contacts ? 'Search name, number or email' : 'Search record title or name'">
+      <TextInput v-model="query" type="search" maxlength="80" :aria-label="searchLabel(state, fields)" :placeholder="searchLabel(state, fields)">
         <template #prefix><FeatherIcon name="search" /></template>
       </TextInput>
     </form>
@@ -96,8 +100,8 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
       <LoadingRows v-if="loading && !items.length" label="Loading records…" />
       <button v-for="tile in items" :key="JSON.stringify([tile.kind, tile.doctype, tile.name, tile.value])" type="button" class="business-tile"
         :disabled="busy" :aria-pressed="tile.kind === 'record' && selectedDoctype === tile.doctype && selected === tile.name" @click="choose(tile)">
-        <Avatar v-if="tile.kind === 'contact'" :label="tile.label" />
-        <span v-else class="business-tile-icon" aria-hidden="true"><FeatherIcon :name="tile.kind === 'record' ? 'file-text' : tile.kind === 'unlinked' ? 'users' : 'folder'" :size="20" /></span>
+        <Avatar v-if="tile.kind === 'contact' || tile.kind === 'record'" :label="tile.label" />
+        <span v-else class="business-tile-icon" aria-hidden="true"><FeatherIcon :name="tile.kind === 'unlinked' ? 'users' : 'folder'" :size="20" /></span>
         <span class="business-tile-copy"><strong>{{ tile.label }}</strong>
           <small v-if="contacts && tile.kind !== 'contact'">{{ tileCount(tile.contact_count, 'contact') }}</small>
           <small v-else-if="tile.kind === 'type' || tile.kind === 'group'">{{ tileCount(tile.record_count, 'record') }}</small>

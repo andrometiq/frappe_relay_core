@@ -341,6 +341,32 @@ class StartDestinationTests(BoundaryTests):
         result = self.start.business_options('Person', 'Sales Partner', 'Partner', channel='WA')
         self.assertEqual(len(result), 2)
 
+    def test_business_picker_explains_a_number_another_contact_owns(self):
+        self.start.business_channels = Mock(return_value=[])
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA'] if kw.get('pluck') else [Row(name='WA', channel='WhatsApp')]
+        key = self.lifecycle.endpoint_key('WA', NUMBER)
+        self.frappe.get_all.side_effect = lambda doctype, **kw: (
+            [('Relay', 'Person')] if doctype == 'Relay Contact' else [Row(endpoint_key=key, relay_contact='Other relay')])
+        with self.assertRaisesRegex(ValueError, 'saved on another contact too'):
+            self.start.business_options('Person', 'Sales Partner', 'Partner')
+
+    def test_held_numbers_name_only_contacts_another_contact_owns(self):
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA']
+        own, shared = self.lifecycle.endpoint_key('WA', '911'), self.lifecycle.endpoint_key('WA', '912')
+        self.frappe.get_all.side_effect = lambda doctype, **kw: (
+            [('Relay A', 'A'), ('Relay B', 'B')] if doctype == 'Relay Contact'
+            else [Row(endpoint_key=own, relay_contact='Relay A'), Row(endpoint_key=shared, relay_contact='Relay Z')])
+        held = self.start.numbers_held_elsewhere({'A': {'911'}, 'B': {'912'}, 'C': {'912'}})
+        self.assertEqual(held, {'B', 'C'})
+        self.assertEqual(self.start.numbers_held_elsewhere({}), set())
+
+    def test_business_picker_without_any_number_returns_no_destinations(self):
+        self.start.business_channels = Mock(return_value=[])
+        self.person.phone_nos = []
+        self.frappe.get_list.side_effect = lambda *a, **kw: ['WA'] if kw.get('pluck') else [Row(name='WA', channel='WhatsApp')]
+        self.assertEqual(self.start.business_options('Person', 'Sales Partner', 'Partner'), [])
+        self.frappe.get_all.assert_not_called()
+
     def test_start_binding_enrolls_on_the_selected_channel_without_sending(self):
         self.frappe.db.get_value.return_value = 'WhatsApp'
         original = self.frappe.get_doc.side_effect

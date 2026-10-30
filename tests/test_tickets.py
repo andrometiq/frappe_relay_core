@@ -182,12 +182,66 @@ class TicketTests(unittest.TestCase):
         self.assertEqual((len(page['items']), page['next']), (30, {'after': 'TKT-00002'}))
         with self.assertRaises(ValueError): self.module.directory(after='RELAY-TKT-0000000001')
 
-    def test_dashboard_counts_readable_tickets_by_status_assignee_and_type(self):
-        self.f.get_list = Mock(return_value=[])
+    def statuses(self):
+        self.module.ticket_settings.STATUS_TYPES = ('Open', 'Closed')
+        self.module.ticket_settings.DOCTYPES = {'status': 'Relay Ticket Status'}
+        versions = [Record(docname='TKT-00007', data='{"changed": [["ticket_status", "Open", "Done"]]}'),
+                    Record(docname='TKT-00008', data='{"changed": [["ticket_status", "Done", "Open"]]}'),
+                    Record(docname='TKT-00002', data='{"changed": [["ticket_status", "Done", "Done"], ["subject", "a", "b"]]}')]
+
+        def get_all(doctype, filters, pluck=None, fields=None):
+            if doctype == 'Version':
+                return versions
+            if doctype == 'Relay Ticket':
+                return ['TKT-00009']
+            return {'Open': ['Open', 'Started'], 'Closed': ['Done']}[filters['state']]
+        self.f.get_all = Mock(side_effect=get_all)
+        self.f.parse_json = __import__('json').loads
+        self.f.utils.today = lambda: '2026-10-30'
+
+    def test_dashboard_sums_open_workload_from_one_permission_checked_query_set(self):
+        self.statuses()
+        groups = [Record(ticket_status='Open', assigned_to='a@example.invalid', business_doctype='Customer', tickets=4),
+                  Record(ticket_status='Started', assigned_to='a@example.invalid', business_doctype=None, tickets=2),
+                  Record(ticket_status='Open', assigned_to=None, business_doctype='Customer', tickets=3),
+                  Record(ticket_status='Done', assigned_to='b@example.invalid', business_doctype='Supplier', tickets=9)]
+        recent = [Record(name='TKT-00009')]
+        oldest = [Record(name='TKT-00001', subject='Old', creation='2026-10-01')]
+        self.f.get_list = Mock(side_effect=[groups, [Record(tickets=5)], recent, oldest])
         result = self.module.dashboard()
-        self.assertEqual(set(result), {'statuses', 'assignees', 'types'})
-        self.assertEqual([call.kwargs['group_by'] for call in self.f.get_list.call_args_list], ['ticket_status', 'assigned_to', 'ticket_type'])
-        self.assertTrue(all(call.args == ('Relay Ticket',) for call in self.f.get_list.call_args_list))
+        self.module.require_access.assert_called_once_with()
+        self.assertEqual(result['totals'], {'open': 9, 'assigned': 6, 'unassigned': 3, 'resolved_today': 5})
+        self.assertEqual(result['oldest_open'].name, 'TKT-00001')
+        self.assertEqual(result['recent'], recent)
+        self.assertEqual(result['assignees'], [{'assigned_to': 'a@example.invalid', 'tickets': 6}, {'assigned_to': '', 'tickets': 3}])
+        self.assertEqual(result['business_types'], [{'business_doctype': 'Customer', 'tickets': 7}, {'business_doctype': '', 'tickets': 2}])
+        self.assertEqual(result['statuses'], [{'ticket_status': 'Done', 'tickets': 9}, {'ticket_status': 'Open', 'tickets': 7},
+                                              {'ticket_status': 'Started', 'tickets': 2}])
+        calls = self.f.get_list.call_args_list
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all(call.args == ('Relay Ticket',) for call in calls))
+        self.assertEqual(calls[1].kwargs['filters'], {'ticket_status': ['in', ['Done']], 'name': ['in', ['TKT-00007', 'TKT-00009']]})
+        self.assertEqual((calls[2].kwargs['order_by'], calls[2].kwargs['limit_page_length']), ('creation desc', 10))
+
+    def test_resolved_today_counts_only_tickets_closed_today(self):
+        self.statuses()
+        self.assertEqual(self.module._resolved_today(), ['TKT-00007', 'TKT-00009'])
+        version_call = next(c for c in self.f.get_all.call_args_list if c.args[0] == 'Version')
+        self.assertEqual(version_call.kwargs['filters'], {'ref_doctype': 'Relay Ticket', 'creation': ['>=', '2026-10-30'],
+                                                          'data': ['like', '%"ticket_status"%']})
+
+    def test_dashboard_links_filter_the_directory_by_state_owner_link_and_resolved_today(self):
+        self.statuses()
+        self.f.get_list = Mock(return_value=[])
+        self.module.directory(state='Open', assigned='1', unlinked='1')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+            'business_doctype': ['is', 'not set'], 'ticket_status': ['in', ['Open', 'Started']], 'assigned_to': ['is', 'set']})
+        self.module.directory(resolved_today='1')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+            'name': ['in', ['TKT-00007', 'TKT-00009']], 'ticket_status': ['in', ['Done']]})
+        self.module.directory(state='Open', ticket_status='Done', assigned='1', assigned_to='')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'ticket_status': 'Done', 'assigned_to': ['is', 'not set']})
+        with self.assertRaises(ValueError): self.module.directory(state='Pending')
 
     def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
         self.doc.name = 'TKT-00001'

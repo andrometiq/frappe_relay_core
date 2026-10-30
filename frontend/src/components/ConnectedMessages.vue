@@ -10,7 +10,7 @@ import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
 import ContactDetails from "./ContactDetails.vue";
 import ChatPanel from "./messages/ChatPanel.vue";
-import { channelOffText, plainChatError } from "../services/chatErrors";
+import { canStartChat, channelOffText, noReplyText, plainChatError } from "../services/chatErrors";
 import { objectValue } from './messageContent';
 import MessageThread from "./messages/MessageThread.vue";
 import SendChannel from "./messages/SendChannel.vue";
@@ -122,7 +122,6 @@ const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactR
 const menuActions = computed(() => [
   ...(conversationContact.value ? [{label:'Internal notes',icon:'message-square',onClick:openNotes}, {label:'Topics',icon:'list',onClick:() => topicsOpen.value = true}] : []),
   {label:'Search conversation',icon:'search',onClick:() => togglePanel('search')},
-  ...(isMobile.value && contactRows.value.length ? [{label:'Create ticket from this chat',icon:'ticket',onClick:() => openTicket()}] : []),
 ]);
 function togglePanel(name) { panel.value = panel.value === name ? '' : name; }
 const provider = computed(() => objectValue(source.value?.provider_context).provider || "");
@@ -253,7 +252,7 @@ function openContact(contact) {
   return state.open(contact);
 }
 function openTicket(message) {
-  ticketMessages.value = Array.isArray(message) ? message : [message || contactRows.value.at(-1)].filter(Boolean);
+  ticketMessages.value = [message].flat().filter(Boolean);
   ticketMessage.value = ticketMessages.value[0] || null;
   ticketOpen.value = !!ticketMessage.value;
 }
@@ -284,6 +283,8 @@ const channels = ref(null);
 coreApi('api.channel_options').then(result => { channels.value = result.items; }, () => {});
 const channelOff = computed(() => !!source.value && !!channels.value && !channels.value.some(row => row.name === source.value.channel && row.enabled));
 const replyOff = computed(() => channelOff.value && !numbers.active.value ? channelOffText(provider.value) : '');
+const replyContact = computed(() => activeContact.value || (linkedContacts.value.length === 1 ? linkedContacts.value[0] : null));
+const noReplyCopy = computed(() => noReplyText({ contact: replyContact.value, choosing: chooseRecipient.value && !activeContact.value }));
 watch(source, value => {
   if (businessName.value && value?.frappe_contact && activeBusinessContact.value && activeBusinessContact.value !== value.frappe_contact) activeBusinessContact.value = value.frappe_contact;
 });
@@ -398,7 +399,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><Avatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
-            <Button class="conversation-ticket" icon="ticket" label="Create ticket from this chat" :title="contactRows.length ? 'Create a ticket linked to the last message' : 'No messages in this chat yet'" :disabled="busy || !contactRows.length" @click="openTicket()" />
             <Button icon="info" aria-label="Contact info" title="Contact info" :aria-pressed="isMobile ? infoOpen : contextShown" @click="toggleInfo" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
@@ -418,7 +418,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <button v-for="contact in linkedContacts" :key="contact.value" type="button"
           :aria-pressed="activeBusinessContact === contact.value" :class="{ active: activeBusinessContact === contact.value }"
           :disabled="busy" @click="chooseContact(contact.value)">
-          <span class="contact-chip-avatar">{{ contact.label.slice(0, 1).toUpperCase() }}</span>
+          <Avatar class="contact-chip-avatar" size="sm" :label="contact.label" aria-hidden="true" />
           <span class="contact-chip-copy"><strong>{{ recordTitle(contact, 'Contact') }}</strong><small v-if="contact.phone || contact.email"><ContactEndpoints :phone="contact.phone" :email="contact.email" :size="11" /></small><small v-else>Review channel identities</small></span>
         </button>
         <span v-if="contactsBusy" class="contact-strip-loading" role="status">Loading contacts</span>
@@ -460,8 +460,8 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </div>
 
       <div v-if="state.pendingCursor.value" ref="moreSentinel" class="h-px" aria-hidden="true" />
-      <Button v-if="newer || state.newArrivals.value" class="jump-latest" icon-left="arrow-down"
-        :label="state.newArrivals.value ? `${state.newArrivals.value} new messages` : 'Go to latest'"
+      <Button v-if="newer || state.newArrivals.value || state.viewPosition.value?.atBottom === false" class="jump-latest" icon-left="arrow-down"
+        :label="state.newArrivals.value ? `${state.newArrivals.value} new message${state.newArrivals.value === 1 ? '' : 's'}` : 'Go to latest'"
         :disabled="busy" @click="state.latest" />
 
       <EmailComposer v-if="!replyOff && source && channelCan(capabilities, provider, 'email_threading')" :key="source.name" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">
@@ -482,10 +482,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
           <NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
             @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" />
         </template>
-        <div v-else class="composer-writing composer-closed">
-          <ComposerMore v-if="noteContact" :actions="composerActions({ off: true, busy })" @action="setComposeMode('note')"><template #details>No channel is available for this conversation.</template></ComposerMore>
-          <p class="composer-closed-copy" role="status">No channel is available for this conversation.</p>
-          <Button icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'" :disabled="busy || contactsBusy" @click="startInChat()" />
+        <div v-else class="composer-writing composer-closed composer-start">
+          <ComposerMore v-if="noteContact" :actions="composerActions({ off: true, busy })" @action="setComposeMode('note')"><template #details>{{ noReplyCopy }}</template></ComposerMore>
+          <p class="composer-closed-copy" role="status">{{ noReplyCopy }}</p>
+          <Button v-if="canStartChat(replyContact)" icon-left="plus" :label="activeContact ? `Message ${activeContact.label}` : 'New message'" :disabled="busy || contactsBusy" @click="startInChat()" />
         </div>
       </div>
 

@@ -36,7 +36,7 @@ Contacts tiles show contact counts; open a record to see its linked contacts.
 
 The Not linked tile contains contacts without a link to a configured business type.
 
-Inbox search matches record titles and names; Contacts search finds contacts at any level.
+Search filters the shown level: business types, the values of the shown group field, or record titles and names. Inside a record and in Not linked, Contacts search matches contact names, numbers and email addresses.
 
 Use the breadcrumbs or Back to return; Back restores the search that opened a contact or thread.
 

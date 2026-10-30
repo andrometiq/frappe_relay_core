@@ -3,14 +3,14 @@ import { useLoadMore } from '../composables/useLoadMore'
 import { useDebouncedSearch } from '../composables/useDebouncedSearch'
 import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, ErrorMessage, FeatherIcon, TextInput, toast } from '@relay/ui'
 import TicketSettings from './TicketSettings.vue'
 import RelaySelect from './RelaySelect.vue'
 import TicketDashboard from './tickets/TicketDashboard.vue'
 import TicketDialog from './tickets/TicketDialog.vue'
 import { useTicketSettings } from '../composables/useTicketSettings'
-import { emptyTicketFilters, pickerOptions, statusLook, ticketFiltersFromRoute } from '../services/ticketSettings'
+import { emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketRoute } from '../services/ticketSettings'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import WorkspaceState from './WorkspaceState.vue'
@@ -31,10 +31,16 @@ const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
 const statusTabs = computed(() => pickerOptions(settings.value.statuses, 'All'))
 const look = ticket => statusLook(settings.value, ticket)
 const hasFilters = computed(() => Object.entries(filters.value).some(([key, value]) => ['assigned_to', 'ticket_type'].includes(key) || Boolean(value)))
-function resetFilters() {
-  filters.value = emptyTicketFilters()
-  openRoute('#/tickets?view=tickets', true)
-}
+// Dashboard filters that have no control of their own on the list.
+const filterLabel = computed(() => {
+  const { state, assigned, resolved_today, assigned_to, ticket_type, exclude_assignees, unlinked } = filters.value
+  return [resolved_today && 'Resolved today', !resolved_today && state && state + ' tickets', assigned && 'With an owner',
+    exclude_assignees && 'Other assignees', assigned_to === '' ? 'Unassigned' : assigned_to && 'Assigned to: ' + linkedTitle('User', assigned_to),
+    ticket_type !== undefined && 'Type: ' + (ticket_type || 'No type'), unlinked && 'Not linked to a business record'].filter(Boolean).join(' · ')
+})
+const resetFilters = () => { filters.value = emptyTicketFilters() }
+const listRoute = () => ticketRoute({ view: view.value, filters: filters.value })
+watch(listRoute, route => { if (location.hash.startsWith('#/tickets') && !selected.value) openRoute(route, true) })
 let generation = 0, detailGeneration = 0
 async function detail(name) {
   const request = ++detailGeneration; detailBusy.value = true
@@ -57,24 +63,26 @@ async function load(cursor = {}) {
   finally { if (request === generation) listBusy.value = false }
 }
 const setFilter = values => { filters.value = { ...filters.value, ...values } }
+function pickStatus(ticket_status) {
+  const { state, resolved_today, ...rest } = filters.value
+  filters.value = { ...rest, ticket_status }
+}
 function dismiss() { ++detailGeneration; selected.value = null; detailBusy.value = false; saveError.value = '' }
 function select(row) {
-  openRoute('#/tickets?ticket=' + encodeURIComponent(row.name), !!selected.value)
+  openRoute(ticketRoute({ view: view.value, filters: filters.value, ticket: row.name }), !!selected.value)
   show(row)
 }
 function show(row) {
   dismiss(); selected.value = row; error.value = ''
   detail(row.name)
 }
-function close() { closeRoute('#/tickets?view=tickets'); dismiss() }
+function close() { closeRoute(listRoute()); dismiss() }
 function readRoute() {
   if (location.hash.split('?')[0] !== '#/tickets') return
-  const params = new URLSearchParams(location.hash.split('?')[1] || '')
-  view.value = params.get('view') === 'tickets' || params.has('ticket') ? 'tickets' : 'dashboard'
-  if (params.get('view') === 'tickets') {
-    filters.value = ticketFiltersFromRoute(location.hash)
-  }
-  const name = params.get('ticket')
+  const route = readTicketRoute(location.hash)
+  view.value = route.view
+  if (JSON.stringify(route.filters) !== JSON.stringify(filters.value)) filters.value = route.filters
+  const name = route.ticket
   if (!name) { if (selected.value) dismiss() }
   else if (name !== selected.value?.name) show(page.value.items.find(row => row.name === name) || { name })
 }
@@ -121,7 +129,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Ticket settings" aria-label="Ticket settings" class="ticket-page-head__settings" @click="view = 'settings'" />
       </div>
       <ErrorMessage :message="error" />
-      <TicketDashboard v-if="view === 'dashboard'" :settings="settings" />
+      <TicketDashboard v-if="view === 'dashboard'" :settings="settings" @open="select" />
       <template v-else>
         <div class="ticket-toolbar">
           <TextInput v-model="filters.query" class="ticket-toolbar__search" type="search" placeholder="Search tickets" aria-label="Search tickets" maxlength="80"><template #prefix><FeatherIcon name="search" /></template></TextInput>
@@ -129,10 +137,10 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
           <button type="button" class="ticket-chip" :aria-pressed="!!filters.mine" @click="setFilter({ mine: filters.mine ? 0 : 1 })"><FeatherIcon name="user" :size="14" />Assigned to me</button>
         </div>
         <div class="ticket-status-tabs" role="tablist" aria-label="Ticket status">
-          <button v-for="option in statusTabs" :key="option.value" type="button" role="tab" :aria-selected="filters.ticket_status === option.value" @click="setFilter({ ticket_status: option.value })">{{ option.label }}</button>
+          <button v-for="option in statusTabs" :key="option.value" type="button" role="tab" :aria-selected="filters.ticket_status === option.value" @click="pickStatus(option.value)">{{ option.label }}</button>
         </div>
-        <div v-if="filters.assigned_to !== undefined || filters.ticket_type !== undefined || filters.exclude_assignees" class="ticket-toolbar">
-          <span>{{ filters.exclude_assignees ? 'Other assignees' : filters.assigned_to !== undefined ? 'Assigned to: ' + linkedTitle('User', filters.assigned_to, 'Unassigned') : 'Type: ' + (filters.ticket_type || 'No type') }}</span>
+        <div v-if="filterLabel" class="ticket-toolbar ticket-toolbar--filter">
+          <span>{{ filterLabel }}</span>
           <Button label="Clear filter" variant="ghost" @click="resetFilters" />
         </div>
         <LoadingRows v-if="busy && !page.items.length" label="Loading tickets…" />
@@ -166,6 +174,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
 .ticket-tabs button[aria-selected=true], .ticket-status-tabs button[aria-selected=true] { background: var(--surface-white); color: var(--ink-gray-9); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .ticket-status-tabs { display: flex; width: fit-content; }
 .ticket-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.ticket-toolbar--filter { align-items: center; font-size: 13px; color: var(--ink-gray-7); }
 .ticket-toolbar__search { flex: 1 1 220px; min-width: 0; max-width: 360px; }
 .ticket-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-white); font-size: 13px; color: var(--ink-gray-7); white-space: nowrap; }
 .ticket-chip[aria-pressed=true] { border-color: var(--outline-blue-1, var(--relay-accent)); background: var(--surface-blue-1, var(--relay-accent-soft)); color: var(--ink-blue-3); font-weight: 600; }
@@ -181,7 +190,8 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
 .ticket-empty { min-height: min(50vh, 360px); }
 @media (max-width: 768px) {
   .ticket-page-head__settings :deep(.relay-button__label) { display: none; }
-  .ticket-toolbar__search { flex-basis: 100%; max-width: none; }
+  .ticket-toolbar--filter { align-items: center; font-size: 13px; color: var(--ink-gray-7); }
+.ticket-toolbar__search { flex-basis: 100%; max-width: none; }
   .ticket-toolbar :deep(:is(input,select)) { min-height:44px !important; }
   .ticket-table, .ticket-table tbody { display:block; }
   .ticket-table thead { display:none; }
