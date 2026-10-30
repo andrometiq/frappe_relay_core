@@ -4,10 +4,10 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
-from relay_core.ai.tools import contracts, as_user
+from relay_core.ai.tools import contracts, as_user, is_company_scoped
 
 FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as_user',
-          'handoff_owner', 'mode', 'daily_limit', 'target', 'instructions', 'reply_style',
+          'handoff_owner', 'mode', 'daily_limit', 'daily_spend_cap_usd', 'target', 'instructions', 'reply_style',
           'search_confirmation', 'exact_trigger', 'execution_policy', 'allowed_tools', 'allowed_actions')
 
 
@@ -101,11 +101,13 @@ def validate_skill(doc):
         channel = frappe.get_doc('Relay Channel', doc.channel)
         if not channel.enabled or channel.channel not in ('WhatsApp', 'Telegram', 'Email'):
             raise ValueError('Choose an enabled WhatsApp, Telegram or email channel')
-        if not channel.get('company') or not frappe.db.exists('Company', channel.company):
+        company = channel.get('company')
+        if company and not frappe.db.exists('Company', company) or not company and is_company_scoped(doc):
             raise ValueError('Choose one company on the channel before enabling events')
         with as_user(channel.get('triage_owner')):
             require_access()
-            frappe.get_doc('Company', channel.company).check_permission('read')
+            if company:
+                frappe.get_doc('Company', company).check_permission('read')
         model = frappe.get_doc('AI Model', doc.ai_model)
         if not model.enabled or not frappe.get_doc('AI Provider Account', model.account).enabled:
             raise ValueError('Choose an enabled AI Model and provider account')

@@ -8,7 +8,12 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 from test_ai_skills import Doc, framework, module
+from relay_core.ai.builtin_capabilities import CAPABILITIES
 from relay_core.flows.action_contracts import ai_contract, ai_inputs
+
+# The payment draft pack as flows.actions.ai_definitions registers it.
+PAYMENT_DRAFT = dict(CAPABILITIES['erpnext.payment_entry_draft'], key='erpnext.payment_entry_draft', app='relay_core',
+                     contexts=['ai'], ai_safe=True, replay_safe=True)
 
 
 def definition(policy='Required'):
@@ -66,9 +71,8 @@ class AIContracts(unittest.TestCase):
     def test_drafts_without_required_approval_are_rejected(self):
         with self.assertRaisesRegex(ValueError, 'staff approval'): ai_contract(definition('None'))
         ai_contract(definition() | {'effect': 'reply', 'approval_policy': 'None'})
-        from relay_core.ai.actions import CREATE_DRAFT
-        self.assertEqual((CREATE_DRAFT['approval_policy'], CREATE_DRAFT['app']), ('Required', 'relay_core'))
-        ai_contract(CREATE_DRAFT)
+        self.assertEqual(PAYMENT_DRAFT['approval_policy'], 'Required')
+        ai_contract(PAYMENT_DRAFT)
 
 
     def test_journal_requires_exactly_one_run_owner(self):
@@ -79,12 +83,21 @@ class AIContracts(unittest.TestCase):
         for run, automation in ((None, None), ('Sim Flow', 'Sim Automation')):
             with self.assertRaises(ValueError): controller.validate(Doc(run=run, automation_run=automation))
 
+    def test_duplicate_lookup_has_an_index_led_by_its_equality_filters(self):
+        f = framework()
+        module('relay_core/relay_core/doctype/relay_flow_action/relay_flow_action.py', f,
+            {'frappe.model.document': types.SimpleNamespace(Document=object)}).on_doctype_update()
+        doctype, columns, name = f.db.add_index.call_args.args
+        self.assertEqual((doctype, name), ('Relay Flow Action', 'relay_flow_action_duplicate'))
+        self.assertEqual(set(columns[:2]), {'input_hash', 'action'})
+        self.assertEqual(columns[2:], ['status', 'creation'])
+
 
 class DeclaredDraftHandler(unittest.TestCase):
     def setUp(self):
         self.f = framework()
         self.handler = module('relay_core/ai/actions.py', self.f)
-        self.declaration = dict(action='create_draft', doctype='Payment Entry', fields=list(self.handler.PAYMENT_FIELDS))
+        self.declaration = dict(action='erpnext.payment_entry_draft', doctype='Payment Entry', fields=list(self.handler.PAYMENT_FIELDS))
         fields = {name: Doc(fieldname=name, permlevel=0) for name in self.handler.PAYMENT_FIELDS}
         fields.update(company=Doc(fieldname='company', fieldtype='Link', options='Company'),
             party_type=Doc(fieldname='party_type', fieldtype='Link', options='DocType'),
@@ -99,7 +112,7 @@ class DeclaredDraftHandler(unittest.TestCase):
             received_amount=1250, paid_from='Sim Bank', paid_to='Sim Payable')
         self.context = dict(company='Sim Company', business=['Supplier', 'Sim Supplier'])
         self.patch = patch.dict(sys.modules, {'relay_core.flows.actions': types.SimpleNamespace(
-            definitions=lambda context=None: {'create_draft': self.handler.CREATE_DRAFT}),
+            definitions=lambda context=None: {'erpnext.payment_entry_draft': PAYMENT_DRAFT}),
             'relay_core.realtime': types.SimpleNamespace(changed=Mock())})
         self.patch.start(); self.addCleanup(self.patch.stop)
 

@@ -5,7 +5,7 @@ import hashlib
 import traceback
 import frappe
 from relay_core.automation.queue import QUEUE
-from relay_core.ai.tools import as_user
+from relay_core.ai.tools import as_user, is_company_scoped
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import action_key
 
@@ -46,7 +46,7 @@ def context(skill, message, capabilities=None):
     from relay_core.automation.provenance import context_of, conversation_key
     sender = authenticated_sender(message, channel)
     conversation = conversation_key(message.channel, message.sender_endpoint, context_of(message))
-    if message.get('conversation_key') != conversation or not channel.get('company'):
+    if message.get('conversation_key') != conversation or not channel.get('company') and is_company_scoped(skill):
         raise ValueError('Conversation or company scope is missing')
     # A linked but disabled/denied user must never fall back to a broader identity.
     if person.get('user') and not frappe.db.get_value('User', person.user, 'enabled'):
@@ -62,7 +62,7 @@ def context(skill, message, capabilities=None):
                ('content', 'transcript', 'message_data', 'provider_context', 'sender_endpoint')):
             raise frappe.PermissionError('Source message fields are not accessible')
         frappe.get_doc(*business).check_permission('read')
-        if not company_allowed(channel.company):
+        if channel.get('company') and not company_allowed(channel.company):
             raise frappe.PermissionError('Conversation company is not accessible')
     scope = dict(sender, site=frappe.local.site, company=channel.company,
         channel=message.channel, conversation=conversation, message=message.name,
@@ -679,6 +679,29 @@ def complete_delivery(action):
 def journal_key(run, slot, prefix):
     """The stored request key of a run's reply slot, as `messaging.request_hash` writes it."""
     return hashlib.sha256((prefix + run.execution_user + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
+
+
+def recoverable_runs(limit: int = 20) -> list[str]:
+    """Pending and Deciding runs to resume. A run whose step awaits approval is left alone once its approval notice
+    is journaled; approval, rejection or expiry resumes it."""
+    from frappe.query_builder import Order
+    run = frappe.qb.DocType('Relay Automation Run')
+    journal = frappe.qb.DocType('Relay Flow Action')
+    awaiting = (journal.status == 'Awaiting approval') & journal.automation_run.isnotnull()
+    active = run.status.isin(['Pending', 'Deciding'])
+    names = (frappe.qb.from_(run).select(run.name)
+        .where(active & run.name.notin(frappe.qb.from_(journal).select(journal.automation_run).where(awaiting)))
+        .orderby(run.creation).limit(limit).run(pluck=True))
+    # A missing notice follows its journal row within seconds, so the newest waiting runs are checked first.
+    waiting = (frappe.qb.from_(run).join(journal).on(journal.automation_run == run.name)
+        .select(run.name, run.message, run.execution_user, run.flow_run).where(active & awaiting)
+        .orderby(journal.creation, order=Order.desc).limit(limit).run(as_dict=True))
+    return names + [row.name for row in waiting if not has_approval_notice(row)]
+
+
+def has_approval_notice(run) -> bool:
+    keys = [journal_key(run, 'approval_notice', prefix) for prefix in ('', 'email:')]
+    return bool(frappe.db.exists('Relay Message Action', {'request_key': ['in', keys]}))
 
 
 def recover_deliveries():

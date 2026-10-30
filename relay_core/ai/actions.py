@@ -18,12 +18,8 @@ PAYMENT_FIELDS = {
 PAYMENT_SCHEMA = dict(type='object', additionalProperties=False, properties=PAYMENT_FIELDS,
     required=['payment_type', 'posting_date', 'paid_amount', 'received_amount', 'paid_from', 'paid_to'])
 
-CREATE_DRAFT = dict(label='Create draft', app='relay_core', method='relay_core.ai.actions.create_draft',
-    contexts=['ai'], replay_safe=True, ai_safe=True, effect='create_draft', approval_policy='Required',
-    permissions={'Payment Entry': 'create'}, parameters=PAYMENT_SCHEMA,
-    scope_fields={'Payment Entry': {'company': 'company', 'business': 'party'}},
-    targets={'Payment Entry': PAYMENT_SCHEMA}, output=dict(type='object', additionalProperties=False,
-        properties={'doctype': {'type': 'string'}, 'name': {'type': 'string'}}, required=['doctype', 'name']))
+DRAFT_OUTPUT = dict(type='object', additionalProperties=False,
+    properties={'doctype': {'type': 'string'}, 'name': {'type': 'string'}}, required=['doctype', 'name'])
 REPLY = dict(label='Reply', app='relay_core', method='relay_core.ai.actions.reply', contexts=['ai'], replay_safe=True, ai_safe=True,
     effect='reply', approval_policy='None', permissions={'Relay Message': 'read'},
     parameters=dict(type='object', additionalProperties=False,

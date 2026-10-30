@@ -24,13 +24,13 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     assert 'company' in keys('company',doctype='GL Entry')
     assert 'party' in keys('scope',doctype='GL Entry',business_doctype='Supplier')
     assert 'debit' in keys('field',doctype='GL Entry',query='Debit')
-    assert keys('draft_doctype',action='create_draft')=={'Payment Entry'}
-    fields=options('draft_field',action='create_draft',doctype='Payment Entry')
+    assert keys('draft_doctype',action='erpnext.payment_entry_draft')=={'Payment Entry'}
+    fields=options('draft_field',action='erpnext.payment_entry_draft',doctype='Payment Entry')
     required={row['value'] for row in fields if row['required']}
     assert required==set(PAYMENT_SCHEMA['required'])
     assert {'docstatus','owner','company','party'}.isdisjoint({row['value'] for row in fields})
     assert all(row['description'] in ('string','number') for row in fields)
-    assert keys('action')=={'create_draft','reply','erpnext.payment_entry_draft'}
+    assert keys('action')=={'reply','erpnext.payment_entry_draft'}
     assert options('user',selected=json.dumps([actor.name]))[0]['label'].startswith('Sim Action Operator')
     for kind in ('doctype','field','identity','company','scope','draft_doctype','draft_field','action','user','model','message'):
         response=request(prefix+'editor_options',dict(kind=kind),authenticated=False,verb='GET')
@@ -39,13 +39,13 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     assert request(prefix+'editor_options',{'kind':'doctype'}).status_code==403
     print('PASS HTTP readable metadata shape, identity/company/business constraints, typed registered drafts and guest/method denial')
 
-    allowed=[dict(action='create_draft',doctype='Payment Entry',fields=list(PAYMENT_SCHEMA['required'])),dict(action='reply')]
+    allowed=[dict(action='erpnext.payment_entry_draft',doctype='Payment Entry',fields=list(PAYMENT_SCHEMA['required'])),dict(action='reply')]
     response=request(prefix+'save', {'name':event.name,'values':json.dumps(dict(target='Review payment evidence',
         reply_style='Brief and precise',allowed_actions=json.dumps(allowed)))})
     assert response.status_code==200 and response.json['message']=={'name':event.name}
     assert json.loads(frappe.get_doc('Relay AI Skill',event.name).allowed_actions)==allowed
     for values in ({'allowed_actions':'[{"action":"submit"}]'}, {'execution_policy':'Ticket only'},
-                   {'allowed_actions':json.dumps([dict(action='create_draft',doctype='Payment Entry',fields=['paid_amount'])])}):
+                   {'allowed_actions':json.dumps([dict(action='erpnext.payment_entry_draft',doctype='Payment Entry',fields=['paid_amount'])])}):
         response=request(prefix+'save',{'name':event.name,'values':json.dumps(values)})
         assert response.status_code==500 and response.json['exc_type']=='ValueError'
     assert json.loads(frappe.get_doc('Relay AI Skill',event.name).allowed_actions)==allowed
@@ -66,7 +66,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         assert result['mode']=='Shadow' and result['search']==plan and result['identity_scope']['company']==company.name
         assert result['match']['selected']==event.title and result['match']['method']=='exact'
         assert model.call_count==1
-        proposals=[dict(action='create_draft',parameters={'paid_amount':1250}),dict(action='reply',parameters={'text':'Received payment evidence'})]
+        proposals=[dict(action='erpnext.payment_entry_draft',parameters={'paid_amount':1250}),dict(action='reply',parameters={'text':'Received payment evidence'})]
         model.return_value=dict(reply='',handoff=False,reason='',actions=proposals,reads=[])
         response=request(prefix+'test_skill',{'name':event.name,'message':message.name})
         assert response.status_code==200 and response.json['message']['actions']==proposals

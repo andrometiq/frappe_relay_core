@@ -27,14 +27,14 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     payable = raw('Account', 'Draft Payable', account_name='Sim Draft Payable '+stamp, company=company.name,
         account_type='Payable', root_type='Liability', report_type='Balance Sheet', account_currency='INR', is_group=0)
     frappe.db.set_value('Company', company.name, dict(default_payable_account=payable.name, default_bank_account=bank.name))
-    declared = [dict(action='create_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties'])),
+    declared = [dict(action='erpnext.payment_entry_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties'])),
                 dict(action='reply')]
     frappe.db.set_value('Relay AI Skill', event.name, dict(allowed_actions=json.dumps(declared),
         instructions='Create a draft Payment Entry from the screenshot, then reply thanks. '
         'If the amount or currency is unclear, leave a ticket note for staff. '
         'For INR use bank '+bank.name+' and payable '+payable.name+'.', target='Payment screenshot'))
     event.reload()
-    assert {'create_draft', 'reply'} <= actions.definitions(context='ai').keys()
+    assert {'erpnext.payment_entry_draft', 'reply'} <= actions.definitions(context='ai').keys()
     from relay_core.ai.configuration import action_contracts
     assert action_contracts(event) == declared
     frappe.db.commit()
@@ -91,7 +91,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
                 reference_date='2026-10-25')
             if fault == 'zero': values['paid_amount'] = 0
             if fault == 'foreign': values['paid_from'] = foreign.name
-            calls = [dict(id='draft', name='EXECUTE', arguments=dict(action='create_draft', parameters=values)),
+            calls = [dict(id='draft', name='EXECUTE', arguments=dict(action='erpnext.payment_entry_draft', parameters=values)),
                      dict(id='reply', name='EXECUTE', arguments=dict(action='reply', parameters={
                          'text': 'Thanks. We received your screenshot showing INR 1250. Our team will check the draft.'}))]
             if fault == 'uncertain_reply_first':
@@ -125,7 +125,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     from relay_core.ai.service import APPROVAL_NOTICE
     def approve(run):
         journal = frappe.get_doc('Relay Flow Action', {'automation_run': run.name, 'status': 'Awaiting approval'})
-        assert journal.action == 'create_draft' and journal.expires_on
+        assert journal.action == 'erpnext.payment_entry_draft' and journal.expires_on
         response = request('flows.actions.approve', dict(name=journal.name, input_hash=journal.input_hash,
             scope_fingerprint=journal.scope_fingerprint))
         assert response.status_code == 200, (response.status_code, response.json.get('exc_type'))
@@ -138,7 +138,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     assert run.status == 'Completed', (run.status, run.reason)
     journals = frappe.get_all('Relay Flow Action', filters={'automation_run': run.name},
         fields=['name', 'action', 'status', 'target_name', 'ticket'], order_by='step asc')
-    assert [j.action for j in journals] == ['create_draft', 'reply'] and all(j.status == 'Completed' for j in journals)
+    assert [j.action for j in journals] == ['erpnext.payment_entry_draft', 'reply'] and all(j.status == 'Completed' for j in journals)
     draft = frappe.get_doc('Payment Entry', journals[0].target_name)
     assert draft.docstatus == 0 and draft.paid_amount == draft.received_amount == 1250
     assert draft.owner == actor.name and draft.company == company.name and draft.party == supplier.name
@@ -184,11 +184,11 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     # Flow HTTP catalog must not advertise handlers that require an AI execution context.
     catalog = request('flows.actions.catalog', verb='GET')
     assert catalog.status_code == 200 and isinstance(catalog.json['message'], list)
-    assert not {'create_draft', 'reply'} & {row['key'] for row in catalog.json['message']}
+    assert not {'erpnext.payment_entry_draft', 'reply'} & {row['key'] for row in catalog.json['message']}
     assert request('flows.actions.catalog', verb='GET', authenticated=False).status_code in (401, 403)
     from relay_core.flows import service as flows
     flow = raw('Relay Flow', 'Draft Invalid Flow', title='Sim Draft Invalid Flow '+stamp, command='/draft',
-        nodes=json.dumps([dict(id='draft', kind='action', action='create_draft', arguments={}), dict(id='end', kind='end')]))
+        nodes=json.dumps([dict(id='draft', kind='action', action='erpnext.payment_entry_draft', arguments={}), dict(id='end', kind='end')]))
     try: flows.validate_flow(flow)
     except frappe.ValidationError: pass
     else: raise AssertionError('AI-only handler accepted by flow validation')
@@ -221,7 +221,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
     frappe.db.set_value('Relay AI Skill', event.name, 'mode', 'Shadow')
     _, shadow = run_message('Shadow action', image=False)
     assert shadow.status == 'Shadow' and shadow.ticket
-    assert [row['action'] for row in json.loads(shadow.decision)['actions']] == ['create_draft', 'reply']
+    assert [row['action'] for row in json.loads(shadow.decision)['actions']] == ['erpnext.payment_entry_draft', 'reply']
     assert not frappe.db.exists('Relay Flow Action', {'automation_run': shadow.name}) and len(sends) == 2
     frappe.db.set_value('Relay AI Skill', event.name, 'mode', 'Automatic')
     print('PASS undeclared final replies denied for empty/draft-only declarations; live Shadow persists proposals without writes or delivery')

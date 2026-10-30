@@ -331,6 +331,24 @@ class PatchTests(unittest.TestCase):
 
 
 
+class DraftPackPatchTests(unittest.TestCase):
+    def test_saved_create_draft_rows_name_the_payment_entry_pack(self):
+        rows = [{'action': 'create_draft', 'doctype': 'Payment Entry', 'fields': ['paid_amount']}, {'action': 'reply'}]
+        skills = [Doc(name='Draft', allowed_actions=json.dumps(rows))]
+        f = types.SimpleNamespace(get_all=Mock(return_value=skills), db=Mock())
+        with patch.dict(sys.modules, frappe=f):
+            sys.modules.pop('relay_core.patches.v1_0.use_payment_entry_draft_pack', None)
+            importlib.import_module('relay_core.patches.v1_0.use_payment_entry_draft_pack').execute()
+        rows[0]['action'] = 'erpnext.payment_entry_draft'
+        f.db.set_value.assert_called_once_with('Relay AI Skill', 'Draft', 'allowed_actions', json.dumps(rows),
+                                               update_modified=False)
+
+    def test_core_registers_no_second_draft_hook(self):
+        from relay_core import hooks
+        self.assertNotIn('create_draft', hooks.relay_flow_actions)
+        self.assertEqual(CAPABILITIES['erpnext.payment_entry_draft']['method'], 'relay_core.ai.actions.create_draft')
+
+
 class RunCapabilityTests(unittest.TestCase):
     from test_ai_skills import ConversationIdentityTests
     setUp = ConversationIdentityTests.setUp
@@ -369,6 +387,47 @@ class RunCapabilityTests(unittest.TestCase):
             run = self.bind()
         self.assertEqual(json.loads(run.capability_hashes)['erpnext.payment_entry_draft'], 'h-action')
         definitions.assert_called_with(context='ai')
+
+
+class CompanyNeutralTests(unittest.TestCase):
+    from test_ai_skills import ConversationIdentityTests
+    setUp = ConversationIdentityTests.setUp
+
+    def neutral(self, channel_company=None, packs=None):
+        neutral = capability(scope={'business_field': 'name', 'company': {'kind': 'company_neutral'}})
+        self.tools.contracts = lambda skill: [neutral] if packs is None else packs
+        self.enterContext(patch.dict(sys.modules, {'relay_core.ai.tools': self.tools}))
+        original = self.f.get_doc.side_effect
+        channel = Doc(channel='WhatsApp', enabled=1, company=channel_company)
+        self.f.get_doc.side_effect = lambda dt, name: channel if dt == 'Relay Channel' else original(dt, name)
+
+    def test_company_neutral_reads_run_on_a_channel_without_company(self):
+        self.neutral()
+        scope = self.service.context(self.skill, self.message)[2]
+        self.assertIsNone(scope['company'])
+        self.company_allowed.assert_not_called()
+
+    def test_company_scoped_reads_and_drafts_still_need_the_channel_company(self):
+        for packs, actions in (([capability()], '[]'), (None, '[{"action": "erpnext.payment_entry_draft"}]'), ([], '[]')):
+            with self.subTest(packs=packs, actions=actions):
+                self.neutral(packs=packs)
+                self.skill.allowed_actions = actions
+                with self.assertRaisesRegex(ValueError, 'company scope is missing'):
+                    self.service.context(self.skill, self.message)
+
+    def test_company_neutral_type_needs_no_company_doctype_or_exactly_one_company(self):
+        self.f.db.get_single_value = Mock(return_value='Member\n')
+        for has_companies, count, allowed in ((False, None, True), (True, 1, True), (True, 2, False), (True, 0, False)):
+            self.f.db.count = Mock(return_value=count)
+            with self.subTest(has_companies=has_companies, count=count), \
+                    patch('relay_core.permissions.has_companies', return_value=has_companies):
+                if allowed:
+                    self.tools.company_neutral('Member')
+                else:
+                    with self.assertRaisesRegex(ValueError, 'not company neutral'): self.tools.company_neutral('Member')
+                with self.assertRaisesRegex(ValueError, 'not company neutral'): self.tools.company_neutral('Customer')
+            if not has_companies:
+                self.f.db.count.assert_not_called()
 
 
 class AIDefinitionTests(unittest.TestCase):

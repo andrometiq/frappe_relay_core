@@ -286,10 +286,41 @@ class AutomationQueueTests(unittest.TestCase):
 
     def test_ai_recovery_keeps_work_off_both_projection_queues(self):
         fake = SimpleNamespace(conf={'relay_automation_enabled': 1}, enqueue=Mock(),
-            get_all=Mock(side_effect=[[], [], [_dict(name='run')], [_dict(name='outbox')]]))
-        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'), patch.object(skills, 'recover_deliveries'):
+            get_all=Mock(side_effect=[[], [], [_dict(name='outbox')]]))
+        with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'), patch.object(skills, 'recover_deliveries'), \
+                patch.object(skills, 'recoverable_runs', return_value=['run']):
             service.recover()
         self.assertEqual([c.kwargs['queue'] for c in fake.enqueue.call_args_list], ['default', 'default'])
+
+    def test_recovery_leaves_runs_awaiting_approval_after_their_notice_is_journaled(self):
+        import sqlite3
+
+        from frappe.query_builder.utils import get_query_builder
+        from pypika.queries import QueryBuilder
+        db = sqlite3.connect(':memory:')
+        db.executescript('''
+            CREATE TABLE `tabRelay Automation Run` (name, status, message, execution_user, flow_run, creation);
+            CREATE TABLE `tabRelay Flow Action` (name, automation_run, status, creation);
+            INSERT INTO `tabRelay Automation Run` VALUES ('Plain', 'Deciding', 'M1', 'partner', NULL, 1),
+                ('Notified', 'Deciding', 'M2', 'partner', NULL, 2), ('Unnotified', 'Deciding', 'M3', 'partner', NULL, 3),
+                ('Approved', 'Pending', 'M4', 'partner', NULL, 4), ('Done', 'Completed', 'M5', 'partner', NULL, 5);
+            INSERT INTO `tabRelay Flow Action` VALUES ('J2', 'Notified', 'Awaiting approval', 2),
+                ('J3', 'Unnotified', 'Awaiting approval', 3), ('J4', 'Approved', 'Approved', 4),
+                ('J5', 'Done', 'Awaiting approval', 5), ('Flow', NULL, 'Awaiting approval', 6);
+        ''')
+        def run(query, pluck=False, as_dict=False):
+            cursor = db.execute(query.get_sql())
+            columns = [column[0] for column in cursor.description]
+            rows = cursor.fetchall()
+            return [row[0] for row in rows] if pluck else [_dict(zip(columns, row)) for row in rows]
+        notified = _dict(name='Notified', message='M2', execution_user='partner', flow_run=None)
+        journaled = {skills.journal_key(notified, 'approval_notice', '')}
+        fake = SimpleNamespace(qb=get_query_builder('mariadb'), db=SimpleNamespace(
+            exists=lambda doctype, filters: bool(journaled & set(filters['request_key'][1]))))
+        with patch.object(skills, 'frappe', fake), patch.object(QueryBuilder, 'run', run, create=True):
+            self.assertEqual(skills.recoverable_runs(), ['Plain', 'Approved', 'Unnotified'])
+            journaled.clear()
+            self.assertEqual(skills.recoverable_runs(), ['Plain', 'Approved', 'Unnotified', 'Notified'])
 
     def test_translation_recovery_uses_automation_queue(self):
         fake = SimpleNamespace(conf={'relay_automation_enabled': 1}, enqueue=Mock(), utils=Mock(),

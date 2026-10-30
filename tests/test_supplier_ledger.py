@@ -84,7 +84,7 @@ class LedgerContractTests(unittest.TestCase):
 class DisabledSkillTests(unittest.TestCase):
     def test_disabled_sample_can_be_saved_without_operational_configuration(self):
         f = framework()
-        tools = types.SimpleNamespace(contracts=Mock(), as_user=Mock(side_effect=AssertionError('No identity configured')))
+        tools = types.SimpleNamespace(contracts=Mock(), is_company_scoped=Mock(), as_user=Mock(side_effect=AssertionError('No identity configured')))
         require = Mock()
         with patch.dict(sys.modules, {'relay_core.permissions': types.SimpleNamespace(require_access=require), 'relay_core.ai.tools': tools}):
             config = module('relay_core/ai/configuration.py', f)

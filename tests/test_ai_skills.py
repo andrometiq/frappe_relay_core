@@ -711,6 +711,17 @@ class SharedAdapterTests(unittest.TestCase):
             self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 140)
         self.assertEqual(self.attempt.call_args.args[3]['timeout'], 20)
 
+    def test_classifier_allows_own_records_and_flags_only_explicit_person_requests(self):
+        self.attempt.return_value = self.outcome({'human_request': False, 'scores': []})
+        self.adapter.match('MODEL-1', [], 'Show my ledger', 'RUN-1', __import__('time').monotonic() + 5)
+        system = self.attempt.call_args.args[2](types.SimpleNamespace(build_turn=lambda *args: args[2]), None, None)
+        self.assertIn('may ask about their own linked records, also when the sender is a supplier, staff member', system)
+        self.assertIn('decline=true only for requests about other parties', system)
+        self.assertIn('human_request=true only when the sender explicitly asks to talk to a person', system)
+        self.assertIn('question about data, records, balances or orders is not a human request', system)
+        self.assertNotIn('supplier or staff details', system)
+        self.assertNotIn('staff requests', system)
+
     def test_matching_shared_engine_has_no_tools_and_rejects_tool_calls(self):
         import time
         payload = {'human_request': False, 'scores': [{'id': 'event', 'score': .95}]}
@@ -1068,6 +1079,7 @@ class EventContractTests(unittest.TestCase):
         self.shared = types.SimpleNamespace(get_readable_meta=lambda dt: self.meta,
             is_sensitive_field=lambda name: name in ('api_key', 'password'))
         self.registered = {}
+        self.has_companies = self.enterContext(patch('relay_core.permissions.has_companies', return_value=True))
         self.modules = patch.dict(sys.modules, {'frappe_tools.ai.tools': self.shared,
             'relay_core.flows.actions': types.SimpleNamespace(definitions=lambda context=None: self.registered)})
         self.modules.start(); self.addCleanup(self.modules.stop)
@@ -1108,6 +1120,26 @@ class EventContractTests(unittest.TestCase):
         self.f.db.get_value.return_value = 1
         self.f.get_doc.side_effect = lambda dt, name: self.channel if dt == 'Relay Channel' else Doc(enabled=0)
         with self.assertRaises(ValueError): self.config.validate_skill(self.doc)
+
+    def test_channel_without_company_is_accepted_only_for_company_neutral_reads(self):
+        neutral = capability(scope={'business_field': 'name', 'company': {'kind': 'company_neutral'}})
+        self.tools.contracts = lambda skill: self.packs
+        self.enable(); self.channel.company = None
+        for packs, actions, accepted in (([neutral], '[]', True), ([neutral], '[{"action": "reply"}]', True),
+                ([], '[]', False), ([neutral, capability()], '[]', False),
+                ([neutral], '[{"action": "erpnext.payment_entry_draft"}]', False)):
+            self.packs = packs
+            self.doc.allowed_actions = actions
+            with self.subTest(packs=len(packs), actions=actions), \
+                    patch.object(self.config, 'contracts'), patch.object(self.config, 'action_contracts'):
+                if accepted:
+                    self.config.validate_skill(self.doc)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'company'): self.config.validate_skill(self.doc)
+        self.has_companies.return_value = False
+        self.packs, self.doc.allowed_actions = [], '[]'
+        with patch.object(self.config, 'contracts'):
+            self.config.validate_skill(self.doc)
 
     def test_read_rows_name_approved_capabilities_of_the_skill_business_type(self):
         packs = {key: capability(key=key, business_doctype=business) for key, business in

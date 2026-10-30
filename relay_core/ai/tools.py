@@ -64,10 +64,22 @@ def check_identity_arguments(contract, arguments, business, scope):
 
 
 def company_neutral(doctype):
-    """A pack without a company field reads only listed types on a single-Company site."""
+    """A pack without a company field reads only listed types on a site without Company or with one Company."""
+    from relay_core.permissions import has_companies
     listed = frappe.db.get_single_value('Relay Settings', 'company_neutral_types') or ''
-    if doctype not in {line.strip() for line in listed.splitlines()} or frappe.db.count('Company') != 1:
+    if doctype not in {line.strip() for line in listed.splitlines()} or has_companies() and frappe.db.count('Company') != 1:
         raise ValueError('This business type is not company neutral')
+
+
+def is_company_scoped(skill) -> bool:
+    """On a site with Company, a skill needs the channel company unless all its reads are company neutral and it
+    declares no draft action."""
+    from relay_core.permissions import has_companies
+    if not has_companies():
+        return False
+    kinds = {row['scope']['company']['kind'] for row in contracts(skill)}
+    actions = json.loads(skill.get('allowed_actions') or '[]')
+    return kinds != {'company_neutral'} or any(not isinstance(row, dict) or row.get('action') != 'reply' for row in actions)
 
 
 def query(contract, arguments, fixed):

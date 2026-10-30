@@ -158,7 +158,7 @@ def main():
                     elif chain and len(turn['messages']) == 2:
                         calls = [dict(id='reply', name='EXECUTE', arguments=dict(action='reply',
                             parameters={'text': 'Invented closing balance 999999'})),
-                            dict(id='draft', name='EXECUTE', arguments=dict(action='create_draft', parameters=draft_values))]
+                            dict(id='draft', name='EXECUTE', arguments=dict(action='erpnext.payment_entry_draft', parameters=draft_values))]
                         data = None
                     else:
                         data=dict(reply='' if chain else 'Invented total 999999',handoff=False,reason='')
@@ -187,7 +187,7 @@ def main():
                     except ValueError: pass
                     else: raise AssertionError('Undeclared read succeeded')
             def approve_draft(run):
-                draft=frappe.get_doc('Relay Flow Action',{'automation_run':run.name,'action':'create_draft'})
+                draft=frappe.get_doc('Relay Flow Action',{'automation_run':run.name,'action':'erpnext.payment_entry_draft'})
                 assert draft.status=='Awaiting approval' and draft.expires_on
                 response=request('flows.actions.approve',dict(name=draft.name,input_hash=draft.input_hash,
                     scope_fingerprint=draft.scope_fingerprint))
@@ -359,7 +359,7 @@ def main():
                 contract=ledger
                 ledger_row=frappe.get_all('GL Entry', filters={'company':company.name}, pluck='name', order_by='name asc')[0]
                 frappe.db.set_value('GL Entry', ledger_row, dict(debit=100.10, credit=40.05))
-                declared=[dict(action='reply'), dict(action='create_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties']))]
+                declared=[dict(action='reply'), dict(action='erpnext.payment_entry_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties']))]
                 frappe.db.set_value('Relay AI Skill', event.name, dict(allowed_tools=json.dumps([{'capability':contract['key']}]), allowed_actions=json.dumps(declared)))
                 event.reload()
                 desired=dict(purpose='Review your ledger', reference=contract['key'], fields=field_names(contract,'model'),
@@ -381,7 +381,7 @@ def main():
                 assert executed.status=='Completed', (executed.status, executed.reason)
                 assert frappe.db.count('Payment Entry', {'company':company.name})==before+1 and len(outbound)==sent
                 assert [r.action for r in frappe.get_all('Relay Flow Action', filters={'automation_run':executed.name},
-                    fields=['action'], order_by='step asc')] == ['reply', 'create_draft']
+                    fields=['action'], order_by='step asc')] == ['reply', 'erpnext.payment_entry_draft']
                 print('PASS delivered EXECUTE reply contains calculated 60.05 and partial-results notice; declared draft waits for approval')
                 original_dispatch=ai.dispatch_reply
                 verified_faults=[]
@@ -419,7 +419,7 @@ def main():
                     assert create.call_count == (1 if mutation_fault=='during_write' else 0)
                     assert denied.status=='Handoff', (mutation_fault, denied.status, denied.reason)
                     assert frappe.db.count('Payment Entry', {'company':company.name})==before
-                    assert not frappe.db.exists('Relay Flow Action', {'automation_run':denied.name, 'action':'create_draft', 'status':'Completed'})
+                    assert not frappe.db.exists('Relay Flow Action', {'automation_run':denied.name, 'action':'erpnext.payment_entry_draft', 'status':'Completed'})
                     with fixture_admin():
                         actor.reload()
                         if not any(r.role=='Accounts Manager' for r in actor.roles):

@@ -1,5 +1,5 @@
 """Core capability packs. No model SQL, Python, URLs or arbitrary methods."""
-from relay_core.ai.actions import CREATE_DRAFT
+from relay_core.ai.actions import DRAFT_OUTPUT, PAYMENT_SCHEMA
 
 LEDGER_FIELDS = [
     {'name': 'name', 'model': True, 'customer': False},
@@ -27,8 +27,12 @@ def ledger(party_type: str, render: str) -> dict:
 CAPABILITIES = {
     'erpnext.customer_ledger': ledger('Customer', 'relay_core.ai.ledger.render'),
     'erpnext.supplier_ledger': ledger('Supplier', 'relay_core.ai.ledger.supplier'),
-    'erpnext.payment_entry_draft': dict(
-        {key: CREATE_DRAFT[key] for key in ('effect', 'method', 'permissions', 'parameters', 'targets', 'output', 'scope_fields')},
-        kind='action', version=1, label='Payment Entry draft', approval_policy='Required',
-        link_checks={'Payment Entry': ['paid_from', 'paid_to']}),
+    'erpnext.payment_entry_draft': {
+        'kind': 'action', 'version': 1, 'label': 'Payment Entry draft', 'effect': 'create_draft',
+        'method': 'relay_core.ai.actions.create_draft', 'approval_policy': 'Required',
+        'permissions': {'Payment Entry': 'create'}, 'parameters': PAYMENT_SCHEMA,
+        'targets': {'Payment Entry': PAYMENT_SCHEMA},
+        'scope_fields': {'Payment Entry': {'company': 'company', 'business': 'party'}}, 'output': DRAFT_OUTPUT,
+        'link_checks': {'Payment Entry': ['paid_from', 'paid_to']},
+    },
 }
