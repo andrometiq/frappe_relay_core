@@ -94,19 +94,29 @@ class SheetContactTests(unittest.TestCase):
             bulk.add_rows(doc, rows, set())
         values = insert.call_args.args[1]
         self.assertEqual([row[2]['contact_status'] for row in values], ['created', 'existing', 'invalid'])
-        self.assertEqual([row[3] for row in values], [None, 'Duplicate number', 'Invalid phone number'])
+        self.assertEqual([row[3] for row in values], [None, 'Duplicate row', 'Invalid phone number'])
         self.create.assert_called_once()
+
+    def test_same_number_with_different_values_is_not_a_duplicate(self):
+        doc = _dict(name='Sheet', source_file='/private/files/people.csv', channel='WA', country='IN',
+                    arguments=json.dumps({'fields': [{'key': 'name', 'label': 'Name'}]}),
+                    column_map=json.dumps({'phone': 'First', 'fields': {'name': 'Name'}, 'fixed': {}}))
+        rows = [(2, {'First': NUMBER, 'Name': 'Asha'}), (3, {'First': NUMBER, 'Name': 'Ravi'}),
+                (4, {'First': NUMBER, 'Name': 'Asha'})]
+        with patch.object(bulk, 'insert_chunk') as insert:
+            bulk.add_rows(doc, rows, set())
+        self.assertEqual([row[3] for row in insert.call_args.args[1]], [None, None, 'Duplicate row'])
 
     def test_first_column_overrides_phone_name_guess_for_sheets_only(self):
         self.assertEqual(bulk_sheet.suggest(['Recipients', 'Phone'], [], first_phone=True)['phone'], 'Recipients')
         self.assertEqual(bulk_sheet.suggest(['Recipients', 'Phone'], [])['phone'], 'Phone')
 
-    def test_held_numbers_use_excel_normalisation_and_mobile_validation(self):
+    def test_held_rows_use_excel_normalisation_and_mobile_validation(self):
         doc = _dict(name='Sheet', country='IN', column_map=json.dumps({'phone': 'Mobile'}))
         rows = list(enumerate({'Mobile': value} for value in
                              ('919876543210.0', '9.19876543210E+11', '9199999787611', '914423456789')))
-        self.fake.get_all = Mock(return_value=[NUMBER])
-        self.assertEqual(bulk.held_numbers(doc, rows), {NUMBER})
+        self.fake.get_all = Mock(return_value=[_dict(destination=NUMBER, arguments=json.dumps({'values': {'name': 'Asha'}}))])
+        self.assertEqual(bulk.held_rows(doc, rows), {bulk.row_key(NUMBER, {'values': {'name': 'Asha'}})})
         self.assertEqual(self.fake.get_all.call_args.kwargs['filters']['destination'], ['in', [NUMBER]])
 
 
@@ -159,7 +169,7 @@ class HeaderResolutionTests(unittest.TestCase):
                 bulk.add_rows(doc, iter(rows), set())
             found = insert.call_args.args[1]
             self.assertEqual([row[3] for row in found],
-                             [None, 'Duplicate number', 'Invalid phone number', 'Invalid phone number'])
+                             [None, 'Duplicate row', 'Invalid phone number', 'Invalid phone number'])
             self.assertEqual([row[1] for row in found[:2]], [NUMBER, NUMBER])
             self.assertEqual(found[0][2]['values']['header_media'], mapping['header_attachment']['files'][0])
             self.assertEqual(enroll.call_count, 1 if source else 0)

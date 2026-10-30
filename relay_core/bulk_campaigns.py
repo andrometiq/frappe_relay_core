@@ -101,7 +101,7 @@ def error_report(name):
 def friendly_reason(reason, fields=()):
     """Only our validation vocabulary is exposed; provider details stay in stored outcomes."""
     text = str(reason or '')
-    exact = {OPTED_OUT, OUTSIDE_WINDOW, 'Invalid phone number', 'Duplicate number',
+    exact = {OPTED_OUT, OUTSIDE_WINDOW, 'Invalid phone number', 'Duplicate number', 'Duplicate row',
         'Missing header attachment', 'Duplicate header attachments', 'Header attachment unavailable',
         'Header attachments must stay private', 'Header attachment must contain 1 byte to 4 MiB',
         'Endpoint verification revoked', 'Contact binding needs review',
@@ -395,7 +395,7 @@ def create_with_rows(title, rows, message=None, template_name=None, language=Non
 
 @frappe.whitelist(methods=['POST'])
 def append_rows(name, rows):
-    """More JSON rows for a Draft campaign created with rows. A number the campaign already holds is a duplicate."""
+    """More JSON rows for a Draft campaign created with rows. A row the campaign already holds is a duplicate."""
     doc = bulk(name, ('Draft',))
     if doc.source_file or doc.recipient_filters or not doc.column_map:
         frappe.throw('Add rows only to a campaign created with rows')
@@ -405,7 +405,7 @@ def append_rows(name, rows):
         numbered = given_rows(rows, int(last))
         if total + len(numbered) > bulk_sheet.MAX_ROWS:
             frappe.throw(f'A campaign supports at most {bulk_sheet.MAX_ROWS} rows')
-        add_rows(doc, numbered, held_numbers(doc, numbered))
+        add_rows(doc, numbered, held_rows(doc, numbered))
         phase(doc, 'Validated', validated=True)
         internal_save(doc)
     from relay_core.bulk_updates import changed
@@ -413,14 +413,20 @@ def append_rows(name, rows):
     return read(name)
 
 
-def held_numbers(doc, rows):
-    """Numbers of these rows the campaign already holds in a row that was not skipped."""
+def held_rows(doc, rows):
+    """Row keys the campaign already holds, unskipped, for the numbers in these rows."""
     column = json.loads(doc.column_map)['phone']
     numbers = list({bulk_sheet.sheet_phone(row.get(column), doc.country) for _, row in rows} - {None})
     if not numbers:
         return set()
-    return set(frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'destination': ['in', numbers],
-                                                  'status': ['!=', 'Skipped']}, pluck='destination', limit_page_length=0))
+    held = frappe.get_all(RECIPIENT, filters={'campaign': doc.name, 'destination': ['in', numbers],
+                          'status': ['!=', 'Skipped']}, fields=['destination', 'arguments'], limit_page_length=0)
+    return {row_key(row.destination, json.loads(row.arguments or '{}')) for row in held}
+
+
+def row_key(destination, values):
+    """A duplicate repeats the number and every message value, so one number may get different messages."""
+    return destination, canonical((values or {}).get('values') or {})
 
 
 def send_timeout(messages):
@@ -503,9 +509,10 @@ def add_rows(doc, rows, seen):
                 problem = problem or contact_problem
         if not problem and message:
             problem = bulk_sheet.message_problem(message, values['values'])
-        if not problem and destination in seen:
-            problem = 'Duplicate number'
-        seen.add(destination)
+        key = row_key(destination, values)
+        if not problem and key in seen:
+            problem = 'Duplicate row'
+        seen.add(key)
         shown = destination or str(row.get(mapping['phone']) or '').strip()[:40]
         chunk.append((number, shown, values, problem))
         if len(chunk) == CHUNK:
