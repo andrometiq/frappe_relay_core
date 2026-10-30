@@ -1,5 +1,7 @@
 frappe.ui.form.on('Relay Canned Reply', {
   async refresh(frm) {
+    frm.page.wrapper.addClass('relay-desk-form');
+    frappe.require('/assets/relay_core/css/desk_forms.css');
     frm.set_df_property('action_key', 'description', __('Enter the action ID supplied by your administrator. It runs only when staff choose the action in the saved reply picker.'));
     if (!frappe.user.has_role('System Manager')) return;
     frm.add_custom_button(__('Choose business action'), async () => {

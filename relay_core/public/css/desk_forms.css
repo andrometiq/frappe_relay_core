@@ -1,0 +1,15 @@
+/* Scoped to Relay-owned Desk forms; core Desk pages keep their own styles. */
+@media (max-width: 768px) {
+  .relay-desk-form :is(button, a.btn, input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea, .control-input .link-btn) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .relay-desk-form .checkbox > label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    gap: 8px;
+  }
+  .relay-desk-form .checkbox input { position: static; margin: 0; }
+}
+[data-theme=dark] .relay-desk-form .help-box { color: var(--text-color) !important; }
