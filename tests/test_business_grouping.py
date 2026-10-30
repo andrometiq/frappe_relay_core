@@ -120,13 +120,16 @@ class GroupAggregateTests(unittest.TestCase):
         self.db.executescript('''
             CREATE TABLE `tabContact` (name TEXT PRIMARY KEY, full_name TEXT, mobile_no TEXT, phone TEXT, email_id TEXT, allowed INTEGER);
             CREATE TABLE `tabDynamic Link` (parent TEXT, parenttype TEXT, parentfield TEXT, link_doctype TEXT, link_name TEXT);
-            CREATE TABLE `tabRelay Contact` (name TEXT PRIMARY KEY, contact TEXT, display_name TEXT, allowed INTEGER);
+            CREATE TABLE `tabRelay Contact` (name TEXT PRIMARY KEY, contact TEXT, display_name TEXT, allowed INTEGER,
+                primary_doctype TEXT, primary_name TEXT);
+            CREATE TABLE `tabRelay Contact Type` (business_doctype TEXT PRIMARY KEY, enabled INTEGER);
+            INSERT INTO `tabRelay Contact Type` VALUES ('Local Business', 1), ('Other', 1), ('Disabled Type', 0);
             CREATE TABLE `tabRelay Channel` (name TEXT PRIMARY KEY, allowed INTEGER);
             CREATE TABLE `tabRelay Message` (name TEXT PRIMARY KEY, business_doctype TEXT, business_name TEXT, relay_contact TEXT,
                 channel TEXT, content TEXT, direction TEXT, sent_at TEXT, creation TEXT, legacy_triage INTEGER, allowed INTEGER, unread INTEGER,
                 relay_timeline_time TEXT GENERATED ALWAYS AS (COALESCE(sent_at, creation)) VIRTUAL);
             INSERT INTO `tabContact` VALUES ('alice', 'Alice', '555001', '', '', 1), ('hidden', 'Hidden person', '555999', '', '', 0);
-            INSERT INTO `tabRelay Contact` VALUES ('r1', 'alice', 'Alice', 1), ('r2', 'hidden', 'Hidden person', 0);
+            INSERT INTO `tabRelay Contact` VALUES ('r1', 'alice', 'Alice', 1, NULL, NULL), ('r2', 'hidden', 'Hidden person', 0, NULL, NULL);
             INSERT INTO `tabRelay Channel` VALUES ('ch1', 1), ('ch2', 1), ('hidden', 0);
             INSERT INTO `tabDynamic Link` VALUES ('alice', 'Contact', 'links', 'Local Business', 'a'),
                 ('alice', 'Contact', 'links', 'Local Business', 'b'), ('hidden', 'Contact', 'links', 'Local Business', 'a');
@@ -239,8 +242,7 @@ class GroupAggregateTests(unittest.TestCase):
         page, counts = [call.args for call in self.fake.db.sql.call_args_list]
         self.assertNotIn('tabRelay Message', page[0])
         self.assertEqual(counts[1]['page'], ('a',))
-        self.assertIn('m.business_name IN %(page)s', counts[0])
-        self.assertNotIn('AS last_channel', counts[0])
+        self.assertIn('IN %(page)s', counts[0])
         self.db.execute("UPDATE `tabRelay Message` SET allowed=0 WHERE name='m1'")
         row = groups.aggregate('Local Business', [], [], business_name='a')[0]
         self.assertEqual((row.unread, row.last_activity, row.unread_records), (0, None, 0))
@@ -397,20 +399,51 @@ class GroupAggregateTests(unittest.TestCase):
         self.assertIn('Contacts tiles show contact counts', doc)
         self.assertTrue(all('\n' not in paragraph for paragraph in doc.strip().split('\n\n')))
 
-    def test_restricted_totals_and_groups_rank_channels_only_for_a_channel_filter(self):
+    def unstamped(self, *links, primary=None):
+        """Contact carol (r3) with `links`, and one unread incoming message on ch2 that names no record."""
+        self.db.execute("INSERT INTO `tabContact` VALUES ('carol', 'Carol', '555003', '', '', 1)")
+        self.db.execute("INSERT INTO `tabRelay Contact` VALUES ('r3', 'carol', 'Carol', 1, ?, ?)", primary or (None, None))
+        self.db.executemany("INSERT INTO `tabDynamic Link` VALUES ('carol', 'Contact', 'links', ?, ?)", links)
+        self.db.execute("INSERT INTO `tabRelay Message` (name, relay_contact, channel, content, direction, sent_at, creation, "
+                        "legacy_triage, allowed, unread) VALUES ('m4', 'r3', 'ch2', 'No record', 'Incoming', '2026-10-06', '2026-10-06', 0, 1, 1)")
+        self.chat_query.return_value = 'restricted'
+
+    def test_restricted_activity_counts_unstamped_messages_under_the_contacts_only_record(self):
+        self.unstamped(('Local Business', 'e'), ('Disabled Type', 'x'))
+        row = groups.aggregate('Local Business', [], [], business_name='e')[0]
+        self.assertEqual((row.unread, row.last_activity, row.unread_records), (1, '2026-10-06', 1))
+        rows = groups.aggregate('Local Business', ['region'], ['North'], channels=['ch2'])
+        self.assertEqual([(row.name, row.unread) for row in rows], [('e', 1)])
+        total = groups.aggregate('Local Business', [], [], totals=True)[0]
+        self.assertEqual((total.unread, total.last_activity), (3, '2026-10-06'))
+
+    def test_unstamped_messages_of_multi_record_contacts_need_a_marked_primary(self):
+        self.unstamped(('Local Business', 'e'), ('Other', 'z'))
+        self.assertIsNone(groups.aggregate('Local Business', [], [], business_name='e')[0].last_activity)
+        self.db.execute("UPDATE `tabRelay Contact` SET primary_doctype='Other', primary_name='z' WHERE name='r3'")
+        self.assertIsNone(groups.aggregate('Local Business', [], [], business_name='e')[0].last_activity)
+        self.db.execute("UPDATE `tabRelay Contact` SET primary_doctype='Local Business', primary_name='e' WHERE name='r3'")
+        self.assertEqual(groups.aggregate('Local Business', [], [], business_name='e')[0].unread, 1)
+
+    def test_unstamped_messages_follow_message_scope_and_triage(self):
+        self.unstamped(('Local Business', 'e'))
+        self.db.execute("UPDATE `tabRelay Message` SET allowed=0 WHERE name='m4'")
+        self.assertIsNone(groups.aggregate('Local Business', [], [], business_name='e')[0].last_activity)
+        self.db.execute("UPDATE `tabRelay Message` SET allowed=1, legacy_triage=1 WHERE name='m4'")
+        self.assertIsNone(groups.aggregate('Local Business', [], [], business_name='e')[0].last_activity)
+
+    def test_restricted_totals_and_groups_filter_by_newest_channel(self):
         self.chat_query.return_value = 'restricted'
         self.db.execute("UPDATE `tabRelay Message` SET allowed=1 WHERE name='m2'")
         self.fake.db.sql.reset_mock()
         total = groups.aggregate('Local Business', [], [], totals=True)[0]
         self.assertEqual((total.record_count, total.unread, total.unread_records, total.last_activity), (5, 2, 2, '2026-10-02'))
-        self.assertIn('ORDER BY m.relay_timeline_time DESC, m.name DESC LIMIT 1', self.fake.db.sql.call_args.args[0])
+        self.assertIn('SELECT MAX(message_at)', self.fake.db.sql.call_args.args[0])
         rows = groups.aggregate('Local Business', ['region'], [])
         self.assertEqual([(row.value, row.unread, row.last_activity) for row in rows],
                          [('', 2, '2026-10-02'), ('North', 0, None)])
-        self.assertNotIn('AS last_channel', self.fake.db.sql.call_args.args[0])
         rows = groups.aggregate('Local Business', ['region'], [], channels=['ch1'])
         self.assertEqual([(row.value, row.record_count, row.unread) for row in rows], [('', 1, 1)])
-        self.assertIn('LIMIT 1) AS last_channel', self.fake.db.sql.call_args.args[0])
 
     def test_empty_record_page_skips_activity(self):
         self.chat_query.return_value = 'restricted'

@@ -121,6 +121,19 @@ def primary(contact, links=None):
     return tuple(marked) if marked and tuple(marked) in links else None
 
 
+def primary_sql(doctype_value):
+    """SQL twin of `primary` for one business type: (relay_contact, business_name) rows. `doctype_value` is a bound
+    parameter. The link's own record must exist; the other links are counted without that check."""
+    links = ("FROM `tabDynamic Link` x WHERE x.parent=r.contact AND x.parenttype='Contact' AND x.parentfield='links'")
+    enabled = links.replace('WHERE', "JOIN `tabRelay Contact Type` t ON t.business_doctype=x.link_doctype AND t.enabled=1 WHERE")
+    return f"""SELECT DISTINCT r.name AS relay_contact, l.link_name AS business_name FROM `tabRelay Contact` r
+        JOIN `tabDynamic Link` l ON l.parent=r.contact AND l.parenttype='Contact' AND l.parentfield='links'
+            AND l.link_doctype={doctype_value}
+        WHERE (SELECT COUNT(*) {links})<={MAX_LINKS}
+            AND ((r.primary_doctype=l.link_doctype AND r.primary_name=l.link_name)
+                 OR NOT EXISTS (SELECT 1 {enabled} AND (x.link_doctype<>l.link_doctype OR x.link_name<>l.link_name)))"""
+
+
 def primary_record(contact, links=None):
     """The primary record the current user can read, for a conversation header."""
     target = primary(contact, links)
