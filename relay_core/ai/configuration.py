@@ -219,8 +219,11 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
     """Bounded, permission-checked captions; identifiers are values, never labels."""
     if skill is not None and skill != "":
         document_name(skill)
-    require_access('Relay AI Skill', 'write')
-    from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
+    if kind == 'business_doctype':
+        require_access()
+    else:
+        require_access('Relay AI Skill', 'write')
+        from frappe_tools.ai.tools import get_readable_meta, get_readable_columns, is_sensitive_field
     if not isinstance(query, str) or len(query) > 80:
         raise ValueError('Use at most 80 search characters')
     selected = frappe.parse_json(selected) if isinstance(selected, str) else selected
@@ -231,7 +234,10 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
     if kind == 'report':
         from relay_core.ai.reports import options
         return {'items': options(business_doctype)}
-    if kind in ('field', 'identity', 'company', 'scope', 'draft_field', 'draft_doctype', 'action'):
+    if kind == 'business_doctype':
+        from relay_core.business_types import picker_options
+        items = picker_options()
+    elif kind in ('field', 'identity', 'company', 'scope', 'draft_field', 'draft_doctype', 'action'):
         if kind in ('action', 'draft_doctype', 'draft_field'):
             from relay_core.flows.actions import definitions
             from relay_core.flows.action_contracts import ai_contract
