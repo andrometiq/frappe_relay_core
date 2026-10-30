@@ -201,18 +201,21 @@ class EventBuild:
 
 
 def compose(model: str, event, sources: list[Source], build_name: str) -> str:
-    """The one tool-free model call: sources in, validated facts with source ids out."""
+    """The one tool-free model call: sources in, validated facts with source ids out. The model sees emails and
+    phones only as placeholders."""
     from relay_core.ai.adapter import MAX_JSON_PROMPT_LENGTH, complete_json
+    from relay_core.ai.minimise import Minimiser
+    minimiser = Minimiser()
     readable = [source for source in sources if source.status in ('Read', 'Cut')]
     prompt = json.dumps({'instruction': PROMPT,
-                         'event': {'title': event.title, 'starts_on': str(event.event_starts_on or ''),
-                                   'ends_on': str(event.event_ends_on or '')},
+                         'event': minimiser.mask({'title': event.title, 'starts_on': str(event.event_starts_on or ''),
+                                                  'ends_on': str(event.event_ends_on or '')}),
                          'sources': [{'id': source.id, 'kind': source.kind, 'label': source.label,
-                                      'text': source.text} for source in readable]}, ensure_ascii=False)
+                                      'text': minimiser.mask(source.text)} for source in readable]}, ensure_ascii=False)
     if len(prompt) > MAX_JSON_PROMPT_LENGTH:
         raise ValueError(f'Event input has {len(prompt)} characters; the limit is {MAX_JSON_PROMPT_LENGTH}')
     value = complete_json(model, prompt, timeout=MODEL_TIMEOUT, reference=(BUILD, build_name))
-    return memory_text(value, {source.id for source in readable})
+    return memory_text(minimiser.unmask(value), {source.id for source in readable})
 
 
 def memory_text(value: dict, source_ids: set[str]) -> str:

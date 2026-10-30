@@ -85,14 +85,18 @@ def period(level: str, day: date) -> tuple[date, date]:
 def summarize(model: str, previous: str, events: list[str], reference: tuple[str, str]) -> str:
     """The one model call: the previous summary merged with new event lines, validated line by line. Input over the
     prompt limit is rejected, never cut. Overlong lines are cut to MAX_LINE_LENGTH; a wrong line format rejects the
-    answer. `reference` names the business record in the AI call log."""
-    prompt = json.dumps({'instruction': PROMPT, 'previous_summary': previous, 'new_events': events}, ensure_ascii=False)
+    answer. `reference` names the business record in the AI call log. The model sees emails and phones only as
+    placeholders."""
+    from relay_core.ai.minimise import Minimiser
+    minimiser = Minimiser()
+    prompt = json.dumps({'instruction': PROMPT, 'previous_summary': minimiser.mask(previous),
+                         'new_events': minimiser.mask(events)}, ensure_ascii=False)
     if len(prompt) > MAX_JSON_PROMPT_LENGTH:
         raise ValueError(f'Memory input has {len(prompt)} characters; the limit is {MAX_JSON_PROMPT_LENGTH}')
     lines = complete_json(model, prompt, timeout=MODEL_TIMEOUT, reference=reference).get('lines')
     if not isinstance(lines, list) or len(lines) > MAX_LINES or not all(isinstance(line, str) for line in lines):
         raise ValueError('The memory model returned invalid lines')
-    lines = [fit_line(line.strip()) for line in lines]
+    lines = [fit_line(minimiser.unmask(line).strip()) for line in lines]
     if not all(len(line) <= MAX_LINE_LENGTH and LINE.fullmatch(line) for line in lines):
         raise ValueError('The memory model returned invalid lines')
     return '\n'.join(lines)

@@ -10,6 +10,11 @@ from relay_core.automation import service, queue
 from relay_core.flows import service as flows
 
 
+def no_contact():
+    """A sender without a Contact name, so only emails and phones are masked."""
+    return patch.object(matching.frappe, 'db', Mock(**{'get_value.return_value': None}))
+
+
 class MatchingTests(unittest.TestCase):
     def result(self, first, second, human=False):
         return matching.validate_result({'scores': [{'id':'one','score':first}, {'id':'two','score':second}],
@@ -67,10 +72,12 @@ class MatchingTests(unittest.TestCase):
         skill = _dict(name='one', target='Explain supplier ledger', instructions='private owner memory',
                       ai_model='model', daily_limit=1, allowed_tools='private contracts')
         with patch.object(adapter,'match',return_value={'scores':[{'id':'one','score':.2}], 'human_request':False}) as model, \
-                patch.object(service,'reserve_attempt') as reserve:
+                patch.object(service,'reserve_attempt') as reserve, no_contact():
             self.assertIsNone(matching.select(_dict(content='Weather', channel='channel'), [skill], 'run', 123)['selected'])
-        model.assert_called_once_with('model',[{'id':'one','target':'Explain supplier ledger'}],'Weather','run',123)
-        reserve.assert_called_once_with(_dict(name='matching:channel', daily_limit=1))
+        owner = _dict(name='matching:channel', daily_limit=1, daily_spend_cap_usd=2)
+        model.assert_called_once_with('model',[{'id':'one','target':'Explain supplier ledger'}],'Weather','run',123,
+                                      skill=owner)
+        reserve.assert_called_once_with(owner)
 
     def test_matching_budget_is_shared_and_independent_of_candidate_order(self):
         skills = [_dict(name='A', daily_limit=1, ai_model='model', target='A'),
@@ -83,7 +90,7 @@ class MatchingTests(unittest.TestCase):
             return counters[key]
         cache.incr.side_effect = incr
         with patch.object(service, 'now_datetime', return_value=__import__('datetime').datetime(2026, 10, 25)), \
-                patch.object(service.frappe, 'cache', return_value=cache), patch.object(adapter, 'match',
+                patch.object(service.frappe, 'cache', return_value=cache), no_contact(), patch.object(adapter, 'match',
                 return_value={'human_request': False, 'scores': [{'id': 'A', 'score': .1}, {'id': 'B', 'score': .98}]}):
             service.reserve_attempt(skills[0])
             for candidates in (skills, list(reversed(skills))):

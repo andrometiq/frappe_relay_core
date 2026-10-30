@@ -18,12 +18,16 @@ class ReplyBlocked(ValueError):
         super().__init__(REASON)
 
 
-def phones(text):
+def phone_matches(text):
+    """Phone-like runs of 10–15 digits, at their positions in `text`; dates, document IDs and money excluded."""
     text = ''.join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in text)
     for pattern in (DOCUMENT, DATE, MONEY):
-        text = pattern.sub('|', text)
-    return {digits for match in PHONE.finditer(text)
-            if 10 <= len(digits := re.sub(r'\D', '', match[0])) <= 15}
+        text = pattern.sub(lambda found: '|' * len(found[0]), text)
+    return [match for match in PHONE.finditer(text) if 10 <= len(re.sub(r'\D', '', match[0])) <= 15]
+
+
+def phones(text):
+    return {re.sub(r'\D', '', match[0]) for match in phone_matches(text)}
 
 
 def contacts(*evidence):

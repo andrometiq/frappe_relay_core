@@ -16,6 +16,7 @@
     "handoff_owner",
     "mode",
     "daily_limit",
+    "daily_spend_cap_usd",
     "target",
     "reply_style",
     "search_confirmation",
@@ -87,6 +88,14 @@
       "fieldtype": "Int",
       "default": 100,
       "reqd": 1
+    },
+    {
+      "fieldname": "daily_spend_cap_usd",
+      "label": "Daily spend cap (USD)",
+      "fieldtype": "Currency",
+      "default": "2",
+      "non_negative": 1,
+      "description": "AI calls of this skill stop for the rest of the day when its estimated spend reaches this amount. The run goes to staff. Empty uses 2."
     },
     {
       "fieldname": "instructions",
@@ -176,5 +185,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-26 12:00:00.000000"
+  "modified": "2026-10-30 12:00:00.000000"
 }

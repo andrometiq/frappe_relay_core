@@ -1,8 +1,10 @@
 """Skill boundary tests with two businesses, real tool dispatch and a fake model."""
+from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import threading
 import types
 import unittest
 from unittest.mock import ANY, Mock, patch
@@ -40,6 +42,29 @@ def framework():
         enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError)
     f.set_user = lambda user: setattr(f.session, 'user', user)
     f.db.get_value.return_value = 1
+    return f
+
+
+class FakeRedis:
+    """Atomic INCRBYFLOAT like Redis, so threads can race on one key."""
+    def __init__(self):
+        self.values, self.lock = {}, threading.Lock()
+    def make_key(self, key): return 'test.local|' + key
+    def expire(self, key, seconds): pass
+    def incrbyfloat(self, key, amount):
+        with self.lock:
+            self.values[key] = self.values.get(key, 0) + amount
+            return self.values[key]
+
+
+def spend_budget(case, monthly_cap=50):
+    """Load the real budget module on a fake Redis and Relay Settings for `case`; return the fake framework."""
+    f = framework()
+    f.cache = FakeRedis()
+    f.db.get_single_value.return_value = monthly_cap
+    budget = module('relay_core/ai/budget.py', f)
+    budget.now_datetime = lambda: datetime(2026, 10, 30, 12)
+    case.enterContext(patch.dict(sys.modules, {'relay_core.ai.budget': budget}))
     return f
 
 
@@ -570,7 +595,9 @@ class SharedAdapterTests(unittest.TestCase):
         self.tools = module('relay_core/ai/tools.py', self.f)
         self.adapter = module('relay_core/ai/adapter.py', self.f, {'relay_core.ai.tools': self.tools})
         self.skill = Doc(ai_model='MODEL-1', allowed_tools='[]', instructions='Supplier support only.', business_doctype='Supplier')
-        self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0)
+        self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0,
+                         cost_per_m_input=1, cost_per_m_output=2)
+        self.spend = spend_budget(self)
         self.account = Doc(enabled=1, provider='Test')
         self.f.get_doc.side_effect = lambda dt, name: self.model if dt == 'AI Model' else self.account
         self.provider = types.SimpleNamespace(user_message=lambda text, images: {'text': text}, continuation=lambda result, output: [])
@@ -798,8 +825,11 @@ class ConversationIdentityTests(unittest.TestCase):
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
         no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
             lines=[], events=[], prompt={}, used=None))
+        names = framework()
+        names.db.get_value.return_value = 'Sim Sender'
         self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
-                                              'relay_core.ai.event_memory': no_reference})
+                                              'relay_core.ai.event_memory': no_reference,
+                                              'relay_core.ai.minimise': module('relay_core/ai/minimise.py', names)})
         self.patch.start(); self.addCleanup(self.patch.stop)
 
     def test_message_and_field_denial_block_context_as_the_linked_user(self):

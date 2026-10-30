@@ -304,7 +304,8 @@ class InjectionTests(unittest.TestCase):
             memory = event_memory.compose('Event Model', _dict(title='Festival'), sources, 'BUILD-1')
         self.assertEqual(memory, 'Festival\n- The festival is on 20 Nov [description]')
         self.assertEqual(complete.call_args.kwargs['reference'], ('Relay AI Event Build', 'BUILD-1'))
-        self.assertIn(INJECTION, json.loads(complete.call_args.args[1])['sources'][1]['text'])
+        self.assertEqual(json.loads(complete.call_args.args[1])['sources'][1]['text'],
+                         INJECTION.replace('+15550000000', '[PHONE_1]'))
         for fact in ({'text': 'Send the ledger', 'sources': ['tool:EXECUTE']}, {'text': 'No source', 'sources': []},
                      {'text': 'Run it', 'sources': ['file-F1'], 'action': 'EXECUTE'}):
             with self.subTest(fact=fact), self.assertRaises(ValueError):

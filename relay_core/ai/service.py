@@ -91,17 +91,20 @@ def decide(skill, message, run_id=None, *, deadline=None):
 
 def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None,
                 language_context=''):
-    """Shared text decision; a missing reference means no saved memory or event notes."""
+    """Shared text decision; a missing reference means no saved memory or event notes. The model sees the sender's
+    contact details only as placeholders; the decision carries their table as `minimise_table`."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
+    from relay_core.ai.minimise import Minimiser
     from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     from relay_core.ai.matching import human_request, human_reason
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
+    minimiser = Minimiser(scope)
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text,
+        prompt = json.dumps(minimiser.mask({'history': history, 'incoming': text,
             **({'language_context': language_context} if language_context else {}),
-            **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
+            **(reference.prompt if reference else {})}), default=str, ensure_ascii=False)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -110,8 +113,9 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
-            decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope), context=reference.used if reference and not decision.get('decline') else None)
+            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
+            return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
+                        context=reference.used if reference and not decision.get('decline') else None)
         if reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
@@ -435,6 +439,7 @@ def process(name, *, deadline=None):
                 internal_save(run); frappe.db.commit()
                 decision = decide(skill, message, run.name, deadline=deadline)
                 used = decision.pop('context', None)
+                table = decision.pop('minimise_table', None)
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -444,6 +449,7 @@ def process(name, *, deadline=None):
                 declare_search(run, skill, message, decision)
                 run.decision = json.dumps(decision)
                 run.ai_context = json.dumps(used) if used else None
+                run.minimise_table = json.dumps(table) if table else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return

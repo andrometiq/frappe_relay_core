@@ -115,12 +115,18 @@ def select(message, skills, run_id, deadline, *, history=None):
     if len(text) > MAX_TEXT:
         raise ValueError('Message exceeds matching budget')
     from relay_core.ai.adapter import match
+    from relay_core.ai.budget import daily_cap
+    from relay_core.ai.minimise import Minimiser
     from relay_core.automation.service import reserve_attempt
     # Matching is shared work; no candidate owns this inference.
-    reserve_attempt(frappe._dict(name='matching:' + message.channel,
-        daily_limit=sum(int(skill.daily_limit) for skill in skills)))
+    owner = frappe._dict(name='matching:' + message.channel,
+        daily_limit=sum(int(skill.daily_limit) for skill in skills),
+        daily_spend_cap_usd=sum(daily_cap(skill) for skill in skills))
+    reserve_attempt(owner)
+    minimiser = Minimiser({'person': frappe.db.get_value('Relay Contact', message.relay_contact, 'contact')})
     value = match(skills[0].ai_model, [{'id': s.name, 'target': s.target} for s in skills],
-                  text, run_id, deadline, **({'history': history} if history else {}))
+                  minimiser.mask(text), run_id, deadline, skill=owner,
+                  **({'history': minimiser.mask(history)} if history else {}))
     result = validate_result(value, {skill.name for skill in skills})
     if not result['selected']:
         result['reason'] = (human_reason(text) if value['human_request'] else
