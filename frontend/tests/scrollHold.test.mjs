@@ -94,3 +94,21 @@ test('a bottom hold never pins to the end while newer rows are not loaded', () =
   assert.equal(hold.apply(), true)
   assert.equal(node.scrollTop, node.scrollHeight - node.clientHeight)
 })
+
+test('scroll anchoring that moves the view down while a bubble grows keeps following the end', () => {
+  const { node, rows, gap } = thread(Array(20).fill(50))
+  const hold = createScrollHold(() => node)
+  hold.toBottom()
+  rows.push({ name: 'M20', height: 400 })
+  node.scrollTop += 50
+  assert.ok(gap() > 80, 'the browser moved the view only part of the way')
+  hold.scrolled()
+  assert.equal(hold.isAtBottom, true)
+  assert.equal(gap(), 0)
+  rows.push({ name: 'M21', height: 300 })
+  hold.apply()
+  assert.equal(gap(), 0)
+  node.scrollTop -= 200
+  hold.scrolled()
+  assert.equal(hold.isAtBottom, false, 'an upward scroll is the reader leaving the end')
+})

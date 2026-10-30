@@ -123,6 +123,33 @@ test('a failed send does not overwrite a new draft', async t => {
   assert.equal(state.body.value, 'New draft')
 })
 
+test('a sent photo closes the attachment panel, and a failed one puts it back', async t => {
+  let fail = false
+  const { state } = fixture(t, method => method === 'messaging.send' && fail ? Promise.reject(Error('Connection lost')) : undefined)
+  await state.open('A')
+  const photo = { name: 'FILE-1', filename: 'photo.jpg', size: 10 }
+  state.kind.value = 'photo'; state.attachment.value = photo
+  await state.send()
+  assert.equal(state.kind.value, 'text')
+  assert.equal(state.attachment.value, null)
+  fail = true
+  state.kind.value = 'photo'; state.attachment.value = photo
+  await state.send()
+  assert.equal(state.kind.value, 'photo')
+  assert.deepEqual(state.attachment.value, photo)
+})
+
+test('a reply sent from an older message jumps to the newest one', async t => {
+  const { state } = fixture(t)
+  await state.open('A')
+  state.rememberPosition({ name: thread[0].name, offset: 20, atBottom: false })
+  state.reply(thread[0])
+  state.body.value = 'Answer'
+  const send = state.send()
+  assert.equal(state.viewPosition.value, null)
+  await send
+})
+
 const rejected = { name: 'pending:RELAY-MA-0000000009', action: 'RELAY-MA-0000000009', scope: 'A', channel: 'whatsapp',
   provider_context: { provider: 'WhatsApp' }, direction: 'Outgoing', content: 'Not sent', creation: '2026-10-28 10:05:00',
   status: 'Failed', _pending: true }
