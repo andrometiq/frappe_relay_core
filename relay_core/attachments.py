@@ -140,6 +140,12 @@ def read(message,download=0,index=None):
         file,raw=file_content(data['attachment'],original)
         import mimetypes
         return response(raw,mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
+    if header and data.get('campaign'):
+        from relay_core.campaign_media import sent_header
+        if kept:=sent_header(source,data['campaign']):
+            import mimetypes
+            filename,raw=kept
+            return response(raw,mimetypes.guess_type(filename)[0] or 'application/octet-stream',filename,download)
     if channel.channel=='WhatsApp':
         media=data.get('media') or header or {};media_id=media.get('id')
         if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
