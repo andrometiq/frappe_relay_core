@@ -106,7 +106,6 @@
   .v1-shell.relay-shell .conversation-channel-line:has(.number-tag){display:flex;align-items:center;gap:6px;color:var(--relay-ink-3)}
   .v1-shell.relay-shell :is(.conversation-meta:empty,.conversation-channel-line+.conversation-meta){display:none}
   .v1-shell.relay-shell .conversation-heading-actions{gap:0}
-  .v1-shell.relay-shell .conversation-heading-actions :is(.conversation-assign,.conversation-ticket){display:none}
   .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:44px;height:44px;min-height:44px;border-radius:8px}
   .mobile-record-bar{display:flex;flex:none;align-items:center;gap:6px;padding:8px 12px;overflow-x:auto;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);scrollbar-width:none}
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}

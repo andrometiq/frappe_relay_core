@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from "vue";
-import { Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
+import { Avatar, Button, FormControl, ErrorMessage, Dialog, TextInput, FeatherIcon } from "@relay/ui";
 import ChoiceField from "../fields/ChoiceField.vue";
 import RelaySelect from "../RelaySelect.vue";
 import TemplateMediaField from "./TemplateMediaField.vue";
@@ -311,7 +311,7 @@ onBeforeUnmount(() => { clearTimeout(contactTimer); ++contactGeneration; contact
             <button v-for="row in contactOptions" :key="row.value" type="button" role="option"
               :aria-selected="contact === row.value" :disabled="busy || !!pending"
               :class="{ selected: contact === row.value }" @click="chooseContact(row)">
-              <span class="contact-chip-avatar" aria-hidden="true">{{ row.label.slice(0, 1).toUpperCase() }}</span>
+              <Avatar class="contact-chip-avatar" size="sm" :label="row.label" aria-hidden="true" />
               <span class="start-contact-copy"><strong>{{ row.label }}</strong>
                 <small v-if="row.phone || row.email"><ContactEndpoints :phone="row.phone" :email="row.email" :size="11" /></small>
                 <small v-else>{{ row.description || "Review verified channels" }}</small></span>

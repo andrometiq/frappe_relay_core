@@ -803,8 +803,12 @@ def query_condition(user=None):
 
 @frappe.whitelist(methods=['GET'])
 def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
-              exclude_assignees=None, business_type=None):
-    """Newest tickets first, 30 per page; `after` continues below the given ticket."""
+              exclude_assignees=None, business_type=None, state=None, assigned=None, unlinked=None,
+              resolved_today=None):
+    """Newest tickets first, 30 per page; `after` continues below the given ticket.
+
+    `state` limits to statuses of that type unless `ticket_status` is given; `resolved_today` is
+    tickets closed today."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid ticket search')
@@ -813,6 +817,13 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         from relay_core.business_inbox import check_type
         check_type(business_type)
         filters['business_doctype'] = business_type
+    elif frappe.utils.cint(unlinked):
+        filters['business_doctype'] = ['is', 'not set']
+    if frappe.utils.cint(resolved_today):
+        state = 'Closed'
+        filters['name'] = ['in', _resolved_today() or ['']]
+    if state and not ticket_status:
+        filters['ticket_status'] = ['in', _status_names(state) or ['']]
     if query:
         filters['subject'] = ['like', '%' + query.replace('%', '\\%').replace('_', '\\_') + '%']
     if ticket_status:
@@ -835,6 +846,8 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
             filters['assigned_to'] = ['not in', users + ['']]
         else:
             or_filters = [['assigned_to', 'not in', users], ['assigned_to', 'is', 'not set']]
+    if frappe.utils.cint(assigned) and 'assigned_to' not in filters:
+        filters['assigned_to'] = ['is', 'set']
     if frappe.utils.cint(mine):
         filters['assigned_to'] = frappe.session.user
     if after:
@@ -850,11 +863,65 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
     return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None, 'group_fields': columns}
 
 
+def _status_names(state):
+    if state not in ticket_settings.STATUS_TYPES:
+        frappe.throw('Invalid ticket filter')
+    return frappe.get_all(ticket_settings.DOCTYPES['status'], filters={'state': state}, pluck='name')
+
+
 @frappe.whitelist(methods=['GET'])
 def dashboard():
-    """Ticket counts by status, assignee and type, limited to the tickets the user can read."""
+    """Open-ticket workload for the readable tickets: totals, groups and the newest open tickets."""
     require_access()
-    def grouped(field):
-        return frappe.get_list('Relay Ticket', fields=[field, {'COUNT': 'name', 'as': 'tickets'}],
-                               group_by=field, order_by='tickets desc', limit_page_length=0)
-    return {'statuses': grouped('ticket_status'), 'assignees': grouped('assigned_to'), 'types': grouped('ticket_type')}
+    open_statuses = _status_names('Open')
+    groups = frappe.get_list('Relay Ticket', fields=['ticket_status', 'assigned_to', 'business_doctype',
+                             {'COUNT': 'name', 'as': 'tickets'}],
+                             group_by='ticket_status, assigned_to, business_doctype', order_by='',
+                             limit_page_length=0)
+    open_groups = [row for row in groups if row.ticket_status in open_statuses]
+    resolved = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', _status_names('Closed') or ['']],
+                               'name': ['in', _resolved_today() or ['']]},
+                               fields=[{'COUNT': 'name', 'as': 'tickets'}], order_by='')
+    recent = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']]},
+                             fields=LIST_FIELDS, order_by='creation desc', limit_page_length=10)
+    oldest = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']]},
+                             fields=['name', 'subject', 'creation'], order_by='creation asc',
+                             limit_page_length=1)
+    return {
+        'totals': {
+            'open': sum(row.tickets for row in open_groups),
+            'assigned': sum(row.tickets for row in open_groups if row.assigned_to),
+            'unassigned': sum(row.tickets for row in open_groups if not row.assigned_to),
+            'resolved_today': resolved[0].tickets if resolved else 0,
+        },
+        'oldest_open': oldest[0] if oldest else None,
+        'statuses': _counted(groups, 'ticket_status'),
+        'assignees': _counted(open_groups, 'assigned_to'),
+        'business_types': _counted(open_groups, 'business_doctype'),
+        'recent': recent,
+    }
+
+
+def _resolved_today():
+    """Tickets moved from an open to a closed status today, read from the ticket's change history.
+
+    A later edit of a ticket closed earlier does not count. The caller keeps only tickets that are still closed."""
+    closed = set(_status_names('Closed'))
+    today = frappe.utils.today()
+    names = set(frappe.get_all('Relay Ticket', filters={'creation': ['>=', today], 'ticket_status': ['in', list(closed) or ['']]},
+                               pluck='name'))
+    versions = frappe.get_all('Version', filters={'ref_doctype': 'Relay Ticket', 'creation': ['>=', today],
+                              'data': ['like', '%"ticket_status"%']}, fields=['docname', 'data'])
+    for version in versions:
+        for field, old, new in frappe.parse_json(version.data).get('changed') or []:
+            if field == 'ticket_status' and new in closed and old not in closed:
+                names.add(version.docname)
+    return sorted(names)
+
+
+def _counted(rows, field):
+    """Ticket counts summed by one field, largest first."""
+    totals = {}
+    for row in rows:
+        totals[row.get(field) or ''] = totals.get(row.get(field) or '', 0) + row.tickets
+    return [{field: key, 'tickets': count} for key, count in sorted(totals.items(), key=lambda item: -item[1])]

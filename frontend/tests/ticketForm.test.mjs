@@ -31,13 +31,13 @@ test('live ticket notices link to the ticket and ignore other events', () => {
   assert.equal(ticketNotice({ kind: 'tickets' }), null)
 })
 
-test('chat header and message menu open the create ticket dialog', async () => {
+test('message selection and the message menu open the create ticket dialog', async () => {
   const inbox = await readFile(new URL('../src/components/ConnectedMessages.vue', import.meta.url), 'utf8')
   const thread = await readFile(new URL('../src/components/messages/MessageThread.vue', import.meta.url), 'utf8')
-  assert.match(inbox, /label="Create ticket from this chat" :title="contactRows\.length \? '[^']+' : 'No messages in this chat yet'"[^>]*@click="openTicket\(\)"/)
-  assert.match(inbox, /isMobile\.value && contactRows\.value\.length \? \[\{label:'Create ticket from this chat'/)
+  assert.doesNotMatch(inbox, /Create ticket from this chat|openTicket\(\)/)
   assert.match(inbox, /@ticket="openTicket"/)
   assert.match(thread, /label: "Create ticket",\s*icon: "bookmark",\s*onClick: \(\) => emit\("ticket", message\)/)
+  assert.match(thread, /emit\('ticket', selectedMessages\.value\)/)
 })
 
 test('people with the same name show their login so a picker never lists one name twice', () => {

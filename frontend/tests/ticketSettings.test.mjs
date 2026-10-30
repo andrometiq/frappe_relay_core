@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { COLOURS, assigneeChartRows, ticketFilterRoute, ticketFiltersFromRoute, chartRows, emptySettings, isClosed, movedNames, pickerOptions, removalHint, statusLook, ticketTotals } from '../src/services/ticketSettings.js'
+import { COLOURS, assigneeChartRows, readTicketRoute, ticketFilterRoute, ticketFiltersFromRoute, ticketRoute, chartRows, emptySettings, isClosed, movedNames, pickerOptions, removalHint, statusLook } from '../src/services/ticketSettings.js'
 
 const settings = { ...emptySettings(), statuses: [
   { name: 'Open', label: 'Open', colour: 'amber', state: 'Open' }, { name: 'Started', label: 'Started', colour: 'red', state: 'Open' },
@@ -34,11 +34,6 @@ test('moving a row gives the new order and refuses to move past either end', () 
 test('a value that tickets use says it cannot be deleted', () => {
   assert.equal(removalHint({ tickets: 0 }), '')
   assert.match(removalHint({ tickets: 1 }), /1 ticket use this, so it cannot be deleted/)
-})
-
-test('dashboard totals count each status by its type', () => {
-  const rows = [{ ticket_status: 'Open', tickets: 4 }, { ticket_status: 'Started', tickets: 2 }, { ticket_status: 'Done', tickets: 3 }]
-  assert.deepEqual(ticketTotals(settings, rows), { open: 6, closed: 3 })
 })
 
 test('chart bars scale to the largest count and name empty values', () => {
@@ -100,21 +95,40 @@ export async function resolve(specifier, context, next) {
 })
 
 
-test('assignee chart keeps top eight and totals the rest, with distinct names and working filters', () => {
+test('assignee chart keeps the top eight open-ticket owners on one line and totals the rest', () => {
   const counts = Array.from({ length: 11 }, (_, index) => ({ assigned_to: index === 10 ? null : `user${index}@example.invalid`, tickets: 11 - index }))
   const rows = assigneeChartRows(counts.reverse(), user => user?.startsWith('user') ? 'Same name' : 'Unassigned')
   assert.equal(rows.length, 9)
-  assert.equal(rows[0].label, 'Same name (user0@example.invalid)')
+  assert.equal(rows[0].label, 'Same name')
+  assert.equal(rows[0].title, 'Same name (user0@example.invalid)')
   assert.equal(rows[8].label, 'Others')
   assert.equal(rows[8].tickets, 6)
   assert.equal(rows.reduce((sum, row) => sum + row.tickets, 0), 66)
   for (const row of rows) {
+    assert.equal(row.filters.state, 'Open')
     const filters = ticketFiltersFromRoute(ticketFilterRoute(row.filters))
     for (const [field, value] of Object.entries(row.filters)) assert.equal(filters[field], value)
   }
   assert.deepEqual(JSON.parse(rows[8].filters.exclude_assignees), Array.from({ length: 8 }, (_, index) => `user${index}@example.invalid`))
   assert.equal(assigneeChartRows(counts.slice(0, 2), user => user || 'Unassigned').length, 2)
   assert.deepEqual(assigneeChartRows([], user => user), [])
+})
+
+test('the Tickets URL holds the view, every list filter and the open ticket', () => {
+  assert.equal(ticketRoute(), '#/tickets')
+  assert.equal(ticketRoute({ view: 'settings' }), '#/tickets?view=settings')
+  assert.equal(ticketRoute({ view: 'dashboard', ticket: 'TKT-1' }), '#/tickets?view=dashboard&ticket=TKT-1')
+  const filters = { query: 'late parcel', ticket_status: 'Open', mine: 1, state: 'Open', assigned: 1, business_type: 'Customer' }
+  const route = ticketRoute({ view: 'tickets', filters, ticket: 'TKT-2' })
+  assert.deepEqual(readTicketRoute(route), { view: 'tickets', ticket: 'TKT-2', filters: { ...filters, assigned: '1' } })
+  assert.equal(ticketRoute({ view: 'tickets', filters: { query: '', ticket_status: '', mine: 0 } }), '#/tickets?view=tickets')
+  assert.equal(ticketRoute({ view: 'dashboard', filters }), '#/tickets')
+})
+
+test('a bare ticket link opens over the list and unknown views fall back to the dashboard', () => {
+  assert.equal(readTicketRoute('#/tickets?ticket=TKT-3').view, 'tickets')
+  assert.equal(readTicketRoute('#/tickets?view=other').view, 'dashboard')
+  assert.equal(readTicketRoute('#/tickets').view, 'dashboard')
 })
 
 test('empty assignee and type filters survive navigation and differ from all tickets', () => {
@@ -134,16 +148,4 @@ test('legacy amber colours render without rewriting saved settings', () => {
   assert.equal(settings.statuses[0].colour, 'amber')
   const pending = { statuses: [{ name: 'Pending', label: 'Pending', colour: 'amber', state: 'Open' }] }
   assert.equal(statusLook(pending, { ticket_status: 'Pending' }).theme, 'gray')
-})
-
-test('expanding assignees preserves totals, filters and duplicate names across the cutoff', () => {
-  const counts = Array.from({ length: 10 }, (_, index) => ({ assigned_to: `user${index}`, tickets: 10 - index }))
-  const label = user => ['user0', 'user9'].includes(user) ? 'Same name' : user
-  assert.equal(assigneeChartRows(counts, label)[0].label, 'Same name (user0)')
-  const rows = assigneeChartRows(counts, label, true)
-  assert.equal(rows.length, 10)
-  assert.equal(rows[9].label, 'Same name (user9)')
-  assert.equal(rows.reduce((sum, row) => sum + row.tickets, 0), 55)
-  assert.deepEqual(rows[9].filters, { assigned_to: 'user9' })
-  assert.ok(rows.every(row => row.width > 0 && row.width <= 100))
 })

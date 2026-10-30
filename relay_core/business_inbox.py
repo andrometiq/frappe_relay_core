@@ -304,11 +304,16 @@ def contacts(doctype, name, query=''):
     business_document(doctype, name)
     rows=_linked_contacts(doctype,name,query,31)
     from relay_core.contacts import contact_emails
+    from relay_core.identity import phone_number
+    from relay_core.conversation_start import numbers_held_elsewhere
     emails=contact_emails([row.name for row in rows[:30] if not row.email_id])
+    phones={row.name:(row.mobile_no or row.phone or '').strip() for row in rows[:30]}
+    elsewhere=numbers_held_elsewhere({name:{phone_number(phone)}-{None} for name,phone in phones.items() if phone})
     result=[]
     for row in rows[:30]:
-        phone=(row.mobile_no or row.phone or '').strip()
+        phone=phones[row.name]
         email=row.email_id or emails.get(row.name,'')
         result.append({'value':row.name,'label':row.full_name or row.name,'phone':phone,'email':email,
-                       'description':' · '.join(value for value in (phone,email) if value),'has_phone':bool(phone)})
+                       'description':' · '.join(value for value in (phone,email) if value),'has_phone':bool(phone),
+                       'number_elsewhere':row.name in elsewhere})
     return {'items':result,'has_more':len(rows)>30}

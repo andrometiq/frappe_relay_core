@@ -37,6 +37,22 @@ class BusinessContactTests(unittest.TestCase):
             business_inbox._linked_contacts('Supplier', 'local', query='x' * 81)
         fake.get_all.assert_not_called()
 
+    def test_contact_whose_number_another_contact_owns_is_flagged(self):
+        from relay_core import conversation_start
+        rows = [Mock(full_name=name, mobile_no=phone, phone=None, email_id='x@y.z') for name, phone in
+                (('Shared', '7790844803'), ('Own', '9150031035'), ('No number', ''))]
+        for row in rows:
+            row.name = row.full_name
+        held = Mock(return_value={'Shared'})
+        with patch.object(business_inbox, 'check_type'), patch.object(business_inbox, 'business_document'), \
+                patch.object(business_inbox, '_linked_contacts', return_value=rows), \
+                patch('relay_core.contacts.contact_emails', return_value={}), \
+                patch('relay_core.identity.phone_number', side_effect=lambda value: '91' + value), \
+                patch.object(conversation_start, 'numbers_held_elsewhere', held):
+            items = business_inbox.contacts('Customer', 'AURA')['items']
+        self.assertEqual([item['number_elsewhere'] for item in items], [True, False, False])
+        held.assert_called_once_with({'Shared': {'917790844803'}, 'Own': {'919150031035'}})
+
 
 if __name__ == '__main__':
     unittest.main()

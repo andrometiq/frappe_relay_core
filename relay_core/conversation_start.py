@@ -37,7 +37,36 @@ def business_channels(contact, business_doctype, business_name):
 @frappe.whitelist(methods=['POST'])
 def business_options(contact, business_doctype, business_name, channel=None):
     enroll_business_contact(contact, business_doctype, business_name, channel)
-    return business_channels(contact, business_doctype, business_name)
+    rows = business_channels(contact, business_doctype, business_name)
+    if not rows:
+        from relay_core.identity import contact_identities
+        person = business_contact(contact, business_doctype, business_name)
+        if numbers_held_elsewhere({person.name: contact_identities(person)['WhatsApp']}, channel):
+            frappe.throw(NUMBER_ELSEWHERE)
+    return rows
+
+
+NUMBER_ELSEWHERE = ('This mobile number is saved on another contact too. A WhatsApp number belongs to one contact, '
+                    'so ask a manager to keep it on one contact only.')
+
+
+def numbers_held_elsewhere(numbers, channel=None):
+    """Contacts, from {contact: WhatsApp numbers}, whose number another contact already owns, so enrollment left it there."""
+    from relay_core.contact_lifecycle import endpoint_key
+    filters = {'enabled': 1, 'account': connection_value('relay_hub_account'), 'channel': 'WhatsApp'}
+    if channel:
+        filters['name'] = channel
+    channels = frappe.get_list('Relay Channel', filters=filters, pluck='name')
+    wanted = {}
+    for contact, values in numbers.items():
+        for key in {endpoint_key(name, number) for name in channels for number in values}:
+            wanted.setdefault(key, []).append(contact)
+    if not wanted:
+        return set()
+
+    relays = dict(frappe.get_all('Relay Contact', filters={'contact': ['in', list(numbers)]}, fields=['name', 'contact'], as_list=True))
+    held = frappe.get_all('Relay Contact Endpoint', filters={'endpoint_key': ['in', list(wanted)]}, fields=['endpoint_key', 'relay_contact'])
+    return {contact for row in held for contact in wanted[row.endpoint_key] if relays.get(row.relay_contact) != contact}
 
 
 def enroll_business_contact(contact, business_doctype, business_name, channel=None):

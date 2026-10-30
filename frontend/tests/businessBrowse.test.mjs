@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, tileCount, tileUnread } from '../src/services/businessBrowse.js'
+import { rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
@@ -12,7 +12,7 @@ async function component(t, props = {}, api) {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, browseCrumbs, browseRoute, enterBrowse, readBrowse, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh() {}, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
@@ -23,8 +23,8 @@ async function component(t, props = {}, api) {
 }
 
 const type = { kind: 'type', doctype: 'Local Supplier', label: 'Suppliers', unread: 12 }
-const blank = { kind: 'group', value: '', label: 'Not set', unread: 12 }
-const team = { kind: 'group', value: 'North / A&B', label: 'North / A&B', unread: 12 }
+const blank = { kind: 'group', field: 'region', value: '', label: 'Not set', unread: 12 }
+const team = { kind: 'group', field: 'team', value: 'North / A&B', label: 'North / A&B', unread: 12 }
 const record = { kind: 'record', name: 'local-1', label: 'Local record', unread: 12 }
 
 function api(calls, contacts = false) {
@@ -33,7 +33,7 @@ function api(calls, contacts = false) {
     if (method === 'api.contact_directory') return { items: [{ name: 'person-1', full_name: 'Local person', mobile_no: '555001' }], next: null }
     const path = JSON.parse(values.path)
     const items = !values.doctype ? (contacts ? [type, { kind: 'unlinked', contact_count: 1 }] : [type]) : path.length === 0 ? [blank] : path.length === 1 ? [team] : [record]
-    return { items, next: null, fields: values.doctype ? [{ label: 'Region' }, { label: 'Team' }] : [] }
+    return { items, next: null, fields: values.doctype ? [{ fieldname: 'region', label: 'Region' }, { fieldname: 'team', label: 'Team' }] : [] }
   }
 }
 
@@ -79,7 +79,8 @@ test('Contacts has no flat root, unlinked is one root tile, and record contacts 
   view.choose(view.items.value[0])
   assert.deepEqual(view.emitted.at(-1), ['contact', 'person-1'])
   view.query.value = '555'; await nextTick(); await view.search()
-  assert.equal(calls.at(-1)[1].business_type, null, 'Search at a record level finds any contact')
+  assert.deepEqual(calls.at(-1), ['api.contact_directory', { query: '555', after: null, business_type: type.doctype, business_name: record.name, unlinked: 0 }],
+    'Contact search stays inside the record')
   view.navigate(rootBrowse()); await settle()
   view.choose({ kind: 'unlinked' }); await settle()
   assert.equal(calls.at(-1)[1].unlinked, 1)
@@ -124,7 +125,7 @@ test('Back restores Contacts and Inbox searches after opening details and after 
     const base = contacts ? '#/contacts' : '#/messages'
     const history = browser(t, base), calls = []
     const view = await component(t, { contacts }, api(calls, contacts))
-    if (!contacts) { view.choose(type); await settle() }
+    view.choose(contacts ? { kind: 'unlinked' } : type); await settle()
     view.query.value = 'Alice & 555'; await settle(); await view.search()
     const parent = location.hash
     assert.equal(readBrowse(parent).query, 'Alice & 555')
@@ -185,7 +186,7 @@ test('rendered root has one Business types label and Contacts tiles have contact
       { kind: 'type', label: 'Local', record_count: 1, contact_count: 2, unread: 4278, unread_records: 121 },
     ], fields: [], next: null }))
     const app = Vue.createSSRApp({ render, setup: () => ({ ...view, contacts, busy: false,
-      selected: '', selectedDoctype: '', heading: null, tileCount, tileUnread, listTime: () => '' }) })
+      selected: '', selectedDoctype: '', heading: null, levelLabel, searchLabel, tileCount, tileUnread, listTime: () => '' }) })
     for (const name of ['Avatar', 'Button', 'ErrorMessage', 'FeatherIcon', 'TextInput', 'LoadingRows']) {
       app.component(name, { setup: () => () => Vue.h('span') })
     }
@@ -200,4 +201,63 @@ test('rendered root has one Business types label and Contacts tiles have contact
       assert.match(html, /121 unread records/)
     }
   }
+})
+
+test('search filters the shown level and the placeholder names it', async t => {
+  for (const contacts of [false, true]) {
+    browser(t, contacts ? '#/contacts' : '#/messages'); const calls = []
+    const view = await component(t, { contacts }, api(calls, contacts))
+    const placeholder = () => searchLabel(view.state.value, view.fields.value)
+    assert.equal(placeholder(), 'Search business types')
+    view.query.value = 'Supp'; await settle(); await view.search()
+    assert.deepEqual([calls.at(-1)[0], calls.at(-1)[1].query, calls.at(-1)[1].doctype], ['business_groups.browse', 'Supp', null])
+    view.choose(type); await settle()
+    assert.equal(placeholder(), 'Search Region')
+    view.query.value = 'North'; await settle(); await view.search()
+    assert.deepEqual([calls.at(-1)[0], calls.at(-1)[1].query, calls.at(-1)[1].path], ['business_groups.browse', 'North', '[]'])
+    view.choose(blank); await settle(); view.choose(team); await settle()
+    assert.equal(placeholder(), 'Search Local Supplier')
+    view.query.value = 'Local'; await settle(); await view.search()
+    assert.deepEqual([calls.at(-1)[0], calls.at(-1)[1].path_fields], ['business_groups.browse', '["region","team"]'])
+    if (contacts) {
+      view.choose(record); await settle()
+      assert.equal(placeholder(), 'Search name, number or email')
+    }
+  }
+})
+
+test('a group level is entered once even when a stale tile is clicked again', async t => {
+  const history = browser(t, '#/contacts'), calls = []
+  const view = await component(t, { contacts: true }, api(calls, true))
+  view.choose(type); await settle()
+  const partner = { ...blank, value: 'Bihar - ATAL MARKETING' }
+  view.choose(partner); view.choose(partner); await settle()
+  assert.deepEqual(view.state.value.path, ['Bihar - ATAL MARKETING'])
+  assert.deepEqual(readBrowse(location.hash).pathFields, ['region'])
+  history.history.back(); await settle()
+  assert.deepEqual(view.state.value.path, [])
+  assert.deepEqual(view.crumbs.value.map(row => row.label), ['Business types', 'Local Supplier'])
+})
+
+test('a URL saved under an older grouping restarts at the level the server answers', async t => {
+  browser(t, '#/contacts?group_type=Customer&group_path=' + encodeURIComponent('["Bihar","Bihar"]') + '&group_fields=' + encodeURIComponent('["customer_group","default_sales_partner"]'))
+  const calls = []
+  const view = await component(t, { contacts: true }, async (method, values) => {
+    calls.push(values)
+    return { items: [{ kind: 'group', field: 'default_sales_partner', value: 'Bihar', label: 'Bihar' }], next: null, path: [], path_fields: [],
+      fields: [{ fieldname: 'default_sales_partner', label: 'Sales Partner' }] }
+  })
+  assert.equal(calls[0].path_fields, '["customer_group","default_sales_partner"]')
+  assert.deepEqual(view.state.value.path, [])
+  assert.equal(readBrowse(location.hash).path.length, 0)
+  assert.deepEqual(view.crumbs.value.map(row => row.label), ['Business types', 'Customer'])
+  assert.equal(view.items.value[0].value, 'Bihar')
+  assert.equal(levelLabel(view.state.value, view.fields.value), 'Sales Partner')
+})
+
+test('record tiles use the coloured initials avatar and group tiles keep the folder icon', async () => {
+  const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
+  assert.match(source, /<Avatar v-if="tile\.kind === 'contact' \|\| tile\.kind === 'record'" :label="tile\.label" \/>/)
+  assert.doesNotMatch(source, /file-text/)
+  assert.match(source, /'folder'/)
 })
