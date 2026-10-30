@@ -67,7 +67,7 @@ test('saved picker captions expose failed lookups and recover on retry', async (
   let fail=true
   const state=new Function('ref','coreApi','pickerError',`
     let generation=0;
-    const props={modelValue:'private-id',method:'options',multiple:false},params=ref({kind:'doctype'}),captions=ref([]),error=ref(''),loading=ref(false),caption=row=>row;
+    const props={modelValue:'private-id',method:'options',multiple:false},params=ref({kind:'doctype'}),captions=ref([]),error=ref(''),loading=ref(false),managed=ref(false),caption=row=>row;
     ${load}
     return {loadCaptions,captions,error};
   `)(ref,async()=>{if(fail)throw Error('Source DocType is not accessible');return {items:[{value:'private-id',label:'Customer'}]}},pickerError)
@@ -77,5 +77,25 @@ test('saved picker captions expose failed lookups and recover on retry', async (
   assert.doesNotMatch(state.error.value,/DocType/)
   fail=false;await state.loadCaptions()
   assert.equal(state.captions.value[0].label,'Customer')
+  assert.equal(state.error.value,'')
+})
+
+
+test('model picker loads capability without a selection and marks saved captions managed', async () => {
+  const source=readFileSync(new URL('../src/components/fields/EventPicker.vue',import.meta.url),'utf8')
+  const load=source.slice(source.indexOf('async function loadCaptions'),source.indexOf('watch(['))
+  const calls=[]
+  const state=new Function('ref','coreApi','pickerError',`
+    let generation=0;
+    const props={modelValue:'',kind:'model',method:'options'},params=ref({kind:'model'}),captions=ref([]),error=ref(''),loading=ref(false),managed=ref(false),caption=row=>row;
+    ${load}
+    return {loadCaptions,props,captions,managed,error};
+  `)(ref,async(method,params)=>{calls.push(params);return {items:[{value:'model',label:'Local model'}],read_only:true}},pickerError)
+  await state.loadCaptions()
+  assert.equal(calls.length,1)
+  assert.equal(state.managed.value,true)
+  state.props.modelValue='model'
+  await state.loadCaptions()
+  assert.equal(state.captions.value[0].label,'Local model')
   assert.equal(state.error.value,'')
 })

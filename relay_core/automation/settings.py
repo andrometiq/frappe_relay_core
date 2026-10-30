@@ -67,7 +67,7 @@ def reference_options(kind, query=''):
         'source_message': ('Relay Message', ['name'], {'direction':'Incoming'}),
         'channel': ('Relay Channel', ['name', 'channel'], {}),
         'provider': ('AI Model', ['name', 'model_id'], {'enabled': 1}),
-        'execution_user': ('User', ['name', 'full_name'], [['User', 'enabled', '=', 1], ['Has Role', 'role', 'in', manager_roles()]]),
+        'execution_user': ('User', ['name', 'full_name'], {'enabled': 1}),
         'reply': ('Relay Canned Reply', ['name', 'language'], {'published': 1, 'ai_enabled': 1}),
     }
     if not isinstance(query, str) or len(query) > 80:
@@ -78,6 +78,12 @@ def reference_options(kind, query=''):
     if kind not in choices or not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid reference search')
     doctype, fields, filters = choices[kind]
+    if kind == 'execution_user':
+        # Resolve eligible role membership internally; User listing still applies
+        # the caller's permissions without exposing the Has Role child table.
+        members = frappe.get_all('Has Role', filters={'parenttype': 'User', 'parentfield': 'roles',
+            'role': ['in', manager_roles()]}, pluck='parent')
+        filters['name'] = ['in', members]
     pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
     rows = frappe.get_list(doctype, filters=filters, or_filters=[[field, 'like', pattern] for field in fields],
                            fields=fields, order_by='name asc', page_length=30)

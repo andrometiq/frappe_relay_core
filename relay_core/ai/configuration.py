@@ -231,6 +231,16 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
             or any(not isinstance(value, str) or len(value) > 140 for value in selected)):
         raise ValueError('Invalid selected options')
     items = []
+    if kind == 'model' and not frappe.has_permission('AI Model', 'read'):
+        # A skill editor may see the caption of its saved model, not browse the
+        # administrator's model/provider configuration or arbitrary identifiers.
+        if skill and selected:
+            event = frappe.get_doc('Relay AI Skill', skill)
+            event.check_permission('read')
+            if event.ai_model and event.ai_model in selected:
+                label = frappe.db.get_value('AI Model', event.ai_model, 'model_label')
+                items.append(dict(value=event.ai_model, label=label or 'Saved AI model'))
+        return {'items': items, 'read_only': True}
     if kind == 'report':
         from relay_core.ai.reports import options
         return {'items': options(business_doctype)}
