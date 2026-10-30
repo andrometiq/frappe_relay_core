@@ -23,7 +23,7 @@ The installed `/relay` workspace uses Frappe login and same-origin APIs. `npm ru
 | Type | Core behavior |
 | --- | --- |
 | Text | Text message. |
-| Image, audio, video, document | Attachment viewer and account-scoped download, up to 16 MiB for received WhatsApp media. Uploads and AI inputs retain their separate 4 MiB limits. Documents retain filename, MIME, optional caption and file_size when supplied. If the webhook omits size, the download response supplies Content-Length; no size is invented during projection. Document previews use caption, then filename. |
+| Image, audio, video, document | Attachment viewer and account-scoped download, up to 16 MiB for received WhatsApp media. Uploads are limited to the lowest of 10 MB, the site file size limit and the WhatsApp limit of the media kind. AI inputs keep their separate 4 MiB limit. Documents retain filename, MIME, optional caption and file_size when supplied. If the webhook omits size, the download response supplies Content-Length; no size is invented during projection. Document previews use caption, then filename. |
 | Sticker | Sticker viewer with a separate 2 MiB WebP proxy. |
 | Location, contacts | Coordinates/address and contact cards. |
 | Reaction | Updates the original message, including reaction removal; no new conversation turn. |

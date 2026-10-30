@@ -103,15 +103,15 @@ def friendly_reason(reason, fields=()):
     text = str(reason or '')
     exact = {OPTED_OUT, OUTSIDE_WINDOW, 'Invalid phone number', 'Duplicate number', 'Duplicate row',
         'Missing header attachment', 'Duplicate header attachments', 'Header attachment unavailable',
-        'Header attachments must stay private', 'Header attachment must contain 1 byte to 4 MiB',
+        'Header attachments must stay private', 'Header attachment is empty',
         'Endpoint verification revoked', 'Contact binding needs review',
         'Message is too long', 'Caption is too long',
         'The first row must hold unique column names', f'A campaign supports at most {bulk_sheet.MAX_ROWS} rows'}
     for field in fields:
         label = field['label']
         exact.update((f'Missing {label}', f'{label} is too long', f'{label} must be an HTTPS link'))
-    if text in exact or any(text == f'Wrong file {part} for {kind} header'
-                           for part in ('type', 'content') for kind in ('image', 'video', 'document')):
+    if text in exact or re.fullmatch(r'Header attachment must be at most [0-9.]+ [KM]B', text) or any(
+            text == f'Wrong file {part} for {kind} header' for part in ('type', 'content') for kind in ('image', 'video', 'document')):
         return text
     return 'This row could not be processed. Check its values and attachment, then validate again.' if text else ''
 
@@ -255,11 +255,13 @@ def media_upload(hub, doc):
 
 
 def upload_media_file(hub, channel, file, mime_type, kind, filename=None):
-    from relay_core.template_media import MAX_BYTES
+    from relay_core.file_limits import get_media_max_bytes, size_error
+    from relay_core.template_media import HEADER_KINDS
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS.get(kind, kind))
     with open(file.get_full_path(), 'rb') as handle:
-        raw = handle.read(MAX_BYTES + 1)
-    if not 1 <= len(raw) <= MAX_BYTES:
-        raise ValueError('Header attachment must contain 1 byte to 4 MiB')
+        raw = handle.read(limit + 1)
+    if error := size_error(len(raw), limit, 'Header attachment'):
+        raise ValueError(error)
     payload = whatsapp.prepare('messages.media_upload', {'media_type': kind, 'mime_type': mime_type,
         'filename': filename or file.file_name, 'content_base64': base64.b64encode(raw).decode()})
     media_id = str(hub.execute(hub_arguments(channel, payload)).get('id') or '')

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
 from relay_core import bulk_campaigns as bulk, bulk_sheet, campaign_media, contact_lifecycle
+from site_file_limit import use_relay_file_limit
 
 NUMBER = '919876543210'
 FIELDS = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format': 'IMAGE'}]})
@@ -18,6 +19,10 @@ FIELDS = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format':
 
 def attachment(mode='static', *names):
     return {'mode': mode, 'files': [{'file_url': '/private/files/' + name, 'filename': name} for name in names]}
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 
 class SheetContactTests(unittest.TestCase):
@@ -191,11 +196,18 @@ class HeaderResolutionTests(unittest.TestCase):
 
     def test_wrong_type_and_empty_or_large_files_are_blocked(self):
         for name, raw, reason in [(NUMBER + '.pdf', b'%PDF-1.4', 'Wrong file type'),
-                                  (NUMBER + '.png', b'', '1 byte'),
-                                  (NUMBER + '.png', b'x' * (campaign_media.MAX_BYTES + 1), '4 MiB')]:
+                                  (NUMBER + '.png', b'', 'Header attachment is empty'),
+                                  (NUMBER + '.png', b'\x89PNG\r\n\x1a\n' + b'x' * 9, 'Header attachment must be at most 16 bytes')]:
             self.file(name, raw)
-            result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
+            with patch('relay_core.file_limits.get_max_bytes', return_value=16):
+                result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
             self.assertIn(reason, result[NUMBER][1])
+
+    def test_header_file_at_the_limit_is_used(self):
+        name = NUMBER + '.png'
+        self.file(name, b'\x89PNG\r\n\x1a\n' + b'x' * 8)
+        with patch('relay_core.file_limits.get_max_bytes', return_value=16):
+            self.assertIsNone(campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')[NUMBER][1])
 
     def test_video_and_document_use_registry_types(self):
         for kind, suffix in [('video', 'mp4'), ('document', 'pdf')]:

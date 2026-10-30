@@ -11,7 +11,7 @@ WhatsApp exposes the existing Hub-backed group list, creation, details,
 invitations, member removal, paged join-request review and text sending. Creation
 supports description and joining approval mode. More group actions exposes JPEG
 photo upload, invite creation, queued pin/unpin by message ID, and deletion after
-typing the group ID. The account must have Meta group capability. The group composer supports text, image/video/audio/document uploads up to 4 MiB,
+typing the group ID. The account must have Meta group capability. The group composer supports text, image/video/audio/document uploads up to the Relay file limit (10 MB),
 media URLs/IDs, captions, filenames, quoted-message IDs and approved templates
 with parameter fields. Sends use the durable queue and preserve failed drafts.
 Account-wide group operations are manager-only; assigned agents use the

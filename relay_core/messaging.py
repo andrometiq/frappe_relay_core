@@ -206,6 +206,8 @@ def _prepare(source, channel, context, kind, data):
         if channel.channel not in ('Telegram','WhatsApp') or set(data)-{'attachment','caption'}:
             raise ValueError('Attachment sending requires a supported channel and private attachment')
         file,raw=file_content(data.get('attachment'),source)
+        from relay_core.file_limits import get_media_max_bytes, size_error
+        if error:=size_error(len(raw),get_media_max_bytes(channel.channel,kind),f'A {channel.channel} {kind}'):raise ValueError(error)
         caption=text(data.get('caption',''),1024)
         content={'kind':kind,'caption':caption,'attachment':file.name,'attachment_source':source.name,'media':{'file_name':file.file_name,'file_size':len(raw)}}
         if channel.channel=='WhatsApp':

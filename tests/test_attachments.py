@@ -7,6 +7,11 @@ from unittest.mock import Mock, patch
 
 from relay_core import attachments
 from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
+from site_file_limit import use_relay_file_limit
+
+
+def setUpModule():
+    use_relay_file_limit()
 
 
 class WhatsAppAttachmentTests(unittest.TestCase):

@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Button, Dropdown, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
 import ComposerMore from './ComposerMore.vue'
+import { sizeLabel } from './attachmentFormats'
 import { composerActions } from '../../services/composerActions'
 import { messagesKey } from '../../composables/messagesContext'
 import { coreApi } from '../../services/coreApi'
@@ -10,6 +11,7 @@ import { addressList, compositionScope, emailComposition, channelStatus } from '
 import { useStoredDraft } from '../../composables/useStoredDraft'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 const { source, busy, beginEmail, finishEmail } = inject(messagesKey)
+const capabilities = inject('relayCapabilities', ref({}))
 // `mode` is "reply" or "note"; note mode shows only the note slot, so a note never goes out as email.
 const props = defineProps({ mode: { type: String, default: 'reply' }, noteBusy: Boolean })
 const emit = defineEmits(['mode'])
@@ -38,8 +40,9 @@ function modeChanged(mode) {
 }
 async function attach(event) {
   const files = [...event.target.files]; event.target.value = ''; error.value = ''
-  if (draft.attachments.length + files.length > 8 || files.reduce((sum,file) => sum + file.size, draft.attachments.reduce((sum,file) => sum + file.size,0)) > 4*1024*1024) {
-    error.value = 'Choose up to eight attachments, at most 4 MiB combined.'; return
+  const limit = capabilities.value.max_file_bytes
+  if (draft.attachments.length + files.length > 8 || limit && files.reduce((sum,file) => sum + file.size, draft.attachments.reduce((sum,file) => sum + file.size,0)) > limit) {
+    error.value = `Choose up to eight attachments${limit ? `, at most ${sizeLabel(limit)} combined` : ''}.`; return
   }
   sending.value = true; activity.value = 'Uploading…'
   try {

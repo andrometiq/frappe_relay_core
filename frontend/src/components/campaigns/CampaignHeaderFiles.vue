@@ -1,13 +1,17 @@
 <script setup>
 import { campaignError } from '../../services/campaignErrors.js';
-import { computed, ref, useId } from 'vue';
+import { computed, inject, ref, useId } from 'vue';
 import { Button, ErrorMessage } from '@relay/ui';
 import { attachmentSelectionError } from '../../services/campaignMedia';
+import { headerChannelKind } from '../../services/templateMedia';
+import { attachmentMaxBytes, sizeLabel } from '../messages/attachmentFormats';
 
 const props = defineProps({ modelValue: Object, upload: Function, busy: Boolean, media: String });
 const emit = defineEmits(['update:modelValue', 'uploading']);
 const uploading = ref(false), error = ref('');
 const group = useId();
+const capabilities = inject('relayCapabilities', ref({}));
+const limit = computed(() => attachmentMaxBytes(capabilities.value, 'WhatsApp', headerChannelKind(props.media)));
 const mode = computed(() => props.modelValue?.mode || 'static');
 const files = computed(() => props.modelValue?.files || []);
 function chooseMode(value) {
@@ -18,7 +22,7 @@ async function chooseFiles(event) {
   const selected = Array.from(event.target.files || []);
   event.target.value = '';
   if (!selected.length) return;
-  error.value = attachmentSelectionError(selected, mode.value);
+  error.value = attachmentSelectionError(selected, mode.value, limit.value);
   if (error.value) return;
   uploading.value = true;
   emit('uploading', true);
@@ -45,7 +49,7 @@ async function chooseFiles(event) {
     <label class="header-picker"><span>{{ uploading ? 'Uploading…' : mode === 'static' ? 'Choose header file' : 'Add contact files' }}</span>
       <input type="file" :multiple="mode === 'dynamic'" :aria-label="mode === 'static' ? 'Header attachment' : 'Contact header attachments'" @change="chooseFiles" />
     </label>
-    <p>Private files, up to 4 MiB each. Use {{ media === 'image' ? 'JPG or PNG' : media === 'video' ? 'MP4' : 'a WhatsApp-supported document' }}.</p>
+    <p>Private files<template v-if="limit">, up to {{ sizeLabel(limit) }} each</template>. Use {{ media === 'image' ? 'JPG or PNG' : media === 'video' ? 'MP4' : 'a WhatsApp-supported document' }}.</p>
     <p v-if="mode === 'dynamic'">Name files by mobile number, with or without the country code; spaces are allowed. For example, 98765 43210.{{ media === 'image' ? 'jpg' : media === 'video' ? 'mp4' : 'pdf' }}. Numbers without a country code use the sending company's country. Missing, duplicate and wrong-type attachments are excluded in the preview.</p>
     <div v-if="files.length" class="header-selected" role="status">
       <span>{{ mode === 'static' ? files[0].filename : `${files.length} files selected` }}</span>

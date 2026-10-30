@@ -9,7 +9,8 @@ from frappe.exceptions import DoesNotExistError, PermissionError, ValidationErro
 
 from relay_core.bulk_sheet import sheet_phone
 from relay_core.channels import channel
-from relay_core.template_media import HEADER_KINDS, MAX_BYTES, plain_filename
+from relay_core.file_limits import get_media_max_bytes, size_error
+from relay_core.template_media import HEADER_KINDS, plain_filename
 
 MAX_FILES = 100000
 ZIP_MAX_BYTES = 200 * 1024 * 1024
@@ -96,8 +97,9 @@ def checked_file(item, media_type):
     if (mime not in channel('WhatsApp').features['media'][HEADER_KINDS[media_type]]
             or mimetypes.guess_type(item['filename'])[0] != mime):
         raise ValueError(f'Wrong file type for {media_type} header')
-    if not 1 <= os.path.getsize(file.get_full_path()) <= MAX_BYTES:
-        raise ValueError('Header attachment must contain 1 byte to 4 MiB')
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type])
+    if error := size_error(os.path.getsize(file.get_full_path()), limit, 'Header attachment'):
+        raise ValueError(error)
     with open(file.get_full_path(), 'rb') as handle:
         prefix = handle.read(1024)
     if not matches_format(prefix, mime):

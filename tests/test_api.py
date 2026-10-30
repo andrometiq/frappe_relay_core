@@ -5,6 +5,8 @@ import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
+from relay_core import file_limits
+from site_file_limit import use_relay_file_limit
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
@@ -63,9 +65,14 @@ class ApiTests(unittest.TestCase):
             result=self.api.capabilities()
         self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,'flows':True,
-                                 'enabled_channels':['WhatsApp'],'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
+                                 'enabled_channels':['WhatsApp'],'max_file_bytes':file_limits.MAX_BYTES,'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
         listed.assert_called_once_with('WhatsApp')
+
+    def test_capabilities_give_the_browser_the_site_file_limit(self):
+        self.use_role('Relay Communication User')
+        with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.file_limits.get_max_bytes',return_value=3*1024*1024):
+            self.assertEqual(self.api.capabilities()['max_file_bytes'],3*1024*1024)
 
     def test_inbox_channels_list_the_site_channels_of_every_enabled_medium(self):
         self.use_role('Relay Communication User')
@@ -342,6 +349,7 @@ class MessageDisplayApiTests(unittest.TestCase):
 
 def setUpModule():
     """These tests cover AI, folder and team behavior, so every feature switch is on."""
+    use_relay_file_limit()
     from unittest import addModuleCleanup, mock
     for target in ('relay_core.ai_features.is_enabled', 'relay_core.features.is_enabled'):
         switch = mock.patch(target, return_value=True)

@@ -5,11 +5,10 @@ import os
 import re
 import frappe
 from frappe.utils import get_datetime, now_datetime
-from relay_core import messaging, whatsapp
+from relay_core import file_limits, messaging, whatsapp
 from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
 from relay_core.hub_channels import hub_arguments
 
-MAX_BYTES=4*1024*1024
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
 # Meta keeps received media for about 30 days; after that the media ID no longer resolves.
 WHATSAPP_MEDIA_DAYS=30
@@ -55,7 +54,7 @@ def file_content(name,source):
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
     raw=file.get_content()
     if isinstance(raw,str):raw=raw.encode()
-    if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
+    if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
     return file,raw
 
 
@@ -65,10 +64,11 @@ def upload(message,filename,content_base64):
     if channel.channel not in ('Telegram','Email','WhatsApp'):frappe.throw('This channel does not support attachments')
     if not isinstance(filename,str) or not 1<=len(filename)<=120 or any(ord(c)<32 for c in filename) or any(c in filename for c in ('/','\\','"')):
         frappe.throw('Use a plain attachment filename of at most 120 characters')
-    if not isinstance(content_base64,str) or len(content_base64)>((MAX_BYTES+2)//3)*4:frappe.throw('Attachment exceeds the 4 MiB limit')
+    limit=file_limits.get_max_bytes()
+    if not isinstance(content_base64,str) or len(content_base64)>file_limits.encoded_length(limit):frappe.throw(f'The attachment must be at most {file_limits.size_label(limit)}')
     try:raw=base64.b64decode(content_base64,validate=True)
     except (ValueError,binascii.Error):frappe.throw('Invalid attachment data')
-    if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment must contain 1 byte to 4 MiB')
+    if error:=file_limits.size_error(len(raw),limit,'The attachment'):frappe.throw(error)
     from frappe.utils.file_manager import save_file
     file=save_file(filename,raw,'Relay Message',source.name,is_private=1)
     return {'name':file.name,'filename':file.file_name,'size':len(raw)}
@@ -129,7 +129,7 @@ def read(message,download=0,index=None):
         result=whatsapp.client().call_tool('email.attachment',hub_arguments(channel,{'provider_id':source.provider_id,'index':int(index)}))
         try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
         except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
-        if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
+        if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
         return response(raw,result.get('content_type','application/octet-stream'),result.get('filename'),download)
     header=template_media(data)
     if source.message_type not in MEDIA_KINDS and not header and not (data.get('template') or {}).get('document'):
@@ -154,5 +154,5 @@ def read(message,download=0,index=None):
     result=whatsapp.client().call_tool('telegram.attachment',hub_arguments(channel,{'file_id':file_id}))
     try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
     except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
-    if not 1<=len(raw)<=MAX_BYTES:frappe.throw('Attachment exceeds the 4 MiB limit')
+    if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
     return response(raw,result.get('content_type','application/octet-stream'),media.get('file_name') or result.get('filename'),download)

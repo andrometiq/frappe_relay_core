@@ -136,7 +136,7 @@ Reply box:
 | Reply tab | Write a normal reply. Enter sends. |
 | Internal note tab | Write a note for staff only. Mentioned colleagues get a notification. |
 | Template tab | Opens the template picker. Use it when the reply window is closed. |
-| Paperclip | Adds a photo, video, audio, document, location or contact card. Files can be up to 4 MiB. It is off when the reply window is closed. |
+| Paperclip | Adds a photo, video, audio, document, location or contact card. A file can be up to 10 MB, or less when the site file size limit is lower. WhatsApp photos can be up to 5 MB and stickers up to 500 KB. The picker shows the limit. It is off when the reply window is closed. |
 | Smiley | Inserts an emoji. |
 | Lightning | Opens saved replies. |
 | "24 h window open · N h left" | Time left to send free text. When it closes, the box says "The WhatsApp reply window is closed" and offers "Use an approved template". |
@@ -559,7 +559,7 @@ Messages are not arriving:
 You cannot send:
 
 1. The reply box says the window is closed: send an approved template.
-2. The paperclip is grey: the window is closed, or the file is over 4 MiB.
+2. The paperclip is grey: the window is closed. A file over the limit that the picker shows gets a message that names the limit.
 3. "No verified channel is available for this contact": add the number with Contacts > New contact, or link the sender from Unlinked senders.
 4. The message shows failed: open "..." > "Delivery failures and retry", or Activity & Health > Failed outgoing messages.
 5. Campaign rows show "Skipped": read the reason. "opted out" means the customer sent STOP.

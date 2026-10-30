@@ -4,7 +4,7 @@ import { Button, ErrorMessage, FeatherIcon, TextInput } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import { formatBytes } from "../../services/mediaCache";
 import { headerChannelKind, headerFileError, headerLinkError, linkFileName, readBase64 } from "../../services/templateMedia";
-import { attachmentAccept } from "./attachmentFormats";
+import { attachmentAccept, attachmentMaxBytes, sizeLabel } from "./attachmentFormats";
 
 // The header file of a template send. `modelValue` is {id, filename, size} after an upload or {link, filename} for a link.
 const props = defineProps({ modelValue: Object, field: Object, channel: String, disabled: Boolean });
@@ -16,7 +16,8 @@ const link = ref(props.modelValue?.link || "");
 const localPreview = ref(""), busy = ref(false), error = ref(""), dragging = ref(false), previewFailed = ref(false);
 const picker = ref(null);
 const accept = computed(() => attachmentAccept(capabilities.value, "WhatsApp", headerChannelKind(format.value)));
-const hint = computed(() => (accept.value ? accept.value.split(",").map((row) => row.slice(1).toUpperCase()).join(", ") + " · " : "") + "up to 4 MB");
+const limit = computed(() => attachmentMaxBytes(capabilities.value, "WhatsApp", headerChannelKind(format.value)));
+const hint = computed(() => [accept.value && accept.value.split(",").map((row) => row.slice(1).toUpperCase()).join(", "), limit.value && "up to " + sizeLabel(limit.value)].filter(Boolean).join(" · "));
 const linkError = computed(() => (link.value.trim() ? headerLinkError(link.value) : ""));
 const value = computed(() => props.modelValue || null);
 const previewSource = computed(() => value.value?.link || localPreview.value);

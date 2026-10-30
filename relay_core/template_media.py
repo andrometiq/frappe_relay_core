@@ -11,8 +11,8 @@ from relay_core.business_access import document_name
 
 from relay_core.bulk_sheet import media_url
 from relay_core.channels import channel as channel_definition
+from relay_core.file_limits import encoded_length, get_media_max_bytes, size_error, size_label
 
-MAX_BYTES = 4 * 1024 * 1024
 HEADER_KINDS = {'image': 'photo', 'video': 'video', 'document': 'document'}  # Meta header type -> channel media kind.
 PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
 
@@ -85,14 +85,15 @@ def upload(channel, media_type, filename, content_base64):
     mime_type = mimetypes.guess_type(filename)[0]
     if mime_type not in channel_definition('WhatsApp').features['media'][HEADER_KINDS[media_type]]:
         frappe.throw(f'This file type is not accepted for this {media_type} header')
-    if not isinstance(content_base64, str) or len(content_base64) > ((MAX_BYTES + 2) // 3) * 4:
-        frappe.throw('The file must be at most 4 MiB')
+    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type])
+    if not isinstance(content_base64, str) or len(content_base64) > encoded_length(limit):
+        frappe.throw(f'The file must be at most {size_label(limit)}')
     try:
         raw = base64.b64decode(content_base64, validate=True)
     except (ValueError, binascii.Error):
         frappe.throw('Invalid file data')
-    if not 1 <= len(raw) <= MAX_BYTES:
-        frappe.throw('The file must hold 1 byte to 4 MiB')
+    if error := size_error(len(raw), limit):
+        frappe.throw(error)
     try:
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:

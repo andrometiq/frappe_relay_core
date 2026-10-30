@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import frappe
 from relay_core import conversation_start, template_media
+from site_file_limit import use_relay_file_limit
 
 
 def header(kind, media):
@@ -16,6 +17,7 @@ def throw(message, exception=frappe.ValidationError):
 
 
 def setUpModule():
+    use_relay_file_limit()
     patcher = patch.object(frappe, 'throw', side_effect=throw)
     patcher.start()
     unittest.addModuleCleanup(patcher.stop)
@@ -93,8 +95,9 @@ class HeaderUploadTests(unittest.TestCase):
             self.upload('offer.gif')
         with self.assertRaisesRegex(frappe.ValidationError, 'not accepted for this video'):
             self.upload('offer.png', media_type='video')
-        with self.assertRaisesRegex(frappe.ValidationError, '4 MiB'):
-            self.upload(raw=b'x' * (template_media.MAX_BYTES + 1))
+        with patch('relay_core.file_limits.get_max_bytes', return_value=16):
+            with self.assertRaisesRegex(frappe.ValidationError, 'at most 16 bytes'):
+                self.upload(raw=b'\x89PNG' + b'x' * 13)
         with self.assertRaisesRegex(frappe.ValidationError, 'plain file name'):
             self.upload('../offer.png')
         self.channel.account = 'other'
@@ -104,6 +107,10 @@ class HeaderUploadTests(unittest.TestCase):
         with self.assertRaises(frappe.PermissionError):
             self.upload()
         self.hub_upload.assert_not_called()
+
+    def test_upload_accepts_a_file_at_the_limit(self):
+        with patch('relay_core.file_limits.get_max_bytes', return_value=16):
+            self.assertEqual(self.upload(raw=b'\x89PNG' + b'x' * 12)['size'], 16)
 
 
 if __name__ == '__main__':

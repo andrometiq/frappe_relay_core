@@ -826,10 +826,6 @@ export function useMessages() {
   async function uploadAttachment(file) {
     attachment.value = null;
     if (!file) return;
-    if (file.size < 1 || file.size > 4 * 1024 * 1024) {
-      error.value = "Choose a file up to 4 MiB.";
-      return;
-    }
     await run(async () => {
       const content = await new Promise((resolve, reject) => {
         const reader = new FileReader();

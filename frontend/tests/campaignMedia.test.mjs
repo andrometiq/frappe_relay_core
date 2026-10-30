@@ -19,12 +19,14 @@ test('media mapping needs an uploaded file, and clearing files blocks import', (
 });
 
 test('multi-select supports bounded individual files and rejects ZIPs including traversal names', () => {
+  const limit = 3 * 1024 * 1024;
   const image = { name: '919876543210.jpg', size: 1024 };
-  assert.equal(attachmentSelectionError([image], 'static'), '');
-  assert.equal(attachmentSelectionError([image, image], 'dynamic'), '');
-  assert.match(attachmentSelectionError([image, image], 'static'), /one file/);
+  assert.equal(attachmentSelectionError([image], 'static', limit), '');
+  assert.equal(attachmentSelectionError([image, image], 'dynamic', limit), '');
+  assert.match(attachmentSelectionError([image, image], 'static', limit), /one file/);
   for (const name of ['contacts.zip', '../contacts.zip', 'CONTACTS.ZIP'])
-    assert.match(attachmentSelectionError([{ name, size: 1024 }], 'dynamic'), /ZIP/);
-  for (const size of [0, 4 * 1024 * 1024 + 1])
-    assert.match(attachmentSelectionError([{ ...image, size }], 'static'), /4 MiB/);
+    assert.match(attachmentSelectionError([{ name, size: 1024 }], 'dynamic', limit), /ZIP/);
+  assert.equal(attachmentSelectionError([{ ...image, size: limit }], 'static', limit), '');
+  assert.equal(attachmentSelectionError([image, { ...image, name: 'big.jpg', size: limit + 1 }], 'dynamic', limit), 'big.jpg must be at most 3 MB.');
+  assert.equal(attachmentSelectionError([{ ...image, size: 0 }], 'static', limit), '919876543210.jpg is empty.');
 });

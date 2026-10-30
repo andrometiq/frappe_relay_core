@@ -60,8 +60,9 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
     if set(arguments)-allowed:frappe.throw('Unsupported operation arguments')
     if {'content_base64','mime_type'}.intersection(arguments):
         if operation not in {'messages.media','templates.media_upload','messages.media_upload'}:frappe.throw('Uploaded bytes require a media upload operation')
-        content = arguments.get('content_base64')
-        if not isinstance(content,str) or not 1 <= len(content) <= ((4*1024*1024+2)//3)*4:frappe.throw('Attachment must be at most 4 MiB')
+        from relay_core.file_limits import encoded_length, get_max_bytes, size_label
+        content = arguments.get('content_base64');limit=get_max_bytes()
+        if not isinstance(content,str) or not 1 <= len(content) <= encoded_length(limit):frappe.throw(f'The attachment must be at most {size_label(limit)}')
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
     if 'request_key' in arguments:frappe.throw('Request keys are managed by the message submission endpoint')
     payload={**arguments,'operation':operation}

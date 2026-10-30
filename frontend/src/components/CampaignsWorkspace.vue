@@ -16,12 +16,17 @@ import { attachmentMapping } from '../services/campaignMedia';
 import { useCampaigns } from "../composables/useCampaigns";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
+import { attachmentMaxBytes, sizeLabel } from "./messages/attachmentFormats";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
   shownCounters, statusTheme, windowNotice, invalidNumberLabel } from "../services/campaignProgress";
 import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
+const headerLimit = computed(() => {
+  const largest = capabilities.value?.max_file_bytes, image = attachmentMaxBytes(capabilities.value, 'WhatsApp', 'photo');
+  return largest && (image < largest ? `${sizeLabel(largest)}, and each image at most ${sizeLabel(image)}` : sizeLabel(largest));
+});
 const workspace = useCampaigns();
 const { busy, error, items, campaign, sheet, templates, filter, replyWindow } = workspace;
 const creating = ref(false), title = ref(""), type = ref("template"), template = ref(""), text = ref(""), mapping = ref(null);
@@ -214,7 +219,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <input type="file" accept=".xlsx,.csv,.tsv,.zip" aria-label="Recipients sheet" :disabled="busy" @change="chooseFile" />
         </label>
         <Button class="campaign-sample" label="Download Excel template" variant="outline" :disabled="busy" @click="workspace.download('sample_sheet')" />
-        <p class="campaign-hint">For header media, put mobile-named files beside the sheet in a ZIP, or add files below. Subfolders are flattened; hidden files are ignored. Each header file must be at most 4 MiB.</p>
+        <p class="campaign-hint">For header media, put mobile-named files beside the sheet in a ZIP, or add files below. Subfolders are flattened; hidden files are ignored.<template v-if="headerLimit"> Each header file must be at most {{ headerLimit }}.</template></p>
         <div v-if="sheet && mapping" class="campaign-mapping">
           <p class="campaign-hint">Mobile numbers: {{ mapping.phone }} (first column)</p>
           <CampaignHeaderFiles v-for="field in sheet.fields.filter(field => field.key === 'header_media')" :key="field.key"
