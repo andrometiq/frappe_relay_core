@@ -721,17 +721,36 @@ def control(name, action, scheduled_at=None):
 
 
 def check_ready(doc):
-    whatsapp_channel(doc.channel)
+    """Campaign fields for a start; a channel, Hub, template or media failure is logged with its step."""
     check_validation(doc)
+    step = 'channel'
     try:
+        whatsapp_channel(doc.channel)
+        step = 'Hub'
         hub, _ = whatsapp.checked_client()
         if doc.operation == 'templates.send':
+            step = 'template'
             approved_template(hub, doc.template_name, doc.language, doc.channel)
+        step = 'media upload'
         return media_upload(hub, doc)
-    except (ValueError, OSError) as exc:
-        frappe.throw(str(exc))
+    except ValidationError as exc:
+        log_start_failure(doc, step, str(exc))
+        raise
     except whatsapp.HubError as exc:
-        frappe.throw(whatsapp.failure_message(exc))
+        log_start_failure(doc, step, exc.detail or str(exc))
+        frappe.throw(whatsapp.failure_message(exc) if exc.detail else str(exc))
+    except ValueError as exc:
+        log_start_failure(doc, step, str(exc))
+        frappe.throw(str(exc))
+    except OSError as exc:
+        log_start_failure(doc, step, str(exc))
+        frappe.throw('The header file could not be read. Upload it again')
+
+
+def log_start_failure(doc, step, detail):
+    """Deferred so the Error Log survives the rollback of the failed request."""
+    frappe.log_error(f'Campaign {doc.name} could not start at the {step} step', detail,
+                     'Relay Campaign', doc.name, defer_insert=True)
 
 
 def check_validation(doc):
