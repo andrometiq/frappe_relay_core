@@ -148,7 +148,8 @@ class MediaUploadTests(unittest.TestCase):
         utils = SimpleNamespace(now=lambda: '2026-10-26 10:00:00', now_datetime=lambda: self.NOW, get_datetime=frappe.utils.get_datetime,
                                 add_to_date=frappe.utils.add_to_date, cint=frappe.utils.cint, flt=frappe.utils.flt)
         self.fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=self.cache, utils=utils, enqueue=Mock(),
-                                    session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
+                                    session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError),
+                                    log_error=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
         for name in ('require_access', 'whatsapp_channel', 'read'):
             self.enterContext(patch.object(bulk_campaigns, name))
@@ -194,6 +195,7 @@ class MediaUploadTests(unittest.TestCase):
                 bulk_campaigns.control('Offer', 'start')
         self.assertEqual(self.doc.status, 'Draft')
         self.assertIsNone(self.doc.media_id)
+        self.assertEqual(self.fake.log_error.call_args_list[0].args[:2], ('Campaign Offer could not start at the media upload step', 'mime type mismatch'))
         self.save.assert_not_called()
         self.cache.lock.assert_not_called()
         self.fake.enqueue.assert_not_called()

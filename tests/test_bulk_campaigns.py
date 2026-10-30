@@ -589,6 +589,47 @@ class ControlTests(unittest.TestCase):
             self.assertIn('at least one valid row', fake.throw.call_args.args[0])
 
 
+class StartFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.doc = _dict(name='Winter launch', status='Scheduled', channel='WA', operation='templates.send',
+                         template_name='notice', language='en', arguments='{}', last_error='')
+        self.log = self.enterContext(patch('frappe.log_error'))
+        self.enterContext(patch('frappe.throw', side_effect=lambda message: (_ for _ in ()).throw(frappe.ValidationError(message))))
+        self.enterContext(patch.object(bulk_campaigns, 'whatsapp_channel'))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(Mock(), {})))
+        self.enterContext(patch.object(bulk_campaigns.whatsapp, 'can_manage', return_value=True))
+
+    def assert_logged(self, step, detail):
+        title, message, doctype, name = self.log.call_args.args
+        self.assertEqual((title, message, doctype, name),
+                         (f'Campaign Winter launch could not start at the {step} step', detail, 'Relay Campaign', 'Winter launch'))
+        self.assertTrue(self.log.call_args.kwargs['defer_insert'])
+
+    def test_hub_rejection_is_logged_with_its_step_and_shown_with_its_reason(self):
+        error = HubError('Hub operation was rejected', detail='Template notice is paused')
+        with patch.object(bulk_campaigns, 'approved_template', side_effect=error), \
+                self.assertRaisesRegex(frappe.ValidationError, '^Hub rejected this operation: Template notice is paused$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('template', 'Template notice is paused')
+
+    def test_unreachable_hub_keeps_the_connection_reason(self):
+        with patch.object(bulk_campaigns.whatsapp, 'checked_client', side_effect=HubError('Hub returned an invalid response or is unavailable')), \
+                self.assertRaisesRegex(frappe.ValidationError, 'is unavailable$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('Hub', 'Hub returned an invalid response or is unavailable')
+
+    def test_media_and_channel_failures_are_logged_before_the_readable_error(self):
+        with patch.object(bulk_campaigns, 'approved_template'), \
+                patch.object(bulk_campaigns, 'media_upload', side_effect=FileNotFoundError('/private/files/a.png')), \
+                self.assertRaisesRegex(frappe.ValidationError, '^The header file could not be read. Upload it again$'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('media upload', '/private/files/a.png')
+        with patch.object(bulk_campaigns, 'whatsapp_channel', side_effect=frappe.ValidationError('Configure an enabled WhatsApp channel')), \
+                self.assertRaisesRegex(frappe.ValidationError, 'Configure an enabled WhatsApp channel'):
+            bulk_campaigns.check_ready(self.doc)
+        self.assert_logged('channel', 'Configure an enabled WhatsApp channel')
+
+
 class ImportTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.object(bulk_campaigns, 'sheet_contact', return_value=('existing', None)))
