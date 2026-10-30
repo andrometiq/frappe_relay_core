@@ -216,6 +216,13 @@ function replaceComponent(components, type, value, include) {
   }
 }
 
+// Meta requires quick replies in one group; the first button decides whether they come first or last.
+export function groupedButtons(buttons) {
+  const replies = buttons.filter((button) => button.type === "QUICK_REPLY");
+  const actions = buttons.filter((button) => button.type !== "QUICK_REPLY");
+  return buttons[0]?.type === "QUICK_REPLY" ? [...replies, ...actions] : [...actions, ...replies];
+}
+
 function normalizedButton(row) {
   const result = row._original_type === row.type ? clone(row) : {};
   for (const fieldname of [
@@ -243,9 +250,11 @@ function normalizedButton(row) {
     result.url = String(row.url || "").trim();
     if (exampleValue) result.example = [exampleValue];
   } else if (result.type === "PHONE_NUMBER") {
-    result.phone_number = String(row.phone_number || "").trim();
+    result.phone_number = String(row.phone_number || "").replace(/[\s()-]/g, "");
   } else if (result.type === "COPY_CODE") {
-    if (exampleValue) result.example = [exampleValue];
+    // Meta fixes the label and takes the example as one string.
+    delete result.text;
+    result.example = exampleValue;
   } else if (result.type === "OTP") {
     result.otp_type = String(row.otp_type || "COPY_CODE").toUpperCase();
     if (result.otp_type !== "COPY_CODE" && row.autofill_text) {
@@ -334,7 +343,7 @@ export function buildTemplateComponents(form) {
   else delete footer.code_expiration_minutes;
   replaceComponent(components, "FOOTER", footer, includeFooter);
 
-  const buttons = (form.buttons || []).map(normalizedButton);
+  const buttons = groupedButtons(form.buttons || []).map(normalizedButton);
   const buttonComponent = {
     ...(component(components, "BUTTONS") || {}),
     type: "BUTTONS",
@@ -344,8 +353,9 @@ export function buildTemplateComponents(form) {
   return components;
 }
 
-const LIMITS = { body: 1024, header: 60, footer: 60, button: 25, url: 2000 };
-const BUTTON_LIMITS = { QUICK_REPLY: 10, URL: 2, PHONE_NUMBER: 1, COPY_CODE: 1 };
+const LIMITS = { body: 1024, header: 60, footer: 60, button: 25, url: 2000, code: 20 };
+const BUTTON_LIMITS = { QUICK_REPLY: 10, URL: 2, PHONE_NUMBER: 1, COPY_CODE: 1, OTP: 1, FLOW: 1 };
+const BUTTON_CATEGORIES = { OTP: ["AUTHENTICATION"], COPY_CODE: ["MARKETING"], CATALOG: ["MARKETING"] };
 const PLACEHOLDER = /\{\{\s*([^{}]*?)\s*\}\}/g;
 
 function placeholders(value) {
@@ -367,17 +377,27 @@ function formatIssues(label, value, parameterFormat) {
     : [];
 }
 
+function buttonLabel(type) {
+  return TEMPLATE_BUTTON_TYPES.find((option) => option.value === type)?.label || type;
+}
+
 function buttonIssues(form) {
   const buttons = form.buttons || [];
   const issues = buttons.length > 10 ? ["Use at most 10 buttons."] : [];
   for (const [type, limit] of Object.entries(BUTTON_LIMITS)) {
     if (buttons.filter((button) => button.type === type).length > limit)
-      issues.push(`Use at most ${limit} ${type.toLowerCase().replaceAll("_", " ")} button${limit > 1 ? "s" : ""}.`);
+      issues.push(`Use at most ${limit} "${buttonLabel(type)}" button${limit > 1 ? "s" : ""}.`);
+  }
+  const category = String(form.category || "").toUpperCase();
+  for (const type of category ? new Set(buttons.map((button) => button.type)) : []) {
+    const categories = BUTTON_CATEGORIES[type] || ["MARKETING", "UTILITY"];
+    if (!categories.includes(category))
+      issues.push(`"${buttonLabel(type)}" buttons are not allowed in ${category.toLowerCase()} templates.`);
   }
   buttons.forEach((button, index) => {
     const label = `Button ${index + 1}`;
     const text = String(button.text || "").trim();
-    if (!text && !["CATALOG", "OTP"].includes(button.type)) issues.push(`${label} needs visible text.`);
+    if (!text && !["CATALOG", "OTP", "COPY_CODE"].includes(button.type)) issues.push(`${label} needs visible text.`);
     if (text.length > LIMITS.button) issues.push(`${label} text must be at most ${LIMITS.button} characters.`);
     if (button.type === "URL") {
       const url = String(button.url || "").trim();
@@ -389,6 +409,9 @@ function buttonIssues(form) {
       else if (variables.length && !String(button.example_value || "").trim())
         issues.push(`${label} needs an example URL value for its variable.`);
     }
+    const code = String(button.example_value || "").trim();
+    if (button.type === "COPY_CODE" && (!code || code.length > LIMITS.code))
+      issues.push(`${label} needs an example offer code of at most ${LIMITS.code} characters.`);
     if (button.type === "PHONE_NUMBER" && !/^\+?[0-9]{7,20}$/.test(String(button.phone_number || "").replace(/[ ()-]/g, "")))
       issues.push(`${label} needs a phone number with country code.`);
     if (button.type === "FLOW" && !button.flow_id) issues.push(`${label} needs a Flow ID.`);
@@ -453,7 +476,7 @@ export function templatePreview(form) {
         example: form.header_media_example ? { header_handle: [form.header_media_example] } : undefined }]),
       { type: "BODY", text: form.body_text },
       { type: "FOOTER", text: form.footer_text },
-      { type: "BUTTONS", buttons: form.buttons || [] },
+      { type: "BUTTONS", buttons: groupedButtons(form.buttons || []) },
     ],
   };
   const descriptors = templateParameterDescriptors(template);

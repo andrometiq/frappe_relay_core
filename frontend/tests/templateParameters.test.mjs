@@ -84,3 +84,22 @@ test('rendering shows header, body, footer and buttons for Meta-synced templates
  assert.equal(media.media,'image'); assert.equal(media.body,'Plain')
  assert.equal(templateRendering({name:'welcome',components:'[]'},[],{}).body,'welcome')
 })
+
+test('send fills dynamic URL and copy code buttons by their sent index', () => {
+	const template = { components: [
+		{ type: 'BODY', text: 'Your offer' },
+		{ type: 'BUTTONS', buttons: [
+			{ type: 'QUICK_REPLY', text: 'Yes' },
+			{ type: 'URL', text: 'Track', url: 'https://example.test/o/{{1}}', example: ['SO-1'] },
+			{ type: 'PHONE_NUMBER', text: 'Call', phone_number: '+919876543210' },
+			{ type: 'COPY_CODE', text: 'Copy offer code', example: ['SAVE20'] },
+		] },
+	] }
+	const descriptors = templateParameterDescriptors(template)
+	assert.deepEqual(descriptors.map((row) => [row.key, row.example]), [['BUTTON:1:1', 'SO-1'], ['BUTTON:1:3', 'SAVE20']])
+	assert.deepEqual(buildTemplateComponents(descriptors, { 'BUTTON:1:1': 'SO-77', 'BUTTON:1:3': 'FEST10' }), [
+		{ type: 'button', sub_type: 'url', index: '1', parameters: [{ type: 'text', text: 'SO-77' }] },
+		{ type: 'button', sub_type: 'copy_code', index: '3', parameters: [{ type: 'coupon_code', coupon_code: 'FEST10' }] },
+	])
+	assert.throws(() => buildTemplateComponents(descriptors, { 'BUTTON:1:1': 'SO-77' }), /Offer code to copy is required/)
+})
