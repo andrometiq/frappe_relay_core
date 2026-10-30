@@ -83,24 +83,24 @@ class ZipTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'could not be read'):
             campaign_media.zip_contents(str(path))
 
-    def test_inspect_uses_existing_private_header_mapping_and_invalidates_previous_rows(self):
-        path = self.archive([('people.csv', 'Mobile,Name\n12025550101,Asha'), ('12025550101.png', b'\x89PNG\r\n\x1a\n')])
+    def test_inspect_maps_the_header_column_to_the_zip_files_and_invalidates_previous_rows(self):
         fields = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format': 'IMAGE'}, {'type': 'BODY', 'text': '{{1}}'}]})
+        column = bulk_sheet.header_column(fields[0])
+        path = self.archive([('people.csv', f'Mobile,{column},Name\n12025550101,offer.png,Asha'), ('images/offer.png', b'\x89PNG\r\n\x1a\n')])
         doc = _dict(name='Local ZIP', arguments=json.dumps({'fields': fields, 'validated': True}))
-        def save(name, raw, *args, **kwargs):
-            self.assertEqual(kwargs['is_private'], 1)
+        def save(name, raw, campaign):
             (self.root / name).write_bytes(raw)
             return _dict(file_url='/private/files/' + name)
         fake = SimpleNamespace(utils=SimpleNamespace(now=lambda: NOW), session=_dict(user=USER))
         with patch.object(bulk, 'frappe', fake), patch.object(bulk, 'bulk', return_value=doc), \
                 patch.object(bulk, 'uploaded_file', return_value=_dict(get_full_path=lambda: path)), \
                 patch.object(bulk, 'source_path', side_effect=lambda url: str(self.root / url.split('/')[-1])), \
-                patch('frappe.utils.file_manager.save_file', side_effect=save), patch.object(bulk, 'internal_save'), \
+                patch.object(campaign_media, 'save_private', side_effect=save), patch.object(bulk, 'internal_save'), \
                 patch.object(bulk.whatsapp, 'client') as hub:
             result = bulk.inspect(doc.name, '/private/files/campaign.zip')
-        self.assertEqual(result['mapping']['fields'], {'body:1': 'Name'})
-        self.assertEqual(result['mapping']['header_attachment']['files'][0]['filename'], '12025550101.png')
-        self.assertEqual(result['mapping']['header_attachment']['mode'], 'dynamic')
+        self.assertEqual(result['mapping']['fields'], {'header_media': column, 'body:1': 'Name'})
+        self.assertEqual(result['mapping']['header_attachment']['files'][0]['filename'], 'offer.png')
+        self.assertEqual(result['mapping']['header_attachment']['mode'], 'named')
         self.assertFalse(json.loads(doc.arguments)['validated'])
         self.assertEqual(doc.source_file, '/private/files/people.csv')
         hub.assert_not_called()
@@ -108,12 +108,12 @@ class ZipTests(unittest.TestCase):
     def test_large_or_damaged_header_files_flag_only_their_rows(self):
         path = self.archive([('people.csv', 'Mobile'), ('12025550101.pdf', b'%PDF-ok'),
                              ('12025550102.pdf', b'%PDF-' + b'x' * 3000), ('12025550103.pdf', b'%PDF-broken')])
-        def save(name, raw, *args, **kwargs):
+        def save(name, raw, campaign):
             if name == '12025550103.pdf':
                 raise PdfReadError('startxref not found')
             return _dict(file_url='/private/files/' + name)
         with patch.object(campaign_media, 'get_media_max_bytes', return_value=2048), \
-                patch('frappe.utils.file_manager.save_file', side_effect=save):
+                patch.object(campaign_media, 'save_private', side_effect=save):
             sheet_url, value = campaign_media.unpack(path, 'Local ZIP', 'document')
         self.assertEqual(sheet_url, '/private/files/people.csv')
         self.assertEqual(value['files'], [{'file_url': '/private/files/12025550101.pdf', 'filename': '12025550101.pdf'}])
@@ -129,6 +129,14 @@ class ZipTests(unittest.TestCase):
         self.assertEqual(result['12025550102'], (None, 'Header attachment must be at most 2 KB'))
         self.assertEqual(result['12025550103'], (None, 'Wrong file content for document header'))
         self.assertEqual([issue['filename'] for issue in issues], ['12025550102.pdf', '12025550103.pdf'])
+
+    def test_zip_files_are_stored_private_with_their_exact_bytes(self):
+        raw = b'\x89PNG\r\n\x1a\n'  # Also valid Windows-1252 text, which file_manager.save_file would rewrite.
+        with patch.object(campaign_media.frappe, 'get_doc') as get_doc:
+            campaign_media.save_private('offer.png', raw, 'Local ZIP')
+        get_doc.assert_called_once_with({'doctype': 'File', 'file_name': 'offer.png', 'attached_to_doctype': 'Relay Campaign',
+                                         'attached_to_name': 'Local ZIP', 'is_private': 1, 'content': raw})
+        get_doc.return_value.insert.assert_called_once_with(ignore_permissions=True)
 
     def test_rejected_files_keep_our_reasons_and_dynamic_mode(self):
         fields = bulk_sheet.template_fields({'components': [{'type': 'HEADER', 'format': 'IMAGE'}]})
@@ -262,14 +270,30 @@ class ValidationTests(unittest.TestCase):
     def test_excel_template_has_phone_first_and_reuses_shared_named_values(self):
         self.fake.local = SimpleNamespace(response={})
         self.doc.arguments = json.dumps({'fields': [
-            {'key': 'header_media', 'label': 'Header image attachment'},
             {'key': 'header:name', 'name': 'name', 'label': 'Header value name'},
             {'key': 'body:name', 'name': 'name', 'label': 'Body value name'}]})
         with patch.object(bulk, 'bulk', return_value=self.doc):
             bulk.sample_sheet(self.doc.name)
         book = load_workbook(BytesIO(self.fake.local.response['filecontent']))
         self.assertEqual(list(book.active.values), [('mobile number', 'name')])
+        self.assertEqual(book.sheetnames, ['Recipients'])
         book.close()
+
+    def test_excel_template_has_the_header_media_column_and_an_example_sheet(self):
+        for media, extension in (('image', 'jpg'), ('video', 'mp4'), ('document', 'pdf')):
+            self.fake.local = SimpleNamespace(response={})
+            self.doc.arguments = json.dumps({'fields': bulk_sheet.template_fields({'components': [
+                {'type': 'HEADER', 'format': media.upper()}, {'type': 'BODY', 'text': '{{1}}'}]})})
+            with patch.object(bulk, 'bulk', return_value=self.doc):
+                bulk.sample_sheet(self.doc.name)
+            book = load_workbook(BytesIO(self.fake.local.response['filecontent']))
+            column = f'Header {media} (file name in the ZIP or https link)'
+            self.assertEqual(list(book['Recipients'].values), [('mobile number', column, 'Body value 1')])
+            example = list(book['Example'].values)
+            self.assertEqual(example[0], ('mobile number', column, 'Body value 1'))
+            self.assertEqual([row[1] for row in example[1:]], [f'offer-1.{extension}', f'offer-2.{extension}',
+                                                              f'offer-1.{extension}', f'https://example.com/offer.{extension}'])
+            book.close()
 
     def test_error_report_pages_all_errors_and_hides_raw_failures(self):
         self.fake.get_all = Mock(side_effect=[[_dict(sheet_row=2, destination='12025550101', status='Skipped', reason='Missing header attachment')],

@@ -1,5 +1,7 @@
 """Recipient rows from a sheet or JSON, WhatsApp template parameters and text or media messages for bulk campaigns."""
 import csv
+import ipaddress
+import mimetypes
 import re
 from decimal import Decimal, InvalidOperation
 from urllib.parse import unquote, urlsplit
@@ -15,6 +17,8 @@ MAX_ROWS = 100000
 MAX_VALUE = 1024
 MESSAGE_MEDIA = {'photo': 'image', 'video': 'video', 'document': 'document'}  # Registry kind -> Meta media type.
 PLACEHOLDER = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
+HEADER_KINDS = {media: kind for kind, media in MESSAGE_MEDIA.items()}  # Meta header type -> registry kind.
 
 
 def sheet_phone(value, region):
@@ -181,14 +185,24 @@ def suggest(header, fields, *, first_phone=False):
     for field in fields:
         if field in positional:
             continue
-        guess = (field.get('name') or field['key'].split(':')[-1]).lower() if field['key'] != 'header_media' else 'image'
-        for candidate in (guess, field['key'].lower(), field['label'].lower(), 'image url', 'media url', 'url'):
+        if field['key'] == 'header_media':
+            candidates = (header_column(field).lower(), field['media'], field['key'], field['label'].lower(),
+                          'image url', 'media url', 'url', 'file', 'file name')
+        else:
+            candidates = ((field.get('name') or field['key'].split(':')[-1]).lower(), field['key'].lower(),
+                          field['label'].lower(), 'image url', 'media url', 'url')
+        for candidate in candidates:
             if candidate in by_name:
                 mapping['fields'][field['key']] = by_name[candidate]
                 break
     used = {mapping['phone'], *mapping['fields'].values()}
     mapping['fields'].update(zip((field['key'] for field in positional), (c for c in header if c not in used)))
     return mapping
+
+
+def header_column(field):
+    """Sheet column name of a template's header media, as the Excel template writes it."""
+    return f"Header {field['media']} (file name in the ZIP or https link)"
 
 
 def is_positional(field):
@@ -214,10 +228,13 @@ def check_mapping(mapping, header, fields):
     for key, column in columns_used.items():
         if column not in header:
             raise ValueError(f'Column {column} is not in the file')
-    if attachment and ('header_media' in columns_used or 'header_media' in fixed):
+    by_number = attachment and attachment['mode'] != 'named'
+    if by_number and ('header_media' in columns_used or 'header_media' in fixed):
         raise ValueError('Choose one header attachment source')
+    if attachment and not by_number and 'header_media' not in columns_used:
+        raise ValueError('Choose the column that names each row\'s header file')
     for field in fields:
-        if field['key'] == 'header_media' and attachment:
+        if field['key'] == 'header_media' and by_number:
             continue
         if field['key'] not in columns_used and not str(fixed.get(field['key']) or '').strip():
             raise ValueError(f"Choose a column or fixed value for {field['label']}")
@@ -235,19 +252,59 @@ def media_url(value):
     return value
 
 
+def public_media_url(value):
+    """The HTTPS link when its host is public. Meta fetches it, so internal names and addresses are refused."""
+    host = urlsplit(media_url(value)).hostname.rstrip('.').lower()
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    last = host.rsplit('.', 1)[-1]
+    if address and not address.is_global or not address and (
+            '.' not in host or host.endswith(PRIVATE_SUFFIXES) or last.isdigit() or last.startswith('0x')):
+        raise ValueError('Media link must point to a public host')
+    return value
+
+
+def zip_name(value):
+    """The ZIP file a header cell names, as its last path part; a link names no file. Match it without case."""
+    return '' if '://' in value else re.split(r'[\\/]', value.strip())[-1]
+
+
+def header_value(value, field, zip_files):
+    """(header value, problem) of a row's header cell: a public HTTPS link of the header's type, or the
+    checked ZIP file it names."""
+    if name := zip_name(value):
+        return zip_files.get(name.casefold(), (None, f'Header file {name[:120]} is not in the ZIP'))
+    try:
+        media_url(value)
+    except ValueError:
+        return None, f"{field['label']} must be an HTTPS link"
+    try:
+        public_media_url(value)
+    except ValueError:
+        return None, f"{field['label']} must be a public link"
+    mime = mimetypes.guess_type(urlsplit(value).path)[0]
+    if mime and mime not in channel('WhatsApp').features['media'][HEADER_KINDS[field['media']]]:
+        return None, f"Wrong file type for {field['media']} header"
+    return value, None
+
+
 def is_site_file(value):
     """An uploaded File that every row sends; Relay uploads it to Hub once when the campaign starts."""
     return isinstance(value, str) and value.startswith(('/files/', '/private/files/'))
 
 
-def prepare_row(row, mapping, fields, region, header_file=None):
-    """Return (destination, values, problem). Problems are user-facing reasons."""
+def prepare_row(row, mapping, fields, region, header_file=None, zip_files=None):
+    """Return (destination, values, problem). Problems are user-facing reasons. A number-matched header file
+    comes as header_file; a header column names a link or one of zip_files (ZIP name -> (file, problem))."""
     destination = sheet_phone(row.get(mapping['phone']), region)
     if not destination:
         return None, None, 'Invalid phone number'
     values = {}
+    by_number = (mapping.get('header_attachment') or {}).get('mode') in ('static', 'dynamic')
     for field in fields:
-        if field['key'] == 'header_media' and mapping.get('header_attachment'):
+        if field['key'] == 'header_media' and by_number:
             if not header_file:
                 return destination, None, 'Missing header attachment'
             values[field['key']] = header_file
@@ -258,7 +315,11 @@ def prepare_row(row, mapping, fields, region, header_file=None):
             return destination, None, f"Missing {field['label']}"
         if len(value) > MAX_VALUE:
             return destination, None, f"{field['label']} is too long"
-        if column and field.get('media'):  # check_mapping checked the fixed value.
+        if column and field['key'] == 'header_media':
+            value, problem = header_value(value, field, zip_files or {})
+            if problem:
+                return destination, None, problem
+        elif column and field.get('media'):  # check_mapping checked the fixed value.
             try:
                 media_url(value)
             except ValueError:

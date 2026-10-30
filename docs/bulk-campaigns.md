@@ -6,13 +6,22 @@ Bulk campaigns are available to Relay Communication Manager and System Manager. 
 
 Create a campaign for an approved template (or text/media inside the reply window). Download the Excel template and fill it in: mobile numbers belong in the first column, followed by template values. New valid mobile numbers are enrolled through the existing Relay contact flow.
 
-Upload `.xlsx`, `.csv` or `.tsv`, or a ZIP containing exactly one such sheet and optional WhatsApp image, video or document files. The site's normal upload limit also applies. ZIPs are limited to 200 MiB both compressed and expanded, and 10000 entries including folders and hidden entries. Hidden files/folders and `__MACOSX` are ignored. Subfolders are flattened. Absolute paths, traversal, symbolic links, encrypted entries, unsupported files and duplicate flattened filenames are rejected. Nested ZIP archives are not accepted. An XLSX in the ZIP counts as a sheet, not as a header document.
+When the template has an image, video or document header, the Excel template has a header column, for example `Header image (file name in the ZIP or https link)`. Its `Example` sheet shows the format; imports read only the first sheet. Each row gives one of these values in the header column:
 
-ZIP media becomes the existing per-contact header attachment selection. Name each file with the recipient's mobile number, for example `12025550101.png`. National numbers use the campaign's country, derived from the sending company. There is no filename column. Alternatively, upload one static header file or select individual mobile-named files. Header files remain private, must be at most 10 MB (images at most 5 MB, or less when the site file size limit is lower), and must match the template's media kind and file signature. Images accept JPG/PNG, videos MP4, and documents the existing WhatsApp registry types.
+| Value | Example | Result |
+| --- | --- | --- |
+| A file name in the ZIP | `offer-1.jpg` | The row sends that file. Many rows can name the same file; Relay uploads it to WhatsApp once. |
+| A public HTTPS link | `https://example.com/offer.jpg` | The row sends the link. WhatsApp fetches it. |
+
+Upload one file: the sheet (`.xlsx`, `.csv` or `.tsv`), or a ZIP that contains exactly one such sheet and the header files. A sheet without a ZIP can use only links. The site's normal upload limit also applies. ZIPs are limited to 200 MiB both compressed and expanded, and 10000 entries including folders and hidden entries. Hidden files/folders and `__MACOSX` are ignored. Subfolders are flattened, and a header cell matches the file name without its folder and without case. Absolute paths, traversal, symbolic links, encrypted entries, unsupported files and duplicate flattened filenames are rejected. Nested ZIP archives are not accepted. An XLSX in the ZIP counts as a sheet, not as a header document.
+
+Header files remain private, must be at most 10 MB (images at most 5 MB, or less when the site file size limit is lower), and must match the template's media kind and file signature. Images accept JPG/PNG, videos MP4, and documents the existing WhatsApp registry types. A link must use HTTPS on a public host, and a link whose path has a file extension must match the header type. Relay does not download links, so it cannot check their size.
+
+Campaigns that were set up before this model, with one file for every row or with files named by mobile number, keep sending as before. The API still accepts those `header_attachment` modes (`static`, `dynamic`); the campaign page uses only the header column.
 
 ## 2. Validate
 
-Select **Validate** after choosing the value mapping. This queues the existing import job; it sends no messages and uploads nothing to Hub. Every row is checked for a valid mobile number, duplicates, required values, header presence/type/size, opted-out or revoked endpoints, and (for text/media messages) an open 24-hour reply window. The enabled sending channel is checked before validation and again before sending. Unmatched or invalid uploaded header files appear as file issues.
+Select **Validate** after choosing the value mapping. This queues the existing import job; it sends no messages and uploads nothing to Hub. Every row is checked for a valid mobile number, duplicates, required values, the header file it names (in the ZIP, type, content and size) or its header link, opted-out or revoked endpoints, and (for text/media messages) an open 24-hour reply window. The enabled sending channel is checked before validation and again before sending. Invalid ZIP header files, and ZIP files that no row names, appear as file issues.
 
 The result shows **N ready / N with errors**, the first 50 error rows and a downloadable Excel report containing all skipped/failed rows, their original row numbers, mobile numbers and friendly reasons. Unknown exceptions/provider responses are not displayed. Rows with errors are stored as Skipped; valid rows are Pending. Sending requires at least one valid row. A replacement upload invalidates earlier validation. Revalidating replaces unsent imported rows through the existing import flow.
 

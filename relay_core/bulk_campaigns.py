@@ -41,6 +41,7 @@ OPERATIONS = ('templates.send', 'messages.send', 'messages.media')
 OUTSIDE_WINDOW = 'Outside the 24-hour reply window'
 OPTED_OUT = 'Opted out'
 MEDIA_DAYS = 29  # Meta keeps an uploaded media id for 30 days.
+MEDIA_CACHE = 'relay-bulk-media:'  # Campaign, file and name -> the Hub media id rows of that file share.
 UNDELIVERED = 'WhatsApp could not deliver this message'
 # Meta error codes of a failed send -> our reason; Meta's own text stays in the stored outcome.
 DELIVERY_REASONS = {
@@ -73,18 +74,20 @@ def phase(doc, label, *, validated=None):
     doc.arguments = canonical(snapshot)
 
 
-def xlsx_response(rows, filename):
+def xlsx_response(rows, filename, example=None):
+    """An Excel download of rows; example rows go on a second sheet, which imports never read."""
     from openpyxl import Workbook
     from openpyxl.cell import WriteOnlyCell
     book = Workbook(write_only=True)
-    sheet = book.create_sheet('Recipients')
-    for row in rows:
-        cells = []
-        for value in row:
-            cell = WriteOnlyCell(sheet, value=str(value or ''))
-            cell.data_type = 's'  # Uploaded cells must never become spreadsheet formulas.
-            cells.append(cell)
-        sheet.append(cells)
+    for title, sheet_rows in [('Recipients', rows), *([('Example', example)] if example else [])]:
+        sheet = book.create_sheet(title)
+        for row in sheet_rows:
+            cells = []
+            for value in row:
+                cell = WriteOnlyCell(sheet, value=str(value or ''))
+                cell.data_type = 's'  # Uploaded cells must never become spreadsheet formulas.
+                cells.append(cell)
+            sheet.append(cells)
     output = BytesIO()
     book.save(output)
     frappe.local.response.update(type='download', filename=filename, filecontent=output.getvalue(),
@@ -93,10 +96,19 @@ def xlsx_response(rows, filename):
 
 @frappe.whitelist(methods=['GET'])
 def sample_sheet(name):
+    """The Excel template: mobile number first, then a header media column when the template has one, then
+    the values. Its Example sheet shows a ZIP file name, a reused name and a link."""
     doc = bulk(name)
-    fields = [field for field in json.loads(doc.arguments)['fields'] if field['key'] != 'header_media']
-    header = list(dict.fromkeys(['mobile number', *(field.get('name') or field['label'] for field in fields)]))
-    xlsx_response([header], 'campaign-template.xlsx')
+    fields = json.loads(doc.arguments)['fields']
+    header = list(dict.fromkeys(['mobile number', *(bulk_sheet.header_column(field) if field['key'] == 'header_media'
+                                                    else field.get('name') or field['label'] for field in fields)]))
+    media = next((field['media'] for field in fields if field['key'] == 'header_media'), None)
+    if not media:
+        return xlsx_response([header], 'campaign-template.xlsx')
+    extension = {'image': 'jpg', 'video': 'mp4', 'document': 'pdf'}[media]
+    cells = (f'offer-1.{extension}', f'offer-2.{extension}', f'offer-1.{extension}', f'https://example.com/offer.{extension}')
+    rows = [[f'91987654321{index}', cell, *('value' for _ in header[2:])] for index, cell in enumerate(cells)]
+    xlsx_response([header], 'campaign-template.xlsx', example=[header, *rows])
 
 
 @frappe.whitelist(methods=['GET'])
@@ -129,8 +141,8 @@ def friendly_reason(reason, fields=()):
         'The first row must hold unique column names', f'A campaign supports at most {bulk_sheet.MAX_ROWS} rows'}
     for field in fields:
         label = field['label']
-        exact.update((f'Missing {label}', f'{label} is too long', f'{label} must be an HTTPS link'))
-    if text in exact or re.fullmatch(r'Header attachment must be at most [0-9.]+ [KM]B', text) or any(
+        exact.update((f'Missing {label}', f'{label} is too long', f'{label} must be an HTTPS link', f'{label} must be a public link'))
+    if text in exact or re.fullmatch(r'Header attachment must be at most [0-9.]+ [KM]B|Header file .{1,120} is not in the ZIP', text) or any(
             text == f'Wrong file {part} for {kind} header' for part in ('type', 'content') for kind in ('image', 'video', 'document')):
         return text
     if code := re.match(r'Meta error ([0-9]+)', text):
@@ -278,8 +290,7 @@ def media_upload(hub, doc):
 
 def upload_media_file(hub, channel, file, mime_type, kind, filename=None):
     from relay_core.file_limits import get_media_max_bytes, size_error
-    from relay_core.template_media import HEADER_KINDS
-    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS.get(kind, kind))
+    limit = get_media_max_bytes('WhatsApp', bulk_sheet.HEADER_KINDS.get(kind, kind))
     with open(file.get_full_path(), 'rb') as handle:
         raw = handle.read(limit + 1)
     if error := size_error(len(raw), limit, 'Header attachment'):
@@ -337,7 +348,6 @@ def inspect(name, file_url):
     internal_save(doc)
     mapping = bulk_sheet.suggest(header, fields, first_phone=True)
     if attachment:
-        mapping['fields'].pop('header_media', None)
         mapping['header_attachment'] = attachment
     return {'columns': header, 'sample': sample, 'fields': fields, 'mapping': mapping}
 
@@ -497,23 +507,27 @@ def add_rows(doc, rows, seen):
     """Check and insert (row number, column -> text) rows in chunks; sheet and JSON rows share this path."""
     snapshot, mapping = json.loads(doc.arguments), json.loads(doc.column_map)
     fields, message = snapshot['fields'], snapshot.get('message')
-    attachment, resolved = mapping.get('header_attachment'), {}
+    attachment, resolved, zip_files = mapping.get('header_attachment'), {}, {}
     snapshot['file_issues'] = []
     if attachment:
-        from relay_core.campaign_media import resolve
-        # Only the destination set is retained; the uploaded sheet remains streamed.
-        if doc.source_file:
-            numbers = {bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country) for _, row in recipient_rows(doc)}
-        else:
+        from relay_core.campaign_media import named_files, resolve
+        # Only the destination or file name set is retained; the uploaded sheet remains streamed.
+        if not doc.source_file:
             rows = list(rows)
-            numbers = {bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country) for _, row in rows}
-        resolved = resolve(attachment, header_type(doc), numbers - {None}, doc.country, issues=snapshot['file_issues'])
+        scanned = recipient_rows(doc) if doc.source_file else rows
+        if attachment['mode'] == 'named':
+            column = mapping['fields']['header_media']
+            used = {bulk_sheet.zip_name(row.get(column, '')).casefold() for _, row in scanned}
+            zip_files = named_files(attachment, header_type(doc), used, snapshot['file_issues'])
+        else:
+            numbers = {bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country) for _, row in scanned}
+            resolved = resolve(attachment, header_type(doc), numbers - {None}, doc.country, issues=snapshot['file_issues'])
     doc.arguments = canonical(snapshot)
     chunk, enrolled = [], {}
     for number, row in rows:
         destination = bulk_sheet.sheet_phone(row.get(mapping['phone']), doc.country)
         header_file, media_problem = resolved.get(destination, (None, None))
-        destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country, header_file)
+        destination, values, problem = bulk_sheet.prepare_row(row, mapping, fields, doc.country, header_file, zip_files)
         if destination and media_problem:
             problem = media_problem
         if doc.source_file and not doc.recipient_filters:
@@ -942,6 +956,10 @@ def prepare_messages(hub, doc, snapshot, rows, *, deadline=None):
             break
         arguments = json.loads(row.arguments)
         item = arguments['values'].get('header_media')
+        if attachment['mode'] == 'named' and isinstance(item, str):  # A checked link; Meta fetches it.
+            row.message = hub_message(doc, snapshot, row)
+            ready.append(row)
+            continue
         try:
             if not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files:
                 raise ValueError('Missing header attachment')
@@ -956,21 +974,31 @@ def prepare_messages(hub, doc, snapshot, rows, *, deadline=None):
                 frappe.db.set_value('Relay Campaign', doc.name, fresh, update_modified=False)
             media_id = doc.media_id
         else:
-            cached = arguments.get('header_upload') or {}
-            now = frappe.utils.now_datetime()
-            if (cached.get('id') and cached.get('at')
-                    and frappe.utils.get_datetime(cached['at']) > frappe.utils.add_to_date(now, days=-MEDIA_DAYS)):
-                media_id = cached['id']
-            else:
-                media_id = upload_media_file(hub, doc.channel, file, mime, kind, item['filename'])
-                arguments['header_upload'] = {'id': media_id, 'at': str(now)}
-                row.arguments = canonical(arguments)
-                frappe.db.set_value(RECIPIENT, row.name, 'arguments', row.arguments, update_modified=False)
-                frappe.db.commit()  # Reuse this upload if bulk admission is retried.
+            media_id = row_media_id(hub, doc, row, arguments, (file, mime, kind, item))
         header = {'id': media_id, **({'filename': item['filename']} if kind == 'document' else {})}
         row.message = hub_message(doc, snapshot, row, header)
         ready.append(row)
     return ready
+
+
+def row_media_id(hub, doc, row, arguments, checked):
+    """Hub media id of a row's own header file. The row keeps it for a retried admission; rows that name the
+    same file share it through the cache, so a reused file is uploaded once."""
+    file, mime, kind, item = checked
+    now, shared = frappe.utils.now_datetime(), f"{MEDIA_CACHE}{doc.name}:{item['file_url']}:{item['filename']}"
+    for upload in (arguments.get('header_upload') or {}, frappe.cache.get_value(shared) or {}):
+        if (upload.get('id') and upload.get('at')
+                and frappe.utils.get_datetime(upload['at']) > frappe.utils.add_to_date(now, days=-MEDIA_DAYS)):
+            break
+    else:
+        upload = {'id': upload_media_file(hub, doc.channel, file, mime, kind, item['filename']), 'at': str(now)}
+        frappe.cache.set_value(shared, upload, expires_in_sec=MEDIA_DAYS * 86400)
+    if arguments.get('header_upload') != upload:
+        arguments['header_upload'] = upload
+        row.arguments = canonical(arguments)
+        frappe.db.set_value(RECIPIENT, row.name, 'arguments', row.arguments, update_modified=False)
+        frappe.db.commit()  # Reuse this upload if bulk admission is retried.
+    return upload['id']
 
 
 def hub_message(doc, snapshot, row, header_media=None):

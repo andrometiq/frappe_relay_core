@@ -11,15 +11,13 @@ import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
 import CampaignValidation from './campaigns/CampaignValidation.vue';
 import { campaignError } from '../services/campaignErrors.js';
-import CampaignHeaderFiles from './campaigns/CampaignHeaderFiles.vue';
-import { attachmentMapping } from '../services/campaignMedia';
 import { useCampaigns } from "../composables/useCampaigns";
 import { coreApi } from "../services/coreApi";
 import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { attachmentMaxBytes, sizeLabel } from "./messages/attachmentFormats";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
-import { campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
+import { campaignActions, campaignMessage, headerFilesNotice, messageLabel, messageTypes, missingMapping, percent, placeholders,
   shownCounters, statusTheme, windowNotice, invalidNumberLabel } from "../services/campaignProgress";
 import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
@@ -35,7 +33,7 @@ const creating = ref(false), title = ref(""), type = ref("template"), template =
 const manyNumbers = computed(() => hasManyNumbers(capabilities.value));
 const number = ref("");
 const numberOptions = computed(() => whatsappNumbers(capabilities.value).map((row) => ({ value: row.name, label: [row.label, row.address].filter(Boolean).join(" · ") })));
-const mediaFile = ref(""), headerUploading = ref(false);
+const mediaFile = ref("");
 const columns = [
   { key: "title", label: "Campaign", width: "minmax(200px,1.4fr)" },
   { key: "status", label: "Status", width: "120px" },
@@ -43,8 +41,9 @@ const columns = [
   { key: "progress", label: "Sent / replied", width: "140px" },
 ];
 const templateOptions = computed(() => templates.value.map((row) => ({ value: `${row.name}|${row.language}`, label: `${row.name} (${row.language})` })));
-const columnOptions = (field) => [{ value: "", label: field.component === "media" ? "One file or link for every row" : "Fixed value" },
+const columnOptions = (field) => [{ value: "", label: field.key === "header_media" ? "Choose a column" : field.component === "media" ? "One file or link for every row" : "Fixed value" },
   ...(sheet.value?.columns || [])];
+const headerField = computed(() => sheet.value?.fields.find((field) => field.key === "header_media"));
 const missing = computed(() => sheet.value && mapping.value ? missingMapping(sheet.value.fields, mapping.value) : []);
 const counts = computed(() => campaign.value?.counts || {});
 const media = (kind) => channelFeature(capabilities.value, "WhatsApp", "media." + kind);
@@ -65,8 +64,8 @@ const actionLabel = (action) => action === "cancel" && campaign.value.status ===
 const headerActions = computed(() => campaignActions(campaign.value?.status).filter((action) => !(action === "start" && campaign.value.status === "Draft")));
 // Draft recipients come from contacts or from a sheet; nothing is picked until the user chooses one.
 const sendMode = ref("now"), startAt = ref("");
-const fileHint = "Accepted: .xlsx, .csv, .tsv or a ZIP containing exactly one sheet and media files (200 MiB / 10000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
-const canSend = computed(() => campaign.value?.validated && !sheet.value && !headerUploading.value && counts.value.total > 0);
+const fileHint = "Accepted: .xlsx, .csv, .tsv, or a ZIP with exactly one sheet and the header files (200 MiB / 10000 entries maximum). Put mobile numbers in the first column, with column names in the first row. New numbers become Relay contacts.";
+const canSend = computed(() => campaign.value?.validated && !sheet.value && counts.value.total > 0);
 const messageName = computed(() => campaign.value?.template_name ? `the template "${campaign.value.template_name}"` : "this message");
 // Starting, retrying or cancelling asks once; the dialog names the people and the message.
 const confirming = ref("");
@@ -130,11 +129,7 @@ async function chooseFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   await workspace.upload(file);
-  if (sheet.value) {
-    mapping.value = { ...sheet.value.mapping, fields: { ...sheet.value.mapping.fields }, fixed: {} };
-    if (sheet.value.fields.some(field => field.key === 'header_media'))
-      mapping.value = attachmentMapping(mapping.value, sheet.value.mapping.header_attachment || { mode: 'static', files: [] });
-  }
+  if (sheet.value) mapping.value = { ...sheet.value.mapping, fields: { ...sheet.value.mapping.fields }, fixed: {} };
   mediaFile.value = "";
   event.target.value = "";
 }
@@ -235,12 +230,13 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <input type="file" accept=".xlsx,.csv,.tsv,.zip" aria-label="Recipients sheet" :disabled="busy" @change="chooseFile" />
         </label>
         <Button class="campaign-sample" label="Download Excel template" variant="outline" :disabled="busy" @click="workspace.download('sample_sheet')" />
-        <p class="campaign-hint">For header media, put mobile-named files beside the sheet in a ZIP, or add files below. Subfolders are flattened; hidden files are ignored.<template v-if="headerLimit"> Each header file must be at most {{ headerLimit }}.</template></p>
+        <p class="campaign-hint">For a template with a header image, video or document, fill its header column on each row with a file name from the ZIP or an https link. Rows can reuse a file name. Subfolders are flattened; hidden files are ignored.<template v-if="headerLimit"> Each header file must be at most {{ headerLimit }}.</template></p>
         <div v-if="sheet && mapping" class="campaign-mapping">
           <p class="campaign-hint">Mobile numbers: {{ mapping.phone }} (first column)</p>
-          <CampaignHeaderFiles v-for="field in sheet.fields.filter(field => field.key === 'header_media')" :key="field.key"
-            :model-value="mapping.header_attachment" :media="field.media" :upload="workspace.uploadMedia" :busy="busy"
-            @update:model-value="mapping = attachmentMapping(mapping, $event)" @uploading="headerUploading = $event" />
+          <div v-if="headerField" class="campaign-map-row">
+            <RelaySelect :model-value="mapping.fields.header_media || ''" :label="`Header ${headerField.media} column`" :options="columnOptions(headerField)" @update:model-value="setColumn('header_media', $event)" />
+            <p class="campaign-hint" role="status">{{ headerFilesNotice(mapping.header_attachment, headerField.media) }}</p>
+          </div>
           <div v-for="field in sheet.fields.filter(field => field.key !== 'header_media')" :key="field.key" class="campaign-map-row">
             <RelaySelect :model-value="mapping.fields[field.key] || ''" :label="field.label" :options="columnOptions(field)" @update:model-value="setColumn(field.key, $event)" />
             <div v-if="!mapping.fields[field.key] && field.component === 'media'" class="campaign-media">
@@ -251,7 +247,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
             <TextInput v-else-if="!mapping.fields[field.key]" v-model="mapping.fixed[field.key]" :placeholder="field.media ? 'https://…' : 'Same value for every row'" :aria-label="`${field.label} fixed value`" />
           </div>
           <p v-if="missing.length" class="campaign-issue">Still needed: {{ missing.join(", ") }}</p>
-          <Button label="Validate" variant="solid" :loading="busy" :disabled="missing.length > 0 || headerUploading" @click="validateSheet" />
+          <Button label="Validate" variant="solid" :loading="busy" :disabled="missing.length > 0" @click="validateSheet" />
         </div>
       </FrappeFormSection>
       <FrappeFormSection title="2. Validate">
