@@ -611,7 +611,7 @@ class ImportTests(unittest.TestCase):
                 patch.object(bulk_campaigns, 'internal_save'), patch('relay_core.bulk_updates.changed') as changed:
             bulk_campaigns.import_job('Winter launch')
         values = db.bulk_insert.call_args.args[2]
-        self.assertEqual([(v[10], v[14]) for v in values], [('Pending', ''), ('Skipped', 'Duplicate number'),
+        self.assertEqual([(v[10], v[14]) for v in values], [('Pending', ''), ('Skipped', 'Duplicate row'),
                          ('Skipped', 'Invalid phone number'), ('Skipped', 'Missing Body value 2'), ('Skipped', 'Opted out')])
         self.assertEqual(values[0][7], 'Contact Asha')
         self.assertEqual(values[0][0], bulk_campaigns.recipient_key('Winter launch', 2))
@@ -681,7 +681,7 @@ class JsonRowTests(unittest.TestCase):
     def test_json_rows_follow_the_sheet_path_with_per_row_links(self):
         rows = [{'phone': '+91 98765 43210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'http://cdn.example/b.jpg'},
-                {'phone': '919876543210', 'name': 'Asha again', 'media_url': 'https://cdn.example/c.jpg'},
+                {'phone': '919876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '123', 'name': 'Nobody', 'media_url': 'https://cdn.example/d.jpg'}]
         result, doc, db, create, control, _ = self.create(rows)
         self.assertEqual(result, 'read')
@@ -690,7 +690,7 @@ class JsonRowTests(unittest.TestCase):
         values = db.bulk_insert.call_args.args[2]
         self.assertEqual([(v[13], v[10], v[14]) for v in values], [
             (1, 'Pending', ''), (2, 'Skipped', 'Photo link must be an HTTPS link'),
-            (3, 'Skipped', 'Duplicate number'), (4, 'Skipped', 'Invalid phone number')])
+            (3, 'Skipped', 'Duplicate row'), (4, 'Skipped', 'Invalid phone number')])
         self.assertEqual(json.loads(values[0][12])['values'], {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'})
 
     def test_start_sends_at_once_and_a_mapping_names_other_columns(self):
@@ -730,7 +730,7 @@ class JsonRowTests(unittest.TestCase):
         db = Mock(sql=Mock(return_value=[(40, 40)]))
         fake = SimpleNamespace(db=db, parse_json=frappe.parse_json, cache=FakeCache(), session=_dict(user='manager@example.invalid'),
                                utils=SimpleNamespace(now=lambda: '2026-10-26 10:00:00'), throw=Mock(side_effect=frappe.ValidationError),
-                               get_all=Mock(return_value=['919876543210']))
+                               get_all=Mock(return_value=[_dict(destination='919876543210', arguments=json.dumps({'values': {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'}}))]))
         rows = [{'phone': '9876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'https://cdn.example/b.jpg'}]
         with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, \
@@ -739,7 +739,7 @@ class JsonRowTests(unittest.TestCase):
             self.assertEqual(bulk_campaigns.append_rows('Promo', rows), 'read')
             bulk.assert_called_once_with('Promo', ('Draft',))
             values = db.bulk_insert.call_args.args[2]
-            self.assertEqual([(v[13], v[10], v[14]) for v in values], [(41, 'Skipped', 'Duplicate number'), (42, 'Pending', '')])
+            self.assertEqual([(v[13], v[10], v[14]) for v in values], [(41, 'Skipped', 'Duplicate row'), (42, 'Pending', '')])
             self.assertEqual(fake.get_all.call_args.kwargs['filters']['status'], ['!=', 'Skipped'])
             db.sql.return_value = [(41, bulk_sheet.MAX_ROWS - 1)]
             with self.assertRaises(frappe.ValidationError):
