@@ -112,7 +112,7 @@ class ValidationTests(unittest.TestCase):
             column_map=json.dumps({'phone': 'Mobile', 'fields': {'body:1': 'Name'}, 'fixed': {}}))
 
     def test_row_errors_and_validated_evidence_persist_without_hub_calls(self):
-        rows = [(2, {'Mobile': '12025550101', 'Name': 'Asha'}), (3, {'Mobile': '+1 202 555 0101', 'Name': 'Duplicate'}),
+        rows = [(2, {'Mobile': '12025550101', 'Name': 'Asha'}), (3, {'Mobile': '+1 202 555 0101', 'Name': 'Asha'}),
                 (4, {'Mobile': 'bad', 'Name': 'Invalid'}), (5, {'Mobile': '12025550102', 'Name': ''}),
                 (6, {'Mobile': '12025550103', 'Name': 'Opted out'}), (7, {'Mobile': '12025550104', 'Name': 'Revoked'})]
         def facts(channel, numbers, blocked=None):
@@ -121,7 +121,7 @@ class ValidationTests(unittest.TestCase):
         with patch.object(bulk, 'endpoint_facts', side_effect=facts), patch.object(bulk.whatsapp, 'client') as hub:
             bulk.add_rows(self.doc, rows, set())
         records = self.db.bulk_insert.call_args.args[2]
-        self.assertEqual([r[14] for r in records], ['', 'Duplicate number', 'Invalid phone number',
+        self.assertEqual([r[14] for r in records], ['', 'Duplicate row', 'Invalid phone number',
             'Missing Body value 1', 'Opted out', 'Endpoint verification revoked'])
         self.assertEqual([r[10] for r in records], ['Pending'] + ['Skipped'] * 5)
         for record in records:
