@@ -21,6 +21,7 @@ scheduler_events = {
         "*/10 * * * *": ["relay_core.scheduled_jobs.sync_whatsapp_templates"],
         "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
+    "hourly": ["relay_core.scheduled_jobs.expire_approvals"],
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels"],
 }
 

@@ -44,7 +44,7 @@ class BusinessTypeAccessTests(unittest.TestCase):
             throw=lambda msg, exc=ValueError: (_ for _ in ()).throw(exc(msg)),
             has_permission=Mock(side_effect=lambda dt, *a, **kw: dt.startswith('Relay ')), get_doc=Mock(),
             get_all=self.get_all, db=SimpleNamespace(escape=lambda value: "'" + value.replace("'", "''") + "'",
-                                                   sql=self.sql, exists=lambda *a: True))
+                                                   sql=self.sql, exists=lambda *a: True, get_value=lambda *a: None))
         self.fake.parse_json = lambda value: json.loads(value) if isinstance(value, str) else value
         self.fake._ = lambda value: value
         self.fake.get_meta = Mock(return_value=_dict(title_field='customer_name', issingle=0, istable=0, module='Selling',
@@ -175,6 +175,20 @@ class BusinessTypeAccessTests(unittest.TestCase):
             self.assertTrue(access.message_allowed(message, 'manager'))
             message.business_doctype, message.business_name = 'Customer', 'LOCAL-C1'
             self.assertTrue(access.message_allowed(message, 'listed'))
+
+    def test_sender_user_reads_only_own_messages(self):
+        people, users = {'own': 'unlinked', 'shared': 'shared'}, {'unlinked': 'outsider'}
+        self.fake.db.get_value = lambda doctype, name, field: (people if doctype == 'Relay Contact' else users).get(name)
+        own = _dict(doctype='Relay Message', relay_contact='own', business_doctype='Supplier', business_name='LOCAL-S1')
+        self.assertTrue(access.message_allowed(own, 'outsider'))
+        with patch.object(permissions, 'assignment_allowed', return_value=False):
+            self.assertTrue(permissions.message_permission(own, 'outsider'))
+            self.assertFalse(permissions.message_permission(own, 'listed'))
+        self.assertFalse(access.message_allowed(own, 'listed'))
+        self.assertFalse(access.message_allowed(_dict(own, relay_contact='shared'), 'outsider'))
+        self.assertFalse(access.message_allowed(_dict(own, legacy_triage=1), 'outsider'))
+        users['unlinked'] = None
+        self.assertFalse(access.message_allowed(own, 'outsider'))
 
     def test_revocation_is_effective_on_the_next_check(self):
         self.assertTrue(access.person_allowed('customer', 'listed'))

@@ -7,6 +7,8 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 from test_ai_skills import Doc, capability, framework, module
+import relay_core.ai.configuration  # noqa: F401 - loaded before frappe is replaced in sys.modules
+import relay_core.automation.channel  # noqa: F401
 from relay_core.ai.builtin_capabilities import CAPABILITIES
 from relay_core.automation.contracts import validate_filters, validate_search
 
@@ -326,6 +328,73 @@ class PatchTests(unittest.TestCase):
         self.assertEqual(f.db.set_value.call_args_list, [
             unittest.mock.call('Relay AI Skill', 'Ledger', 'allowed_tools', '[{"capability": "erpnext.customer_ledger"}]', update_modified=False),
             unittest.mock.call('Relay AI Skill', 'Supplier', 'allowed_tools', '[{"capability": "erpnext.supplier_ledger"}]', update_modified=False)])
+
+
+
+class RunCapabilityTests(unittest.TestCase):
+    from test_ai_skills import ConversationIdentityTests
+    setUp = ConversationIdentityTests.setUp
+
+    def bind(self):
+        self.packs = [capability()]
+        self.tools.contracts = lambda skill: self.packs
+        self.service.lock_contact = Mock(return_value=Doc(automation_paused=0, automation_generation=1))
+        self.service.message_hash = Mock(return_value='hash')
+        self.skill.update(enabled=1, modified='v1')
+        self.enterContext(patch.dict(sys.modules, {'relay_core.tickets': types.SimpleNamespace(check_episode=Mock()),
+                                                   'relay_core.ai.tools': self.tools}))
+        scope = self.service.context(self.skill, self.message)[2]
+        return Doc(skill_version='v1', generation=1, message_hash='hash', capability_hashes=json.dumps(scope['capabilities']))
+
+    def test_context_records_the_hash_of_each_active_pack(self):
+        from relay_core.ai.capabilities import manifest_hash
+        run = self.bind()
+        self.assertEqual(json.loads(run.capability_hashes), {'erpnext.ledger': manifest_hash(capability())})
+        self.assertEqual(self.service.current(run, self.skill, self.message)[2]['capabilities'], json.loads(run.capability_hashes))
+
+    def test_capability_changed_or_disabled_between_decision_and_send_supersedes_the_run(self):
+        run = self.bind()
+        self.packs = [capability(limit=5)]
+        with self.assertRaisesRegex(self.service.Superseded, 'Capability changed'):
+            self.service.current(run, self.skill, self.message)
+        self.tools.contracts = Mock(side_effect=ValueError('Capability is not approved'))
+        with self.assertRaisesRegex(self.service.Superseded, 'Capability changed'):
+            self.service.current(run, self.skill, self.message)
+
+    def test_capability_action_packs_join_the_run_hashes(self):
+        self.skill.allowed_actions = '[{"action": "erpnext.payment_entry_draft"}]'
+        registered = {'erpnext.payment_entry_draft': {'capability_hash': 'h-action'}, 'reply': {}}
+        with patch('relay_core.ai.configuration.action_contracts', return_value=[{'action': 'erpnext.payment_entry_draft'}]), \
+                patch('relay_core.flows.actions.definitions', return_value=registered) as definitions:
+            run = self.bind()
+        self.assertEqual(json.loads(run.capability_hashes)['erpnext.payment_entry_draft'], 'h-action')
+        definitions.assert_called_with(context='ai')
+
+
+class AIDefinitionTests(unittest.TestCase):
+    def setUp(self):
+        from relay_core.ai.actions import REPLY
+        from relay_core.flows import actions
+        self.actions = actions
+        self.hooks = {'reply': REPLY}
+        self.enterContext(patch.object(actions.frappe, 'get_hooks', side_effect=lambda hook, app_name=None: self.hooks))
+        self.draft = dict(CAPABILITIES['erpnext.payment_entry_draft'], key='erpnext.payment_entry_draft', app='relay_core')
+        self.packs = self.enterContext(patch('relay_core.ai.capabilities.packs', return_value=[self.draft]))
+
+    def test_ai_actions_merge_core_built_ins_and_approved_action_packs(self):
+        from relay_core.ai.capabilities import manifest_hash
+        registered = self.actions.definitions(context='ai')
+        self.assertEqual(set(registered), {'reply', 'erpnext.payment_entry_draft'})
+        pack = registered['erpnext.payment_entry_draft']
+        self.assertEqual(pack['capability_hash'], manifest_hash(self.draft))
+        self.assertEqual((pack['contexts'], pack['ai_safe'], pack['replay_safe']), (['ai'], True, True))
+        self.actions.frappe.get_hooks.assert_called_with('relay_flow_actions', app_name='relay_core')
+        self.packs.assert_called_once_with('Action')
+
+    def test_a_key_declared_by_core_and_a_pack_fails_the_registry(self):
+        self.hooks['erpnext.payment_entry_draft'] = self.hooks['reply']
+        with self.assertRaisesRegex(ValueError, 'declared twice'):
+            self.actions.definitions(context='ai')
 
 
 if __name__ == '__main__':

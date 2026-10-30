@@ -152,7 +152,7 @@ class DeclineDeliveryTests(unittest.TestCase):
         message = fixtures.Doc(name='MSG-1', relay_contact='CONTACT-1', content='Do my coding homework')
         skill = fixtures.Doc(name='SKILL-1', modified='version', execution_policy='Ticket only', mode='Automatic')
         f.get_doc.return_value = message
-        scope = {'company': 'Local Company', 'message': message.name}
+        scope = {'company': 'Local Company', 'message': message.name, 'capabilities': {}}
         with patch.object(service, 'frappe', f), patch.object(service, 'lock_run', return_value=run), \
                 patch.object(service, 'lock_contact', return_value=fixtures.Doc(automation_generation=0)), \
                 patch.object(service, 'message_hash', return_value='original'), \

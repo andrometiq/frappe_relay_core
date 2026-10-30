@@ -58,7 +58,7 @@ def grade(case, decision):
     elif outcome == 'handoff':
         reply = notice('handoff', text, ACKNOWLEDGEMENT)
     else:
-        registered = definitions() if decision.get('actions') else {}
+        registered = definitions(context='ai') if decision.get('actions') else {}
         reply = '\n'.join([decision.get('reply', ''), *(row['parameters']['text']
             for row in decision.get('actions', []) if registered[row['action']]['effect'] == 'reply')]).strip()
     expected = case['expected'] if isinstance(case['expected'], list) else [case['expected']]

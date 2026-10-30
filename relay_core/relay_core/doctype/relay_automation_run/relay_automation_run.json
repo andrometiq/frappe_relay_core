@@ -28,6 +28,7 @@
     "skill_version",
     "stage",
     "scope_fingerprint",
+    "capability_hashes",
     "match_result",
     "search_plan",
     "ownership_generation",
@@ -165,6 +166,13 @@
       "read_only": 1
     },
     {
+      "fieldname": "capability_hashes",
+      "fieldtype": "JSON",
+      "label": "Capability hashes",
+      "read_only": 1,
+      "description": "The hash of every capability pack the decision used, by capability key."
+    },
+    {
       "fieldname": "match_result",
       "fieldtype": "JSON",
       "label": "Match result",
@@ -216,5 +224,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-28 12:00:00.000000"
+  "modified": "2026-10-30 18:00:00.000000"
 }

@@ -605,13 +605,16 @@ def ai_history(name, before=None, limit=20):
         reads = _history_json(run.decision).get('reads')
         actions = []
         for action in frappe.get_all('Relay Flow Action', filters={'automation_run': run.name, 'ticket': name},
-                fields=['name', 'action', 'step', 'status', 'approval_evidence'],
+                fields=['name', 'action', 'step', 'status', 'approval_evidence', 'capability_hash', 'expires_on',
+                        'rejection_reason', 'duplicate_of'],
                 order_by='step asc', limit_page_length=4):
-            stale = (action.status != 'Completed' and (ticket.get('ai_disabled')
+            stale = (action.status not in ('Completed', 'Rejected', 'Expired') and (ticket.get('ai_disabled')
                 or int(run.ownership_generation or 0) != int(ticket.get('generation') or 0)))
             actions.append(dict(name=action.name, action=action.action, step=action.step + 1,
                 status='Stopped' if stale else action.status,
-                approval='Invalidated' if stale else 'Recorded' if action.approval_evidence else None))
+                approval='Invalidated' if stale else 'Recorded' if action.approval_evidence else None,
+                capability_hash=action.capability_hash, expires_on=action.expires_on,
+                rejection_reason=action.rejection_reason, duplicate_of=action.duplicate_of))
         deliveries = []
         for delivery in frappe.get_all('Relay Message Action', filters={'source_message': run.message},
                 fields=['name', 'status', 'payload'], order_by='creation asc', limit_page_length=20):

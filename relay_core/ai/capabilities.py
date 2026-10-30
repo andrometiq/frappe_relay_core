@@ -50,7 +50,7 @@ def validate_manifest(app: str, key: str, manifest: dict) -> dict:
     label = manifest.get('label')
     if type(manifest.get('version')) is not int or manifest['version'] < 1 or not isinstance(label, str) or not 1 <= len(label) <= 140:
         raise ValueError(f'Capability {key} needs a version and a label')
-    checked = validate_read(manifest) if manifest['kind'] == 'read' else validate_action(manifest)
+    checked = validate_read(manifest) if manifest['kind'] == 'read' else validate_action(manifest, app)
     return dict(checked, key=key, app=app)
 
 
@@ -145,14 +145,12 @@ def is_filter_spec(spec):
             and isinstance(enum, list) and 1 <= len(enum) <= 100 and all(isinstance(value, str) for value in enum))
 
 
-def validate_action(manifest):
-    """The fields of an AI action registration; drafts always wait for staff approval."""
+def validate_action(manifest, app):
+    """The fields of an AI action registration; ai_contract keeps drafts behind staff approval."""
     from relay_core.flows.action_contracts import ai_contract
     if not ACTION <= set(manifest) or set(manifest) - ACTION - ACTION_OPTIONAL:
         raise ValueError('Action capability fields are invalid')
-    if manifest['effect'] == 'create_draft' and manifest['approval_policy'] != 'Required':
-        raise ValueError('Draft actions require staff approval')
-    ai_contract(dict(manifest, ai_safe=True, contexts=['ai']))
+    ai_contract(dict(manifest, ai_safe=True, contexts=['ai'], app=app))
     targets = manifest.get('targets') or {}
     for doctype, fields in (manifest.get('link_checks') or {}).items():
         properties = targets.get(doctype, {}).get('properties', {})
@@ -228,18 +226,19 @@ def trusted_apps() -> set[str]:
     return {line.strip() for line in value.splitlines() if line.strip()}
 
 
-def read_packs(business_doctype: str) -> list[dict]:
-    keys = frappe.get_all(DOCTYPE, filters={'kind': 'Read', 'business_doctype': business_doctype,
-        'enabled': 1, 'status': 'Approved'}, pluck='name', order_by='name asc')
-    packs = []
+def packs(kind: str, **filters) -> list[dict]:
+    """Active manifests of one kind ('Read' or 'Action'), in key order."""
+    keys = frappe.get_all(DOCTYPE, filters=dict(filters, kind=kind, enabled=1, status='Approved'),
+                          pluck='name', order_by='name asc')
+    active_packs = []
     for key in keys:
         try:
-            packs.append(active(key))
+            active_packs.append(active(key))
         except ValueError:
             continue
-    return packs
+    return active_packs
 
 
 def options(business_doctype: str) -> list[dict]:
     return [dict(value=row['key'], label=row['label'], description=row.get('data_notes', ''))
-            for row in read_packs(business_doctype)]
+            for row in packs('Read', business_doctype=business_doctype)]

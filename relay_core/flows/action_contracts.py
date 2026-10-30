@@ -78,15 +78,18 @@ def inputs(value, schema, answers):
 
 
 def ai_contract(action):
-    """Only reviewed Core draft/reply handlers can enter the AI registry."""
+    """Only reviewed reply or draft handlers of the declaring app can enter the AI registry."""
+    app = action.get('app') if action else None
     if (not action or action.get('ai_safe') is not True
             or 'ai' not in action.get('contexts', ['flow'])
-            or not action.get('method', '').startswith('relay_core.')
+            or not isinstance(app, str) or not app or not action.get('method', '').startswith(app + '.')
             or action.get('effect') not in ('reply', 'create_draft')
             or action.get('approval_policy') not in ('None', 'Required')
             or not isinstance(action.get('permissions'), dict) or not action['permissions']
             or any(permission not in ('read', 'create') for permission in action['permissions'].values())):
-        raise ValueError('Only explicitly AI-safe Core reply or draft actions are allowed')
+        raise ValueError('Only explicitly AI-safe reply or draft actions of the declaring app are allowed')
+    if action['effect'] == 'create_draft' and action['approval_policy'] != 'Required':
+        raise ValueError('Draft actions require staff approval')
     check_schema(action.get('parameters'))
     check_schema(action.get('output'))
     if (action['parameters']['type'] != 'object'

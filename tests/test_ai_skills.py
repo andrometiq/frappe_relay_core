@@ -249,7 +249,8 @@ class SearchGateTests(unittest.TestCase):
         self.origin = Doc(name='Origin', message='Source', skill='Event', skill_version='version',
             execution_user='partner', generation=2, ticket='Ticket', stage='Event', status='Deciding')
         self.run = self.origin
-        self.scope = dict(message='Source', company='Company', endpoint='sender', user='partner')
+        self.scope = dict(message='Source', company='Company', endpoint='sender', user='partner',
+                          capabilities={'erpnext.ledger': 'hash'})
         self.receipt = Doc(status='Submitted', source_message='Source', payload=json.dumps({'automation_run':'Origin'}))
         self.automation = types.SimpleNamespace(internal_save=Mock(), lock_run=lambda name: self.origin if name=='Origin' else self.run,
             lock_contact=Mock(), message_hash=lambda msg: msg.get('hash') or msg.name, latest_message=Mock(),
@@ -1038,7 +1039,7 @@ class EventContractTests(unittest.TestCase):
             is_sensitive_field=lambda name: name in ('api_key', 'password'))
         self.registered = {}
         self.modules = patch.dict(sys.modules, {'frappe_tools.ai.tools': self.shared,
-            'relay_core.flows.actions': types.SimpleNamespace(definitions=lambda: self.registered)})
+            'relay_core.flows.actions': types.SimpleNamespace(definitions=lambda context=None: self.registered)})
         self.modules.start(); self.addCleanup(self.modules.stop)
         self.doc = Doc(name='Sim Ledger', title='Sim Ledger', enabled=0, business_doctype='Supplier',
             instructions='Read only this sender’s ledger after date confirmation.', mode='Shadow', daily_limit=25,
@@ -1110,12 +1111,13 @@ class EventContractTests(unittest.TestCase):
         declared = json.dumps([{'action': 'draft_payment', 'doctype': 'Payment Entry', 'fields': ['amount']}])
         self.doc.allowed_actions = declared
         schema = {'type': 'object', 'properties': {'amount': {'type': 'number'}}, 'additionalProperties': False}
-        definition = dict(contexts=['ai'], ai_safe=True, method='relay_core.ai.actions.create_draft', effect='create_draft',
+        definition = dict(contexts=['ai'], ai_safe=True, app='relay_core', method='relay_core.ai.actions.create_draft', effect='create_draft',
             approval_policy='Required', permissions={'Payment Entry': 'create'}, parameters=schema,
             targets={'Payment Entry': schema}, output={'type': 'object'})
         self.registered['draft_payment'] = definition
         self.config.validate_skill(self.doc)
-        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'},
+        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'}, {'app': 'relay_yrp'},
+                {'app': None}, {'approval_policy': 'None'},
                 {'permissions': []}, {'approval_policy': 'anything'}, {'targets': {}}, {'output': {}},
                 {'targets': {'Payment Entry': {'type': 'object', 'properties': {'docstatus': {'type': 'integer'}}}}}):
             self.registered['draft_payment'] = definition | changes
@@ -1215,12 +1217,10 @@ def site_tests():
                 provider='OpenRouter', auth_type='API Key', enabled=1)
             model = insert('AI Model', 'Sim Event Model', model_label='Sim Event Model ' + stamp,
                 account=account.name, provider='OpenRouter', model_id='sim-local-no-network', enabled=1)
-            contract = dict(name='receipt', method='get_doc', doctype='Payment Entry', scope_field='name',
-                fields=['company', 'paid_amount'], identity_anchor='Payment Entry',
-                identity_fields={'Email': 'contact_email'}, company_field='company')
-            values = dict(title='Sim Receipt Event ' + stamp, business_doctype='Payment Entry', enabled=0,
+            row = {'capability': 'erpnext.supplier_ledger'}
+            values = dict(title='Sim Receipt Event ' + stamp, business_doctype='Supplier', enabled=0,
                 mode='Shadow', daily_limit=25, instructions='Explain the sender’s own payment of 1250. Never submit.',
-                allowed_tools=json.dumps([contract]), allowed_actions='[]')
+                allowed_tools=json.dumps([row]), allowed_actions='[]')
             name = configuration.save(values)['name']; created.append(('Relay AI Skill', name))
             assert not frappe.get_doc('Relay AI Skill', name).enabled
             activation = dict(enabled=1, target='Explain my receipt', channel=channel.name, ai_model=model.name,
@@ -1230,8 +1230,9 @@ def site_tests():
             second = configuration.save(values | activation | {'title': 'Sim Receipt Review ' + stamp,
                 'target': 'Ask staff to review a receipt', 'execution_policy': 'Ticket only'})['name']
             created.append(('Relay AI Skill', second))
-            for invalid in ({'target': ''}, {'allowed_tools': json.dumps([contract | {'identity_fields': {'Email': 'api_secret'}}])},
-                    {'allowed_tools': json.dumps([contract | {'company_field': 'paid_amount'}])},
+            for invalid in ({'target': ''}, {'allowed_tools': json.dumps([{'capability': 'erpnext.customer_ledger'}])},
+                    {'allowed_tools': json.dumps([{'capability': 'yrp.not_installed'}])},
+                    {'allowed_tools': json.dumps([row | {'fields': ['remarks']}])},
                     {'allowed_actions': '[{"action":"retailer.create_follow_up"}]'}, {'allowed_actions': '[{"action":"frappe.client.submit"}]'}):
                 try:
                     configuration.save(invalid, name=name)
@@ -1240,7 +1241,7 @@ def site_tests():
                 else:
                     raise AssertionError('Invalid activation was accepted')
             assert frappe.get_doc('Relay AI Skill', name).target == activation['target']
-            print('PASS relay.test disabled draft, activation, two targets, invalid identity/company/actions and stored version')
+            print('PASS relay.test disabled draft, activation, two targets, invalid capability rows/actions and stored version')
             frappe.db.commit(); frappe.destroy()
 
             original_init = frappe.app.init_request

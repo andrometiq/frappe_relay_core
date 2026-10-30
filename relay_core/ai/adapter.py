@@ -101,7 +101,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         from relay_core.ai.configuration import action_contracts
         from relay_core.flows.actions import definitions
         declarations = action_contracts(skill)
-        registered = definitions()
+        registered = definitions(context='ai')
         action_schemas = [dict(row, parameters=registered[row['action']]['parameters'],
             approval_policy=registered[row['action']]['approval_policy']) for row in declarations]
     def execute_action(action, parameters):
@@ -274,13 +274,6 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     declaration = value.pop('search', None)
     if declaration is None and proposed:
         declaration = proposed[0]
-    # Compatibility for the Hub's existing ISO date offer; still no read authority.
-    if declaration is None and search is None and not reader.evidence and len(references) == 1:
-        dates = re.findall(r'\b\d{4}-\d{2}-\d{2}\b', value['reply'])
-        if references[0]['doctype'] == 'GL Entry' and len(dates) == 2:
-            row = references[0]
-            declaration = dict(purpose=skill.get('target') or 'Review your ledger', reference=row['key'],
-                fields=field_names(row, 'model'), arguments={'filters': {'posting_date': ['between', dates]}})
     if declaration is not None:
         plan = declaration if isinstance(declaration, dict) else {}
         contract = next((row for row in references if row['key'] == plan.get('reference')), None)

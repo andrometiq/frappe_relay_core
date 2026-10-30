@@ -68,6 +68,7 @@ class ExecutionContexts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 actions.execute(SimpleNamespace(relay_contact='Sim Contact'), {'action': 'create_draft'}, {}, 'key')
         # Frappe list-merging must preserve a one-item context declaration.
-        with patch.object(actions.frappe, 'get_hooks', return_value={'reply': dict(REPLY, contexts=['ai'])}):
+        with patch.object(actions.frappe, 'get_hooks', return_value={'reply': dict(REPLY, contexts=['ai'])}), \
+                patch('relay_core.ai.capabilities.packs', return_value=[]):
             self.assertEqual(actions.definitions(context='flow'), {})
             self.assertIn('reply', actions.definitions(context='ai'))

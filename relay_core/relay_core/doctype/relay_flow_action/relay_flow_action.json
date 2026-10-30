@@ -19,7 +19,11 @@
     "scope_fingerprint",
     "approval_evidence",
     "target_doctype",
-    "target_name"
+    "target_name",
+    "capability_hash",
+    "expires_on",
+    "rejection_reason",
+    "duplicate_of"
   ],
   "fields": [
     {
@@ -87,7 +91,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "read_only": 1,
-      "options": "Pending\nAwaiting approval\nApproved\nCompleted"
+      "options": "Pending\nAwaiting approval\nApproved\nCompleted\nRejected\nExpired"
     },
     {
       "fieldname": "scope_snapshot",
@@ -118,6 +122,31 @@
       "label": "Draft Name",
       "fieldtype": "Data",
       "read_only": 1
+    },
+    {
+      "fieldname": "capability_hash",
+      "label": "Capability Hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "expires_on",
+      "label": "Approval Expires On",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "rejection_reason",
+      "label": "Rejection Reason",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "duplicate_of",
+      "label": "Duplicate Of",
+      "fieldtype": "Link",
+      "options": "Relay Flow Action",
+      "read_only": 1
     }
   ],
   "permissions": [
@@ -129,5 +158,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-25 04:02:52.925542"
+  "modified": "2026-10-30 18:00:00.000000"
 }

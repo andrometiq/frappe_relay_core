@@ -38,7 +38,7 @@ def action_contracts(doc):
         return actions
     from relay_core.flows.actions import definitions
     from relay_core.flows.action_contracts import check_schema, ai_contract
-    registered = definitions()
+    registered = definitions(context='ai')
     for row in actions:
         action = registered.get(row['action'])
         ai_contract(action)
@@ -214,7 +214,7 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
             from relay_core.flows.actions import definitions
             from relay_core.flows.action_contracts import ai_contract
             registered = {}
-            for key, definition in definitions().items():
+            for key, definition in definitions(context='ai').items():
                 if definition.get('ai_safe') and 'ai' in definition.get('contexts', []):
                     ai_contract(definition)
                     registered[key] = definition

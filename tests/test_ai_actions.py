@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from contextlib import nullcontext
+from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 from test_ai_skills import Doc, framework, module
@@ -13,7 +14,7 @@ from relay_core.flows.action_contracts import ai_contract, ai_inputs
 def definition(policy='Required'):
     schema = {'type': 'object', 'required': ['paid_amount'],
               'properties': {'paid_amount': {'type': 'number', 'minimum': 1}}, 'additionalProperties': False}
-    return dict(method='relay_core.ai.actions.create_draft', contexts=['flow', 'ai'], replay_safe=True, ai_safe=True,
+    return dict(app='relay_core', method='relay_core.ai.actions.create_draft', contexts=['flow', 'ai'], replay_safe=True, ai_safe=True,
         effect='create_draft', approval_policy=policy, permissions={'Payment Entry': 'create'},
         parameters=schema, targets={'Payment Entry': schema}, output={'type': 'object',
         'properties': {'doctype': {'type': 'string'}, 'name': {'type': 'string'}}, 'required': ['doctype', 'name']})
@@ -55,6 +56,20 @@ class AIContracts(unittest.TestCase):
                        {'output': {}}, {'parameters': {'type': 'string'}}):
             with self.subTest(change=change), self.assertRaises(ValueError): ai_contract(definition() | change)
 
+    def test_method_must_belong_to_the_declaring_app(self):
+        ai_contract(definition() | {'app': 'relay_yrp', 'method': 'relay_yrp.actions.create_draft'})
+        for change in ({'app': 'relay_yrp'}, {'app': None}, {'app': ''}, {'app': 'relay'},
+                       {'app': 'relay_yrp', 'method': 'relay_distributorx.actions.create_draft'}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'declaring app'):
+                ai_contract(definition() | change)
+
+    def test_drafts_without_required_approval_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'staff approval'): ai_contract(definition('None'))
+        ai_contract(definition() | {'effect': 'reply', 'approval_policy': 'None'})
+        from relay_core.ai.actions import CREATE_DRAFT
+        self.assertEqual((CREATE_DRAFT['approval_policy'], CREATE_DRAFT['app']), ('Required', 'relay_core'))
+        ai_contract(CREATE_DRAFT)
+
 
     def test_journal_requires_exactly_one_run_owner(self):
         controller = module('relay_core/relay_core/doctype/relay_flow_action/relay_flow_action.py', framework(),
@@ -84,7 +99,7 @@ class DeclaredDraftHandler(unittest.TestCase):
             received_amount=1250, paid_from='Sim Bank', paid_to='Sim Payable')
         self.context = dict(company='Sim Company', business=['Supplier', 'Sim Supplier'])
         self.patch = patch.dict(sys.modules, {'relay_core.flows.actions': types.SimpleNamespace(
-            definitions=lambda: {'create_draft': self.handler.CREATE_DRAFT}),
+            definitions=lambda context=None: {'create_draft': self.handler.CREATE_DRAFT}),
             'relay_core.realtime': types.SimpleNamespace(changed=Mock())})
         self.patch.start(); self.addCleanup(self.patch.stop)
 
@@ -123,6 +138,10 @@ class ActionJournal(unittest.TestCase):
     def setUp(self):
         self.f = framework()
         self.f.get_attr = Mock()
+        self.now = datetime(2026, 10, 30, 12)
+        self.f.utils = types.SimpleNamespace(now_datetime=lambda: self.now, get_datetime=lambda value: value,
+            add_to_date=lambda value, days=0, hours=0: value + timedelta(days=days, hours=hours))
+        self.f.has_permission = Mock(return_value=True)
         self.actions = module('relay_core/flows/actions.py', self.f,
             {'relay_core.permissions': types.SimpleNamespace(require_access=Mock(), readable_contact=Mock())})
         self.definition = definition()
@@ -212,6 +231,120 @@ class ActionJournal(unittest.TestCase):
         self.f.get_attr.assert_not_called()
 
 
+class ApprovalLifecycle(unittest.TestCase):
+    def setUp(self):
+        ActionJournal.setUp(self)
+        self.run.capability_hashes = json.dumps({'draft_payment': 'h1'})
+        self.definition['capability_hash'] = 'h1'
+        self.binding['scope']['business'] = ['Supplier', 'SUP-A']
+        self.journal.update(action='draft_payment', scope_fingerprint=self.actions._hash(self.binding),
+                            input_hash=self.actions._hash([self.definition['method'], self.values]))
+        self.f.throw = Mock(side_effect=ValueError('thrown'))
+        self.lock_run = Mock(return_value=self.run)
+        self.enterContext(patch.dict(sys.modules, {'relay_core.automation.service': types.SimpleNamespace(lock_run=self.lock_run)}))
+
+    def proposals(self, *earlier):
+        self.f.db.exists.return_value = False
+        self.f.get_all.return_value = [Doc(name=name, ticket=ticket) for name, ticket in earlier]
+        businesses = {'Earlier Ticket': ('Supplier', 'SUP-A'), 'Other Ticket': ('Supplier', 'SUP-B')}
+        self.f.db.get_value.side_effect = lambda doctype, name, fields: businesses[name]
+
+    def test_new_proposal_records_capability_hash_and_48_hour_expiry(self):
+        self.proposals()
+        self.assertEqual(self.actions.execute_ai(self.run.name, 0)['status'], 'Awaiting approval')
+        values = self.actions._journal.call_args.kwargs
+        self.assertEqual(values['capability_hash'], 'h1')
+        self.assertEqual(values['expires_on'], self.now + timedelta(hours=48))
+        self.assertEqual(values['status'], 'Awaiting approval')
+        self.assertIsNone(self.journal.duplicate_of)
+
+    def test_changed_capability_refuses_before_journaling(self):
+        self.definition['capability_hash'] = 'h2'
+        with self.assertRaisesRegex(ValueError, 'Capability changed'): self.actions.execute_ai(self.run.name, 0)
+        self.actions._journal.assert_not_called()
+        self.f.get_attr.assert_not_called()
+
+    def test_same_request_for_the_same_business_within_7_days_is_a_duplicate(self):
+        self.proposals(('Other', 'Other Ticket'), ('Earlier', 'Earlier Ticket'))
+        result = self.actions.execute_ai(self.run.name, 0)
+        self.assertEqual(result, {'name': 'Sim Action', 'status': 'Rejected', 'reason': 'Duplicate request'})
+        self.assertEqual((self.journal.duplicate_of, self.journal.rejection_reason), ('Earlier', 'Duplicate request'))
+        filters = self.f.get_all.call_args.kwargs['filters']
+        self.assertEqual((filters['action'], filters['input_hash'], filters['name']),
+                         ('draft_payment', self.journal.input_hash, ['!=', 'Sim Action']))
+        self.assertEqual(filters['status'], ['in', ['Awaiting approval', 'Approved', 'Completed']])
+        self.assertEqual(filters['creation'], ['>=', self.now - timedelta(days=7)])
+        self.f.get_attr.assert_not_called()
+
+    def test_another_business_or_a_replayed_journal_is_not_a_duplicate(self):
+        self.proposals(('Other', 'Other Ticket'))
+        self.assertEqual(self.actions.execute_ai(self.run.name, 0)['status'], 'Awaiting approval')
+        self.f.db.exists.return_value = True
+        self.f.get_all.reset_mock()
+        self.actions.execute_ai(self.run.name, 0)
+        self.f.get_all.assert_not_called()
+
+    def test_rejected_and_expired_journals_hand_back_their_reason_without_execution(self):
+        for status, reason in (('Rejected', 'Wrong amount'), ('Expired', 'Approval expired')):
+            self.journal.status, self.journal.rejection_reason = status, 'Wrong amount' if status == 'Rejected' else None
+            self.assertEqual(self.actions.execute_ai(self.run.name, 0), {'name': 'Sim Action', 'status': status, 'reason': reason})
+        self.f.get_attr.assert_not_called()
+
+    def test_approval_resumes_the_run(self):
+        self.f.get_doc.return_value = self.journal
+        self.journal.expires_on = self.now + timedelta(hours=1)
+        self.actions.approve(self.journal.name, self.journal.input_hash, self.journal.scope_fingerprint)
+        self.assertEqual(self.journal.status, 'Approved')
+        self.assertEqual(self.f.enqueue.call_args.kwargs['name'], self.run.name)
+        self.f.has_permission.assert_called_once_with('Payment Entry', 'create', user='operator')
+
+    def test_approval_is_refused_when_expired_or_approver_lost_permission(self):
+        self.f.get_doc.return_value = self.journal
+        for status, expires_on in (('Expired', None), ('Awaiting approval', self.now), ('Awaiting approval', self.now - timedelta(hours=1))):
+            self.journal.status, self.journal.expires_on = status, expires_on
+            with self.subTest(status=status, expires_on=expires_on), self.assertRaisesRegex(ValueError, 'thrown'):
+                self.actions.approve(self.journal.name, self.journal.input_hash, self.journal.scope_fingerprint)
+        self.journal.status, self.journal.expires_on = 'Awaiting approval', None
+        self.f.has_permission.return_value = False
+        with self.assertRaises(PermissionError):
+            self.actions.approve(self.journal.name, self.journal.input_hash, self.journal.scope_fingerprint)
+        self.f.has_permission.return_value = True
+        ticket = Doc(denied=True)
+        self.f.get_doc.side_effect = lambda doctype, name: ticket if doctype == 'Relay Ticket' else self.journal
+        with self.assertRaises(PermissionError):
+            self.actions.approve(self.journal.name, self.journal.input_hash, self.journal.scope_fingerprint)
+        self.assertEqual(self.journal.status, 'Awaiting approval')
+        self.f.enqueue.assert_not_called()
+
+    def test_reject_records_the_reason_under_the_run_lock_and_resumes_for_handoff(self):
+        self.f.get_doc.return_value = self.journal
+        self.assertEqual(self.actions.reject(self.journal.name, ' Wrong amount '), {'name': 'Sim Action', 'status': 'Rejected'})
+        self.assertEqual(self.journal.rejection_reason, 'Wrong amount')
+        self.lock_run.assert_called_once()
+        self.assertEqual(self.f.enqueue.call_args.kwargs['name'], self.run.name)
+        with self.assertRaisesRegex(ValueError, 'thrown'): self.actions.reject(self.journal.name, 'Again')
+        for reason in ('', '   ', 'x' * 501, None):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, 'thrown'):
+                self.actions.reject(self.journal.name, reason)
+
+    def test_reject_needs_ticket_write(self):
+        ticket = Doc(denied=True)
+        self.f.get_doc.side_effect = lambda doctype, name: ticket if doctype == 'Relay Ticket' else self.journal
+        with self.assertRaises(PermissionError): self.actions.reject(self.journal.name, 'Wrong amount')
+        self.assertEqual(self.journal.status, 'Awaiting approval')
+
+    def test_hourly_expiry_skips_proposals_decided_meanwhile(self):
+        approved = Doc(self.journal, name='Sim Approved', status='Approved')
+        self.f.get_all.return_value = ['Sim Action', 'Sim Approved']
+        self.f.get_doc.side_effect = lambda doctype, name: approved if name == 'Sim Approved' else self.journal
+        self.actions.expire_approvals()
+        self.assertEqual((self.journal.status, approved.status), ('Expired', 'Approved'))
+        self.assertEqual(self.f.get_all.call_args.kwargs['filters'], {'status': 'Awaiting approval', 'expires_on': ['<', self.now]})
+        self.f.db.commit.assert_called_once_with()
+        self.f.db.rollback.assert_called_once_with()
+        self.assertEqual(self.f.enqueue.call_count, 1)
+
+
 class ExecutionAdapter(unittest.TestCase):
     from test_ai_skills import SharedAdapterTests
     setUp = SharedAdapterTests.setUp
@@ -299,7 +432,7 @@ class ExecutionAdapter(unittest.TestCase):
         self.skill.execution_policy = 'Execute'
         contracts = types.SimpleNamespace(action_contracts=lambda skill: [declared])
         from relay_core.flows.actions import validate_sequence
-        actions = types.SimpleNamespace(validate_sequence=validate_sequence, definitions=lambda: {'draft_payment': definition()},
+        actions = types.SimpleNamespace(validate_sequence=validate_sequence, definitions=lambda context=None: {'draft_payment': definition()},
             proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(parameters, definition(), declared)))
         patcher = patch.dict(sys.modules, {'relay_core.ai.configuration': contracts, 'relay_core.flows.actions': actions})
         patcher.start(); self.addCleanup(patcher.stop)
@@ -588,3 +721,44 @@ class VerifiedContactExecution(unittest.TestCase):
         self.send.assert_not_called()
         self.f.db.rollback.assert_any_call(save_point='relay_action_' + self.journal.action_key[:16])
         self.handoff.assert_called_once()
+
+
+class ApprovalDelivery(unittest.TestCase):
+    from test_ai_skills import SkillDeliveryTests
+    setUp = SkillDeliveryTests.setUp
+
+    def process(self, outcome):
+        self.service.decide.return_value = self.service.decide.return_value | {'actions': [
+            {'action': 'create_draft', 'parameters': {'paid_amount': 1250}}]}
+        execute = Mock(return_value=outcome)
+        with patch.dict(sys.modules, {'relay_core.flows.actions': types.SimpleNamespace(execute_ai=execute, validate_sequence=Mock())}):
+            self.service.process(self.run.name)
+
+    def test_waiting_proposal_sends_the_fixed_approval_notice_and_stops(self):
+        from relay_core.automation.contracts import action_key
+        self.process({'name': 'Sim Action', 'status': 'Awaiting approval'})
+        self.send.assert_called_once()
+        self.assertEqual(self.send.call_args.args[2], {'text': self.service.APPROVAL_NOTICE})
+        self.assertEqual(self.send.call_args.args[3], action_key('MSG-1', 'approval_notice'))
+        self.assertEqual(self.run.status, 'Deciding')
+        self.handoff.assert_not_called()
+
+    def test_rejected_expired_or_duplicate_proposal_hands_off_with_its_reason(self):
+        for status, reason in (('Rejected', 'Duplicate request'), ('Rejected', 'Wrong amount'), ('Expired', 'Approval expired')):
+            with self.subTest(reason=reason):
+                self.run.update(status='Pending', decision=None, attempts=0)
+                self.handoff.reset_mock()
+                self.process({'name': 'Sim Action', 'status': status, 'reason': reason})
+                self.handoff.assert_called_once_with(self.run, self.skill, reason)
+                self.send.assert_not_called()
+
+    def test_approval_notice_receipt_does_not_complete_the_waiting_run(self):
+        import hashlib
+        from relay_core.automation.contracts import action_key
+        self.run.update(status='Deciding', decision=json.dumps({'actions': [{'action': 'create_draft', 'parameters': {}}]}))
+        action = Doc(name='Sim Receipt', operation='text', status='Submitted', source_message=self.run.message,
+            payload=json.dumps({'automation_run': self.run.name}), request_key=hashlib.sha256(
+                (self.run.execution_user + ':' + action_key(self.run.message, 'approval_notice')).encode()).hexdigest())
+        self.f.get_doc.side_effect = lambda dt, name: action if dt == 'Relay Message Action' else self.message
+        self.service.complete_delivery(action.name)
+        self.assertEqual(self.run.status, 'Deciding')

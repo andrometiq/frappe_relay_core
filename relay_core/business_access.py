@@ -171,9 +171,16 @@ def reference(doc):
     return primary(doc.relay_contact)
 
 
+def own_message(doc, user=None):
+    """The Contact behind the message's Relay Contact is this user."""
+    person = frappe.db.get_value('Relay Contact', doc.relay_contact, 'contact') if doc.get('relay_contact') else None
+    return bool(person) and frappe.db.get_value('Contact', person, 'user') == (user or frappe.session.user)
+
+
 def message_allowed(doc, user=None):
-    """A message is readable through its business, or through its contact's one conversation."""
+    """A message is readable by its own sender's user, through its business, or through its contact's one conversation."""
     if doc.get('legacy_triage'): return (user or frappe.session.user) == 'Administrator'
+    if own_message(doc, user): return True
     if reference(doc): return allowed(doc, user)
     from relay_core.permissions import assignment_allowed
     return assignment_allowed(doc.relay_contact, user)
