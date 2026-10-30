@@ -10,6 +10,7 @@ import WorkspaceState from './WorkspaceState.vue'
 import { dateTime, relativeTime } from './relativeTime'
 import DeliveryWorkspace from './DeliveryWorkspace.vue'
 const tab = ref('health'), recovery = ref(null), callbacks = ref(null), failures = ref([]), busy = ref(false), error = ref('')
+const updateStatus = status => ({ Ignored: 'No change needed', Pending: 'Waiting to process', Projected: 'Processed' })[status] || status
 let refreshPending = false
 async function load() {
   if (busy.value) { refreshPending = true; return }
@@ -31,7 +32,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Hub Event'], ['messages', 'incoming'
     <nav class="v1-tabs" aria-label="Activity sections"><Button label="Health & failures" :variant="tab === 'health' ? 'solid' : 'ghost'" @click="tab = 'health'" /><Button label="Delivery & uncertain sends" :variant="tab === 'delivery' ? 'solid' : 'ghost'" @click="tab = 'delivery'" /></nav>
     <DeliveryWorkspace v-if="tab === 'delivery'" />
     <div v-else class="v1-content space-y-5">
-      <WorkspaceHeading description="Monitor delivery, callback receipts and recovery in one place."><Button label="Refresh health" icon-left="refresh-cw" :loading="busy" @click="load" /></WorkspaceHeading>
+      <WorkspaceHeading description="Check message delivery, incoming updates and recovery in one place."><Button label="Refresh health" icon-left="refresh-cw" :loading="busy" @click="load" /></WorkspaceHeading>
       <ErrorMessage :message="error" />
       <LoadingRows v-if="busy && !callbacks && !recovery" :count="3" label="Reading health…" />
       <div class="v1-card-grid health-overview">
@@ -40,14 +41,15 @@ useRealtimeRefresh(['Relay Message', 'Relay Hub Event'], ['messages', 'incoming'
         <article class="workflow-card"><span><FeatherIcon name="refresh-cw" /> Recovery scheduling</span><Badge :label="recovery ? recovery.inactive ? 'Inactive' : 'Active' : 'Not checked'" :theme="recovery && !recovery.inactive ? 'green' : 'gray'" /><p>{{ recovery?.mode || 'Waiting for recovery status' }}</p></article>
       </div>
       <section class="workflow-card">
-        <header class="card-heading"><h3>Callback receipt and projection</h3><Badge v-if="callbacks?.latest" :label="callbacks.latest.projection_status" :theme="callbacks.latest.projection_status === 'Failed' ? 'red' : 'gray'" /></header>
+        <header class="card-heading"><h3>Incoming updates</h3><Badge v-if="callbacks?.latest" :label="updateStatus(callbacks.latest.projection_status)" :theme="callbacks.latest.projection_status === 'Failed' ? 'red' : 'gray'" /></header>
         <template v-if="callbacks">
-          <p v-if="callbacks.latest" class="workspace-help">Latest authenticated callback <time :title="callbacks.latest.creation">{{ relativeTime(callbacks.latest.creation) }}</time></p>
-          <p v-else class="workspace-help">No callback receipt is recorded for this account. A saved signing secret does not confirm delivery.</p>
-          <article v-for="row in callbacks.items" :key="row.name" class="health-event"><FeatherIcon name="activity" /><a :href="'/desk/relay-hub-event/' + encodeURIComponent(row.name)">Review callback</a><Badge :label="row.projection_status" :theme="row.projection_status === 'Failed' ? 'red' : 'gray'" /><time :title="row.creation">{{ relativeTime(row.creation) }}</time></article>
-          <p v-if="!callbacks.items.length" class="workspace-success"><FeatherIcon name="check" /> No failed or pending projections.</p><p v-if="callbacks.more" class="workspace-help">Showing the latest 50. Review earlier events in Desk.</p>
+          <p v-if="callbacks.latest" class="workspace-help">Latest verified update <time :title="callbacks.latest.creation">{{ relativeTime(callbacks.latest.creation) }}</time></p>
+          <p v-else class="workspace-help">No incoming update is recorded for this account. A saved connection secret does not confirm that updates arrive.</p>
+          <article v-for="row in callbacks.items" :key="row.name" class="health-event"><FeatherIcon name="activity" /><a :href="'/desk/relay-hub-event/' + encodeURIComponent(row.name)">Review update</a><Badge :label="updateStatus(row.projection_status)" :theme="row.projection_status === 'Failed' ? 'red' : 'gray'" /><time :title="row.creation">{{ relativeTime(row.creation) }}</time></article>
+          <p v-if="callbacks.latest?.projection_status === 'Ignored'" class="workspace-help">The latest update did not need a change to any conversation.</p>
+          <p v-if="!callbacks.items.length" class="workspace-success"><FeatherIcon name="check" /> No failed or waiting updates.</p><p v-if="callbacks.more" class="workspace-help">Showing the latest 50. Review earlier events in Desk.</p>
         </template>
-        <a class="v1-link" href="#/contacts?tab=unlinked">Review unlinked / ambiguous senders <FeatherIcon name="arrow-up-right" /></a><p class="workspace-help">Hub forwarding attempts and callback acknowledgement errors are available in Hub’s delivery diagnostics.</p>
+        <a class="v1-link" href="#/contacts?tab=unlinked">Review unlinked / ambiguous senders <FeatherIcon name="arrow-up-right" /></a><p class="workspace-help">Check Hub’s delivery details for problems forwarding updates to Relay.</p>
       </section>
       <section class="workflow-card"><header class="card-heading"><h3>Failed outgoing messages</h3><Badge v-if="failures.length" :label="String(failures.length)" theme="red" /></header><p class="workspace-help">Latest 50 accessible failures. Review delivery details before retrying.</p>
         <a v-for="row in failures" :key="row.name" :href="'#/messages?message=' + encodeURIComponent(row.name)" class="failure-row"><span class="failure-icon"><FeatherIcon name="alert-circle" :size="20" /></span><span class="failure-copy"><strong>{{ row.content || 'Failed message' }}</strong><small><Badge :label="row.status" theme="red" /><time :title="row.creation">{{ relativeTime(row.creation) }}</time></small></span><FeatherIcon name="chevron-right" /><span class="sr-only">Open conversation</span></a>

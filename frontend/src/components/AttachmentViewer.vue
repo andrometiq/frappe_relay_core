@@ -89,12 +89,12 @@ watch(() => props.message.name, () => {
       <button v-else-if="media && kind !== 'document'" type="button" @click="save">Download</button>
     </p>
     <p v-if="data.caption" class="whitespace-pre-wrap break-words">{{ data.caption }}</p>
-    <dialog v-if="kind === 'image' && media" ref="lightbox" class="media-lightbox" aria-label="Photo" @click.self="lightbox.close()">
+    <Teleport to="body"><dialog v-if="kind === 'image' && media" ref="lightbox" class="media-lightbox" aria-label="Photo" @click.self="lightbox.close()">
       <img :src="media.url" :alt="data.caption || 'Photo'" />
       <div class="media-lightbox-actions">
         <button type="button" @click="save"><FeatherIcon name="download" />Download</button>
         <button type="button" @click="lightbox.close()"><FeatherIcon name="x" />Close</button>
       </div>
-    </dialog>
+    </dialog></Teleport>
   </div>
 </template>

@@ -47,11 +47,11 @@ const features = [
 const checklist = computed(() => [
   { label: 'Hub connection', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Checked just now' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · select Check connection' : 'Needs setup', href: '#hub-connection' },
   { label: 'Incoming message secret', icon: 'lock', ready: config.value.callback_configured, state: !loaded.value ? 'Not checked' : config.value.callback_configured ? 'Saved' : 'Missing', href: '#hub-connection' },
-  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? 'Enabled locally · confirm receipts in Activity' : 'Needs setup', href: '/desk/relay-channel' })),
+  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? (capabilities.value.configure ? 'Enabled locally · confirm incoming messages in Activity' : 'Enabled locally · ask an administrator to confirm incoming messages') : 'Needs setup', href: '/desk/relay-channel' })),
   { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '/desk/relay-channel' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '/desk/relay-contact-type' },
   { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },
-  { label: 'Incoming messages and recovery', icon: 'activity', state: 'See what arrived and retry failures', href: '#/activity' },
+  ...(capabilities.value.configure ? [{ label: 'Incoming messages and recovery', icon: 'activity', state: 'See what arrived and retry failures', href: '#/activity' }] : []),
 ])
 onMounted(() => run(load))
 watch(() => capabilities.value?.configure, configure => { if (configure) loadMargin() }, { immediate: true })
@@ -86,7 +86,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
         <div><Button type="submit" label="Save service charge" variant="solid" :disabled="busy || margin === ''" /></div>
         <p v-if="marginNotice" role="status" class="workspace-success">{{ marginNotice }}</p>
       </form>
-      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Each channel is set up in Hub. Check the Activity page to see that messages arrive.</p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a class="underline" href="#/activity">Open Activity</a></div>
+      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Each channel is set up in Hub. <template v-if="capabilities.configure">Check the Activity page to see that messages arrive.</template><template v-else>Ask a system administrator to check that messages arrive.</template></p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a v-if="capabilities.configure" class="underline" href="#/activity">Open Activity</a></div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/relay-channel">Configure channel</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Contact numbers and addresses</a></div>
     </div>
   </section>
