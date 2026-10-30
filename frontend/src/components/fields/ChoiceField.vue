@@ -16,10 +16,14 @@ function position() {
   place.value = {left: box.left + 'px', width: box.width + 'px', maxHeight: Math.min(260, (up ? box.top : below) - 12) + 'px',
     ...(up ? {bottom: innerHeight - box.top + 4 + 'px'} : {top: box.bottom + 4 + 'px'})}
 }
+function onScroll(event) {
+  if (results.value?.contains(event.target)) return
+  close()
+}
 watch(open, value => {
   if (typeof window === 'undefined') return
   const method = value ? 'addEventListener' : 'removeEventListener'
-  window[method]('scroll', position, true); window[method]('resize', position)
+  window[method]('scroll', onScroll, true); window[method]('resize', position)
   if (value) nextTick(position)
 })
 const inside = (event, target) => event.currentTarget.contains(target) || results.value?.contains(target)
@@ -85,7 +89,11 @@ async function loadMore() {
   finally { if (current === generation) loading.value = false }
 }
 const moreSentinel = useLoadMore({ loading: () => loading.value || props.field.loading, hasMore: () => open.value && props.field.hasMore, error: () => error.value || props.field.error, load: loadMore })
-onBeforeUnmount(() => { cancel(); open.value = false })
+onBeforeUnmount(() => {
+  cancel()
+  window.removeEventListener('scroll', onScroll, true)
+  window.removeEventListener('resize', position)
+})
 </script>
 <template>
   <div class="remote-choice" @focusout="event => {if(!inside(event, event.relatedTarget))close()}">
@@ -123,5 +131,6 @@ onBeforeUnmount(() => { cancel(); open.value = false })
 .choice-hint{@apply text-xs text-ink-gray-5}
 .choice-results [role=alert]{@apply text-ink-red-2}
 @keyframes choice-appear{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:768px){.choice-results li{min-height:44px;min-width:44px;padding:12px 8px}.choice-chip button{min-height:44px;min-width:44px}}
 @media(prefers-reduced-motion:reduce){.choice-results{animation:none}}
 </style>

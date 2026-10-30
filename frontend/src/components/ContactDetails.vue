@@ -76,6 +76,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
 
 <style scoped>
 .contact-details { display:flex; flex-direction:column; min-width:0; overflow-wrap:anywhere; }
+.contact-details > * { flex-shrink:0; }
 .contact-detail-heading { margin-bottom:4px; }
 .contact-detail-name { flex:1; min-width:0; }
 .contact-detail-heading h3 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

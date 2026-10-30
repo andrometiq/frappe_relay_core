@@ -1,4 +1,5 @@
 <script setup>
+import { dateTime } from '../relativeTime'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { businessScope } from "../../services/businessScope.js";
 import { ref, computed, watch, onBeforeUnmount } from "vue";
@@ -183,7 +184,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: after, error: error, 
                   ><span class="block text-xs text-ink-gray-5"
                     >{{ message.direction || "History" }} ·
                     {{
-                      message.sent_at || message.creation || 'Message'
+                      dateTime(message.sent_at || message.creation) || 'Message'
                     }}</span
                   >{{ (message.content || "Attachment").slice(0, 250) }}</label
                 >

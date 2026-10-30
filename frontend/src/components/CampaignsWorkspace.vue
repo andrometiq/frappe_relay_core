@@ -1,4 +1,5 @@
 <script setup>
+import { dateTime } from './relativeTime';
 import ChoiceField from './fields/ChoiceField.vue'
 import { useLoadMore } from '../composables/useLoadMore'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -18,7 +19,7 @@ import { closeRoute, openRoute } from "../useViewRoute";
 import { channelFeature } from "../services/enabledChannels";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { campaignActions, campaignMessage, messageLabel, messageTypes, missingMapping, percent, placeholders,
-  shownCounters, statusTheme, windowNotice } from "../services/campaignProgress";
+  shownCounters, statusTheme, windowNotice, invalidNumberLabel } from "../services/campaignProgress";
 import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
@@ -206,7 +207,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
             <small v-if="key !== 'total' && key !== 'skipped' && counts.total">{{ percent(counts[key], counts.total) }}%</small></div>
         </div>
         <p v-if="campaign.contact_counts" class="campaign-hint" role="status">
-          Sheet rows: {{ campaign.contact_counts.created }} created · {{ campaign.contact_counts.existing }} existing · {{ campaign.contact_counts.invalid }} invalid numbers.
+          Sheet rows: {{ campaign.contact_counts.created }} created · {{ campaign.contact_counts.existing }} existing · {{ invalidNumberLabel(campaign) }}.
         </p>
         <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaignError(campaign.last_error) }}</p>
         <p v-if="replyWindow" :class="replyWindow.open ? 'campaign-note' : 'campaign-issue'" role="status">{{ windowNotice(replyWindow) }}</p>
@@ -273,7 +274,7 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         <div v-if="campaign.next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </FrappeFormSection>
       <FrappeFormSection v-if="campaign.phases?.length" title="Campaign log" collapsible>
-        <ol class="campaign-log"><li v-for="(entry, index) in campaign.phases" :key="index"><strong>{{ entry.phase }}</strong> · {{ entry.at }} · {{ entry.user }}</li></ol>
+        <ol class="campaign-log"><li v-for="(entry, index) in campaign.phases" :key="index"><strong>{{ entry.phase }}</strong> · {{ dateTime(entry.at) }} · {{ entry.user }}</li></ol>
       </FrappeFormSection>
       <template #sidebar>
         <div class="frappe-field-grid">
@@ -281,8 +282,8 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <FrappeReadField v-else label="Message" :value="campaign.message?.body || campaign.message?.caption || messageLabel(campaign)" wide />
           <FrappeReadField v-if="manyNumbers && campaign.channel" label="WhatsApp number" :value="numberName(capabilities, campaign.channel) || campaign.channel" wide />
           <FrappeReadField label="Reply window" :value="`${campaign.reply_window_hours} hours`" wide />
-          <FrappeReadField v-if="campaign.scheduled_at" label="Scheduled for" :value="`${campaign.scheduled_at} (${campaign.time_zone})`" wide />
-          <FrappeReadField label="Started" :value="campaign.started_at" wide />
+          <FrappeReadField v-if="campaign.scheduled_at" label="Scheduled for" :value="`${dateTime(campaign.scheduled_at)} (${campaign.time_zone})`" wide />
+          <FrappeReadField label="Started" :value="dateTime(campaign.started_at)" wide />
         </div>
       </template>
     </FrappeFormView>

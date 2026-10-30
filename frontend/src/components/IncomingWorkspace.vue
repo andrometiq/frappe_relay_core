@@ -145,7 +145,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 .incoming-workspace header p,
 .incoming-workspace form > p {
   font-size: 13px;
-  color: #7b8490;
+  color: var(--relay-ink-2);
   margin-top: 6px;
 }
 .incoming-grid {
@@ -168,7 +168,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 }
 .incoming-title span,
 .incoming-grid small {
-  color: #7b8490;
+  color: var(--relay-ink-2);
   font-size: 11px;
 }
 .incoming-preview {
@@ -191,7 +191,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
   font-weight: 600;
 }
 .incoming-empty {
-  color: #7b8490;
+  color: var(--relay-ink-2);
   padding: 30px;
   text-align: center;
 }

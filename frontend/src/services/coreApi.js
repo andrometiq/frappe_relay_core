@@ -34,7 +34,7 @@ export async function frappeRequest(
   } catch (error) {
     if (error.name === "AbortError") throw error;
     throw Error(
-      "Connection lost. Your draft is preserved. Check the connection before retrying.",
+      "Connection lost. Check the connection and try again.",
     );
   }
   const body = await response.json().catch(() => null);

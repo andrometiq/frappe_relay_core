@@ -185,7 +185,7 @@ async function save() {
           <RelaySelect label="Category" v-model="form.category" :options="[{ value: 'UTILITY', label: 'Utility' }, { value: 'MARKETING', label: 'Marketing' }, { value: 'AUTHENTICATION', label: 'Authentication' }]" :disabled="busy || !!template?.id" />
           <div>
             <RelaySelect label="How to write variables" v-model="form.parameter_format" :options="[{ value: 'NAMED', label: 'Names, like {{customer_name}}' }, { value: 'POSITIONAL', label: 'Numbers, like {{1}}' }]" :disabled="busy || !!template?.id" />
-            <small class="template-field-hint" v-text="'Variables are filled in for each person when you send, for example: Hi {{customer_name}}.'" />
+            <small class="template-field-hint" v-text="'Variables are filled in for each person when you send, for example: Hi ' + (form.parameter_format === 'NAMED' ? '{{customer_name}}' : '{{1}}') + '.'" />
           </div>
         </div>
       </FrappeFormSection>

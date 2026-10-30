@@ -28,7 +28,7 @@ const menu = computed(() => [
         <small v-if="phone || primary">{{ [phoneCaption(phone) || phone, primary?.title].filter(Boolean).join(' · ') }}</small>
         <div class="contact-info-actions">
           <a v-if="phone" class="contact-info-action" :href="'tel:' + phone.replace(/[^0-9+]/g, '')"><FeatherIcon name="phone" :size="18" />Call</a>
-          <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('cases')"><FeatherIcon name="bookmark" :size="18" />Ticket</button>
+          <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('cases')"><FeatherIcon name="bookmark" :size="18" />Cases</button>
         </div>
       </div>
       <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" :link="link" @loaded="phone = $event.phone" @changed="emit('changed')" />

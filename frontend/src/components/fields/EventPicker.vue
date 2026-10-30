@@ -1,24 +1,33 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { Button, ErrorMessage } from '@relay/ui'
 import ChoiceField from './ChoiceField.vue'
 import { coreApi } from '../../services/coreApi'
 import { readableName } from '../../services/recordTitle'
 const props = defineProps({ method: { type: String, default: 'ai.configuration.editor_options' }, modelValue: [String, Array], label: String, kind: String, doctype: String, businessDoctype: String, action: String, skill: String, multiple: Boolean, disabled: Boolean })
 defineEmits(['update:modelValue'])
-const captions = ref([])
+const captions = ref([]), error = ref(''), loading = ref(false)
 const params = computed(() => ({kind: props.kind, doctype: props.doctype, business_doctype: props.businessDoctype, action: props.action, skill: props.skill}))
 const caption = row => ({...row, label: readableName(row.label, props.label), description: [row.required ? 'Required' : '', row.description].filter(Boolean).join(' · ')})
 let generation = 0
-watch([() => props.modelValue, params, () => props.method], async () => {
+async function loadCaptions() {
   const current = ++generation
+  error.value = ''; loading.value = false
   const selected = (props.multiple ? props.modelValue || [] : [props.modelValue]).filter(Boolean)
   captions.value = selected.map(value => ({value, label: 'Saved selection'}))
   if (!selected.length) return
+  loading.value = true
   try {
     const result = await coreApi(props.method, {...params.value, selected: JSON.stringify(selected)})
     if (current === generation) captions.value = selected.map(value => caption(result.items.find(row => row.value === value) || {value, label: 'Unavailable selection'}))
-  } catch { /* The searchable picker exposes request errors; never display raw IDs. */ }
-}, {immediate: true, deep: true})
+  } catch (e) {
+    if (current === generation) {
+      captions.value = selected.map(value => ({value, label: 'Unavailable selection'}))
+      error.value = e.message || 'Could not load the saved selection.'
+    }
+  } finally { if (current === generation) loading.value = false }
+}
+watch([() => props.modelValue, params, () => props.method], loadCaptions, {immediate: true, deep: true})
 const search = computed(() => {
   const values = params.value, method = props.method
   return async (query, signal) => (await coreApi(method, {...values, query}, false, {signal})).items.map(caption)
@@ -27,4 +36,7 @@ const field = computed(() => ({label: props.label, readOnly: props.disabled, ini
   search: search.value,
 }))
 </script>
-<template><ChoiceField :field="field" :model-value="modelValue" :multiple="multiple" @update:model-value="$emit('update:modelValue', $event)" /></template>
+<template><div class="event-picker"><ChoiceField :field="field" :model-value="modelValue" :multiple="multiple" @update:model-value="$emit('update:modelValue', $event)" /><ErrorMessage :message="error" /><Button v-if="error" label="Retry saved selection" variant="ghost" :loading="loading" @click="loadCaptions" /></div></template>
+<style scoped>
+.event-picker{min-width:0;display:grid;gap:6px;align-content:start}
+</style>

@@ -7,7 +7,7 @@ import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import LoadingRows from './LoadingRows.vue'
 import WorkspaceHeading from './WorkspaceHeading.vue'
 import WorkspaceState from './WorkspaceState.vue'
-import { relativeTime } from './relativeTime'
+import { dateTime, relativeTime } from './relativeTime'
 import DeliveryWorkspace from './DeliveryWorkspace.vue'
 const tab = ref('health'), recovery = ref(null), callbacks = ref(null), failures = ref([]), busy = ref(false), error = ref('')
 let refreshPending = false
@@ -53,7 +53,7 @@ useRealtimeRefresh(['Relay Message', 'Relay Hub Event'], ['messages', 'incoming'
         <a v-for="row in failures" :key="row.name" :href="'#/messages?message=' + encodeURIComponent(row.name)" class="failure-row"><span class="failure-icon"><FeatherIcon name="alert-circle" :size="20" /></span><span class="failure-copy"><strong>{{ row.content || 'Failed message' }}</strong><small><Badge :label="row.status" theme="red" /><time :title="row.creation">{{ relativeTime(row.creation) }}</time></small></span><FeatherIcon name="chevron-right" /><span class="sr-only">Open conversation</span></a>
         <WorkspaceState v-if="!failures.length && !busy && !error" compact title="No failed outgoing messages" description="Delivery failures will appear here when they need your attention." icon="check"><a class="relay-button" href="#/messages">Open inbox</a></WorkspaceState>
       </section>
-      <section v-if="recovery" class="workflow-card"><header class="card-heading"><h3>Recovery</h3><Badge :label="recovery.inactive ? 'Inactive' : 'Scheduling active'" :theme="recovery.inactive ? 'orange' : 'green'" /></header><p v-for="reason in recovery.reasons" :key="reason">{{ reason }}</p><div v-for="job in recovery.items.filter(row => ['Incoming event recovery', 'Message receipt recovery', 'Summary recovery'].includes(row.label))" :key="job.label" class="health-event"><FeatherIcon name="refresh-cw" /><strong>{{ job.label }}</strong><Badge :label="job.state" /><time :title="job.last_started">{{ relativeTime(job.last_started) || 'Never started' }}</time></div><p class="workspace-help">Checked {{ recovery.checked_at }}. A job starting does not confirm it completed.</p><a class="v1-link" href="/desk/scheduled-job-log">Review job logs in Desk <FeatherIcon name="arrow-up-right" /></a></section>
+      <section v-if="recovery" class="workflow-card"><header class="card-heading"><h3>Recovery</h3><Badge :label="recovery.inactive ? 'Inactive' : 'Scheduling active'" :theme="recovery.inactive ? 'orange' : 'green'" /></header><p v-for="reason in recovery.reasons" :key="reason">{{ reason }}</p><div v-for="job in recovery.items.filter(row => ['Incoming event recovery', 'Message receipt recovery', 'Summary recovery'].includes(row.label))" :key="job.label" class="health-event"><FeatherIcon name="refresh-cw" /><strong>{{ job.label }}</strong><Badge :label="job.state" /><time :title="job.last_started">{{ relativeTime(job.last_started) || 'Never started' }}</time></div><p class="workspace-help">Checked {{ dateTime(recovery.checked_at) }}. A job starting does not confirm it completed.</p><a class="v1-link" href="/desk/scheduled-job-log">Review job logs in Desk <FeatherIcon name="arrow-up-right" /></a></section>
     </div>
   </section>
 </template>

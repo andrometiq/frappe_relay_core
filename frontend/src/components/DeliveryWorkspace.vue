@@ -115,7 +115,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, error: error, l
         />
         <ErrorMessage v-if="actionId === row.id" :message="error" />
       </article>
-      <p v-if="!rows.length && !busy" class="text-sm text-ink-gray-5">
+      <p v-if="!rows.length && !busy && !error" class="text-sm text-ink-gray-5">
         No deliveries on this page.
       </p>
     </div>
