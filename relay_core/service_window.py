@@ -2,6 +2,8 @@
 
 Reference: https://business.whatsapp.com/policy (24 September 2026).
 """
+from zoneinfo import ZoneInfo
+
 import frappe
 from relay_core.timeline import page_query
 
@@ -21,7 +23,9 @@ def status(contact, channel, endpoint=None):
     rows=page_query(['name','sent_at','creation'],filters,1).run(as_dict=True)
     expires=expires_at(rows[0]) if rows else None
     remaining=max(0,(expires-frappe.utils.now_datetime()).total_seconds()) if expires else 0
-    return {'open':remaining>0,'expires_at':expires,'remaining_seconds':remaining}
+    return {'open':remaining>0,'expires_at':expires,
+            'expires_at_iso':expires.replace(tzinfo=ZoneInfo(frappe.utils.get_system_timezone())).isoformat() if expires else None,
+            'remaining_seconds':remaining}
 
 
 def open_numbers(channel, numbers):
