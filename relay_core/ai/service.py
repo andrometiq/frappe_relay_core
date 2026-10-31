@@ -10,6 +10,10 @@ from relay_core.automation.service import internal_save, lock_run, lock_contact,
 from relay_core.automation.contracts import action_key
 
 REPLY_TIMEOUT = 60
+SEARCH_NOTICE = 'I will check your records for this.'
+SEARCH_CONFIRM = "Reply 'yes' to continue, or tell me what to change."
+CONFIRM_WORDS = ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please',
+                 'അതെ', 'हाँ', 'हां', 'ஆம்', 'అవును', 'ಹೌದು', 'হ্যাঁ', 'होय')
 APPROVAL_NOTICE = 'Thanks. Your request is recorded for staff review. Our team will confirm it with you.'
 
 
@@ -259,7 +263,7 @@ def confirmation_required(skill, plan):
 
 def declare_search(run, skill, message, decision):
     from relay_core.ai.tools import contracts
-    from relay_core.automation.contracts import validate_search, canonical
+    from relay_core.automation.contracts import validate_search
     if decision.get('handoff') or decision.get('reads') or run.get('search_plan'):
         return
     plan = decision.get('search')
@@ -273,25 +277,14 @@ def declare_search(run, skill, message, decision):
         origin=run.name, source=message.name, source_hash=message_hash(message),
         source_transcript_hash=scope.get('transcript_hash'), confirmed_by=None, consumed_by=None)
     run.search_plan, run.stage = json.dumps(record), 'Search'
-    statement = (f"I will search {plan['reference']} to {plan['purpose']}. "
-                 f"Fields: {', '.join(plan['fields'])}. Search: {canonical(plan['arguments'])}.")
-    from relay_core.ai.language import detect, incoming
-    language = detect(incoming(message))['language']
-    labels = {
-        'Malayalam': ('റിപ്പോർട്ട് പരിശോധിക്കും', 'ലക്ഷ്യം', 'വിവരങ്ങൾ', 'തിരച്ചിൽ',
-            ' ഈ തീയതി പരിധിയും തിരച്ചിലും സ്ഥിരീകരിക്കാൻ അതെ എന്ന് മറുപടി നൽകുക; അല്ലെങ്കിൽ മാറ്റം പറയുക.'),
-        'Hindi': ('रिपोर्ट जाँचूँगा', 'उद्देश्य', 'फ़ील्ड', 'खोज',
-            ' इस तारीख सीमा और खोज की पुष्टि के लिए हाँ लिखें या बदलाव बताएं।'),
-        'Tamil': ('அறிக்கையைச் சரிபார்க்கிறேன்', 'நோக்கம்', 'விவரங்கள்', 'தேடல்',
-            ' இந்த தேதி வரம்பையும் தேடலையும் உறுதிப்படுத்த ஆம் என்று பதிலளிக்கவும் அல்லது மாற்றத்தைக் கூறவும்.'),
-    }.get(language)
-    if labels:
-        statement = (f"{labels[0]}: {plan['reference']}. {labels[1]}: {plan['purpose']}. "
-                     f"{labels[2]}: {', '.join(plan['fields'])}. {labels[3]}: {canonical(plan['arguments'])}.")
+    from relay_core.ai.language import message_notice
+    statement = message_notice('search', message, SEARCH_NOTICE)
+    dates = [value[1] for value in plan['arguments'].get('filters', {}).values()
+             if isinstance(value, list) and value[0] == 'between']
+    if dates:
+        statement += f' {dates[0][0]} – {dates[0][1]}.'  # ISO dates read the same in every language.
     if confirmation_required(skill, plan):
-        statement += labels[4] if labels else ' Please confirm this exact search by replying yes, or tell me what to change.'
-    if len(statement) > 2000:
-        raise ValueError('Search declaration is too large')
+        statement += ' ' + message_notice('search_confirm', message, SEARCH_CONFIRM)
     decision.update(reply=statement, search=plan)
 
 
@@ -357,7 +350,7 @@ def authorize_search(run_id, skill, contract, arguments):
 def pending_search(message, ticket, *, exclude=None, lock=True):
     """Read the latest confirmation candidate; only continue_search consumes it."""
     from relay_core.ai.language import incoming
-    if not ticket or incoming(message).strip().casefold().rstrip('.!।') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please', 'അതെ', 'हाँ', 'हां', 'ஆம்'):
+    if not ticket or incoming(message).strip().casefold().rstrip('.!।') not in CONFIRM_WORDS:
         return None
     filters = {'ticket': ticket}
     if exclude:

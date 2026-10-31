@@ -323,10 +323,32 @@ class SearchGateTests(unittest.TestCase):
         self.assertTrue(self.service.confirmation_required(self.skill, self.plan))
         self.assertEqual(self.origin.stage, 'Search')
         self.assertEqual(self.decision['reads'], [])
-        self.assertIn('2026-10-31', self.decision['reply'])
-        self.assertIn('confirm', self.decision['reply'])
+        self.assertEqual(self.decision['reply'], self.service.SEARCH_NOTICE + ' 2026-10-01 – 2026-10-31. '
+                         + self.service.SEARCH_CONFIRM)
         with self.assertRaises(ValueError): self.authorize()
         with self.assertRaises(ValueError): self.service.authorize_search(None, self.skill, self.contract, {})
+
+    def test_search_notice_is_localized_and_names_no_internals(self):
+        from relay_core.ai.language import NOTICES
+        words = {'Malayalam': 'അതെ', 'Hindi': 'हाँ', 'Tamil': 'ஆம்', 'Telugu': 'అవును', 'Kannada': 'ಹೌದು',
+                 'Bengali': 'হ্যাঁ', 'Marathi': 'होय'}
+        texts = {'Telugu': 'నా లెడ్జర్ చూపించండి', 'Kannada': 'ನನ್ನ ಲೆಡ್ಜರ್ ತೋರಿಸಿ', 'Bengali': 'আমার লেজার দেখান',
+                 'Marathi': 'माझे खातेवही दाखवा, किती बाकी आहे?', 'Tamil': 'என் லெட்ஜர் காட்டுங்கள்'}
+        for language, text in texts.items():
+            with self.subTest(language=language):
+                self.origin.search_plan = None
+                self.source.content = text
+                decision = dict(reply='Searching', handoff=False, reads=[], search=self.plan)
+                self.service.declare_search(self.origin, self.skill, self.source, decision)
+                self.assertEqual(decision['reply'], NOTICES['search'][language] + ' 2026-10-01 – 2026-10-31. '
+                                 + NOTICES['search_confirm'][language])
+                for internal in ('erpnext.ledger', 'posting_date', 'debit', 'between', '{', 'Review your ledger'):
+                    self.assertNotIn(internal, decision['reply'])
+        for language, word in words.items():
+            with self.subTest(word=word):
+                self.assertIn(f"'{word}'", NOTICES['search_confirm'][language])
+                self.assertIn(word, self.service.CONFIRM_WORDS)
+        self.assertIn("'yes'", self.service.SEARCH_CONFIRM)
 
     def test_confirmed_exact_range_reads_and_replay_cannot_consume_twice(self):
         self.confirmed(); self.authorize()

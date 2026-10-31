@@ -218,7 +218,7 @@ def channel_ai_cases(fixture):
                 deny(lambda:reader(event,actor,business,scope,run_id).read(contract,**plan['arguments']))
                 return dict(reply='',handoff=False,reason='',user=actor,reads=[],search=plan)
             assert search==plan
-            assert outbound and 'I will search '+contract['key'] in outbound[-1]['text' if provider=='Telegram' else 'body']
+            assert outbound and outbound[-1]['text' if provider=='Telegram' else 'body'].startswith(service.SEARCH_NOTICE)
             # The declaration journal is real; it cannot authorize another name.
             deny(lambda:reader(event,actor,business,scope,run_id).read(contract,name=unrelated.name))
             # Probe actual sender binding and company checks with the same authorized plan.
