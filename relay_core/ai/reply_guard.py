@@ -69,9 +69,9 @@ def check(reply, skill, scope, *, evidence=(), knowledge=''):
     Unindexed display names, lowercase names and other business DocTypes are not scanned.
     Numeric strings of 10–15 digits, excluding dates, document IDs and money, may be phones.
     """
-    from relay_core.ai.adapter import PRIVACY_REPLY, SYSTEM_RULES
+    from relay_core.ai.adapter import DECLINE_REPLIES, SYSTEM_RULES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
-    if not reply or reply in (PRIVACY_REPLY, ACKNOWLEDGEMENT):
+    if not reply or reply in (*DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
         return
     # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
     if copied(reply, (SYSTEM_RULES, knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):

@@ -116,7 +116,7 @@ class ReplyGuardTests(unittest.TestCase):
 
     def test_fixed_core_replies_are_exempt(self):
         from relay_core.ai.handoff import ACKNOWLEDGEMENT
-        for text in (adapter.PRIVACY_REPLY, ACKNOWLEDGEMENT):
+        for text in (*adapter.DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
             self.skill.instructions = text
             self.check(text)
         self.f.get_all.assert_not_called()
