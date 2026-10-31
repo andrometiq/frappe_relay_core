@@ -47,11 +47,16 @@ def capability(key='erpnext.ledger', fields=('posting_date', 'debit', 'credit'),
         render='relay_core.ai.ledger.supplier', data_notes='') | changes
 
 
+class QueryDeadlockError(Exception):
+    pass
+
+
 def framework():
     f = types.SimpleNamespace(session=Doc(user='operator'), flags=Doc(), local=Doc(site='test.local'),
         whitelist=lambda **kw: lambda fn: fn, db=Mock(), get_doc=Mock(), get_all=Mock(), get_list=Mock(),
         get_meta=Mock(), get_roles=Mock(return_value=['System Manager']),
-        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError)
+        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError,
+        QueryDeadlockError=QueryDeadlockError)
     f.set_user = lambda user: setattr(f.session, 'user', user)
     f.db.get_value.return_value = 1
     return f
@@ -553,6 +558,14 @@ class SkillDeliveryTests(unittest.TestCase):
                     self.assertIn(str(failure), self.f.log_error.call_args.kwargs['message'])
                     if mode == 'Shadow':
                         self.handoff.assert_not_called()
+        self.send.assert_not_called()
+
+    def test_deadlock_is_raised_for_job_retry(self):
+        self.service.decide.side_effect = QueryDeadlockError('Deadlock found')
+        with self.assertRaises(QueryDeadlockError):
+            self.service.process('RUN-1')
+        self.assertNotIn(self.run.status, ('Cancelled', 'Handoff', 'Shadow'))
+        self.f.log_error.assert_not_called()
         self.send.assert_not_called()
 
     def test_takeover_prevents_delivery(self):

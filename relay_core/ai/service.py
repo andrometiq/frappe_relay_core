@@ -531,6 +531,8 @@ def process(name, *, deadline=None):
             frappe.db.commit()
             if run.status == 'Pending' and run.stage == 'Event':
                 return process(run.name, deadline=deadline)
+    except frappe.QueryDeadlockError:
+        raise
     except Superseded:
         frappe.db.rollback()
         run = lock_run(name)
