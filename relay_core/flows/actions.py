@@ -166,7 +166,7 @@ def validate_sequence(skill, steps):
 
 
 def _ai_context(run_name, step):
-    from relay_core.ai.service import current, delivery_scope
+    from relay_core.ai.service import current, delivery_scope, sender
     from relay_core.ai.configuration import action_contracts
     from relay_core.ai.tools import as_user
     from relay_core.automation.service import lock_run
@@ -203,7 +203,8 @@ def _ai_context(run_name, step):
             raise ValueError('Action is outside the event')
         definition = definitions(context='ai').get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
-        # current() verifies the sender endpoint and the Contact link to this business.
+    # current() verified the sender login and its business; effects act as the skill service user.
+    with as_user(sender(run, skill)):
         for doctype, permission in definition['permissions'].items():
             if not frappe.has_permission(doctype, permission):
                 raise frappe.PermissionError('Action permission denied')
@@ -268,6 +269,7 @@ def duplicate_of(journal, business):
 
 def execute_ai(run_name, step):
     """Consume one persisted step. Never commit, submit, or choose a destination."""
+    from relay_core.ai.service import sender
     from relay_core.ai.tools import as_user
     run, definition, declaration, values, binding = _ai_context(run_name, step)
     if step and not frappe.db.exists('Relay Flow Action',
@@ -296,7 +298,7 @@ def execute_ai(run_name, step):
         raise ValueError('Action scope, version or ownership changed')
     if journal.status == 'Completed':
         result = json.loads(journal.result)
-        with as_user(run.execution_user):
+        with as_user(sender(run)):
             if definition['effect'] == 'create_draft':
                 _draft_result(result, declaration, binding, journal)
         return dict(name=journal.name, status='Completed', result=result)
@@ -306,7 +308,7 @@ def execute_ai(run_name, step):
             return dict(name=journal.name, status='Awaiting approval')
         if evidence.get('input_hash') != journal.input_hash or evidence.get('scope_fingerprint') != journal.scope_fingerprint:
             raise ValueError('Approval does not match this action')
-    with as_user(run.execution_user):
+    with as_user(sender(run)):
         def checked(result):
             if definition['effect'] == 'create_draft':
                 _draft_result(result, declaration, binding, journal)

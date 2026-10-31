@@ -650,6 +650,16 @@ class VerifiedContactExecution(unittest.TestCase):
         self.assertEqual(self.send.call_args.args[2], {'text': 'Noted: 1250 received.'})
         self.handoff.assert_not_called()
 
+    def test_action_permission_and_handler_use_the_skill_service_user(self):
+        self.skill.run_as_user = 'service'
+        handlers = []
+        self.f.has_permission.side_effect = lambda *args, **kw: self.f.session.user == 'service'
+        self.f.get_attr.return_value = lambda **kw: handlers.append(self.f.session.user) or {'reply': 'Noted.'}
+        self.service.process(self.run.name)
+        self.assertEqual(handlers, ['service'])
+        self.assertEqual(self.journal.status, 'Completed')
+        self.handoff.assert_not_called()
+
     def test_unlinked_contact_or_revoked_endpoint_never_executes_or_replies(self):
         for linked, verified in ((False, 1), (True, 0)):
             with self.subTest(linked=linked, verified=verified):
