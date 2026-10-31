@@ -112,6 +112,9 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
             context['oracle_text'] = frappe.get_attr(oracle)(seeded, row) if oracle else None
             failures += [dict(item, turn=index + 1) for item in checks.run_checks(observation, turn['expect'], context)]
             cost, state = cost + observation['calls']['usd'], observation['state']
+    except Exception as error:  # A crashed turn fails this scenario, not the suite.
+        frappe.db.rollback()
+        failures.append(dict(checks.failure('error', None, f'{type(error).__name__}: {error}'[:300]), turn=index + 1))
     finally:
         for undo in reversed(context['undo']):
             undo()
