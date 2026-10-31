@@ -494,8 +494,11 @@ def process(name, *, deadline=None):
             if decision['handoff']:
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
             elif decision.get('decline'):
+                from relay_core.ai.adapter import DECLINE_REPLIES
+                from relay_core.ai.language import message_notice
                 kind = decision.get('notice', 'decline')
-                result = dispatch_reply(run, skill, message, decline_notices(message)[kind], slot='reply')
+                result = dispatch_reply(run, skill, message, message_notice(kind, message, DECLINE_REPLIES[kind]),
+                                        slot='reply')
                 run = lock_run(name)
                 run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
                 internal_save(run)
