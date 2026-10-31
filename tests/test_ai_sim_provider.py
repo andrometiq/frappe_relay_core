@@ -74,7 +74,7 @@ class FakeTier(unittest.TestCase):
         self.assertEqual([call['name'] for call in calls], ['SEARCH'])
         self.assertEqual(json.loads(calls[0]['arguments']), {key: PLAN[key] for key in ('purpose', 'reference', 'arguments')})
         _, second = post(self.provider.url, body('Send my October ledger', tool_turns=1))
-        self.assertEqual(decision_of(second), {'reply': '', 'handoff': False, 'reason': '', 'data_question': True})
+        self.assertEqual(decision_of(second), {'reply': 'ok', 'handoff': False, 'reason': '', 'data_question': True})
         self.assertEqual(openrouter.parse_response(type('R', (), {'json': lambda self: second})())[2], 'stop')
 
     def test_authorized_search_is_read_once_after_confirmation(self):
