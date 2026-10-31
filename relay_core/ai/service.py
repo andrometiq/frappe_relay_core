@@ -53,12 +53,10 @@ def context(skill, message, capabilities=None):
         raise ValueError('Contact is linked to a disabled portal user')
     user = person.get('user') or skill.run_as_user
     from relay_core.permissions import company_allowed
-    from relay_core.business_access import own_message
     with as_user(user):
         # Apply field permissions to a fresh copy, leaving the coordination source intact.
         source = frappe.get_doc('Relay Message', message.name)
-        if not own_message(source, user):  # A sender's own login reads its message without a Relay role.
-            source.check_permission('read')
+        check_readable(source, user)
         source.apply_fieldlevel_read_permissions()
         if any(source.get(field) != message.get(field) for field in
                ('content', 'transcript', 'message_data', 'provider_context', 'sender_endpoint')):
@@ -233,6 +231,13 @@ def conversation_language(message, user, business):
         return ''
 
 
+def check_readable(message, user):
+    """A sender's own login reads its own message without a Relay role; any other user needs read access."""
+    from relay_core.business_access import own_message
+    if not own_message(message, user):
+        message.check_permission('read')
+
+
 class Superseded(ValueError):
     pass
 
@@ -312,7 +317,7 @@ def check_search(run, skill, record):
     origin = frappe.get_doc('Relay Automation Run', record['origin'])
     original = json.loads(origin.search_plan)
     source = frappe.get_doc('Relay Message', record['source'])
-    source.check_permission('read')
+    check_readable(source, frappe.session.user)
     source_scope = context(skill, source)[2]
     if (origin.message != source.name or origin.skill != skill.name or origin.skill_version != str(skill.modified)
             or origin.ticket != run.ticket or original['plan'] != record['plan']

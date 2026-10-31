@@ -954,6 +954,11 @@ class ConversationIdentityTests(unittest.TestCase):
         self.message.own = False
         with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
 
+    def test_declared_search_source_is_readable_by_the_sender_login_only(self):
+        self.service.check_readable(Doc(self.message, denied=True, own=True), 'partner')
+        with self.assertRaises(PermissionError):
+            self.service.check_readable(Doc(self.message, denied=True), 'partner')
+
     def test_sender_login_reads_only_its_own_business_as_itself(self):
         readers, f = [], self.f
         class Business(Doc):
