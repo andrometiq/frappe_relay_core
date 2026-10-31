@@ -320,7 +320,7 @@ def check_search(run, skill, record):
             or source_scope.get('transcript_hash') != record.get('source_transcript_hash')
             or search_scope(source_scope) != record['scope']):
         raise ValueError('Declared search source changed')
-    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, origin.execution_user, origin)},
+    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, sender(origin), origin)},
         ['status', 'source_message', 'payload'], as_dict=True)
     if (not receipt or receipt.status != 'Submitted' or receipt.source_message != source.name
             or json.loads(receipt.payload).get('automation_run') != origin.name):
@@ -463,7 +463,6 @@ def process(name, *, deadline=None):
     try:
         with as_user(run.execution_user):
             message = frappe.get_doc('Relay Message', run.message)
-            message.check_permission('read')
             current(run, skill, message)
             decision = json.loads(run.decision) if run.decision else None
             if decision is None:
@@ -613,8 +612,9 @@ def dispatch_reply(run, skill, message, reply, *, slot):
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
     try:
-        disclose(run, message)
-        result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
+        with as_user(sender(run, skill)):
+            disclose(run, message)
+            result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
     finally:
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
@@ -664,7 +664,7 @@ def complete_delivery(action):
             return
         # Delayed duplicate announcement callbacks must not complete a later reply.
         source = frappe.get_doc('Relay Message', run.message)
-        if action.request_key == search_request_key(source, run.execution_user, run) and run.stage != 'Search':
+        if action.request_key == search_request_key(source, sender(run), run) and run.stage != 'Search':
             return
         # The run waits for staff approval; its notice receipt does not complete it.
         if action.request_key == journal_key(run, 'approval_notice', prefix):
@@ -688,9 +688,18 @@ def complete_delivery(action):
     frappe.db.commit()
 
 
+def sender(run, skill=None) -> str:
+    """Who sends a run's customer messages: the skill's service user. The sender's own login only reads, so a portal
+    user never needs Relay messaging access."""
+    if not run.get('skill'):
+        return run.execution_user
+    skill = skill or frappe.get_doc('Relay AI Skill', run.skill)
+    return skill.get('run_as_user') or run.execution_user
+
+
 def journal_key(run, slot, prefix):
     """The stored request key of a run's reply slot, as `messaging.request_hash` writes it."""
-    return hashlib.sha256((prefix + run.execution_user + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
+    return hashlib.sha256((prefix + sender(run) + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
 
 
 def recoverable_runs(limit: int = 20) -> list[str]:
@@ -706,7 +715,7 @@ def recoverable_runs(limit: int = 20) -> list[str]:
         .orderby(run.creation).limit(limit).run(pluck=True))
     # A missing notice follows its journal row within seconds, so the newest waiting runs are checked first.
     waiting = (frappe.qb.from_(run).join(journal).on(journal.automation_run == run.name)
-        .select(run.name, run.message, run.execution_user, run.flow_run).where(active & awaiting)
+        .select(run.name, run.message, run.execution_user, run.skill, run.flow_run).where(active & awaiting)
         .orderby(journal.creation, order=Order.desc).limit(limit).run(as_dict=True))
     return names + [row.name for row in waiting if not has_approval_notice(row)]
 

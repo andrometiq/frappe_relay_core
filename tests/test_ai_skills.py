@@ -510,6 +510,18 @@ class SkillDeliveryTests(unittest.TestCase):
         self.assertEqual(self.run.status, 'Completed')
         self.assertIsNone(self.automation.outgoing_run.get())
 
+    def test_sender_login_reads_and_the_skill_service_user_sends(self):
+        self.run.execution_user, self.skill.run_as_user = 'partner', 'service'
+        readers, senders = [], []
+        self.service.current.side_effect = lambda *args: readers.append(self.f.session.user) or (
+            'partner', ('Supplier', 'SUP-A'), self.scope)
+        self.send.side_effect = lambda *args, **kw: senders.append(self.f.session.user) or {'status': 'Submitted'}
+        self.service.process('RUN-1')
+        self.assertEqual(set(readers), {'partner'})
+        self.assertEqual(senders, ['service'])
+        self.assertEqual(self.run.status, 'Completed')
+        self.assertEqual(self.f.session.user, 'operator')
+
     def test_run_records_ai_context_and_rechecks_events_before_delivery(self):
         used = {'memory': {'rows': ['MEM-1'], 'sha256': 'abc'}, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
         self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
@@ -941,6 +953,18 @@ class ConversationIdentityTests(unittest.TestCase):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')
         self.message.own = False
         with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
+
+    def test_sender_login_reads_only_its_own_business_as_itself(self):
+        readers, f = [], self.f
+        class Business(Doc):
+            def check_permission(self, *args):
+                readers.append(f.session.user)
+                if self.get('denied'): raise PermissionError('not linked')
+        self.business = Business(name='SUP-A')
+        user, business, scope = self.service.context(self.skill, Doc(self.message, own=True))
+        self.assertEqual((user, business, scope['business'], readers), ('partner', ('Supplier', 'SUP-A'), ['Supplier', 'SUP-A'], ['partner']))
+        self.business.denied = True
+        with self.assertRaises(PermissionError): self.service.context(self.skill, Doc(self.message, own=True))
 
     def test_linked_user_takes_precedence_and_missing_link_uses_run_as(self):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')

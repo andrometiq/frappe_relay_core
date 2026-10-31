@@ -190,6 +190,18 @@ class BusinessTypeAccessTests(unittest.TestCase):
         users['unlinked'] = None
         self.assertFalse(access.message_allowed(own, 'outsider'))
 
+    def test_sender_login_without_a_relay_role_cannot_send(self):
+        """The self rule is for AI reads only; the messaging API still needs Relay access."""
+        from relay_core import messaging
+        def throw(message, exception=frappe.ValidationError):
+            raise exception(message)
+        with patch('frappe.has_permission', return_value=False), patch('frappe.throw', throw), \
+                patch.object(messaging, 'request_hash', return_value='sim-hash'), \
+                patch.object(messaging, 'channel_sources', return_value=[]), \
+                patch.object(messaging.frappe, 'get_doc') as get_doc, self.assertRaises(frappe.PermissionError):
+            messaging.send('RELAY-MSG-0000000001', 'text', {'text': 'Hi'}, 'sim-key', quote=0)
+        get_doc.assert_not_called()
+
     def test_revocation_is_effective_on_the_next_check(self):
         self.assertTrue(access.person_allowed('customer', 'listed'))
         self.db.execute('DELETE FROM `tabRelay Contact Type User`')

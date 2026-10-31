@@ -299,11 +299,11 @@ class AutomationQueueTests(unittest.TestCase):
         from pypika.queries import QueryBuilder
         db = sqlite3.connect(':memory:')
         db.executescript('''
-            CREATE TABLE `tabRelay Automation Run` (name, status, message, execution_user, flow_run, creation);
+            CREATE TABLE `tabRelay Automation Run` (name, status, message, execution_user, skill, flow_run, creation);
             CREATE TABLE `tabRelay Flow Action` (name, automation_run, status, creation);
-            INSERT INTO `tabRelay Automation Run` VALUES ('Plain', 'Deciding', 'M1', 'partner', NULL, 1),
-                ('Notified', 'Deciding', 'M2', 'partner', NULL, 2), ('Unnotified', 'Deciding', 'M3', 'partner', NULL, 3),
-                ('Approved', 'Pending', 'M4', 'partner', NULL, 4), ('Done', 'Completed', 'M5', 'partner', NULL, 5);
+            INSERT INTO `tabRelay Automation Run` VALUES ('Plain', 'Deciding', 'M1', 'partner', NULL, NULL, 1),
+                ('Notified', 'Deciding', 'M2', 'partner', NULL, NULL, 2), ('Unnotified', 'Deciding', 'M3', 'partner', NULL, NULL, 3),
+                ('Approved', 'Pending', 'M4', 'partner', NULL, NULL, 4), ('Done', 'Completed', 'M5', 'partner', NULL, NULL, 5);
             INSERT INTO `tabRelay Flow Action` VALUES ('J2', 'Notified', 'Awaiting approval', 2),
                 ('J3', 'Unnotified', 'Awaiting approval', 3), ('J4', 'Approved', 'Approved', 4),
                 ('J5', 'Done', 'Awaiting approval', 5), ('Flow', NULL, 'Awaiting approval', 6);

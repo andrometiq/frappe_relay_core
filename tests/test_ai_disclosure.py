@@ -68,7 +68,7 @@ class DisclosureDelivery(unittest.TestCase):
     def test_disclosure_receipt_never_decides_the_run(self):
         action = Doc(name='Sim Notice', operation='text', source_message=self.message.name,
             payload='{"automation_run": "Sim Run"}', request_key=hashlib.sha256(
-                (self.run.execution_user + ':' + action_key(self.message.name, 'disclosure')).encode()).hexdigest())
+                (self.skill.run_as_user + ':' + action_key(self.message.name, 'disclosure')).encode()).hexdigest())
         lookup = self.f.get_doc.side_effect
         self.f.get_doc.side_effect = lambda dt, name: action if dt == 'Relay Message Action' else lookup(dt, name)
         for status in ('Submitted', 'Rejected'):

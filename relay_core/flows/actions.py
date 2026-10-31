@@ -188,7 +188,6 @@ def _ai_context(run_name, step):
         raise ValueError('Invalid execution step')
     with as_user(run.execution_user):
         message = frappe.get_doc('Relay Message', run.message)
-        message.check_permission('read')
         user, business, scope = current(run, skill, message)
         delivery_scope(run, skill, message, plan)
         if user != run.execution_user:
