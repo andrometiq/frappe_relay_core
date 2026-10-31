@@ -110,6 +110,8 @@ def settings() -> None:
                 'company_neutral_types': 'Members' if 'relay_sihma' in frappe.get_installed_apps() else ''})
     if not doc.get_password('callback_secret', raise_exception=False):
         doc.callback_secret = frappe.generate_hash(length=48)
+    if not doc.get_password('hub_token', raise_exception=False):
+        doc.hub_token = 'sim-placeholder'  # The driver answers Hub calls in-process; nothing uses this token.
     doc.save(ignore_permissions=True)
 
 
