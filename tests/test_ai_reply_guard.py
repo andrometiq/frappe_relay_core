@@ -48,6 +48,12 @@ class ReplyGuardTests(unittest.TestCase):
             self.assertEqual(call.kwargs['filters']['name'][0], 'in')
         self.f.db.sql.assert_not_called()
 
+    def test_names_from_authorized_read_rows_pass_but_other_names_still_block(self):
+        names = set(reply_guard.record_names([{'name': 'DN-1', 'transporter': 'Private Supplier'}]))
+        self.check('DN-1 · Transporter: Private Supplier', read_names=names)
+        with self.assertRaises(reply_guard.ReplyBlocked):
+            self.check('Transporter: Private Supplier. Ask Other Retailer.', read_names=names)
+
     def test_instruction_system_and_reply_style_chunks_block_at_twelve_words(self):
         self.skill.reply_style = 'Always answer with these twelve private style words that belong only to our team.'
         for source in (self.skill.instructions, adapter.SYSTEM_RULES, self.skill.reply_style):
@@ -208,6 +214,7 @@ class GuardWiringTests(unittest.TestCase):
         self.assertEqual(len(result['reads']), 1)
         self.assertEqual(authorize.call_count, 2)
         self.assertEqual(result['reply_contacts'], ['15551234567', 'own@example.test'])
+        self.assertEqual(result['reply_names'], ['+1 555 123 4567', 'SELF', 'own@example.test'])
         message = fixtures.Doc(channel='CHANNEL-1', sender_endpoint='sender@example.test',
             business_doctype='Supplier', business_name='SELF', content='My contact details?')
         run = fixtures.Doc(decision=json.dumps(result))

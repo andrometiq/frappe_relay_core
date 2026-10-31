@@ -276,7 +276,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             row['parameters']['text'] = rendered
         value['reply'] = '' if replies else rendered
     if not value['handoff']:
-        from relay_core.ai.reply_guard import check, contacts, ReplyBlocked, REASON
+        from relay_core.ai.reply_guard import check, contacts, record_names, ReplyBlocked, REASON
         try:
             prompt = json.loads(text)
             evidence = [prompt.get('incoming', ''), prompt.get('reference_data', {})]
@@ -284,6 +284,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             evidence = [text]
         evidence = minimiser.unmask(evidence)
         allowed_contacts = contacts(*evidence, *read_results)
+        allowed_names = record_names(*read_results)
         replies = [value['reply'], *(row['parameters']['text'] for row in actions
             if registered[row['action']]['effect'] == 'reply')]
         try:
@@ -292,10 +293,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                 if reply.strip() and reply != rendered and not matches(reply, language):
                     return dict(reply='', handoff=True, reason='Reply language did not match the latest customer message; staff translation required', reads=[], user=user)
                 check(reply, skill, dict(scope or {}, business=list(business)), evidence=allowed_contacts,
-                      knowledge=knowledge)
+                      knowledge=knowledge, read_names=set(allowed_names))
         except ReplyBlocked:
             return dict(reply='', handoff=True, reason=REASON, reads=[], user=user)
-        value = dict(value, reply_contacts=allowed_contacts)
+        value = dict(value, reply_contacts=allowed_contacts, reply_names=allowed_names)
     if value['handoff']:
         value['reason'] = ' '.join(value['reason'].split())
         if not value['reason']:

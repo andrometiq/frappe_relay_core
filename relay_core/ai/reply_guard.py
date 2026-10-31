@@ -45,6 +45,19 @@ def contacts(*evidence):
     return sorted(found)
 
 
+def record_names(*rows):
+    """Text values of authorized read rows; a Customer or Supplier named there may be repeated."""
+    found = set()
+    for value in rows:
+        if isinstance(value, dict):
+            found.update(record_names(*value.values()))
+        elif isinstance(value, (list, tuple)):
+            found.update(record_names(*value))
+        elif isinstance(value, str) and len(value) <= 140:
+            found.add(value)
+    return sorted(found)
+
+
 def copied(reply, sources, shortest=12):
     """A copied 12-word run of a source; a source of `shortest` to 12 words counts when copied whole."""
     def words_of(text):
@@ -62,10 +75,11 @@ def copied(reply, sources, shortest=12):
     return False
 
 
-def check(reply, skill, scope, *, evidence=(), knowledge=''):
+def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
     """Raise without including leaked text. Allow authorized evidence and Company contacts.
 
-    Customer/Supplier checks cover exact capitalised primary-key names up to six words.
+    Customer/Supplier checks cover exact capitalised primary-key names up to six words; `read_names` from
+    authorized reads are allowed.
     Unindexed display names, lowercase names and other business DocTypes are not scanned.
     Numeric strings of 10–15 digits, excluding dates, document IDs and money, may be phones.
     """
@@ -109,7 +123,7 @@ def check(reply, skill, scope, *, evidence=(), knowledge=''):
             continue
         found = frappe.get_all(doctype, filters={'name': ['in', sorted(names)]}, pluck='name',
                                limit_page_length=len(names))
-        if any((doctype, name) not in own and name not in companies for name in found):
+        if any((doctype, name) not in own and name not in companies and name not in read_names for name in found):
             raise ReplyBlocked()
 
 
@@ -122,4 +136,5 @@ def check_delivery(run, skill, message, reply):
     knowledge = prompt((message.business_doctype, message.business_name), company)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
         contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge)
+        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge,
+        read_names=set(decision.get('reply_names', [])))
