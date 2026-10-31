@@ -102,7 +102,7 @@ def decide(skill, message, run_id=None, *, deadline=None):
         if run_id:
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
-    language_context = conversation_language(message, user, business)
+    language_context = conversation_language(skill, message, business)
     return decide_text(skill, text, user, business, scope, history, reference, run_id,
                        deadline=deadline, language_context=language_context)
 
@@ -156,81 +156,78 @@ def check_continuation(run_id):
     frappe.db.commit()
 
 
+def own_conversation(skill, message, business, before, page_length):
+    """The sender's own earlier incoming messages on this conversation and business, read as the skill's service user.
+    A sender's portal login has no Relay role, so the fixed sender filters, not that login, limit the read."""
+    with as_user(skill.run_as_user):
+        rows = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
+            'relay_contact': message.relay_contact, 'sender_endpoint': message.sender_endpoint,
+            'business_doctype': business[0], 'business_name': business[1], 'direction': 'Incoming',
+            'name': ['<', before]}, fields=['name'], order_by='name desc', page_length=page_length)
+        sources = []
+        for row in rows:
+            source = frappe.get_doc('Relay Message', row.name)
+            source.check_permission('read')
+            source.apply_fieldlevel_read_permissions()
+            sources.append(source)
+    return sources
+
+
 def conversation_history(skill, message, user, business, scope):
     """Keep scoped announcements; old business results require a fresh authorized read."""
     from relay_core.ai.tools import fingerprint
     history = []
-    try:
-        with as_user(user):
-            sources = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
-                'business_doctype': business[0], 'business_name': business[1], 'direction': 'Incoming',
-                'name': ['<', message.name]}, fields=['name', 'content'], order_by='name desc', page_length=3)
-            for source in reversed(sources):
-                source = frappe.get_doc('Relay Message', source.name)
-                source.check_permission('read')
-                source.apply_fieldlevel_read_permissions()
-                # The journal is internal coordination metadata. Only a reply with
-                # no business reads and this exact permission-checked source scope
-                # may cross into history; audit records themselves stay private.
-                stored = frappe.db.get_value('Relay Automation Run', {'message': source.name,
-                    'skill': skill.name, 'skill_version': str(skill.modified), 'status': 'Completed'},
-                    'decision')
-                try:
-                    decision = json.loads(stored)
-                except (TypeError, ValueError):
-                    continue
-                if (not isinstance(decision, dict) or decision.get('reads') != [] or decision.get('handoff')
-                        or decision.get('user') != user
-                        or decision.get('scope') != fingerprint(dict(scope, message=source.name))
-                        or not isinstance(decision.get('reply'), str) or len(decision['reply']) > 2000):
-                    continue
-                if not isinstance(source.get('content'), str):
-                    continue
-                replies = [decision['reply']] if decision['reply'].strip() else []
-                # Completed EXECUTE replies contain the actual clarification, while
-                # the top-level reply is intentionally empty. Never replay draft inputs.
-                from relay_core.flows.actions import definitions
-                registered = definitions(context='ai') if decision.get('actions') else {}
-                replies.extend(row['parameters']['text'] for row in decision.get('actions', [])
-                    if registered.get(row.get('action'), {}).get('effect') == 'reply'
-                    and isinstance(row.get('parameters', {}).get('text'), str))
-                reply = '\n'.join(replies)
-                if not reply.strip() or len(reply) > 2000:
-                    continue
-                history.extend([{'direction': 'Incoming', 'content': source.content},
-                    {'direction': 'Outgoing', 'content': reply}])
-    except frappe.PermissionError:
-        return []  # Optional history never borrows the run-as user's broader access.
+    for source in reversed(own_conversation(skill, message, business, message.name, 3)):
+        # The journal is internal coordination metadata. Only a reply with
+        # no business reads and this exact source scope may cross into
+        # history; audit records themselves stay private.
+        stored = frappe.db.get_value('Relay Automation Run', {'message': source.name,
+            'skill': skill.name, 'skill_version': str(skill.modified), 'status': 'Completed'},
+            'decision')
+        try:
+            decision = json.loads(stored)
+        except (TypeError, ValueError):
+            continue
+        if (not isinstance(decision, dict) or decision.get('reads') != [] or decision.get('handoff')
+                or decision.get('user') != user
+                or decision.get('scope') != fingerprint(dict(scope, message=source.name))
+                or not isinstance(decision.get('reply'), str) or len(decision['reply']) > 2000):
+            continue
+        if not isinstance(source.get('content'), str):
+            continue
+        replies = [decision['reply']] if decision['reply'].strip() else []
+        # Completed EXECUTE replies contain the actual clarification, while
+        # the top-level reply is intentionally empty. Never replay draft inputs.
+        from relay_core.flows.actions import definitions
+        registered = definitions(context='ai') if decision.get('actions') else {}
+        replies.extend(row['parameters']['text'] for row in decision.get('actions', [])
+            if registered.get(row.get('action'), {}).get('effect') == 'reply'
+            and isinstance(row.get('parameters', {}).get('text'), str))
+        reply = '\n'.join(replies)
+        if not reply.strip() or len(reply) > 2000:
+            continue
+        history.extend([{'direction': 'Incoming', 'content': source.content},
+            {'direction': 'Outgoing', 'content': reply}])
     return history
 
 
-def conversation_language(message, user, business):
+def conversation_language(skill, message, business):
     """Read only language evidence, including turns whose report results cannot be replayed."""
     from relay_core.ai.language import detect, incoming
     if detect(incoming(message))['script']:
         return ''
     before = message.name
-    try:
-        with as_user(user):
-            while True:
-                sources = frappe.get_list('Relay Message', filters={
-                    'conversation_key': message.conversation_key, 'business_doctype': business[0],
-                    'business_name': business[1], 'direction': 'Incoming', 'name': ['<', before]},
-                    fields=['name'], order_by='name desc', page_length=50)
-                for row in sources:
-                    source = frappe.get_doc('Relay Message', row.name)
-                    source.check_permission('read')
-                    source.apply_fieldlevel_read_permissions()
-                    if source.get('message_type') in ('voice', 'audio') and not (source.get('transcript') or '').strip():
-                        continue
-                    text = incoming(source)
-                    if detect(text)['script']:
-                        return text[:2000]
-                if len(sources) < 50:
-                    return ''
-                before = sources[-1].name
-    except frappe.PermissionError:
-        return ''
+    while True:
+        sources = own_conversation(skill, message, business, before, 50)
+        for source in sources:
+            if source.get('message_type') in ('voice', 'audio') and not (source.get('transcript') or '').strip():
+                continue
+            text = incoming(source)
+            if detect(text)['script']:
+                return text[:2000]
+        if len(sources) < 50:
+            return ''
+        before = sources[-1].name
 
 
 def check_readable(message, user):

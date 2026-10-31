@@ -1049,7 +1049,31 @@ class ConversationIdentityTests(unittest.TestCase):
             self.assertEqual(history(), [])
             decision.update(original)
         self.f.get_list.side_effect = PermissionError('Audit history is restricted')
-        self.assertEqual(history(), [])
+        with self.assertRaises(PermissionError): history()
+        self.assertEqual(self.f.session.user, 'operator')
+
+    def test_partner_history_is_read_as_service_user_and_limited_to_own_contact(self):
+        user, business, scope = self.service.context(self.skill, self.message)
+        self.assertEqual(user, 'partner')
+        own = Doc(name='MSG-0', content='Show my October ledger', relay_contact='CONTACT-1',
+                  sender_endpoint=self.message.sender_endpoint, conversation_key=self.message.conversation_key,
+                  business_doctype='Supplier', business_name='SUP-A', direction='Incoming')
+        other = Doc(own, name='MSG-00', content='Other contact secret', relay_contact='CONTACT-2', sender_endpoint='15550000009')
+        readers = []
+        def get_list(doctype, filters, **kwargs):
+            readers.append(self.f.session.user)
+            return [row for row in (own, other) if all(row.get(key) == value for key, value in filters.items()
+                                                       if key != 'name')]
+        self.f.get_list.side_effect = get_list
+        self.f.get_doc.side_effect = lambda dt, name: {own.name: own, other.name: other}[name]
+        decisions = {name: json.dumps(dict(user=user, handoff=False, reads=[], reply='Reply to ' + name,
+            scope=self.tools.fingerprint(dict(scope, message=name)))) for name in (own.name, other.name)}
+        self.f.db.get_value.side_effect = lambda dt, filters, *args, **kw: (
+            decisions[filters['message']] if dt == 'Relay Automation Run' else 1)
+        history = self.service.conversation_history(self.skill, self.message, user, business, scope)
+        self.assertEqual(history, [{'direction': 'Incoming', 'content': own.content},
+                                   {'direction': 'Outgoing', 'content': 'Reply to MSG-0'}])
+        self.assertEqual(readers, ['service'])
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_takeover_during_image_observation_prevents_next_model(self):
