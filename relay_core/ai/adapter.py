@@ -265,6 +265,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     if value.get('data_question') and not value['handoff'] and not (reader.evidence or proposed or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)
     value.pop('data_question', None)
+    rendered = None
     if reader.results and not value['handoff']:
         from relay_core.ai.render import render, empty_text
         packs = {row['key']: row for row in references}
@@ -287,7 +288,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             if registered[row['action']]['effect'] == 'reply')]
         try:
             for reply in replies:
-                if reply.strip() and not matches(reply, language):
+                # Pack renderers localize labels around record values, which keep their own script.
+                if reply.strip() and reply != rendered and not matches(reply, language):
                     return dict(reply='', handoff=True, reason='Reply language did not match the latest customer message; staff translation required', reads=[], user=user)
                 check(reply, skill, dict(scope or {}, business=list(business)), evidence=allowed_contacts,
                       knowledge=knowledge)

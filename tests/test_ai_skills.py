@@ -805,6 +805,25 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertNotIn('Own supplier', rendered)
         self.assertEqual(result['reply'], '')
 
+    def test_rendered_read_in_the_sender_language_keeps_latin_record_values(self):
+        rows = [dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
+            voucher_type='Journal Entry', voucher_no='SIM-1')]
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[],
+            results={'erpnext.ledger': {'rows': rows, 'truncated': False}})
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability(
+            fields=('company', 'posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit'))]))
+        text = 'खाता: Journal Entry SIM-1 Local Company Supplier Ledger Approved'
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: lambda *args: text)))
+        self.attempt.return_value = self.outcome({'reply': 'ठीक है', 'handoff': False, 'reason': ''})
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        with patch.object(self.adapter, 'Reader', return_value=reader):
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'मेरा खाता भेजिए', scope={})
+        self.assertFalse(result['handoff'])
+        self.assertEqual(result['actions'][0]['parameters']['text'], text)
+
     def test_search_proposes_without_reading_and_rejects_malformed_calls(self):
         reference = capability()
         arguments = dict(purpose='Review your ledger', reference='erpnext.ledger',
