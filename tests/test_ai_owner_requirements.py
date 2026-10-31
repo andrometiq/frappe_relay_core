@@ -86,7 +86,8 @@ class OwnerBoundaries(unittest.TestCase):
         for text, expected in [('दिवाळीची सुट्टी कधी आहे आणि बोनस कधी मिळेल?', 'Marathi'),
                 ('मला पगार कधी मिळेल', 'Marathi'), ('कार्यक्रम कब है?', 'Hindi'),
                 ('मुझे छुट्टी चाहिए', 'Hindi'), ('उद्या कार्यक्रम रद्द', 'Hindi'),
-                ('ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?', 'Kannada'), ('Riverside event ಎಲ್ಲಿ?', 'Kannada'), ('অনুষ্ঠান কখন?', 'Bengali')]:
+                ('ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?', 'Kannada'), ('Riverside event ಎಲ್ಲಿ?', 'Kannada'), ('অনুষ্ঠান কখন?', 'Bengali'),
+                ('order status কি?', 'Bengali')]:
             with self.subTest(text=text):
                 self.assertEqual(language.detect(text)['language'], expected)
 

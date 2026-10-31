@@ -16,7 +16,7 @@ QUESTION_WORDS = {
     'TAMIL': r'எப்போது|எங்கே|என்ன|எப்படி|எவ்வளவு|எந்த|யார்|ஏன்',
     'TELUGU': r'ఎప్పుడు|ఎక్కడ|ఏమి|ఎలా|ఎంత|ఎవరు|ఎందుకు',
     'KANNADA': r'ಯಾವಾಗ|ಎಲ್ಲಿ|ಏನು|ಹೇಗೆ|ಎಷ್ಟು|ಯಾರು|ಏಕೆ',
-    'BENGALI': r'কখন|কোথায়|কেমন|কত|কেন|কী',
+    'BENGALI': r'কখন|কোথায়|কেমন|কত|কেন|কী|কি',
     'ARABIC': r'متى|أين|كيف|كم|لماذا|ماذا',
 }
 # Whole words common in Marathi and absent from Hindi; Devanagari without them stays Hindi.
