@@ -109,7 +109,10 @@ def forbidden_text(observation: dict, expect: dict, context: dict) -> list[dict]
 def script(observation: dict, expect: dict, context: dict) -> list[dict]:
     if 'script' not in expect:
         return []
-    return [failure('script', expect['script'], detect(text)['language']) for text in customer_texts(observation)
+    # A search declaration names the pack, fields and arguments verbatim, so only its labels are localized.
+    texts = [row['text'] for row in observation.get('outbound', [])
+             if row.get('text') and row.get('slot') not in (*NOTICE_SLOTS, 'search')]
+    return [failure('script', expect['script'], detect(text)['language']) for text in texts
             if detect(text)['language'] not in (expect['script'], 'undetermined')]
 
 

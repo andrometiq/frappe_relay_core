@@ -137,6 +137,7 @@
     },
     "expect": {
      "class": "search_declared",
+     "script": "Malayalam",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",
@@ -232,6 +233,7 @@
     },
     "expect": {
      "class": "search_declared",
+     "script": "Hindi",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",
@@ -327,6 +329,7 @@
     },
     "expect": {
      "class": "search_declared",
+     "script": "Tamil",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",

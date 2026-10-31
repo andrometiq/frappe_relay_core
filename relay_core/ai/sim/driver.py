@@ -110,16 +110,30 @@ class Driver:
         return count
 
     def outbound(self) -> list[dict]:
-        """Relay Message Action rows since the last read, with their text and a `disclosure` slot marker."""
+        """Relay Message Action rows since the last read, with their text and a `disclosure` or `search` slot."""
         rows = frappe.get_all('Relay Message Action', filters={'name': ['>', self.cursor]},
-                              fields=['name', 'payload', 'status', 'source_message'], order_by='name asc')
+                              fields=['name', 'payload', 'status', 'source_message', 'request_key'], order_by='name asc')
         if rows:
             self.cursor = rows[-1].name
         notices = disclosure_texts()
         result = []
         for row in rows:
-            content = (json.loads(row.payload or '{}').get('content') or {})
+            payload = json.loads(row.payload or '{}')
+            content = payload.get('content') or {}
             text = content.get('text') if isinstance(content, dict) else None
+            slot = 'disclosure' if text in notices else \
+                'search' if row.request_key == search_key(payload.get('automation_run')) else None
             result.append({'name': row.name, 'status': row.status, 'source_message': row.source_message, 'text': text,
-                           'slot': 'disclosure' if text in notices else None})
+                           'slot': slot})
         return result
+
+
+def search_key(run_name: str | None) -> str | None:
+    """The request key of the run's search declaration, if it is an AI run."""
+    if not run_name:
+        return None
+    from relay_core.ai.service import search_request_key
+    run = frappe.get_doc('Relay Automation Run', run_name)
+    if not run.execution_user:
+        return None
+    return search_request_key(frappe.get_doc('Relay Message', run.message), run.execution_user, run)
