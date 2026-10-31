@@ -11,6 +11,12 @@ from test_ai_skills import Doc, framework, module
 from relay_core.ai.builtin_capabilities import CAPABILITIES
 from relay_core.flows.action_contracts import ai_contract, ai_inputs
 
+class Journal(Doc):
+    """Frappe's Document.update takes one dict, not keyword arguments."""
+    def update(self, values):
+        dict.update(self, values)
+
+
 # The payment draft pack as flows.actions.ai_definitions registers it.
 PAYMENT_DRAFT = dict(CAPABILITIES['erpnext.payment_entry_draft'], key='erpnext.payment_entry_draft', app='relay_core',
                      contexts=['ai'], ai_safe=True, replay_safe=True)
@@ -162,7 +168,7 @@ class ActionJournal(unittest.TestCase):
         self.binding = {'scope': {'company': 'Sim Company'}, 'generation': 1}
         self.run = Doc(name='Sim Run', ticket='Sim Ticket', execution_user='operator')
         self.declaration = dict(action='draft_payment', doctype='Payment Entry', fields=['paid_amount'])
-        self.journal = Doc(name='Sim Action', action_key='a'*64, input_hash=self.actions._hash(
+        self.journal = Journal(name='Sim Action', action_key='a'*64, input_hash=self.actions._hash(
             [self.definition['method'], self.values]), scope_fingerprint=self.actions._hash(self.binding),
             status='Awaiting approval', automation_run=self.run.name, step=0, ticket=self.run.ticket)
         self.context = patch.object(self.actions, '_ai_context', return_value=(self.run, self.definition,
@@ -250,8 +256,8 @@ class ApprovalLifecycle(unittest.TestCase):
         self.run.capability_hashes = json.dumps({'draft_payment': 'h1'})
         self.definition['capability_hash'] = 'h1'
         self.binding['scope']['business'] = ['Supplier', 'SUP-A']
-        self.journal.update(action='draft_payment', scope_fingerprint=self.actions._hash(self.binding),
-                            input_hash=self.actions._hash([self.definition['method'], self.values]))
+        self.journal.update(dict(action='draft_payment', scope_fingerprint=self.actions._hash(self.binding),
+                                 input_hash=self.actions._hash([self.definition['method'], self.values])))
         self.f.throw = Mock(side_effect=ValueError('thrown'))
         self.lock_run = Mock(return_value=self.run)
         self.enterContext(patch.dict(sys.modules, {'relay_core.automation.service': types.SimpleNamespace(lock_run=self.lock_run)}))

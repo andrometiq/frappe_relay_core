@@ -288,7 +288,7 @@ def execute_ai(run_name, step):
     if new:
         original = duplicate_of(journal, tuple(binding['scope']['business']))
         if original:
-            journal.update(duplicate_of=original, status='Rejected', rejection_reason='Duplicate request')
+            journal.update(dict(duplicate_of=original, status='Rejected', rejection_reason='Duplicate request'))
             journal.save(ignore_permissions=True)
     if journal.status in ('Rejected', 'Expired'):
         return dict(name=journal.name, status=journal.status,
