@@ -98,7 +98,8 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
         for index, turn in enumerate(row['turns']):
             before, calls = snapshot(), len(answers.calls)
             if 'step' in turn:
-                STEPS[turn['step']](context, **turn.get('args', {}))
+                with context['driver'].isolated():
+                    STEPS[turn['step']](context, **turn.get('args', {}))
                 identifier = None
             else:
                 if isinstance(answers, Script):

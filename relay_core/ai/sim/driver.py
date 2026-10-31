@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 import uuid
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -57,7 +58,7 @@ class Driver:
         raw = json.dumps({'account': self.account, 'events': [{'id': event_id, 'payload': payload}]}).encode()
         request = SimpleNamespace(get_data=lambda: raw, headers=signed(raw, self.secret, str(int(time.time()))))
         frappe.db.commit()  # Each callback is its own HTTP transaction.
-        with patch.object(frappe, 'request', request, create=True), patch.object(frappe, 'publish_realtime'):
+        with patch.object(frappe, 'request', request, create=True), self.isolated():
             inbound.receive()
         frappe.db.commit()
         self.events.append((event_id, payload))
@@ -69,14 +70,21 @@ class Driver:
     def collect(self, method, **kwargs) -> None:
         self.jobs.append((method, {key: value for key, value in kwargs.items() if key not in JOB_OPTIONS}))
 
-    def drain(self, rounds: int = 50) -> int:
-        """Project Hub events, run the message hooks and every job they queue, until nothing is left."""
-        from relay_core.automation import projection, queue
+    @contextmanager
+    def isolated(self):
+        """Jobs are collected for `run_jobs`, never sent to the shared RQ workers; Hub calls stay in-process."""
+        from relay_core.automation import queue
         from relay_core.hub import HubClient
-        done = 0
         hub = lambda client, name, arguments: self.hub(name, arguments)
         with patch.object(frappe, 'enqueue', side_effect=self.collect), patch.object(queue.Drain, 'wake', lambda self: None), \
                 patch.object(frappe, 'publish_realtime'), patch.object(HubClient, 'call_tool', hub):
+            yield
+
+    def drain(self, rounds: int = 50) -> int:
+        """Project Hub events, run the message hooks and every job they queue, until nothing is left."""
+        from relay_core.automation import projection, queue
+        done = 0
+        with self.isolated():
             for _ in range(rounds):
                 events = frappe.get_all('Relay Hub Event', filters={'projection_status': 'Pending'}, pluck='name',
                                         order_by='name asc')
