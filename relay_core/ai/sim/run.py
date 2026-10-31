@@ -93,6 +93,7 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
                'business': seeded['personas'][row['persona']]['business'], 'driver': Driver(), 'undo': [],
                'disclosures': Counter(), 'run': None}
     failures, cost, state = [], 0.0, {}
+    release(context['business'])
     try:
         for index, turn in enumerate(row['turns']):
             before, calls = snapshot(), len(answers.calls)
@@ -120,6 +121,17 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
             undo()
         frappe.db.commit()
     return failures, cost, state
+
+
+def release(business: list[str]) -> None:
+    """Close the persona's open episode so each trial starts a new conversation, as a manager would."""
+    from relay_core.tickets import close_and_release
+    tickets = frappe.get_all('Relay Ticket', filters={'business_doctype': business[0], 'business_name': business[1],
+                             'active_scope_key': ['is', 'set']}, pluck='name')
+    with acting_as(MANAGER):
+        for name in tickets:
+            close_and_release(name)
+    frappe.db.commit()
 
 
 def snapshot() -> dict:
