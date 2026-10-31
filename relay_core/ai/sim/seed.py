@@ -66,7 +66,7 @@ def core(result: dict) -> str:
     company()
     for email, roles in ((MANAGER, ['Relay Communication Manager', 'Accounts Manager', 'System Manager']),
                          (HANDOFF_OWNER, ['Relay Communication User']), (STAFF, ['Relay Communication User']),
-                         (AGENT, ['Relay Communication User', 'Accounts User'])):
+                         (AGENT, ['Relay Communication Manager', 'Accounts User'])):
         user(email, roles)
     settings()
     channel = channel_for('WhatsApp')
@@ -97,6 +97,8 @@ def user(email: str, roles: list[str], first_name: str | None = None, mobile: st
         frappe.get_doc({'doctype': 'User', 'email': email, 'first_name': first_name or email.split('@')[0],
                         'mobile_no': mobile, 'send_welcome_email': 0,
                         'roles': [{'role': role} for role in roles]}).insert(ignore_permissions=True)
+    else:
+        frappe.get_doc('User', email).add_roles(*roles)
     return email
 
 
