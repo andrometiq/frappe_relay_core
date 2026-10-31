@@ -7,6 +7,7 @@ import frappe
 
 MAX_CANDIDATES = 20
 MAX_TEXT = 4000
+DECLINE_REASONS = {'identity': 'Sender claims another account', 'decline': 'Private or off-topic request'}
 
 
 def candidates(message):
@@ -90,13 +91,11 @@ def validate_result(value, names):
     if (winner and not value['human_request'] and Decimal(str(winner['score'])) >= Decimal('0.85')
             and Decimal(str(winner['score'])) - Decimal(str(runner)) >= Decimal('0.15')):
         selected = winner['id']
-    if value.get('identity_claim') and winner:
+    kind = 'identity' if value.get('identity_claim') else 'decline' if value.get('decline') else None
+    if kind and winner:
         # Bind only a fixed Core decline to an accessible candidate; no skill tools run.
-        return dict(selected=winner['id'], scores=scores, decline=True, notice='identity',
-                    reason='Sender claims another account', method='classifier')
-    if value.get('decline') and winner:
-        return dict(selected=winner['id'], scores=scores, decline=True, notice='decline',
-                    reason='Private or off-topic request', method='classifier')
+        return dict(selected=winner['id'], scores=scores, decline=True, notice=kind,
+                    reason=DECLINE_REASONS[kind], method='classifier')
     return dict(selected=selected, scores=scores, reason='Sender requested a person' if value['human_request']
                 else 'Event matched' if selected else 'No confident event match', method='classifier')
 
