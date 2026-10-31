@@ -65,7 +65,7 @@ def seed(suites: list[str]) -> dict:
 def core(result: dict) -> str:
     company()
     for email, roles in ((MANAGER, ['Relay Communication Manager', 'Accounts Manager', 'System Manager']),
-                         (HANDOFF_OWNER, ['Relay Communication User', 'Sales User']), (STAFF, ['Relay Communication User']),
+                         (HANDOFF_OWNER, ['Relay Communication User', 'Sales User']), (STAFF, ['Relay Communication User', 'Sales User']),
                          (AGENT, ['Relay Communication Manager', 'Accounts User'])):
         user(email, roles)
     settings()
@@ -127,9 +127,13 @@ def channel_for(provider: str) -> str:
 
 
 def contact_type(doctype: str) -> None:
-    if not frappe.db.exists('Relay Contact Type', doctype):
-        frappe.get_doc({'doctype': 'Relay Contact Type', 'business_doctype': doctype, 'enabled': 1,
-                        'users': [{'user': STAFF}]}).insert(ignore_permissions=True)
+    """Staff and the triage owner both see this type's contacts; the owner must, to receive episodes."""
+    doc = frappe.get_doc('Relay Contact Type', doctype) if frappe.db.exists('Relay Contact Type', doctype) \
+        else frappe.get_doc({'doctype': 'Relay Contact Type', 'business_doctype': doctype, 'enabled': 1})
+    for login in (HANDOFF_OWNER, STAFF):
+        if login not in [row.user for row in doc.users]:
+            doc.append('users', {'user': login})
+    doc.save(ignore_permissions=True)
 
 
 def ai_model() -> str:
