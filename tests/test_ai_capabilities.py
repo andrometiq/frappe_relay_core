@@ -322,6 +322,15 @@ class FilterTests(unittest.TestCase):
                 self.assertEqual(validate_search(dict(plan, fields=fields), [self.manifest]), full)
         self.assertEqual(validate_search(plan, [self.manifest]), full)
 
+    def test_field_list_nested_in_arguments_gets_the_same_check(self):
+        self.manifest['fields'][0]['model'] = False
+        plan = dict(purpose='Show my ledger', reference='erpnext.ledger', arguments={'filters': self.date})
+        nested = dict(plan, arguments=dict(plan['arguments'], fields=['debit']))
+        self.assertEqual(validate_search(nested, [self.manifest]), dict(plan, fields=['status', 'posting_date', 'debit']))
+        for fields in (['name'], 'status', None):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                validate_search(dict(plan, arguments=dict(plan['arguments'], fields=fields)), [self.manifest])
+
 
 class PatchTests(unittest.TestCase):
     def test_skill_rows_become_capability_rows(self):

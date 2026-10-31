@@ -51,6 +51,10 @@ def validate_search(value, references):
         raise ValueError('Invalid search declaration')
     if not isinstance(value['purpose'], str) or not 1 <= len(value['purpose'].strip()) <= 300:
         raise ValueError('State the search purpose')
+    arguments = value['arguments']
+    if isinstance(arguments, dict) and 'fields' in arguments and 'fields' not in value:
+        # Models often nest the field list in the arguments; it gets the same check as a top-level list.
+        value = dict(value, fields=arguments['fields'], arguments={k: v for k, v in arguments.items() if k != 'fields'})
     contract = next((row for row in references if row['key'] == value['reference']), None)
     fields = field_names(contract, 'model') if contract else []
     named = value.get('fields', fields)
