@@ -132,8 +132,8 @@ def search_key(run_name: str | None) -> str | None:
     """The request key of the run's search declaration, if it is an AI run."""
     if not run_name:
         return None
-    from relay_core.ai.service import search_request_key
+    from relay_core.ai.service import search_request_key, sender
     run = frappe.get_doc('Relay Automation Run', run_name)
     if not run.execution_user:
         return None
-    return search_request_key(frappe.get_doc('Relay Message', run.message), run.execution_user, run)
+    return search_request_key(frappe.get_doc('Relay Message', run.message), sender(run), run)
