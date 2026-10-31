@@ -914,7 +914,8 @@ class ConversationIdentityTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: {'Relay Contact': Doc(name='CONTACT-1', contact='PERSON-1'),
             'Contact': self.person, 'Relay Channel': Doc(channel='WhatsApp', enabled=1, company='Sim Company'), 'Company': Doc(), 'Supplier': self.business, 'Relay Message': Doc(self.message)}[dt]
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 1
-        access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')])
+        access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')],
+                                       own_message=lambda doc, user=None: bool(doc.get('own')))
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
         no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
             lines=[], events=[], prompt={}, used=None))
@@ -934,6 +935,12 @@ class ConversationIdentityTests(unittest.TestCase):
             with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
         self.assertEqual(self.message.content, 'Private message')
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_sender_login_reads_its_own_message_without_a_relay_role(self):
+        self.message.update(denied=True, own=True)
+        self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')
+        self.message.own = False
+        with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
 
     def test_linked_user_takes_precedence_and_missing_link_uses_run_as(self):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')

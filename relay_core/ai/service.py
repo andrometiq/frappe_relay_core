@@ -53,10 +53,12 @@ def context(skill, message, capabilities=None):
         raise ValueError('Contact is linked to a disabled portal user')
     user = person.get('user') or skill.run_as_user
     from relay_core.permissions import company_allowed
+    from relay_core.business_access import own_message
     with as_user(user):
         # Apply field permissions to a fresh copy, leaving the coordination source intact.
         source = frappe.get_doc('Relay Message', message.name)
-        source.check_permission('read')
+        if not own_message(source, user):  # A sender's own login reads its message without a Relay role.
+            source.check_permission('read')
         source.apply_fieldlevel_read_permissions()
         if any(source.get(field) != message.get(field) for field in
                ('content', 'transcript', 'message_data', 'provider_context', 'sender_endpoint')):
