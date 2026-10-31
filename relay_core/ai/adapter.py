@@ -258,8 +258,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                 raise TimeoutError('AI model did not answer in time')
             raise ValueError(('AI provider error: ' + llm.redact_secrets(error, secrets))[:500])
         value = outcome['result']['data']
-        if (not isinstance(value, dict) or not {'reply', 'handoff', 'reason', 'data_question'} <= set(value)
-                or set(value) - {'reply', 'handoff', 'reason', 'search', 'decline', 'data_question', 'identity_claim'}):
+        if (not isinstance(value, dict) or not set(RESPONSE['required']) <= set(value)
+                or set(value) - set(RESPONSE['properties'])):
             raise ValueError('Invalid skill decision')
         if any(type(value.get(key, False)) is not bool for key in ('data_question', 'decline', 'identity_claim')):
             raise ValueError('Invalid skill decision')
