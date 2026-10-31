@@ -145,13 +145,19 @@ def snapshot() -> dict:
     return {doctype: list(frappe.db.sql(f'select count(*), max(modified) from `tab{doctype}`')[0]) for doctype in tables}
 
 
+RUN_FIELDS = ['name', 'status', 'stage', 'decision', 'reason', 'ticket', 'skill']
+
+
 def observe(context: dict, identifier: str | None, before: dict, calls: list[dict]) -> dict:
+    """A posted turn observes its own run; a step turn re-reads the run of the last posted turn."""
     if identifier:
         message = frappe.db.get_value('Relay Message', {'provider_id': identifier},
                                       ['name', 'business_doctype', 'business_name'], as_dict=True)
         context['run'] = message and frappe.db.get_value('Relay Automation Run', {'message': message.name},
-            ['name', 'status', 'stage', 'decision', 'reason', 'ticket', 'skill'], as_dict=True)
+                                                         RUN_FIELDS, as_dict=True)
         context['message'] = message
+    elif context['run']:
+        context['run'] = frappe.db.get_value('Relay Automation Run', context['run']['name'], RUN_FIELDS, as_dict=True)
     run, message = context['run'] or {}, context.get('message') or {}
     decision = json.loads(run.get('decision') or '{}') if run else {}
     outbound = context['driver'].outbound()
