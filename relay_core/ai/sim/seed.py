@@ -65,7 +65,7 @@ def seed(suites: list[str]) -> dict:
 def core(result: dict) -> str:
     company()
     for email, roles in ((MANAGER, ['Relay Communication Manager', 'Accounts Manager', 'System Manager']),
-                         (HANDOFF_OWNER, ['Relay Communication User']), (STAFF, ['Relay Communication User']),
+                         (HANDOFF_OWNER, ['Relay Communication User', 'Sales User']), (STAFF, ['Relay Communication User']),
                          (AGENT, ['Relay Communication Manager', 'Accounts User'])):
         user(email, roles)
     settings()
