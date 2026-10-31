@@ -82,6 +82,25 @@ class OwnerBoundaries(unittest.TestCase):
         with self.assertRaises(reply_guard.ReplyBlocked):
             reply_guard.check('फोन ९८७६५४३२१०', {}, {})
 
+    def test_marathi_needs_marathi_words_and_other_devanagari_stays_hindi(self):
+        for text, expected in [('दिवाळीची सुट्टी कधी आहे आणि बोनस कधी मिळेल?', 'Marathi'),
+                ('मला पगार कधी मिळेल', 'Marathi'), ('कार्यक्रम कब है?', 'Hindi'),
+                ('मुझे छुट्टी चाहिए', 'Hindi'), ('उद्या कार्यक्रम रद्द', 'Hindi'),
+                ('ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?', 'Kannada'), ('Riverside event ಎಲ್ಲಿ?', 'Kannada'), ('অনুষ্ঠান কখন?', 'Bengali')]:
+            with self.subTest(text=text):
+                self.assertEqual(language.detect(text)['language'], expected)
+
+    def test_every_notice_has_each_indian_language_the_detector_names(self):
+        senders = {'Telugu': 'కార్యక్రమం ఎప్పుడు?', 'Kannada': 'ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?',
+                   'Bengali': 'অনুষ্ঠান কখন?', 'Marathi': 'कार्यक्रम कधी आहे?', 'Hindi': 'कार्यक्रम कब है?'}
+        for kind, texts in language.NOTICES.items():
+            for name, text in senders.items():
+                with self.subTest(kind=kind, language=name):
+                    notice = language.notice(kind, text, 'ENGLISH')
+                    self.assertEqual(notice, texts[name])
+                    self.assertTrue(language.matches(notice, language.detect(text)))
+            self.assertEqual(language.notice(kind, 'When is the event?', 'ENGLISH'), 'ENGLISH')
+
     def test_voice_uses_transcript_and_never_audio_placeholder(self):
         message = Doc(message_type='voice', content='[audio]', transcript='कार्यक्रम कब है?')
         self.assertEqual(language.incoming(message), message.transcript)

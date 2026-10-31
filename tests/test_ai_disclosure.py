@@ -82,10 +82,11 @@ class DisclosureDelivery(unittest.TestCase):
 
 class BarePersonRequest(unittest.TestCase):
     def test_bare_word_in_four_languages_hands_off(self):
-        for text in ('person', 'Person.', 'HUMAN!', 'staff?', ' agent ', 'ആള്', 'ആൾ', 'व्यक्ति', 'ஆள்!'):
+        for text in ('person', 'Person.', 'HUMAN!', 'staff?', ' agent ', 'ആള്', 'ആൾ', 'व्यक्ति', 'ஆள்!',
+                     'మనిషి', 'ವ್ಯಕ್ತಿ', 'মানুষ।', 'व्यक्ती'):
             with self.subTest(text=text):
                 self.assertTrue(matching.human_request(text))
-        for text in ('person please call', 'the person', 'staff invoice', 'agent 25', 'ஆள் வேண்டாம்'):
+        for text in ('person please call', 'the person', 'staff invoice', 'agent 25', 'ஆள் வேண்டாம்', 'మనిషి వద్దు', 'মানুষ লাগবে না'):
             with self.subTest(text=text):
                 self.assertFalse(matching.human_request(text))
 
