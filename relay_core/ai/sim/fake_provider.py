@@ -95,8 +95,7 @@ class Script:
         return 200, response
 
     def match(self, key: tuple, decision: dict, body: dict) -> dict:
-        if 'match' in decision:
-            return decision['match']
+        """Scores for every target, the scenario's skill winning; a scripted `match` overrides all but empty scores."""
         try:
             targets = json.loads(user_text(body)).get('targets', [])
         except (ValueError, AttributeError):
@@ -104,7 +103,8 @@ class Script:
         skill = self.skills.get(key[0], '')
         scores = [{'id': row['id'], 'score': 1.0 if row['id'] == skill or row['id'].startswith(skill + '-') else 0.0}
                   for row in targets if isinstance(row, dict) and 'id' in row]
-        return {'human_request': False, 'decline': False, 'scores': scores}
+        scripted = {name: value for name, value in decision.get('match', {}).items() if name != 'scores' or value}
+        return {'human_request': False, 'decline': False, 'scores': scores, **scripted}
 
     def decide(self, decision: dict, body: dict, system: str) -> dict:
         """One planned tool call per round while tools are allowed, then the decision JSON."""

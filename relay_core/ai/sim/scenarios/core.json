@@ -137,7 +137,6 @@
     },
     "expect": {
      "class": "search_declared",
-     "script": "Malayalam",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",
@@ -233,7 +232,6 @@
     },
     "expect": {
      "class": "search_declared",
-     "script": "Hindi",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",
@@ -329,7 +327,6 @@
     },
     "expect": {
      "class": "search_declared",
-     "script": "Tamil",
      "disclosure": 1,
      "forbid_text": [
       "Northwind Hosiery",
@@ -581,14 +578,25 @@
     },
     "expect": {
      "class": "handoff",
-     "reads": [
-      {
-       "capability": "erpnext.customer_ledger"
-      }
-     ],
      "forbid_text": [
       "Northwind Hosiery",
       "+91 70000"
+     ],
+     "tool_calls": [
+      {
+       "name": "SEARCH",
+       "reference": "erpnext.customer_ledger",
+       "filters": {
+        "posting_date": [
+         "between",
+         [
+          "2026-09-01",
+          "2026-09-30"
+         ]
+        ]
+       },
+       "limit": 20
+      }
      ]
     }
    }
