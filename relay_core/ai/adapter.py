@@ -334,9 +334,13 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         # Older providers return final text. It still needs the declared reply
         # step, its position, and the same journal as native EXECUTE proposals.
         if value['reply'].strip():
-            if len(actions) >= len(declarations) or registered[declarations[len(actions)]['action']]['effect'] != 'reply':
+            reply_steps = [row for row in declarations if registered[row['action']]['effect'] == 'reply']
+            step = declarations[len(actions)] if len(actions) < len(declarations) else None
+            if not actions and reply_steps and step not in reply_steps:
+                step = reply_steps[0]  # A plain answer needs no draft step.
+            if step not in reply_steps:
                 raise ValueError('Reply is outside the declared action sequence')
-            actions.append(proposal(skill, declarations[len(actions)]['action'], {'text': value['reply']}))
+            actions.append(proposal(skill, step['action'], {'text': value['reply']}))
             value['reply'] = ''
         validate_sequence(skill, actions)
     if actions and not value['handoff']:

@@ -55,9 +55,13 @@ class AIContracts(unittest.TestCase):
         from relay_core.flows.actions import validate_sequence
         declared=[{'action':'create_draft'}, {'action':'reply'}]
         steps=[dict(row, parameters={}) for row in declared]
+        self.enterContext(patch('relay_core.flows.actions.definitions',
+            return_value={'create_draft': definition(), 'reply': {'effect': 'reply'}}))
         with patch('relay_core.ai.configuration.action_contracts', return_value=declared):
             self.assertEqual(validate_sequence(Doc(), steps), declared)
-            for invalid in (steps[::-1], steps[:1], steps[1:], steps + steps[:1], None):
+            self.assertEqual(validate_sequence(Doc(), steps[1:]), declared)  # A plain answer skips the draft.
+            for invalid in (steps[::-1], steps[:1], steps[1:] * 2, steps + steps[:1],
+                            [dict(action='other_reply', parameters={})], None):
                 with self.subTest(steps=invalid), self.assertRaises(ValueError):
                     validate_sequence(Doc(), invalid)
 
@@ -482,6 +486,24 @@ class ExecutionAdapter(unittest.TestCase):
         self.prepare()
         with self.assertRaises(ValueError):
             self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Payment', 'RUN-1')
+
+    def test_plain_answer_on_a_draft_then_reply_skill_is_the_reply_step_alone(self):
+        from relay_core.ai.actions import REPLY
+        from relay_core.flows.action_contracts import ai_inputs
+        from relay_core.flows.actions import validate_sequence
+        declared = [dict(action='draft_payment', doctype='Payment Entry', fields=['paid_amount']), dict(action='reply')]
+        registered = {'draft_payment': definition(), 'reply': REPLY}
+        self.skill.allowed_actions, self.skill.execution_policy = json.dumps(declared), 'Execute'
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value=registered))
+        actions = types.SimpleNamespace(validate_sequence=validate_sequence, definitions=lambda context=None: registered,
+            proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(
+                parameters, registered[action], next(row for row in declared if row['action'] == action))))
+        self.enterContext(patch.dict(sys.modules, {'relay_core.flows.actions': actions,
+            'relay_core.ai.configuration': types.SimpleNamespace(action_contracts=lambda skill: declared)}))
+        self.attempt.return_value = self.outcome(dict(reply='Returns are accepted within 15 days.', handoff=False, reason=''))
+        result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'How many days to return?', 'RUN-1')
+        self.assertEqual(result['actions'], [dict(action='reply', parameters={'text': 'Returns are accepted within 15 days.'})])
+        self.assertEqual(result['reply'], '')
 
     def test_vision_denied_before_image_validation_or_provider(self):
         self.model.supports_vision = 0

@@ -155,14 +155,21 @@ def proposal(skill, action, parameters):
 
 
 def validate_sequence(skill, steps):
-    """The declaration is the owner-authorized chain, with each step used once."""
+    """The declaration is the owner-authorized chain, with each step used once; a plain answer is one declared reply step."""
     from relay_core.ai.configuration import action_contracts
     declared = action_contracts(skill)
     if (not isinstance(steps, list) or len(steps) > 4
-            or any(not isinstance(row, dict) or set(row) != {'action', 'parameters'} for row in steps)
-            or steps and [row['action'] for row in steps] != [row['action'] for row in declared]):
+            or any(not isinstance(row, dict) or set(row) != {'action', 'parameters'} for row in steps)):
+        raise ValueError('Execute the complete declared action sequence in order')
+    names = [row['action'] for row in steps]
+    if names and names != [row['action'] for row in declared] and not is_reply_only(names, declared):
         raise ValueError('Execute the complete declared action sequence in order')
     return declared
+
+
+def is_reply_only(names, declared):
+    return (len(names) == 1 and any(row['action'] == names[0] for row in declared)
+            and definitions(context='ai').get(names[0], {}).get('effect') == 'reply')
 
 
 def _ai_context(run_name, step):
