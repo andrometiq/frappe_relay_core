@@ -1,4 +1,4 @@
-"""One owner-configured fallback; installing it grants no model or data access."""
+"""One owner-configured fallback for every business type on its channel; installing it grants no model or data access."""
 import frappe
 
 DEFAULT_KEY = 'relay-default-skill'

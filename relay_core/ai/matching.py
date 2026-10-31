@@ -10,12 +10,14 @@ MAX_TEXT = 4000
 
 
 def candidates(message):
+    """Skills of the sender's business type, plus the channel's default skill for every type."""
+    from relay_core.ai.skills import DEFAULT_KEY
     from relay_core.business_access import reference
     business = reference(message)
     if not business:
         return []
-    names = frappe.get_all('Relay AI Skill', filters={'channel': message.channel,
-        'business_doctype': business[0], 'enabled': 1}, pluck='name',
+    names = frappe.get_all('Relay AI Skill', filters={'channel': message.channel, 'enabled': 1},
+        or_filters={'business_doctype': business[0], 'sample_key': DEFAULT_KEY}, pluck='name',
         order_by='name asc', limit_page_length=MAX_CANDIDATES + 1)
     if len(names) > MAX_CANDIDATES:
         raise ValueError('Too many enabled events for bounded matching')

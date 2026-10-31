@@ -942,6 +942,16 @@ class ConversationIdentityTests(unittest.TestCase):
         self.message.own = False
         with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
 
+    def test_default_skill_serves_every_business_type_but_other_skills_do_not(self):
+        from relay_core.ai.skills import DEFAULT_KEY
+        self.skill.business_doctype = 'Contact'
+        with self.assertRaisesRegex(ValueError, 'Business identity'):
+            self.service.context(self.skill, self.message)
+        self.skill.sample_key = DEFAULT_KEY
+        self.assertEqual(self.service.context(self.skill, self.message)[1], ('Supplier', 'SUP-A'))
+        self.business.denied = True
+        with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
+
     def test_linked_user_takes_precedence_and_missing_link_uses_run_as(self):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')
         self.person.user = None

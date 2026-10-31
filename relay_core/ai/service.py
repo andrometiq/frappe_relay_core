@@ -29,8 +29,10 @@ def capability_hashes(skill):
 
 def context(skill, message, capabilities=None):
     from relay_core.business_access import reference, candidates
+    from relay_core.ai.skills import is_default
     business = reference(message)
-    if not business or business[0] != skill.business_doctype or business not in candidates(message.relay_contact):
+    if (not business or business not in candidates(message.relay_contact)
+            or business[0] != skill.business_doctype and not is_default(skill)):
         raise ValueError('Business identity is missing or ambiguous')
     contact = frappe.get_doc('Relay Contact', message.relay_contact)
     person = frappe.get_doc('Contact', contact.contact)

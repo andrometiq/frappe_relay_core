@@ -51,7 +51,10 @@ class OwnerBoundaries(unittest.TestCase):
             model.assert_not_called()
             model.return_value = dict(human_request=False, scores=[dict(id='EVENT', score=.2)])
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'DEFAULT')
-            model.return_value['human_request'] = True
+            model.return_value['decline'] = True
+            declined = matching.select(message, [specific, default], None, time.monotonic()+20)
+            self.assertEqual((declined['selected'], declined['decline']), ('EVENT', True))
+            model.return_value.update(decline=False, human_request=True)
             self.assertIsNone(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'])
             specific.exact_trigger = message.content
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'EVENT')
