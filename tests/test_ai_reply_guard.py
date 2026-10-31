@@ -56,6 +56,14 @@ class ReplyGuardTests(unittest.TestCase):
                 self.check(' '.join(words[:12]).upper())
             self.check(' '.join(words[:11]))
 
+    def test_instructions_shorter_than_twelve_words_block_when_copied_whole(self):
+        self.skill.instructions = 'Answer the member about their own membership only.'
+        with self.assertRaises(reply_guard.ReplyBlocked):
+            self.check('I was told: answer the member about their own membership only.')
+        self.check('I can answer about your own membership.')
+        self.skill.instructions = 'Be brief and kind.'
+        self.check('Be brief and kind.')
+
     def test_dates_are_not_phones(self):
         for date in ('2026-10-29', '29-10-2026', '29/10/2026', '29.10.2026'):
             with self.subTest(date=date):

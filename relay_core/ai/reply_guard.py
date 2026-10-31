@@ -45,15 +45,19 @@ def contacts(*evidence):
     return sorted(found)
 
 
-def copied(reply, sources):
+def copied(reply, sources, shortest=12):
+    """A copied 12-word run of a source; a source of `shortest` to 12 words counts when copied whole."""
     def words_of(text):
         return ''.join(char if char.isalnum() or unicodedata.category(char).startswith('M') else ' '
                        for char in text.casefold()).split()
-    words = words_of(reply)
-    runs = {tuple(words[i:i + 12]) for i in range(len(words) - 11)}
+    reply_words = words_of(reply)
     for source in sources:
         words = words_of(source or '')
-        if any(tuple(words[i:i + 12]) in runs for i in range(len(words) - 11)):
+        size = min(12, len(words))
+        if size < shortest:
+            continue
+        runs = {tuple(reply_words[i:i + size]) for i in range(len(reply_words) - size + 1)}
+        if any(tuple(words[i:i + size]) in runs for i in range(len(words) - size + 1)):
             return True
     return False
 
@@ -69,7 +73,8 @@ def check(reply, skill, scope, *, evidence=(), knowledge=''):
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
     if not reply or reply in (PRIVACY_REPLY, ACKNOWLEDGEMENT):
         return
-    if copied(reply, (SYSTEM_RULES, skill.get('instructions'), skill.get('reply_style'), knowledge)):
+    # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
+    if copied(reply, (SYSTEM_RULES, knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
         raise ReplyBlocked()
     emails = {value.casefold() for value in EMAIL.findall(reply)}
     numbers = phones(reply)
