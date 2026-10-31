@@ -117,7 +117,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     options['timeout'] = min(options.get('timeout', REPLY_TIMEOUT), deadline - time.monotonic())
     reader = Reader(skill, user, business, scope,
         authorize=lambda contract, arguments: authorize_search(run_id, skill, contract, arguments))
-    references = contracts(skill)
+    # The default skill serves other business types without its own type's reports.
+    references = contracts(skill) if business[0] == skill.business_doctype else []
     proposed = []
     read_results = []
     actions = []

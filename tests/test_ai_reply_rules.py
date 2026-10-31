@@ -130,6 +130,7 @@ class ReplyDecisionTests(unittest.TestCase):
 
     def test_foreign_search_is_declined_before_declaration_or_read(self):
         case = self.case
+        case.skill.business_doctype = 'Customer'
         contract = fixtures.capability(key='erpnext.orders', business_doctype='Customer', doctype='Sales Order',
             fields=('name', 'customer'), filters={}, confirmation='When required',
             scope=dict(business_field='customer', company={'kind': 'company_field', 'field': 'company'}))
