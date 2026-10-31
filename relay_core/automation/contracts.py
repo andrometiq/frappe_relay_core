@@ -44,15 +44,20 @@ def action_key(message, slot):
 
 
 def validate_search(value, references):
-    """A declaration can only narrow one approved capability."""
+    """A declaration can only narrow one approved capability; Core sets `fields` from the approved pack."""
     from relay_core.ai.render import field_names
-    if not isinstance(value, dict) or set(value) != {'purpose', 'reference', 'fields', 'arguments'}:
+    if not isinstance(value, dict) or not {'purpose', 'reference', 'arguments'} <= set(value) <= {
+            'purpose', 'reference', 'fields', 'arguments'}:
         raise ValueError('Invalid search declaration')
     if not isinstance(value['purpose'], str) or not 1 <= len(value['purpose'].strip()) <= 300:
         raise ValueError('State the search purpose')
     contract = next((row for row in references if row['key'] == value['reference']), None)
-    if not contract or value['fields'] != field_names(contract, 'model'):
+    fields = field_names(contract, 'model') if contract else []
+    named = value.get('fields', fields)
+    if (not contract or not isinstance(named, list) or not all(isinstance(name, str) for name in named)
+            or not set(named) <= set(fields)):
         raise ValueError('Search fields must match the declared reference')
+    value = dict(value, fields=fields)
     args = value['arguments']
     if not isinstance(args, dict):
         raise ValueError('Invalid search arguments')

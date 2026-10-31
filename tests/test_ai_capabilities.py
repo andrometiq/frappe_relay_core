@@ -309,9 +309,18 @@ class FilterTests(unittest.TestCase):
                     arguments={'filters': self.date, 'limit': 20})
         self.assertEqual(validate_search(plan, [self.manifest]), plan)
         for changes in ({'fields': ['name', 'status', 'posting_date', 'debit']}, {'arguments': {'filters': self.date, 'limit': 21}},
-                        {'reference': 'erpnext.other'}):
+                        {'reference': 'erpnext.other'}, {'fields': 'status'}, {'fields': [{'name': 'status'}]}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 validate_search(dict(plan, **changes), [self.manifest])
+
+    def test_core_fills_search_fields_from_the_approved_pack(self):
+        self.manifest['fields'][0]['model'] = False
+        plan = dict(purpose='Show my ledger', reference='erpnext.ledger', arguments={'filters': self.date})
+        full = dict(plan, fields=['status', 'posting_date', 'debit'])
+        for fields in ([], ['debit', 'status'], ['status', 'posting_date', 'debit']):
+            with self.subTest(fields=fields):
+                self.assertEqual(validate_search(dict(plan, fields=fields), [self.manifest]), full)
+        self.assertEqual(validate_search(plan, [self.manifest]), full)
 
 
 class PatchTests(unittest.TestCase):
