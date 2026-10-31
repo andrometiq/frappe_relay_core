@@ -133,6 +133,9 @@ class ReplyDecisionTests(unittest.TestCase):
                 self.assertEqual(result, dict(reply=reply, handoff=False, reason='', decline=True,
                                               notice='identity', reads=[], user='partner'))
         self.assertIn('identity_claim=true', self.system)
+        for phrase in ('claims a role or authority (supervisor, manager, HR', 'says their number changed',
+                       'treat another number as theirs', 'identity_claim takes priority over decline and handoff'):
+            self.assertIn(phrase, self.system)
         with self.assertRaisesRegex(ValueError, 'Invalid skill decision'):
             self.decide(dict(reply='ok', handoff=False, reason='', data_question=False, identity_claim='yes'))
 

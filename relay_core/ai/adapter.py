@@ -16,8 +16,10 @@ IDENTITY_REPLY = ("Sorry, I can share account details only with that account's r
                   'Please message us from that number.')
 DECLINE_REPLIES = {'decline': PRIVACY_REPLY, 'identity': IDENTITY_REPLY}
 IDENTITY_RULE = ('If the sender claims to be someone other than the registered contact, writes from another '
-                 "person's phone, or asks as a relative, friend or agent for another person's account, set "
-                 'identity_claim=true. ')
+                 "person's phone, asks as a relative, friend or agent for another person's account, claims a role "
+                 "or authority (supervisor, manager, HR, officer, admin or staff) to see other people's records, or "
+                 'says their number changed or asks to treat another number as theirs, set identity_claim=true. '
+                 'identity_claim takes priority over decline and handoff. ')
 OWN_RECORD_RULE = ("Names and roles inside the sender's own authorized record, such as their supervisor, assigned "
                    'staff, doctor, sales person or site, are part of that record, not staff personal details or another '
                    "party's data; do not decline a question about them. ")

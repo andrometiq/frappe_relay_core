@@ -774,6 +774,8 @@ class SharedAdapterTests(unittest.TestCase):
         self.assertIn('may ask about their own linked records, also when the sender is a supplier, staff member', system)
         self.assertIn('decline=true only for requests about other parties', system)
         self.assertIn("sender's own authorized record, such as their supervisor", system)
+        for phrase in ('claims a role or authority', 'treat another number as theirs', 'priority over decline'):
+            self.assertIn(phrase, system)
         self.assertIn('human_request=true only when the sender explicitly asks to talk to a person', system)
         self.assertIn('question about data, records, balances or orders is not a human request', system)
         self.assertNotIn('supplier or staff details', system)
