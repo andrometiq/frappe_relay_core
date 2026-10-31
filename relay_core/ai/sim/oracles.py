@@ -24,13 +24,17 @@ def records(seed: dict, suite: str, key: str, name: str) -> list[dict]:
 
 
 def latest_order_line(seed: dict, scenario: dict) -> str:
-    key = 'yrp.customer_orders'
-    return rendered(scenario, key, records(seed, 'distributor', key, business(seed, scenario)[1])[:1])
+    return latest(seed, scenario, 'yrp.customer_orders')
 
 
 def latest_slip_line(seed: dict, scenario: dict) -> str:
-    key = 'yrp.customer_slips'
-    return rendered(scenario, key, records(seed, 'distributor', key, business(seed, scenario)[1])[:1])
+    return latest(seed, scenario, 'yrp.customer_slips')
+
+
+def latest(seed: dict, scenario: dict, key: str) -> str:
+    """A one-row search notes that more rows match."""
+    rows = records(seed, 'distributor', key, business(seed, scenario)[1])
+    return rendered(scenario, key, rows[:1], len(rows) > 1)
 
 
 def distributor_october_ledger(seed: dict, scenario: dict) -> str:
