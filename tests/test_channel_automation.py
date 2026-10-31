@@ -145,6 +145,23 @@ class ChannelApiTests(unittest.TestCase):
         self.assertEqual(self.fake.get_list.call_args.kwargs['or_filters'], [
             [field, 'like', '%98000%'] for field in ('name', 'title', 'channel', 'address')])
 
+    def test_default_skill_binds_every_business_type_but_other_skills_do_not(self):
+        skill = _dict(name='DEFAULT', enabled=1, channel='channel', business_doctype='Contact', modified='m',
+                      execution_policy='Answer', sample_key='relay-default-skill')
+        self.fake.get_doc.return_value = skill
+        message = _dict(channel='channel', business_doctype='Supplier')
+        run = _dict()
+        with patch.object(ai, 'context', return_value=('partner', ('Supplier', 'S1'), {'capabilities': []})), \
+                patch('relay_core.ai.tools.fingerprint', return_value='print'), \
+                patch('relay_core.ai_features.is_enabled', return_value=True):
+            ai.select_skill(run, message, 'DEFAULT')
+            self.assertEqual((run.skill, run.execution_user), ('DEFAULT', 'partner'))
+            self.assertTrue(channel.ai_available(message, {'ai_skill': 'DEFAULT'}))
+            skill.sample_key = None
+            with self.assertRaisesRegex(ValueError, 'enabled AI skill'):
+                ai.select_skill(_dict(), message, 'DEFAULT')
+            self.assertFalse(channel.ai_available(message, {'ai_skill': 'DEFAULT'}))
+
     def test_customizing_defaults_keeps_automatic_skill_matching(self):
         self.doc.automation_steps = channel.DEFAULT_STEPS
         with patch.object(channel, 'validate_skill') as validate_skill:

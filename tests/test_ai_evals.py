@@ -63,6 +63,8 @@ class EvalTests(unittest.TestCase):
             result = evals.grade(dict(expected=outcome, must_not_contain=['UNSAFE']), decision)
             self.assertTrue(result['passed'])
             self.assertEqual(result['reply'], reply)
+        result = evals.grade(dict(expected='decline'), dict(reply='', handoff=False, decline=True, notice='identity'))
+        self.assertEqual(result['reply'], adapter.IDENTITY_REPLY)
 
     def test_human_cases_take_real_shortcut_without_model(self):
         cases = [case for case in evals.load_cases(None) if case['message'] in (

@@ -51,7 +51,10 @@ class OwnerBoundaries(unittest.TestCase):
             model.assert_not_called()
             model.return_value = dict(human_request=False, scores=[dict(id='EVENT', score=.2)])
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'DEFAULT')
-            model.return_value['human_request'] = True
+            model.return_value['decline'] = True
+            declined = matching.select(message, [specific, default], None, time.monotonic()+20)
+            self.assertEqual((declined['selected'], declined['decline']), ('EVENT', True))
+            model.return_value.update(decline=False, human_request=True)
             self.assertIsNone(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'])
             specific.exact_trigger = message.content
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'EVENT')
@@ -78,6 +81,26 @@ class OwnerBoundaries(unittest.TestCase):
         reply_guard.check('വിളിക്കുക ൯൮൭൬൫൪൩൨൧൦', {}, {'endpoint': '9876543210'})
         with self.assertRaises(reply_guard.ReplyBlocked):
             reply_guard.check('फोन ९८७६५४३२१०', {}, {})
+
+    def test_marathi_needs_marathi_words_and_other_devanagari_stays_hindi(self):
+        for text, expected in [('दिवाळीची सुट्टी कधी आहे आणि बोनस कधी मिळेल?', 'Marathi'),
+                ('मला पगार कधी मिळेल', 'Marathi'), ('कार्यक्रम कब है?', 'Hindi'),
+                ('मुझे छुट्टी चाहिए', 'Hindi'), ('उद्या कार्यक्रम रद्द', 'Hindi'),
+                ('ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?', 'Kannada'), ('Riverside event ಎಲ್ಲಿ?', 'Kannada'), ('অনুষ্ঠান কখন?', 'Bengali'),
+                ('order status কি?', 'Bengali')]:
+            with self.subTest(text=text):
+                self.assertEqual(language.detect(text)['language'], expected)
+
+    def test_every_notice_has_each_indian_language_the_detector_names(self):
+        senders = {'Telugu': 'కార్యక్రమం ఎప్పుడు?', 'Kannada': 'ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?',
+                   'Bengali': 'অনুষ্ঠান কখন?', 'Marathi': 'कार्यक्रम कधी आहे?', 'Hindi': 'कार्यक्रम कब है?'}
+        for kind, texts in language.NOTICES.items():
+            for name, text in senders.items():
+                with self.subTest(kind=kind, language=name):
+                    notice = language.notice(kind, text, 'ENGLISH')
+                    self.assertEqual(notice, texts[name])
+                    self.assertTrue(language.matches(notice, language.detect(text)))
+            self.assertEqual(language.notice(kind, 'When is the event?', 'ENGLISH'), 'ENGLISH')
 
     def test_voice_uses_transcript_and_never_audio_placeholder(self):
         message = Doc(message_type='voice', content='[audio]', transcript='कार्यक्रम कब है?')

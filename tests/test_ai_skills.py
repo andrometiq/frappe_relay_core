@@ -853,6 +853,21 @@ class SharedAdapterTests(unittest.TestCase):
                 with self.assertRaises(ValueError): self.adapter.complete(self.skill,'partner',('Supplier','SUP-A'),'Ledger please')
             reader.read.assert_not_called()
 
+    def test_default_skill_offers_no_reads_to_another_business_type(self):
+        from relay_core.ai.skills import DEFAULT_KEY
+        self.skill.sample_key = DEFAULT_KEY
+        plan = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]) as contracts, \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=plan))
+            with self.assertRaisesRegex(ValueError, 'Search fields must match'):
+                self.adapter.complete(self.skill, 'partner', ('Customer', 'CUST-A'), 'Ledger please')
+            contracts.assert_not_called()
+            self.assertEqual(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['search'], plan)
+        reader.read.assert_not_called()
+
     def test_non_tool_compatibility_uses_same_engine(self):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
         self.assertEqual(self.adapter.complete_json('MODEL-1', 'Draft knowledge'), {'instructions': 'Support knowledge'})
@@ -970,6 +985,16 @@ class ConversationIdentityTests(unittest.TestCase):
         self.assertEqual((user, business, scope['business'], readers), ('partner', ('Supplier', 'SUP-A'), ['Supplier', 'SUP-A'], ['partner']))
         self.business.denied = True
         with self.assertRaises(PermissionError): self.service.context(self.skill, Doc(self.message, own=True))
+
+    def test_default_skill_serves_every_business_type_but_other_skills_do_not(self):
+        from relay_core.ai.skills import DEFAULT_KEY
+        self.skill.business_doctype = 'Contact'
+        with self.assertRaisesRegex(ValueError, 'Business identity'):
+            self.service.context(self.skill, self.message)
+        self.skill.sample_key = DEFAULT_KEY
+        self.assertEqual(self.service.context(self.skill, self.message)[1], ('Supplier', 'SUP-A'))
+        self.business.denied = True
+        with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
 
     def test_linked_user_takes_precedence_and_missing_link_uses_run_as(self):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')

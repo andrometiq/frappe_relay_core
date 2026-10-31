@@ -47,14 +47,15 @@ def load_cases(cases):
 
 
 def grade(case, decision):
-    from relay_core.ai.adapter import PRIVACY_REPLY
+    from relay_core.ai.adapter import DECLINE_REPLIES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
     from relay_core.flows.actions import definitions
     outcome = 'decline' if decision.get('decline') else 'handoff' if decision.get('handoff') else 'reply'
     from relay_core.ai.language import notice, detect
     text = case.get('transcript') or case.get('message', '')
     if outcome == 'decline':
-        reply = notice('decline', text, PRIVACY_REPLY)
+        kind = decision.get('notice', 'decline')
+        reply = notice(kind, text, DECLINE_REPLIES[kind])
     elif outcome == 'handoff':
         reply = notice('handoff', text, ACKNOWLEDGEMENT)
     else:

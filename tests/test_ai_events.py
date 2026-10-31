@@ -103,8 +103,9 @@ class MatchingTests(unittest.TestCase):
         fake = Mock(); fake.get_all.return_value = ['one','two']
         with patch.object(matching,'frappe',fake), patch('relay_core.business_access.reference',return_value=('Supplier','A')):
             matching.candidates(_dict(channel='channel'))
-            self.assertEqual(fake.get_all.call_args.kwargs['filters'],
-                {'channel':'channel','business_doctype':'Supplier','enabled':1})
+            self.assertEqual(fake.get_all.call_args.kwargs['filters'], {'channel':'channel','enabled':1})
+            self.assertEqual(fake.get_all.call_args.kwargs['or_filters'],
+                {'business_doctype':'Supplier','sample_key':'relay-default-skill'})
             fake.get_all.return_value = list(range(21))
             with self.assertRaises(ValueError): matching.candidates(_dict(channel='channel'))
 
