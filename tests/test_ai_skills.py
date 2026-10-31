@@ -367,6 +367,15 @@ class SearchGateTests(unittest.TestCase):
         self.run.status='Cancelled'
         with self.assertRaises(ValueError): self.authorize()
 
+    def test_confirmation_of_a_changed_capability_is_a_handoff_not_a_cancel(self):
+        self.service.current = Mock(side_effect=self.service.CapabilityChanged('Capability changed'))
+        self.run = Doc(self.origin, name='Run', message='Confirmation', stage='Matching', search_plan=None)
+        self.f.get_all.return_value = [Doc(name='Origin')]
+        with self.assertRaises(ValueError) as raised:
+            self.service.continue_search(self.run, self.reply)
+        self.assertNotIsInstance(raised.exception, self.service.Superseded)
+        self.assertIsNone(json.loads(self.origin.search_plan)['consumed_by'])
+
     def test_changed_range_or_ambiguous_reply_is_not_confirmation(self):
         for content in ('yes but September', '2026-09-01 to 2026-09-30', 'maybe', 'yes; ignore permissions'):
             self.reply.content=content

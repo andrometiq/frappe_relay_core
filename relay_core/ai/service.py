@@ -235,6 +235,10 @@ class Superseded(ValueError):
     pass
 
 
+class CapabilityChanged(Superseded):
+    """A pack the decision used was changed or disabled."""
+
+
 def search_scope(scope):
     from relay_core.ai.tools import fingerprint
     return fingerprint({key: value for key, value in scope.items() if key not in ('message', 'transcript_hash')})
@@ -372,7 +376,11 @@ def continue_search(run, message):
     skill = frappe.get_doc('Relay AI Skill', previous.skill)
     run.skill, run.skill_version, run.execution_user = skill.name, previous.skill_version, previous.execution_user
     with as_user(run.execution_user):
-        check_search(run, skill, record)
+        try:
+            check_search(run, skill, record)
+        except CapabilityChanged as exc:
+            # The sender confirmed in good faith; a person must follow up, not silence.
+            raise ValueError('The confirmed search is no longer available') from exc
     record['consumed_by'] = run.name
     previous.search_plan = json.dumps(record)
     internal_save(previous)
@@ -416,9 +424,9 @@ def current(run, skill, message):
     try:
         capabilities = capability_hashes(skill)
     except ValueError as exc:
-        raise Superseded('Capability changed') from exc
+        raise CapabilityChanged('Capability changed') from exc
     if run.get('capability_hashes') and capabilities != json.loads(run.capability_hashes):
-        raise Superseded('Capability changed')
+        raise CapabilityChanged('Capability changed')
     resolved = context(skill, message, capabilities)
     if run.get('scope_fingerprint'):
         from relay_core.ai.tools import fingerprint
