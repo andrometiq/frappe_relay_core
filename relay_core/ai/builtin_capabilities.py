@@ -17,7 +17,7 @@ def ledger(party_type: str, render: str) -> dict:
                   'fixed': {'party_type': party_type, 'is_cancelled': 0}},
         'fields': LEDGER_FIELDS,
         'filters': {'posting_date': {'type': 'date', 'operators': ['between'], 'required': True}},
-        'order_by': 'name asc', 'limit': 20,
+        'order_by': 'posting_date asc, name asc', 'limit': 20,
         'empty_result': 'handoff', 'confirmation': 'Always',
         'render': render,
         'data_notes': 'Totals cover returned rows only, never an opening or closing balance.',
