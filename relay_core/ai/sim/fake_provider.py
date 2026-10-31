@@ -13,6 +13,7 @@ CHAT_PATH = '/api/v1/chat/completions'
 MATCHING_PREFIX = 'Classify the incoming message'
 AUTHORIZED = re.compile(r'\nAuthorized search:\n(.*?)\nSkill:\n', re.DOTALL)
 CONTENT_ONLY = ('search', 'calls', 'execute', 'match', 'json', 'fault')
+OK = {'MALAYALAM': 'ശരി', 'DEVANAGARI': 'ठीक है', 'TAMIL': 'சரி'}  # Short answers in the sender's script.
 
 
 def user_text(body: dict) -> str:
@@ -120,7 +121,9 @@ class Script:
         for key, default in (('reply', ''), ('handoff', False), ('reason', '')):
             value.setdefault(key, default)
         if planned and done and not value['reply'] and not value['handoff']:
-            value['reply'] = 'ok'  # A model that ran its tools answers; the pack renderer replaces this text.
+            # A model that ran its tools answers in the sender's script; the pack renderer replaces this text.
+            from relay_core.ai.language import detect
+            value['reply'] = OK.get(detect(incoming(body))['script'], 'ok')
         return content(value, body)
 
 
