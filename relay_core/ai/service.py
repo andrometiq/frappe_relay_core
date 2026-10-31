@@ -494,9 +494,8 @@ def process(name, *, deadline=None):
             if decision['handoff']:
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
             elif decision.get('decline'):
-                from relay_core.ai.adapter import PRIVACY_REPLY
-                from relay_core.ai.language import message_notice
-                result = dispatch_reply(run, skill, message, message_notice('decline', message, PRIVACY_REPLY), slot='reply')
+                kind = decision.get('notice', 'decline')
+                result = dispatch_reply(run, skill, message, decline_notices(message)[kind], slot='reply')
                 run = lock_run(name)
                 run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
                 internal_save(run)
@@ -606,11 +605,16 @@ def send_reply(message, reply, *, slot='reply'):
     return send(message.name, 'text', {'text': reply}, key, quote=0)
 
 
+def decline_notices(message) -> dict:
+    """Fixed decline notices by kind, in the sender's language."""
+    from relay_core.ai.adapter import DECLINE_REPLIES
+    from relay_core.ai.language import message_notice
+    return {kind: message_notice(kind, message, text) for kind, text in DECLINE_REPLIES.items()}
+
+
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
-    from relay_core.ai.adapter import PRIVACY_REPLY
-    from relay_core.ai.language import message_notice
-    if slot != 'approval_notice' and reply != message_notice('decline', message, PRIVACY_REPLY):
+    if slot != 'approval_notice' and reply not in decline_notices(message).values():
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
@@ -837,7 +841,8 @@ def admit(run):
             if result.get('decline'):
                 from relay_core.ai.adapter import decline_decision
                 run.status = 'Pending'
-                run.decision = json.dumps(dict(decline_decision(contexts[skill.name][0], matching.trigger(message)), scope=scopes[skill.name]))
+                decision = decline_decision(contexts[skill.name][0], matching.trigger(message), result['notice'])
+                run.decision = json.dumps(dict(decision, scope=scopes[skill.name]))
             episode(run, message)
             internal_save(run)
         frappe.db.commit()

@@ -69,8 +69,8 @@ def trigger(message):
 def validate_result(value, names):
     """Require one finite score for every candidate, including rejected ones."""
     if (not isinstance(value, dict) or not {'scores', 'human_request'} <= set(value)
-            or set(value) - {'scores', 'human_request', 'decline'}
-            or type(value['human_request']) is not bool or type(value.get('decline', False)) is not bool):
+            or set(value) - {'scores', 'human_request', 'decline', 'identity_claim'}
+            or any(type(value.get(key, False)) is not bool for key in ('human_request', 'decline', 'identity_claim'))):
         raise ValueError('Invalid event match')
     scores = value['scores']
     if not isinstance(scores, list) or len(scores) != len(names):
@@ -90,9 +90,12 @@ def validate_result(value, names):
     if (winner and not value['human_request'] and Decimal(str(winner['score'])) >= Decimal('0.85')
             and Decimal(str(winner['score'])) - Decimal(str(runner)) >= Decimal('0.15')):
         selected = winner['id']
-    if value.get('decline') and winner:
+    if value.get('identity_claim') and winner:
         # Bind only a fixed Core decline to an accessible candidate; no skill tools run.
-        return dict(selected=winner['id'], scores=scores, decline=True,
+        return dict(selected=winner['id'], scores=scores, decline=True, notice='identity',
+                    reason='Sender claims another account', method='classifier')
+    if value.get('decline') and winner:
+        return dict(selected=winner['id'], scores=scores, decline=True, notice='decline',
                     reason='Private or off-topic request', method='classifier')
     return dict(selected=selected, scores=scores, reason='Sender requested a person' if value['human_request']
                 else 'Event matched' if selected else 'No confident event match', method='classifier')
