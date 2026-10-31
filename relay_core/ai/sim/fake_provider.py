@@ -119,6 +119,8 @@ class Script:
         value.setdefault('data_question', bool(planned))
         for key, default in (('reply', ''), ('handoff', False), ('reason', '')):
             value.setdefault(key, default)
+        if planned and done and not value['reply'] and not value['handoff']:
+            value['reply'] = 'ok'  # A model that ran its tools answers; the pack renderer replaces this text.
         return content(value, body)
 
 
