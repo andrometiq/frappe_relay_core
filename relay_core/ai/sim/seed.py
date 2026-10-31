@@ -113,6 +113,10 @@ def settings() -> None:
     doc.save(ignore_permissions=True)
 
 
+def whatsapp_channel() -> str:
+    return frappe.db.get_value('Relay Channel', {'channel': 'WhatsApp', 'account': HUB_ACCOUNT}, 'name')
+
+
 def channel_for(provider: str) -> str:
     name = frappe.db.get_value('Relay Channel', {'channel': provider, 'account': HUB_ACCOUNT}, 'name')
     doc = frappe.get_doc('Relay Channel', name) if name else frappe.new_doc('Relay Channel')
@@ -161,7 +165,8 @@ def event() -> None:
 def skill(title: str, model: str, *, tools: list[dict], actions: list[dict]) -> str:
     name = frappe.db.get_value('Relay AI Skill', {'title': title}, 'name')
     doc = frappe.get_doc('Relay AI Skill', name) if name else frappe.new_doc('Relay AI Skill')
-    doc.update({'title': title, 'enabled': 1, 'business_doctype': 'Customer', 'ai_model': model, 'mode': 'Automatic',
+    doc.update({'title': title, 'enabled': 1, 'business_doctype': 'Customer', 'channel': whatsapp_channel(),
+                'ai_model': model, 'mode': 'Automatic',
                 'handoff_owner': HANDOFF_OWNER, 'run_as_user': AGENT, 'daily_limit': 1000, 'daily_spend_cap_usd': 2,
                 'instructions': f'{title}: answer the sender about their own Sim Co records only.',
                 'target': f'{title} questions from Sim Co customers', 'search_confirmation': 'When required',
