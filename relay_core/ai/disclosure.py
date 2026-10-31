@@ -16,6 +16,8 @@ def send(run, message) -> dict:
     frappe.db.set_value('Relay Ticket', run.ticket, 'ai_disclosed', 1, update_modified=False)
     try:
         return send_reply(message, message_notice('disclosure', message, DISCLOSURE), slot='disclosure')
+    except frappe.QueryDeadlockError:
+        raise  # The deadlock already rolled back the transaction and its savepoint; the run retries.
     except Exception:
         frappe.db.rollback(save_point='relay_disclosure')  # The flag never commits without its journal row.
         raise

@@ -65,6 +65,14 @@ class DisclosureDelivery(unittest.TestCase):
         self.service.process(self.run.name)
         self.assertEqual(self.send.call_args.args[3], first)
 
+    def test_deadlock_reaches_the_retry_without_a_savepoint_rollback(self):
+        self.send.side_effect = self.f.QueryDeadlockError('Deadlock found')
+        self.f.db.rollback.side_effect = AssertionError('SAVEPOINT relay_disclosure does not exist')
+        with self.assertRaises(self.f.QueryDeadlockError):
+            self.service.process(self.run.name)
+        self.f.db.rollback.assert_not_called()
+        self.handoff.assert_not_called()
+
     def test_disclosure_receipt_never_decides_the_run(self):
         action = Doc(name='Sim Notice', operation='text', source_message=self.message.name,
             payload='{"automation_run": "Sim Run"}', request_key=hashlib.sha256(
