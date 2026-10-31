@@ -111,7 +111,7 @@ def settings() -> None:
     if not doc.get_password('callback_secret', raise_exception=False):
         doc.callback_secret = frappe.generate_hash(length=48)
     if not doc.get_password('hub_token', raise_exception=False):
-        doc.hub_token = 'sim-placeholder'  # The driver answers Hub calls in-process; nothing uses this token.
+        doc.hub_token = frappe.generate_hash(length=40)  # The driver answers Hub calls in-process; no Hub sees it.
     doc.save(ignore_permissions=True)
 
 
