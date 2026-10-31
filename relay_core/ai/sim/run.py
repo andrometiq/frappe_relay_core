@@ -124,13 +124,18 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
 
 
 def release(business: list[str]) -> None:
-    """Close the persona's open episode so each trial starts a new conversation, as a manager would."""
+    """Each trial starts a new conversation: close the persona's open episode, as a manager would, and age its
+    earlier AI proposals past the duplicate window so a repeated scripted request is new again."""
+    from relay_core.flows.actions import DUPLICATE_DAYS
     from relay_core.tickets import close_and_release
-    tickets = frappe.get_all('Relay Ticket', filters={'business_doctype': business[0], 'business_name': business[1],
-                             'active_scope_key': ['is', 'set']}, pluck='name')
+    filters = {'business_doctype': business[0], 'business_name': business[1]}
     with acting_as(MANAGER):
-        for name in tickets:
+        for name in frappe.get_all('Relay Ticket', filters=dict(filters, active_scope_key=['is', 'set']), pluck='name'):
             close_and_release(name)
+    tickets = frappe.get_all('Relay Ticket', filters=filters, pluck='name')
+    if tickets:
+        frappe.db.sql('update `tabRelay Flow Action` set creation = creation - interval %s day '
+                      'where automation_run is not null and ticket in %s', (DUPLICATE_DAYS + 1, tickets))
     frappe.db.commit()
 
 
