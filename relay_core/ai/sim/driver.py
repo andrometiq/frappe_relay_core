@@ -1,4 +1,4 @@
-"""Drive one test site in-process: signed Hub callbacks in, queued work drained, Hub-bound actions read back."""
+"""Drive one test site in-process: signed Hub callbacks in, queued work drained against an in-process Hub, actions read back."""
 import hashlib
 import hmac
 import json
@@ -38,7 +38,12 @@ class Driver:
         from relay_core.settings import value
         self.account, self.secret = value('relay_hub_account'), value('relay_callback_secret')
         self.cursor = frappe.db.get_value('Relay Message Action', {}, 'name', order_by='name desc') or ''
-        self.jobs, self.errors, self.events = [], [], []
+        self.jobs, self.errors, self.events, self.hub_calls = [], [], [], []
+
+    def hub(self, name: str, arguments: dict) -> dict:
+        """The in-process Hub: every tool call is accepted with a new provider message id."""
+        self.hub_calls.append((name, arguments))
+        return {'success': True, 'messages': [{'id': 'wamid.sim.out.' + uuid.uuid4().hex[:20]}]}
 
     def post_inbound(self, scenario: dict, turn: dict) -> str:
         """Post the turn's text from the persona's phone; returns the provider message id."""
@@ -67,9 +72,11 @@ class Driver:
     def drain(self, rounds: int = 50) -> int:
         """Project Hub events, run the message hooks and every job they queue, until nothing is left."""
         from relay_core.automation import projection, queue
+        from relay_core.hub import HubClient
         done = 0
+        hub = lambda client, name, arguments: self.hub(name, arguments)
         with patch.object(frappe, 'enqueue', side_effect=self.collect), patch.object(queue.Drain, 'wake', lambda self: None), \
-                patch.object(frappe, 'publish_realtime'):
+                patch.object(frappe, 'publish_realtime'), patch.object(HubClient, 'call_tool', hub):
             for _ in range(rounds):
                 events = frappe.get_all('Relay Hub Event', filters={'projection_status': 'Pending'}, pluck='name',
                                         order_by='name asc')
