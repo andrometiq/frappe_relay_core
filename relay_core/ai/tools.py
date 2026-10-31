@@ -48,6 +48,14 @@ def fixed_filters(contract, business, company):
     return filters
 
 
+def own_record_arguments(contract, arguments, business):
+    """The model never sees the sender's record name, so a read of that record takes it from the scope."""
+    if (contract['operation'] == 'get_doc' and contract['scope']['business_field'] == 'name'
+            and isinstance(arguments, dict) and 'name' not in arguments):
+        return dict(arguments, name=business[1])
+    return arguments
+
+
 def check_identity_arguments(contract, arguments, business, scope):
     """Reject another party before even announcing a search; reads still enforce all fixed filters."""
     if not isinstance(arguments, dict):

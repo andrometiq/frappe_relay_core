@@ -169,6 +169,18 @@ class ScopedToolTests(unittest.TestCase):
         self.assertTrue(self.reader.failed)
         self.assertEqual(self.f.session.user, 'operator')
 
+    def test_own_record_read_takes_the_name_from_the_scope(self):
+        own = capability(operation='get_doc', scope={'business_field': 'name', 'company': {'kind': 'company_field', 'field': 'company'}})
+        self.assertEqual(self.tools.own_record_arguments(own, {}, ('Supplier', 'SUP-A')), {'name': 'SUP-A'})
+        for arguments in ({'name': 'SUP-B'}, {'name': 'SUP-A'}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.tools.own_record_arguments(own, arguments, ('Supplier', 'SUP-A')), arguments)
+        with self.assertRaises(self.tools.PrivacyDenied):
+            self.tools.check_identity_arguments(own, {'name': 'SUP-B'}, ('Supplier', 'SUP-A'), None)
+        for contract in (dict(own, operation='get_list'), dict(self.contract, operation='get_doc')):
+            with self.subTest(contract=contract['operation']):
+                self.assertEqual(self.tools.own_record_arguments(contract, {}, ('Supplier', 'SUP-A')), {})
+
     def test_query_hook_denial_never_falls_back_to_get_all(self):
         self.f.get_list.side_effect = PermissionError('Distributor denied')
         with self.assertRaises(ValueError): self.reader.read(self.contract)

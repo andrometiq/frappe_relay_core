@@ -3,7 +3,7 @@ import time
 import json
 import re
 import frappe
-from relay_core.ai.tools import Reader, contracts, PrivacyDenied, check_identity_arguments
+from relay_core.ai.tools import Reader, contracts, PrivacyDenied, check_identity_arguments, own_record_arguments
 from relay_core.automation.contracts import validate_search
 from relay_core.ai.render import field_names
 
@@ -154,6 +154,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         purpose, arguments = minimiser.unmask([purpose, arguments])
         try:
             contract = next(row for row in references if row['key'] == reference)
+            arguments = own_record_arguments(contract, arguments, business)
             check_identity_arguments(contract, arguments, business, scope)
             plan = validate_search(dict(purpose=purpose, reference=reference,
                 fields=field_names(contract, 'model'), arguments=arguments), references)
@@ -325,6 +326,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     if declaration is not None:
         plan = declaration if isinstance(declaration, dict) else {}
         contract = next((row for row in references if row['key'] == plan.get('reference')), None)
+        if contract:
+            declaration = plan = dict(plan, arguments=own_record_arguments(contract, plan.get('arguments'), business))
         try:
             if contract:
                 check_identity_arguments(contract, plan.get('arguments'), business, scope)
