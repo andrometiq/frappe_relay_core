@@ -113,6 +113,9 @@ def project(name, business_overrides=None):
         from relay_core.channel_sync import queue_sync
         queue_sync()
         set_status(name, 'Projected'); return
+    if payload.get('object') == 'relay_signup':
+        from relay_core.onboarding.signup import project_event
+        set_status(name, 'Projected' if project_event(payload) else 'Failed'); return
     if 'channel_statuses' in payload:
         from relay_core.channel_statuses import project_batch
         project_batch(event, payload['channel_statuses'])

@@ -216,7 +216,8 @@ def capabilities():
     teams=False
     from relay_core.contact_import import allowed as contact_transfer_allowed
     from relay_core.file_limits import get_max_bytes
-    return {'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
+    from relay_core.onboarding.progress import capability as onboarding
+    return {'onboarding':onboarding(), 'contact_transfer': contact_transfer_allowed(frappe.session.user, frappe.get_roles()), 'manage':manage, 'teams':manage and teams, 'teams_enabled':teams, 'folders':features.is_enabled('folders'),
             'billing':frappe.has_permission('Relay WhatsApp Billing Month', 'read'),
             'multi_team':sees_all_teams(), 'configure':can_configure(),
             'ai':ai_features.is_enabled(),

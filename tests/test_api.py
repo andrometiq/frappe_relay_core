@@ -24,6 +24,7 @@ class ApiTests(unittest.TestCase):
         self.api.require_access=Mock();self.api.readable_contact=Mock()
         self.f.PermissionError=ValueError
         self.person_access=self.enterContext(patch('relay_core.business_access.require_person'))
+        self.enterContext(patch('relay_core.onboarding.progress.capability', return_value={'required': False, 'step': 'done'}))
         self.enterContext(patch('relay_core.business_access.allowed_types', return_value={'Customer'}))
         self.people_query=self.enterContext(patch('relay_core.business_access.people_query', side_effect=lambda **kwargs: self.f.qb.get_query('Contact', **kwargs)))
         self.api.contact_query=Mock(return_value='independent_business_scope')
@@ -63,7 +64,7 @@ class ApiTests(unittest.TestCase):
         numbers=[{'name':'WA-1','label':'Sales','address':'+91 1'},{'name':'WA-2','label':'Support','address':'+91 2'}]
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
-        self.assertEqual(result,{'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
+        self.assertEqual(result,{'onboarding':{'required':False,'step':'done'},'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
                                  'ai':True,'skills':True,'business_events':True,'flows':True,
                                  'enabled_channels':['WhatsApp'],'max_file_bytes':file_limits.MAX_BYTES,'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
