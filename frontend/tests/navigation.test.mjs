@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { navAllowed, whatsappRoute, whatsappSections } from '../src/services/navigation.js'
+import { navAllowed, navListed, opensSetup, whatsappRoute, whatsappSections } from '../src/services/navigation.js'
 import { routeTab } from '../src/useViewRoute.js'
 
 const settings = { name: 'Settings', configure: true }
@@ -54,4 +54,18 @@ test('each WhatsApp section links to its tab route', () => {
   assert.equal(whatsappRoute('billing'), '#/whatsapp?tab=billing')
   assert.equal(routeTab(whatsappRoute('billing'), 'templates'), 'billing')
   assert.equal(routeTab(whatsappRoute('templates'), 'templates'), 'templates')
+})
+
+test('Get started is listed for a System Manager until setup is finished and opens first only from the default page', () => {
+  const setup = { name: 'Setup', configure: true, setup: true }
+  const admin = { ...channels, configure: true, onboarding: { required: true, step: 'hub' } }
+  assert.equal(navListed(setup, admin), true)
+  assert.equal(navListed(setup, { ...admin, onboarding: { required: false, step: 'done' } }), false)
+  assert.equal(navAllowed(setup, { ...admin, onboarding: { required: false } }), true)
+  assert.equal(navListed(setup, { ...channels, ...none, onboarding: { required: true } }), false)
+  assert.equal(opensSetup(admin, ''), true)
+  assert.equal(opensSetup(admin, '/messages'), true)
+  assert.equal(opensSetup(admin, '/contacts'), false)
+  assert.equal(opensSetup({ ...admin, configure: false }, ''), false)
+  assert.equal(opensSetup({ ...admin, onboarding: { required: false } }, ''), false)
 })

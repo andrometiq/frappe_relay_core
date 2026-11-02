@@ -1231,3 +1231,4 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .composer-dock :is(.composer-writing,.note-input) textarea:focus { outline:0; }
 .composer-writing:has(textarea:focus-visible) { outline:2px solid var(--relay-accent); outline-offset:-2px; }
 .note-input:has(textarea:focus-visible) { outline:2px solid var(--relay-note-ink); outline-offset:1px; }
+.setup-pending{margin:12px 16px 0;border:1px solid var(--outline-gray-2);border-radius:8px;padding:10px 12px;background:var(--surface-gray-1);color:var(--ink-gray-7);font-size:13px}
