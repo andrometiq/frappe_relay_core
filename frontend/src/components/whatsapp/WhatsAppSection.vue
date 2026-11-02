@@ -41,7 +41,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
     <nav class="v1-tabs" aria-label="WhatsApp sections">
       <Button v-for="item in tabs" :key="item.name" :label="item.label" :variant="tab === item.name ? 'solid' : 'ghost'" :aria-current="tab === item.name ? 'page' : undefined" @click="open(item.name)" />
     </nav>
-    <div v-if="tab === 'account'" class="v1-content space-y-5">
+    <div v-if="tab === 'account'" class="v1-content channel-section-content space-y-5">
       <ErrorMessage :message="error" />
       <div class="workflow-card">
         <h2 class="font-semibold">Your WhatsApp number</h2><p v-if="account">Account: {{ account }}</p>
@@ -49,12 +49,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
       </div>
       <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Connection settings</a><a class="v1-link" href="/desk/relay-channel">Channel setup in Desk</a></div>
     </div>
-    <component :is="views[tab]" v-else v-bind="tab === 'billing' ? { account } : {}" />
+    <component :is="views[tab]" v-else class="channel-section-content" v-bind="tab === 'billing' ? { account } : {}" />
   </section>
 </template>
 <style scoped>
 .channel-section-header { display:flex; align-items:center; gap:8px; padding:12px 16px 4px; color:var(--ink-gray-8); }
 .channel-section-header h2 { font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .channel-section-header svg { color:var(--ink-gray-5); flex-shrink:0; }
-.channel-section > :last-child { display:flex; flex:1; flex-direction:column; min-height:0; }
+.channel-section-content { display:flex; flex:1; flex-direction:column; min-height:0; }
 </style>
