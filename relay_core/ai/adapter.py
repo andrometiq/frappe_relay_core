@@ -292,6 +292,11 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                       'or explicitly hand off with a reason.')
     else:
         raise ValueError('Empty skill decision')
+    if search is not None and not value['handoff'] and not reader.evidence and is_same_search(value.get('search'), search, references, business):
+        # The model repeated the authorized plan instead of calling SEARCH; Core reads exactly that plan.
+        search_data(search['purpose'], search['reference'], search['arguments'])
+        if reader.private is True:
+            return decline_decision(user, incoming_text)
     if value.get('data_question') and not value['handoff'] and not (reader.evidence or proposed or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)
     value.pop('data_question', None)
@@ -368,6 +373,19 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             raise ValueError('Declare searches before proposing actions')
         value['actions'] = actions
     return dict(value, reads=reader.evidence, user=user)
+
+
+def is_same_search(declaration, search, references, business) -> bool:
+    """Whether a final-answer declaration is exactly the authorized plan."""
+    contract = next((row for row in references if isinstance(declaration, dict)
+                     and row['key'] == declaration.get('reference')), None)
+    if not contract:
+        return False
+    try:
+        plan = dict(declaration, arguments=own_record_arguments(contract, declaration.get('arguments'), business))
+        return validate_search(plan, references) == search
+    except ValueError:
+        return False
 
 
 def declaration_error(declaration, references, business, scope):

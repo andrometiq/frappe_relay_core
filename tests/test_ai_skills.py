@@ -925,6 +925,33 @@ class SharedAdapterTests(unittest.TestCase):
             self.attempt.assert_called_once()
         reader.read.assert_not_called()
 
+    def test_authorized_turn_reads_a_plan_the_model_repeats_instead_of_calling_search(self):
+        plan = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        rows = [{'posting_date': '2026-10-02', 'debit': 10, 'credit': 0}]
+        def read(contract, **arguments):
+            reader.results[contract['key']] = {'rows': rows, 'truncated': False}
+            reader.evidence.append({'tool': contract['key']})
+            return {'rows': rows, 'truncated': False}
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock(side_effect=read))
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: lambda *args: 'Ledger text')))
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability()]))
+        self.enterContext(patch.object(self.adapter, 'Reader', return_value=reader))
+        self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=plan, data_question=True))
+        result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please', scope={}, search=plan)
+        reader.read.assert_called_once_with(capability(), **plan['arguments'])
+        self.assertEqual(result['actions'], [dict(action='reply', parameters={'text': 'Ledger text'})])
+        reader.read.reset_mock(); reader.results.clear(); reader.evidence.clear()
+        other = dict(plan, arguments={'filters': {'posting_date': ['between', ['2026-09-01', '2026-10-31']]}})
+        self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=other, data_question=True))
+        with self.assertRaisesRegex(ValueError, 'Search changed after confirmation'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please', scope={}, search=plan)
+        reader.read.assert_not_called()
+
     def test_default_skill_offers_no_reads_to_another_business_type(self):
         from relay_core.ai.skills import DEFAULT_KEY
         self.skill.sample_key = DEFAULT_KEY
