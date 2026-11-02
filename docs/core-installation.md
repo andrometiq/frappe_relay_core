@@ -99,6 +99,31 @@ its API key/secret and the matching callback secret in Hub. Callbacks target
 `/api/method/relay_core.inbound.receive` and require Frappe authentication plus the
 Hub signature. See [callback contract](authentication.md#hub-callbacks).
 
+## Self-service setup
+
+The Relay provider sets up the Hub once: one Meta app, a Hub container with self-service WhatsApp signup turned on, and a bench enrolment token. After that, each customer site needs only `new-site` and `install-app relay_core`. The customer's System Manager opens `/relay` and follows **Get started** (`/relay#/setup`).
+
+Put these keys in the bench `common_site_config.json`, or in one site's `site_config.json`:
+
+| Key | Value |
+| --- | --- |
+| `relay_hub_origin` | Hub public origin and prefix, for example `https://hub.example.com` |
+| `relay_enrolment_token` | The bench enrolment token from the Hub admin, `relay_enrol_` and 64 hex characters |
+
+Get started has 5 steps:
+
+| Step | What happens |
+| --- | --- |
+| Connect to Relay | Core creates the `relay-hub@<site>` user with the Relay Hub Service role, sends its API key, a new callback secret and a nonce to `POST {relay_hub_origin}/api/enrol`, and saves the Hub URL, account and token in Relay Settings. The Hub checks the site through `relay_core.onboarding.api.enrolment_proof`. Without the config keys, the admin pastes a setup code or setup link from the Hub admin. |
+| Business details | The admin checks the business name, email, website, country, time zone, category and WhatsApp display name. Relay Settings keeps them as a draft. |
+| WhatsApp number | The admin picks a new number, a WhatsApp Business app number or a number on another provider. A Hub window runs Meta's Embedded Signup. The Hub does the rest; Core keeps a Relay WhatsApp Signup row per session. |
+| Test and finish | Core sends Meta's `hello_world` template and shows the payment method, name and limit state. |
+| Link records | The checked DocTypes become enabled Relay Contact Types. |
+
+When a number is connected, the admin who started the signup gets the Relay Communication Manager role. Finishing sets **Setup finished** in Relay Settings. A site that already had an enabled WhatsApp channel at upgrade is marked as finished. Manual connection stays available under **Settings > Hub connection > Connect manually (advanced)**.
+
+For a WhatsApp Business app number, Core imports the copied chats with `legacy_source = "WhatsApp Business app"`, so no AI, flow, ticket or unread count runs on them. Phone contacts become Relay contacts, and messages sent from the phone show as sent messages.
+
 ## Configure business contacts
 
 1. Create an enabled `Relay Contact Type` for each allowed business DocType, such

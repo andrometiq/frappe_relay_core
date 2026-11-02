@@ -39,6 +39,12 @@ class ChannelSyncTests(unittest.TestCase):
         self.assertEqual((second.company, second.triage_owner), ('Acme Main', 'owner@example.invalid'))
         self.assertFalse(second.get('is_default'))
 
+    def test_a_business_app_number_is_marked_coexistence(self):
+        site = FakeSite(Relay_Channel=[LEGACY])
+        self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'},
+                                   {'key': 'wa-120', 'label': 'Phone', 'coexistence': True, 'onboarding': 'coexistence'}))
+        self.assertEqual([row.connection_type for row in site.rows('Relay Channel')], ['Cloud API', 'Coexistence'])
+
     def test_a_channel_the_hub_no_longer_lists_is_disabled_and_kept(self):
         site = FakeSite(Relay_Channel=[LEGACY, dict(LEGACY, hub_channel='wa-2', title='Old')])
         result, _ = self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'}))

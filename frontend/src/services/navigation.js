@@ -7,8 +7,19 @@ export function navAllowed(item, capabilities) {
   return gates.every(gate => !item[gate] || Boolean(capabilities?.[gate])) && channelEnabled(capabilities, item.channel)
 }
 
+// Get started stays reachable after setup (Add another number) but leaves the menu once setup is finished.
+export function navListed(item, capabilities) {
+  return navAllowed(item, capabilities) && (!item.setup || Boolean(capabilities?.onboarding?.required))
+}
+
+// A System Manager opening /relay on a site that is not set up lands on Get started.
+export function opensSetup(capabilities, initialPath) {
+  return Boolean(capabilities?.configure && capabilities?.onboarding?.required) && ['', '/', '/messages'].includes(initialPath)
+}
+
 // Desktop rail groups. Each group opens its first allowed page; a group with more pages shows them as tabs.
 const RAIL = [
+  { name: 'Get started', icon: 'play', pages: ['Setup'] },
   { name: 'Chats', icon: 'message-square', pages: ['Messages'] },
   { name: 'Tickets', icon: 'ticket', pages: ['Tickets'] },
   { name: 'Contacts', icon: 'users', pages: ['Contacts'] },

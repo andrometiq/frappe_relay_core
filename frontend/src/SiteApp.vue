@@ -10,7 +10,7 @@ import AccessDenied from './components/AccessDenied.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import TicketNotices from './components/TicketNotices.vue'
 import { routeTab, useViewRoute } from './useViewRoute'
-import { navAllowed, railGroups, whatsappRoute, whatsappSections } from './services/navigation'
+import { navAllowed, navListed, opensSetup, railGroups, whatsappRoute, whatsappSections } from './services/navigation'
 import MobileTabBar from './components/shell/MobileTabBar.vue'
 import { useMobileLayout } from './composables/useMobileLayout'
 import { useUnreadChats } from './composables/useQueueCounts'
@@ -19,8 +19,10 @@ import { openLegacyConversation } from './services/legacyLinks'
 import { THEME_LABELS, cycleTheme, theme } from './services/theme'
 
 const location = window.location
+const initialPath = location.hash.slice(1).split('?')[0]
 const views = {
   Messages: ConnectedMessages,
+  Setup: defineAsyncComponent(() => import('./components/onboarding/OnboardingWorkspace.vue')),
   Tickets: defineAsyncComponent(() => import('./components/TicketsWorkspace.vue')),
   Knowledge: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
   Events: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
@@ -35,6 +37,7 @@ const views = {
   Activity: defineAsyncComponent(() => import('./components/ActivityWorkspace.vue')),
 }
 const navigation = [
+  { name: 'Setup', label: 'Get started', icon: 'play', configure: true, setup: true },
   { name: 'Messages', label: 'Chats', icon: 'message-square' },
   { name: 'Tickets', label: 'Tickets', icon: 'ticket' },
   { name: 'Contacts', label: 'Contacts', icon: 'users' },
@@ -54,7 +57,8 @@ const rendered = pageCapabilities(document.getElementById('app'))
 const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, teams_enabled: false, folders: false, ai: false, skills: false, business_events: false, flows: false }), ready = ref(Boolean(rendered))
 const error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
-const visible = computed(() => navigation.filter(item => navAllowed(item, capabilities.value)))
+const visible = computed(() => navigation.filter(item => navListed(item, capabilities.value)))
+const setupPending = computed(() => capabilities.value.onboarding?.required && !capabilities.value.configure && !capabilities.value.whatsapp_numbers?.length)
 const rail = computed(() => railGroups(visible.value))
 const currentGroup = computed(() => rail.value.find(group => group.pages.some(page => page.name === view.value)))
 const isMobile = useMobileLayout(), moreOpen = ref(false)
@@ -77,6 +81,7 @@ async function initialize() {
   try { capabilities.value = await coreApi('api.capabilities'); ready.value = true }
   catch (e) { error.value = e.message }
 }
+function openSetupFirst() { if (opensSetup(capabilities.value, initialPath)) view.value = 'Setup' }
 async function logout() {
   error.value = ''
   try { await frappeRequest('logout', {}, true); location.assign('/login?redirect-to=/relay') }
@@ -89,7 +94,7 @@ function focusSearch(event) {
   event.preventDefault()
   input.focus()
 }
-onMounted(() => { startRealtime(); initialize(); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
+onMounted(() => { startRealtime(); initialize().then(openSetupFirst); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
@@ -132,6 +137,7 @@ onErrorCaptured(e => {
         <Button v-for="page in currentGroup.pages" :key="page.name" :label="page.label" :variant="view === page.name ? 'solid' : 'ghost'"
           :aria-current="view === page.name ? 'page' : undefined" @click="view = page.name" />
       </nav>
+      <p v-if="setupPending && ready" class="setup-pending" role="status">Relay is being set up. Ask your administrator to finish setup.</p>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <AccessDenied v-else-if="current && !navAllowed(current, capabilities)" :page="current" :capabilities="capabilities" />

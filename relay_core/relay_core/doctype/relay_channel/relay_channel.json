@@ -13,6 +13,7 @@
     "label",
     "address",
     "waba_id",
+    "connection_type",
     "is_default",
     "enabled",
     "company",
@@ -75,6 +76,16 @@
       "fieldtype": "Data",
       "read_only": 1,
       "depends_on": "eval:doc.channel=='WhatsApp'"
+    },
+    {
+      "fieldname": "connection_type",
+      "label": "Connection type",
+      "fieldtype": "Select",
+      "options": "Cloud API\nCoexistence",
+      "default": "Cloud API",
+      "read_only": 1,
+      "depends_on": "eval:doc.channel=='WhatsApp'",
+      "description": "Coexistence numbers stay on the WhatsApp Business app on the phone."
     },
     {
       "fieldname": "is_default",
@@ -196,5 +207,5 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "title_field": "title",
-  "modified": "2026-10-27 12:00:00.000000"
+  "modified": "2026-11-02 12:00:00.000000"
 }

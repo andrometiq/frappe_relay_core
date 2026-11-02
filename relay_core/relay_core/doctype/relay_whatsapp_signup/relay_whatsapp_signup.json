@@ -1,0 +1,200 @@
+{
+  "doctype": "DocType",
+  "name": "Relay WhatsApp Signup",
+  "module": "Relay Core",
+  "autoname": "field:session_id",
+  "naming_rule": "By fieldname",
+  "engine": "InnoDB",
+  "title_field": "phone_number",
+  "track_changes": 1,
+  "field_order": [
+    "session_id",
+    "flow",
+    "flow_actual",
+    "status",
+    "step",
+    "error_code",
+    "error_message",
+    "retryable",
+    "column_break_number",
+    "channel",
+    "hub_channel",
+    "phone_number",
+    "waba_id",
+    "payment_method_ready",
+    "coexistence_section",
+    "contacts_status",
+    "history_status",
+    "history_progress",
+    "people_section",
+    "started_by",
+    "completed_at",
+    "session_data"
+  ],
+  "fields": [
+    {
+      "fieldname": "session_id",
+      "fieldtype": "Data",
+      "label": "Session",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "flow",
+      "fieldtype": "Select",
+      "label": "Number type",
+      "options": "new\ncoexistence\nmigrate",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "flow_actual",
+      "fieldtype": "Select",
+      "label": "Number type from Meta",
+      "options": "\nnew\ncoexistence\nmigrate",
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "options": "Started\nWaiting for Meta\nSetting up\nCompleted\nCancelled\nFailed\nExpired\nSuperseded",
+      "default": "Started",
+      "read_only": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "step",
+      "fieldtype": "Data",
+      "label": "Step",
+      "read_only": 1
+    },
+    {
+      "fieldname": "error_code",
+      "fieldtype": "Data",
+      "label": "Error code",
+      "read_only": 1
+    },
+    {
+      "fieldname": "error_message",
+      "fieldtype": "Small Text",
+      "label": "Error",
+      "read_only": 1
+    },
+    {
+      "fieldname": "retryable",
+      "fieldtype": "Check",
+      "label": "Can retry",
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_break_number",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "channel",
+      "fieldtype": "Link",
+      "label": "Channel",
+      "options": "Relay Channel",
+      "read_only": 1
+    },
+    {
+      "fieldname": "hub_channel",
+      "fieldtype": "Data",
+      "label": "Hub channel",
+      "read_only": 1
+    },
+    {
+      "fieldname": "phone_number",
+      "fieldtype": "Data",
+      "label": "Phone number",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "waba_id",
+      "fieldtype": "Data",
+      "label": "WhatsApp Business Account",
+      "read_only": 1
+    },
+    {
+      "fieldname": "payment_method_ready",
+      "fieldtype": "Check",
+      "label": "Payment method added",
+      "read_only": 1
+    },
+    {
+      "fieldname": "coexistence_section",
+      "fieldtype": "Section Break",
+      "label": "Business app copy",
+      "depends_on": "eval:doc.flow_actual=='coexistence'"
+    },
+    {
+      "fieldname": "contacts_status",
+      "fieldtype": "Select",
+      "label": "Contacts",
+      "options": "\nPending\nRequested\nDone\nFailed",
+      "read_only": 1
+    },
+    {
+      "fieldname": "history_status",
+      "fieldtype": "Select",
+      "label": "Chat history",
+      "options": "\nPending\nRequested\nImporting\nDone\nDeclined\nFailed",
+      "read_only": 1
+    },
+    {
+      "fieldname": "history_progress",
+      "fieldtype": "Percent",
+      "label": "Chat history progress",
+      "read_only": 1
+    },
+    {
+      "fieldname": "people_section",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "started_by",
+      "fieldtype": "Link",
+      "label": "Started by",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completed_at",
+      "fieldtype": "Datetime",
+      "label": "Completed at",
+      "read_only": 1
+    },
+    {
+      "fieldname": "session_data",
+      "fieldtype": "JSON",
+      "label": "Hub session",
+      "read_only": 1,
+      "hidden": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "modified": "2026-11-02 12:00:00.000000"
+}
