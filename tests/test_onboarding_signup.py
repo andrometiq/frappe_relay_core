@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from channel_fakes import FakeSite
 from relay_core.automation import projection
 from relay_core.hub import HubError
-from relay_core.onboarding import api, details, progress, signup
+from relay_core.onboarding import api, details, progress, signup, test_message
 from relay_core.onboarding.messages import OnboardingError, text
 
 SESSION = 'sus_' + 'a' * 32
@@ -274,6 +274,43 @@ class BusinessNameTests(unittest.TestCase):
         self.assertEqual(self.name('Acme Pvt Ltd', 'Frappe'), 'Acme Pvt Ltd')
         self.assertEqual(self.name(None, 'Acme ERP'), 'Acme ERP')
         self.assertEqual(self.name(None, 'Frappe'), 'acme.example.com')
+
+
+class TestMessageTests(unittest.TestCase):
+    """A new site has no business records, so the test message starts an unlinked chat."""
+    def setUp(self):
+        self.endpoints = {'RELAY-CON-1': 'RCE-1'}
+        self.fake = SimpleNamespace(throw=Mock(side_effect=ValueError), db=SimpleNamespace(
+            exists=Mock(return_value=True),
+            get_value=Mock(side_effect=lambda doctype, filters, field: self.endpoints.get(filters['relay_contact']))))
+        self.start = Mock(return_value={'action': 'A-1', 'status': 'Submitted', 'message': 'MSG-1'})
+        for item in (patch.object(test_message, 'frappe', self.fake), patch.object(test_message, 'connection_value', return_value='acme'),
+                     patch('relay_core.messaging_api.destination_number', return_value='919876500001'),
+                     patch('relay_core.onboarding.coexistence.contact_for', return_value='RELAY-CON-1'),
+                     patch('relay_core.contact_lifecycle.endpoint_key', return_value='key'),
+                     patch('relay_core.conversation_start.send', self.start)):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_sends_hello_world_without_a_business_record_and_a_double_click_is_one_message(self):
+        self.assertEqual(test_message.send('Acme-1', '+91 98765 00001')['message'], 'MSG-1')
+        test_message.send('Acme-1', '+91 98765 00001')
+        first, second = self.start.call_args_list
+        self.assertEqual(first.args[:4], ('RELAY-CON-1', 'RCE-1', 'template', {'name': 'hello_world', 'language': 'en_US', 'components': []}))
+        self.assertEqual(first.args[4], second.args[4])
+        self.assertEqual(len(first.args), 5)
+
+    def test_another_sites_or_a_disabled_channel_is_refused(self):
+        self.fake.db.exists.return_value = False
+        with self.assertRaises(ValueError):
+            test_message.send('Other-1', '+91 98765 00001')
+        self.start.assert_not_called()
+
+    def test_a_number_on_two_contacts_is_refused(self):
+        self.endpoints.clear()
+        with self.assertRaises(ValueError):
+            test_message.send('Acme-1', '+91 98765 00001')
+        self.start.assert_not_called()
 
 
 if __name__ == '__main__':
