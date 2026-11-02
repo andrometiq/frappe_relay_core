@@ -28,6 +28,8 @@ A type without group fields shows its records directly.
 
 Empty field values appear as Not set.
 
+Inbox group and record tiles show the newest activity first. Tiles without activity come last, in name order. Team pickers keep name order.
+
 Inbox type and group badges count records with unread messages; record badges count unread messages.
 
 Inbox filters apply to the records and counts in each group.

@@ -57,17 +57,17 @@ class ExecutionContexts(unittest.TestCase):
         from unittest.mock import Mock, patch
         from types import SimpleNamespace
         from relay_core.flows import actions
-        from relay_core.ai.actions import CREATE_DRAFT, REPLY
-        hooks = {'create_draft': CREATE_DRAFT, 'reply': REPLY,
-                 'flow': dict(REPLY, contexts=['flow', 'ai'])}
+        from relay_core.ai.actions import REPLY
+        hooks = {'reply': REPLY, 'flow': dict(REPLY, contexts=['flow', 'ai'])}
         with patch.object(actions.frappe, 'get_hooks', return_value=hooks), patch.object(actions, 'require_access'), \
                 patch.object(actions, 'readable_contact'):
             self.assertEqual(set(actions.definitions()), set(hooks))
             self.assertEqual(set(actions.definitions(context='flow')), {'flow'})
             self.assertEqual([row['key'] for row in actions.catalog()], ['flow'])
             with self.assertRaises(ValueError):
-                actions.execute(SimpleNamespace(relay_contact='Sim Contact'), {'action': 'create_draft'}, {}, 'key')
+                actions.execute(SimpleNamespace(relay_contact='Sim Contact'), {'action': 'reply'}, {}, 'key')
         # Frappe list-merging must preserve a one-item context declaration.
-        with patch.object(actions.frappe, 'get_hooks', return_value={'reply': dict(REPLY, contexts=['ai'])}):
+        with patch.object(actions.frappe, 'get_hooks', return_value={'reply': dict(REPLY, contexts=['ai'])}), \
+                patch('relay_core.ai.capabilities.packs', return_value=[]):
             self.assertEqual(actions.definitions(context='flow'), {})
             self.assertIn('reply', actions.definitions(context='ai'))

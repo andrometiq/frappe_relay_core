@@ -5,7 +5,7 @@ app_description = "Multi-channel business communication"
 app_email = "support@andrometiq.com"
 app_license = "MIT"
 before_install = "relay_core.permissions.install_roles"
-after_migrate = "relay_core.permissions.after_migrate"
+after_migrate = ["relay_core.permissions.after_migrate", "relay_core.ai.capabilities.sync"]
 after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
 
@@ -21,7 +21,9 @@ scheduler_events = {
         "*/10 * * * *": ["relay_core.scheduled_jobs.sync_whatsapp_templates"],
         "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
-    "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels"],
+    "hourly": ["relay_core.scheduled_jobs.expire_approvals"],
+    "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels",
+              "relay_core.scheduled_jobs.purge_ai_payloads"],
 }
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
@@ -37,8 +39,11 @@ add_to_apps_screen = [{"name":"relay_core","title":"Relay Core",
 # Registered adapters are explicit; case definitions remain Desk configuration.
 from relay_core.flows.retailer import ACTION as _retailer_action
 relay_flow_actions = {'retailer.create_follow_up': _retailer_action}
-from relay_core.ai.actions import CREATE_DRAFT as _draft_action, REPLY as _reply_action
-relay_flow_actions.update({'create_draft': _draft_action, 'reply': _reply_action})
+from relay_core.ai.actions import REPLY as _reply_action
+relay_flow_actions['reply'] = _reply_action
+# AI capability packs: a dotted path per app, because get_hooks would merge nested dict values into lists.
+relay_ai_capabilities = 'relay_core.ai.builtin_capabilities.CAPABILITIES'
+relay_ai_capability_prefix = 'erpnext'
 
 # Realtime invalidations contain no record payload; browser reads recheck permissions.
 from relay_core.realtime import RESOURCES as _realtime_resources

@@ -1,7 +1,6 @@
-"""Fixed read contracts: model arguments can only narrow a business scope."""
+"""Capability reads: model arguments can only narrow a business scope."""
 import json
 import hashlib
-import re
 from contextlib import contextmanager
 import frappe
 
@@ -19,62 +18,102 @@ def as_user(user):
 
 
 def contracts(skill):
-    value = json.loads(skill.allowed_tools or '[]')
-    if not isinstance(value, list) or len(value) > 12:
-        raise ValueError('Choose at most 12 read tools')
-    names = set()
-    for row in value:
-        required = {'name', 'method', 'doctype', 'fields', 'scope_field'}
-        if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'identity_anchor', 'identity_fields', 'company_field', 'report'}:
-            raise ValueError('Each tool needs name, method, doctype, fields and scope_field')
-        if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', row['name']) or row['name'] in names:
-            raise ValueError('Tool names must be distinct lowercase identifiers')
-        names.add(row['name'])
-        if row.get('report'):
-            from relay_core.ai.reports import validate
-            validate(row, skill.business_doctype)
-        if row['method'] not in ('get_doc', 'get_list'):
-            raise ValueError('Only get_doc and get_list are allowed')
-        from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
-        meta = get_readable_meta(row['doctype'])
-        fields = row['fields']
-        if not isinstance(fields, list) or not 1 <= len(fields) <= 20:
-            raise ValueError('Choose 1–20 readable fields')
-        for name in fields:
-            field = meta.get_field(name)
-            if name != 'name' and (not field or field.fieldtype in ('Table', 'Table MultiSelect', 'Password', 'Code', 'HTML')):
-                raise ValueError('Only scalar fields are allowed')
-            if is_sensitive_field(name):
-                raise ValueError('Sensitive fields are unavailable')
-        scope = row['scope_field']
-        if row['doctype'] == skill.business_doctype and scope == 'name':
-            continue
-        field = meta.get_field(scope)
-        if not field or not (field.fieldtype == 'Link' and field.options == skill.business_doctype or field.fieldtype == 'Dynamic Link'):
-            raise ValueError('Scope must link directly to the skill business type')
-    return value
+    """The skill's capability rows as approved read manifests for its business type."""
+    rows = json.loads(skill.allowed_tools or '[]')
+    if not isinstance(rows, list) or len(rows) > 12:
+        raise ValueError('Choose at most 12 read capabilities')
+    if any(not isinstance(row, dict) or set(row) != {'capability'} or not isinstance(row['capability'], str)
+           for row in rows):
+        raise ValueError('Each read reference names one capability')
+    keys = [row['capability'] for row in rows]
+    if len(set(keys)) != len(keys):
+        raise ValueError('Read capabilities must be distinct')
+    from relay_core.ai.capabilities import active
+    manifests = [active(key) for key in keys]
+    if any(row['kind'] != 'read' or row['business_doctype'] != skill.business_doctype for row in manifests):
+        raise ValueError('Choose read capabilities for the skill business type')
+    return manifests
 
 
 class PrivacyDenied(ValueError):
     """A requested identity contradicts the authenticated business scope."""
 
 
+def fixed_filters(contract, business, company):
+    """The business, company and pack filters a model can never change."""
+    rule = contract['scope']
+    filters = dict(rule.get('fixed', {}), **{rule['business_field']: business[1]})
+    if rule['company']['kind'] == 'company_field':
+        filters[rule['company']['field']] = company
+    return filters
+
+
+def own_record_arguments(contract, arguments, business):
+    """The model never sees the sender's record name, so a read of that record takes it from the scope."""
+    if (contract['operation'] == 'get_doc' and contract['scope']['business_field'] == 'name'
+            and isinstance(arguments, dict) and 'name' not in arguments):
+        # Models send the list shape (empty filters, a limit) for a one-record read.
+        if set(arguments) <= {'filters', 'limit'} and not arguments.get('filters'):
+            return {'name': business[1]}
+        return dict(arguments, name=business[1])
+    return arguments
+
+
 def check_identity_arguments(contract, arguments, business, scope):
     """Reject another party before even announcing a search; reads still enforce all fixed filters."""
-    fixed = {contract['scope_field']: business[1]}
-    if scope:
-        fixed[contract.get('company_field', 'company')] = scope['company']
-        if contract['doctype'] == business[0]:
-            identity = contract.get('identity_fields', {}).get(scope['provider'])
-            if identity:
-                fixed[identity] = scope['endpoint']
-    if contract['method'] == 'get_doc':
-        if contract['scope_field'] == 'name' and arguments.get('name') != business[1]:
+    if not isinstance(arguments, dict):
+        return
+    if contract['operation'] == 'get_doc':
+        if contract['scope']['business_field'] == 'name' and arguments.get('name') != business[1]:
             raise PrivacyDenied('Another business record was requested')
-    else:
-        for key, value in (arguments.get('filters') or {}).items():
-            if key in fixed and value != fixed[key]:
-                raise PrivacyDenied('Another business identity was requested')
+        return
+    fixed = fixed_filters(contract, business, scope and scope['company'])
+    filters = arguments.get('filters')
+    for key, value in (filters.items() if isinstance(filters, dict) else ()):
+        if key in fixed and value not in (fixed[key], ['=', fixed[key]]):
+            raise PrivacyDenied('Another business identity was requested')
+
+
+def company_neutral(doctype):
+    """A pack without a company field reads only listed types on a site without Company or with one Company."""
+    from relay_core.permissions import has_companies
+    listed = frappe.db.get_single_value('Relay Settings', 'company_neutral_types') or ''
+    if doctype not in {line.strip() for line in listed.splitlines()} or has_companies() and frappe.db.count('Company') != 1:
+        raise ValueError('This business type is not company neutral')
+
+
+def is_company_scoped(skill) -> bool:
+    """On a site with Company, a skill needs the channel company unless all its reads are company neutral and it
+    declares no draft action."""
+    from relay_core.permissions import has_companies
+    if not has_companies():
+        return False
+    kinds = {row['scope']['company']['kind'] for row in contracts(skill)}
+    actions = json.loads(skill.get('allowed_actions') or '[]')
+    return kinds != {'company_neutral'} or any(not isinstance(row, dict) or row.get('action') != 'reply' for row in actions)
+
+
+def query(contract, arguments, fixed):
+    """Model arguments can only narrow the fixed scope, inside the pack's filters and limit."""
+    from relay_core.automation.contracts import validate_filters
+    filters = dict(fixed)
+    if contract['operation'] == 'get_doc':
+        if (set(arguments) != {'name'} or not isinstance(arguments['name'], str)
+                or not 1 <= len(arguments['name']) <= 140):
+            raise ValueError('A document name is required')
+        if filters.get('name', arguments['name']) != arguments['name']:
+            raise ValueError('Document is outside the business')
+        return dict(filters, name=arguments['name']), 1
+    if set(arguments) - {'filters', 'limit'}:
+        raise ValueError('Unexpected arguments')
+    for key, value in validate_filters(contract, arguments.get('filters') or {}).items():
+        if key in filters and value != filters[key]:
+            raise ValueError('Invalid filter value')
+        filters[key] = value
+    limit = arguments.get('limit', contract['limit'])
+    if type(limit) is not int or not 1 <= limit <= contract['limit']:
+        raise ValueError('Invalid row limit')
+    return filters, limit
 
 
 class Reader:
@@ -84,7 +123,7 @@ class Reader:
         self.failed = False
         self.private = False
         self.evidence = []
-        self.ledger_results = []
+        self.results = {}
         self.authorize = authorize
 
     def read(self, contract, **arguments):
@@ -96,8 +135,8 @@ class Reader:
             with as_user(self.user):
                 result = self._read(contract, arguments)
                 self.authorize(contract, arguments)
-                self.evidence.append({'tool': contract['name'], 'arguments': arguments,
-                    'scope': fingerprint(self.scope), 'digest': fingerprint(result)})
+                self.evidence.append({'tool': contract['key'], 'arguments': arguments,
+                    'scope': fingerprint(self.scope), 'digest': fingerprint(self.results[contract['key']])})
                 return result
         except PrivacyDenied:
             self.private = True
@@ -108,79 +147,38 @@ class Reader:
             raise ValueError('Business data is unavailable; hand off to a person') from None
 
     def _read(self, contract, arguments):
+        """Full rows stay in results for the renderer; the model sees only model fields."""
         from frappe_tools.ai.tools import get_readable_meta, get_readable_columns
-        from relay_core.ai.configuration import read_contracts
+        from relay_core.ai.identity import validate
+        from relay_core.ai.render import visible_rows
         from relay_core.business_access import scoped_document
         self.check_scope()
-        if (contract not in read_contracts(self.skill, self.scope['provider'])
-                or not {'identity_anchor', 'identity_fields', 'company_field'} <= contract.keys()
-                or self.business[0] != self.skill.business_doctype):
+        if contract not in contracts(self.skill) or self.business[0] != self.skill.business_doctype:
             raise ValueError('Tool is outside the skill')
-        doctype, field = contract['doctype'], contract['scope_field']
-        meta = get_readable_meta(doctype)
-        columns = get_readable_columns(meta)
-        if not set(contract['fields']).issubset(columns):
+        validate(contract, self.scope, self.business)
+        doctype = contract['doctype']
+        fields = [row['name'] for row in contract['fields'] if row['model'] or row['customer']]
+        if not set(fields).issubset(get_readable_columns(get_readable_meta(doctype))):
             raise ValueError('Unreadable fields')
-        identity_field = contract['identity_fields'][self.scope['provider']]
-        anchor_filters = {identity_field: self.scope['endpoint']}
-        scoped_document(*self.business, anchor_filters)
-        filters = {field: self.business[1]}
-        filters[contract['company_field']] = self.scope['company']
-        if doctype == self.business[0]:
-            filters[identity_field] = self.scope['endpoint']
-        scope_meta = meta.get_field(field)
-        if scope_meta and scope_meta.fieldtype == 'Dynamic Link':
-            filters[scope_meta.options] = self.business[0]
-        if doctype == 'GL Entry':
-            filters['is_cancelled'] = 0
-        fixed = dict(filters)
-        if contract['method'] == 'get_doc':
-            if (set(arguments) != {'name'} or not isinstance(arguments['name'], str)
-                    or not 1 <= len(arguments['name']) <= 140):
-                raise ValueError('A document name is required')
-            # get_list enforces query hooks as well as get_doc's document hooks.
-            filters['name'] = arguments['name']
-            if field == 'name' and arguments['name'] != self.business[1]:
-                raise ValueError('Document is outside the business')
-            limit = 1
-        else:
-            if set(arguments) - {'filters', 'limit'}:
-                raise ValueError('Unexpected arguments')
-            extra = arguments.get('filters') or {}
-            if not isinstance(extra, dict) or set(extra) - set(contract['fields']):
-                raise ValueError('Invalid filters')
-            for key, value in extra.items():
-                valid = isinstance(value, str) and len(value) <= 140
-                if isinstance(value, list) and len(value) == 2 and value[0] in ('=', '>=', '<=', 'between'):
-                    operand = value[1]
-                    valid = (isinstance(operand, str) and len(operand) <= 140 if value[0] != 'between' else
-                        isinstance(operand, list) and len(operand) == 2 and all(isinstance(v, str) and len(v) <= 140 for v in operand))
-                if not valid or key in filters and value != filters[key]:
-                    raise ValueError('Invalid filter value')
-                filters[key] = value
-            limit = arguments.get('limit', 20)
-            if type(limit) is not int or not 1 <= limit <= 20:
-                raise ValueError('Invalid row limit')
-        ledger = doctype == 'GL Entry' and contract['method'] == 'get_list' and {'debit', 'credit'}.issubset(contract['fields'])
-        fields = list(contract['fields'])
-        if ledger and 'company' not in fields:
-            raise ValueError('Ledger company must be a declared readable field')
-        names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit + int(ledger), order_by='name asc')
-        if not names:
+        if contract['scope']['company']['kind'] == 'company_neutral':
+            company_neutral(doctype)
+        fixed = fixed_filters(contract, self.business, self.scope['company'])
+        filters, limit = query(contract, arguments, fixed)
+        names = frappe.get_list(doctype, filters=filters, fields=['name'], page_length=limit + 1,
+                                order_by=contract['order_by'])
+        if not names and (contract['operation'] == 'get_doc' or contract['empty_result'] == 'handoff'):
             raise ValueError('No readable business data; hand off for review')
-        result = []
+        rows = []
         for row in names[:limit]:
             doc = scoped_document(doctype, row.name, fixed, fields)
-            result.append({key: doc.get(key) for key in fields})
+            rows.append({key: doc.get(key) for key in fields})
         self.check_scope()
-        scoped_document(*self.business, anchor_filters)
-        if contract['method'] == 'get_doc':
-            return result[0]
-        if ledger:
-            from relay_core.ai.ledger import summarize
-            result = summarize(result, len(names) > limit)
-            self.ledger_results.append(result)
-        return result
+        validate(contract, self.scope, self.business)
+        self.results[contract['key']] = dict(rows=rows, truncated=len(names) > limit)
+        model = visible_rows(contract, rows, 'model')
+        if contract['operation'] == 'get_doc':
+            return model[0]
+        return dict(rows=model, truncated=len(names) > limit)
 
     def check_scope(self):
         from relay_core.ai.service import context
@@ -197,12 +195,12 @@ def fingerprint(value):
 
 
 def recheck(skill, user, business, evidence, scope=None, *, authorize=None):
-    allowed = {row['name']: row for row in contracts(skill)}
+    allowed = {row['key']: row for row in contracts(skill)}
     reader = Reader(skill, user, business, scope, authorize=authorize)
     reader.check_scope()
     for entry in evidence:
         if entry.get('scope') != fingerprint(scope):
             raise ValueError('Read scope changed before delivery')
-        result = reader.read(allowed[entry['tool']], **entry['arguments'])
-        if fingerprint(result) != entry['digest']:
+        reader.read(allowed[entry['tool']], **entry['arguments'])
+        if fingerprint(reader.results[entry['tool']]) != entry['digest']:
             raise ValueError('Business data changed before delivery')

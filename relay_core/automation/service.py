@@ -410,8 +410,9 @@ def recover():
         else:
             out.status = 'Uncertain'
         internal_save(out)
-    for row in frappe.get_all('Relay Automation Run', filters={'status': ['in', ['Pending', 'Deciding']]}, fields=['name'], limit_page_length=20, order_by='creation asc'):
-        frappe.enqueue('relay_core.automation.service.process', name=row.name, queue=QUEUE, timeout=180)
+    from relay_core.ai.service import recoverable_runs
+    for name in recoverable_runs():
+        frappe.enqueue('relay_core.automation.service.process', name=name, queue=QUEUE, timeout=180)
     for row in frappe.get_all('Relay Automation Outbox', filters={'status': 'Pending'}, fields=['name'], limit_page_length=20, order_by='creation asc'):
         frappe.enqueue('relay_core.automation.service.dispatch', name=row.name, queue=QUEUE, timeout=90)
 

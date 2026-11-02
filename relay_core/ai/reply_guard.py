@@ -18,12 +18,16 @@ class ReplyBlocked(ValueError):
         super().__init__(REASON)
 
 
-def phones(text):
+def phone_matches(text):
+    """Phone-like runs of 10–15 digits, at their positions in `text`; dates, document IDs and money excluded."""
     text = ''.join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in text)
     for pattern in (DOCUMENT, DATE, MONEY):
-        text = pattern.sub('|', text)
-    return {digits for match in PHONE.finditer(text)
-            if 10 <= len(digits := re.sub(r'\D', '', match[0])) <= 15}
+        text = pattern.sub(lambda found: '|' * len(found[0]), text)
+    return [match for match in PHONE.finditer(text) if 10 <= len(re.sub(r'\D', '', match[0])) <= 15]
+
+
+def phones(text):
+    return {re.sub(r'\D', '', match[0]) for match in phone_matches(text)}
 
 
 def contacts(*evidence):
@@ -41,31 +45,50 @@ def contacts(*evidence):
     return sorted(found)
 
 
-def copied(reply, sources):
+def record_names(*rows):
+    """Text values of authorized read rows; a Customer or Supplier named there may be repeated."""
+    found = set()
+    for value in rows:
+        if isinstance(value, dict):
+            found.update(record_names(*value.values()))
+        elif isinstance(value, (list, tuple)):
+            found.update(record_names(*value))
+        elif isinstance(value, str) and len(value) <= 140:
+            found.add(value)
+    return sorted(found)
+
+
+def copied(reply, sources, shortest=12):
+    """A copied 12-word run of a source; a source of `shortest` to 12 words counts when copied whole."""
     def words_of(text):
         return ''.join(char if char.isalnum() or unicodedata.category(char).startswith('M') else ' '
                        for char in text.casefold()).split()
-    words = words_of(reply)
-    runs = {tuple(words[i:i + 12]) for i in range(len(words) - 11)}
+    reply_words = words_of(reply)
     for source in sources:
         words = words_of(source or '')
-        if any(tuple(words[i:i + 12]) in runs for i in range(len(words) - 11)):
+        size = min(12, len(words))
+        if size < shortest:
+            continue
+        runs = {tuple(reply_words[i:i + size]) for i in range(len(reply_words) - size + 1)}
+        if any(tuple(words[i:i + size]) in runs for i in range(len(words) - size + 1)):
             return True
     return False
 
 
-def check(reply, skill, scope, *, evidence=(), knowledge=''):
+def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
     """Raise without including leaked text. Allow authorized evidence and Company contacts.
 
-    Customer/Supplier checks cover exact capitalised primary-key names up to six words.
+    Customer/Supplier checks cover exact capitalised primary-key names up to six words; `read_names` from
+    authorized reads are allowed.
     Unindexed display names, lowercase names and other business DocTypes are not scanned.
     Numeric strings of 10–15 digits, excluding dates, document IDs and money, may be phones.
     """
-    from relay_core.ai.adapter import PRIVACY_REPLY, SYSTEM_RULES
+    from relay_core.ai.adapter import DECLINE_REPLIES, SYSTEM_RULES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
-    if not reply or reply in (PRIVACY_REPLY, ACKNOWLEDGEMENT):
+    if not reply or reply in (*DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
         return
-    if copied(reply, (SYSTEM_RULES, skill.get('instructions'), skill.get('reply_style'), knowledge)):
+    # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
+    if copied(reply, (SYSTEM_RULES, knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
         raise ReplyBlocked()
     emails = {value.casefold() for value in EMAIL.findall(reply)}
     numbers = phones(reply)
@@ -100,7 +123,7 @@ def check(reply, skill, scope, *, evidence=(), knowledge=''):
             continue
         found = frappe.get_all(doctype, filters={'name': ['in', sorted(names)]}, pluck='name',
                                limit_page_length=len(names))
-        if any((doctype, name) not in own and name not in companies for name in found):
+        if any((doctype, name) not in own and name not in companies and name not in read_names for name in found):
             raise ReplyBlocked()
 
 
@@ -113,4 +136,5 @@ def check_delivery(run, skill, message, reply):
     knowledge = prompt((message.business_doctype, message.business_name), company)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
         contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge)
+        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge,
+        read_names=set(decision.get('reply_names', [])))

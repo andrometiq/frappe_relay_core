@@ -120,8 +120,8 @@ def contact_permission(doc, user=None, permission_type=None):
 
 
 def message_permission(doc, user=None, permission_type=None):
-    from relay_core.business_access import message_allowed
-    return assignment_allowed(doc.relay_contact, user) and message_allowed(doc,user)
+    from relay_core.business_access import message_allowed, own_message
+    return message_allowed(doc, user) and (own_message(doc, user) or assignment_allowed(doc.relay_contact, user))
 
 
 def assignment_condition(user=None, *, message=False):

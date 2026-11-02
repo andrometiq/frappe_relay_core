@@ -1,6 +1,7 @@
 """Pure validation at the untrusted model boundary; no model-authored tools."""
 import hashlib
 import json
+import math
 from datetime import date
 
 CATEGORIES = ('Query', 'Payment evidence', 'Support', 'Other')
@@ -36,46 +37,71 @@ def validate_decision(value, allowed_replies, *, allow_ticket, allow_report=Fals
 
 
 def action_key(message, slot):
-    if slot not in ('ticket', 'reply', 'search', 'handoff', 'event_reply_0', 'event_reply_1', 'event_reply_2', 'event_reply_3'):
+    if slot not in ('ticket', 'reply', 'search', 'handoff', 'disclosure', 'approval_notice',
+                    'event_reply_0', 'event_reply_1', 'event_reply_2', 'event_reply_3'):
         raise ValueError('Unknown action slot')
     return 'relay_ai_' + event_key(message) + '_' + slot
 
 
 def validate_search(value, references):
-    """A declaration can only narrow one owner-declared read contract."""
-    if not isinstance(value, dict) or set(value) != {'purpose', 'reference', 'fields', 'arguments'}:
+    """A declaration can only narrow one approved capability; Core sets `fields` from the approved pack."""
+    from relay_core.ai.render import field_names
+    if not isinstance(value, dict) or not {'purpose', 'reference', 'arguments'} <= set(value) <= {
+            'purpose', 'reference', 'fields', 'arguments'}:
         raise ValueError('Invalid search declaration')
     if not isinstance(value['purpose'], str) or not 1 <= len(value['purpose'].strip()) <= 300:
         raise ValueError('State the search purpose')
-    contract = next((row for row in references if row['name'] == value['reference']), None)
-    if not contract or value['fields'] != contract['fields']:
+    arguments = value['arguments']
+    if isinstance(arguments, dict) and 'fields' in arguments and 'fields' not in value:
+        # Models often nest the field list in the arguments; it gets the same check as a top-level list.
+        value = dict(value, fields=arguments['fields'], arguments={k: v for k, v in arguments.items() if k != 'fields'})
+    contract = next((row for row in references if row['key'] == value['reference']), None)
+    fields = field_names(contract, 'model') if contract else []
+    named = value.get('fields', fields)
+    if (not contract or not isinstance(named, list) or not all(isinstance(name, str) for name in named)
+            or not set(named) <= set(fields)):
         raise ValueError('Search fields must match the declared reference')
+    value = dict(value, fields=fields)
     args = value['arguments']
     if not isinstance(args, dict):
         raise ValueError('Invalid search arguments')
-    if contract['method'] == 'get_doc':
+    if contract['operation'] == 'get_doc':
         if set(args) != {'name'} or not isinstance(args['name'], str) or not 1 <= len(args['name']) <= 140:
             raise ValueError('Declare a document name')
     else:
-        if set(args) - {'filters', 'limit'} or not isinstance(args.get('filters', {}), dict):
+        if set(args) - {'filters', 'limit'}:
             raise ValueError('Invalid search filters')
-        if type(args.get('limit', 20)) is not int or not 1 <= args.get('limit', 20) <= 20:
+        limit = args.get('limit', contract['limit'])
+        if type(limit) is not int or not 1 <= limit <= contract['limit']:
             raise ValueError('Invalid search limit')
-        for key, operand in args.get('filters', {}).items():
-            if key not in contract['fields']:
-                raise ValueError('Undeclared search field')
-            valid = isinstance(operand, str) and len(operand) <= 140
-            if isinstance(operand, list) and len(operand) == 2 and operand[0] in ('=', '>=', '<=', 'between'):
-                bound = operand[1]
-                valid = (isinstance(bound, str) and len(bound) <= 140 if operand[0] != 'between' else
-                    isinstance(bound, list) and len(bound) == 2 and all(isinstance(v, str) and len(v) <= 140 for v in bound))
-            if not valid:
-                raise ValueError('Invalid search filter')
-    if 'Ledger' in contract['doctype'] or contract['doctype'] == 'GL Entry':
-        bound = args.get('filters', {}).get('posting_date')
-        if not isinstance(bound, list) or len(bound) != 2 or bound[0] != 'between' or not isinstance(bound[1], list) or len(bound[1]) != 2:
-            raise ValueError('Ledger searches require an explicit date range')
-        start, end = bound[1]
-        if date.fromisoformat(start).isoformat() != start or date.fromisoformat(end).isoformat() != end or start > end:
-            raise ValueError('Invalid ledger date range')
+        validate_filters(contract, args.get('filters', {}))
     return json.loads(canonical(value))
+
+
+def validate_filters(contract, filters):
+    """Model filters use only the capability's declared fields, operators and value types."""
+    specs = contract['filters']
+    if not isinstance(filters, dict) or set(filters) - set(specs):
+        raise ValueError('Undeclared search filter')
+    if any(spec.get('required') and key not in filters for key, spec in specs.items()):
+        raise ValueError('A required search filter is missing')
+    for key, value in filters.items():
+        operator, operand = value if isinstance(value, list) and len(value) == 2 else ('=', value)
+        operands = operand if operator == 'between' and isinstance(operand, list) and len(operand) == 2 else [operand]
+        if (operator not in specs[key]['operators'] or (operator == 'between') != (len(operands) == 2)
+                or not all(is_filter_value(specs[key], item) for item in operands) or operands[0] > operands[-1]):
+            raise ValueError('Invalid search filter')
+    return filters
+
+
+def is_filter_value(spec, value):
+    if spec['type'] == 'number':
+        return type(value) in (int, float) and math.isfinite(value)
+    if not isinstance(value, str) or len(value) > spec.get('max_length', 140):
+        return False
+    if spec['type'] == 'date':
+        try:
+            return date.fromisoformat(value).isoformat() == value
+        except ValueError:
+            return False
+    return value in spec.get('enum', [value])

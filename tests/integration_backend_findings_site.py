@@ -214,7 +214,7 @@ def main():
         frappe.set_user('Administrator')
         with configured(f): runtime_cases(f, flow, sender)
         concurrent_skills(f, model)
-        legacy_ledger(f)
+        capability_rows(f)
         print('PASS native contact discovery and cross-business notification recipient deny; long identifiers inserted intact')
     finally:
         if server:server.shutdown();server.server_close()
@@ -377,30 +377,18 @@ def runtime_cases(f, flow, sender):
     print('PASS durable fixed-email intent survives job loss and crash without duplicate journal admission')
 
 
-def legacy_ledger(f):
+def capability_rows(f):
+    """Old persisted tool rows are refused; the capability patch converts them to approved pack keys."""
     import frappe
-    from channel_site_fixtures import user
-    from relay_core.ai.tools import Reader, contracts
-    from relay_core.ai.samples import LEDGER_TOOL
-    frappe.set_user('Administrator')
-    actor=user('relay-be-ledger-'+f.stamp+'@example.invalid',manager=True)
-    frappe.get_doc('User',actor).add_roles('Accounts User')
-    company=frappe.db.get_value('Company',{},'name')
-    row=frappe.get_doc(dict(doctype='GL Entry',name='LOCAL-BE-LEDGER-'+f.stamp,company=company,
-        party_type='Supplier',party=f.supplier.name,debit=1250,credit=250,is_cancelled=0,
-        posting_date=frappe.utils.nowdate(),voucher_type='Journal Entry',voucher_no='LOCAL-BE-'+f.stamp,
-        remarks='Local-only old ledger contract test'))
-    row.db_insert()
-    old_contract=dict(LEDGER_TOOL,fields=[field for field in LEDGER_TOOL['fields'] if field!='company'])
-    skill=frappe.get_doc(dict(doctype='Relay AI Skill',name='LOCAL-BE-OLD-LEDGER-'+f.stamp,
-        title='Local old ledger contract',enabled=0,business_doctype='Supplier',allowed_tools=json.dumps([old_contract])))
-    skill.db_insert();skill=frappe.get_doc('Relay AI Skill',skill.name)
-    result=Reader(skill,actor,('Supplier',f.supplier.name)).read(contracts(skill)[0])
-    assert result['totals']=={'debit':'1250.0','credit':'250.0','net_debit':'1000.0'}
-    assert result['rows'][0]['company']==company
-    assert 'company' not in json.loads(skill.allowed_tools)[0]['fields']
-    frappe.db.rollback()
-    print('PASS old persisted ledger contract reads permission-checked company and non-zero totals')
+    from relay_core.ai.tools import contracts
+    skill=frappe._dict(business_doctype='Supplier',allowed_tools=json.dumps([dict(name='ledger',method='get_list',
+        doctype='GL Entry',fields=['name','debit','credit'],scope_field='party')]))
+    try: contracts(skill)
+    except ValueError: pass
+    else: raise AssertionError('Old tool rows must not read business data')
+    skill.allowed_tools=json.dumps([{'capability':'erpnext.supplier_ledger'}])
+    assert [row['key'] for row in contracts(skill)]==['erpnext.supplier_ledger']
+    print('PASS old persisted tool rows are refused; capability rows resolve to the approved pack')
 
 
 def concurrent_skills(f, model):
@@ -412,7 +400,7 @@ def concurrent_skills(f, model):
         skill=frappe.get_doc(dict(doctype='Relay AI Skill',title='Sim ' + ('Primary' if index == 0 else 'Backup') + ' Skill ' + f.stamp,enabled=0,
             channel=f.channels['WhatsApp'].name,business_doctype='Customer',ai_model=model.name,run_as_user=f.actor,
             handoff_owner=f.actor,mode='Shadow',daily_limit=10,instructions='Read this customer only.',
-            allowed_tools=json.dumps([dict(name='customer',method='get_doc',doctype='Customer',fields=['name'],scope_field='name')]))).insert()
+            allowed_tools=json.dumps([{'capability':'erpnext.customer_ledger'}]))).insert()
         names.append(skill.name)
     frappe.db.commit()
     def enable(name):

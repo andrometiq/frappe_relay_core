@@ -11,7 +11,7 @@ import sys
 from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
-from integration_ai_permissions_site import confine_writes
+from integration_ai_permissions_site import approved_pack, confine_writes
 from site_labels import run_label, phone
 
 SITES = os.environ['SITES_PATH']
@@ -28,6 +28,7 @@ def main():
     from werkzeug.test import Client
     from werkzeug.wrappers import Response
     from relay_core.ai import adapter, service as ai
+    from relay_core.ai.render import field_names
     from relay_core.ai.tools import Reader
     from relay_core.automation import service, queue
     from relay_core.automation.provenance import conversation_key
@@ -91,9 +92,8 @@ def main():
                 company=company.name,triage_owner=actor.name,enabled=1)).insert(set_name=sequential_name('channel'))
             frappe.get_doc(dict(doctype='Relay Contact Endpoint',channel=channel.name,endpoint=endpoint,
                                relay_contact=contact.name,verified=1)).insert()
-            contract = dict(name='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party',
-                fields=['name','company','posting_date','debit','credit'], identity_anchor='Supplier',
-                identity_fields={'WhatsApp':'alias'}, company_field='company')
+            from relay_core.ai.capabilities import active
+            contract = active('erpnext.supplier_ledger')
             raw('GL Entry','Search Debit',company=company.name,party_type='Supplier',party=supplier.name,
                 posting_date='2026-10-01',debit=1250,credit=0,is_cancelled=0)
             raw('GL Entry','Search Credit',company=company.name,party_type='Supplier',party=supplier.name,
@@ -101,7 +101,7 @@ def main():
             event = raw('Relay AI Skill','Search Ledger',title='Sim Search Ledger '+stamp,enabled=1,
                 channel=channel.name,business_doctype='Supplier',run_as_user=actor.name,handoff_owner=actor.name,
                 mode='Automatic',daily_limit=100,search_confirmation='When required',target='Explain supplier ledger',instructions='Use my ledger only',
-                execution_policy='Execute',allowed_tools=json.dumps([contract]),allowed_actions='[{"action":"reply"}]')
+                execution_policy='Execute',allowed_tools=json.dumps([{'capability':contract['key']}]),allowed_actions='[{"action":"reply"}]')
             frappe.db.commit()
             client = Client(frappe.app.application, Response)
             def request(method, data=None, authenticated=True, verb='POST'):
@@ -122,7 +122,7 @@ def main():
             from frappe_tools.ai import client as model_client
             from relay_core import messaging
             from relay_core.ai.tools import as_user
-            plan = dict(purpose='Review your ledger', reference=contract['name'], fields=contract['fields'],
+            plan = dict(purpose='Review your ledger', reference=contract['key'], fields=field_names(contract,'model'),
                 arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}})
             desired = dict(plan)
             legacy = False
@@ -151,27 +151,26 @@ def main():
                     if len(turn['messages']) == 1:
                         arguments=json.loads(run.search_plan)['plan']['arguments']
                         if change_read: arguments={'filters':{'posting_date':['between',['2026-09-01','2026-09-30']]}}
-                        calls=[{'id':'read','name':contract['name'] if legacy else 'SEARCH',
+                        calls=[{'id':'read','name':contract['key'] if legacy else 'SEARCH',
                             'arguments':json.dumps(arguments if legacy else dict(purpose=json.loads(run.search_plan)['plan']['purpose'],
-                                reference=contract['name'], arguments=arguments))}]
+                                reference=contract['key'], arguments=arguments))}]
                         data=None
                     elif chain and len(turn['messages']) == 2:
                         calls = [dict(id='reply', name='EXECUTE', arguments=dict(action='reply',
                             parameters={'text': 'Invented closing balance 999999'})),
-                            dict(id='draft', name='EXECUTE', arguments=dict(action='create_draft', parameters=draft_values))]
+                            dict(id='draft', name='EXECUTE', arguments=dict(action='erpnext.payment_entry_draft', parameters=draft_values))]
                         data = None
                     else:
                         data=dict(reply='' if chain else 'Invented total 999999',handoff=False,reason='')
                 else:
-                    data=dict(reply='Please confirm 2026-10-01 to 2026-10-31',handoff=False,reason='')
-                    if not legacy: data['search']=desired
+                    data=dict(reply='',handoff=False,reason='',search=desired)
                 return {'ok':True,'result':{'data':data,'tool_calls':calls,'response':{}}}
             def classify(ai_model,targets,*args,**kwargs):
                 return {'human_request':False,'scores':[{'id':t['id'],'score':.98} for t in targets]}
             read_calls=[]
             original_read=Reader._read
             def reading(reader, reference, arguments):
-                read_calls.append((reference['name'],arguments))
+                read_calls.append((reference['key'],arguments))
                 return original_read(reader,reference,arguments)
             def run_message(text):
                 doc=source(text)
@@ -187,6 +186,13 @@ def main():
                     try: reader.read(contract,**plan['arguments'])
                     except ValueError: pass
                     else: raise AssertionError('Undeclared read succeeded')
+            def approve_draft(run):
+                draft=frappe.get_doc('Relay Flow Action',{'automation_run':run.name,'action':'erpnext.payment_entry_draft'})
+                assert draft.status=='Awaiting approval' and draft.expires_on
+                response=request('flows.actions.approve',dict(name=draft.name,input_hash=draft.input_hash,
+                    scope_fingerprint=draft.scope_fingerprint))
+                assert response.status_code==200, (response.status_code,response.json.get('exc_type'))
+                service.process(run.name); run.reload()
             def reset_hold():
                 from relay_core.tickets import resume_ai
                 for name in frappe.get_all('Relay Ticket', filters={'company':company.name,
@@ -262,14 +268,14 @@ def main():
                 assert confirmed.status=='Completed' and len(read_calls)>count
                 print('PASS uncertain announcement blocks reads and submitted receipt recovery unlocks exact confirmation')
 
-                # Existing single-event Hub ledger conversation: text offer and named reference call.
+                # A provider naming the declared reference as its tool still reads only the confirmed plan.
                 legacy=True
                 doc,offer=run_message('I have a doubt in my ledger')
                 assert offer.stage=='Search' and offer.status=='Completed'
                 doc,confirmed=run_message('yes')
                 assert confirmed.status=='Completed' and len(json.loads(confirmed.decision)['reads'])==1
                 legacy=False
-                print('PASS existing single-event supplier ledger offer/yes/reference-tool protocol')
+                print('PASS named reference tool call reads only the confirmed plan')
 
                 # A confirmed model trying a different date range cannot query or send a result.
                 doc,offer=run_message('Explain my October ledger')
@@ -279,14 +285,13 @@ def main():
                 change_read=False; reset_hold()
                 print('PASS changed model range denied before a business read or result send')
 
-                # A clear non-ledger search can continue in the same run after submission.
-                nonledger=dict(contract,name='payment_status',doctype='Payment Entry',
-                    fields=['name','company','paid_amount'])
-                raw('Payment Entry','Search Payment',company=company.name,party_type='Supplier',party=supplier.name,
-                    paid_amount=1250,docstatus=0)
-                frappe.db.set_value('Relay AI Skill',event.name,'allowed_tools',json.dumps([nonledger]))
-                event.reload(); contract=nonledger
-                desired=dict(purpose='Review your draft payment',reference=contract['name'],fields=contract['fields'],arguments={})
+                # A clear search (no confirmation, no required filter) can continue in the same run after submission.
+                ledger=contract
+                contract=approved_pack('erpnext.sim_clear_'+''.join(c for c in stamp.lower() if c.isalnum()),
+                    dict(ledger, label='Sim clear supplier entries', filters={}, confirmation='When required'))
+                frappe.db.set_value('Relay AI Skill',event.name,'allowed_tools',json.dumps([{'capability':contract['key']}]))
+                event.reload()
+                desired=dict(purpose='Review your draft payment',reference=contract['key'],fields=field_names(contract,'model'),arguments={})
                 count=len(read_calls); sent=len(outbound)
                 doc,clear=run_message('Show my draft payment')
                 assert clear.status=='Completed' and clear.stage=='Event', (clear.status,clear.reason)
@@ -351,15 +356,13 @@ def main():
                 payable=raw('Account', 'Search Payable', account_name='Sim Search Payable '+stamp, company=company.name,
                     account_type='Payable', root_type='Liability', report_type='Balance Sheet', account_currency='INR', is_group=0)
                 frappe.db.set_value('Company', company.name, dict(default_payable_account=payable.name, default_bank_account=bank.name))
-                contract=dict(name='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party',
-                    fields=['name','company','posting_date','debit','credit'], identity_anchor='Supplier',
-                    identity_fields={'WhatsApp':'alias'}, company_field='company')
+                contract=ledger
                 ledger_row=frappe.get_all('GL Entry', filters={'company':company.name}, pluck='name', order_by='name asc')[0]
                 frappe.db.set_value('GL Entry', ledger_row, dict(debit=100.10, credit=40.05))
-                declared=[dict(action='reply'), dict(action='create_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties']))]
-                frappe.db.set_value('Relay AI Skill', event.name, dict(allowed_tools=json.dumps([contract]), allowed_actions=json.dumps(declared)))
+                declared=[dict(action='reply'), dict(action='erpnext.payment_entry_draft', doctype='Payment Entry', fields=list(PAYMENT_SCHEMA['properties']))]
+                frappe.db.set_value('Relay AI Skill', event.name, dict(allowed_tools=json.dumps([{'capability':contract['key']}]), allowed_actions=json.dumps(declared)))
                 event.reload()
-                desired=dict(purpose='Review your ledger', reference=contract['name'], fields=contract['fields'],
+                desired=dict(purpose='Review your ledger', reference=contract['key'], fields=field_names(contract,'model'),
                     arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}, 'limit':1})
                 draft_values=dict(payment_type='Pay', posting_date='2026-10-25', paid_amount=1250, received_amount=1250,
                     paid_from=bank.name, paid_to=payable.name, source_exchange_rate=1, target_exchange_rate=1,
@@ -368,13 +371,18 @@ def main():
                 doc,offer=run_message('Search then execute the owner chain')
                 before=frappe.db.count('Payment Entry', {'company':company.name})
                 doc,executed=run_message('yes')
+                assert executed.status=='Deciding', (executed.status, executed.reason)
+                assert frappe.db.count('Payment Entry', {'company':company.name})==before
+                assert outbound[-1]['body']==ai.APPROVAL_NOTICE
+                assert '60.05' in outbound[-2]['body'] and 'Partial totals' in outbound[-2]['body']
+                assert '999999' not in outbound[-2]['body']
+                sent=len(outbound)
+                approve_draft(executed)
                 assert executed.status=='Completed', (executed.status, executed.reason)
-                assert frappe.db.count('Payment Entry', {'company':company.name})==before+1
-                assert '60.05' in outbound[-1]['body'] and 'Partial totals' in outbound[-1]['body']
-                assert '999999' not in outbound[-1]['body']
+                assert frappe.db.count('Payment Entry', {'company':company.name})==before+1 and len(outbound)==sent
                 assert [r.action for r in frappe.get_all('Relay Flow Action', filters={'automation_run':executed.name},
-                    fields=['action'], order_by='step asc')] == ['reply', 'create_draft']
-                print('PASS delivered EXECUTE reply contains calculated 60.05 and partial-results notice; declared draft follows')
+                    fields=['action'], order_by='step asc')] == ['reply', 'erpnext.payment_entry_draft']
+                print('PASS delivered EXECUTE reply contains calculated 60.05 and partial-results notice; declared draft waits for approval')
                 original_dispatch=ai.dispatch_reply
                 verified_faults=[]
                 def revoke_after_reply(*args, **kwargs):
@@ -405,11 +413,13 @@ def main():
                     with patch.object(handlers, 'create_draft', side_effect=change_during_write if mutation_fault=='during_write' else original_create) as create, \
                             patch.object(ai, 'dispatch_reply', side_effect=revoke_after_reply):
                         doc,denied=run_message('yes')
+                        if mutation_fault == 'during_write':
+                            approve_draft(denied)
                     assert mutation_fault in verified_faults
                     assert create.call_count == (1 if mutation_fault=='during_write' else 0)
                     assert denied.status=='Handoff', (mutation_fault, denied.status, denied.reason)
                     assert frappe.db.count('Payment Entry', {'company':company.name})==before
-                    assert not frappe.db.exists('Relay Flow Action', {'automation_run':denied.name, 'action':'create_draft', 'status':'Completed'})
+                    assert not frappe.db.exists('Relay Flow Action', {'automation_run':denied.name, 'action':'erpnext.payment_entry_draft', 'status':'Completed'})
                     with fixture_admin():
                         actor.reload()
                         if not any(r.role=='Accounts Manager' for r in actor.roles):

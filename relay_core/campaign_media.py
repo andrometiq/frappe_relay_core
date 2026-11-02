@@ -9,10 +9,10 @@ from collections import defaultdict
 import frappe
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 
-from relay_core.bulk_sheet import sheet_phone
+from relay_core.bulk_sheet import HEADER_KINDS, sheet_phone
 from relay_core.channels import channel
 from relay_core.file_limits import get_media_max_bytes, size_error
-from relay_core.template_media import HEADER_KINDS, plain_filename
+from relay_core.template_media import plain_filename
 
 MAX_FILES = 100000
 ZIP_MAX_BYTES = 200 * 1024 * 1024
@@ -69,16 +69,15 @@ def zip_contents(path):
 
 
 def unpack(path, campaign, media_type):
-    """(sheet file URL, dynamic header attachment or None) of a campaign ZIP. A header file that is too
-    large or unreadable is not stored; it is kept as rejected, so only its row fails validation."""
-    from frappe.utils.file_manager import save_file
+    """(sheet file URL, header attachment or None) of a campaign ZIP; each row's header column names its file.
+    A header file that is too large or unreadable is not stored; it is kept as rejected, so only its rows fail."""
     from pypdf.errors import PyPdfError
     sheet_name, contents = zip_contents(path)
     limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type]) if media_type else 0
     sheet_url, files, rejected = None, [], []
     for filename, raw in contents:
         if filename == sheet_name:
-            sheet_url = save_file(filename, raw, 'Relay Campaign', campaign, is_private=1).file_url
+            sheet_url = save_private(filename, raw, campaign).file_url
             continue
         if not media_type:
             continue
@@ -86,20 +85,27 @@ def unpack(path, campaign, media_type):
             rejected.append({'filename': filename, 'reason': error})
             continue
         try:
-            saved = save_file(filename, raw, 'Relay Campaign', campaign, is_private=1)
+            saved = save_private(filename, raw, campaign)
         except (PyPdfError, ValidationError):  # Frappe parses every PDF; a damaged or unsafe one is refused.
             rejected.append({'filename': filename, 'reason': f'Wrong file content for {media_type} header'})
             continue
         files.append({'file_url': saved.file_url, 'filename': filename})
-    attachment = {'mode': 'dynamic', 'files': files, **({'rejected': rejected} if rejected else {})}
+    attachment = {'mode': 'named', 'files': files, **({'rejected': rejected} if rejected else {})}
     return sheet_url, attachment if files or rejected else None
+
+
+def save_private(filename, raw, campaign):
+    """A private File of the campaign holding raw. Not file_manager.save_file: its File re-reads the written file
+    and stores binary content that decodes as Windows-1252, such as a small PNG, as UTF-8 text."""
+    return frappe.get_doc({'doctype': 'File', 'file_name': filename, 'attached_to_doctype': 'Relay Campaign',
+                           'attached_to_name': campaign, 'is_private': 1, 'content': raw}).insert(ignore_permissions=True)
 
 
 def check_attachment(value, fields):
     if value is None:
         return None  # Existing API callers may still map HTTPS header URLs.
     if (not isinstance(value, dict) or not {'mode', 'files'} <= set(value) <= {'mode', 'files', 'rejected'}
-            or value.get('mode') not in ('static', 'dynamic')
+            or value.get('mode') not in ('static', 'dynamic', 'named')
             or not any(field['key'] == 'header_media' for field in fields)):
         raise ValueError('Choose a header attachment mode')
     files, rejected = value['files'], check_rejected(value)
@@ -121,7 +127,7 @@ def check_rejected(value):
     """ZIP files that unpack() did not store, each with the reason its row fails."""
     from relay_core.bulk_campaigns import friendly_reason
     rejected = value.get('rejected', [])
-    if not isinstance(rejected, list) or len(rejected) > MAX_FILES or rejected and value['mode'] != 'dynamic':
+    if not isinstance(rejected, list) or len(rejected) > MAX_FILES or rejected and value['mode'] == 'static':
         raise ValueError('Header attachments must be private uploaded files')
     for item in rejected:
         if (not isinstance(item, dict) or set(item) != {'filename', 'reason'} or not item['reason']
@@ -167,8 +173,8 @@ def matches_format(prefix, mime):
     return False
 
 
-def resolve(attachment, media_type, numbers, region, issues=None):
-    """Number -> (file reference, problem), using the sheet's region and mobile rules."""
+def checked_files(attachment, media_type):
+    """(file name, file reference or None, problem) of each uploaded header file, each checked once."""
     files = []
     for item in attachment['files']:
         try:
@@ -179,7 +185,23 @@ def resolve(attachment, media_type, numbers, region, issues=None):
         except (OSError, DoesNotExistError, PermissionError, ValidationError):
             problem = 'Header attachment unavailable'
         files.append((item['filename'], item, problem))
-    files += [(item['filename'], None, item['reason']) for item in attachment.get('rejected', [])]
+    return files + [(item['filename'], None, item['reason']) for item in attachment.get('rejected', [])]
+
+
+def named_files(attachment, media_type, used, issues):
+    """ZIP name -> (file reference, problem) for the header column; used holds the names rows give.
+    A bad file, or one that no row names, becomes a file issue."""
+    files = {}
+    for filename, item, problem in checked_files(attachment, media_type):
+        files[filename.casefold()] = (None if problem else item, problem)
+        if problem or filename.casefold() not in used:
+            issues.append({'filename': filename, 'reason': problem or 'No row names this file'})
+    return files
+
+
+def resolve(attachment, media_type, numbers, region, issues=None):
+    """Number -> (file reference, problem), using the sheet's region and mobile rules."""
+    files = checked_files(attachment, media_type)
     if issues is not None:
         for filename, _, problem in files:
             unused = (attachment['mode'] == 'dynamic' and
@@ -211,6 +233,8 @@ def sent_header(source, campaign):
     if not row:
         return None
     item = json.loads(row.arguments or '{}').get('values', {}).get('header_media')
+    if isinstance(item, str):
+        return None  # The row sent a link, which Meta fetched.
     files = {(entry['file_url'], entry['filename']) for entry in attachment['files']}
     if (doc.channel != source.channel or row.destination != source.sender_endpoint
             or not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files):

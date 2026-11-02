@@ -1,8 +1,10 @@
 """Skill boundary tests with two businesses, real tool dispatch and a fake model."""
+from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import threading
 import types
 import unittest
 from unittest.mock import ANY, Mock, patch
@@ -33,13 +35,53 @@ def module(path, f, extra=None):
     return result
 
 
+def capability(key='erpnext.ledger', fields=('posting_date', 'debit', 'credit'), **changes):
+    """A read manifest as capabilities.active returns it."""
+    return dict(key=key, app='relay_core', kind='read', version=1, label='Ledger', business_doctype='Supplier',
+        doctype='GL Entry', operation='get_list',
+        scope={'business_field': 'party', 'company': {'kind': 'company_field', 'field': 'company'},
+               'fixed': {'party_type': 'Supplier'}},
+        fields=[dict(name=name, model=True, customer=True) for name in fields],
+        filters={'posting_date': {'type': 'date', 'operators': ['between'], 'required': True}},
+        order_by='name asc', limit=20, empty_result='handoff', confirmation='Always',
+        render='relay_core.ai.ledger.supplier', data_notes='') | changes
+
+
+class QueryDeadlockError(Exception):
+    pass
+
+
 def framework():
     f = types.SimpleNamespace(session=Doc(user='operator'), flags=Doc(), local=Doc(site='test.local'),
         whitelist=lambda **kw: lambda fn: fn, db=Mock(), get_doc=Mock(), get_all=Mock(), get_list=Mock(),
         get_meta=Mock(), get_roles=Mock(return_value=['System Manager']),
-        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError)
+        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError,
+        QueryDeadlockError=QueryDeadlockError)
     f.set_user = lambda user: setattr(f.session, 'user', user)
     f.db.get_value.return_value = 1
+    return f
+
+
+class FakeRedis:
+    """Atomic INCRBYFLOAT like Redis, so threads can race on one key."""
+    def __init__(self):
+        self.values, self.lock = {}, threading.Lock()
+    def make_key(self, key): return 'test.local|' + key
+    def expire(self, key, seconds): pass
+    def incrbyfloat(self, key, amount):
+        with self.lock:
+            self.values[key] = self.values.get(key, 0) + amount
+            return self.values[key]
+
+
+def spend_budget(case, monthly_cap=50):
+    """Load the real budget module on a fake Redis and Relay Settings for `case`; return the fake framework."""
+    f = framework()
+    f.cache = FakeRedis()
+    f.db.get_single_value.return_value = monthly_cap
+    budget = module('relay_core/ai/budget.py', f)
+    budget.now_datetime = lambda: datetime(2026, 10, 30, 12)
+    case.enterContext(patch.dict(sys.modules, {'relay_core.ai.budget': budget}))
     return f
 
 
@@ -47,10 +89,10 @@ class ScopedToolTests(unittest.TestCase):
     def setUp(self):
         self.f = framework()
         self.tools = module('relay_core/ai/tools.py', self.f)
-        self.contract = dict(name='ledger', method='get_list', doctype='Payment Ledger Entry',
-            fields=['name', 'party', 'amount', 'posting_date'], scope_field='party',
-            identity_anchor='Supplier', identity_fields={'WhatsApp': 'phone'}, company_field='company')
-        self.skill = Doc(enabled=1, business_doctype='Supplier', allowed_tools=json.dumps([self.contract]))
+        self.contract = capability(doctype='Payment Ledger Entry', fields=('name', 'party', 'amount', 'posting_date'),
+            filters={'posting_date': {'type': 'date', 'operators': ['between', '>=', '<=']}}, confirmation='When required')
+        self.manifests = {self.contract['key']: self.contract}
+        self.skill = Doc(enabled=1, business_doctype='Supplier', allowed_tools=json.dumps([{'capability': 'erpnext.ledger'}]))
         self.records = [Doc(name='LED-1', party='SUP-A', party_type='Supplier', amount=1250, posting_date='2026-10-01'),
                         Doc(name='LED-2', party='SUP-B', party_type='Supplier', amount=4500, posting_date='2026-10-02'),
                         Doc(name='LED-3', party='SUP-A', party_type='Customer', amount=900, posting_date='2026-10-03')]
@@ -68,7 +110,14 @@ class ScopedToolTests(unittest.TestCase):
         access = module('relay_core/business_access.py', self.f)
         self.scope = dict(provider='WhatsApp', endpoint='15550000001', company='Sim Company', message='MSG-1')
         self.current_scope = dict(self.scope)
+        self.identity = Mock(return_value=None)
+        def active(key):
+            if key not in self.manifests:
+                raise ValueError('Capability is not approved')
+            return self.manifests[key]
         self.patch = patch.dict(sys.modules, {'frappe_tools.ai.tools': shared, 'relay_core.ai.configuration': config,
+            'relay_core.ai.capabilities': types.SimpleNamespace(active=active),
+            'relay_core.ai.identity': types.SimpleNamespace(validate=self.identity),
             'relay_core.business_access': access, 'relay_core.ai.service': types.SimpleNamespace(
                 context=lambda *args: ('partner', ('Supplier', 'SUP-A'), self.current_scope))}); self.patch.start(); self.addCleanup(self.patch.stop)
         self.f.get_doc.side_effect = lambda dt, name: self.anchor if dt == 'Supplier' else Doc(name=name) if dt == 'Relay Message' else next(row for row in self.records if row.name == name)
@@ -90,9 +139,11 @@ class ScopedToolTests(unittest.TestCase):
         self.assertEqual(self.authorize.call_count, 2)
 
     def test_ledger_is_scoped_by_business_name_and_dynamic_type(self):
-        self.assertEqual(self.reader.read(self.contract), [{'name': 'LED-1', 'party': 'SUP-A', 'amount': 1250, 'posting_date': '2026-10-01'}])
+        rows = [{'name': 'LED-1', 'party': 'SUP-A', 'amount': 1250, 'posting_date': '2026-10-01'}]
+        self.assertEqual(self.reader.read(self.contract), {'rows': rows, 'truncated': False})
+        self.assertEqual(self.reader.results['erpnext.ledger'], {'rows': rows, 'truncated': False})
         self.assertEqual(self.f.session.user, 'operator')
-        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters'],
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['filters'],
             {'party': 'SUP-A', 'party_type': 'Supplier', 'company': 'Sim Company'})
         self.f.db.sql.assert_not_called()
 
@@ -100,16 +151,16 @@ class ScopedToolTests(unittest.TestCase):
         for args in ({'filters': {'party': 'SUP-B'}}, {'or_filters': {}}, {'method': 'run_report'},
                      {'url': 'https://example.org'}, {'filters': {'amount': ['sql', 'select 1']}}, {'limit': 200}):
             with self.subTest(args=args), self.assertRaises(ValueError): self.reader.read(self.contract, **args)
-        self.assertFalse(any(call.args[0] != 'Supplier' for call in self.f.get_list.call_args_list))
+        self.f.get_list.assert_not_called()
         self.f.db.sql.assert_not_called()
 
     def test_unknown_doctype_and_method_fail_before_read(self):
-        for change in ({'doctype': 'User'}, {'method': 'sql'}, {'name': 'not_allowed'}):
+        for change in ({'doctype': 'User'}, {'operation': 'sql'}, {'key': 'erpnext.not_allowed'}):
             with self.assertRaises(ValueError): self.reader.read(self.contract | change)
         self.f.get_list.assert_not_called()
 
     def test_get_doc_checks_query_scope_and_document_permission(self):
-        self.contract['method'] = 'get_doc'; self.skill.allowed_tools = json.dumps([self.contract])
+        self.contract['operation'] = 'get_doc'
         for name in ('', 'x' * 141):
             with self.assertRaises(ValueError): self.reader.read(self.contract, name=name)
         with self.assertRaises(ValueError): self.reader.read(self.contract, name='LED-2')
@@ -117,6 +168,21 @@ class ScopedToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unavailable'): self.reader.read(self.contract, name='LED-1')
         self.assertTrue(self.reader.failed)
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_own_record_read_takes_the_name_from_the_scope(self):
+        own = capability(operation='get_doc', scope={'business_field': 'name', 'company': {'kind': 'company_field', 'field': 'company'}})
+        self.assertEqual(self.tools.own_record_arguments(own, {}, ('Supplier', 'SUP-A')), {'name': 'SUP-A'})
+        for arguments in ({'name': 'SUP-B'}, {'name': 'SUP-A'}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.tools.own_record_arguments(own, arguments, ('Supplier', 'SUP-A')), arguments)
+        with self.assertRaises(self.tools.PrivacyDenied):
+            self.tools.check_identity_arguments(own, {'name': 'SUP-B'}, ('Supplier', 'SUP-A'), None)
+        self.assertEqual(self.tools.own_record_arguments(own, {'filters': {}, 'limit': 1}, ('Supplier', 'SUP-A')), {'name': 'SUP-A'})
+        self.assertEqual(self.tools.own_record_arguments(own, {'filters': {'status': 'Open'}}, ('Supplier', 'SUP-A')),
+                         {'filters': {'status': 'Open'}, 'name': 'SUP-A'})
+        for contract in (dict(own, operation='get_list'), dict(self.contract, operation='get_doc')):
+            with self.subTest(contract=contract['operation']):
+                self.assertEqual(self.tools.own_record_arguments(contract, {}, ('Supplier', 'SUP-A')), {})
 
     def test_query_hook_denial_never_falls_back_to_get_all(self):
         self.f.get_list.side_effect = PermissionError('Distributor denied')
@@ -134,37 +200,49 @@ class ScopedToolTests(unittest.TestCase):
     def test_date_range_is_a_bound_filter_and_cannot_replace_party(self):
         self.f.get_list.side_effect = None; self.f.get_list.return_value = [Doc(name='LED-1')]
         self.reader.read(self.contract, filters={'posting_date': ['between', ['2026-10-01', '2026-10-20']]})
-        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters']['party'], 'SUP-A')
-        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters']['posting_date'][0], 'between')
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['filters']['party'], 'SUP-A')
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['filters']['posting_date'][0], 'between')
 
     def test_empty_query_hook_result_hands_off_instead_of_claiming_zero_balance(self):
         self.f.get_list.side_effect = None; self.f.get_list.return_value = []
         with self.assertRaises(ValueError): self.reader.read(self.contract)
         self.assertTrue(self.reader.failed)
 
-    def test_identity_is_canonical_and_cannot_come_from_a_typed_number(self):
-        self.anchor.phone = '15550000002'
-        with self.assertRaises(ValueError): self.reader.read(self.contract)
-        self.anchor.phone = '+1 (555) 000-0001'
-        with self.assertRaises(ValueError): self.reader.read(self.contract)
-        self.f.get_all.assert_not_called()
+    def test_identity_denial_is_private_and_reads_nothing(self):
+        self.identity.side_effect = self.tools.PrivacyDenied('Not linked')
+        with self.assertRaisesRegex(ValueError, 'private'): self.reader.read(self.contract)
+        self.assertTrue(self.reader.private)
+        self.assertEqual(self.reader.evidence, [])
+        self.f.get_list.assert_not_called()
 
-    def test_reference_requires_present_matching_identity_before_business_read(self):
-        for phone in (None, '', '15550000002'):
-            with self.subTest(phone=phone):
-                self.anchor.phone = phone
-                self.f.get_list.reset_mock()
-                with self.assertRaises(ValueError):
-                    self.reader.read(self.contract)
-                self.assertEqual(self.reader.evidence, [])
-                self.assertTrue(all(call.args[0] == 'Supplier' for call in self.f.get_list.call_args_list))
-        self.anchor.phone = self.scope['endpoint']
-        self.assertEqual(self.reader.read(self.contract)[0]['amount'], 1250)
+    def test_identity_is_rechecked_after_the_read(self):
+        self.identity.side_effect = [None, self.tools.PrivacyDenied('Unlinked while reading')]
+        with self.assertRaises(ValueError): self.reader.read(self.contract)
+        self.assertEqual(self.reader.evidence, [])
+
+    def test_model_rows_omit_customer_only_fields(self):
+        self.contract['fields'][2] = dict(name='amount', model=False, customer=True)
+        result = self.reader.read(self.contract)
+        self.assertEqual(result['rows'], [{'name': 'LED-1', 'party': 'SUP-A', 'posting_date': '2026-10-01'}])
+        self.assertEqual(self.reader.results['erpnext.ledger']['rows'][0]['amount'], 1250)
+
+    def test_limit_is_bounded_by_the_capability_and_truncation_is_reported(self):
+        self.contract['limit'] = 1
+        self.records.append(Doc(self.records[0], name='LED-5'))
+        self.assertTrue(self.reader.read(self.contract)['truncated'])
+        with self.assertRaises(ValueError): self.reader.read(self.contract, limit=2)
+
+    def test_empty_result_returns_no_rows_only_when_the_pack_allows_it(self):
+        later = {'filters': {'posting_date': ['>=', '2027-01-01']}}
+        with self.assertRaises(ValueError): self.reader.read(self.contract, **later)
+        self.contract['empty_result'] = 'fixed_text'
+        self.assertEqual(self.reader.read(self.contract, **later), {'rows': [], 'truncated': False})
 
     def test_missing_scope_or_legacy_contract_never_grants_access(self):
         with self.assertRaises(ValueError):
             self.tools.Reader(self.skill, 'partner', ('Supplier', 'SUP-A')).read(self.contract)
-        self.contract.pop('identity_fields'); self.skill.allowed_tools = json.dumps([self.contract])
+        self.skill.allowed_tools = json.dumps([dict(name='ledger', method='get_list', doctype='Payment Ledger Entry',
+            fields=['name'], scope_field='party', report='supplier_ledger')])
         with self.assertRaises(ValueError): self.reader.read(self.contract)
         self.f.get_list.assert_not_called()
 
@@ -207,8 +285,8 @@ class SearchGateTests(unittest.TestCase):
         from contextvars import ContextVar
         self.f = framework()
         self.tools = module('relay_core/ai/tools.py', self.f)
-        self.contract = dict(name='ledger', method='get_list', doctype='GL Entry', fields=['posting_date', 'debit', 'credit'])
-        self.plan = dict(purpose='Review your ledger', reference='ledger', fields=self.contract['fields'],
+        self.contract = capability()
+        self.plan = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
                         arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
         self.skill = Doc(name='Event', enabled=1, modified='version', search_confirmation='When required')
         self.source = Doc(name='Source', content='Ledger please', provider_context={'provider':'WhatsApp'})
@@ -216,7 +294,8 @@ class SearchGateTests(unittest.TestCase):
         self.origin = Doc(name='Origin', message='Source', skill='Event', skill_version='version',
             execution_user='partner', generation=2, ticket='Ticket', stage='Event', status='Deciding')
         self.run = self.origin
-        self.scope = dict(message='Source', company='Company', endpoint='sender', user='partner')
+        self.scope = dict(message='Source', company='Company', endpoint='sender', user='partner',
+                          capabilities={'erpnext.ledger': 'hash'})
         self.receipt = Doc(status='Submitted', source_message='Source', payload=json.dumps({'automation_run':'Origin'}))
         self.automation = types.SimpleNamespace(internal_save=Mock(), lock_run=lambda name: self.origin if name=='Origin' else self.run,
             lock_contact=Mock(), message_hash=lambda msg: msg.get('hash') or msg.name, latest_message=Mock(),
@@ -259,10 +338,32 @@ class SearchGateTests(unittest.TestCase):
         self.assertTrue(self.service.confirmation_required(self.skill, self.plan))
         self.assertEqual(self.origin.stage, 'Search')
         self.assertEqual(self.decision['reads'], [])
-        self.assertIn('2026-10-31', self.decision['reply'])
-        self.assertIn('confirm', self.decision['reply'])
+        self.assertEqual(self.decision['reply'], self.service.SEARCH_NOTICE + ' 2026-10-01 – 2026-10-31. '
+                         + self.service.SEARCH_CONFIRM)
         with self.assertRaises(ValueError): self.authorize()
         with self.assertRaises(ValueError): self.service.authorize_search(None, self.skill, self.contract, {})
+
+    def test_search_notice_is_localized_and_names_no_internals(self):
+        from relay_core.ai.language import NOTICES
+        words = {'Malayalam': 'അതെ', 'Hindi': 'हाँ', 'Tamil': 'ஆம்', 'Telugu': 'అవును', 'Kannada': 'ಹೌದು',
+                 'Bengali': 'হ্যাঁ', 'Marathi': 'होय'}
+        texts = {'Telugu': 'నా లెడ్జర్ చూపించండి', 'Kannada': 'ನನ್ನ ಲೆಡ್ಜರ್ ತೋರಿಸಿ', 'Bengali': 'আমার লেজার দেখান',
+                 'Marathi': 'माझे खातेवही दाखवा, किती बाकी आहे?', 'Tamil': 'என் லெட்ஜர் காட்டுங்கள்'}
+        for language, text in texts.items():
+            with self.subTest(language=language):
+                self.origin.search_plan = None
+                self.source.content = text
+                decision = dict(reply='Searching', handoff=False, reads=[], search=self.plan)
+                self.service.declare_search(self.origin, self.skill, self.source, decision)
+                self.assertEqual(decision['reply'], NOTICES['search'][language] + ' 2026-10-01 – 2026-10-31. '
+                                 + NOTICES['search_confirm'][language])
+                for internal in ('erpnext.ledger', 'posting_date', 'debit', 'between', '{', 'Review your ledger'):
+                    self.assertNotIn(internal, decision['reply'])
+        for language, word in words.items():
+            with self.subTest(word=word):
+                self.assertIn(f"'{word}'", NOTICES['search_confirm'][language])
+                self.assertIn(word, self.service.CONFIRM_WORDS)
+        self.assertIn("'yes'", self.service.SEARCH_CONFIRM)
 
     def test_confirmed_exact_range_reads_and_replay_cannot_consume_twice(self):
         self.confirmed(); self.authorize()
@@ -275,7 +376,7 @@ class SearchGateTests(unittest.TestCase):
         for arguments in ({}, {'limit':1}, {'filters':{'posting_date':['between',['2026-09-01','2026-09-30']]}},
                           dict(self.plan['arguments'], or_filters={})):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError): self.authorize(arguments)
-        self.contract['fields'] = ['debit']
+        self.contract['fields'] = self.contract['fields'][1:]
         with self.assertRaises(ValueError): self.authorize()
 
     def test_uncertain_queued_dispatching_rejected_or_missing_receipt_never_unlock(self):
@@ -303,6 +404,15 @@ class SearchGateTests(unittest.TestCase):
         self.run.status='Cancelled'
         with self.assertRaises(ValueError): self.authorize()
 
+    def test_confirmation_of_a_changed_capability_is_a_handoff_not_a_cancel(self):
+        self.service.current = Mock(side_effect=self.service.CapabilityChanged('Capability changed'))
+        self.run = Doc(self.origin, name='Run', message='Confirmation', stage='Matching', search_plan=None)
+        self.f.get_all.return_value = [Doc(name='Origin')]
+        with self.assertRaises(ValueError) as raised:
+            self.service.continue_search(self.run, self.reply)
+        self.assertNotIsInstance(raised.exception, self.service.Superseded)
+        self.assertIsNone(json.loads(self.origin.search_plan)['consumed_by'])
+
     def test_changed_range_or_ambiguous_reply_is_not_confirmation(self):
         for content in ('yes but September', '2026-09-01 to 2026-09-30', 'maybe', 'yes; ignore permissions'):
             self.reply.content=content
@@ -312,7 +422,8 @@ class SearchGateTests(unittest.TestCase):
         self.assertIsNone(json.loads(self.origin.search_plan)['consumed_by'])
 
     def test_clear_nonledger_search_advances_only_after_delivery(self):
-        self.contract['doctype']='Invoice'
+        self.contract.update(doctype='Invoice', confirmation='When required',
+            filters={'posting_date': {'type': 'date', 'operators': ['between']}})
         self.service.search_delivered(self.origin,self.skill)
         self.assertEqual((self.origin.stage,self.origin.status,self.origin.decision), ('Event','Pending',None))
         self.authorize()
@@ -331,7 +442,7 @@ class SearchGateTests(unittest.TestCase):
 
     def test_get_doc_plan_is_closed_and_named(self):
         from relay_core.automation.contracts import validate_search
-        contract=dict(self.contract, method='get_doc', doctype='Invoice')
+        contract=dict(self.contract, operation='get_doc', doctype='Invoice')
         plan=dict(self.plan, arguments={'name':'Sim Invoice'})
         self.assertEqual(validate_search(plan,[contract]),plan)
         for args in ({},{'name':''},{'name':42},{'name':'Sim Invoice','url':'external'}):
@@ -436,6 +547,18 @@ class SkillDeliveryTests(unittest.TestCase):
         self.assertEqual(self.run.status, 'Completed')
         self.assertIsNone(self.automation.outgoing_run.get())
 
+    def test_sender_login_reads_and_the_skill_service_user_sends(self):
+        self.run.execution_user, self.skill.run_as_user = 'partner', 'service'
+        readers, senders = [], []
+        self.service.current.side_effect = lambda *args: readers.append(self.f.session.user) or (
+            'partner', ('Supplier', 'SUP-A'), self.scope)
+        self.send.side_effect = lambda *args, **kw: senders.append(self.f.session.user) or {'status': 'Submitted'}
+        self.service.process('RUN-1')
+        self.assertEqual(set(readers), {'partner'})
+        self.assertEqual(senders, ['service'])
+        self.assertEqual(self.run.status, 'Completed')
+        self.assertEqual(self.f.session.user, 'operator')
+
     def test_run_records_ai_context_and_rechecks_events_before_delivery(self):
         used = {'memory': {'rows': ['MEM-1'], 'sha256': 'abc'}, 'events': [{'event': 'EV-1', 'revision': 'R1', 'build': 'B1'}]}
         self.service.decide.return_value = dict(self.service.decide.return_value, context=used)
@@ -493,6 +616,14 @@ class SkillDeliveryTests(unittest.TestCase):
                     self.assertIn(str(failure), self.f.log_error.call_args.kwargs['message'])
                     if mode == 'Shadow':
                         self.handoff.assert_not_called()
+        self.send.assert_not_called()
+
+    def test_deadlock_is_raised_for_job_retry(self):
+        self.service.decide.side_effect = QueryDeadlockError('Deadlock found')
+        with self.assertRaises(QueryDeadlockError):
+            self.service.process('RUN-1')
+        self.assertNotIn(self.run.status, ('Cancelled', 'Handoff', 'Shadow'))
+        self.f.log_error.assert_not_called()
         self.send.assert_not_called()
 
     def test_takeover_prevents_delivery(self):
@@ -570,7 +701,9 @@ class SharedAdapterTests(unittest.TestCase):
         self.tools = module('relay_core/ai/tools.py', self.f)
         self.adapter = module('relay_core/ai/adapter.py', self.f, {'relay_core.ai.tools': self.tools})
         self.skill = Doc(ai_model='MODEL-1', allowed_tools='[]', instructions='Supplier support only.', business_doctype='Supplier')
-        self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0)
+        self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0,
+                         cost_per_m_input=1, cost_per_m_output=2)
+        self.spend = spend_budget(self)
         self.account = Doc(enabled=1, provider='Test')
         self.f.get_doc.side_effect = lambda dt, name: self.model if dt == 'AI Model' else self.account
         self.provider = types.SimpleNamespace(user_message=lambda text, images: {'text': text}, continuation=lambda result, output: [])
@@ -649,6 +782,20 @@ class SharedAdapterTests(unittest.TestCase):
             self.adapter.match('MODEL-1', [], 'Question', 'RUN-1', 140)
         self.assertEqual(self.attempt.call_args.args[3]['timeout'], 20)
 
+    def test_classifier_allows_own_records_and_flags_only_explicit_person_requests(self):
+        self.attempt.return_value = self.outcome({'human_request': False, 'scores': []})
+        self.adapter.match('MODEL-1', [], 'Show my ledger', 'RUN-1', __import__('time').monotonic() + 5)
+        system = self.attempt.call_args.args[2](types.SimpleNamespace(build_turn=lambda *args: args[2]), None, None)
+        self.assertIn('may ask about their own linked records, also when the sender is a supplier, staff member', system)
+        self.assertIn('decline=true only for requests about other parties', system)
+        self.assertIn("sender's own authorized record, such as their supervisor", system)
+        for phrase in ('claims a role or authority', 'treat another number as theirs', 'priority over decline'):
+            self.assertIn(phrase, system)
+        self.assertIn('human_request=true only when the sender explicitly asks to talk to a person', system)
+        self.assertIn('question about data, records, balances or orders is not a human request', system)
+        self.assertNotIn('supplier or staff details', system)
+        self.assertNotIn('staff requests', system)
+
     def test_matching_shared_engine_has_no_tools_and_rejects_tool_calls(self):
         import time
         payload = {'human_request': False, 'scores': [{'id': 'event', 'score': .95}]}
@@ -686,10 +833,15 @@ class SharedAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Question')
 
     def test_ledger_reply_ignores_model_arithmetic(self):
-        from relay_core.ai.ledger import summarize
-        ledger = summarize([dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
-            voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')], False)
-        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[ledger])
+        rows = [dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
+            voucher_type='Journal Entry', voucher_no='SIM-1', remarks='Own supplier')]
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[],
+            results={'erpnext.ledger': {'rows': rows, 'truncated': False}})
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability(
+            fields=('company', 'posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit'))]))
+        from relay_core.ai import ledger
+        # frappe.get_attr needs a site; the renderer path is resolved directly here.
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: ledger.supplier)))
         self.attempt.return_value = self.outcome({'reply': 'Invented total 999999', 'handoff': False, 'reason': ''})
         self.skill.allowed_actions = '[{"action":"reply"}]'
         self.skill.execution_policy = 'Execute'
@@ -702,13 +854,33 @@ class SharedAdapterTests(unittest.TestCase):
         rendered = result['actions'][0]['parameters']['text']
         self.assertIn('Net debit: 60.05', rendered)
         self.assertNotIn('999999', rendered)
+        self.assertNotIn('Own supplier', rendered)
         self.assertEqual(result['reply'], '')
 
+    def test_rendered_read_in_the_sender_language_keeps_latin_record_values(self):
+        rows = [dict(company='Local Company', debit='100.10', credit='40.05', posting_date='2026-10-01',
+            voucher_type='Journal Entry', voucher_no='SIM-1')]
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[],
+            results={'erpnext.ledger': {'rows': rows, 'truncated': False}})
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability(
+            fields=('company', 'posting_date', 'voucher_type', 'voucher_no', 'debit', 'credit'))]))
+        text = 'खाता: Journal Entry SIM-1 Local Company Supplier Ledger Approved'
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: lambda *args: text)))
+        self.attempt.return_value = self.outcome({'reply': 'ठीक है', 'handoff': False, 'reason': ''})
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        with patch.object(self.adapter, 'Reader', return_value=reader):
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'मेरा खाता भेजिए', scope={})
+        self.assertFalse(result['handoff'])
+        self.assertEqual(result['actions'][0]['parameters']['text'], text)
+
     def test_search_proposes_without_reading_and_rejects_malformed_calls(self):
-        reference = dict(name='ledger', report='supplier_ledger', method='get_list', doctype='GL Entry', scope_field='party', fields=['posting_date','debit','credit'])
-        arguments = dict(purpose='Review your ledger', reference='ledger',
+        reference = capability()
+        arguments = dict(purpose='Review your ledger', reference='erpnext.ledger',
             arguments={'filters':{'posting_date':['between',['2026-10-01','2026-10-31']]}})
-        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], ledger_results=[], read=Mock())
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
         with patch.object(self.adapter,'contracts',return_value=[reference]), patch.object(self.adapter,'Reader',return_value=reader):
             self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':json.dumps(arguments),'id':'one'}]),
                 self.outcome(dict(reply='Confirm the range',handoff=False,reason=''))]
@@ -720,6 +892,80 @@ class SharedAdapterTests(unittest.TestCase):
                 self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':invalid,'id':'one'}])]
                 with self.assertRaises(ValueError): self.adapter.complete(self.skill,'partner',('Supplier','SUP-A'),'Ledger please')
             reader.read.assert_not_called()
+
+    def test_rejected_declaration_gets_one_correction_turn(self):
+        good = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        bad = dict(good, arguments={'filters': {'semester': 'Semester 3'}})
+        prompts = []
+        def attempt(responses):
+            def call(account, model, build, *args):
+                provider = Mock()
+                build(provider, {}, model)
+                prompts.append(provider.build_turn.call_args.args[2])
+                return next(responses)
+            return call
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]), \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            self.attempt.side_effect = attempt(iter([self.outcome(dict(reply='', handoff=False, reason='', search=bad)),
+                                                     self.outcome(dict(reply='', handoff=False, reason='', search=good))]))
+            self.assertEqual(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['search'], good)
+            self.assertIn('search declaration was rejected: Undeclared search filter', prompts[1])
+            self.attempt.side_effect = None
+            self.attempt.reset_mock()
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=bad))
+            with self.assertRaisesRegex(ValueError, 'Undeclared search filter'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+            self.assertEqual(self.attempt.call_count, 2)
+            self.attempt.reset_mock()
+            other = dict(bad, arguments={'filters': {'party': 'SUP-B'}})
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=other))
+            self.assertTrue(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['decline'])
+            self.attempt.assert_called_once()
+        reader.read.assert_not_called()
+
+    def test_authorized_turn_reads_a_plan_the_model_repeats_instead_of_calling_search(self):
+        plan = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        rows = [{'posting_date': '2026-10-02', 'debit': 10, 'credit': 0}]
+        def read(contract, **arguments):
+            reader.results[contract['key']] = {'rows': rows, 'truncated': False}
+            reader.evidence.append({'tool': contract['key']})
+            return {'rows': rows, 'truncated': False}
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock(side_effect=read))
+        self.skill.allowed_actions = '[{"action":"reply"}]'
+        self.skill.execution_policy = 'Execute'
+        from relay_core.ai.actions import REPLY
+        self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
+        self.enterContext(patch('relay_core.ai.render.frappe', types.SimpleNamespace(get_attr=lambda path: lambda *args: 'Ledger text')))
+        self.enterContext(patch.object(self.adapter, 'contracts', return_value=[capability()]))
+        self.enterContext(patch.object(self.adapter, 'Reader', return_value=reader))
+        self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=plan, data_question=True))
+        result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please', scope={}, search=plan)
+        reader.read.assert_called_once_with(capability(), **plan['arguments'])
+        self.assertEqual(result['actions'], [dict(action='reply', parameters={'text': 'Ledger text'})])
+        reader.read.reset_mock(); reader.results.clear(); reader.evidence.clear()
+        other = dict(plan, arguments={'filters': {'posting_date': ['between', ['2026-09-01', '2026-10-31']]}})
+        self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=other, data_question=True))
+        with self.assertRaisesRegex(ValueError, 'Search changed after confirmation'):
+            self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please', scope={}, search=plan)
+        reader.read.assert_not_called()
+
+    def test_default_skill_offers_no_reads_to_another_business_type(self):
+        from relay_core.ai.skills import DEFAULT_KEY
+        self.skill.sample_key = DEFAULT_KEY
+        plan = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]) as contracts, \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=plan))
+            with self.assertRaisesRegex(ValueError, 'Search fields must match'):
+                self.adapter.complete(self.skill, 'partner', ('Customer', 'CUST-A'), 'Ledger please')
+            contracts.assert_not_called()
+            self.assertEqual(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['search'], plan)
+        reader.read.assert_not_called()
 
     def test_non_tool_compatibility_uses_same_engine(self):
         self.attempt.return_value = self.outcome({'instructions': 'Support knowledge'})
@@ -794,12 +1040,16 @@ class ConversationIdentityTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: {'Relay Contact': Doc(name='CONTACT-1', contact='PERSON-1'),
             'Contact': self.person, 'Relay Channel': Doc(channel='WhatsApp', enabled=1, company='Sim Company'), 'Company': Doc(), 'Supplier': self.business, 'Relay Message': Doc(self.message)}[dt]
         self.f.db.get_value.side_effect = lambda dt, *args, **kw: self.binding if dt == 'Relay Contact Endpoint' else 1
-        access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')])
+        access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')],
+                                       own_message=lambda doc, user=None: bool(doc.get('own')))
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
         no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
             lines=[], events=[], prompt={}, used=None))
+        names = framework()
+        names.db.get_value.return_value = 'Sim Sender'
         self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
-                                              'relay_core.ai.event_memory': no_reference})
+                                              'relay_core.ai.event_memory': no_reference,
+                                              'relay_core.ai.minimise': module('relay_core/ai/minimise.py', names)})
         self.patch.start(); self.addCleanup(self.patch.stop)
 
     def test_message_and_field_denial_block_context_as_the_linked_user(self):
@@ -811,6 +1061,39 @@ class ConversationIdentityTests(unittest.TestCase):
             with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
         self.assertEqual(self.message.content, 'Private message')
         self.assertEqual(self.f.session.user, 'operator')
+
+    def test_sender_login_reads_its_own_message_without_a_relay_role(self):
+        self.message.update(denied=True, own=True)
+        self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')
+        self.message.own = False
+        with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
+
+    def test_declared_search_source_is_readable_by_the_sender_login_only(self):
+        self.service.check_readable(Doc(self.message, denied=True, own=True), 'partner')
+        with self.assertRaises(PermissionError):
+            self.service.check_readable(Doc(self.message, denied=True), 'partner')
+
+    def test_sender_login_reads_only_its_own_business_as_itself(self):
+        readers, f = [], self.f
+        class Business(Doc):
+            def check_permission(self, *args):
+                readers.append(f.session.user)
+                if self.get('denied'): raise PermissionError('not linked')
+        self.business = Business(name='SUP-A')
+        user, business, scope = self.service.context(self.skill, Doc(self.message, own=True))
+        self.assertEqual((user, business, scope['business'], readers), ('partner', ('Supplier', 'SUP-A'), ['Supplier', 'SUP-A'], ['partner']))
+        self.business.denied = True
+        with self.assertRaises(PermissionError): self.service.context(self.skill, Doc(self.message, own=True))
+
+    def test_default_skill_serves_every_business_type_but_other_skills_do_not(self):
+        from relay_core.ai.skills import DEFAULT_KEY
+        self.skill.business_doctype = 'Contact'
+        with self.assertRaisesRegex(ValueError, 'Business identity'):
+            self.service.context(self.skill, self.message)
+        self.skill.sample_key = DEFAULT_KEY
+        self.assertEqual(self.service.context(self.skill, self.message)[1], ('Supplier', 'SUP-A'))
+        self.business.denied = True
+        with self.assertRaises(PermissionError): self.service.context(self.skill, self.message)
 
     def test_linked_user_takes_precedence_and_missing_link_uses_run_as(self):
         self.assertEqual(self.service.context(self.skill, self.message)[0], 'partner')
@@ -865,7 +1148,31 @@ class ConversationIdentityTests(unittest.TestCase):
             self.assertEqual(history(), [])
             decision.update(original)
         self.f.get_list.side_effect = PermissionError('Audit history is restricted')
-        self.assertEqual(history(), [])
+        with self.assertRaises(PermissionError): history()
+        self.assertEqual(self.f.session.user, 'operator')
+
+    def test_partner_history_is_read_as_service_user_and_limited_to_own_contact(self):
+        user, business, scope = self.service.context(self.skill, self.message)
+        self.assertEqual(user, 'partner')
+        own = Doc(name='MSG-0', content='Show my October ledger', relay_contact='CONTACT-1',
+                  sender_endpoint=self.message.sender_endpoint, conversation_key=self.message.conversation_key,
+                  business_doctype='Supplier', business_name='SUP-A', direction='Incoming')
+        other = Doc(own, name='MSG-00', content='Other contact secret', relay_contact='CONTACT-2', sender_endpoint='15550000009')
+        readers = []
+        def get_list(doctype, filters, **kwargs):
+            readers.append(self.f.session.user)
+            return [row for row in (own, other) if all(row.get(key) == value for key, value in filters.items()
+                                                       if key != 'name')]
+        self.f.get_list.side_effect = get_list
+        self.f.get_doc.side_effect = lambda dt, name: {own.name: own, other.name: other}[name]
+        decisions = {name: json.dumps(dict(user=user, handoff=False, reads=[], reply='Reply to ' + name,
+            scope=self.tools.fingerprint(dict(scope, message=name)))) for name in (own.name, other.name)}
+        self.f.db.get_value.side_effect = lambda dt, filters, *args, **kw: (
+            decisions[filters['message']] if dt == 'Relay Automation Run' else 1)
+        history = self.service.conversation_history(self.skill, self.message, user, business, scope)
+        self.assertEqual(history, [{'direction': 'Incoming', 'content': own.content},
+                                   {'direction': 'Outgoing', 'content': 'Reply to MSG-0'}])
+        self.assertEqual(readers, ['service'])
         self.assertEqual(self.f.session.user, 'operator')
 
     def test_takeover_during_image_observation_prevents_next_model(self):
@@ -997,8 +1304,9 @@ class EventContractTests(unittest.TestCase):
         self.shared = types.SimpleNamespace(get_readable_meta=lambda dt: self.meta,
             is_sensitive_field=lambda name: name in ('api_key', 'password'))
         self.registered = {}
+        self.has_companies = self.enterContext(patch('relay_core.permissions.has_companies', return_value=True))
         self.modules = patch.dict(sys.modules, {'frappe_tools.ai.tools': self.shared,
-            'relay_core.flows.actions': types.SimpleNamespace(definitions=lambda: self.registered)})
+            'relay_core.flows.actions': types.SimpleNamespace(definitions=lambda context=None: self.registered)})
         self.modules.start(); self.addCleanup(self.modules.stop)
         self.doc = Doc(name='Sim Ledger', title='Sim Ledger', enabled=0, business_doctype='Supplier',
             instructions='Read only this sender’s ledger after date confirmation.', mode='Shadow', daily_limit=25,
@@ -1038,19 +1346,41 @@ class EventContractTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: self.channel if dt == 'Relay Channel' else Doc(enabled=0)
         with self.assertRaises(ValueError): self.config.validate_skill(self.doc)
 
-    def test_declared_identity_and_company_mappings_are_checked_against_metadata(self):
-        self.enable(); self.doc.allowed_tools = json.dumps([self.read])
+    def test_channel_without_company_is_accepted_only_for_company_neutral_reads(self):
+        neutral = capability(scope={'business_field': 'name', 'company': {'kind': 'company_neutral'}})
+        self.tools.contracts = lambda skill: self.packs
+        self.enable(); self.channel.company = None
+        for packs, actions, accepted in (([neutral], '[]', True), ([neutral], '[{"action": "reply"}]', True),
+                ([], '[]', False), ([neutral, capability()], '[]', False),
+                ([neutral], '[{"action": "erpnext.payment_entry_draft"}]', False)):
+            self.packs = packs
+            self.doc.allowed_actions = actions
+            with self.subTest(packs=len(packs), actions=actions), \
+                    patch.object(self.config, 'contracts'), patch.object(self.config, 'action_contracts'):
+                if accepted:
+                    self.config.validate_skill(self.doc)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'company'): self.config.validate_skill(self.doc)
+        self.has_companies.return_value = False
+        self.packs, self.doc.allowed_actions = [], '[]'
+        with patch.object(self.config, 'contracts'):
+            self.config.validate_skill(self.doc)
+
+    def test_read_rows_name_approved_capabilities_of_the_skill_business_type(self):
+        packs = {key: capability(key=key, business_doctype=business) for key, business in
+                 (('erpnext.supplier_ledger', 'Supplier'), ('erpnext.customer_ledger', 'Customer'))}
+        def active(key):
+            if key not in packs:
+                raise ValueError('Capability is not approved')
+            return packs[key]
+        self.enterContext(patch.dict(sys.modules, {'relay_core.ai.capabilities': types.SimpleNamespace(active=active)}))
+        self.enable(); self.doc.allowed_tools = json.dumps([{'capability': 'erpnext.supplier_ledger'}])
         self.config.validate_skill(self.doc)
-        for changes in ({'identity_anchor': 'Customer'}, {'identity_fields': {'WhatsApp': 'missing'}},
-                {'identity_fields': {'WhatsApp': 'password'}}, {'identity_fields': {'WhatsApp': 'company'}},
-                {'identity_fields': {'Telegram': 'phone'}}, {'identity_fields': {'SMS': 'phone'}},
-                {'company_field': 'phone'}, {'company_field': 'missing'}, {'method': 'sql'}, {'extra': 'anything'}):
-            self.doc.allowed_tools = json.dumps([self.read | changes])
-            with self.subTest(changes=changes), self.assertRaises(ValueError): self.config.validate_skill(self.doc)
-        self.doc.allowed_tools = json.dumps([{key: value for key, value in self.read.items() if key not in self.config.SCOPE_FIELDS}])
-        with self.assertRaises(ValueError): self.config.validate_skill(self.doc)
-        self.doc.enabled = 0
-        self.config.validate_skill(self.doc)  # Legacy references remain editable as drafts.
+        for rows in ([{'capability': 'erpnext.customer_ledger'}], [{'capability': 'erpnext.unapproved'}],
+                [{'capability': 'erpnext.supplier_ledger', 'identity_fields': {}}], [{'report': 'supplier_ledger'}],
+                [{'capability': 'erpnext.supplier_ledger'}] * 2, [{'capability': 3}], [self.read]):
+            self.doc.allowed_tools = json.dumps(rows)
+            with self.subTest(rows=rows), self.assertRaises(ValueError): self.config.validate_skill(self.doc)
 
     def test_owner_text_and_contracts_are_bounded_and_plain_text_preserved(self):
         self.doc.instructions = 'Owner says <review> & check 1250; never submit.'
@@ -1068,12 +1398,13 @@ class EventContractTests(unittest.TestCase):
         declared = json.dumps([{'action': 'draft_payment', 'doctype': 'Payment Entry', 'fields': ['amount']}])
         self.doc.allowed_actions = declared
         schema = {'type': 'object', 'properties': {'amount': {'type': 'number'}}, 'additionalProperties': False}
-        definition = dict(contexts=['ai'], ai_safe=True, method='relay_core.ai.actions.create_draft', effect='create_draft',
+        definition = dict(contexts=['ai'], ai_safe=True, app='relay_core', method='relay_core.ai.actions.create_draft', effect='create_draft',
             approval_policy='Required', permissions={'Payment Entry': 'create'}, parameters=schema,
             targets={'Payment Entry': schema}, output={'type': 'object'})
         self.registered['draft_payment'] = definition
         self.config.validate_skill(self.doc)
-        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'},
+        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'}, {'app': 'relay_yrp'},
+                {'app': None}, {'approval_policy': 'None'},
                 {'permissions': []}, {'approval_policy': 'anything'}, {'targets': {}}, {'output': {}},
                 {'targets': {'Payment Entry': {'type': 'object', 'properties': {'docstatus': {'type': 'integer'}}}}}):
             self.registered['draft_payment'] = definition | changes
@@ -1173,12 +1504,10 @@ def site_tests():
                 provider='OpenRouter', auth_type='API Key', enabled=1)
             model = insert('AI Model', 'Sim Event Model', model_label='Sim Event Model ' + stamp,
                 account=account.name, provider='OpenRouter', model_id='sim-local-no-network', enabled=1)
-            contract = dict(name='receipt', method='get_doc', doctype='Payment Entry', scope_field='name',
-                fields=['company', 'paid_amount'], identity_anchor='Payment Entry',
-                identity_fields={'Email': 'contact_email'}, company_field='company')
-            values = dict(title='Sim Receipt Event ' + stamp, business_doctype='Payment Entry', enabled=0,
+            row = {'capability': 'erpnext.supplier_ledger'}
+            values = dict(title='Sim Receipt Event ' + stamp, business_doctype='Supplier', enabled=0,
                 mode='Shadow', daily_limit=25, instructions='Explain the sender’s own payment of 1250. Never submit.',
-                allowed_tools=json.dumps([contract]), allowed_actions='[]')
+                allowed_tools=json.dumps([row]), allowed_actions='[]')
             name = configuration.save(values)['name']; created.append(('Relay AI Skill', name))
             assert not frappe.get_doc('Relay AI Skill', name).enabled
             activation = dict(enabled=1, target='Explain my receipt', channel=channel.name, ai_model=model.name,
@@ -1188,8 +1517,9 @@ def site_tests():
             second = configuration.save(values | activation | {'title': 'Sim Receipt Review ' + stamp,
                 'target': 'Ask staff to review a receipt', 'execution_policy': 'Ticket only'})['name']
             created.append(('Relay AI Skill', second))
-            for invalid in ({'target': ''}, {'allowed_tools': json.dumps([contract | {'identity_fields': {'Email': 'api_secret'}}])},
-                    {'allowed_tools': json.dumps([contract | {'company_field': 'paid_amount'}])},
+            for invalid in ({'target': ''}, {'allowed_tools': json.dumps([{'capability': 'erpnext.customer_ledger'}])},
+                    {'allowed_tools': json.dumps([{'capability': 'yrp.not_installed'}])},
+                    {'allowed_tools': json.dumps([row | {'fields': ['remarks']}])},
                     {'allowed_actions': '[{"action":"retailer.create_follow_up"}]'}, {'allowed_actions': '[{"action":"frappe.client.submit"}]'}):
                 try:
                     configuration.save(invalid, name=name)
@@ -1198,7 +1528,7 @@ def site_tests():
                 else:
                     raise AssertionError('Invalid activation was accepted')
             assert frappe.get_doc('Relay AI Skill', name).target == activation['target']
-            print('PASS relay.test disabled draft, activation, two targets, invalid identity/company/actions and stored version')
+            print('PASS relay.test disabled draft, activation, two targets, invalid capability rows/actions and stored version')
             frappe.db.commit(); frappe.destroy()
 
             original_init = frappe.app.init_request

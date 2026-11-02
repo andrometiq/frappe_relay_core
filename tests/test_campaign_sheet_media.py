@@ -270,8 +270,11 @@ class HeaderSendTests(unittest.TestCase):
         self.now = frappe.utils.get_datetime('2026-10-29 12:00:00')
         self.doc = _dict(name='Sheet', channel='WA', template_name='offer', language='en', arguments=json.dumps({'fields': FIELDS}),
             column_map=json.dumps({'header_attachment': attachment('static', 'offer.png')}))
+        self.cached = {}
         self.fake = SimpleNamespace(db=Mock(), utils=SimpleNamespace(now_datetime=lambda: self.now,
-            get_datetime=frappe.utils.get_datetime, add_to_date=frappe.utils.add_to_date))
+            get_datetime=frappe.utils.get_datetime, add_to_date=frappe.utils.add_to_date),
+            cache=SimpleNamespace(get_value=self.cached.get,
+                                  set_value=lambda key, value, expires_in_sec: self.cached.__setitem__(key, value)))
         self.enterContext(patch.object(bulk, 'frappe', self.fake))
         self.enterContext(patch.object(campaign_media, 'checked_file', return_value=(self.file, 'image/png')))
         self.enterContext(patch.object(bulk.whatsapp, 'prepare', side_effect=lambda operation, args: {'operation': operation, **args}))
@@ -346,3 +349,91 @@ class HeaderSendTests(unittest.TestCase):
         self.hub.execute.return_value = {'id': 'not-an-id'}
         with self.assertRaises(bulk.whatsapp.HubError):
             bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.rows(1))
+
+    def named_rows(self, *values):
+        self.doc.column_map = json.dumps({'header_attachment': attachment('named', 'offer.png')})
+        return [_dict(name=f'N{index}', destination=NUMBER, arguments=json.dumps({'values': {'header_media': value}}))
+                for index, value in enumerate(values)]
+
+    def test_reused_file_uploads_once_across_batches_and_links_never_upload(self):
+        item = attachment('named', 'offer.png')['files'][0]
+        link = 'https://cdn.example.com/offer.png'
+        rows = bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.named_rows(item, item, link))
+        later = bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.named_rows(item))
+        self.hub.execute.assert_called_once()
+        self.assertEqual([row.message['components'][0]['parameters'][0]['image'] for row in [*rows, *later]],
+                         [{'id': '555'}, {'id': '555'}, {'link': link}, {'id': '555'}])
+        self.assertEqual({json.loads(row.arguments).get('header_upload', {}).get('id') for row in rows[:2]}, {'555'})
+
+    def test_shared_upload_keeps_its_age(self):
+        item = attachment('named', 'offer.png')['files'][0]
+        bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.named_rows(item))
+        uploaded_at = next(iter(self.cached.values()))['at']
+        self.now = frappe.utils.add_to_date(self.now, days=5)
+        rows = bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.named_rows(item))
+        self.assertEqual(json.loads(rows[0].arguments)['header_upload']['at'], uploaded_at)
+        self.hub.execute.assert_called_once()
+
+    def test_file_outside_the_campaign_is_never_sent(self):
+        foreign = {'file_url': '/private/files/other.png', 'filename': 'other.png'}
+        self.assertEqual(bulk.prepare_messages(self.hub, self.doc, {'fields': FIELDS}, self.named_rows(foreign)), [])
+        self.hub.execute.assert_not_called()
+
+
+class HeaderColumnTests(unittest.TestCase):
+    """Each row's header cell names a file in the ZIP or gives an HTTPS link."""
+    COLUMN = bulk_sheet.header_column(FIELDS[0])
+
+    def setUp(self):
+        self.value = attachment('named', 'offer-1.png', 'offer-2.png')
+        self.mapping = bulk_sheet.check_mapping({'phone': 'Mobile', 'fields': {'header_media': self.COLUMN},
+                                                 'header_attachment': self.value}, ['Mobile', self.COLUMN], FIELDS)
+        self.files = {item['filename'].casefold(): (item, None) for item in self.value['files']}
+
+    def row(self, cell):
+        return bulk_sheet.prepare_row({'Mobile': NUMBER, self.COLUMN: cell}, self.mapping, FIELDS, 'IN', zip_files=self.files)
+
+    def test_rows_send_their_own_zip_file_a_reused_one_or_a_link(self):
+        first, second = self.value['files']
+        for cell, expected in (('offer-1.png', first), ('folder/OFFER-2.PNG', second), ('offer-1.png', first),
+                               ('https://cdn.example.com/a/offer.jpg', 'https://cdn.example.com/a/offer.jpg'),
+                               ('https://cdn.example.com/render?id=7', 'https://cdn.example.com/render?id=7')):
+            _, values, problem = self.row(cell)
+            self.assertIsNone(problem, cell)
+            self.assertEqual(values['values']['header_media'], expected)
+
+    def test_each_bad_cell_names_its_reason(self):
+        self.files['bad.png'] = (None, 'Wrong file content for image header')
+        for cell, reason in (('missing.png', 'Header file missing.png is not in the ZIP'),
+                             ('bad.png', 'Wrong file content for image header'),
+                             ('http://cdn.example.com/a.png', 'Header image attachment must be an HTTPS link'),
+                             ('https://relay.localhost/a.png', 'Header image attachment must be a public link'),
+                             ('https://10.0.0.5/a.png', 'Header image attachment must be a public link'),
+                             ('https://cdn.example.com/a.mp4', 'Wrong file type for image header'),
+                             ('', 'Missing Header image attachment')):
+            self.assertEqual(self.row(cell)[2], reason, cell)
+            self.assertEqual(bulk.friendly_reason(reason, FIELDS), reason)
+
+    def test_named_files_need_a_header_column_and_report_unused_or_bad_files(self):
+        with self.assertRaisesRegex(ValueError, 'column'):
+            bulk_sheet.check_mapping({'phone': 'Mobile', 'header_attachment': self.value}, ['Mobile'], FIELDS)
+        value = {**self.value, 'rejected': [{'filename': 'big.png', 'reason': 'Header attachment must be at most 5 MB'}]}
+        self.assertIs(campaign_media.check_attachment(value, FIELDS), value)
+        issues = []
+        with patch.object(campaign_media, 'checked_file'):
+            files = campaign_media.named_files(value, 'image', {'offer-1.png', 'big.png'}, issues)
+        self.assertEqual(files['offer-1.png'], (value['files'][0], None))
+        self.assertEqual(files['big.png'], (None, 'Header attachment must be at most 5 MB'))
+        self.assertEqual(issues, [{'filename': 'offer-2.png', 'reason': 'No row names this file'},
+                                  {'filename': 'big.png', 'reason': 'Header attachment must be at most 5 MB'}])
+
+    def test_plain_sheet_rows_send_links_and_file_names_need_a_zip(self):
+        mapping = bulk_sheet.check_mapping({'phone': 'Mobile', 'fields': {'header_media': self.COLUMN}}, ['Mobile', self.COLUMN], FIELDS)
+        row = {'Mobile': NUMBER, self.COLUMN: 'offer.png'}
+        self.assertEqual(bulk_sheet.prepare_row(row, mapping, FIELDS, 'IN')[2], 'Header file offer.png is not in the ZIP')
+        row[self.COLUMN] = 'https://cdn.example.com/offer.png'
+        self.assertIsNone(bulk_sheet.prepare_row(row, mapping, FIELDS, 'IN')[2])
+
+    def test_suggestion_maps_the_template_column(self):
+        mapping = bulk_sheet.suggest(['mobile number', self.COLUMN], FIELDS, first_phone=True)
+        self.assertEqual(mapping['fields'], {'header_media': self.COLUMN})

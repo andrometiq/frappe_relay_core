@@ -1,37 +1,45 @@
 """Code-owned arithmetic, truncation and tool scoping."""
-import json
 import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
 from test_ai_skills import Doc, framework, module
 import test_ai_skills
-from relay_core.ai.ledger import summarize, reply
+from relay_core.ai.ledger import render, supplier, totals
+
+
+ROWS = [dict(posting_date='2026-10-01', voucher_type='Journal Entry', voucher_no='SIM-1', debit=.1, credit=0),
+        dict(posting_date='2026-10-02', voucher_type='Journal Entry', voucher_no='SIM-2', debit=.2, credit=.05)]
 
 
 class LedgerTests(unittest.TestCase):
     def test_decimal_totals_partial_note_and_bounded_reply(self):
-        rows = [dict(company='Local Company', posting_date='2026-10-01', voucher_type='Journal Entry', voucher_no='SIM-1', debit=.1, credit=0, remarks='fixture'),
-                dict(company='Local Company', posting_date='2026-10-02', voucher_type='Journal Entry', voucher_no='SIM-2', debit=.2, credit=.05, remarks='fixture')]
-        result = summarize(rows, False)
-        self.assertEqual(result['totals'], dict(debit='0.3', credit='0.05', net_debit='0.25'))
-        self.assertIn('not an opening or closing balance', reply(result))
-        partial = summarize(rows, True)
-        self.assertIn('Partial totals', reply(partial))
-        self.assertEqual(partial['totals'], result['totals'])
-        rows[0]['remarks'] = 'x' * 3000
-        self.assertLessEqual(len(reply(summarize(rows, False))), 2000)
-        self.assertIn('omitted', reply(summarize(rows, False)))
+        rows = [dict(row) for row in ROWS]
+        self.assertEqual(totals(rows), dict(debit='0.3', credit='0.05', net_debit='0.25'))
+        self.assertIn('not an opening or closing balance', render(rows, 'English', False))
+        self.assertIn('Partial totals', render(rows, 'English', True))
+        self.assertTrue(render(rows, 'English', False).startswith('Customer ledger'))
+        self.assertTrue(supplier(rows, 'English', False).startswith('Supplier ledger'))
+        many = [dict(rows[0], voucher_no='SIM-' + 'x' * 120) for _ in range(20)]
+        self.assertLessEqual(len(render(many, 'English', False)), 1850)
+        self.assertIn('omitted', render(many, 'English', False))
+        self.assertLessEqual(len(render(many, 'Tamil', False)), 1850)
+
+    def test_remarks_appear_only_when_the_pack_shows_them(self):
+        self.assertNotIn('fixture', render(ROWS, 'English', False))
+        self.assertIn('fixture', render([dict(row, remarks='fixture') for row in ROWS], 'English', False))
 
     def test_non_finite_amounts_are_rejected(self):
         for value in ('NaN', 'Infinity', '-Infinity'):
-            with self.assertRaises(ValueError): summarize([dict(company='Local Company', debit=value, credit=0)], False)
+            with self.assertRaises(ValueError): totals([dict(debit=value, credit=0)])
+
 
 class LedgerContractTests(unittest.TestCase):
     def setUp(self):
         test_ai_skills.ScopedToolTests.setUp(self)
-        self.contract.update(doctype='GL Entry', fields=['name', 'company', 'debit', 'credit', 'posting_date'])
-        self.skill.allowed_tools = json.dumps([self.contract])
+        self.contract.update(doctype='GL Entry', fields=[dict(name=name, model=True, customer=True)
+            for name in ('name', 'company', 'debit', 'credit', 'posting_date')], limit=1)
+        self.contract['scope']['fixed'] = {'party_type': 'Supplier', 'is_cancelled': 0}
         for row in self.records:
             row.debit, row.credit, row.is_cancelled = row.amount, 0, 0
         self.records.append(Doc(name='LED-5', company='Sim Company', party='SUP-A', party_type='Supplier', debit=50, credit=10, is_cancelled=0))
@@ -46,49 +54,37 @@ class LedgerContractTests(unittest.TestCase):
         listing = self.f.get_list.side_effect
         self.f.get_list.side_effect = lambda dt, filters, **kw: listing(dt, filters, **kw)[:kw['page_length']]
 
-    def test_gl_contract_fetches_extra_row_and_totals_only_returned_supplier_rows(self):
-        result = self.reader.read(self.contract, limit=1)
-        self.assertEqual(result['totals'], dict(debit='1250', credit='0', net_debit='1250'))
+    def test_gl_contract_fetches_extra_row_to_report_truncation(self):
+        result = self.reader.read(self.contract)
         self.assertTrue(result['truncated'])
         self.assertEqual([row['name'] for row in result['rows']], ['LED-1'])
-        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['page_length'], 2)
-        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters'], {'party': 'SUP-A', 'party_type': 'Supplier', 'is_cancelled': 0, 'company': 'Sim Company'})
-        self.assertEqual(self.reader.ledger_results, [result])
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['page_length'], 2)
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['filters'], {'party': 'SUP-A', 'party_type': 'Supplier', 'is_cancelled': 0, 'company': 'Sim Company'})
+        self.assertEqual(self.reader.results['erpnext.ledger'], result)
         self.assertEqual(len(self.reader.evidence), 1)
 
     def test_cancelled_rows_do_not_consume_limit_or_inflate_totals_or_truncation(self):
         self.records[0].is_cancelled = 1  # Previously contributed 1,250 before the limit.
-        result = self.reader.read(self.contract, limit=1)
+        result = self.reader.read(self.contract)
         self.assertEqual([row['name'] for row in result['rows']], ['LED-5'])
-        self.assertEqual(result['totals'], dict(debit='50', credit='10', net_debit='40'))
+        self.assertEqual(totals(result['rows']), dict(debit='50', credit='10', net_debit='40'))
         self.assertFalse(result['truncated'])
         self.records.append(Doc(name='LED-6', company='Sim Company', party='SUP-A', party_type='Supplier', debit=100, credit=0, is_cancelled=0))
-        partial = self.reader.read(self.contract, limit=1)
+        partial = self.reader.read(self.contract)
         self.assertTrue(partial['truncated'])
-        self.assertEqual(partial['totals'], result['totals'])
-        self.assertIn('Partial totals', reply(partial))
-
-    def test_ledger_cannot_return_undeclared_company(self):
-        self.contract['fields'].remove('company')
-        self.skill.allowed_tools = json.dumps([self.contract])
-        with self.assertRaises(ValueError): self.reader.read(self.contract, limit=1)
+        self.assertIn('Partial totals', render(partial['rows'], 'English', partial['truncated']))
 
     def test_model_cannot_include_cancelled_entries(self):
-        self.contract['fields'].append('is_cancelled')
-        self.skill.allowed_tools = json.dumps([self.contract])
-        shared = sys.modules['frappe_tools.ai.tools']
-        original = shared.get_readable_meta('GL Entry').get_field
-        with patch.object(shared, 'get_readable_meta', return_value=Doc(get_field=lambda key: Doc(fieldtype='Check') if key == 'is_cancelled' else original(key))), \
-                patch.object(shared, 'get_readable_columns', return_value=set(self.contract['fields'])):
-            with self.assertRaises(ValueError):
-                self.reader.read(self.contract, filters={'is_cancelled': '1'})
+        self.contract['filters'] = {'is_cancelled': {'type': 'number', 'operators': ['=']}}
+        with self.assertRaises(ValueError):
+            self.reader.read(self.contract, filters={'is_cancelled': 1})
         self.f.get_list.assert_not_called()
 
 
 class DisabledSkillTests(unittest.TestCase):
     def test_disabled_sample_can_be_saved_without_operational_configuration(self):
         f = framework()
-        tools = types.SimpleNamespace(contracts=Mock(), as_user=Mock(side_effect=AssertionError('No identity configured')))
+        tools = types.SimpleNamespace(contracts=Mock(), is_company_scoped=Mock(), as_user=Mock(side_effect=AssertionError('No identity configured')))
         require = Mock()
         with patch.dict(sys.modules, {'relay_core.permissions': types.SimpleNamespace(require_access=require), 'relay_core.ai.tools': tools}):
             config = module('relay_core/ai/configuration.py', f)

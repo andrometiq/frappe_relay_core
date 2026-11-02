@@ -18,13 +18,9 @@ PAYMENT_FIELDS = {
 PAYMENT_SCHEMA = dict(type='object', additionalProperties=False, properties=PAYMENT_FIELDS,
     required=['payment_type', 'posting_date', 'paid_amount', 'received_amount', 'paid_from', 'paid_to'])
 
-CREATE_DRAFT = dict(label='Create draft', method='relay_core.ai.actions.create_draft',
-    contexts=['ai'], replay_safe=True, ai_safe=True, effect='create_draft', approval_policy='None',
-    permissions={'Payment Entry': 'create'}, parameters=PAYMENT_SCHEMA,
-    scope_fields={'Payment Entry': {'company': 'company', 'business': 'party'}},
-    targets={'Payment Entry': PAYMENT_SCHEMA}, output=dict(type='object', additionalProperties=False,
-        properties={'doctype': {'type': 'string'}, 'name': {'type': 'string'}}, required=['doctype', 'name']))
-REPLY = dict(label='Reply', method='relay_core.ai.actions.reply', contexts=['ai'], replay_safe=True, ai_safe=True,
+DRAFT_OUTPUT = dict(type='object', additionalProperties=False,
+    properties={'doctype': {'type': 'string'}, 'name': {'type': 'string'}}, required=['doctype', 'name'])
+REPLY = dict(label='Reply', app='relay_core', method='relay_core.ai.actions.reply', contexts=['ai'], replay_safe=True, ai_safe=True,
     effect='reply', approval_policy='None', permissions={'Relay Message': 'read'},
     parameters=dict(type='object', additionalProperties=False,
         properties={'text': {'type': 'string', 'minLength': 1, 'maxLength': 2000}}, required=['text']),
@@ -36,7 +32,7 @@ def create_draft(*, action_input, idempotency_key, automation_run, ticket, execu
     """Insert normally as the effective user; never bypass ERP validation or submit."""
     from relay_core.flows.action_contracts import ai_inputs
     from relay_core.flows.actions import definitions
-    definition = definitions()[declaration['action']]
+    definition = definitions(context='ai')[declaration['action']]
     values = ai_inputs(action_input, definition, declaration)
     doc = frappe.new_doc(declaration['doctype'])
     doc.update(values)

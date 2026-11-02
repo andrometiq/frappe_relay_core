@@ -123,7 +123,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
                 self.committed = True
                 self.revoke()
         self.fake.db.commit.side_effect = commit
-        def context(skill, message):
+        def context(skill, message, capabilities=None):
             self.assertTrue(self.committed)
             if self.denied: raise PermissionError('Linked user lost access to SUP-A')
             return 'partner', ('Supplier', 'SUP-A'), {'company': 'Sim Company'}

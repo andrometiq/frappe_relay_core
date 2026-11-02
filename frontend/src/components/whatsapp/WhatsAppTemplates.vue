@@ -10,6 +10,7 @@ import RelaySelect from "../RelaySelect.vue";
 import { whatsappKey } from "../../composables/whatsapp/context";
 import { languageLabel } from "../../services/templateLanguages";
 import { sentenceCase } from "../../services/textCase";
+import { qualityBadge } from "../../services/whatsappHealth";
 import {
   filterTemplates,
   templateBody,
@@ -59,10 +60,13 @@ const renderedBody = (row) => templateBody(row) ? templateRendering(row, templat
 const shortBody = (row) => { const body = renderedBody(row).replace(/\s+/g, " "); return body.length > 80 ? body.slice(0, 79) + "…" : body; };
 const statusHint = (status) => ({ PENDING: "Waiting for Meta to approve. This usually takes under a day.", REJECTED: "Meta did not approve this template.",
   APPROVED: "Ready to send.", PAUSED: "Meta flagged low quality.", DISABLED: "Meta turned this template off." })[String(status || "").toUpperCase()] || "";
+const qualityHint = (score) => ({ GREEN: "Customers respond well.", YELLOW: "Customers are reporting or blocking it. Review the content.",
+  RED: "Meta may pause it soon. Change the content or stop sending it." })[score] || "Meta has not rated it yet. New and rarely sent templates stay unknown.";
 const rejection = (row) => row.rejected_reason || row.rejection_reason || "";
 const columns = [
   { key: "name", label: "Template name", width: "minmax(210px,1.2fr)" },
   { key: "status", label: "Status", width: "130px" },
+  { key: "quality", label: "Quality", width: "110px" },
   { key: "category", label: "Category", width: "150px" },
   { key: "language", label: "Language", width: "190px" },
   { key: "message", label: "Message", width: "minmax(240px,1.5fr)" },
@@ -186,6 +190,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <FrappeFormSection>
       <div class="frappe-field-grid">
         <FrappeReadField label="Status" :value="[selectedTemplate.status ? sentenceCase(selectedTemplate.status) : 'Unknown', statusHint(selectedTemplate.status)].filter(Boolean).join(' · ')" />
+        <FrappeReadField label="Quality" :value="[qualityBadge(selectedTemplate.quality_score?.score).label, qualityHint(selectedTemplate.quality_score?.score)].join(' · ')" />
         <FrappeReadField v-if="['REJECTED', 'PAUSED', 'DISABLED'].includes(selectedTemplate.status)" label="Reason from Meta" :value="rejection(selectedTemplate) || 'Meta has not provided a reason. Review the template in WhatsApp Manager.'" wide />
         <FrappeReadField label="Category" :value="sentenceCase(selectedTemplate.category)" />
         <FrappeReadField label="Language" :value="languageLabel(selectedTemplate.language)" />
@@ -202,7 +207,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
     <FrappeFormSection v-if="templateButtons(selectedTemplate).length" title="Buttons" collapsible>
       <div class="template-button-list">
         <div v-for="(button, index) in templateButtons(selectedTemplate)" :key="index">
-          <span>{{ button.type?.replaceAll('_', ' ') }}</span><strong>{{ button.text || "Untitled button" }}</strong>
+          <span>{{ button.type?.replaceAll('_', ' ') }}</span><strong>{{ button.text || (button.type === "COPY_CODE" ? "Copy offer code" : "Untitled button") }}</strong>
         </div>
       </div>
     </FrappeFormSection>
@@ -248,6 +253,7 @@ onBeforeUnmount(() => window.removeEventListener("popstate", restoreHandler));
       <RelaySelect v-model="language" label="Language" hide-label :options="[{ value: 'ALL', label: 'All languages' }, ...[...new Set(templates.map(row => row.language).filter(Boolean))].map(value => ({ value, label: languageLabel(value) }))]" />
     </template>
     <template #cell-name="{ item }"><strong>{{ recordTitle(item, 'Template') }}</strong></template>
+    <template #cell-quality="{ item }"><Badge v-bind="qualityBadge(item.quality_score?.score)" :title="qualityHint(item.quality_score?.score)" /></template>
     <template #cell-status="{ item }"><Badge :label="item.status ? sentenceCase(item.status) : 'Unknown'" :theme="templateStatusTheme(item.status)" :title="statusHint(item.status)" /></template>
     <template #cell-category="{ item }">{{ item.category ? sentenceCase(item.category) : "—" }}</template>
     <template #cell-language="{ item }">{{ languageLabel(item.language) }}</template>

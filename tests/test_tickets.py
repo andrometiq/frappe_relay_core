@@ -811,7 +811,8 @@ class TicketHistoryTests(unittest.TestCase):
         self.assertEqual(row['event'], 'Payment review')
         self.assertEqual(row['read_count'], 1)
         self.assertTrue(row['search']['confirmed'])
-        self.assertEqual(row['actions'][0], dict(name='Sim Action', action='create_draft', step=1, status='Completed', approval='Recorded'))
+        self.assertEqual(row['actions'][0], dict(name='Sim Action', action='create_draft', step=1, status='Completed', approval='Recorded',
+            capability_hash=None, expires_on=None, rejection_reason=None, duplicate_of=None))
         self.assertEqual(row['deliveries'], [dict(name='Sim Delivery',status='Uncertain')])
         self.assertNotIn('private', self.json.dumps(result))
         self.f.get_all.assert_any_call('Relay Automation Run', filters={'ticket':self.ticket.name},

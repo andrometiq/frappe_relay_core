@@ -23,7 +23,24 @@ def _hook_value(value, key=None):
 
 
 def definitions(hook="relay_flow_actions", *, context=None):
-    hooks = frappe.get_hooks(hook) or {}
+    """Registered actions. The AI context reads only Core built-ins and approved capability action packs."""
+    if context == 'ai':
+        return ai_definitions()
+    return hook_definitions(frappe.get_hooks(hook) or {}, context)
+
+
+def ai_definitions():
+    from relay_core.ai.capabilities import packs, manifest_hash
+    result = hook_definitions(frappe.get_hooks('relay_flow_actions', app_name='relay_core') or {}, 'ai')
+    for pack in packs('Action'):
+        if pack['key'] in result:
+            raise ValueError(f"Action {pack['key']} is declared twice")
+        result[pack['key']] = dict(pack, contexts=['ai'], replay_safe=True, ai_safe=True,
+                                   capability_hash=manifest_hash(pack))
+    return result
+
+
+def hook_definitions(hooks, context):
     if not isinstance(hooks, dict):
         return {}
     result = {}
@@ -133,26 +150,32 @@ def proposal(skill, action, parameters):
     declared = next((row for row in action_contracts(skill) if row['action'] == action), None)
     if not declared:
         raise ValueError('Action is outside the event')
-    definition = definitions().get(action)
+    definition = definitions(context='ai').get(action)
     return dict(action=action, parameters=ai_inputs(parameters, definition, declared))
 
 
 def validate_sequence(skill, steps):
-    """The declaration is the owner-authorized chain, with each step used once."""
+    """The declaration is the owner-authorized chain, with each step used once; a plain answer is one declared reply step."""
     from relay_core.ai.configuration import action_contracts
     declared = action_contracts(skill)
     if (not isinstance(steps, list) or len(steps) > 4
-            or any(not isinstance(row, dict) or set(row) != {'action', 'parameters'} for row in steps)
-            or steps and [row['action'] for row in steps] != [row['action'] for row in declared]):
+            or any(not isinstance(row, dict) or set(row) != {'action', 'parameters'} for row in steps)):
+        raise ValueError('Execute the complete declared action sequence in order')
+    names = [row['action'] for row in steps]
+    if names and names != [row['action'] for row in declared] and not is_reply_only(names, declared):
         raise ValueError('Execute the complete declared action sequence in order')
     return declared
 
 
+def is_reply_only(names, declared):
+    return (len(names) == 1 and any(row['action'] == names[0] for row in declared)
+            and definitions(context='ai').get(names[0], {}).get('effect') == 'reply')
+
+
 def _ai_context(run_name, step):
-    from relay_core.ai.service import current, delivery_scope
-    from relay_core.ai.configuration import action_contracts, read_contracts
+    from relay_core.ai.service import current, delivery_scope, sender
+    from relay_core.ai.configuration import action_contracts
     from relay_core.ai.tools import as_user
-    from relay_core.business_access import scoped_document
     from relay_core.automation.service import lock_run
     run = lock_run(run_name)
     skill = frappe.get_doc('Relay AI Skill', run.skill)
@@ -172,7 +195,6 @@ def _ai_context(run_name, step):
         raise ValueError('Invalid execution step')
     with as_user(run.execution_user):
         message = frappe.get_doc('Relay Message', run.message)
-        message.check_permission('read')
         user, business, scope = current(run, skill, message)
         delivery_scope(run, skill, message, plan)
         if user != run.execution_user:
@@ -186,16 +208,10 @@ def _ai_context(run_name, step):
         declaration = next((row for row in action_contracts(skill) if row['action'] == item['action']), None)
         if not declaration:
             raise ValueError('Action is outside the event')
-        definition = definitions().get(item['action'])
+        definition = definitions(context='ai').get(item['action'])
         values = ai_inputs(item['parameters'], definition, declaration)
-        # current() verifies the sender endpoint and the Contact link to this business.
-        # A reference's legacy identity mapping restricts only actions on its doctype.
-        references = read_contracts(skill, scope['provider'])
-        anchors = {row['identity_fields'][scope['provider']] for row in references
-                   if row.get('identity_anchor') == business[0]
-                   and row['doctype'] in definition['permissions']}
-        for field in anchors:
-            scoped_document(*business, {field: scope['endpoint']})
+    # current() verified the sender login and its business; effects act as the skill service user.
+    with as_user(sender(run, skill)):
         for doctype, permission in definition['permissions'].items():
             if not frappe.has_permission(doctype, permission):
                 raise frappe.PermissionError('Action permission denied')
@@ -241,22 +257,55 @@ def _draft_result(result, declaration, binding, journal):
     journal.target_doctype, journal.target_name = doc.doctype, doc.name
 
 
+APPROVAL_HOURS = 48
+DUPLICATE_DAYS = 7
+EXPIRED = 'Approval expired'
+
+
+def duplicate_of(journal, business):
+    """An earlier live or completed proposal of the same action and input for the same business."""
+    since = frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-DUPLICATE_DAYS)
+    for row in frappe.get_all('Relay Flow Action', filters={'action': journal.action, 'input_hash': journal.input_hash,
+            'status': ['in', ['Awaiting approval', 'Approved', 'Completed']], 'automation_run': ['is', 'set'],
+            'name': ['!=', journal.name], 'creation': ['>=', since]},
+            fields=['name', 'ticket'], order_by='creation asc', limit_page_length=20):
+        if frappe.db.get_value('Relay Ticket', row.ticket, ['business_doctype', 'business_name']) == business:
+            return row.name
+    return None
+
+
 def execute_ai(run_name, step):
     """Consume one persisted step. Never commit, submit, or choose a destination."""
+    from relay_core.ai.service import sender
     from relay_core.ai.tools import as_user
     run, definition, declaration, values, binding = _ai_context(run_name, step)
     if step and not frappe.db.exists('Relay Flow Action',
             {'action_key': _ai_key(run_name, step - 1), 'status': 'Completed'}):
         raise ValueError('Execute event steps in order')
-    journal = _journal(_ai_key(run_name, step), _hash([definition['method'], values]),
+    capability = definition.get('capability_hash')
+    if capability != json.loads(run.get('capability_hashes') or '{}').get(declaration['action']):
+        raise ValueError('Capability changed after the decision')
+    required = definition['approval_policy'] == 'Required'
+    key = _ai_key(run_name, step)
+    new = required and not frappe.db.exists('Relay Flow Action', {'action_key': key})
+    journal = _journal(key, _hash([definition['method'], values]),
         automation_run=run.name, ticket=run.ticket, action=declaration['action'], step=step,
         input_snapshot=_encoded(values), scope_snapshot=_encoded(binding), scope_fingerprint=_hash(binding),
-        status='Awaiting approval' if definition['approval_policy'] == 'Required' else 'Pending')
+        capability_hash=capability, status='Awaiting approval' if required else 'Pending',
+        expires_on=frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=APPROVAL_HOURS) if required else None)
+    if new:
+        original = duplicate_of(journal, tuple(binding['scope']['business']))
+        if original:
+            journal.update(dict(duplicate_of=original, status='Rejected', rejection_reason='Duplicate request'))
+            journal.save(ignore_permissions=True)
+    if journal.status in ('Rejected', 'Expired'):
+        return dict(name=journal.name, status=journal.status,
+                    reason=journal.rejection_reason if journal.status == 'Rejected' else EXPIRED)
     if journal.scope_fingerprint != _hash(binding):
         raise ValueError('Action scope, version or ownership changed')
     if journal.status == 'Completed':
         result = json.loads(journal.result)
-        with as_user(run.execution_user):
+        with as_user(sender(run)):
             if definition['effect'] == 'create_draft':
                 _draft_result(result, declaration, binding, journal)
         return dict(name=journal.name, status='Completed', result=result)
@@ -266,7 +315,7 @@ def execute_ai(run_name, step):
             return dict(name=journal.name, status='Awaiting approval')
         if evidence.get('input_hash') != journal.input_hash or evidence.get('scope_fingerprint') != journal.scope_fingerprint:
             raise ValueError('Approval does not match this action')
-    with as_user(run.execution_user):
+    with as_user(sender(run)):
         def checked(result):
             if definition['effect'] == 'create_draft':
                 _draft_result(result, declaration, binding, journal)
@@ -279,9 +328,15 @@ def execute_ai(run_name, step):
     return dict(name=journal.name, status='Completed', result=result)
 
 
+def resume(run):
+    from relay_core.automation.queue import QUEUE
+    frappe.enqueue('relay_core.automation.service.process', name=run, queue=QUEUE, enqueue_after_commit=True)
+
+
 @frappe.whitelist(methods=['POST'])
 def approve(name, input_hash, scope_fingerprint):
-    """Approve an exact proposal only. Execution still rechecks all permissions."""
+    """Approve an exact proposal only. The approver needs ticket write and target create access now;
+    execution still rechecks all permissions as the acting user."""
     from relay_core.business_access import document_name
     document_name(name)
     require_access(manage=True)
@@ -291,9 +346,12 @@ def approve(name, input_hash, scope_fingerprint):
             raise ValueError('Action is not awaiting approval')
         actor = frappe.session.user
         frappe.get_doc('Relay Ticket', journal.ticket).check_permission('write')
-        _, definition, _, values, binding = _ai_context(journal.automation_run, journal.step)
+        _, definition, declaration, values, binding = _ai_context(journal.automation_run, journal.step)
+        if declaration.get('doctype') and not frappe.has_permission(declaration['doctype'], 'create', user=actor):
+            raise frappe.PermissionError('Approver cannot create the draft')
         journal.reload()  # Run lock serializes approval with execution and other approvers.
         if (journal.status != 'Awaiting approval' or definition['approval_policy'] != 'Required'
+                or journal.expires_on and frappe.utils.get_datetime(journal.expires_on) <= frappe.utils.now_datetime()
                 or input_hash != journal.input_hash or input_hash != _hash([definition['method'], values])
                 or scope_fingerprint != journal.scope_fingerprint or scope_fingerprint != _hash(binding)):
             raise ValueError('Approval is stale')
@@ -301,6 +359,47 @@ def approve(name, input_hash, scope_fingerprint):
             input_hash=input_hash, scope_fingerprint=scope_fingerprint))
         journal.status = 'Approved'
         journal.save(ignore_permissions=True)
+        resume(journal.automation_run)
         return dict(name=journal.name, status=journal.status)
     except ValueError:
         frappe.throw('Action approval is stale or unavailable')
+
+
+def close(name, status, reason=None):
+    """End a waiting proposal under the run lock; the resumed run hands off to staff."""
+    from relay_core.automation.service import lock_run
+    lock_run(frappe.db.get_value('Relay Flow Action', name, 'automation_run'))
+    journal = frappe.get_doc('Relay Flow Action', name)
+    if not journal.automation_run or journal.status != 'Awaiting approval':
+        raise ValueError('Action is not awaiting approval')
+    journal.status, journal.rejection_reason = status, reason
+    journal.save(ignore_permissions=True)
+    resume(journal.automation_run)
+    return journal
+
+
+@frappe.whitelist(methods=['POST'])
+def reject(name, reason):
+    """Staff decline a proposal with a reason; the run hands off with that reason."""
+    from relay_core.business_access import document_name
+    document_name(name)
+    require_access(manage=True)
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 500:
+        frappe.throw('Give a rejection reason of 1–500 characters')
+    frappe.get_doc('Relay Ticket', frappe.db.get_value('Relay Flow Action', name, 'ticket')).check_permission('write')
+    try:
+        journal = close(name, 'Rejected', reason.strip())
+    except ValueError:
+        frappe.throw('Action is not awaiting approval')
+    return dict(name=journal.name, status=journal.status)
+
+
+def expire_approvals():
+    """Hourly: a proposal nobody approved in time expires and its run hands off."""
+    for name in frappe.get_all('Relay Flow Action', filters={'status': 'Awaiting approval',
+            'expires_on': ['<', frappe.utils.now_datetime()]}, pluck='name', order_by='expires_on asc', limit_page_length=100):
+        try:
+            close(name, 'Expired')
+            frappe.db.commit()
+        except ValueError:
+            frappe.db.rollback()  # Approved or rejected meanwhile.

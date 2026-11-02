@@ -7,15 +7,18 @@ import frappe
 
 MAX_CANDIDATES = 20
 MAX_TEXT = 4000
+DECLINE_REASONS = {'identity': 'Sender claims another account', 'decline': 'Private or off-topic request'}
 
 
 def candidates(message):
+    """Skills of the sender's business type, plus the channel's default skill for every type."""
+    from relay_core.ai.skills import DEFAULT_KEY
     from relay_core.business_access import reference
     business = reference(message)
     if not business:
         return []
-    names = frappe.get_all('Relay AI Skill', filters={'channel': message.channel,
-        'business_doctype': business[0], 'enabled': 1}, pluck='name',
+    names = frappe.get_all('Relay AI Skill', filters={'channel': message.channel, 'enabled': 1},
+        or_filters={'business_doctype': business[0], 'sample_key': DEFAULT_KEY}, pluck='name',
         order_by='name asc', limit_page_length=MAX_CANDIDATES + 1)
     if len(names) > MAX_CANDIDATES:
         raise ValueError('Too many enabled events for bounded matching')
@@ -35,6 +38,7 @@ def human_request(text):
                 or re.search(r'\bi (?:want|need|would like) (?:to (?:talk|speak) to )?' + person
                              + r'(?=\s*(?:[.!?]|$)|\s+please\b)', value)
                 or re.fullmatch(r'(?:please ' + person + '|' + person + r' please)[.!?]*', value)
+                or re.fullmatch(r'(?:person|human|staff|agent|ആള്|ആൾ|व्यक्ति|व्यक्ती|ஆள்|మనిషి|ವ್ಯಕ್ತಿ|মানুষ)[.!?।]*', value)
                 or re.search(r'\b(?:please escalate|escalate (?:this|my|the issue)|i (?:want|need|would like) to escalate)\b', value)
                 or re.search(r'\b(?:i (?:want|need|would like) to (?:complain|(?:raise|file|make|lodge) a complaint)'
                              r'|i (?:have a complaint|am (?:unhappy|dissatisfied) with)|this is (?:a complaint|unacceptable))\b', value)
@@ -66,8 +70,8 @@ def trigger(message):
 def validate_result(value, names):
     """Require one finite score for every candidate, including rejected ones."""
     if (not isinstance(value, dict) or not {'scores', 'human_request'} <= set(value)
-            or set(value) - {'scores', 'human_request', 'decline'}
-            or type(value['human_request']) is not bool or type(value.get('decline', False)) is not bool):
+            or set(value) - {'scores', 'human_request', 'decline', 'identity_claim'}
+            or any(type(value.get(key, False)) is not bool for key in ('human_request', 'decline', 'identity_claim'))):
         raise ValueError('Invalid event match')
     scores = value['scores']
     if not isinstance(scores, list) or len(scores) != len(names):
@@ -87,10 +91,11 @@ def validate_result(value, names):
     if (winner and not value['human_request'] and Decimal(str(winner['score'])) >= Decimal('0.85')
             and Decimal(str(winner['score'])) - Decimal(str(runner)) >= Decimal('0.15')):
         selected = winner['id']
-    if value.get('decline') and winner:
+    kind = 'identity' if value.get('identity_claim') else 'decline' if value.get('decline') else None
+    if kind and winner:
         # Bind only a fixed Core decline to an accessible candidate; no skill tools run.
-        return dict(selected=winner['id'], scores=scores, decline=True,
-                    reason='Private or off-topic request', method='classifier')
+        return dict(selected=winner['id'], scores=scores, decline=True, notice=kind,
+                    reason=DECLINE_REASONS[kind], method='classifier')
     return dict(selected=selected, scores=scores, reason='Sender requested a person' if value['human_request']
                 else 'Event matched' if selected else 'No confident event match', method='classifier')
 
@@ -114,12 +119,18 @@ def select(message, skills, run_id, deadline, *, history=None):
     if len(text) > MAX_TEXT:
         raise ValueError('Message exceeds matching budget')
     from relay_core.ai.adapter import match
+    from relay_core.ai.budget import daily_cap
+    from relay_core.ai.minimise import Minimiser
     from relay_core.automation.service import reserve_attempt
     # Matching is shared work; no candidate owns this inference.
-    reserve_attempt(frappe._dict(name='matching:' + message.channel,
-        daily_limit=sum(int(skill.daily_limit) for skill in skills)))
+    owner = frappe._dict(name='matching:' + message.channel,
+        daily_limit=sum(int(skill.daily_limit) for skill in skills),
+        daily_spend_cap_usd=sum(daily_cap(skill) for skill in skills))
+    reserve_attempt(owner)
+    minimiser = Minimiser({'person': frappe.db.get_value('Relay Contact', message.relay_contact, 'contact')})
     value = match(skills[0].ai_model, [{'id': s.name, 'target': s.target} for s in skills],
-                  text, run_id, deadline, **({'history': history} if history else {}))
+                  minimiser.mask(text), run_id, deadline, skill=owner,
+                  **({'history': minimiser.mask(history)} if history else {}))
     result = validate_result(value, {skill.name for skill in skills})
     if not result['selected']:
         result['reason'] = (human_reason(text) if value['human_request'] else

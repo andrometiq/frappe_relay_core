@@ -79,32 +79,38 @@ class LanguageRegression(unittest.TestCase):
     def test_language_context_reads_scoped_permitted_customer_transcripts_without_old_answers(self):
         f = fixtures.framework()
         local = fixtures.module('relay_core/ai/service.py', f)
-        message = fixtures.Doc(name='NEW', content='ok', conversation_key='LOCAL-CONVERSATION')
+        message = fixtures.Doc(name='NEW', content='ok', conversation_key='LOCAL-CONVERSATION',
+                               relay_contact='CONTACT-1', sender_endpoint='15550000001')
+        skill = fixtures.Doc(run_as_user='service')
         source = fixtures.Doc(name='OLD', message_type='voice', transcript='പരിപാടി എപ്പോൾ?')
         f.get_list.return_value = [source]
         f.get_doc.return_value = source
         with patch.object(local, 'as_user'):
-            self.assertEqual(local.conversation_language(message, 'local-user', ('Customer', 'LOCAL')), source.transcript)
+            self.assertEqual(local.conversation_language(skill, message, ('Customer', 'LOCAL')), source.transcript)
             self.assertEqual(f.get_list.call_args.kwargs['filters'], dict(conversation_key='LOCAL-CONVERSATION',
-                business_doctype='Customer', business_name='LOCAL', direction='Incoming', name=['<', 'NEW']))
+                relay_contact='CONTACT-1', sender_endpoint='15550000001', business_doctype='Customer',
+                business_name='LOCAL', direction='Incoming', name=['<', 'NEW']))
+            local.as_user.assert_called_with('service')
             source.denied = True
-            self.assertEqual(local.conversation_language(message, 'local-user', ('Customer', 'LOCAL')), '')
+            with self.assertRaises(PermissionError):
+                local.conversation_language(skill, message, ('Customer', 'LOCAL'))
             source.denied = False
             with patch.object(fixtures.Doc, 'apply_fieldlevel_read_permissions', lambda doc: doc.update(transcript='')):
-                self.assertEqual(local.conversation_language(message, 'local-user', ('Customer', 'LOCAL')), '')
+                self.assertEqual(local.conversation_language(skill, message, ('Customer', 'LOCAL')), '')
         f.db.get_value.assert_not_called()
 
     def test_language_lookup_pages_past_neutral_messages(self):
         f = fixtures.framework()
         local = fixtures.module('relay_core/ai/service.py', f)
         message = fixtures.Doc(name='NEW', content='👍', conversation_key='LOCAL-CONVERSATION')
+        skill = fixtures.Doc(run_as_user='service')
         neutral = [fixtures.Doc(name=f'NEUTRAL-{index}', content='ok') for index in range(50)]
         clear = fixtures.Doc(name='OLD', message_type='voice', transcript='कार्यक्रम कब है?')
         rows = {row.name: row for row in [*neutral, clear]}
         f.get_list.side_effect = [neutral, [clear]]
         f.get_doc.side_effect = lambda doctype, name: rows[name]
         with patch.object(local, 'as_user'):
-            self.assertEqual(local.conversation_language(message, 'local-user', ('Customer', 'LOCAL')), clear.transcript)
+            self.assertEqual(local.conversation_language(skill, message, ('Customer', 'LOCAL')), clear.transcript)
         self.assertEqual(f.get_list.call_args.kwargs['filters']['name'], ['<', neutral[-1].name])
 
     def test_decide_passes_prior_customer_language_to_the_adapter(self):

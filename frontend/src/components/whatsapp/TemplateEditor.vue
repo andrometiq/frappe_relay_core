@@ -229,11 +229,11 @@ async function save() {
             <header><strong>Button {{ index + 1 }}</strong><Button icon="trash" variant="ghost" :aria-label="`Remove button ${index + 1}`" :disabled="busy" @click="form.buttons.splice(index, 1)" /></header>
             <div class="frappe-field-grid">
               <RelaySelect label="Action" v-model="button.type" :options="buttonTypes" :disabled="busy" />
-              <FormControl label="Button text" v-model="button.text" maxlength="25" :disabled="busy" />
+              <FormControl v-if="button.type !== 'COPY_CODE'" label="Button text" v-model="button.text" maxlength="25" :disabled="busy" />
               <FormControl v-if="button.type === 'URL'" label="Website URL" v-model="button.url" placeholder="https://example.com/orders/{{1}}" :disabled="busy" />
               <FormControl v-if="button.type === 'URL'" label="Example URL value" v-model="button.example_value" :disabled="busy" />
               <FormControl v-if="button.type === 'PHONE_NUMBER'" label="Phone number" v-model="button.phone_number" :disabled="busy" />
-              <FormControl v-if="button.type === 'COPY_CODE'" label="Example offer code" v-model="button.example_value" :disabled="busy" />
+              <FormControl v-if="button.type === 'COPY_CODE'" label="Example offer code" v-model="button.example_value" maxlength="20" :disabled="busy" />
               <RelaySelect v-if="button.type === 'OTP'" label="OTP delivery" v-model="button.otp_type" :options="['COPY_CODE', 'ONE_TAP', 'ZERO_TAP']" :disabled="busy" />
               <FormControl v-if="button.type === 'OTP' && button.otp_type !== 'COPY_CODE'" label="Autofill text" v-model="button.autofill_text" :disabled="busy" />
               <FormControl v-if="button.type === 'OTP' && button.otp_type === 'ZERO_TAP'" label="Android package name" v-model="button.package_name" :disabled="busy" />
@@ -245,6 +245,7 @@ async function save() {
               <FormControl v-if="button.type === 'VOICE_CALL'" label="Call request validity (minutes)" type="number" v-model="button.ttl_minutes" :disabled="busy" />
             </div>
           </article>
+          <small v-if="form.buttons.length > 1" class="template-field-hint">Quick replies are sent together, before or after the other buttons, as Meta requires. The preview shows the sent order.</small>
           <Button variant="outline" label="Add button" icon-left="plus" :disabled="busy || form.buttons.length >= 10" @click="addButton" />
         </div>
       </FrappeFormSection>

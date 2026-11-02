@@ -31,7 +31,8 @@ def handoff(run, skill, reason):
         ticket = ensure_episode(message, owner=owner, run=run, reason=reason)
         ticket = hold_episode(ticket.name)
         run.ticket, run.status, run.reason = ticket.name, 'Handoff', reason[:500]
-        queue_acknowledgement(run, ticket, user=run.execution_user)
+        from relay_core.ai.service import sender
+        queue_acknowledgement(run, ticket, user=sender(run, skill))
         internal_save(run)
         return ticket.name
     finally:

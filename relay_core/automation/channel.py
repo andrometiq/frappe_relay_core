@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import frappe
+from relay_core.ai.skills import is_default
 from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 
@@ -71,12 +72,18 @@ def assign_conversation(contact, team=None, user=None):
     return assign(contact, team, user)
 
 
+def serves(skill, channel, business):
+    """An enabled skill serves its own business type; the default skill serves every type on its channel."""
+    return bool(skill.enabled and skill.channel == channel
+                and (not business or skill.business_doctype == business or is_default(skill)))
+
+
 def validate_skill(name, channel, business=None, *, check_read=True):
     document_name(name)
     skill = frappe.get_doc('Relay AI Skill', name)
     if check_read:
         skill.check_permission('read')
-    if not skill.enabled or skill.channel != channel or business and skill.business_doctype != business:
+    if not serves(skill, channel, business):
         frappe.throw('Choose an enabled AI skill for this channel and business type')
     return skill
 
@@ -251,7 +258,8 @@ def ai_available(message, row):
     if not row.get('ai_skill'):
         return True
     skill = frappe.get_doc('Relay AI Skill', row['ai_skill'])
-    return bool(skill.enabled and skill.channel == message.channel and skill.business_doctype == message.get('business_doctype'))
+    business = message.get('business_doctype')
+    return bool(business) and serves(skill, message.channel, business)
 
 
 def delivery_scope(run, message):

@@ -47,18 +47,19 @@ def load_cases(cases):
 
 
 def grade(case, decision):
-    from relay_core.ai.adapter import PRIVACY_REPLY
+    from relay_core.ai.adapter import DECLINE_REPLIES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
     from relay_core.flows.actions import definitions
     outcome = 'decline' if decision.get('decline') else 'handoff' if decision.get('handoff') else 'reply'
     from relay_core.ai.language import notice, detect
     text = case.get('transcript') or case.get('message', '')
     if outcome == 'decline':
-        reply = notice('decline', text, PRIVACY_REPLY)
+        kind = decision.get('notice', 'decline')
+        reply = notice(kind, text, DECLINE_REPLIES[kind])
     elif outcome == 'handoff':
         reply = notice('handoff', text, ACKNOWLEDGEMENT)
     else:
-        registered = definitions() if decision.get('actions') else {}
+        registered = definitions(context='ai') if decision.get('actions') else {}
         reply = '\n'.join([decision.get('reply', ''), *(row['parameters']['text']
             for row in decision.get('actions', []) if registered[row['action']]['effect'] == 'reply')]).strip()
     expected = case['expected'] if isinstance(case['expected'], list) else [case['expected']]

@@ -185,3 +185,57 @@ test('a too long template name gets a length message', () => {
   assert.ok(issues.includes('Template name must be at most 512 characters.'))
   assert.ok(!issues.some(text => text.includes('lowercase')))
 })
+
+function buttonsForm(category, buttons) {
+	const form = namedForm('Hi {{customer_name}}, order {{order_id}} is ready.')
+	form.category = category
+	form.buttons = buttons.map((button) => ({ ...button, _original_type: button.type }))
+	return form
+}
+
+const MIXED = [
+	{ type: 'QUICK_REPLY', text: 'Yes' },
+	{ type: 'URL', text: 'Track', url: 'https://example.test/o/{{1}}', example_value: 'SO-12' },
+	{ type: 'QUICK_REPLY', text: 'No' },
+	{ type: 'PHONE_NUMBER', text: 'Call us', phone_number: '+91 98765 43210' },
+	{ type: 'COPY_CODE', text: 'ignored', example_value: 'SAVE20' },
+]
+
+test('mixed buttons are sent grouped and in Meta shape', () => {
+	const request = templateRequest(buttonsForm('MARKETING', MIXED), { submit: true })
+	assert.deepEqual(request.template.components.at(-1).buttons, [
+		{ type: 'QUICK_REPLY', text: 'Yes' },
+		{ type: 'QUICK_REPLY', text: 'No' },
+		{ type: 'URL', text: 'Track', url: 'https://example.test/o/{{1}}', example: ['SO-12'] },
+		{ type: 'PHONE_NUMBER', text: 'Call us', phone_number: '+919876543210' },
+		{ type: 'COPY_CODE', example: 'SAVE20' },
+	])
+	const actionsFirst = buttonsForm('UTILITY', [MIXED[1], MIXED[0], MIXED[3], MIXED[2]])
+	assert.deepEqual(buildTemplateComponents(actionsFirst).at(-1).buttons.map((button) => button.text), ['Track', 'Call us', 'Yes', 'No'])
+	assert.deepEqual(templatePreview(actionsFirst).buttons.map((button) => button.text), ['Track', 'Call us', 'Yes', 'No'])
+})
+
+test('invalid button combinations get a clear message before submit', () => {
+	const url = MIXED[1]
+	const cases = [
+		[[url, url, url], /at most 2 "Open website" buttons/],
+		[[MIXED[3], MIXED[3]], /at most 1 "Call phone number" button\./],
+		[[MIXED[4], MIXED[4]], /at most 1 "Copy offer code" button\./],
+		[Array(11).fill(MIXED[0]), /at most 10 buttons/],
+		[[{ type: 'COPY_CODE', example_value: '' }], /example offer code of at most 20/],
+	]
+	for (const [buttons, rule] of cases) assert.match(templateIssues(buttonsForm('MARKETING', buttons)).join(' '), rule)
+	assert.match(templateIssues(buttonsForm('UTILITY', [MIXED[4]])).join(' '), /"Copy offer code" buttons are not allowed in utility/)
+	assert.match(templateIssues(buttonsForm('MARKETING', [{ type: 'OTP' }])).join(' '), /"One-time password" buttons are not allowed in marketing/)
+	assert.deepEqual(templateIssues(buttonsForm('MARKETING', MIXED)), [])
+	assert.ok(!templateIssues(buttonsForm('', MIXED)).some((text) => text.includes('not allowed')))
+})
+
+test('a synced copy code button edits back without its fixed label', () => {
+	const form = templateForm({ account_name: 'a', template_name: 'offer', category: 'MARKETING', components: [
+		{ type: 'BODY', text: 'Your offer is here' },
+		{ type: 'BUTTONS', buttons: [{ type: 'COPY_CODE', text: 'Copy offer code', example: ['SAVE20'] }, { type: 'QUICK_REPLY', text: 'Stop' }] },
+	] })
+	assert.equal(form.buttons[0].example_value, 'SAVE20')
+	assert.deepEqual(buildTemplateComponents(form).at(-1).buttons, [{ type: 'COPY_CODE', example: 'SAVE20' }, { type: 'QUICK_REPLY', text: 'Stop' }])
+})

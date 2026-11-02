@@ -36,6 +36,11 @@ def timeline_sql(alias):
     return f'{alias}.relay_timeline_time' if has_timeline_column() else f'COALESCE({alias}.sent_at, {alias}.creation)'
 
 
+def index_hint(index):
+    """Force a time index on MariaDB, where permission subqueries otherwise make the planner sort a whole history."""
+    return f' FORCE INDEX (`{index}`)' if has_timeline_column() else ''
+
+
 def latest(filters, fields=('name',), since=None, limit=1):
     """Newest messages by message time, not insert time, so imported history ranks by when it happened."""
     message = frappe.qb.DocType('Relay Message')

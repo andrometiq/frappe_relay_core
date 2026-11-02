@@ -456,7 +456,7 @@ Tips: do not start or end the body with a variable. Do not put an offer in a Uti
 5. Click "Create campaign". The campaign opens as a Draft.
 6. Under "1. Upload or choose recipients", choose "Relay contacts" or "Upload sheet".
 7. With Relay contacts: filter by Tag, Linked to (business type and its segments), Number contains, and Last message from and to. The line under the filters shows how many numbers match. Use "Add a contact" and "Remove" for single people. Under Message values, pick a contact or record field for each template variable, or type the same value for all. Click "Validate".
-8. With a file: download the Excel template and fill it in, keeping mobile numbers in the first column. Upload `.xlsx`, `.csv`, `.tsv` or a ZIP with exactly one sheet and mobile-named header files. Map the remaining values and click "Validate". Review the ready/error counts and download the Excel error report if needed. Nothing is sent during validation.
+8. With a file: download the Excel template and fill it in, keeping mobile numbers in the first column. For a template with a media header, put a file name from the ZIP or an https link in the header column of each row; rows can reuse a file name. Upload `.xlsx`, `.csv`, `.tsv`, or a ZIP with exactly one sheet and the header files. Map the remaining values and click "Validate". Review the ready/error counts and download the Excel error report if needed. Nothing is sent during validation.
 9. Once at least one row is ready, under "3. Send", choose "Send now" and click "Start sending", or choose "Schedule at", pick the start time and click "Schedule".
 10. Watch the counters. Use Pause, Resume or Cancel campaign if needed.
 

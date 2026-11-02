@@ -8,7 +8,7 @@ import frappe
 import test_ai_skills as fixtures
 from test_ai_skills import Doc
 from relay_core import ai_features
-from relay_core.ai import events, evals, knowledge, language, matching, reports, reply_guard, service, skills
+from relay_core.ai import events, evals, knowledge, language, matching, reply_guard, service, skills
 
 
 class OwnerBoundaries(unittest.TestCase):
@@ -45,12 +45,16 @@ class OwnerBoundaries(unittest.TestCase):
         default = Doc(name='DEFAULT', sample_key=skills.DEFAULT_KEY, daily_limit=10, ai_model='MOCK')
         specific = Doc(name='EVENT', target='Event overview', daily_limit=10, ai_model='MOCK')
         message = Doc(content='സിഹ്മ പരിപാടി എവിടെ?', channel='WA')
-        with patch('relay_core.automation.service.reserve_attempt'), patch('relay_core.ai.adapter.match') as model:
+        with patch('relay_core.automation.service.reserve_attempt'), patch('relay_core.ai.adapter.match') as model, \
+                patch.object(matching.frappe, 'db', Mock(**{'get_value.return_value': None})):
             self.assertEqual(matching.select(message, [default], None, time.monotonic()+20)['selected'], 'DEFAULT')
             model.assert_not_called()
             model.return_value = dict(human_request=False, scores=[dict(id='EVENT', score=.2)])
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'DEFAULT')
-            model.return_value['human_request'] = True
+            model.return_value['decline'] = True
+            declined = matching.select(message, [specific, default], None, time.monotonic()+20)
+            self.assertEqual((declined['selected'], declined['decline']), ('EVENT', True))
+            model.return_value.update(decline=False, human_request=True)
             self.assertIsNone(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'])
             specific.exact_trigger = message.content
             self.assertEqual(matching.select(message, [specific, default], None, time.monotonic()+20)['selected'], 'EVENT')
@@ -78,10 +82,30 @@ class OwnerBoundaries(unittest.TestCase):
         with self.assertRaises(reply_guard.ReplyBlocked):
             reply_guard.check('फोन ९८७६५४३२१०', {}, {})
 
+    def test_marathi_needs_marathi_words_and_other_devanagari_stays_hindi(self):
+        for text, expected in [('दिवाळीची सुट्टी कधी आहे आणि बोनस कधी मिळेल?', 'Marathi'),
+                ('मला पगार कधी मिळेल', 'Marathi'), ('कार्यक्रम कब है?', 'Hindi'),
+                ('मुझे छुट्टी चाहिए', 'Hindi'), ('उद्या कार्यक्रम रद्द', 'Hindi'),
+                ('ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?', 'Kannada'), ('Riverside event ಎಲ್ಲಿ?', 'Kannada'), ('অনুষ্ঠান কখন?', 'Bengali'),
+                ('order status কি?', 'Bengali')]:
+            with self.subTest(text=text):
+                self.assertEqual(language.detect(text)['language'], expected)
+
+    def test_every_notice_has_each_indian_language_the_detector_names(self):
+        senders = {'Telugu': 'కార్యక్రమం ఎప్పుడు?', 'Kannada': 'ಕಾರ್ಯಕ್ರಮ ಯಾವಾಗ?',
+                   'Bengali': 'অনুষ্ঠান কখন?', 'Marathi': 'कार्यक्रम कधी आहे?', 'Hindi': 'कार्यक्रम कब है?'}
+        for kind, texts in language.NOTICES.items():
+            for name, text in senders.items():
+                with self.subTest(kind=kind, language=name):
+                    notice = language.notice(kind, text, 'ENGLISH')
+                    self.assertEqual(notice, texts[name])
+                    self.assertTrue(language.matches(notice, language.detect(text)))
+            self.assertEqual(language.notice(kind, 'When is the event?', 'ENGLISH'), 'ENGLISH')
+
     def test_voice_uses_transcript_and_never_audio_placeholder(self):
         message = Doc(message_type='voice', content='[audio]', transcript='कार्यक्रम कब है?')
         self.assertEqual(language.incoming(message), message.transcript)
-        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local'})), \
+        with patch.object(service, 'context', return_value=('staff', ('Customer', 'LOCAL'), {'company':'Local', 'provider':'WhatsApp'})), \
                 patch.object(service, 'conversation_history', return_value=[]), \
                 patch('relay_core.ai.event_memory.ReplyContext') as reference, \
                 patch.object(service, 'decide_text', return_value={'reply':'कार्यक्रम नवंबर में है।'}) as decide:
@@ -102,21 +126,6 @@ class OwnerBoundaries(unittest.TestCase):
             self.assertTrue(evals.grade(case, dict(reply=text))['passed'])
             if lang != 'English':
                 self.assertFalse(evals.grade(case, dict(reply='The event is in Sampleville.'))['passed'])
-
-
-class ReportContracts(unittest.TestCase):
-    def setUp(self):
-        fixtures.ScopedToolTests.setUp(self)
-
-    # Use populated scoped rows and the real Reader, with framework I/O mocked.
-    def test_registered_report_cannot_change_code_fields_or_business_scope(self):
-        contract = dict(self.contract, report='supplier_ledger', doctype='GL Entry', fields=reports.LEDGER_FIELDS)
-        reports.validate(contract, 'Supplier')
-        for changes in ({'report':'sql'}, {'method':'python'}, {'fields':['password']}, {'scope_field':'name'}):
-            with self.assertRaises(ValueError):
-                reports.validate(dict(contract, **changes), 'Supplier')
-        with self.assertRaises(ValueError):
-            reports.validate(contract, 'Customer')
 
 
 class DecisionPath(unittest.TestCase):
@@ -161,8 +170,8 @@ class DecisionPath(unittest.TestCase):
             self.assertNotIn('actions', wrong)
 
     def test_no_sql_code_or_legacy_read_tool_reachable(self):
-        legacy = dict(name='records', method='get_list', doctype='Customer', fields=['name'], scope_field='name')
-        with patch.object(self.case.adapter, 'contracts', return_value=[legacy]), \
+        # Legacy rows fail capability validation, so the skill has no read tool at all.
+        with patch.object(self.case.adapter, 'contracts', return_value=[]), \
                 patch.object(self.case.tools.Reader, 'read') as read:
             for name in ('sql', 'python', 'run_code', 'get_list', 'records', 'SEARCH'):
                 self.case.attempt.return_value = self.case.outcome(calls=[dict(id='1', name=name, arguments={})])

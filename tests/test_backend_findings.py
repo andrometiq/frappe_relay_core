@@ -12,7 +12,6 @@ from frappe import _dict
 from relay_core import business_access, cases, channel_statuses, collaboration, delivery, email_preferences, legacy, messaging, permissions, telegram, tickets
 from relay_core.automation import projection, queue
 from relay_core.flows import service as flows
-from relay_core.ai.ledger import summarize
 from test_business_routing import RoutingFixtures
 
 
@@ -145,10 +144,6 @@ class BackendFindings(unittest.TestCase):
         with patch.object(queue,'frappe',f), patch.object(queue.AUTOMATION,'release_signal') as release:
             with self.assertRaisesRegex(RuntimeError,'supports MariaDB and PostgreSQL'): queue.drain('token')
             release.assert_not_called(); f.db.sql.assert_not_called()
-
-    def test_ledger_refuses_missing_or_mixed_company(self):
-        for rows in ([dict(debit=25,credit=1)], [dict(company='',debit=25,credit=1)], [dict(company='INR company',debit=25,credit=1),dict(company='USD company',debit=3,credit=0)]):
-            with self.assertRaises(ValueError): summarize(rows,False)
 
     def test_flow_claims_queued_trigger_before_run_exists(self):
         f=self.fake(); f.db.exists.return_value=True

@@ -5,17 +5,38 @@ import hashlib
 import traceback
 import frappe
 from relay_core.automation.queue import QUEUE
-from relay_core.ai.tools import as_user
+from relay_core.ai.tools import as_user, is_company_scoped
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import action_key
 
 REPLY_TIMEOUT = 60
+SEARCH_NOTICE = 'I will check your records for this.'
+SEARCH_CONFIRM = "Reply 'yes' to continue, or tell me what to change."
+CONFIRM_WORDS = ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please',
+                 'അതെ', 'हाँ', 'हां', 'ஆம்', 'అవును', 'ಹೌದು', 'হ্যাঁ', 'होय')
+APPROVAL_NOTICE = 'Thanks. Your request is recorded for staff review. Our team will confirm it with you.'
 
 
-def context(skill, message):
+def capability_hashes(skill):
+    """{key: hash} of the skill's read packs and capability action packs; raises when one is not active."""
+    from relay_core.ai.capabilities import manifest_hash
+    from relay_core.ai.tools import contracts
+    hashes = {row['key']: manifest_hash(row) for row in contracts(skill)}
+    if skill.get('allowed_actions') and skill.allowed_actions != '[]':
+        from relay_core.ai.configuration import action_contracts
+        from relay_core.flows.actions import definitions
+        registered = definitions(context='ai')
+        hashes.update({row['action']: registered[row['action']]['capability_hash'] for row in action_contracts(skill)
+                       if 'capability_hash' in registered[row['action']]})
+    return hashes
+
+
+def context(skill, message, capabilities=None):
     from relay_core.business_access import reference, candidates
+    from relay_core.ai.skills import is_default
     business = reference(message)
-    if not business or business[0] != skill.business_doctype or business not in candidates(message.relay_contact):
+    if (not business or business not in candidates(message.relay_contact)
+            or business[0] != skill.business_doctype and not is_default(skill)):
         raise ValueError('Business identity is missing or ambiguous')
     contact = frappe.get_doc('Relay Contact', message.relay_contact)
     person = frappe.get_doc('Contact', contact.contact)
@@ -31,7 +52,7 @@ def context(skill, message):
     from relay_core.automation.provenance import context_of, conversation_key
     sender = authenticated_sender(message, channel)
     conversation = conversation_key(message.channel, message.sender_endpoint, context_of(message))
-    if message.get('conversation_key') != conversation or not channel.get('company'):
+    if message.get('conversation_key') != conversation or not channel.get('company') and is_company_scoped(skill):
         raise ValueError('Conversation or company scope is missing')
     # A linked but disabled/denied user must never fall back to a broader identity.
     if person.get('user') and not frappe.db.get_value('User', person.user, 'enabled'):
@@ -41,17 +62,18 @@ def context(skill, message):
     with as_user(user):
         # Apply field permissions to a fresh copy, leaving the coordination source intact.
         source = frappe.get_doc('Relay Message', message.name)
-        source.check_permission('read')
+        check_readable(source, user)
         source.apply_fieldlevel_read_permissions()
         if any(source.get(field) != message.get(field) for field in
                ('content', 'transcript', 'message_data', 'provider_context', 'sender_endpoint')):
             raise frappe.PermissionError('Source message fields are not accessible')
         frappe.get_doc(*business).check_permission('read')
-        if not company_allowed(channel.company):
+        if channel.get('company') and not company_allowed(channel.company):
             raise frappe.PermissionError('Conversation company is not accessible')
     scope = dict(sender, site=frappe.local.site, company=channel.company,
         channel=message.channel, conversation=conversation, message=message.name,
-        contact=contact.name, person=person.name, business=list(business), user=user)
+        contact=contact.name, person=person.name, business=list(business), user=user,
+        capabilities=capability_hashes(skill) if capabilities is None else capabilities)
     if message.message_type in ('voice', 'audio'):
         from relay_core.ai.language import incoming
         scope['transcript_hash'] = hashlib.sha256(incoming(message).encode()).hexdigest()
@@ -68,8 +90,10 @@ def decide(skill, message, run_id=None, *, deadline=None):
         return decide_text(skill, text, user, business, scope, [], run_id=run_id, deadline=deadline)
     history = conversation_history(skill, message, user, business, scope)
     from relay_core.ai.event_memory import ReplyContext
-    # The authenticated sender's own memory of this record, plus events published to its business type.
-    reference = ReplyContext(business, scope['company'], message.sender_endpoint or message.relay_contact)
+    # The authenticated sender's own memory of this record on this company and provider, plus events published to
+    # its business type.
+    reference = ReplyContext(business, scope['company'], scope['provider'],
+                             message.sender_endpoint or message.relay_contact, user)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image
@@ -82,24 +106,27 @@ def decide(skill, message, run_id=None, *, deadline=None):
         if run_id:
             reserve_attempt(skill)
         text = json.dumps({'caption': text, 'image_observation': observe_image(skill, images, run_id, deadline=deadline)})
-    language_context = conversation_language(message, user, business)
+    language_context = conversation_language(skill, message, business)
     return decide_text(skill, text, user, business, scope, history, reference, run_id,
                        deadline=deadline, language_context=language_context)
 
 
 def decide_text(skill, text, user, business, scope, history, reference=None, run_id=None, *, deadline=None,
                 language_context=''):
-    """Shared text decision; a missing reference means no saved memory or event notes."""
+    """Shared text decision; a missing reference means no saved memory or event notes. The model sees the sender's
+    contact details only as placeholders; the decision carries their table as `minimise_table`."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
+    from relay_core.ai.minimise import Minimiser
     from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     from relay_core.ai.matching import human_request, human_reason
     if human_request(text):
         return {'handoff': True, 'reply': '', 'reason': human_reason(text), 'user': user, 'reads': [], 'scope': fingerprint(scope)}
+    minimiser = Minimiser(scope)
     while True:
-        prompt = json.dumps({'history': history, 'incoming': text,
+        prompt = json.dumps(minimiser.mask({'history': history, 'incoming': text,
             **({'language_context': language_context} if language_context else {}),
-            **(reference.prompt if reference else {})}, default=str, ensure_ascii=False)
+            **(reference.prompt if reference else {})}), default=str, ensure_ascii=False)
         overflow = len(prompt) - MAX_PROMPT_LENGTH
         if overflow <= 0:
             options = {"deadline": deadline} if deadline else {}
@@ -108,8 +135,9 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
-            decision = complete(skill, user, business, prompt, run_id, scope=scope, **options)
-            return dict(decision, scope=fingerprint(scope), context=reference.used if reference and not decision.get('decline') else None)
+            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
+            return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
+                        context=reference.used if reference and not decision.get('decline') else None)
         if reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
@@ -132,85 +160,93 @@ def check_continuation(run_id):
     frappe.db.commit()
 
 
+def own_conversation(skill, message, business, before, page_length):
+    """The sender's own earlier incoming messages on this conversation and business, read as the skill's service user.
+    A sender's portal login has no Relay role, so the fixed sender filters, not that login, limit the read."""
+    with as_user(skill.run_as_user):
+        rows = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
+            'relay_contact': message.relay_contact, 'sender_endpoint': message.sender_endpoint,
+            'business_doctype': business[0], 'business_name': business[1], 'direction': 'Incoming',
+            'name': ['<', before]}, fields=['name'], order_by='name desc', page_length=page_length)
+        sources = []
+        for row in rows:
+            source = frappe.get_doc('Relay Message', row.name)
+            source.check_permission('read')
+            source.apply_fieldlevel_read_permissions()
+            sources.append(source)
+    return sources
+
+
 def conversation_history(skill, message, user, business, scope):
     """Keep scoped announcements; old business results require a fresh authorized read."""
     from relay_core.ai.tools import fingerprint
     history = []
-    try:
-        with as_user(user):
-            sources = frappe.get_list('Relay Message', filters={'conversation_key': message.conversation_key,
-                'business_doctype': business[0], 'business_name': business[1], 'direction': 'Incoming',
-                'name': ['<', message.name]}, fields=['name', 'content'], order_by='name desc', page_length=3)
-            for source in reversed(sources):
-                source = frappe.get_doc('Relay Message', source.name)
-                source.check_permission('read')
-                source.apply_fieldlevel_read_permissions()
-                # The journal is internal coordination metadata. Only a reply with
-                # no business reads and this exact permission-checked source scope
-                # may cross into history; audit records themselves stay private.
-                stored = frappe.db.get_value('Relay Automation Run', {'message': source.name,
-                    'skill': skill.name, 'skill_version': str(skill.modified), 'status': 'Completed'},
-                    'decision')
-                try:
-                    decision = json.loads(stored)
-                except (TypeError, ValueError):
-                    continue
-                if (not isinstance(decision, dict) or decision.get('reads') != [] or decision.get('handoff')
-                        or decision.get('user') != user
-                        or decision.get('scope') != fingerprint(dict(scope, message=source.name))
-                        or not isinstance(decision.get('reply'), str) or len(decision['reply']) > 2000):
-                    continue
-                if not isinstance(source.get('content'), str):
-                    continue
-                replies = [decision['reply']] if decision['reply'].strip() else []
-                # Completed EXECUTE replies contain the actual clarification, while
-                # the top-level reply is intentionally empty. Never replay draft inputs.
-                from relay_core.flows.actions import definitions
-                registered = definitions() if decision.get('actions') else {}
-                replies.extend(row['parameters']['text'] for row in decision.get('actions', [])
-                    if registered.get(row.get('action'), {}).get('effect') == 'reply'
-                    and isinstance(row.get('parameters', {}).get('text'), str))
-                reply = '\n'.join(replies)
-                if not reply.strip() or len(reply) > 2000:
-                    continue
-                history.extend([{'direction': 'Incoming', 'content': source.content},
-                    {'direction': 'Outgoing', 'content': reply}])
-    except frappe.PermissionError:
-        return []  # Optional history never borrows the run-as user's broader access.
+    for source in reversed(own_conversation(skill, message, business, message.name, 3)):
+        # The journal is internal coordination metadata. Only a reply with
+        # no business reads and this exact source scope may cross into
+        # history; audit records themselves stay private.
+        stored = frappe.db.get_value('Relay Automation Run', {'message': source.name,
+            'skill': skill.name, 'skill_version': str(skill.modified), 'status': 'Completed'},
+            'decision')
+        try:
+            decision = json.loads(stored)
+        except (TypeError, ValueError):
+            continue
+        if (not isinstance(decision, dict) or decision.get('reads') != [] or decision.get('handoff')
+                or decision.get('user') != user
+                or decision.get('scope') != fingerprint(dict(scope, message=source.name))
+                or not isinstance(decision.get('reply'), str) or len(decision['reply']) > 2000):
+            continue
+        if not isinstance(source.get('content'), str):
+            continue
+        replies = [decision['reply']] if decision['reply'].strip() else []
+        # Completed EXECUTE replies contain the actual clarification, while
+        # the top-level reply is intentionally empty. Never replay draft inputs.
+        from relay_core.flows.actions import definitions
+        registered = definitions(context='ai') if decision.get('actions') else {}
+        replies.extend(row['parameters']['text'] for row in decision.get('actions', [])
+            if registered.get(row.get('action'), {}).get('effect') == 'reply'
+            and isinstance(row.get('parameters', {}).get('text'), str))
+        reply = '\n'.join(replies)
+        if not reply.strip() or len(reply) > 2000:
+            continue
+        history.extend([{'direction': 'Incoming', 'content': source.content},
+            {'direction': 'Outgoing', 'content': reply}])
     return history
 
 
-def conversation_language(message, user, business):
+def conversation_language(skill, message, business):
     """Read only language evidence, including turns whose report results cannot be replayed."""
     from relay_core.ai.language import detect, incoming
     if detect(incoming(message))['script']:
         return ''
     before = message.name
-    try:
-        with as_user(user):
-            while True:
-                sources = frappe.get_list('Relay Message', filters={
-                    'conversation_key': message.conversation_key, 'business_doctype': business[0],
-                    'business_name': business[1], 'direction': 'Incoming', 'name': ['<', before]},
-                    fields=['name'], order_by='name desc', page_length=50)
-                for row in sources:
-                    source = frappe.get_doc('Relay Message', row.name)
-                    source.check_permission('read')
-                    source.apply_fieldlevel_read_permissions()
-                    if source.get('message_type') in ('voice', 'audio') and not (source.get('transcript') or '').strip():
-                        continue
-                    text = incoming(source)
-                    if detect(text)['script']:
-                        return text[:2000]
-                if len(sources) < 50:
-                    return ''
-                before = sources[-1].name
-    except frappe.PermissionError:
-        return ''
+    while True:
+        sources = own_conversation(skill, message, business, before, 50)
+        for source in sources:
+            if source.get('message_type') in ('voice', 'audio') and not (source.get('transcript') or '').strip():
+                continue
+            text = incoming(source)
+            if detect(text)['script']:
+                return text[:2000]
+        if len(sources) < 50:
+            return ''
+        before = sources[-1].name
+
+
+def check_readable(message, user):
+    """A sender's own login reads its own message without a Relay role; any other user needs read access."""
+    from relay_core.business_access import own_message
+    if not own_message(message, user):
+        message.check_permission('read')
 
 
 class Superseded(ValueError):
     pass
+
+
+class CapabilityChanged(Superseded):
+    """A pack the decision used was changed or disabled."""
 
 
 def search_scope(scope):
@@ -220,14 +256,14 @@ def search_scope(scope):
 
 def confirmation_required(skill, plan):
     from relay_core.ai.tools import contracts
-    reference = next(row for row in contracts(skill) if row['name'] == plan['reference'])
-    return (skill.get('search_confirmation') != 'When required'
-            or reference['doctype'] == 'GL Entry' or 'Ledger' in reference['doctype'])
+    reference = next(row for row in contracts(skill) if row['key'] == plan['reference'])
+    return (skill.get('search_confirmation') != 'When required' or reference['confirmation'] == 'Always'
+            or any(spec.get('required') for spec in reference['filters'].values()))
 
 
 def declare_search(run, skill, message, decision):
     from relay_core.ai.tools import contracts
-    from relay_core.automation.contracts import validate_search, canonical
+    from relay_core.automation.contracts import validate_search
     if decision.get('handoff') or decision.get('reads') or run.get('search_plan'):
         return
     plan = decision.get('search')
@@ -241,25 +277,14 @@ def declare_search(run, skill, message, decision):
         origin=run.name, source=message.name, source_hash=message_hash(message),
         source_transcript_hash=scope.get('transcript_hash'), confirmed_by=None, consumed_by=None)
     run.search_plan, run.stage = json.dumps(record), 'Search'
-    statement = (f"I will search {plan['reference']} to {plan['purpose']}. "
-                 f"Fields: {', '.join(plan['fields'])}. Search: {canonical(plan['arguments'])}.")
-    from relay_core.ai.language import detect, incoming
-    language = detect(incoming(message))['language']
-    labels = {
-        'Malayalam': ('റിപ്പോർട്ട് പരിശോധിക്കും', 'ലക്ഷ്യം', 'വിവരങ്ങൾ', 'തിരച്ചിൽ',
-            ' ഈ തീയതി പരിധിയും തിരച്ചിലും സ്ഥിരീകരിക്കാൻ അതെ എന്ന് മറുപടി നൽകുക; അല്ലെങ്കിൽ മാറ്റം പറയുക.'),
-        'Hindi': ('रिपोर्ट जाँचूँगा', 'उद्देश्य', 'फ़ील्ड', 'खोज',
-            ' इस तारीख सीमा और खोज की पुष्टि के लिए हाँ लिखें या बदलाव बताएं।'),
-        'Tamil': ('அறிக்கையைச் சரிபார்க்கிறேன்', 'நோக்கம்', 'விவரங்கள்', 'தேடல்',
-            ' இந்த தேதி வரம்பையும் தேடலையும் உறுதிப்படுத்த ஆம் என்று பதிலளிக்கவும் அல்லது மாற்றத்தைக் கூறவும்.'),
-    }.get(language)
-    if labels:
-        statement = (f"{labels[0]}: {plan['reference']}. {labels[1]}: {plan['purpose']}. "
-                     f"{labels[2]}: {', '.join(plan['fields'])}. {labels[3]}: {canonical(plan['arguments'])}.")
+    from relay_core.ai.language import message_notice
+    statement = message_notice('search', message, SEARCH_NOTICE)
+    dates = [value[1] for value in plan['arguments'].get('filters', {}).values()
+             if isinstance(value, list) and value[0] == 'between']
+    if dates:
+        statement += f' {dates[0][0]} – {dates[0][1]}.'  # ISO dates read the same in every language.
     if confirmation_required(skill, plan):
-        statement += labels[4] if labels else ' Please confirm this exact search by replying yes, or tell me what to change.'
-    if len(statement) > 2000:
-        raise ValueError('Search declaration is too large')
+        statement += ' ' + message_notice('search_confirm', message, SEARCH_CONFIRM)
     decision.update(reply=statement, search=plan)
 
 
@@ -284,7 +309,7 @@ def check_search(run, skill, record):
     origin = frappe.get_doc('Relay Automation Run', record['origin'])
     original = json.loads(origin.search_plan)
     source = frappe.get_doc('Relay Message', record['source'])
-    source.check_permission('read')
+    check_readable(source, frappe.session.user)
     source_scope = context(skill, source)[2]
     if (origin.message != source.name or origin.skill != skill.name or origin.skill_version != str(skill.modified)
             or origin.ticket != run.ticket or original['plan'] != record['plan']
@@ -292,7 +317,7 @@ def check_search(run, skill, record):
             or source_scope.get('transcript_hash') != record.get('source_transcript_hash')
             or search_scope(source_scope) != record['scope']):
         raise ValueError('Declared search source changed')
-    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, origin.execution_user, origin)},
+    receipt = frappe.db.get_value('Relay Message Action', {'request_key': search_request_key(source, sender(origin), origin)},
         ['status', 'source_message', 'payload'], as_dict=True)
     if (not receipt or receipt.status != 'Submitted' or receipt.source_message != source.name
             or json.loads(receipt.payload).get('automation_run') != origin.name):
@@ -301,6 +326,7 @@ def check_search(run, skill, record):
 
 
 def authorize_search(run_id, skill, contract, arguments):
+    from relay_core.ai.render import field_names
     if not run_id:
         raise ValueError('Preview cannot read undeclared business data')
     run = lock_run(run_id)
@@ -312,17 +338,19 @@ def authorize_search(run_id, skill, contract, arguments):
             record['confirmed_by'] != run.message or original['consumed_by'] != run.name):
         raise ValueError('Confirm the exact search before reading')
     expected = record['plan']['arguments']
-    if contract['method'] == 'get_list':
-        expected = dict(filters=expected.get('filters', {}), limit=expected.get('limit', 20))
-        arguments = dict(filters=arguments.get('filters', {}), limit=arguments.get('limit', 20)) if not set(arguments) - {'filters', 'limit'} else arguments
-    if contract['name'] != record['plan']['reference'] or contract['fields'] != record['plan']['fields'] or arguments != expected:
+    if contract['operation'] == 'get_list':
+        limit = contract['limit']
+        expected = dict(filters=expected.get('filters', {}), limit=expected.get('limit', limit))
+        arguments = dict(filters=arguments.get('filters', {}), limit=arguments.get('limit', limit)) if not set(arguments) - {'filters', 'limit'} else arguments
+    if (contract['key'] != record['plan']['reference'] or field_names(contract, 'model') != record['plan']['fields']
+            or arguments != expected):
         raise ValueError('Search differs from the declared plan')
 
 
 def pending_search(message, ticket, *, exclude=None, lock=True):
     """Read the latest confirmation candidate; only continue_search consumes it."""
     from relay_core.ai.language import incoming
-    if not ticket or incoming(message).strip().casefold().rstrip('.!।') not in ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please', 'അതെ', 'हाँ', 'हां', 'ஆம்'):
+    if not ticket or incoming(message).strip().casefold().rstrip('.!।') not in CONFIRM_WORDS:
         return None
     filters = {'ticket': ticket}
     if exclude:
@@ -347,14 +375,19 @@ def continue_search(run, message):
     skill = frappe.get_doc('Relay AI Skill', previous.skill)
     run.skill, run.skill_version, run.execution_user = skill.name, previous.skill_version, previous.execution_user
     with as_user(run.execution_user):
-        check_search(run, skill, record)
+        try:
+            check_search(run, skill, record)
+        except CapabilityChanged as exc:
+            # The sender confirmed in good faith; a person must follow up, not silence.
+            raise ValueError('The confirmed search is no longer available') from exc
     record['consumed_by'] = run.name
     previous.search_plan = json.dumps(record)
     internal_save(previous)
     record['confirmed_by'] = message.name
     run.search_plan, run.stage = json.dumps(record), 'Event'
     from relay_core.ai.tools import fingerprint
-    run.scope_fingerprint = fingerprint(context(skill, message)[2])
+    scope = context(skill, message)[2]
+    run.scope_fingerprint, run.capability_hashes = fingerprint(scope), json.dumps(scope['capabilities'])
     internal_save(run)
     return True
 
@@ -387,7 +420,13 @@ def current(run, skill, message):
         raise Superseded('Conversation or skill changed')
     if message_hash(message) != run.message_hash or not latest_message(message):
         raise Superseded('Incoming message changed or was superseded')
-    resolved = context(skill, message)
+    try:
+        capabilities = capability_hashes(skill)
+    except ValueError as exc:
+        raise CapabilityChanged('Capability changed') from exc
+    if run.get('capability_hashes') and capabilities != json.loads(run.capability_hashes):
+        raise CapabilityChanged('Capability changed')
+    resolved = context(skill, message, capabilities)
     if run.get('scope_fingerprint'):
         from relay_core.ai.tools import fingerprint
         if fingerprint(resolved[2]) != run.scope_fingerprint:
@@ -421,7 +460,6 @@ def process(name, *, deadline=None):
     try:
         with as_user(run.execution_user):
             message = frappe.get_doc('Relay Message', run.message)
-            message.check_permission('read')
             current(run, skill, message)
             decision = json.loads(run.decision) if run.decision else None
             if decision is None:
@@ -433,6 +471,7 @@ def process(name, *, deadline=None):
                 internal_save(run); frappe.db.commit()
                 decision = decide(skill, message, run.name, deadline=deadline)
                 used = decision.pop('context', None)
+                table = decision.pop('minimise_table', None)
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -442,15 +481,18 @@ def process(name, *, deadline=None):
                 declare_search(run, skill, message, decision)
                 run.decision = json.dumps(decision)
                 run.ai_context = json.dumps(used) if used else None
+                run.minimise_table = json.dumps(table) if table else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
             if decision['handoff']:
                 handoff(run, skill, decision['reason'] or 'Outside the configured skill')
             elif decision.get('decline'):
-                from relay_core.ai.adapter import PRIVACY_REPLY
+                from relay_core.ai.adapter import DECLINE_REPLIES
                 from relay_core.ai.language import message_notice
-                result = dispatch_reply(run, skill, message, message_notice('decline', message, PRIVACY_REPLY), slot='reply')
+                kind = decision.get('notice', 'decline')
+                result = dispatch_reply(run, skill, message, message_notice(kind, message, DECLINE_REPLIES[kind]),
+                                        slot='reply')
                 run = lock_run(name)
                 run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
                 internal_save(run)
@@ -467,6 +509,14 @@ def process(name, *, deadline=None):
                     delivery_scope(run, skill, message, decision)
                     frappe.db.commit()  # Local write and journal result commit together.
                     if outcome['status'] == 'Awaiting approval':
+                        from relay_core.ai.language import message_notice
+                        dispatch_reply(run, skill, message, message_notice('approval_notice', message, APPROVAL_NOTICE),
+                                       slot='approval_notice')
+                        frappe.db.commit()
+                        return
+                    if outcome['status'] in ('Rejected', 'Expired'):
+                        handoff(run, skill, outcome['reason'])
+                        frappe.db.commit()
                         return
                     if 'reply' in outcome.get('result', {}):
                         result = dispatch_reply(run, skill, message, outcome['result']['reply'], slot=f'event_reply_{step}')
@@ -489,6 +539,8 @@ def process(name, *, deadline=None):
             frappe.db.commit()
             if run.status == 'Pending' and run.stage == 'Event':
                 return process(run.name, deadline=deadline)
+    except frappe.QueryDeadlockError:
+        raise
     except Superseded:
         frappe.db.rollback()
         run = lock_run(name)
@@ -550,21 +602,37 @@ def send_reply(message, reply, *, slot='reply'):
     return send(message.name, 'text', {'text': reply}, key, quote=0)
 
 
+def decline_notices(message) -> dict:
+    """Fixed decline notices by kind, in the sender's language."""
+    from relay_core.ai.adapter import DECLINE_REPLIES
+    from relay_core.ai.language import message_notice
+    return {kind: message_notice(kind, message, text) for kind, text in DECLINE_REPLIES.items()}
+
+
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
-    from relay_core.ai.adapter import PRIVACY_REPLY
-    from relay_core.ai.language import message_notice
-    if reply != message_notice('decline', message, PRIVACY_REPLY):
+    if slot != 'approval_notice' and reply not in decline_notices(message).values():
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
     try:
-        result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
+        with as_user(sender(run, skill)):
+            disclose(run, message)
+            result = send_reply(message, reply, **({'slot': slot} if slot != 'reply' else {}))
     finally:
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
         raise ValueError('Reply delivery requires review')
     return result
+
+
+def disclose(run, message):
+    """Send the assistant notice before the ticket's first AI reply; `current` holds the ticket lock."""
+    from relay_core.ai.disclosure import due, send
+    if not run.get('ticket'):
+        return  # Pre-episode runs have no ticket to record the notice on.
+    if due(frappe.db.get_value('Relay Ticket', run.ticket, ['name', 'ai_disclosed'], as_dict=True)):
+        send(run, message)
 
 
 def complete(action):
@@ -584,13 +652,14 @@ def complete_delivery(action):
     if (not run.get('skill') or run.message != action.source_message
             or run.status not in ('Pending', 'Deciding', 'Delivering', 'Completed')):
         return
+    prefix = 'email:' if action.operation == 'email' else ''
+    if action.request_key == journal_key(run, 'disclosure', prefix):
+        return  # The notice receipt never decides the run; its reply has its own receipt.
     if action.status == 'Submitted':
         steps = json.loads(run.decision or '{}').get('actions', [])
-        prefix = 'email:' if action.operation == 'email' else ''
         # Explicit replies resume the persisted chain after receipt recovery.
         # A delayed receipt cannot reopen an already completed chain.
-        if any(action.request_key == hashlib.sha256((prefix + run.execution_user + ':' +
-                reply_key(run.message, f'event_reply_{step}', run)).encode()).hexdigest() for step in range(len(steps))):
+        if any(action.request_key == journal_key(run, f'event_reply_{step}', prefix) for step in range(len(steps))):
             if run.status != 'Completed':
                 run.status = 'Pending'
                 internal_save(run)
@@ -598,7 +667,11 @@ def complete_delivery(action):
             frappe.db.commit()
             return
         # Delayed duplicate announcement callbacks must not complete a later reply.
-        if action.request_key == search_request_key(frappe.get_doc('Relay Message', run.message), run.execution_user, run) and run.stage != 'Search':
+        source = frappe.get_doc('Relay Message', run.message)
+        if action.request_key == search_request_key(source, sender(run), run) and run.stage != 'Search':
+            return
+        # The run waits for staff approval; its notice receipt does not complete it.
+        if action.request_key == journal_key(run, 'approval_notice', prefix):
             return
         run.status = 'Completed'
         if run.stage == 'Search':
@@ -617,6 +690,43 @@ def complete_delivery(action):
             defer_handoff(run.name)
             return
     frappe.db.commit()
+
+
+def sender(run, skill=None) -> str:
+    """Who sends a run's customer messages: the skill's service user. The sender's own login only reads, so a portal
+    user never needs Relay messaging access."""
+    if not run.get('skill'):
+        return run.execution_user
+    skill = skill or frappe.get_doc('Relay AI Skill', run.skill)
+    return skill.get('run_as_user') or run.execution_user
+
+
+def journal_key(run, slot, prefix):
+    """The stored request key of a run's reply slot, as `messaging.request_hash` writes it."""
+    return hashlib.sha256((prefix + sender(run) + ':' + reply_key(run.message, slot, run)).encode()).hexdigest()
+
+
+def recoverable_runs(limit: int = 20) -> list[str]:
+    """Pending and Deciding runs to resume. A run whose step awaits approval is left alone once its approval notice
+    is journaled; approval, rejection or expiry resumes it."""
+    from frappe.query_builder import Order
+    run = frappe.qb.DocType('Relay Automation Run')
+    journal = frappe.qb.DocType('Relay Flow Action')
+    awaiting = (journal.status == 'Awaiting approval') & journal.automation_run.isnotnull()
+    active = run.status.isin(['Pending', 'Deciding'])
+    names = (frappe.qb.from_(run).select(run.name)
+        .where(active & run.name.notin(frappe.qb.from_(journal).select(journal.automation_run).where(awaiting)))
+        .orderby(run.creation).limit(limit).run(pluck=True))
+    # A missing notice follows its journal row within seconds, so the newest waiting runs are checked first.
+    waiting = (frappe.qb.from_(run).join(journal).on(journal.automation_run == run.name)
+        .select(run.name, run.message, run.execution_user, run.skill, run.flow_run).where(active & awaiting)
+        .orderby(journal.creation, order=Order.desc).limit(limit).run(as_dict=True))
+    return names + [row.name for row in waiting if not has_approval_notice(row)]
+
+
+def has_approval_notice(run) -> bool:
+    keys = [journal_key(run, 'approval_notice', prefix) for prefix in ('', 'email:')]
+    return bool(frappe.db.exists('Relay Message Action', {'request_key': ['in', keys]}))
 
 
 def recover_deliveries():
@@ -661,7 +771,7 @@ def select_skill(run, message, name):
     skill = validate_skill(name, message.channel, message.get('business_doctype'), check_read=False)
     user, _, scope = context(skill, message)
     run.skill, run.skill_version, run.execution_user = skill.name, str(skill.modified), user
-    run.scope_fingerprint = fingerprint(scope)
+    run.scope_fingerprint, run.capability_hashes = fingerprint(scope), json.dumps(scope['capabilities'])
     run.stage, run.attempts, run.status = 'Event', 0, 'Pending'
     if skill.execution_policy == 'Ticket only':
         run.status = 'Shadow' if skill.mode == 'Shadow' else 'Completed'
@@ -738,7 +848,8 @@ def admit(run):
             if result.get('decline'):
                 from relay_core.ai.adapter import decline_decision
                 run.status = 'Pending'
-                run.decision = json.dumps(dict(decline_decision(contexts[skill.name][0], matching.trigger(message)), scope=scopes[skill.name]))
+                decision = decline_decision(contexts[skill.name][0], matching.trigger(message), result['notice'])
+                run.decision = json.dumps(dict(decision, scope=scopes[skill.name]))
             episode(run, message)
             internal_save(run)
         frappe.db.commit()

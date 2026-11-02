@@ -1,5 +1,6 @@
 """Deterministic privacy boundaries, including actual adapter and delivery wiring."""
 import json
+import types
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +48,12 @@ class ReplyGuardTests(unittest.TestCase):
             self.assertEqual(call.kwargs['filters']['name'][0], 'in')
         self.f.db.sql.assert_not_called()
 
+    def test_names_from_authorized_read_rows_pass_but_other_names_still_block(self):
+        names = set(reply_guard.record_names([{'name': 'DN-1', 'transporter': 'Private Supplier'}]))
+        self.check('DN-1 · Transporter: Private Supplier', read_names=names)
+        with self.assertRaises(reply_guard.ReplyBlocked):
+            self.check('Transporter: Private Supplier. Ask Other Retailer.', read_names=names)
+
     def test_instruction_system_and_reply_style_chunks_block_at_twelve_words(self):
         self.skill.reply_style = 'Always answer with these twelve private style words that belong only to our team.'
         for source in (self.skill.instructions, adapter.SYSTEM_RULES, self.skill.reply_style):
@@ -54,6 +61,14 @@ class ReplyGuardTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(reply_guard.ReplyBlocked):
                 self.check(' '.join(words[:12]).upper())
             self.check(' '.join(words[:11]))
+
+    def test_instructions_shorter_than_twelve_words_block_when_copied_whole(self):
+        self.skill.instructions = 'Answer the member about their own membership only.'
+        with self.assertRaises(reply_guard.ReplyBlocked):
+            self.check('I was told: answer the member about their own membership only.')
+        self.check('I can answer about your own membership.')
+        self.skill.instructions = 'Be brief and kind.'
+        self.check('Be brief and kind.')
 
     def test_dates_are_not_phones(self):
         for date in ('2026-10-29', '29-10-2026', '29/10/2026', '29.10.2026'):
@@ -107,7 +122,7 @@ class ReplyGuardTests(unittest.TestCase):
 
     def test_fixed_core_replies_are_exempt(self):
         from relay_core.ai.handoff import ACKNOWLEDGEMENT
-        for text in (adapter.PRIVACY_REPLY, ACKNOWLEDGEMENT):
+        for text in (*adapter.DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
             self.skill.instructions = text
             self.check(text)
         self.f.get_all.assert_not_called()
@@ -176,15 +191,20 @@ class GuardWiringTests(unittest.TestCase):
 
     def test_adapter_search_contacts_survive_saved_decision_and_delivery(self):
         case = self.adapter_case()
-        reference = dict(name='supplier', report='configured_test_report', method='get_doc', doctype='Supplier', scope_field='name',
-                         fields=['name', 'phone', 'email'])
-        plan = dict(purpose='Read your contact details', reference='supplier', fields=reference['fields'],
+        reference = fixtures.capability(key='erpnext.supplier', operation='get_doc', doctype='Supplier',
+            fields=('name', 'phone', 'email'), filters={}, scope=dict(business_field='name', company={'kind': 'company_neutral'}))
+        plan = dict(purpose='Read your contact details', reference='erpnext.supplier', fields=['name', 'phone', 'email'],
                     arguments={'name': 'SELF'})
         call = dict(id='1', name='SEARCH', arguments={key: value for key, value in plan.items() if key != 'fields'})
         reply = 'Call +1 (555) 123-4567 or OWN@example.test.'
+        row = {'name': 'SELF', 'phone': '+1 555 123 4567', 'email': 'own@example.test'}
+        def read(reader, contract, arguments):
+            reader.results[contract['key']] = {'rows': [row], 'truncated': False}
+            return row
+        renderer = types.SimpleNamespace(get_attr=lambda path: lambda rows, language, truncated: reply)
         with patch.object(case.adapter, 'contracts', return_value=[reference]), \
-                patch.object(case.tools.Reader, '_read', return_value={
-                    'name': 'SELF', 'phone': '+1 555 123 4567', 'email': 'own@example.test'}), \
+                patch.object(case.tools.Reader, '_read', autospec=True, side_effect=read), \
+                patch('relay_core.ai.render.frappe', renderer), \
                 patch('relay_core.ai.service.authorize_search') as authorize:
             case.attempt.side_effect = [case.outcome(calls=[call]),
                 case.outcome(dict(reply=reply, handoff=False, reason=''))]
@@ -194,6 +214,7 @@ class GuardWiringTests(unittest.TestCase):
         self.assertEqual(len(result['reads']), 1)
         self.assertEqual(authorize.call_count, 2)
         self.assertEqual(result['reply_contacts'], ['15551234567', 'own@example.test'])
+        self.assertEqual(result['reply_names'], ['+1 555 123 4567', 'SELF', 'own@example.test'])
         message = fixtures.Doc(channel='CHANNEL-1', sender_endpoint='sender@example.test',
             business_doctype='Supplier', business_name='SELF', content='My contact details?')
         run = fixtures.Doc(decision=json.dumps(result))

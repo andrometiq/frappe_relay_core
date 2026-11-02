@@ -10,7 +10,7 @@ class RelaySettings(Document):
         previous = self.get_doc_before_save()
         if previous and not self.get('enable_ai_features'):
             fields = ('ai_handoff_owner', 'transcription_provider', 'memory_model',
-                      'event_memory_model', 'max_ai_file_size_mb')
+                      'event_memory_model', 'max_ai_file_size_mb', 'trusted_adapter_apps', 'company_neutral_types')
             if any(self.get(field) != previous.get(field) for field in fields):
                 frappe.throw('Enable AI features before changing AI settings', frappe.PermissionError)
         if self.hub_url:

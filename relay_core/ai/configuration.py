@@ -4,13 +4,11 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core import ai_features
 from relay_core.permissions import require_access
-from relay_core.ai.tools import contracts, as_user
+from relay_core.ai.tools import contracts, as_user, is_company_scoped
 
 FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as_user',
-          'handoff_owner', 'mode', 'daily_limit', 'target', 'instructions', 'reply_style',
+          'handoff_owner', 'mode', 'daily_limit', 'daily_spend_cap_usd', 'target', 'instructions', 'reply_style',
           'search_confirmation', 'exact_trigger', 'execution_policy', 'allowed_tools', 'allowed_actions')
-READ_FIELDS = {'name', 'method', 'doctype', 'fields', 'scope_field'}
-SCOPE_FIELDS = {'identity_anchor', 'identity_fields', 'company_field'}
 
 
 def _list(value, label):
@@ -19,41 +17,6 @@ def _list(value, label):
     rows = json.loads(value)
     if not isinstance(rows, list) or len(rows) > 12:
         raise ValueError(f'Choose at most 12 {label}')
-    return rows
-
-
-def read_contracts(doc, provider=None):
-    """Validate declarations only; tools.py owns runtime identity enforcement."""
-    rows = _list(doc.allowed_tools or '[]', 'read references')
-    for row in rows:
-        if not isinstance(row, dict) or not READ_FIELDS <= row.keys() or row.keys() - READ_FIELDS - SCOPE_FIELDS - {'report'}:
-            raise ValueError('Invalid read reference fields')
-    # Reuse the existing scalar-field and direct business Link validation.
-    contracts(doc)
-    from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
-    for row in rows:
-        declared = SCOPE_FIELDS.intersection(row)
-        if not declared and not doc.enabled:
-            continue  # Legacy, disabled starter drafts can still be edited.
-        if declared != SCOPE_FIELDS or row['identity_anchor'] != doc.business_doctype:
-            raise ValueError('Identity must anchor to the selected business DocType')
-        identities = row['identity_fields']
-        if (not isinstance(identities, dict) or not identities
-                or identities.keys() - {'WhatsApp', 'Telegram', 'Email'}
-                or provider and provider not in identities):
-            raise ValueError('Declare the authenticated provider identity field')
-        anchor = get_readable_meta(row['identity_anchor'])
-        for fieldname in identities.values():
-            if not isinstance(fieldname, str):
-                raise ValueError('Invalid provider identity field')
-            field = anchor.get_field(fieldname)
-            if not field or field.fieldtype != 'Data' or is_sensitive_field(fieldname):
-                raise ValueError('Identity fields must be non-sensitive Data fields on the business record')
-        if not isinstance(row['company_field'], str):
-            raise ValueError('Invalid company field')
-        field = get_readable_meta(row['doctype']).get_field(row['company_field'])
-        if not field or field.fieldtype != 'Link' or field.options != 'Company':
-            raise ValueError('Every read reference needs a direct Company link')
     return rows
 
 
@@ -75,7 +38,7 @@ def action_contracts(doc):
         return actions
     from relay_core.flows.actions import definitions
     from relay_core.flows.action_contracts import check_schema, ai_contract
-    registered = definitions()
+    registered = definitions(context='ai')
     for row in actions:
         action = registered.get(row['action'])
         ai_contract(action)
@@ -132,22 +95,23 @@ def validate_skill(doc):
     if doc.enabled or doc.handoff_owner:
         with as_user(doc.handoff_owner):
             require_access()
-    channel = None
     if doc.enabled:
         if not doc.channel or not doc.ai_model:
             raise ValueError('Choose a channel and AI Model before enabling the event')
         channel = frappe.get_doc('Relay Channel', doc.channel)
         if not channel.enabled or channel.channel not in ('WhatsApp', 'Telegram', 'Email'):
             raise ValueError('Choose an enabled WhatsApp, Telegram or email channel')
-        if not channel.get('company') or not frappe.db.exists('Company', channel.company):
+        company = channel.get('company')
+        if company and not frappe.db.exists('Company', company) or not company and is_company_scoped(doc):
             raise ValueError('Choose one company on the channel before enabling events')
         with as_user(channel.get('triage_owner')):
             require_access()
-            frappe.get_doc('Company', channel.company).check_permission('read')
+            if company:
+                frappe.get_doc('Company', company).check_permission('read')
         model = frappe.get_doc('AI Model', doc.ai_model)
         if not model.enabled or not frappe.get_doc('AI Provider Account', model.account).enabled:
             raise ValueError('Choose an enabled AI Model and provider account')
-    read_contracts(doc, channel.channel if channel else None)
+    contracts(doc)
     action_contracts(doc)
 
 
@@ -242,7 +206,7 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
                 items.append(dict(value=event.ai_model, label=label or 'Saved AI model'))
         return {'items': items, 'read_only': True}
     if kind == 'report':
-        from relay_core.ai.reports import options
+        from relay_core.ai.capabilities import options
         return {'items': options(business_doctype)}
     if kind == 'business_doctype':
         from relay_core.business_types import picker_options
@@ -252,7 +216,7 @@ def editor_options(kind, query='', doctype=None, business_doctype=None, action=N
             from relay_core.flows.actions import definitions
             from relay_core.flows.action_contracts import ai_contract
             registered = {}
-            for key, definition in definitions().items():
+            for key, definition in definitions(context='ai').items():
                 if definition.get('ai_safe') and 'ai' in definition.get('contexts', []):
                     ai_contract(definition)
                     registered[key] = definition
