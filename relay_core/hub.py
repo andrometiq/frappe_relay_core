@@ -12,6 +12,7 @@ from . import test_mode
 from . import file_limits
 
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
+SIGNUP_TOOLS = ('whatsapp.signup.start', 'whatsapp.signup.get', 'whatsapp.signup.resume', 'whatsapp.signup.cancel')
 
 MEDIA_CHECKS = {
     'account': 'an account-scoped credential is required',
@@ -180,7 +181,7 @@ class HubClient:
         return self.call_tool("whatsapp.execute", arguments)
 
     def call_tool(self, name, arguments):
-        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment"}:
+        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment", *SIGNUP_TOOLS}:
             raise HubError("Unsupported Hub tool")
         if name == "email.send":
             test_mode.ensure_email_allowed()

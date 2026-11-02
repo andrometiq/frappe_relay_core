@@ -178,7 +178,7 @@ class MetadataTests(unittest.TestCase):
             'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
             'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title', 'Relay Document Action':'title',
             'Relay WhatsApp Billing Month':'record_key',
-            'Relay AI Capability':'capability_key',
+            'Relay AI Capability':'capability_key', 'Relay WhatsApp Signup':'session_id',
             'Relay Ticket Status':'label', 'Relay Ticket Category':'label', 'Relay Ticket Type':'label',
         }
         for path in Path('relay_core/relay_core/doctype').glob('*/*.json'):
