@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { CLOSED, FLOWS, WAITING, openSignupWindow, signupSteps } from '../../services/onboarding'
+import { CLOSED, FLOWS, WAITING, needsRestart, openSignupWindow, signupSteps } from '../../services/onboarding'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 
 const props = defineProps({ state: { type: Object, required: true }, sessionId: String })
@@ -17,12 +17,13 @@ let popup = null
 const session = computed(() => props.state.signup)
 const phase = computed(() => {
   const value = session.value?.state
-  if (!session.value || restart.value || !watching.value || CLOSED.includes(value)) return 'choose'
+  if (!session.value || restart.value || !watching.value || CLOSED.includes(value) || needsRestart(session.value)) return 'choose'
   return WAITING.includes(value) ? 'waiting' : 'progress'
 })
 const chosen = computed(() => FLOWS.find(item => item.value === flow.value))
 const steps = computed(() => signupSteps(session.value))
-const note = computed(() => CLOSED.includes(session.value?.state) && watching.value ? session.value.error?.message : '')
+const note = computed(() => (CLOSED.includes(session.value?.state) || needsRestart(session.value)) && watching.value && !restart.value
+  ? session.value.error?.message : '')
 const disconnected = computed(() => props.state.channels.length && !props.state.channels.some(row => row.enabled))
 const icons = { done: 'check', running: 'loader-circle', failed: 'alert-circle', pending: 'circle' }
 
@@ -87,6 +88,7 @@ async function resume() {
     </template>
     <template v-else>
       <p v-if="session.state === 'completed'" class="onboarding-row onboarding-ok" role="status"><FeatherIcon name="check" :size="18" />{{ session.phone?.display_phone_number || 'Your number' }} is connected to Relay.</p>
+      <p v-else-if="session.state === 'failed'">Relay could not finish setting up {{ session.phone?.display_phone_number || 'your number' }}.</p>
       <p v-else>Relay is setting up {{ session.phone?.display_phone_number || 'your number' }}. You can close this page; setup continues.</p>
       <ul class="onboarding-steps" aria-label="Setup progress">
         <li v-for="step in steps" :key="step.name" :class="'is-' + step.status">

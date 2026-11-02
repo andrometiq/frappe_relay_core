@@ -59,9 +59,17 @@ export function watchSetup({ hubOrigin, sessionId, reread, onRealtime, target = 
   return () => { target.removeEventListener('message', message); page.removeEventListener('visibilitychange', visible); stop() }
 }
 
-// Skipped steps (register for a Business app number, copies for other numbers) are not shown.
+// A session that failed before Relay got access from Facebook has nothing to resume: the customer starts again.
+export function needsRestart(session) {
+  return session?.state === 'failed' && !session.steps?.some(step => step.name === 'exchange' && step.status === 'done')
+}
+
+// Steps that do not apply are not shown: register for a Business app number, the copies for other numbers.
+// The Hub skips them only when it gets there, so the flow decides first.
 export function signupSteps(session) {
-  return (session?.steps || []).filter(step => step.status !== 'skipped' && STEP_LABELS[step.name])
+  const flow = session?.flow_actual || session?.flow
+  const applies = name => name.startsWith('sync_') ? !flow || flow === 'coexistence' : name !== 'register' || flow !== 'coexistence'
+  return (session?.steps || []).filter(step => step.status !== 'skipped' && STEP_LABELS[step.name] && applies(step.name))
     .map(step => ({ ...step, label: STEP_LABELS[step.name] }))
 }
 

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  SIGNUP_WINDOW, activeStep, isSignupMessage, limitText, nameStatus, openSignupWindow, setupQuery, setupRoute, signupSteps,
+  SIGNUP_WINDOW, activeStep, isSignupMessage, limitText, nameStatus, needsRestart, openSignupWindow, setupQuery, setupRoute, signupSteps,
   watchSetup,
 } from '../src/services/onboarding.js'
 
@@ -76,10 +76,22 @@ test('setup links carry the step and session', () => {
 test('skipped steps are hidden and limits and name states read plainly', () => {
   const session = { steps: [{ name: 'verify', status: 'done' }, { name: 'register', status: 'skipped' }, { name: 'sync_history', status: 'running' }, { name: 'odd', status: 'done' }] }
   assert.deepEqual(signupSteps(session).map(step => [step.label, step.status]), [['Checking access', 'done'], ['Copying chats', 'running']])
+  const pending = ['register', 'sync_contacts'].map(name => ({ name, status: 'pending' }))
+  assert.deepEqual(signupSteps({ flow: 'new', steps: pending }).map(step => step.name), ['register'])
+  assert.deepEqual(signupSteps({ flow: 'new', flow_actual: 'coexistence', steps: pending }).map(step => step.name), ['sync_contacts'])
   assert.equal(limitText('TIER_250'), '250 customers a day until Meta verifies your business')
   assert.equal(limitText('TIER_1K'), '1,000 customers a day')
   assert.equal(limitText(undefined), 'Not known yet')
   assert.deepEqual(nameStatus('APPROVED'), { label: 'Approved', theme: 'green' })
   assert.deepEqual(nameStatus('PENDING_REVIEW'), { label: 'In review', theme: 'amber' })
   assert.deepEqual(nameStatus('DECLINED'), { label: 'Declined', theme: 'red' })
+})
+
+test('a signup that failed before Facebook gave access starts again instead of resuming', () => {
+  const steps = status => [{ name: 'exchange', status }, { name: 'verify', status: 'pending' }]
+  assert.equal(needsRestart({ state: 'failed', steps: steps('pending') }), true)
+  assert.equal(needsRestart({ state: 'failed', steps: steps('failed') }), true)
+  assert.equal(needsRestart({ state: 'failed', steps: steps('done') }), false)
+  assert.equal(needsRestart({ state: 'working', steps: steps('pending') }), false)
+  assert.equal(needsRestart(null), false)
 })
