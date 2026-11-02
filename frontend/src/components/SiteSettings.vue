@@ -38,6 +38,11 @@ async function saveMargin() {
   marginNotice.value = 'Service charge saved.'; toast('Saved')
 }
 async function saveFeature(feature, enabled) { await coreApi('settings.save_feature', { feature, enabled: enabled ? 1 : 0 }, true); location.reload() }
+async function reconnect() {
+  const result = await coreApi('onboarding.api.connect_hub', { reconnect: 1 }, true)
+  if (result.error) throw Error(result.error.message)
+  identity.value = null; await refreshIdentity(); notice.value = 'Reconnected to Relay Hub as ' + result.account + '.'; toast('Reconnected'); await load()
+}
 async function verify() { verified.value = false; await coreApi('settings.verify_connection', {}, true); verified.value = true; notice.value = 'Connection works. Incoming messages are checked on the Activity page.' }
 const features = [
   { key: 'ai', label: 'Enable AI features', help: 'Shows AI replies, AI skills and AI history on tickets.' },
@@ -45,6 +50,7 @@ const features = [
   { key: 'flows', label: 'Enable automations', help: 'Shows the Flows page, where managers build automatic replies and steps.' },
 ]
 const checklist = computed(() => [
+  ...(capabilities.value.configure ? [{ label: 'Get started', icon: 'play', ready: !capabilities.value.onboarding?.required, state: capabilities.value.onboarding?.required ? 'Guided setup is not finished' : 'Finished', href: '#/setup' }] : []),
   { label: 'Hub connection', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Checked just now' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · select Check connection' : 'Needs setup', href: '#hub-connection' },
   { label: 'Incoming message secret', icon: 'lock', ready: config.value.callback_configured, state: !loaded.value ? 'Not checked' : config.value.callback_configured ? 'Saved' : 'Missing', href: '#hub-connection' },
   ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? (capabilities.value.configure ? 'Enabled locally · confirm incoming messages in Activity' : 'Enabled locally · ask an administrator to confirm incoming messages') : 'Needs setup', href: '/desk/relay-channel' })),
@@ -67,15 +73,17 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
       <div class="v1-card-grid setup-checklist"><a v-for="(step, index) in checklist" :key="step.label" :href="step.href" class="v1-list-card" @click="followStep($event, step)"><span class="setup-step-top"><FeatherIcon :name="step.icon" :size="20" /><Badge :label="!loaded ? 'Not checked' : step.ready ? 'Ready' : 'Review'" :theme="loaded && step.ready ? 'green' : 'gray'" /></span><strong>{{ index + 1 }}. {{ step.label }}</strong><span>{{ step.state }}</span><small>Review setup <FeatherIcon name="arrow-up-right" :size="14" /></small></a></div>
       <BusinessTypeSettings v-if="capabilities.manage" />
       <form id="hub-connection" class="workflow-card" @submit.prevent="run(save)">
-        <h2 class="text-lg font-semibold">Hub connection</h2><p class="text-sm">Relay sends and receives messages through Hub. Enter the details your Hub administrator gave you, save, then select Check connection.</p>
+        <h2 class="text-lg font-semibold">Hub connection</h2><p class="text-sm">Relay sends and receives messages through Hub.<template v-if="config.account"> This site is linked as {{ config.account }}.</template></p>
+        <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><Button label="Reconnect to Relay Hub" variant="outline" icon-left="refresh-cw" :disabled="busy" @click="run(reconnect)" /><Button variant="outline" label="Check connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
+        <details class="settings-advanced"><summary>Connect manually (advanced)</summary><p class="text-sm">Enter the details your Hub administrator gave you, then save.</p>
         <div class="settings-fields"><FormControl label="Connection address" v-model="config.url" :disabled="busy || !capabilities.configure" /><FormControl label="Account name" v-model="config.account" :disabled="busy || !capabilities.configure" />
         <FormControl v-if="capabilities.configure" label="Access key" type="password" autocomplete="new-password" v-model="token" :placeholder="config.token_configured ? 'Saved — leave blank to keep' : 'Required'" :disabled="busy" /></div>
         <details v-if="capabilities.configure" class="settings-advanced"><summary>Advanced</summary>
           <div class="settings-fields"><FormControl label="Incoming message secret" type="password" autocomplete="new-password" v-model="callbackSecret" :placeholder="config.callback_configured ? 'Saved — leave blank to keep' : '32–512 printable characters'" :disabled="busy" /></div>
           <p class="text-sm text-ink-gray-5">Hub signs each incoming message with this secret. Use the same value in Hub.</p>
         </details><template v-if="capabilities.configure">
-          <div class="flex flex-wrap gap-3"><Button type="submit" label="Save connection" variant="solid" :disabled="busy || !loaded" /><Button variant="outline" label="Check connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
-        </template><p v-else>A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
+          <div class="flex flex-wrap gap-3"><Button type="submit" label="Save connection" variant="solid" :disabled="busy || !loaded" /></div>
+        </template></details><p v-if="!capabilities.configure">A System Manager can edit this connection.</p><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
       </form>
       <div v-if="config.can_switch_ai" class="workflow-card settings-features"><h2 class="font-semibold">Features</h2><p class="text-sm text-ink-gray-5">Relay reloads the page after you change a switch.</p>
         <div v-for="feature in features" :key="feature.key"><FormControl type="checkbox" :label="feature.label" :model-value="Boolean(config[feature.key + '_enabled'])" :disabled="busy || !loaded" @update:model-value="value => run(() => saveFeature(feature.key, value))" /><small>{{ feature.help }}</small></div></div>
