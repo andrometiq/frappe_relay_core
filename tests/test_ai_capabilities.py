@@ -54,6 +54,10 @@ class LoaderTests(CapabilityCase):
         self.assertNotIn('remarks', [row['name'] for row in ledger['fields']])
         self.assertEqual(loaded['erpnext.payment_entry_draft']['approval_policy'], 'Required')
 
+    def test_packs_over_missing_doctypes_are_not_loaded(self):
+        self.f.db.exists = lambda doctype, name: name not in ('GL Entry', 'Payment Entry')
+        self.assertEqual(self.capabilities.manifests(), {})
+
     def test_key_must_use_the_declaring_app_prefix(self):
         self.hooks['relay_yrp'] = {'relay_ai_capability_prefix': ['distributor']}
         for key in ('yrp.Orders', 'distributor', 'erpnext.orders', 'relay_yrp.orders', 'yrp.orders.extra', 3):
@@ -132,7 +136,7 @@ class SyncTests(CapabilityCase):
             return doc
         self.enterContext(patch.object(Doc, 'insert', insert))
         self.f.new_doc = lambda doctype: Doc(doctype=doctype, flags=Doc())
-        self.f.db.exists.side_effect = lambda doctype, name: name in self.rows
+        self.f.db.exists.side_effect = lambda doctype, name: doctype == 'DocType' or name in self.rows
         self.f.get_doc.side_effect = lambda doctype, name: self.rows[name]
         self.f.get_all.side_effect = lambda doctype, filters, pluck: [name for name in self.rows
             if name not in filters['name'][1] and self.rows[name].status != 'Missing']

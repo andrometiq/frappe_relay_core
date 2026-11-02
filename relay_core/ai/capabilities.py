@@ -31,8 +31,15 @@ def manifests() -> dict[str, dict]:
             for key, manifest in frappe.get_attr(path).items():
                 if key in loaded:
                     raise ValueError(f'Capability {key} is declared by {loaded[key]["app"]} and {app}')
-                loaded[key] = validate_manifest(app, key, manifest)
+                if has_doctypes(manifest):
+                    loaded[key] = validate_manifest(app, key, manifest)
     return loaded
+
+
+def has_doctypes(manifest: dict) -> bool:
+    """A pack over DocTypes this site does not have (ERPNext packs on a site without ERPNext) is not loaded."""
+    doctypes = [manifest.get('doctype')] if manifest.get('kind') == 'read' else list(manifest.get('targets') or {})
+    return all(isinstance(name, str) and frappe.db.exists('DocType', name) for name in doctypes)
 
 
 def validate_manifest(app: str, key: str, manifest: dict) -> dict:
