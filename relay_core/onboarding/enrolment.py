@@ -209,9 +209,8 @@ def proof(nonce, challenge):
 
 
 def display_name():
-    company = frappe.defaults.get_global_default('company') if frappe.db.exists('DocType', 'Company') else None
-    name = company or frappe.db.get_single_value('System Settings', 'app_name') or frappe.local.site
-    return str(name)[:200]
+    from relay_core.onboarding.details import business_name
+    return str(business_name())[:200]
 
 
 def version():

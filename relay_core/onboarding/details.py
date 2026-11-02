@@ -42,10 +42,17 @@ def country_code(country):
     return code.upper() if isinstance(code, str) and len(code) == 2 else ''
 
 
+def business_name(found=None):
+    """The default company, else the site's own app name, else the site host. Frappe's default app name is no business name."""
+    found = company() if found is None else found
+    app_name = frappe.db.get_single_value('System Settings', 'app_name')
+    return (found or {}).get('company_name') or (app_name if app_name != 'Frappe' else '') or frappe.local.site
+
+
 def defaults():
     """Prefill from the default company, System Settings and the current user."""
     found = company() or {}
-    name = found.get('company_name') or frappe.db.get_single_value('System Settings', 'app_name') or frappe.local.site
+    name = business_name(found)
     zone = frappe.db.get_single_value('System Settings', 'time_zone')
     return {'name': str(name)[:100], 'email': frappe.session.user if EMAIL.fullmatch(frappe.session.user or '') else '',
             'website': found.get('website') or '', 'no_website': not found.get('website'),

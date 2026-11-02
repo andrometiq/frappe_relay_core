@@ -98,6 +98,9 @@ class ConnectTests(unittest.TestCase):
         for item in patches:
             self.addCleanup(item.stop)
         self.restore = self.mocks[4]
+        names = patch('relay_core.onboarding.details.frappe', self.frappe)
+        names.start()
+        self.addCleanup(names.stop)
 
     def hub(self, *, fail=None):
         """A Hub that checks the proof the way the real one does."""

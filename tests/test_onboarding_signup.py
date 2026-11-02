@@ -264,5 +264,17 @@ class PatchTests(unittest.TestCase):
         self.run_patch([{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Telegram', 'enabled': 1}]).assert_not_called()
 
 
+class BusinessNameTests(unittest.TestCase):
+    def name(self, company, app_name):
+        fake = SimpleNamespace(db=SimpleNamespace(get_single_value=Mock(return_value=app_name)), local=SimpleNamespace(site='acme.example.com'))
+        with patch.object(details, 'frappe', fake):
+            return details.business_name({'company_name': company} if company else {})
+
+    def test_frappe_default_app_name_is_not_a_business_name(self):
+        self.assertEqual(self.name('Acme Pvt Ltd', 'Frappe'), 'Acme Pvt Ltd')
+        self.assertEqual(self.name(None, 'Acme ERP'), 'Acme ERP')
+        self.assertEqual(self.name(None, 'Frappe'), 'acme.example.com')
+
+
 if __name__ == '__main__':
     unittest.main()

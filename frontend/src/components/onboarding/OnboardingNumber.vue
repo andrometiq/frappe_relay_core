@@ -86,7 +86,8 @@ async function resume() {
       </div>
     </template>
     <template v-else>
-      <p>Relay is setting up {{ session.phone?.display_phone_number || 'your number' }}. You can close this page; setup continues.</p>
+      <p v-if="session.state === 'completed'" class="onboarding-row onboarding-ok" role="status"><FeatherIcon name="check" :size="18" />{{ session.phone?.display_phone_number || 'Your number' }} is connected to Relay.</p>
+      <p v-else>Relay is setting up {{ session.phone?.display_phone_number || 'your number' }}. You can close this page; setup continues.</p>
       <ul class="onboarding-steps" aria-label="Setup progress">
         <li v-for="step in steps" :key="step.name" :class="'is-' + step.status">
           <FeatherIcon :name="icons[step.status]" :size="16" :class="{ 'relay-button__spinner': step.status === 'running' }" />
