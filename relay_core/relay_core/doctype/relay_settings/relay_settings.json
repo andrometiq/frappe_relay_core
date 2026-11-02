@@ -28,7 +28,13 @@
     "whatsapp_margin_percent",
     "opt_out_section",
     "opt_out_keywords",
-    "opt_in_keywords"
+    "opt_in_keywords",
+    "onboarding_section",
+    "hub_origin",
+    "enrolled_at",
+    "enrolment_source",
+    "onboarding_completed",
+    "onboarding_draft"
   ],
   "fields": [
     {
@@ -195,6 +201,43 @@
       "fieldtype": "Small Text",
       "default": "START",
       "description": "One per line. An incoming message that is exactly one of these words opts the number back in."
+    },
+    {
+      "fieldname": "onboarding_section",
+      "label": "Self-service setup",
+      "fieldtype": "Section Break",
+      "collapsible": 1
+    },
+    {
+      "fieldname": "hub_origin",
+      "label": "Hub origin",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Set when this site linked itself to the Hub."
+    },
+    {
+      "fieldname": "enrolled_at",
+      "label": "Linked to Hub at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "enrolment_source",
+      "label": "Linked by",
+      "fieldtype": "Select",
+      "options": "\nManual\nSite config\nSetup code",
+      "read_only": 1
+    },
+    {
+      "fieldname": "onboarding_completed",
+      "label": "Setup finished",
+      "fieldtype": "Check"
+    },
+    {
+      "fieldname": "onboarding_draft",
+      "label": "Business details draft",
+      "fieldtype": "JSON",
+      "hidden": 1
     }
   ],
   "permissions": [
@@ -206,5 +249,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-30 12:00:00.000000"
+  "modified": "2026-11-02 12:00:00.000000"
 }
