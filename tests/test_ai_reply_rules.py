@@ -88,6 +88,9 @@ class ReplyDecisionTests(unittest.TestCase):
         self.assertIn('only if history shows none was asked yet for this topic; otherwise hand off', self.system)
         self.assertIn('Search confirmation is not a clarifying question', self.system)
         self.assertNotIn('If unclear, ask a question with search=null', self.system)
+        self.assertIn('Do not ask which record or period when a declared reference can list', self.system)
+        self.assertIn('a report row that does not mention it does not contradict it', self.system)
+        self.assertIn("A get_doc reference reads the sender's own record: send empty arguments", self.system)
 
     def test_unknown_inaccessible_and_low_confidence_requests_require_specific_reason(self):
         for request, reason in (

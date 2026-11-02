@@ -52,6 +52,9 @@ def own_record_arguments(contract, arguments, business):
     """The model never sees the sender's record name, so a read of that record takes it from the scope."""
     if (contract['operation'] == 'get_doc' and contract['scope']['business_field'] == 'name'
             and isinstance(arguments, dict) and 'name' not in arguments):
+        # Models send the list shape (empty filters, a limit) for a one-record read.
+        if set(arguments) <= {'filters', 'limit'} and not arguments.get('filters'):
+            return {'name': business[1]}
         return dict(arguments, name=business[1])
     return arguments
 

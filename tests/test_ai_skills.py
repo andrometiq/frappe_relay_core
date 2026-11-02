@@ -177,6 +177,9 @@ class ScopedToolTests(unittest.TestCase):
                 self.assertEqual(self.tools.own_record_arguments(own, arguments, ('Supplier', 'SUP-A')), arguments)
         with self.assertRaises(self.tools.PrivacyDenied):
             self.tools.check_identity_arguments(own, {'name': 'SUP-B'}, ('Supplier', 'SUP-A'), None)
+        self.assertEqual(self.tools.own_record_arguments(own, {'filters': {}, 'limit': 1}, ('Supplier', 'SUP-A')), {'name': 'SUP-A'})
+        self.assertEqual(self.tools.own_record_arguments(own, {'filters': {'status': 'Open'}}, ('Supplier', 'SUP-A')),
+                         {'filters': {'status': 'Open'}, 'name': 'SUP-A'})
         for contract in (dict(own, operation='get_list'), dict(self.contract, operation='get_doc')):
             with self.subTest(contract=contract['operation']):
                 self.assertEqual(self.tools.own_record_arguments(contract, {}, ('Supplier', 'SUP-A')), {})
@@ -889,6 +892,38 @@ class SharedAdapterTests(unittest.TestCase):
                 self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':invalid,'id':'one'}])]
                 with self.assertRaises(ValueError): self.adapter.complete(self.skill,'partner',('Supplier','SUP-A'),'Ledger please')
             reader.read.assert_not_called()
+
+    def test_rejected_declaration_gets_one_correction_turn(self):
+        good = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],
+            arguments={'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}})
+        bad = dict(good, arguments={'filters': {'semester': 'Semester 3'}})
+        prompts = []
+        def attempt(responses):
+            def call(account, model, build, *args):
+                provider = Mock()
+                build(provider, {}, model)
+                prompts.append(provider.build_turn.call_args.args[2])
+                return next(responses)
+            return call
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]), \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            self.attempt.side_effect = attempt(iter([self.outcome(dict(reply='', handoff=False, reason='', search=bad)),
+                                                     self.outcome(dict(reply='', handoff=False, reason='', search=good))]))
+            self.assertEqual(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['search'], good)
+            self.assertIn('search declaration was rejected: Undeclared search filter', prompts[1])
+            self.attempt.side_effect = None
+            self.attempt.reset_mock()
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=bad))
+            with self.assertRaisesRegex(ValueError, 'Undeclared search filter'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+            self.assertEqual(self.attempt.call_count, 2)
+            self.attempt.reset_mock()
+            other = dict(bad, arguments={'filters': {'party': 'SUP-B'}})
+            self.attempt.return_value = self.outcome(dict(reply='', handoff=False, reason='', search=other))
+            self.assertTrue(self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')['decline'])
+            self.attempt.assert_called_once()
+        reader.read.assert_not_called()
 
     def test_default_skill_offers_no_reads_to_another_business_type(self):
         from relay_core.ai.skills import DEFAULT_KEY
