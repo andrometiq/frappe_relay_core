@@ -21,7 +21,7 @@ class HubCapabilitiesCacheTests(unittest.TestCase):
         self.hub.execute.return_value = {'site': 'https://relay.example', 'templates': True}
         self.cache = Cache()
         self.url = 'https://relay.example/'
-        self.frappe = SimpleNamespace(cache=self.cache, throw=Mock(side_effect=PermissionError),
+        self.frappe = SimpleNamespace(cache=self.cache, throw=Mock(side_effect=PermissionError), get_all=Mock(return_value=[]),
             utils=SimpleNamespace(get_url=lambda: self.url))
         self.settings = {'relay_hub_url': 'https://hub.example/mcp', 'relay_hub_account': 'acme'}
         for item in (patch.object(whatsapp, 'frappe', self.frappe), patch.object(whatsapp, 'client', return_value=self.hub),
@@ -53,6 +53,14 @@ class HubCapabilitiesCacheTests(unittest.TestCase):
         self.url = 'http://relay.example'
         self.hub.execute.return_value = {'site': 'https://relay.example:8443', 'templates': True}
         self.assertTrue(whatsapp.checked_client()[1]['templates'])
+
+    def test_a_site_with_several_numbers_names_its_default_number(self):
+        self.frappe.get_all.return_value = ['Acme Traders-002']
+        with patch('relay_core.hub_channels.hub_arguments', side_effect=lambda name, arguments: dict(arguments, channel='wa-' + name)) as arguments:
+            whatsapp.checked_client()
+        arguments.assert_called_once_with('Acme Traders-002', {'operation': 'capabilities'})
+        self.hub.execute.assert_called_once_with({'operation': 'capabilities', 'channel': 'wa-Acme Traders-002'})
+        self.assertEqual(self.frappe.get_all.call_args.kwargs['order_by'], 'is_default desc, creation asc')
 
     def test_a_failed_hub_read_is_not_cached(self):
         self.hub.execute.side_effect = [RuntimeError('down'), {'site': 'https://relay.example'}]

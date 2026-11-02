@@ -95,11 +95,19 @@ def checked_client():
     key=f"{HUB_CAPABILITIES_KEY}:{connection_value('relay_hub_url')}:{connection_value('relay_hub_account')}"
     capabilities=frappe.cache.get_value(key)
     if capabilities is None:
-        capabilities=hub.execute({'operation':'capabilities'})
+        capabilities=hub.execute(capabilities_request())
         frappe.cache.set_value(key,capabilities,expires_in_sec=HUB_CAPABILITIES_SECONDS)
     if not is_same_site(capabilities.get('site'), frappe.utils.get_url()):
         frappe.throw('Hub account belongs to another site')
     return hub,capabilities
+
+
+def capabilities_request():
+    """Hub capabilities are per number, so a site with several numbers asks for its default (else oldest) one."""
+    from relay_core.hub_channels import hub_arguments
+    names=frappe.get_all('Relay Channel', pluck='name', limit=1, order_by='is_default desc, creation asc',
+        filters={'channel':'WhatsApp', 'account':connection_value('relay_hub_account'), 'enabled':1})
+    return hub_arguments(names[0] if names else None, {'operation':'capabilities'})
 
 
 def clear_hub_capabilities():
