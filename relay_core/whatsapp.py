@@ -2,7 +2,7 @@
 import re
 import frappe
 from relay_core.business_access import document_name, business_document
-from relay_core.settings import value as connection_value
+from relay_core.settings import is_same_site, value as connection_value
 from relay_core.hub import HubClient, HubError
 from relay_core.permissions import require_access, require_business_assignment, can_manage
 
@@ -97,7 +97,7 @@ def checked_client():
     if capabilities is None:
         capabilities=hub.execute({'operation':'capabilities'})
         frappe.cache.set_value(key,capabilities,expires_in_sec=HUB_CAPABILITIES_SECONDS)
-    if str(capabilities.get('site','')).rstrip('/') != frappe.utils.get_url().rstrip('/'):
+    if not is_same_site(capabilities.get('site'), frappe.utils.get_url()):
         frappe.throw('Hub account belongs to another site')
     return hub,capabilities
 

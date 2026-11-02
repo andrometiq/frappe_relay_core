@@ -1,5 +1,6 @@
 """Site-owned connection settings. Password values never enter read responses."""
 import re
+from urllib.parse import urlsplit
 import frappe
 from relay_core import features
 from relay_core.permissions import require_access, can_configure, can_manage
@@ -19,6 +20,12 @@ def value(key):
         result=doc.get_password(field,raise_exception=False) if field in ('hub_token','callback_secret') else doc.get(field)
         if result:return result
     return frappe.conf.get(key)
+
+def is_same_site(origin, site_url):
+    """Whether a Hub binding's origin names the site at `site_url`. Only the host is compared: a background job
+    builds the URL without the request, so behind a TLS proxy or on a port it lacks the request's scheme and port."""
+    host=urlsplit(str(origin or '')).hostname
+    return bool(host) and host==urlsplit(str(site_url or '')).hostname
 
 @frappe.whitelist(methods=['GET'])
 def connection():
@@ -55,7 +62,7 @@ def save_connection(url,account,token='',callback_secret=''):
     credential=token or value('relay_hub_token') or ''
     hub=HubClient(url,credential)
     binding=hub.call_tool('account.get',{})
-    if binding.get('account')!=account or str(binding.get('site','')).rstrip('/')!=frappe.utils.get_url().rstrip('/'):
+    if binding.get('account')!=account or not is_same_site(binding.get('site'),frappe.utils.get_url()):
         frappe.throw('Hub account does not match this Frappe site',frappe.PermissionError)
     if callback_secret and (len(callback_secret)<32 or len(callback_secret)>512 or any(ord(c)<32 for c in callback_secret)):
         raise ValueError('Callback secret must contain 32–512 printable characters')
@@ -73,7 +80,7 @@ def verify_connection():
     require_access(configure=True)
     hub=HubClient(value('relay_hub_url') or '',value('relay_hub_token') or '')
     binding=hub.call_tool('account.get',{})
-    if binding.get('account')!=value('relay_hub_account') or str(binding.get('site','')).rstrip('/')!=frappe.utils.get_url().rstrip('/'):
+    if binding.get('account')!=value('relay_hub_account') or not is_same_site(binding.get('site'),frappe.utils.get_url()):
         frappe.throw('Hub account does not match this Frappe site',frappe.PermissionError)
     from relay_core.channel_sync import sync
     return {'verified':True,'channels':sync()}

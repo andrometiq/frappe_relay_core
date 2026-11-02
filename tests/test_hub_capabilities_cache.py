@@ -49,6 +49,11 @@ class HubCapabilitiesCacheTests(unittest.TestCase):
             whatsapp.checked_client()
         self.hub.execute.assert_called_once()
 
+    def test_a_background_url_without_the_request_scheme_and_port_is_the_same_site(self):
+        self.url = 'http://relay.example'
+        self.hub.execute.return_value = {'site': 'https://relay.example:8443', 'templates': True}
+        self.assertTrue(whatsapp.checked_client()[1]['templates'])
+
     def test_a_failed_hub_read_is_not_cached(self):
         self.hub.execute.side_effect = [RuntimeError('down'), {'site': 'https://relay.example'}]
         with self.assertRaises(RuntimeError):
