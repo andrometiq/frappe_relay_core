@@ -111,7 +111,11 @@ def user(email: str, roles: list[str], first_name: str | None = None, mobile: st
                         'mobile_no': mobile, 'send_welcome_email': 0,
                         'roles': [{'role': role} for role in roles]}).insert(ignore_permissions=True)
     else:
-        frappe.get_doc('User', email).add_roles(*roles)
+        # A user save enqueues a Contact sync that would land inside a scenario's state diff.
+        doc = frappe.get_doc('User', email)
+        missing = [role for role in roles if role not in {row.role for row in doc.roles}]
+        if missing:
+            doc.add_roles(*missing)
     return email
 
 

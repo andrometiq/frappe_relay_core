@@ -4,6 +4,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -131,6 +132,15 @@ class SiteGuard(unittest.TestCase):
             with self.subTest(site=site), patch.object(frappe, 'local', SimpleNamespace(site=None)), \
                     self.assertRaises(seed.SiteRefused):
                 seed.guard(site)
+
+    def test_existing_user_is_saved_only_for_missing_roles(self):
+        doc = SimpleNamespace(roles=[SimpleNamespace(role='Accounts User')], add_roles=unittest.mock.Mock())
+        with patch.object(seed.frappe, 'db', SimpleNamespace(exists=lambda *args: True), create=True), \
+                patch.object(seed.frappe, 'get_doc', return_value=doc):
+            seed.user('sim.agent@example.invalid', ['Accounts User'])
+            doc.add_roles.assert_not_called()
+            seed.user('sim.agent@example.invalid', ['Accounts User', 'Relay Communication Manager'])
+            doc.add_roles.assert_called_once_with('Relay Communication Manager')
 
     def test_seed_refuses_before_any_write(self):
         with patch.object(frappe, 'local', SimpleNamespace(site='relay.test')), patch.object(frappe, 'set_user') as set_user, \
