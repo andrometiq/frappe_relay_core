@@ -10,6 +10,9 @@ import frappe
 from relay_core.settings import value as connection_value
 from relay_core.permissions import require_access
 
+# Copied WhatsApp Business app chats arrive in chunks of up to 4 MiB.
+MAX_CALLBACK_BYTES = 6 * 1024 * 1024
+
 
 callback_write = ContextVar('relay_authenticated_callback', default=False)
 
@@ -49,7 +52,7 @@ def insert_event(values, *, inline=False):
 def authenticated_payload(raw, timestamp, signature, secret, expected_account):
     if not isinstance(secret, str) or len(secret) < 32:
         raise ValueError('Callback authentication is not configured')
-    if len(raw) > 2 * 1024 * 1024:
+    if len(raw) > MAX_CALLBACK_BYTES:
         raise ValueError('Callback is too large')
     try:
         age = abs(time.time() - int(timestamp))

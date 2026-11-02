@@ -143,6 +143,8 @@ def project(name, business_overrides=None):
         set_status(name, 'Uncategorized'); return
     try:
         template_update = project_templates(payload, event) if medium == 'WhatsApp' else False
+        from relay_core.onboarding.coexistence import project_changes
+        copied = medium == 'WhatsApp' and project_changes(payload, channel)
         incoming = extract_messages(payload)
         update_status = apply_updates(payload, channel, event)
         from relay_core.call_records import ingest as ingest_calls
@@ -241,7 +243,7 @@ def project(name, business_overrides=None):
         else:
             message.insert(ignore_permissions=True)
     frappe.db.set_value('Relay Hub Event', name, 'routing_decisions', json.dumps(decisions, sort_keys=True))
-    frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or update_status == 'Projected' else 'Ignored')
+    frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or copied or update_status == 'Projected' else 'Ignored')
     from relay_core.realtime import changed
     changed(event)
     if medium == 'Telegram':

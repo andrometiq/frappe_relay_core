@@ -8,11 +8,12 @@ from relay_core.settings import value as connection_value
 PROVIDERS = ('WhatsApp', 'Telegram', 'Email')
 KEY = re.compile(r'[A-Za-z0-9_.:-]{1,140}')
 FIELDS = ['name', 'channel', 'account', 'hub_channel', 'label', 'address', 'waba_id', 'enabled', 'is_default',
-          'company', 'triage_owner', 'creation']
+          'company', 'triage_owner', 'connection_type', 'creation']
+ONBOARDING = ('new', 'coexistence', 'migrate')
 
 
 def listed_channels(result):
-    """Validated `channels.list` rows as {key, provider, label, address, waba_id, enabled}."""
+    """Validated `channels.list` rows as {key, provider, label, address, waba_id, enabled, coexistence, onboarding}."""
     rows = result.get('channels')
     if not isinstance(rows, list) or len(rows) > 500:
         raise ValueError('Hub returned an invalid channel list')
@@ -27,7 +28,9 @@ def listed_channels(result):
             raise ValueError('Hub returned an invalid WhatsApp Business Account')
         channels.append({'key': row['key'], 'provider': row['provider'], 'label': text(row.get('label')),
                          'address': text(row.get('display_number') or row.get('address')),
-                         'waba_id': waba[:40], 'enabled': row.get('enabled') is not False})
+                         'waba_id': waba[:40], 'enabled': row.get('enabled') is not False,
+                         'coexistence': row.get('coexistence') is True,
+                         'onboarding': row.get('onboarding') if row.get('onboarding') in ONBOARDING else ''})
     return channels
 
 
@@ -79,8 +82,11 @@ def store(account, listed):
 
 
 def values(account, item):
-    return {'account': account, 'label': item['label'], 'address': item['address'], 'waba_id': item['waba_id'],
-            'enabled': int(item['enabled'])}
+    result = {'account': account, 'label': item['label'], 'address': item['address'], 'waba_id': item['waba_id'],
+              'enabled': int(item['enabled'])}
+    if item['provider'] == 'WhatsApp':
+        result['connection_type'] = 'Coexistence' if item.get('coexistence') else 'Cloud API'
+    return result
 
 
 def insert(account, item):
