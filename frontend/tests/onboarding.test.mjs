@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  SIGNUP_WINDOW, activeStep, isSignupMessage, limitText, nameStatus, needsRestart, openSignupWindow, setupQuery, setupRoute, signupSteps,
+  SIGNUP_WINDOW, activeStep, findSignupWindow, isSignupMessage, limitText, nameStatus, needsRestart, openSignupWindow, readQueue, setupQuery, setupRoute, signupSteps,
   watchSetup,
 } from '../src/services/onboarding.js'
 
@@ -94,4 +94,26 @@ test('a signup that failed before Facebook gave access starts again instead of r
   assert.equal(needsRestart({ state: 'failed', steps: steps('done') }), false)
   assert.equal(needsRestart({ state: 'working', steps: steps('pending') }), false)
   assert.equal(needsRestart(null), false)
+})
+
+test('after a reload a running Hub window is found by name and not loaded again', () => {
+  const calls = []
+  const crossOrigin = { get location() { throw new Error('cross-origin') } }
+  assert.deepEqual(findSignupWindow((...args) => { calls.push(args); return crossOrigin }, false), { popup: crossOrigin, running: true })
+  assert.deepEqual(calls[0], ['', SIGNUP_WINDOW, 'popup,width=600,height=760'])
+  const blank = { location: { href: 'about:blank' } }
+  assert.deepEqual(findSignupWindow(() => blank, true), { popup: blank, running: false })
+  assert.deepEqual(findSignupWindow(() => null, true), { popup: null, running: false })
+})
+
+test('a change during a read is read once more after it, not dropped', async () => {
+  const reasons = []
+  let release
+  const read = readQueue(reason => { reasons.push(reason); return reasons.length === 1 ? new Promise(done => { release = done }) : undefined })
+  const first = read('open')
+  read('onboarding')
+  read('channels')
+  release()
+  await first
+  assert.deepEqual(reasons, ['open', 'onboarding'])
 })

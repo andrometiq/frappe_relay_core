@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { onRealtime, subscribeRoom } from '../../services/realtime'
-import { CLOSED, STEPS, activeStep, setupQuery, setupRoute, watchSetup } from '../../services/onboarding'
+import { CLOSED, STEPS, activeStep, readQueue, setupQuery, setupRoute, watchSetup } from '../../services/onboarding'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 import LoadingRows from '../LoadingRows.vue'
 import OnboardingHub from './OnboardingHub.vue'
@@ -39,14 +39,13 @@ function go(name, sessionId = '') {
 function readRoute() { query.value = setupQuery(location.hash) }
 // The Hub window's message, a visible tab or a reconnect may come before the Hub callback, so an open
 // session is read from the Hub once; a realtime change already updated Core's copy.
-async function reread(reason) {
-  if (loading.value) return
+const reread = readQueue(async reason => {
   const open = query.value.session || (state.value?.signup && !['completed', ...CLOSED].includes(state.value.signup.state) ? session.value : '')
   if (open && reason !== 'onboarding' && reason !== 'channels') {
     try { await coreApi('onboarding.api.signup_status', { session: open }) } catch { /* Core's last copy is shown instead. */ }
   }
   await load()
-}
+})
 
 let stopWatch, stopRoom
 onMounted(() => {
