@@ -165,8 +165,8 @@ def recipient_business(contact, channel, address, doctype=None, name=None, notif
     """A subscription authorizes its own recipient independently of ticket ownership."""
     notification = notification or outgoing_notification.get()
     if not notification:
-        from relay_core.business_access import choose_business
-        return choose_business(contact, doctype, name)
+        from relay_core.conversation_start import start_business
+        return start_business(contact, doctype, name)
     row = frappe.get_doc('Relay Ticket Notification', notification)
     if snapshot and doctype and name:
         # Recording a provider receipt must survive unsubscribe or a late success after rejection.

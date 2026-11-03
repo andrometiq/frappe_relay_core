@@ -32,8 +32,25 @@ class ChannelRegistryTests(unittest.TestCase):
 
     def test_enabled_follows_the_site_switch(self):
         settings = types.SimpleNamespace(ENABLED_CHANNELS=('WhatsApp', 'Email'))
-        with patch.dict(sys.modules, {'relay_core.settings': settings}):
+        with patch.dict(sys.modules, {'relay_core.settings': settings}), patch('relay_core.channels.linked', return_value=set()):
             self.assertEqual([item.name for item in enabled()], ['WhatsApp', 'Email'])
+
+    def test_a_linked_bot_or_mailbox_switches_its_channel_on(self):
+        settings = types.SimpleNamespace(ENABLED_CHANNELS=('WhatsApp',))
+        for linked, expected in ((set(), ['WhatsApp']), ({'Email'}, ['WhatsApp', 'Email']),
+                                 ({'Telegram', 'Email'}, ['WhatsApp', 'Telegram', 'Email'])):
+            with self.subTest(linked=linked), patch.dict(sys.modules, {'relay_core.settings': settings}), \
+                    patch('relay_core.channels.linked', return_value=linked):
+                self.assertEqual([item.name for item in enabled()], expected)
+
+    def test_linked_reads_enabled_channels_of_the_site_account(self):
+        settings = types.SimpleNamespace(value=Mock(return_value='acme'))
+        frappe = types.SimpleNamespace(get_all=Mock(return_value=['Telegram']))
+        with patch.dict(sys.modules, {'relay_core.settings': settings, 'frappe': frappe}):
+            from relay_core.channels import linked
+            self.assertEqual(linked(), {'Telegram'})
+        filters = frappe.get_all.call_args.kwargs['filters']
+        self.assertEqual((filters['enabled'], filters['account']), (1, 'acme'))
 
     def test_whatsapp_supports_its_message_types(self):
         whatsapp = channel('WhatsApp')
