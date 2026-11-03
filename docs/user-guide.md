@@ -37,7 +37,7 @@ Meta WhatsApp  --->  Relay Hub (holds the WhatsApp account and keys)
                      (same business number the customer wrote to)
 ```
 
-Today Relay shows WhatsApp only. The Email and Telegram chips in the Inbox show "soon".
+Relay always shows WhatsApp. Telegram and Email show when the Hub links an enabled bot or mailbox to this site. A first message from a private Telegram chat, or from an email address that the receiving mail server authenticated and that no Contact has, makes a new unlinked contact and shows under Chats > Not linked. Mail from an address that a Contact already has waits in Contacts > New senders until a manager links it.
 
 ## 2. Words used in this guide
 

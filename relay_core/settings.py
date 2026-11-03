@@ -6,7 +6,7 @@ from relay_core import features
 from relay_core.permissions import require_access, can_configure, can_manage
 from relay_core.hub import HubClient
 
-# Channels the Relay UI offers. Telegram and Email backends stay intact for a later switch-on.
+# Channels the Relay UI always offers. Telegram and Email show once the site has an enabled bot or mailbox.
 ENABLED_CHANNELS=('WhatsApp',)
 
 FIELDS={'relay_hub_url':'hub_url','relay_hub_account':'hub_account','relay_hub_token':'hub_token','relay_callback_secret':'callback_secret'}
