@@ -41,10 +41,11 @@ def throw(message, exception=ValueError):
     raise exception(message)
 
 
-def fake_frappe(conf=None, roles=('System Manager',)):
+def fake_frappe(conf=None, roles=('System Manager',), request=True):
     settings = _dict(save=Mock())
     settings.update = lambda values: dict.update(settings, values)
-    return SimpleNamespace(conf=_dict(conf or {}), cache=FakeCache(), local=SimpleNamespace(site='acme.localhost'),
+    return SimpleNamespace(conf=_dict(conf or {}), cache=FakeCache(),
+                           local=SimpleNamespace(site='acme.localhost', request=object() if request else None),
                            utils=SimpleNamespace(get_url=lambda: 'http://acme.localhost:8001', now_datetime=lambda: 'now'),
                            db=SimpleNamespace(commit=Mock(), exists=Mock(return_value=False),
                                               get_single_value=Mock(return_value='Acme')),
@@ -73,6 +74,13 @@ class SetupCredentialTests(unittest.TestCase):
     def test_a_bare_code_uses_the_configured_hub(self):
         self.assertEqual(self.credential(TOKEN, relay_hub_origin=HUB)[:2], (HUB, TOKEN))
 
+    def test_a_pasted_link_cannot_move_a_site_off_its_configured_hub(self):
+        with self.assertRaises(OnboardingError) as caught:
+            self.credential('https://attacker.example/enrol?code=' + TOKEN, relay_hub_origin='https://hub.example.com')
+        self.assertEqual(caught.exception.code, 'hub_origin_mismatch')
+        self.assertEqual(self.credential('https://hub.example.com/enrol?code=' + TOKEN, relay_hub_origin='https://hub.example.com/')[0],
+                         'https://hub.example.com')
+
     def test_bad_codes_and_plain_http_hubs_are_refused(self):
         for code, conf, expected in (('short', {'relay_hub_origin': HUB}, 'setup_code_invalid'),
                                      (TOKEN, {}, 'hub_origin_missing'),
@@ -81,6 +89,24 @@ class SetupCredentialTests(unittest.TestCase):
             with self.subTest(code=code, conf=conf), self.assertRaises(OnboardingError) as caught:
                 self.credential(code, **conf)
             self.assertEqual(caught.exception.code, expected)
+
+
+class SiteOriginTests(unittest.TestCase):
+    def origin(self, request=True, url='http://acme.localhost:8001', **conf):
+        frappe = fake_frappe(conf, request=request)
+        frappe.utils.get_url = lambda: url
+        with patch.object(enrolment, 'frappe', frappe):
+            return enrolment.site_origin()
+
+    def test_a_browser_request_gives_the_address_in_lower_case(self):
+        self.assertEqual(self.origin(url='https://Acme.Example.com'), 'https://acme.example.com')
+
+    def test_a_script_needs_host_name(self):
+        with self.assertRaises(OnboardingError) as caught:
+            self.origin(request=False, url='http://acme.localhost')
+        self.assertEqual(caught.exception.code, 'site_address_unknown')
+        self.assertEqual(self.origin(request=False, url='https://acme.example.com', host_name='https://acme.example.com'),
+                         'https://acme.example.com')
 
 
 class ConnectTests(unittest.TestCase):
@@ -97,7 +123,7 @@ class ConnectTests(unittest.TestCase):
         self.mocks = [item.start() for item in patches]
         for item in patches:
             self.addCleanup(item.stop)
-        self.restore = self.mocks[4]
+        self.restore, self.check, self.sync = self.mocks[4], self.mocks[5], self.mocks[6]
         names = patch('relay_core.onboarding.details.frappe', self.frappe)
         names.start()
         self.addCleanup(names.stop)
@@ -146,6 +172,30 @@ class ConnectTests(unittest.TestCase):
             self.assertEqual(enrolment.connect()['account'], 'acme-localhost')
         enrol.assert_not_called()
         self.frappe.cache.lock.assert_called_once_with('site:relay-enrolment', timeout=120, blocking_timeout=60)
+
+    def test_try_again_on_a_linked_site_syncs_and_checks_the_saved_link(self):
+        self.settings.update(relay_hub_url=HUB + '/mcp', relay_hub_token='t' * 40, relay_hub_account='acme-localhost')
+        self.check.side_effect = OnboardingError('hub_check_failed')
+        with self.hub() as enrol, self.assertRaises(OnboardingError):
+            enrolment.connect()
+        enrol.assert_not_called()
+        self.sync.assert_called_once()
+        self.assertEqual(self.check.call_args.args[0], {'site_id': 'acme-localhost', 'mcp_url': HUB + '/mcp',
+                                                        'hub_token': 't' * 40, 're_enrolled': False})
+
+    def test_channels_are_read_even_when_the_check_fails(self):
+        self.check.side_effect = OnboardingError('hub_check_failed')
+        with self.hub(), self.assertRaises(OnboardingError):
+            enrolment.connect()
+        self.sync.assert_called_once()
+        self.assertEqual(self.frappe.settings['hub_token'], RESULT['hub_token'])
+
+    def test_any_failure_before_the_hub_answers_restores_the_old_secret(self):
+        with patch.object(enrolment, 'request_enrolment', side_effect=RuntimeError('test mode blocked')), \
+                self.assertRaises(RuntimeError):
+            enrolment.connect()
+        self.restore.assert_called_once_with('relay-hub@acme.localhost', 'old-secret')
+        self.assertEqual(self.frappe.cache.values, {})
 
     def test_reconnect_enrols_again(self):
         self.settings.update(relay_hub_url=HUB + '/mcp', relay_hub_token='t' * 40, relay_hub_account='old')
