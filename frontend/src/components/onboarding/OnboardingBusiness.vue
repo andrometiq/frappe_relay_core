@@ -37,16 +37,29 @@ async function save() {
     <div class="onboarding-fields">
       <FormControl v-model="form.name" class="is-wide" label="Business name" required maxlength="100" :disabled="busy" />
       <FormControl v-model="form.email" label="Business email" type="email" required :disabled="busy" />
-      <FormControl v-model="form.country" label="Country" type="select" required :options="state.options.countries" :disabled="busy" />
       <div class="is-wide space-y-2">
         <FormControl v-model="form.website" label="Website" type="url" placeholder="https://example.com" :disabled="busy || form.no_website" />
         <FormControl v-model="form.no_website" type="checkbox" label="We have no website" :disabled="busy" />
       </div>
-      <FormControl v-model="form.timezone" label="Time zone" type="select" :options="timezones" :disabled="busy" />
-      <FormControl v-model="form.category" label="Category" type="select" :options="state.options.categories" :disabled="busy" />
+      <FormControl v-model="form.street1" class="is-wide" label="Street address" required maxlength="140" autocomplete="address-line1" :disabled="busy" />
+      <FormControl v-model="form.street2" class="is-wide" label="Street address line 2" maxlength="140" autocomplete="address-line2" :disabled="busy" />
+      <FormControl v-model="form.city" label="City" required maxlength="100" autocomplete="address-level2" :disabled="busy" />
+      <FormControl v-model="form.state" label="State" required maxlength="100" autocomplete="address-level1" :disabled="busy" />
+      <FormControl v-model="form.zip_code" label="PIN or ZIP code" required maxlength="20" autocomplete="postal-code" :disabled="busy" />
+      <FormControl v-model="form.country" label="Country" type="select" required :options="state.options.countries" :disabled="busy" />
+      <div class="onboarding-phone">
+        <FormControl v-model="form.phone_code" label="Country code" required inputmode="numeric" maxlength="5" placeholder="91" :disabled="busy" />
+        <FormControl v-model="form.phone_number" label="Business phone" type="tel" required maxlength="20" autocomplete="tel-national" :disabled="busy" />
+      </div>
+      <FormControl v-model="form.timezone" label="Time zone" type="select" required :options="timezones" :disabled="busy" />
+      <FormControl v-model="form.category" label="Category" type="select" required :options="state.options.categories" :disabled="busy" />
       <FormControl v-model="form.display_name" class="is-wide" label="WhatsApp display name" maxlength="100" :disabled="busy" />
+      <FormControl v-model="form.description" class="is-wide" label="Business description" type="textarea" rows="3" required maxlength="512" :disabled="busy" />
     </div>
     <p class="onboarding-hint">Customers see the display name in WhatsApp. Meta checks that it matches your business.</p>
     <div class="onboarding-actions is-primary"><Button type="submit" variant="solid" label="Continue" :loading="busy" /></div>
   </form>
 </template>
+<style scoped>
+.onboarding-phone { display:grid; grid-template-columns:minmax(0,96px) minmax(0,1fr); gap:8px; }
+</style>
