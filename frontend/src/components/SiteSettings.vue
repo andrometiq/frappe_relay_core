@@ -14,7 +14,7 @@ const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: fal
 const capabilities = inject('relayCapabilities')
 const channels = ref([])
 const config = ref({}), channel = ref(null), types = ref([]), loaded = ref(false), verified = ref(false)
-const token = ref(''), callbackSecret = ref(''), tab = ref('setup')
+const token = ref(''), callbackSecret = ref(''), tab = ref('setup'), setupCode = ref(''), askCode = ref(false)
 const margin = ref(''), marginError = ref(''), marginNotice = ref('')
 const { busy, error, notice, run } = useTask()
 async function load() {
@@ -38,9 +38,12 @@ async function saveMargin() {
   marginNotice.value = 'Service charge saved.'; toast('Saved')
 }
 async function saveFeature(feature, enabled) { await coreApi('settings.save_feature', { feature, enabled: enabled ? 1 : 0 }, true); location.reload() }
+// A site linked with a setup code has no token in its config, so Reconnect asks for a new code.
 async function reconnect() {
-  const result = await coreApi('onboarding.api.connect_hub', { reconnect: 1 }, true)
+  const result = await coreApi('onboarding.api.connect_hub', { reconnect: 1, ...(askCode.value ? { setup_code: setupCode.value } : {}) }, true)
+  if (result.error?.code === 'setup_code_required') askCode.value = true
   if (result.error) throw Error(result.error.message)
+  askCode.value = false; setupCode.value = ''
   identity.value = null; await refreshIdentity(); notice.value = 'Reconnected to Relay Hub as ' + result.account + '.'; toast('Reconnected'); await load()
 }
 async function verify() { verified.value = false; await coreApi('settings.verify_connection', {}, true); verified.value = true; notice.value = 'Connection works. Incoming messages are checked on the Activity page.' }
@@ -75,6 +78,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
       <form id="hub-connection" class="workflow-card" @submit.prevent="run(save)">
         <h2 class="text-lg font-semibold">Hub connection</h2><p class="text-sm">Relay sends and receives messages through Hub.<template v-if="config.account"> This site is linked as {{ config.account }}.</template></p>
         <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><Button label="Reconnect to Relay Hub" variant="outline" icon-left="refresh-cw" :disabled="busy" @click="run(reconnect)" /><Button variant="outline" label="Check connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
+        <div v-if="capabilities.configure && askCode" class="settings-fields"><FormControl v-model="setupCode" label="Setup code" autocomplete="off" spellcheck="false" class="font-mono" :disabled="busy" /><p class="text-sm">Enter the setup code or setup link your Relay provider gave you, then select Reconnect to Relay Hub.</p></div>
         <details class="settings-advanced"><summary>Connect manually (advanced)</summary><p class="text-sm">Enter the details your Hub administrator gave you, then save.</p>
         <div class="settings-fields"><FormControl label="Connection address" v-model="config.url" :disabled="busy || !capabilities.configure" /><FormControl label="Account name" v-model="config.account" :disabled="busy || !capabilities.configure" />
         <FormControl v-if="capabilities.configure" label="Access key" type="password" autocomplete="new-password" v-model="token" :placeholder="config.token_configured ? 'Saved — leave blank to keep' : 'Required'" :disabled="busy" /></div>
