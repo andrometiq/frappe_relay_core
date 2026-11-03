@@ -13,7 +13,8 @@ from relay_core.onboarding.messages import OnboardingError, text
 
 SESSION = 'sus_' + 'a' * 32
 DRAFT = {'name': 'Acme', 'email': 'admin@acme.example', 'website': '', 'country': 'IN', 'timezone': 'UTC+05:30',
-         'display_name': 'Acme', 'category': 'OTHER', 'description': ''}
+         'display_name': 'Acme', 'category': 'OTHER', 'description': 'Garments maker', 'street1': '1 Demo Street', 'street2': '',
+         'city': 'Sampleville', 'state': 'Tamil Nadu', 'zip_code': '600001', 'phone_code': '91', 'phone_number': '9000000000'}
 
 
 def session(state='working', **values):
@@ -64,8 +65,7 @@ class SignupTests(unittest.TestCase):
         result = signup.start('coexistence', DRAFT)
         tool, arguments = self.hub.call_tool.call_args.args
         self.assertEqual((tool, arguments['flow'], arguments['actor']), ('whatsapp.signup.start', 'coexistence', 'admin@acme.example'))
-        self.assertEqual(arguments['prefill']['business'], {'name': 'Acme', 'email': 'admin@acme.example', 'country': 'IN',
-                                                            'timezone': 'UTC+05:30'})
+        self.assertEqual(arguments['prefill'], details.prefill(DRAFT))
         self.assertEqual(result['launch_url'], launch)
         row, = self.site.rows('Relay WhatsApp Signup')
         self.assertEqual((row.session_id, row.status, row.started_by), (SESSION, 'Started', 'admin@acme.example'))
@@ -192,7 +192,10 @@ class DetailsTests(unittest.TestCase):
     def test_wrong_details_name_the_field(self):
         for values, words in (({'name': ''}, 'business name'), ({'email': 'nope'}, 'email'), ({'website': 'acme', 'no_website': False}, 'website'),
                               ({'country': 'XX'}, 'country'), ({'timezone': 'Asia/Kolkata'}, 'time zone'),
-                              ({'category': 'SPAM'}, 'category'), ({'name': 'x' * 101}, 'at most 100')):
+                              ({'category': 'SPAM'}, 'category'), ({'name': 'x' * 101}, 'at most 100'),
+                              ({'street1': ''}, 'street'), ({'city': ''}, 'city'), ({'state': ''}, 'state'),
+                              ({'zip_code': ''}, 'PIN'), ({'description': ''}, 'description'),
+                              ({'phone_number': '12'}, 'phone'), ({'phone_code': 'x'}, 'phone'), ({'description': 'x' * 513}, 'at most 512')):
             with self.subTest(values=values), self.assertRaisesRegex(ValueError, words):
                 self.check(**values)
 
@@ -205,6 +208,37 @@ class DetailsTests(unittest.TestCase):
         self.assertEqual(details.utc_offset('Nowhere/City'), 'UTC+00:00')
         self.assertNotIn('website', details.prefill(DRAFT)['business'])
         self.assertEqual(details.prefill(dict(DRAFT, website='https://a.example'))['business']['website'], 'https://a.example')
+
+    def test_prefill_carries_the_address_phone_and_description(self):
+        prefill = details.prefill(DRAFT)
+        business = prefill['business']
+        self.assertEqual((business['street_address1'], business['city'], business['state'], business['zip_postal']),
+                         ('1 Demo Street', 'Sampleville', 'Tamil Nadu', '600001'))
+        self.assertEqual(business['phone'], {'code': '91', 'number': '9000000000'})
+        self.assertEqual(prefill['phone']['description'], 'Garments maker')
+
+    def test_phone_numbers_are_split_into_code_and_number(self):
+        self.assertEqual(details.business_phone('+91 90000 00000', 'IN'), {'phone_code': '91', 'phone_number': '9000000000'})
+        self.assertEqual(details.business_phone('090000 00000', 'IN'), {'phone_code': '91', 'phone_number': '9000000000'})
+        self.assertEqual(details.business_phone('', 'IN'), {'phone_code': '91', 'phone_number': ''})
+
+    def test_an_incomplete_draft_is_not_saved(self):
+        for draft, complete in ((DRAFT, True), (dict(DRAFT, phone_number=''), False), (dict(DRAFT, street1=''), False)):
+            with self.subTest(draft=draft), patch.object(details, 'stored', return_value=draft):
+                self.assertEqual(bool(details.saved()), complete)
+
+    def test_time_zone_follows_the_country(self):
+        def zone(system, country_zones):
+            values = {'time_zone': system}
+            fake = SimpleNamespace(db=SimpleNamespace(get_single_value=lambda doctype, field: values.get(field),
+                                                      get_value=lambda doctype, name, field: country_zones))
+            with patch.object(details, 'frappe', fake):
+                return details.timezone_name('India')
+        self.assertEqual(zone('UTC', 'Asia/Kolkata'), 'Asia/Kolkata')
+        self.assertEqual(zone('', 'Asia/Kolkata'), 'Asia/Kolkata')
+        self.assertEqual(zone('America/Chicago', 'America/New_York\nAmerica/Chicago'), 'America/Chicago')
+        self.assertEqual(zone('Asia/Kolkata', None), 'Asia/Kolkata')
+        self.assertEqual(details.utc_offset(zone('UTC', 'Asia/Kolkata')), 'UTC+05:30')
 
 
 class StepTests(unittest.TestCase):
@@ -299,15 +333,18 @@ class PatchTests(unittest.TestCase):
 
 
 class BusinessNameTests(unittest.TestCase):
-    def name(self, company, app_name):
-        fake = SimpleNamespace(db=SimpleNamespace(get_single_value=Mock(return_value=app_name)), local=SimpleNamespace(site='acme.example.com'))
+    def name(self, company, app_name, website_name=None):
+        names = {'Website Settings': website_name, 'System Settings': app_name}
+        fake = SimpleNamespace(db=SimpleNamespace(get_single_value=lambda doctype, field: names[doctype]),
+                               local=SimpleNamespace(site='acme.example.com'))
         with patch.object(details, 'frappe', fake):
             return details.business_name({'company_name': company} if company else {})
 
     def test_frappe_default_app_name_is_not_a_business_name(self):
         self.assertEqual(self.name('Acme Pvt Ltd', 'Frappe'), 'Acme Pvt Ltd')
         self.assertEqual(self.name(None, 'Acme ERP'), 'Acme ERP')
-        self.assertEqual(self.name(None, 'Frappe'), 'acme.example.com')
+        self.assertEqual(self.name(None, 'Frappe', 'Acme Shop'), 'Acme Shop')
+        self.assertEqual(self.name(None, 'Frappe'), '')
 
 
 class TestMessageTests(unittest.TestCase):
