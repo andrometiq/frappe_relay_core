@@ -162,6 +162,7 @@ class GroupAggregateTests(unittest.TestCase):
         self.enterContext(patch('relay_core.inbox_filters.business_filter'))
         self.enterContext(patch('relay_core.timeline.has_timeline_column', return_value=True))
         self.enterContext(patch('relay_core.timeline.index_hint', return_value=''))
+        self.unlinked_chats = self.enterContext(patch('relay_core.inbox_records.unlinked_chats', return_value=(0, 0)))
 
     def query(self, sql, values=None):
         return SimpleNamespace(walk=lambda: (sql, values or {}))
@@ -314,6 +315,18 @@ class GroupAggregateTests(unittest.TestCase):
             self.chat_query.return_value = 'restricted'
             filtered = groups.browse('Local Business', channels=['ch1'])['items'][0]
             self.assertEqual((filtered['record_count'], filtered['unread']), (1, 1))
+
+    def test_chats_show_a_not_linked_tile_when_unlinked_chats_exist(self):
+        with patch.object(groups, 'configuration', return_value=['region']), \
+                patch('relay_core.business_types.list_types', return_value=[_dict(business_doctype='Local Business', enabled=1, label='Local')]):
+            self.assertNotIn('unlinked', [row['kind'] for row in groups.browse()['items']])
+            self.unlinked_chats.return_value = (1, 1)
+            tile = groups.browse(channels=['ch2'])['items'][-1]
+            self.assertEqual(tile, {'kind': 'unlinked', 'label': 'Not linked', 'chat_count': 1, 'unread_records': 1})
+            self.unlinked_chats.assert_called_with(['ch2'])
+            for kwargs in ({'channels': []}, {'business_type': 'Local Business'}, {'query': 'Local'}):
+                with self.subTest(kwargs=kwargs):
+                    self.assertNotIn('unlinked', [row['kind'] for row in groups.browse(**kwargs)['items']])
 
     def test_contacts_count_unique_readable_people_without_multiplying_records(self):
         row = groups.aggregate('Local Business', ['region'], [], contacts=True)[0]

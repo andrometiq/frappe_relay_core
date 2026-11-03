@@ -37,8 +37,8 @@ class InboxRecordTests(unittest.TestCase):
     def get_list(self, doctype, **kwargs):
         if doctype == 'Relay Channel':
             return [('CH-1', 'WhatsApp')]
-        if kwargs.get('fields') == [{'COUNT': '*', 'as': 'total'}]:
-            return [_dict(total=1)]
+        if kwargs.get('fields') == [{'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'}]:
+            return [_dict(total=1, unread=1)]
         return self.chats
 
     def chat_call(self):

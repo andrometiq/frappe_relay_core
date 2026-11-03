@@ -10,7 +10,7 @@ import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 
 const props = defineProps({ selected: String, selectedDoctype: String, busy: Boolean, contacts: Boolean, filters: Object })
-const emit = defineEmits(['select', 'contact', 'navigate'])
+const emit = defineEmits(['select', 'contact', 'navigate', 'unlinked'])
 const base = props.contacts ? '#/contacts' : '#/messages'
 const state = ref(readBrowse(location.hash)), query = ref(state.value.query), items = ref([]), fields = ref([])
 const loading = ref(false), error = ref(''), next = ref(null), heading = ref(null)
@@ -66,6 +66,7 @@ function choose(tile) {
   saveSearch()
   if (tile.kind === 'contact') return emit('contact', tile.name)
   if (tile.kind === 'record' && !props.contacts) return emit('select', state.value.doctype, tile)
+  if (tile.kind === 'unlinked' && !props.contacts) return emit('unlinked')
   navigate(enterBrowse(state.value, tile))
 }
 function readRoute() {
@@ -107,6 +108,7 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
           <small v-else-if="tile.kind === 'type' || tile.kind === 'group'">{{ tileCount(tile.record_count, 'record') }}</small>
           <small v-else-if="tile.kind === 'record'">{{ tile.last_activity ? 'Last activity ' + listTime(tile.last_activity) : 'No activity yet' }}</small>
           <small v-else-if="tile.kind === 'contact'">{{ tile.mobile_no || tile.name }}</small>
+          <small v-else-if="tile.kind === 'unlinked'">{{ tileCount(tile.chat_count, 'chat') }}</small>
         </span>
         <span v-if="!contacts && tileUnread(tile)" class="directory-unread" :aria-label="tileCount(tileUnread(tile), tile.kind === 'record' ? 'unread message' : 'unread record')">{{ tileUnread(tile) }}</span>
         <FeatherIcon name="chevron-right" :size="16" aria-hidden="true" />
