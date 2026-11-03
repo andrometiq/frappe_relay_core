@@ -183,9 +183,10 @@ class DetailsTests(unittest.TestCase):
 
 
 class StepTests(unittest.TestCase):
-    def step(self, connected=True, draft=True, channels=(), completed=False):
+    def step(self, connected=True, draft=True, channels=(), completed=False, others=()):
         with patch.object(progress, 'is_completed', return_value=completed), \
                 patch.object(progress, 'is_connected', return_value=connected), \
+                patch.object(progress, 'other_channels', return_value=list(others)), \
                 patch.object(details, 'saved', return_value=DRAFT if draft else None):
             return progress.current_step([SimpleNamespace(enabled=enabled) for enabled in channels])
 
@@ -196,6 +197,11 @@ class StepTests(unittest.TestCase):
         self.assertEqual(self.step(channels=(0,)), 'number')
         self.assertEqual(self.step(channels=(1,)), 'ready')
         self.assertEqual(self.step(completed=True, connected=False), 'done')
+
+    def test_a_telegram_or_email_channel_alone_makes_the_site_ready(self):
+        mailbox = SimpleNamespace(name='mail', channel='Email')
+        self.assertEqual(self.step(draft=False, others=[mailbox]), 'ready')
+        self.assertEqual(self.step(connected=False, others=[mailbox]), 'hub')
 
 
 class RightsTests(unittest.TestCase):
@@ -255,13 +261,16 @@ class PatchTests(unittest.TestCase):
             mark_existing_onboarded.execute()
         return site.frappe.db.set_single_value
 
-    def test_a_site_with_a_whatsapp_channel_skips_get_started(self):
-        self.run_patch([{'channel': 'WhatsApp', 'enabled': 1}]).assert_called_once_with(
-            'Relay Settings', {'onboarding_completed': 1, 'enrolment_source': 'Manual'})
+    def test_a_site_with_any_enabled_channel_skips_get_started(self):
+        for channels in ([{'channel': 'WhatsApp', 'enabled': 1}], [{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Telegram', 'enabled': 1}],
+                         [{'channel': 'Email', 'enabled': 1}]):
+            with self.subTest(channels=channels):
+                self.run_patch(channels).assert_called_once_with(
+                    'Relay Settings', {'onboarding_completed': 1, 'enrolment_source': 'Manual'})
 
     def test_a_new_or_disabled_site_keeps_get_started(self):
         self.run_patch([]).assert_not_called()
-        self.run_patch([{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Telegram', 'enabled': 1}]).assert_not_called()
+        self.run_patch([{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Email', 'enabled': 0}]).assert_not_called()
 
 
 class BusinessNameTests(unittest.TestCase):
