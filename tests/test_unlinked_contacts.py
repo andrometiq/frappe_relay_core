@@ -128,6 +128,29 @@ class EnrollmentTests(BoundaryTests):
         self.assertIsNone(self.lifecycle.whatsapp_contact('WA', NUMBER))
         self.assertEqual(self.created, [])
 
+    def test_first_telegram_chat_creates_unlinked_person_once(self):
+        for _ in range(2):
+            self.assertEqual(self.lifecycle.new_sender_contact('TG', 'Telegram', '5550001234', 'Tara Test'), 'Relay Contact-new')
+        person, relay = self.created
+        self.assertEqual((person.first_name, person.phone_nos, person.email_ids, person.links), ('Tara Test', [], [], []))
+        self.assertEqual(relay.contact, person.name)
+        self.assertEqual([(row.endpoint, row.verified) for row in self.rows], [('5550001234', 1)])
+
+    def test_new_mail_address_creates_person_with_that_address(self):
+        self.lifecycle.new_sender_contact('MAIL', 'Email', 'Mala@Example.invalid')
+        self.assertEqual(self.created[0].first_name, 'mala@example.invalid')
+        self.assertEqual(self.created[0].email_ids, [{'email_id': 'mala@example.invalid', 'is_primary': 1}])
+
+    def test_known_mail_address_sibling_owner_or_group_stays_in_new_senders(self):
+        self.frappe.db.exists.side_effect = lambda dt, filters: dt == 'Contact Email'
+        self.assertIsNone(self.lifecycle.new_sender_contact('MAIL', 'Email', 'known@example.invalid'))
+        self.frappe.db.exists.side_effect = None
+        self.frappe.get_all.side_effect = [['TG', 'Other TG'], ['Owner']]
+        self.assertIsNone(self.lifecycle.new_sender_contact('TG', 'Telegram', '5550001234'))
+        self.frappe.get_all.side_effect = None
+        self.assertIsNone(self.lifecycle.new_sender_contact('TG', 'Telegram', '-1005550001234'))
+        self.assertEqual(self.created, [])
+
     def test_enroll_refuses_other_owner_or_revocation_and_returns_same_owner(self):
         self.rows.append(Row(channel='WA', endpoint=NUMBER, relay_contact='A', verified=1))
         self.assertIsNone(self.lifecycle.enroll('B', 'WA', 'WhatsApp', NUMBER))
@@ -172,6 +195,7 @@ class ProjectionTests(BoundaryTests):
         self.projection.apply_updates = Mock(return_value='Ignored')
         self.lifecycle.sibling_contact = Mock(return_value=None)
         self.lifecycle.whatsapp_contact = Mock(return_value='Relay-new')
+        self.lifecycle.new_sender_contact = Mock(return_value='Relay-new')
         self.messages = []
         self.event = Row(name='Event', account='account', projection_status='Pending', routing_decisions='{}')
         self.frappe.get_doc.side_effect = self.get_doc
@@ -186,15 +210,22 @@ class ProjectionTests(BoundaryTests):
             return doc
         return self.event
 
-    def project(self, medium='WhatsApp', group=False, previous=None, known=False, rule='triage_no_business'):
+    def project(self, medium='WhatsApp', group=False, previous=None, known=False, rule='triage_no_business', auth='pass',
+                auto_submitted=False):
         message = dict(id='m1', **{'from': NUMBER}, type='text', text={'body': 'Local test: quantity 12'})
         if group:
             message['group_id'] = 'group-id'
         payload = {'entry': [{'changes': [{'value': {'messages': [message],
             'contacts': [{'wa_id': NUMBER, 'profile': {'name': 'Test sender'}}]}}]}]}
-        if medium != 'WhatsApp':
-            payload = dict(channel=medium, direction='inbound', provider_id='m1', sender=NUMBER if medium == 'Telegram'
-                else 'local@example.invalid', body='Local test: quantity 12')
+        if medium == 'Telegram':
+            chat = -int(NUMBER) if group else int(NUMBER)
+            update = {'update_id': 'm1', 'message': {'message_id': 7, 'chat': {'id': chat, 'type': 'group' if group else 'private'},
+                      'from': {'id': int(NUMBER), 'first_name': 'Tara', 'last_name': 'Test'}, 'text': 'Local test: quantity 12'}}
+            payload = dict(channel=medium, direction='inbound', provider_id='m1', sender=str(chat), body='Local test: quantity 12',
+                           payload=update)
+        elif medium == 'Email':
+            payload = dict(channel=medium, direction='inbound', provider_id='m1', sender='local@example.invalid',
+                           body='Local test: quantity 12', payload={'authentication': {'status': auth}, 'auto_submitted': auto_submitted})
         self.event.payload = json.dumps(payload)
         self.event.routing_decisions = json.dumps({'m1': previous} if previous else {})
         self.routing.resolve.return_value = (('Customer', 'C1') if rule == 'single_link' else None, rule)
@@ -236,15 +267,34 @@ class ProjectionTests(BoundaryTests):
         self.assertEqual(self.frappe.get_all.call_args.kwargs['filters'], {'projection_status': 'Uncategorized'})
         self.tickets.ensure_episode.assert_not_called()
 
-    def test_groups_telegram_and_email_keep_no_business_triage(self):
-        for medium, group in [('WhatsApp', True), ('Telegram', False), ('Email', False)]:
-            with self.subTest(medium=medium):
+    def test_groups_and_unauthenticated_email_keep_no_business_triage(self):
+        for medium, group, auth in [('WhatsApp', True, 'pass'), ('Email', False, 'fail'), ('Telegram', True, 'pass')]:
+            with self.subTest(medium=medium, group=group):
                 self.event.projection_status = 'Pending'
-                self.project(medium, group, known=True)
+                self.project(medium, group, known=True, auth=auth)
                 self.assertEqual(self.event.projection_status, 'Uncategorized')
                 self.assertEqual(self.messages, [])
         self.lifecycle.whatsapp_contact.assert_not_called()
+        self.lifecycle.new_sender_contact.assert_not_called()
         self.assertEqual(self.tickets.ensure_episode.call_count, 3)
+
+    def test_private_telegram_and_authenticated_email_show_as_unlinked_chats(self):
+        for medium, sender, name in [('Telegram', NUMBER, 'Tara Test'), ('Email', 'local@example.invalid', None)]:
+            with self.subTest(medium=medium):
+                self.messages.clear()
+                self.lifecycle.new_sender_contact.reset_mock()
+                self.event.projection_status = 'Pending'
+                self.project(medium)
+                self.assertEqual(self.event.projection_status, 'Projected')
+                self.assertEqual((self.messages[0].relay_contact, self.messages[0].business_doctype), ('Relay-new', None))
+                self.lifecycle.new_sender_contact.assert_called_once_with('WA', medium, sender, name)
+        self.lifecycle.whatsapp_contact.assert_not_called()
+        self.tickets.ensure_episode.assert_not_called()
+
+    def test_auto_submitted_mail_does_not_start_a_contact(self):
+        self.project('Email', auto_submitted=True)
+        self.assertEqual(self.event.projection_status, 'Uncategorized')
+        self.lifecycle.new_sender_contact.assert_not_called()
 
     def test_reference_and_binding_failures_remain_triage(self):
         for rule in ('triage_conflicting_references', 'triage_unresolved_reference', 'triage_binding_changed',

@@ -93,6 +93,36 @@ def whatsapp_contact(channel, number, profile_name=None, *, locked=False):
             return relay if enroll(relay, channel, 'WhatsApp', number, locked=True) else None
 
 
+def new_sender_contact(channel, provider, endpoint, name=None):
+    """A new unlinked Contact for a first private Telegram chat or authenticated mail on this channel.
+
+    An address that a Frappe Contact already has stays in New senders: only a manager binds mail to a known
+    person. Revoked or ambiguous bindings, and identities owned on a sibling channel, are never overwritten."""
+    from relay_core.contacts import ensure_relay, new_person
+    try:
+        value = normalize(provider, endpoint)
+    except ValueError:
+        return None
+    if provider == 'Telegram' and not value.isdigit():
+        return None
+    with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
+        existing = list(bindings(channel, provider, value))
+        if existing:
+            return existing[0].relay_contact if len(existing) == 1 and existing[0].verified else None
+        account = frappe.db.get_value('Relay Channel', channel, 'account')
+        siblings = frappe.get_all('Relay Channel', pluck='name', filters={'channel': provider, 'account': account})
+        if frappe.get_all('Relay Contact Endpoint', limit_page_length=1, filters={
+                'endpoint_key': ['in', [endpoint_key(name, value) for name in siblings]], 'verified': 1}):
+            return None
+        if provider == 'Email' and (frappe.db.exists('Contact Email', {'email_id': value})
+                                    or frappe.db.exists('Contact', {'email_id': value})):
+            return None
+        label = ''.join(c for c in (name or '') if ord(c) >= 32).strip()[:140] or value
+        person = new_person(label, None, ignore_permissions=True, email=value if provider == 'Email' else None)
+        relay = ensure_relay(person)
+        return relay if enroll(relay, channel, provider, value, locked=True) else None
+
+
 def associate_unlinked_messages(relay):
     """A sole business link owns live history; imported and already owned history stays intact."""
     from relay_core.business_access import candidates

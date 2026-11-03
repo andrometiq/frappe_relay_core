@@ -18,6 +18,21 @@ STATUS_EVENT_KEYS = ('statuses:%', 'channel-statuses:%', 'bulk-updates:%', '%:up
 CURSOR = 'relay-projection-cursor:'  # Last event a drain tried; only recover() rescans older failures.
 
 
+def telegram_name(sender):
+    if not isinstance(sender, dict):
+        return None
+    name = ' '.join(part for part in (sender.get('first_name'), sender.get('last_name')) if isinstance(part, str))
+    return name or (sender.get('username') if isinstance(sender.get('username'), str) else None)
+
+
+def new_sender_allowed(medium, context):
+    """A private Telegram chat, or mail whose sender the trusted receiver authenticated, may start a new contact."""
+    if medium == 'Telegram':
+        return context.get('chat_type') == 'private'
+    return (medium == 'Email' and (context.get('authentication') or {}).get('status') == 'pass'
+            and not context.get('auto_submitted'))
+
+
 def extract_messages(payload):
     if payload.get('channel') in ('Telegram', 'Email'):
         if payload.get('direction') != 'inbound':
@@ -39,6 +54,7 @@ def extract_messages(payload):
                 row['type'] = context.get('message_type', 'text')
                 raw = payload['payload']['message']
                 row['message_data'] = normalize(row['type'], raw.get(row['type'], {}), provider='Telegram', body=body)
+                row['profile_name'] = telegram_name(raw.get('from'))
         if payload['channel']=='Email':
             from relay_core.email import recipients
             from relay_core.identity import normalize as normalize_identity
@@ -173,9 +189,13 @@ def project(name, business_overrides=None):
             from relay_core.contact_lifecycle import sibling_contact
             contact = sibling_contact(channel, row['from'])
         private_whatsapp = medium == 'WhatsApp' and not context.get('group_id') and row['from'].isdigit()
+        private_chat = private_whatsapp or new_sender_allowed(medium, context)
         if not contact and private_whatsapp:
             from relay_core.contact_lifecycle import whatsapp_contact
             contact = whatsapp_contact(channel, row['from'], row.get('profile_name'))
+        elif not contact and private_chat:
+            from relay_core.contact_lifecycle import new_sender_contact
+            contact = new_sender_contact(channel, medium, row['from'], row.get('profile_name'))
         if not contact:
             decisions[row['id']] = 'triage_unverified'
             if triage_tickets:
@@ -184,12 +204,12 @@ def project(name, business_overrides=None):
         from relay_core.business_routing import resolve
         previous_rule = decisions.get(row['id'], '')
         was_triage = previous_rule.startswith('triage_')
-        recover_unlinked = private_whatsapp and previous_rule in ('triage_unverified', 'triage_no_business')
+        recover_unlinked = private_chat and previous_rule in ('triage_unverified', 'triage_no_business')
         business, rule = resolve(contact, channel, row['from'], context, row, event,
                                  (business_overrides or {}).get(row['id']), position=position)
         decisions[row['id']] = rule
         context['business_rule'] = rule
-        if not business and not (private_whatsapp and rule == 'triage_no_business'):
+        if not business and not (private_chat and rule == 'triage_no_business'):
             if triage_tickets:
                 ensure_episode(event=event, channel=channel, row=row)
             unresolved = True
