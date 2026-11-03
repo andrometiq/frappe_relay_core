@@ -96,11 +96,11 @@ def cancel_signup(session):
 
 
 @frappe.whitelist(methods=['POST'])
-def send_test(channel, to):
+def send_test(channel, to, attempt=''):
     """Meta's `hello_world` template through the normal send path, as an unlinked chat."""
     system_manager()
     from relay_core.onboarding import test_message
-    return test_message.send(channel, to)
+    return test_message.send(channel, to, attempt)
 
 
 @frappe.whitelist(methods=['GET'])

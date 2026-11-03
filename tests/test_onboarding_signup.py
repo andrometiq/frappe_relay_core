@@ -334,6 +334,15 @@ class TestMessageTests(unittest.TestCase):
         self.assertEqual(first.args[4], second.args[4])
         self.assertEqual(len(first.args), 5)
 
+    def test_each_send_press_after_a_failure_is_a_new_message(self):
+        for attempt in ('press-one-1', 'press-one-1', 'press-two-2', 'bad key!'):
+            test_message.send('Acme-1', '+91 98765 00001', attempt)
+        keys = [call.args[4] for call in self.start.call_args_list]
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[1], keys[2])
+        test_message.send('Acme-1', '+91 98765 00001')
+        self.assertEqual(keys[3], self.start.call_args.args[4], 'A malformed attempt falls back to the time window')
+
     def test_another_sites_or_a_disabled_channel_is_refused(self):
         self.fake.db.exists.return_value = False
         with self.assertRaises(ValueError):

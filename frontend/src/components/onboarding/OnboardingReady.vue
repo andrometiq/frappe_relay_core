@@ -25,7 +25,9 @@ async function checkPayment(session) {
   if (await task('payment', () => coreApi('onboarding.api.signup_status', { session: session.session_id, refresh: 1 }))) emit('reload')
 }
 async function sendTest(channel) {
-  const result = await task('test:' + channel.name, () => coreApi('onboarding.api.send_test', { channel: channel.name, to: to.value[channel.name] }, true))
+  // Each press is a new attempt, so a test can be sent again after the cause of a failure is fixed.
+  const attempt = crypto.randomUUID?.() || String(Date.now()) + Math.random().toString(36).slice(2)
+  const result = await task('test:' + channel.name, () => coreApi('onboarding.api.send_test', { channel: channel.name, to: to.value[channel.name], attempt }, true))
   if (result) tests.value[channel.name] = { message: result.message, status: result.message ? 'Pending' : result.status, error: result.error || '' }
 }
 // Delivery receipts change the message; each change re-reads only the test messages.
