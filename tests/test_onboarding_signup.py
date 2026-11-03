@@ -95,6 +95,31 @@ class SignupTests(unittest.TestCase):
         self.site.frappe.publish_realtime.assert_called_with('relay_changed', {'kind': 'onboarding', 'session': SESSION},
                                                              room='doctype:Relay WhatsApp Signup', after_commit=True)
 
+    def test_a_failed_channel_read_is_retried_on_the_next_store(self):
+        channels = self.site.tables['Relay Channel']
+        saved = list(channels)
+        channels.clear()
+        signup.store(session('completed'), actor='admin@acme.example')
+        row, = self.site.rows('Relay WhatsApp Signup')
+        self.assertEqual((row.status, row.channel), ('Completed', None))
+        channels.extend(saved)
+        self.assertEqual(signup.latest()['channel'], 'Acme-001')
+        self.assertEqual(signup.store(session('completed'))['channel'], 'Acme-001')
+        self.assertEqual(self.sync.call_count, 2)
+        self.assertEqual(self.site.rows('Relay WhatsApp Signup')[0].channel, 'Acme-001')
+        signup.store(session('completed'))
+        self.assertEqual(self.sync.call_count, 2)
+
+    def test_the_store_commits_before_reading_and_before_the_lock_is_released(self):
+        events = []
+        self.site.frappe.db.commit = Mock(side_effect=lambda: events.append('commit'))
+        lock = Mock()
+        lock.return_value.__enter__ = Mock(side_effect=lambda: events.append('lock'))
+        lock.return_value.__exit__ = Mock(side_effect=lambda *a: events.append('unlock'))
+        self.site.frappe.cache.lock = lock
+        signup.store(session('working'), actor='admin@acme.example')
+        self.assertEqual(events, ['lock', 'commit', 'commit', 'unlock'])
+
     def test_errors_read_in_relay_words(self):
         cases = ((session('cancelled', error={'meta_step': 'PHONE_NUMBER_VERIFICATION'}), 'cancelled', 'phone number verification'),
                  (session('failed', error={'code': 'register_rate_limited', 'retryable': False}), 'register_rate_limited', '72 hours'),

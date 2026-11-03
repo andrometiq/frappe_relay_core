@@ -90,10 +90,15 @@ def cancel(name):
 
 def latest():
     """The newest session of this site as the page shows it, or None."""
-    row = frappe.get_all(DOCTYPE, fields=['session_data', 'channel'], order_by='creation desc', limit_page_length=1)
+    row = frappe.get_all(DOCTYPE, fields=['session_data', 'channel', 'hub_channel'], order_by='creation desc', limit_page_length=1)
     if not row or not row[0].session_data:
         return None
-    return shown(json.loads(row[0].session_data), row[0].channel)
+    return shown(json.loads(row[0].session_data), row[0].channel or channel_of(row[0].hub_channel))
+
+
+def channel_of(hub_channel):
+    """The Core Relay Channel of a Hub WhatsApp channel key, once a channel sync brought it in."""
+    return frappe.db.get_value('Relay Channel', {'channel': 'WhatsApp', 'hub_channel': hub_channel}, 'name') if hub_channel else None
 
 
 def steps(session):
@@ -169,21 +174,26 @@ def shown(session, channel=None):
 
 
 def store(session, actor=None):
-    """Upsert the Core copy under a per-session lock; the first completion finishes the setup once."""
+    """Upsert the Core copy under a per-session lock; completion runs until the new channel is linked.
+
+    The lock holder reads after a commit and commits before it lets go, so a request and the callback
+    worker never write from an older snapshot (MariaDB error 1020)."""
     session = checked_session(session)
     name = session['session_id']
     with frappe.cache.lock(frappe.cache.make_key('relay-signup:' + name), timeout=60, blocking_timeout=30):
+        frappe.db.commit()
         exists = frappe.db.exists(DOCTYPE, name)
         doc = frappe.get_doc(DOCTYPE, name) if exists else frappe.get_doc(
             {'doctype': DOCTYPE, 'name': name, 'session_id': name, 'started_by': actor or frappe.session.user})
-        finishing = STATUS[session['state']] == 'Completed' and doc.get('status') != 'Completed'
+        first = doc.get('status') != 'Completed'
         doc.update(kept(doc, values(session)))
-        if finishing:
+        if doc.status == 'Completed' and (first or (doc.hub_channel and not doc.get('channel'))):
             doc.update(complete(doc))
         if exists:
             doc.save(ignore_permissions=True)
         else:
             doc.insert(ignore_permissions=True)
+        frappe.db.commit()
     publish(name)
     return shown(session, doc.get('channel'))
 
@@ -213,15 +223,16 @@ def kept(doc, changes):
 
 
 def complete(doc):
-    """Bring the new channel in, queue its templates and make the admin a Relay Communication Manager."""
+    """Bring the new channel in, queue its templates and make the admin a Relay Communication Manager.
+
+    A failed channel read leaves `channel` empty, and the next store of the session runs this again."""
     from relay_core.channel_sync import sync
     sync()
-    channel = frappe.db.get_value('Relay Channel', {'channel': 'WhatsApp', 'hub_channel': doc.hub_channel}, 'name') \
-        if doc.hub_channel else None
+    channel = channel_of(doc.hub_channel)
     frappe.enqueue('relay_core.whatsapp_templates.sync', queue='short', job_id='relay-onboarding-templates',
                    deduplicate=True, enqueue_after_commit=True, notify=True)
     grant_manager(doc.started_by)
-    return {'channel': channel, 'completed_at': frappe.utils.now_datetime()}
+    return {'channel': channel, 'completed_at': doc.get('completed_at') or frappe.utils.now_datetime()}
 
 
 def grant_manager(user):
