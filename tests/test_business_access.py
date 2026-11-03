@@ -101,6 +101,19 @@ class LegacyAdmissionTests(unittest.TestCase):
                     messaging.admission_scope(_dict(payload={'business': snapshot}))
 
 
+class RecipientBusinessTests(unittest.TestCase):
+    def test_staff_mail_follows_the_chat_start_rule(self):
+        from relay_core import conversation_start, ticket_notifications
+        with patch.object(conversation_start, 'start_business', return_value=(None, None)) as start:
+            self.assertEqual(ticket_notifications.recipient_business('contact', 'MAIL', 'a@example.invalid'), (None, None))
+        start.assert_called_once_with('contact', None, None)
+
+    def test_contact_without_records_gets_an_unlinked_reply(self):
+        from relay_core import conversation_start
+        with patch('relay_core.business_access.candidates', return_value=[]):
+            self.assertEqual(conversation_start.start_business('contact'), (None, None))
+
+
 class LegacyEmailAncestryTests(unittest.TestCase):
     def setUp(self):
         from relay_core.message_updates import provider_key
