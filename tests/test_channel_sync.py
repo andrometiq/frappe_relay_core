@@ -39,6 +39,18 @@ class ChannelSyncTests(unittest.TestCase):
         self.assertEqual((second.company, second.triage_owner), ('Acme Main', 'owner@example.invalid'))
         self.assertFalse(second.get('is_default'))
 
+    def test_store_runs_between_commits_inside_the_lock(self):
+        site, events = FakeSite(Relay_Channel=[LEGACY]), []
+        frappe = site.frappe
+        lock = Mock()
+        lock.__enter__ = Mock(side_effect=lambda: events.append('lock'))
+        lock.__exit__ = Mock(side_effect=lambda *args: events.append('unlock'))
+        frappe.cache = Mock(lock=Mock(return_value=lock))
+        frappe.db.commit = Mock(side_effect=lambda: events.append('commit'))
+        with patch.object(channel_sync, 'store', side_effect=lambda *args: events.append('store') or {}):
+            self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'}))
+        self.assertEqual(events, ['lock', 'commit', 'store', 'commit', 'unlock'])
+
     def test_a_business_app_number_is_marked_coexistence(self):
         site = FakeSite(Relay_Channel=[LEGACY])
         self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'},

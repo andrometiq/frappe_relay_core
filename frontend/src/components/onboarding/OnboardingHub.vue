@@ -13,12 +13,13 @@ async function connect(setupCode = '') {
   busy.value = true; failure.value = null
   try {
     const result = await coreApi('onboarding.api.connect_hub', setupCode ? { setup_code: setupCode } : {}, true)
+    // A linked site whose check failed stays here, so Try again can check it again.
     if (result.error) failure.value = result.error
-    if (result.connected) { account.value = result.account; moving = setTimeout(() => emit('next', 'business'), 1000) }
+    else if (result.connected) { account.value = result.account; moving = setTimeout(() => emit('next', 'business'), 1000) }
   } catch (e) { failure.value = { code: 'unknown', message: e.message } }
   finally { busy.value = false }
 }
-const askCode = () => !props.state.hub.enrolment_available || NEW_CODE.includes(failure.value?.code)
+const askCode = () => failure.value?.code !== 'hub_check_failed' && (!props.state.hub.enrolment_available || NEW_CODE.includes(failure.value?.code))
 onMounted(() => { if (!props.state.hub.connected && props.state.hub.enrolment_available) connect() })
 onBeforeUnmount(() => clearTimeout(moving))
 </script>

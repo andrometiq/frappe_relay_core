@@ -22,6 +22,8 @@ PENDING_SECONDS = 600
 CREDENTIAL = re.compile(r'[A-Za-z0-9_-]{20,200}')
 ACCOUNT = re.compile(r'[A-Za-z0-9_-]{1,100}')
 LOOPBACK = {'127.0.0.1', '::1'}
+# The Hub calls the site back (up to 10 s) before it answers; a shorter wait restores the old secret too early.
+ENROL_SECONDS = 40
 
 
 def hub_origin(value):
@@ -41,14 +43,19 @@ def setup_credential(setup_code=''):
     """(Hub origin, credential, source) from a pasted setup code or link, else from site config."""
     pasted = (setup_code or '').strip() if isinstance(setup_code, str) else ''
     if pasted:
-        origin = frappe.conf.get('relay_hub_origin')
+        configured = frappe.conf.get('relay_hub_origin')
+        origin = configured
         if pasted.startswith(('https://', 'http://')):
             link = urlsplit(pasted)
             pasted = (parse_qs(link.query).get('code') or [''])[0]
             origin = link._replace(path=link.path.rsplit('/enrol', 1)[0], query='', fragment='').geturl()
         if not CREDENTIAL.fullmatch(pasted):
             raise OnboardingError('setup_code_invalid')
-        return hub_origin(origin or ''), pasted, 'Setup code'
+        origin = hub_origin(origin or '')
+        # The site's API secret goes to this Hub, so a pasted link never moves a site off its configured Hub.
+        if configured and origin != hub_origin(configured):
+            raise OnboardingError('hub_origin_mismatch')
+        return origin, pasted, 'Setup code'
     token = frappe.conf.get('relay_enrolment_token')
     if not token or not frappe.conf.get('relay_hub_origin'):
         raise OnboardingError('setup_code_required')
@@ -63,8 +70,13 @@ def available():
 
 
 def site_origin():
+    """The public address the Hub calls back, lower case as the Hub stores it.
+
+    A browser request gives it, behind a gateway too; a script or job has only `host_name`."""
+    if not getattr(frappe.local, 'request', None) and not frappe.conf.get('host_name'):
+        raise OnboardingError('site_address_unknown')
     parsed = urlsplit(frappe.utils.get_url())
-    return f'{parsed.scheme}://{parsed.netloc}'
+    return f'{parsed.scheme}://{parsed.netloc.lower()}'
 
 
 def service_user():
@@ -109,7 +121,7 @@ def request_enrolment(origin, credential, body):
     request = Request(url, data=json.dumps(body).encode(), method='POST', headers={
         'Authorization': 'Bearer ' + credential, 'Content-Type': 'application/json', 'Accept': 'application/json'})
     try:
-        with build_opener(NoRedirect).open(request, timeout=15) as response:
+        with build_opener(NoRedirect).open(request, timeout=ENROL_SECONDS) as response:
             result = json.loads(response.read(65537)[:65536])
     except HTTPError as exc:
         code = hub_error_code(exc)
@@ -146,33 +158,43 @@ def enrolled(result):
 
 
 def connect(setup_code='', reconnect=False):
-    """Enrol once per site; a second caller waits for the first and then sees the link."""
+    """Enrol once per site; a second caller waits for the first and then sees the link.
+
+    Every call, also on an existing link, reads the Hub channels and checks the link again, so Try again re-checks."""
     from relay_core.settings import value
     with frappe.cache.lock(frappe.cache.make_key('relay-enrolment'), timeout=120, blocking_timeout=60):
         if not reconnect and value('relay_hub_url') and value('relay_hub_token') and value('relay_hub_account'):
-            return {'connected': True, 'account': value('relay_hub_account'), 're_enrolled': False}
-        origin, credential, source = setup_credential(setup_code)
-        user = service_user()
-        api_key, api_secret, previous = rotate_secret(user)
-        callback_secret, nonce = secrets.token_hex(32), secrets.token_hex(32)
-        site = site_origin()
-        frappe.cache.set_value(PENDING, {'nonce': nonce, 'secret': callback_secret, 'origin': site},
-                               expires_in_sec=PENDING_SECONDS)
-        try:
-            result = request_enrolment(origin, credential, {
-                'origin': site, 'site_name': frappe.local.site, 'display_name': display_name(),
-                'core_api_key': api_key, 'core_api_secret': api_secret, 'callback_secret': callback_secret,
-                'nonce': nonce, 'relay_core_version': version()})
-        except OnboardingError:
-            restore_secret(user.name, previous)
-            raise
-        finally:
-            frappe.cache.delete_value(PENDING)
-        save(result, callback_secret, source)
-    check(result)
+            result = {'site_id': value('relay_hub_account'), 'mcp_url': value('relay_hub_url'),
+                      'hub_token': value('relay_hub_token'), 're_enrolled': False}
+        else:
+            result = enrol(setup_code)
     from relay_core.channel_sync import sync
     sync()
+    check(result)
     return {'connected': True, 'account': result['site_id'], 're_enrolled': bool(result.get('re_enrolled'))}
+
+
+def enrol(setup_code):
+    """One enrolment call; any failure before the Hub answers puts the old API secret back."""
+    origin, credential, source = setup_credential(setup_code)
+    site = site_origin()
+    user = service_user()
+    api_key, api_secret, previous = rotate_secret(user)
+    callback_secret, nonce = secrets.token_hex(32), secrets.token_hex(32)
+    frappe.cache.set_value(PENDING, {'nonce': nonce, 'secret': callback_secret, 'origin': site},
+                           expires_in_sec=PENDING_SECONDS)
+    try:
+        result = request_enrolment(origin, credential, {
+            'origin': site, 'site_name': frappe.local.site, 'display_name': display_name(),
+            'core_api_key': api_key, 'core_api_secret': api_secret, 'callback_secret': callback_secret,
+            'nonce': nonce, 'relay_core_version': version()})
+    except Exception:
+        restore_secret(user.name, previous)
+        raise
+    finally:
+        frappe.cache.delete_value(PENDING)
+    save(result, callback_secret, source)
+    return result
 
 
 def check(result):

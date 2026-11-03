@@ -952,6 +952,41 @@ class SharedAdapterTests(unittest.TestCase):
             self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please', scope={}, search=plan)
         reader.read.assert_not_called()
 
+    def test_structured_output_schemas_are_strict_compatible(self):
+        def objects(schema):
+            if isinstance(schema, dict):
+                if 'properties' in schema:
+                    yield schema
+                for value in schema.values():
+                    yield from objects(value)
+            elif isinstance(schema, list):
+                for value in schema:
+                    yield from objects(value)
+        for name in ('RESPONSE', 'MATCH_RESPONSE'):
+            for schema in objects(getattr(self.adapter, name)):
+                with self.subTest(schema=name, properties=sorted(schema['properties'])):
+                    self.assertIs(schema['additionalProperties'], False)
+                    self.assertEqual(set(schema['required']), set(schema['properties']))
+
+    def test_strict_search_arguments_text_is_read_as_the_declared_object(self):
+        arguments = {'filters': {'posting_date': ['between', ['2026-10-01', '2026-10-31']]}}
+        plan = dict(purpose='Review your ledger', reference='erpnext.ledger', arguments=json.dumps(arguments))
+        strict = dict(reply='', handoff=False, reason='', decline=False, identity_claim=False, data_question=True)
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]), \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            self.attempt.return_value = self.outcome(dict(strict, search=plan))
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+            self.assertEqual(result['search'], dict(plan, arguments=arguments, fields=['posting_date', 'debit', 'credit']))
+            self.attempt.return_value = self.outcome(dict(strict, handoff=True, reason='Needs staff', search=None))
+            result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+            self.assertNotIn('search', result)
+            self.assertFalse(result['decline'])
+            self.attempt.return_value = self.outcome(dict(strict, search=dict(plan, arguments='not json')))
+            with self.assertRaisesRegex(ValueError, 'Invalid search arguments'):
+                self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+        reader.read.assert_not_called()
+
     def test_default_skill_offers_no_reads_to_another_business_type(self):
         from relay_core.ai.skills import DEFAULT_KEY
         self.skill.sample_key = DEFAULT_KEY

@@ -12,6 +12,11 @@ TEXT = {
     'token_revoked': 'This setup code was withdrawn. ' + NEW_CODE,
     'token_used_up': 'This setup code was already used for another site. ' + NEW_CODE,
     'origin_not_allowed': "This site's address is not allowed by your setup code. " + NEW_CODE,
+    'origin_not_https': "Relay Hub needs this site's HTTPS address. Open Get started from the site's public address, "
+                        'or set host_name in the site config.',
+    'site_address_unknown': "This site does not know its public address here. Set host_name in the site config, "
+                            'or connect from Get started in the browser.',
+    'hub_origin_mismatch': 'This setup link is for another Relay Hub than the one this site uses. Contact your Relay provider.',
     'proof_failed': 'Relay Hub could not confirm that it reached this site. Check the site address and try again.',
     'site_unreachable': 'Relay Hub could not reach this site. Check that the site is online at its public address.',
     'invalid_request': 'Relay Hub refused the request. Contact your Relay provider.',

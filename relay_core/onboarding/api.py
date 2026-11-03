@@ -56,11 +56,11 @@ def enrolment_proof(nonce=None, challenge=None):
 
 @frappe.whitelist(methods=['POST'])
 def save_draft(name=None, email=None, website=None, no_website=0, country=None, timezone=None, timezone_name=None,
-               display_name=None, category=None, description=None):
+               display_name=None, category=None, description=None, street1=None, street2=None, city=None, state=None,
+               zip_code=None, phone_code=None, phone_number=None):
     system_manager()
-    details.save({'name': name, 'email': email, 'website': website, 'no_website': str(no_website) in ('1', 'true', 'True'),
-                  'country': country, 'timezone': timezone, 'timezone_name': timezone_name,
-                  'display_name': display_name, 'category': category, 'description': description})
+    values = {key: value for key, value in locals().items() if key != 'no_website'}
+    details.save({**values, 'no_website': str(no_website) in ('1', 'true', 'True')})
     return {'saved': True}
 
 
@@ -96,11 +96,11 @@ def cancel_signup(session):
 
 
 @frappe.whitelist(methods=['POST'])
-def send_test(channel, to):
+def send_test(channel, to, attempt=''):
     """Meta's `hello_world` template through the normal send path, as an unlinked chat."""
     system_manager()
     from relay_core.onboarding import test_message
-    return test_message.send(channel, to)
+    return test_message.send(channel, to, attempt)
 
 
 @frappe.whitelist(methods=['GET'])

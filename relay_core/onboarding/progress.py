@@ -24,16 +24,26 @@ def whatsapp_channels():
                           order_by='creation asc', limit_page_length=50)
 
 
-def current_step(channels=None, draft=None):
+def other_channels():
+    """Enabled Telegram and Email channels the Hub admin linked to this site; they need no WhatsApp number."""
+    account = connection_value('relay_hub_account')
+    if not account:
+        return []
+    return frappe.get_all('Relay Channel', filters={'channel': ['in', ('Telegram', 'Email')], 'account': account, 'enabled': 1},
+                          fields=['name', 'channel', 'label', 'title', 'address'], order_by='creation asc', limit_page_length=50)
+
+
+def current_step(channels=None, draft=None, others=None):
+    """A site with a working channel of any kind is ready; WhatsApp needs business details and a number first."""
     if is_completed():
         return 'done'
     if not is_connected():
         return 'hub'
-    from relay_core.onboarding.details import saved
-    if not (draft or saved()):
-        return 'business'
     channels = whatsapp_channels() if channels is None else channels
-    return 'ready' if any(row.enabled for row in channels) else 'number'
+    if any(row.enabled for row in channels) or (other_channels() if others is None else others):
+        return 'ready'
+    from relay_core.onboarding.details import saved
+    return 'number' if draft or saved() else 'business'
 
 
 def capability():
@@ -55,10 +65,10 @@ def record_types():
 def state():
     from relay_core.onboarding import details, enrolment, signup
     draft = details.saved()
-    channels = whatsapp_channels()
+    channels, others = whatsapp_channels(), other_channels()
     from relay_core.permissions import can_configure
     configure = can_configure()
-    return {'step': current_step(channels, draft), 'completed': is_completed(), 'can_configure': configure,
+    return {'step': current_step(channels, draft, others), 'completed': is_completed(), 'can_configure': configure,
             'hub': {'connected': is_connected(), 'account': connection_value('relay_hub_account') or '',
                     'hub_origin': signup.hub_origin() if is_connected() else '',
                     'enrolment_available': enrolment.available(),
@@ -68,4 +78,6 @@ def state():
             'channels': [{'name': row.name, 'label': row.label or row.title, 'address': row.address or '',
                           'waba_id': row.waba_id or '', 'enabled': bool(row.enabled),
                           'connection_type': row.connection_type or 'Cloud API'} for row in channels],
+            'other_channels': [{'name': row.name, 'channel': row.channel, 'label': row.label or row.title,
+                                'address': row.address or ''} for row in others],
             'record_types': record_types() if configure else []}

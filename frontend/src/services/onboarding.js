@@ -32,6 +32,26 @@ export function openSignupWindow(open, mobile, url = 'about:blank') {
   return open(url, SIGNUP_WINDOW, mobile ? '' : 'popup,width=600,height=760') || null
 }
 
+// After a page reload Core no longer knows the window's address. An empty address finds a window that is still
+// open by its name without loading it again; only a new blank window means that no Facebook steps are running.
+export function findSignupWindow(open, mobile) {
+  const popup = openSignupWindow(open, mobile, '')
+  if (!popup) return { popup: null, running: false }
+  try { return { popup, running: popup.location.href !== 'about:blank' } }
+  catch { return { popup, running: true } }
+}
+
+// Reads run one at a time; a change that comes during a read is read once more after it, never dropped.
+export function readQueue(read) {
+  let busy = false, waiting = ''
+  return async function queued(reason) {
+    if (busy) { waiting ||= reason; return }
+    busy = true
+    try { await read(reason) } finally { busy = false }
+    if (waiting) { const next = waiting; waiting = ''; await queued(next) }
+  }
+}
+
 export function originOf(url) {
   try { return new URL(url).origin } catch { return '' }
 }

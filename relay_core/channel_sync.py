@@ -44,7 +44,8 @@ def sync():
     """Upsert listed channels by Hub channel key and switch off the ones the Hub no longer lists.
 
     Rows are never deleted, as messages link to them. A Hub without `channels.list` changes nothing,
-    so a legacy single-channel site keeps its channel."""
+    so a legacy single-channel site keeps its channel. The lock holder reads after a commit and commits
+    before it lets go, so two syncs never insert from an older snapshot (MariaDB error 1020 on tabSeries)."""
     account = connection_value('relay_hub_account')
     if not account or not connection_value('relay_hub_url') or not connection_value('relay_hub_token'):
         return {'synced': False}
@@ -54,8 +55,9 @@ def sync():
     except (HubError, ValueError) as error:
         return {'synced': False, 'error': getattr(error, 'detail', '') or str(error)}
     with frappe.cache.lock('relay-channel-sync', timeout=60, blocking_timeout=10):
+        frappe.db.commit()
         result = store(account, listed)
-    frappe.db.commit()
+        frappe.db.commit()
     return dict(result, synced=True)
 
 

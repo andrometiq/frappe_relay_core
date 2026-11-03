@@ -8,6 +8,7 @@ import { VERIFICATION_LINK, limitText, managerLink, nameStatus } from '../../ser
 const props = defineProps({ state: { type: Object, required: true } })
 const emit = defineEmits(['next', 'go', 'reload'])
 const channels = computed(() => props.state.channels.filter(row => row.enabled))
+const others = computed(() => props.state.other_channels || [])
 const signup = computed(() => props.state.signup?.state === 'completed' ? props.state.signup : null)
 const to = ref({}), tests = ref({}), busy = ref(''), error = ref('')
 const COPY = { pending: 'Waiting', requested: 'Asked Meta', importing: 'Copying', done: 'Done', declined: 'Not shared', failed: 'Failed' }
@@ -24,7 +25,9 @@ async function checkPayment(session) {
   if (await task('payment', () => coreApi('onboarding.api.signup_status', { session: session.session_id, refresh: 1 }))) emit('reload')
 }
 async function sendTest(channel) {
-  const result = await task('test:' + channel.name, () => coreApi('onboarding.api.send_test', { channel: channel.name, to: to.value[channel.name] }, true))
+  // Each press is a new attempt, so a test can be sent again after the cause of a failure is fixed.
+  const attempt = crypto.randomUUID?.() || String(Date.now()) + Math.random().toString(36).slice(2)
+  const result = await task('test:' + channel.name, () => coreApi('onboarding.api.send_test', { channel: channel.name, to: to.value[channel.name], attempt }, true))
   if (result) tests.value[channel.name] = { message: result.message, status: result.message ? 'Pending' : result.status, error: result.error || '' }
 }
 // Delivery receipts change the message; each change re-reads only the test messages.
@@ -46,6 +49,10 @@ onBeforeUnmount(() => { stopRoom?.(); stopRealtime?.() })
   <section class="workflow-card onboarding-card" aria-labelledby="onboarding-ready-title">
     <h2 id="onboarding-ready-title">Test and finish</h2>
     <ErrorMessage :message="error" />
+    <template v-if="others.length">
+      <p>Your Relay provider connected these channels:</p>
+      <ul class="list-disc space-y-1 pl-5"><li v-for="row in others" :key="row.name">{{ row.channel }}: {{ row.label || row.address }}<template v-if="row.label && row.address"> ({{ row.address }})</template></li></ul>
+    </template>
     <p v-if="!channels.length">No WhatsApp number is connected yet. <a class="v1-link" href="#/setup?step=number">Connect a number</a></p>
     <article v-for="channel in channels" :key="channel.name" class="onboarding-number space-y-4">
       <h3 class="font-semibold">{{ sessionOf(channel)?.phone?.display_phone_number || channel.address || channel.label }}</h3>
@@ -77,8 +84,8 @@ onBeforeUnmount(() => { stopRoom?.(); stopRealtime?.() })
     </article>
     <p class="onboarding-hint">Meta raises your limits after you <a class="v1-link" :href="VERIFICATION_LINK" target="_blank" rel="noopener">verify your business</a>.</p>
     <div class="onboarding-actions is-primary">
-      <Button variant="solid" label="Continue" :disabled="!channels.length" @click="emit('next', 'records')" />
-      <Button variant="outline" label="Add another number" @click="emit('go', 'number')" />
+      <Button variant="solid" label="Continue" :disabled="!channels.length && !others.length" @click="emit('next', 'records')" />
+      <Button variant="outline" :label="channels.length ? 'Add another number' : 'Add a WhatsApp number'" @click="emit('go', state.draft_saved ? 'number' : 'business')" />
     </div>
   </section>
 </template>

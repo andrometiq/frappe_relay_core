@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Badge, Button, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { CLOSED, FLOWS, WAITING, needsRestart, openSignupWindow, signupSteps } from '../../services/onboarding'
+import { CLOSED, FLOWS, WAITING, findSignupWindow, needsRestart, openSignupWindow, signupSteps } from '../../services/onboarding'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 
 const props = defineProps({ state: { type: Object, required: true }, sessionId: String })
@@ -34,9 +34,8 @@ async function call(work) {
   finally { busy.value = false }
 }
 // The window opens inside the click; the Hub address follows when Core has it.
-async function start() {
-  blocked.value = false
-  popup = openSignupWindow(window.open, isMobile.value)
+async function start(opened = openSignupWindow(window.open, isMobile.value)) {
+  popup = opened
   blocked.value = !popup
   const result = await call(() => coreApi('onboarding.api.start_whatsapp', { flow: flow.value }, true))
   if (!result) { popup?.close(); popup = null; return }
@@ -45,10 +44,17 @@ async function start() {
   emit('go', 'number', result.session.session_id)
   emit('reload')
 }
+// After a reload the running window is only brought to the front; a new signup would supersede it.
 function openAgain() {
-  if (!launchUrl.value) return start()
-  popup = openSignupWindow(window.open, isMobile.value, launchUrl.value)
-  blocked.value = !popup
+  if (launchUrl.value) {
+    popup = openSignupWindow(window.open, isMobile.value, launchUrl.value)
+    blocked.value = !popup
+    return
+  }
+  const found = findSignupWindow(window.open, isMobile.value)
+  if (!found.running) return start(found.popup)
+  popup = found.popup; blocked.value = false
+  popup.focus()
 }
 async function cancel() {
   popup?.close(); popup = null
@@ -73,7 +79,7 @@ async function resume() {
           <small>What you need: {{ item.need }}</small>
         </label>
       </div>
-      <div class="onboarding-actions is-primary"><Button variant="solid" label="Continue with Facebook" :loading="busy" @click="start" /></div>
+      <div class="onboarding-actions is-primary"><Button variant="solid" label="Continue with Facebook" :loading="busy" @click="start()" /></div>
     </template>
     <template v-else-if="phase === 'waiting'">
       <p class="onboarding-row" role="status"><FeatherIcon name="loader-circle" class="relay-button__spinner" :size="18" />Finish the steps in the Facebook window.</p>

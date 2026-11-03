@@ -114,13 +114,15 @@ Get started has 5 steps:
 
 | Step | What happens |
 | --- | --- |
-| Connect to Relay | Core creates the `relay-hub@<site>` user with the Relay Hub Service role, sends its API key, a new callback secret and a nonce to `POST {relay_hub_origin}/api/enrol`, and saves the Hub URL, account and token in Relay Settings. The Hub checks the site through `relay_core.onboarding.api.enrolment_proof`. Without the config keys, the admin pastes a setup code or setup link from the Hub admin. |
+| Connect to Relay | Core creates the `relay-hub@<site>` user with the Relay Hub Service role, sends its API key, a new callback secret and a nonce to `POST {relay_hub_origin}/api/enrol`, and saves the Hub URL, account and token in Relay Settings. The Hub checks the site through `relay_core.onboarding.api.enrolment_proof`. Core then reads the Hub channels and checks the link with `account.get`; **Try again** does both again. Without the config keys, the admin pastes the setup link from the Hub admin, or the bare setup code when the site has `relay_hub_origin`. When `relay_hub_origin` is set, a pasted link must name the same Hub. |
 | Business details | The admin checks the business name, email, website, country, time zone, category and WhatsApp display name. Relay Settings keeps them as a draft. |
 | WhatsApp number | The admin picks a new number, a WhatsApp Business app number or a number on another provider. A Hub window runs Meta's Embedded Signup. The Hub does the rest; Core keeps a Relay WhatsApp Signup row per session. |
-| Test and finish | Core sends Meta's `hello_world` template and shows the payment method, name and limit state. |
+| Test and finish | Core sends Meta's `hello_world` template and shows the payment method, name and limit state. Each **Send** sends a new test. Telegram bots and mailboxes that the Hub admin linked to the site show here too; a site with only those channels can finish without a WhatsApp number. |
 | Link records | The checked DocTypes become enabled Relay Contact Types. |
 
-When a number is connected, the admin who started the signup gets the Relay Communication Manager role. Finishing sets **Setup finished** in Relay Settings. A site that already had an enabled WhatsApp channel at upgrade is marked as finished. Manual connection stays available under **Settings > Hub connection > Connect manually (advanced)**.
+When a number is connected, the admin who started the signup gets the Relay Communication Manager role. Finishing sets **Setup finished** in Relay Settings. A site that already had an enabled channel of any kind at upgrade is marked as finished.
+
+Core sends the site address that the browser used, also behind an HTTPS gateway that sets `X-Forwarded-Proto`. To connect or reconnect from a script or a console, set `host_name` in the site config to the public HTTPS address; without it Core stops with "This site does not know its public address here". **Settings > Reconnect to Relay Hub** asks for a new setup code when the site config has no enrolment token. Manual connection stays available under **Settings > Hub connection > Connect manually (advanced)**.
 
 For a WhatsApp Business app number, Core imports the copied chats with `legacy_source = "WhatsApp Business app"`, so no AI, flow, ticket or unread count runs on them. Phone contacts become Relay contacts, and messages sent from the phone show as sent messages.
 

@@ -13,7 +13,8 @@ from relay_core.onboarding.messages import OnboardingError, text
 
 SESSION = 'sus_' + 'a' * 32
 DRAFT = {'name': 'Acme', 'email': 'admin@acme.example', 'website': '', 'country': 'IN', 'timezone': 'UTC+05:30',
-         'display_name': 'Acme', 'category': 'OTHER', 'description': ''}
+         'display_name': 'Acme', 'category': 'OTHER', 'description': 'Garments maker', 'street1': '1 Demo Street', 'street2': '',
+         'city': 'Sampleville', 'state': 'Tamil Nadu', 'zip_code': '600001', 'phone_code': '91', 'phone_number': '9000000000'}
 
 
 def session(state='working', **values):
@@ -64,8 +65,7 @@ class SignupTests(unittest.TestCase):
         result = signup.start('coexistence', DRAFT)
         tool, arguments = self.hub.call_tool.call_args.args
         self.assertEqual((tool, arguments['flow'], arguments['actor']), ('whatsapp.signup.start', 'coexistence', 'admin@acme.example'))
-        self.assertEqual(arguments['prefill']['business'], {'name': 'Acme', 'email': 'admin@acme.example', 'country': 'IN',
-                                                            'timezone': 'UTC+05:30'})
+        self.assertEqual(arguments['prefill'], details.prefill(DRAFT))
         self.assertEqual(result['launch_url'], launch)
         row, = self.site.rows('Relay WhatsApp Signup')
         self.assertEqual((row.session_id, row.status, row.started_by), (SESSION, 'Started', 'admin@acme.example'))
@@ -94,6 +94,31 @@ class SignupTests(unittest.TestCase):
         self.assertEqual(len(self.site.queued), 1)
         self.site.frappe.publish_realtime.assert_called_with('relay_changed', {'kind': 'onboarding', 'session': SESSION},
                                                              room='doctype:Relay WhatsApp Signup', after_commit=True)
+
+    def test_a_failed_channel_read_is_retried_on_the_next_store(self):
+        channels = self.site.tables['Relay Channel']
+        saved = list(channels)
+        channels.clear()
+        signup.store(session('completed'), actor='admin@acme.example')
+        row, = self.site.rows('Relay WhatsApp Signup')
+        self.assertEqual((row.status, row.channel), ('Completed', None))
+        channels.extend(saved)
+        self.assertEqual(signup.latest()['channel'], 'Acme-001')
+        self.assertEqual(signup.store(session('completed'))['channel'], 'Acme-001')
+        self.assertEqual(self.sync.call_count, 2)
+        self.assertEqual(self.site.rows('Relay WhatsApp Signup')[0].channel, 'Acme-001')
+        signup.store(session('completed'))
+        self.assertEqual(self.sync.call_count, 2)
+
+    def test_the_store_commits_before_reading_and_before_the_lock_is_released(self):
+        events = []
+        self.site.frappe.db.commit = Mock(side_effect=lambda: events.append('commit'))
+        lock = Mock()
+        lock.return_value.__enter__ = Mock(side_effect=lambda: events.append('lock'))
+        lock.return_value.__exit__ = Mock(side_effect=lambda *a: events.append('unlock'))
+        self.site.frappe.cache.lock = lock
+        signup.store(session('working'), actor='admin@acme.example')
+        self.assertEqual(events, ['lock', 'commit', 'commit', 'unlock'])
 
     def test_errors_read_in_relay_words(self):
         cases = ((session('cancelled', error={'meta_step': 'PHONE_NUMBER_VERIFICATION'}), 'cancelled', 'phone number verification'),
@@ -167,7 +192,10 @@ class DetailsTests(unittest.TestCase):
     def test_wrong_details_name_the_field(self):
         for values, words in (({'name': ''}, 'business name'), ({'email': 'nope'}, 'email'), ({'website': 'acme', 'no_website': False}, 'website'),
                               ({'country': 'XX'}, 'country'), ({'timezone': 'Asia/Kolkata'}, 'time zone'),
-                              ({'category': 'SPAM'}, 'category'), ({'name': 'x' * 101}, 'at most 100')):
+                              ({'category': 'SPAM'}, 'category'), ({'name': 'x' * 101}, 'at most 100'),
+                              ({'street1': ''}, 'street'), ({'city': ''}, 'city'), ({'state': ''}, 'state'),
+                              ({'zip_code': ''}, 'PIN'), ({'description': ''}, 'description'),
+                              ({'phone_number': '12'}, 'phone'), ({'phone_code': 'x'}, 'phone'), ({'description': 'x' * 513}, 'at most 512')):
             with self.subTest(values=values), self.assertRaisesRegex(ValueError, words):
                 self.check(**values)
 
@@ -181,11 +209,43 @@ class DetailsTests(unittest.TestCase):
         self.assertNotIn('website', details.prefill(DRAFT)['business'])
         self.assertEqual(details.prefill(dict(DRAFT, website='https://a.example'))['business']['website'], 'https://a.example')
 
+    def test_prefill_carries_the_address_phone_and_description(self):
+        prefill = details.prefill(DRAFT)
+        business = prefill['business']
+        self.assertEqual((business['street_address1'], business['city'], business['state'], business['zip_postal']),
+                         ('1 Demo Street', 'Sampleville', 'Tamil Nadu', '600001'))
+        self.assertEqual(business['phone'], {'code': '91', 'number': '9000000000'})
+        self.assertEqual(prefill['phone']['description'], 'Garments maker')
+
+    def test_phone_numbers_are_split_into_code_and_number(self):
+        self.assertEqual(details.business_phone('+91 90000 00000', 'IN'), {'phone_code': '91', 'phone_number': '9000000000'})
+        self.assertEqual(details.business_phone('090000 00000', 'IN'), {'phone_code': '91', 'phone_number': '9000000000'})
+        self.assertEqual(details.business_phone('', 'IN'), {'phone_code': '91', 'phone_number': ''})
+
+    def test_an_incomplete_draft_is_not_saved(self):
+        for draft, complete in ((DRAFT, True), (dict(DRAFT, phone_number=''), False), (dict(DRAFT, street1=''), False)):
+            with self.subTest(draft=draft), patch.object(details, 'stored', return_value=draft):
+                self.assertEqual(bool(details.saved()), complete)
+
+    def test_time_zone_follows_the_country(self):
+        def zone(system, country_zones):
+            values = {'time_zone': system}
+            fake = SimpleNamespace(db=SimpleNamespace(get_single_value=lambda doctype, field: values.get(field),
+                                                      get_value=lambda doctype, name, field: country_zones))
+            with patch.object(details, 'frappe', fake):
+                return details.timezone_name('India')
+        self.assertEqual(zone('UTC', 'Asia/Kolkata'), 'Asia/Kolkata')
+        self.assertEqual(zone('', 'Asia/Kolkata'), 'Asia/Kolkata')
+        self.assertEqual(zone('America/Chicago', 'America/New_York\nAmerica/Chicago'), 'America/Chicago')
+        self.assertEqual(zone('Asia/Kolkata', None), 'Asia/Kolkata')
+        self.assertEqual(details.utc_offset(zone('UTC', 'Asia/Kolkata')), 'UTC+05:30')
+
 
 class StepTests(unittest.TestCase):
-    def step(self, connected=True, draft=True, channels=(), completed=False):
+    def step(self, connected=True, draft=True, channels=(), completed=False, others=()):
         with patch.object(progress, 'is_completed', return_value=completed), \
                 patch.object(progress, 'is_connected', return_value=connected), \
+                patch.object(progress, 'other_channels', return_value=list(others)), \
                 patch.object(details, 'saved', return_value=DRAFT if draft else None):
             return progress.current_step([SimpleNamespace(enabled=enabled) for enabled in channels])
 
@@ -196,6 +256,11 @@ class StepTests(unittest.TestCase):
         self.assertEqual(self.step(channels=(0,)), 'number')
         self.assertEqual(self.step(channels=(1,)), 'ready')
         self.assertEqual(self.step(completed=True, connected=False), 'done')
+
+    def test_a_telegram_or_email_channel_alone_makes_the_site_ready(self):
+        mailbox = SimpleNamespace(name='mail', channel='Email')
+        self.assertEqual(self.step(draft=False, others=[mailbox]), 'ready')
+        self.assertEqual(self.step(connected=False, others=[mailbox]), 'hub')
 
 
 class RightsTests(unittest.TestCase):
@@ -255,25 +320,31 @@ class PatchTests(unittest.TestCase):
             mark_existing_onboarded.execute()
         return site.frappe.db.set_single_value
 
-    def test_a_site_with_a_whatsapp_channel_skips_get_started(self):
-        self.run_patch([{'channel': 'WhatsApp', 'enabled': 1}]).assert_called_once_with(
-            'Relay Settings', {'onboarding_completed': 1, 'enrolment_source': 'Manual'})
+    def test_a_site_with_any_enabled_channel_skips_get_started(self):
+        for channels in ([{'channel': 'WhatsApp', 'enabled': 1}], [{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Telegram', 'enabled': 1}],
+                         [{'channel': 'Email', 'enabled': 1}]):
+            with self.subTest(channels=channels):
+                self.run_patch(channels).assert_called_once_with(
+                    'Relay Settings', {'onboarding_completed': 1, 'enrolment_source': 'Manual'})
 
     def test_a_new_or_disabled_site_keeps_get_started(self):
         self.run_patch([]).assert_not_called()
-        self.run_patch([{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Telegram', 'enabled': 1}]).assert_not_called()
+        self.run_patch([{'channel': 'WhatsApp', 'enabled': 0}, {'channel': 'Email', 'enabled': 0}]).assert_not_called()
 
 
 class BusinessNameTests(unittest.TestCase):
-    def name(self, company, app_name):
-        fake = SimpleNamespace(db=SimpleNamespace(get_single_value=Mock(return_value=app_name)), local=SimpleNamespace(site='acme.example.com'))
+    def name(self, company, app_name, website_name=None):
+        names = {'Website Settings': website_name, 'System Settings': app_name}
+        fake = SimpleNamespace(db=SimpleNamespace(get_single_value=lambda doctype, field: names[doctype]),
+                               local=SimpleNamespace(site='acme.example.com'))
         with patch.object(details, 'frappe', fake):
             return details.business_name({'company_name': company} if company else {})
 
     def test_frappe_default_app_name_is_not_a_business_name(self):
         self.assertEqual(self.name('Acme Pvt Ltd', 'Frappe'), 'Acme Pvt Ltd')
         self.assertEqual(self.name(None, 'Acme ERP'), 'Acme ERP')
-        self.assertEqual(self.name(None, 'Frappe'), 'acme.example.com')
+        self.assertEqual(self.name(None, 'Frappe', 'Acme Shop'), 'Acme Shop')
+        self.assertEqual(self.name(None, 'Frappe'), '')
 
 
 class TestMessageTests(unittest.TestCase):
@@ -299,6 +370,15 @@ class TestMessageTests(unittest.TestCase):
         self.assertEqual(first.args[:4], ('RELAY-CON-1', 'RCE-1', 'template', {'name': 'hello_world', 'language': 'en_US', 'components': []}))
         self.assertEqual(first.args[4], second.args[4])
         self.assertEqual(len(first.args), 5)
+
+    def test_each_send_press_after_a_failure_is_a_new_message(self):
+        for attempt in ('press-one-1', 'press-one-1', 'press-two-2', 'bad key!'):
+            test_message.send('Acme-1', '+91 98765 00001', attempt)
+        keys = [call.args[4] for call in self.start.call_args_list]
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[1], keys[2])
+        test_message.send('Acme-1', '+91 98765 00001')
+        self.assertEqual(keys[3], self.start.call_args.args[4], 'A malformed attempt falls back to the time window')
 
     def test_another_sites_or_a_disabled_channel_is_refused(self):
         self.fake.db.exists.return_value = False
