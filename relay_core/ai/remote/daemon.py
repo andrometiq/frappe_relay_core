@@ -178,6 +178,7 @@ class Service:
         timeout = min(float(spec['timeout']), float(spec['deadline']) - time.time())
         if timeout <= 0:
             return {'error': 'timeout', 'detail': 'The request expired in the AI service queue'}
+        started = time.monotonic()
         try:
             async with asyncio.timeout(timeout):
                 async with self.http.stream('POST', spec['url'], headers=spec['headers'], json=spec['body']) as answer:
@@ -186,7 +187,8 @@ class Service:
                         body.extend(chunk)
                         if len(body) > MAX_RESPONSE_BYTES:
                             return {'error': 'unavailable', 'detail': 'The AI provider answer is too large'}
-                    return {'status': answer.status_code, 'body': body.decode('utf-8', 'replace')}
+                    return {'status': answer.status_code, 'body': body.decode('utf-8', 'replace'),
+                            'latency_ms': int((time.monotonic() - started) * 1000)}
         except TimeoutError:
             return {'error': 'timeout', 'detail': 'The AI provider did not answer in time'}
         except httpx.HTTPError as error:

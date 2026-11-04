@@ -1,10 +1,10 @@
 """Site side of the bench AI service.
 
-A run job builds each provider turn as today. With `relay_ai_service` on and the service alive, the turn goes to the
-service and the job ends; the service's signed result resumes the run, which replays its earlier turns from stored
-results. Credentials stay on the site: the service fetches them per call and never stores them. When the service
-is down the turn runs in the worker as before; a request it loses or does not answer in time fails the run, which
-hands the conversation to staff.
+A run job builds each provider turn with frappe_tools (see `turns`). With `relay_ai_service` on and the service
+alive, `post` hands the turn to the service and the job ends; the service's signed result resumes the run, which
+replays its earlier turns from stored results. Credentials stay on the site: the service fetches them per call and
+never stores them. When the service is down the turn runs in the worker as before; a request it loses or does not
+answer in time fails the run, which hands the conversation to staff.
 """
 import json
 import time
@@ -77,26 +77,24 @@ def is_waiting(run: str) -> bool:
     return bool(frappe.cache.exists(key('waiting', run), shared=True))
 
 
+def is_active() -> bool:
+    """True inside a run job of a site with the service on: `turns` then sends provider turns through `post`."""
+    return turn_state.get() is not None
+
+
 @contextmanager
 def transport(run: str):
-    """Within one run job, send provider turns through the AI service. Swaps frappe_tools' module seams, which a
-    `transport` hook in frappe_tools' client should replace."""
+    """Within one run job, send provider turns through the AI service; `turns` sends them through `post`."""
     if not is_enabled():
         yield
         return
-    from frappe_tools.ai import client
-    state = {'run': run, 'undo': [], 'account': None, 'handed': False}
+    state = {'run': run, 'undo': []}
     token = turn_state.set(state)
-    seams = {'requests': client.requests, 'accounts': client.accounts, '_log_attempt': client._log_attempt}
-    client.requests, client.accounts = Requests(state, seams['requests']), Accounts(state, seams['accounts'])
-    client._log_attempt = lambda *args: None if state['handed'] else seams['_log_attempt'](*args)
     try:
         yield
     except Handed:
         release(state)
     finally:
-        for name, value in seams.items():
-            setattr(client, name, value)
         turn_state.reset(token)
 
 
@@ -107,45 +105,30 @@ def release(state: dict) -> None:
     frappe.db.commit()
 
 
-class Requests:
-    """`requests` as frappe_tools' client sees it in a run job; only `post` changes."""
-
-    def __init__(self, state: dict, module):
-        self.state, self.module = state, module
-
-    def __getattr__(self, name):
-        return getattr(self.module, name)
-
-    def post(self, url, *, headers, json, timeout, stream=False):
-        return send(self.state, url, headers, json, timeout)
-
-
-class Accounts:
-    """Records which account a turn uses, so the service can fetch its current credentials."""
-
-    def __init__(self, state: dict, module):
-        self.state, self.module = state, module
-
-    def __getattr__(self, name):
-        return getattr(self.module, name)
-
-    def credentials(self, account, timeout=120):
-        self.state['account'] = account.name if hasattr(account, 'name') else None
-        return self.module.credentials(account, timeout)
-
-
-def send(state: dict, url: str, headers: dict, body: dict, timeout: float):
-    run, turn = state['run'], protocol.body_key(url, body)
+def post(account: str, url: str, headers: dict, body: dict, timeout: float) -> tuple[requests.Response, int | None]:
+    """The provider answer to a turn of the active run and the provider latency the service measured: a stored result,
+    else the turn goes to a live service (raising Handed), else it is posted from this worker."""
+    run, turn = turn_state.get()['run'], protocol.body_key(url, body)
     stored = frappe.cache.get(key('result', run, turn))
     if stored:
-        return response(json.loads(stored))
+        result = json.loads(stored)
+        return response(result), result.get('latency_ms')
     hops = frappe.cache.incr(key('hops', run))
     frappe.cache.expire(key('hops', run), RESULT_SECONDS)
-    if not state['account'] or hops > MAX_HOPS or not is_service_up():
-        return requests.post(url, headers=headers, json=body, timeout=timeout, stream=True)
-    hand(run, turn, state['account'], url, body, timeout)
-    state['handed'] = True
+    if hops > MAX_HOPS or not is_service_up():
+        return requests.post(url, headers=headers, json=body, timeout=timeout, stream=True), None
+    hand(run, turn, account, url, body, timeout)
     raise Handed(run)
+
+
+def is_first_replay(url: str, body: dict) -> bool:
+    """Whether to log a replayed turn: every later hop replays it again, so only the first hop whose work commits
+    logs it."""
+    name = key('logged', turn_state.get()['run'], protocol.body_key(url, body))
+    if frappe.cache.get(name):
+        return False
+    frappe.db.after_commit.add(lambda: frappe.cache.set(name, 1, ex=RESULT_SECONDS))
+    return True
 
 
 def hand(run: str, turn: str, account: str, url: str, body: dict, timeout: float) -> None:
@@ -220,6 +203,8 @@ def result(**_ignored) -> dict:
         outcome = {'error': value['error'], 'detail': str(value.get('detail') or '')[:300]}
     elif type(value.get('status')) is int and isinstance(value.get('body'), str) and len(value['body']) <= MAX_BODY_CHARS:
         outcome = {'status': value['status'], 'body': value['body']}
+        if type(value.get('latency_ms')) is int and value['latency_ms'] >= 0:
+            outcome['latency_ms'] = value['latency_ms']
     else:
         frappe.throw('Invalid AI service result', frappe.ValidationError)
     return {'status': 'stored' if store(value['id'], spec, outcome) else 'duplicate'}
@@ -254,3 +239,4 @@ def expire_overdue(now: float | None = None) -> int:
         else:
             frappe.cache.zrem(key('inflight'), identifier)
     return len(overdue)
+

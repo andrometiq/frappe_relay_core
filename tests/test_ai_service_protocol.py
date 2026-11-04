@@ -92,8 +92,15 @@ class Service(unittest.TestCase):
         service = self.run_entry()
         self.assertEqual([call[0] for call in self.calls], ['request', 'provider', 'result'])
         self.assertEqual(self.calls[0][1], 'a.local')
-        self.assertEqual(self.calls[2][1], {'id': 'e' * 64, 'status': 200, 'body': SSE})
+        result = self.calls[2][1]
+        self.assertIsInstance(result.pop('latency_ms'), int)
+        self.assertEqual(result, {'id': 'e' * 64, 'status': 200, 'body': SSE})
         self.assertEqual((self.acked, service.counts['done']), (['1-0'], 1))
+
+    def test_the_result_carries_the_measured_provider_latency(self):
+        self.delay = 0.2
+        self.run_entry()
+        self.assertGreaterEqual(self.calls[-1][1]['latency_ms'], 200)
 
     def test_a_slow_provider_becomes_a_timeout_result(self):
         self.delay = 2
