@@ -84,7 +84,8 @@ def is_active() -> bool:
 
 @contextmanager
 def transport(run: str):
-    """Within one run job, send provider turns through the AI service; `turns` sends them through `post`."""
+    """Within one run job, send provider turns through the AI service. A job that does not hand a turn over ends the
+    run's time budget, so a later attempt starts a fresh one."""
     if not is_enabled():
         yield
         return
@@ -94,6 +95,8 @@ def transport(run: str):
         yield
     except Handed:
         release(state)
+    else:
+        frappe.cache.delete(key('deadline', run))
     finally:
         turn_state.reset(token)
 
@@ -103,6 +106,19 @@ def release(state: dict) -> None:
     for undo in reversed(state['undo']):
         undo()
     frappe.db.commit()
+
+
+def run_deadline(run: str, stage: str, seconds: float) -> float:
+    """The time.monotonic() deadline of `stage` of `run`; in a service run job every job hop of the stage keeps the
+    first hop's deadline, so waiting for the service counts against the stage's time budget. The run lease makes this
+    read-modify-write safe."""
+    if not is_active():
+        return time.monotonic() + seconds
+    deadlines = json.loads(frappe.cache.get(key('deadline', run)) or '{}')
+    if stage not in deadlines:
+        deadlines[stage] = time.time() + seconds
+        frappe.cache.set(key('deadline', run), json.dumps(deadlines), ex=RESULT_SECONDS)
+    return time.monotonic() + deadlines[stage] - time.time()
 
 
 def post(account: str, url: str, headers: dict, body: dict, timeout: float) -> tuple[requests.Response, int | None]:
@@ -135,7 +151,7 @@ def hand(run: str, turn: str, account: str, url: str, body: dict, timeout: float
     """Queue the turn once; a replay of a turn already in the service only ends its job."""
     site = frappe.local.site
     identifier = protocol.request_id(site, run, turn)
-    deadline = time.time() + float(timeout) + GRACE_SECONDS
+    deadline = time.time() + float(timeout)  # Within the run's time budget; a later answer is of no use.
     spec = {'run': run, 'turn': turn, 'account': account, 'url': url, 'body': body, 'timeout': float(timeout),
             'deadline': deadline}
     lifetime = int(timeout) + GRACE_SECONDS + 60
@@ -220,7 +236,7 @@ def store(identifier: str, spec: dict, outcome: dict) -> bool:
     frappe.set_user('Administrator')  # As the scheduler's recovery queues runs; each run acts as its execution user.
     try:
         frappe.enqueue('relay_core.automation.service.process', name=spec['run'], queue=QUEUE,
-                       job_id='relay-ai-resume-' + identifier, deduplicate=True)
+                       job_id='relay-ai-resume-' + identifier, deduplicate=True, at_front=True)
     finally:
         frappe.set_user(actor)
     return True

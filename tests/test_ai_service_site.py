@@ -53,6 +53,7 @@ class FakeCache:
         return [member.encode() for member, score in self.sorted.get(key, {}).items() if low <= score <= high][:num]
 
 
+
 class SiteSide(unittest.TestCase):
     def setUp(self):
         self.cache, self.stream, self.jobs, self.beat = FakeCache(), [], [], {'ts': time.time()}
@@ -94,7 +95,7 @@ class SiteSide(unittest.TestCase):
         self.assertEqual((codex.parse_response(answer)[0], latency), ('{"ok":true}', None))
         self.assertFalse(site.is_waiting('AR-1'))
         self.assertEqual(self.jobs, [('relay_core.automation.service.process', {'name': 'AR-1', 'queue': 'default',
-            'job_id': 'relay-ai-resume-' + self.identifier(), 'deduplicate': True})])
+            'job_id': 'relay-ai-resume-' + self.identifier(), 'deduplicate': True, 'at_front': True})])
         self.assertEqual([args.args for args in self.frappe.set_user.call_args_list], [('Administrator',), ('Guest',)])
 
     def test_a_second_result_is_ignored_and_does_not_resume_twice(self):
@@ -136,6 +137,12 @@ class SiteSide(unittest.TestCase):
             raise site.Handed('AR-1')
         self.assertEqual(undone, ['reply spend'])
 
+    def test_a_handed_turn_must_answer_within_its_own_timeout(self):
+        before = time.time()
+        self.hand()
+        self.assertLessEqual(site.spec_for(self.identifier())['deadline'], time.time() + 20)
+        self.assertGreaterEqual(site.spec_for(self.identifier())['deadline'], before + 20)
+
     def test_a_replayed_turn_reports_the_provider_latency_the_service_measured(self):
         self.hand()
         result = {'id': self.identifier(), 'status': 200, 'body': SSE, 'latency_ms': 3210}
@@ -157,6 +164,30 @@ class SiteSide(unittest.TestCase):
         self.assertTrue(site.is_first_replay(URL, BODY))  # That hop rolled back: its log row is gone.
         callbacks[-1]()  # This hop commits.
         self.assertFalse(site.is_first_replay(URL, BODY))
+
+    def test_every_hop_of_a_stage_keeps_the_first_hops_deadline(self):
+        first = site.run_deadline('AR-1', 'Event', 60)
+        with patch.object(site.time, 'time', return_value=time.time() + 25):
+            later = site.run_deadline('AR-1', 'Event', 60)  # The resume job, 25 s later.
+            matching = site.run_deadline('AR-1', 'Matching', 40)
+        self.assertAlmostEqual(first - later, 25, delta=0.5)
+        self.assertAlmostEqual(matching - time.monotonic(), 40, delta=0.5)
+
+    def test_a_job_that_does_not_hand_a_turn_ends_the_runs_deadline(self):
+        with patch.object(site, 'is_enabled', return_value=True), site.transport('AR-1'):
+            site.run_deadline('AR-1', 'Event', 60)
+        self.assertIsNone(self.cache.get(site.key('deadline', 'AR-1')))
+        with patch.object(site, 'is_enabled', return_value=True), site.transport('AR-1'):
+            site.run_deadline('AR-1', 'Event', 60)
+            raise site.Handed('AR-1')
+        self.assertIsNotNone(self.cache.get(site.key('deadline', 'AR-1')))
+
+    def test_outside_a_service_run_job_each_deadline_is_fresh(self):
+        site.turn_state.set(None)
+        site.run_deadline('AR-1', 'Event', 60)
+        with patch.object(site.time, 'monotonic', return_value=time.monotonic() + 30):
+            self.assertAlmostEqual(site.run_deadline('AR-1', 'Event', 60) - site.time.monotonic(), 60, delta=0.5)
+        self.assertEqual(self.cache.values, {})
 
     def test_a_service_run_job_leaves_frappe_tools_modules_alone(self):
         from frappe_tools.ai import accounts, client

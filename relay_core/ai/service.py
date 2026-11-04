@@ -12,6 +12,7 @@ from relay_core.automation.contracts import action_key
 from relay_core.ai.remote import site as remote
 
 REPLY_TIMEOUT = 60
+MATCHING_TIMEOUT = 40  # Matching has its own budget; a reply gets REPLY_TIMEOUT.
 SEARCH_NOTICE = 'I will check your records for this.'
 SEARCH_CONFIRM = "Reply 'yes' to continue, or tell me what to change."
 CONFIRM_WORDS = ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please',
@@ -493,6 +494,7 @@ def process(name, *, deadline=None):
                 run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
                 internal_save(run); frappe.db.commit()
                 remote.on_handed(lambda: undo_attempt(name))
+                deadline = deadline or remote.run_deadline(name, run.stage, REPLY_TIMEOUT)
                 decision = decide(skill, message, run.name, deadline=deadline)
                 remote.settled()
                 used = decision.pop('context', None)
@@ -808,7 +810,7 @@ def admit(run):
     from relay_core.ai import matching
     from relay_core.ai.tools import fingerprint
     from relay_core.automation.service import episode, triage
-    deadline = time.monotonic() + 40  # Matching budget; replies get their own REPLY_TIMEOUT.
+    deadline = remote.run_deadline(run.name, 'Matching', MATCHING_TIMEOUT)
     message = frappe.get_doc('Relay Message', run.message)
     try:
         ticket = episode(run, message)
