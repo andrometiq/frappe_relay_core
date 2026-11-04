@@ -1512,6 +1512,9 @@
   "skill": "Sim payments",
   "turns": [
    {
+    "step": "write_actions"
+   },
+   {
     "in": "I paid 5000 in cash today. Please record it.",
     "decision": {
      "reply": "Your payment is recorded for review.",
@@ -1561,6 +1564,9 @@
   "language": "English",
   "skill": "Sim payments",
   "turns": [
+   {
+    "step": "write_actions"
+   },
    {
     "in": "I paid 5000 in cash today. Please record it.",
     "decision": {
@@ -1635,6 +1641,9 @@
   "skill": "Sim payments",
   "turns": [
    {
+    "step": "write_actions"
+   },
+   {
     "in": "I paid 5000 in cash today. Please record it.",
     "decision": {
      "reply": "Your payment is recorded for review.",
@@ -1697,6 +1706,9 @@
   "skill": "Sim payments",
   "turns": [
    {
+    "step": "write_actions"
+   },
+   {
     "in": "I paid 5000 in cash today. Please record it.",
     "decision": {
      "reply": "Your payment is recorded for review.",
@@ -1758,6 +1770,9 @@
   "language": "English",
   "skill": "Sim payments",
   "turns": [
+   {
+    "step": "write_actions"
+   },
    {
     "in": "I paid 5000 in cash today. Please record it.",
     "decision": {
@@ -1837,6 +1852,9 @@
   "language": "Tamil",
   "skill": "Sim payments",
   "turns": [
+   {
+    "step": "write_actions"
+   },
    {
     "in": "நான் இன்று 5000 ரொக்கமாக செலுத்தினேன், பதிவு செய்யுங்கள்.",
     "decision": {

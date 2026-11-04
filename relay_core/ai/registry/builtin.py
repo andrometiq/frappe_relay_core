@@ -84,9 +84,9 @@ class CoreTools:
         self.code_tools, self.context = [], None
         if skill.get('allowed_actions') and skill.get('allowed_actions') != '[]':
             from relay_core.ai.configuration import action_contracts
-            from relay_core.flows.actions import definitions
-            self.declarations = action_contracts(skill)
+            from relay_core.flows.actions import definitions, offered_actions
             self.registered = definitions(context='ai')
+            self.declarations = offered_actions(action_contracts(skill), self.registered)
             self.action_schemas = [dict(row, parameters=self.registered[row['action']]['parameters'],
                 approval_policy=self.registered[row['action']]['approval_policy']) for row in self.declarations]
 

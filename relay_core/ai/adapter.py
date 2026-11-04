@@ -76,6 +76,10 @@ SYSTEM_RULES = ('You are a Relay business assistant. These rules take priority o
         'Return JSON with reply, handoff, reason, search, decline (false unless declining), '
         'identity_claim (false unless set above) and data_question (true for record-data requests, false otherwise).'))
 
+READ_ONLY_RULE = ('\nYou only read and reply. You cannot change, cancel, create or record anything for the sender. '
+                  'For such a request, say politely that you cannot do it, set handoff=true and give the request as '
+                  'the reason, so staff follow up on a ticket.')
+
 # Strict structured output (OpenAI Codex) needs every property in `required` and a closed schema for every object,
 # so the search arguments travel as JSON text. Providers without strict mode may still omit the optional keys.
 SEARCH_DECLARATION = {'type': ['object', 'null'], 'additionalProperties': False,
@@ -184,7 +188,9 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     # The model sees each pack's key, model fields and filters, never its renderer or identity paths.
     catalogue = [dict(reference=row['key'], label=row['label'], operation=row['operation'], fields=field_names(row, 'model'),
         filters=row['filters'], limit=row['limit'], notes=row.get('data_notes', '')) for row in references]
-    system = (SYSTEM_RULES + '\nReply language:\n' + instruction(incoming_text, language_history)
+    writes = any(core.registered[row['action']]['effect'] != 'reply' for row in core.declarations)
+    system = (SYSTEM_RULES + ('' if writes else READ_ONLY_RULE)
+        + '\nReply language:\n' + instruction(incoming_text, language_history)
         + '\nKnowledge base — standing instructions:\n' + (knowledge or '(none)')
         + playbook_index(core, skill, business, scope)
         + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(catalogue) +

@@ -18,7 +18,7 @@ EXPECT_KEYS = frozenset({'class', 'skill', 'outbound', 'tool_calls', 'reads', 'o
                          'state', 'journals', 'disclosure'})
 # Operator steps run between customer turns; run.STEPS implements each.
 STEPS = frozenset({'takeover', 'approve', 'reject', 'expire', 'disable_capability', 'duplicate_callback',
-                   'disable_user', 'spend_cap'})
+                   'disable_user', 'spend_cap', 'write_actions'})
 
 
 class ScenarioError(ValueError):

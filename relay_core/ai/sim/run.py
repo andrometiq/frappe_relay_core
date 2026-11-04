@@ -249,6 +249,11 @@ def step_spend_cap(context: dict, usd: float, skill: str) -> None:
     switch(context, 'Relay AI Skill', frappe.db.get_value('Relay AI Skill', {'title': skill}), 'daily_spend_cap_usd', usd)
 
 
+def step_write_actions(context: dict, enabled: int = 1) -> None:
+    """Turn AI write actions on (they are off by default) for this trial."""
+    switch(context, 'Relay Settings', 'Relay Settings', 'allow_ai_write_actions', enabled)
+
+
 def step_duplicate_callback(context: dict) -> None:
     context['driver'].repeat_last()
 
@@ -263,7 +268,7 @@ def switch(context: dict, doctype: str, name: str, field: str, value) -> None:
 
 STEPS = {'takeover': step_takeover, 'approve': step_approve, 'reject': step_reject, 'expire': step_expire,
          'disable_capability': step_disable_capability, 'disable_user': step_disable_user,
-         'spend_cap': step_spend_cap, 'duplicate_callback': step_duplicate_callback}
+         'spend_cap': step_spend_cap, 'duplicate_callback': step_duplicate_callback, 'write_actions': step_write_actions}
 
 
 def capability_hashes() -> dict:
