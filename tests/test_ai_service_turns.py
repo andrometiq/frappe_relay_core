@@ -73,6 +73,15 @@ class Turns(unittest.TestCase):
         self.assertIn('slow down', outcome['error'])
         self.assertEqual((self.log.call_args.kwargs['status'], self.log.call_args.kwargs['http_status']), ('Error', 429))
 
+    def test_a_truncated_answer_fails_with_frappe_tools_hint(self):
+        state = client.new_state()
+        with patch.object(site, 'post', return_value=(answer(), 40)), \
+                patch.object(turns.codex, 'parse_response', return_value=('{"ok":', {}, 'length', {})):
+            outcome = turns.try_model(self.account, 'gpt-test', self.build, OPTIONS, CONTEXT)
+        state.update(raw_text='{"ok":', finish_reason='length')
+        self.assertEqual((outcome['ok'], outcome['error']), (False, client._json_error(state)))
+        self.assertIn('Max Tokens', outcome['error'])
+
     def test_a_service_timeout_fails_the_turn_as_a_timeout(self):
         with patch.object(site, 'post', side_effect=requests.Timeout('The AI service did not answer in time')):
             outcome = turns.try_model(self.account, 'gpt-test', self.build, OPTIONS, CONTEXT)

@@ -116,8 +116,7 @@ def execute(account, model: str, build, options: dict, state: dict, deadline: fl
         state['calls'] = adapter.tool_calls(state['result']) if state['body'].get('tools') else []
         state['data'] = llm.safe_json_loads(state['raw_text'])
         if state['data'] is None and not state['calls'] and options.get('require_json', True):
-            raise ValueError(frappe._('could not parse JSON from model response. Raw begins: {0}').format(
-                llm.redact_secrets(state['raw_text'], state['secrets'])[:200] or frappe._('<empty response>')))
+            raise ValueError(client._json_error(state))  # The same message, with its truncation hint.
     finally:
         response.close()
 
