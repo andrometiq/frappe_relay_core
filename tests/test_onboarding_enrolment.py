@@ -280,9 +280,6 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'hub_unavailable')
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class DisconnectTests(unittest.TestCase):
     def setUp(self):
@@ -307,6 +304,11 @@ class DisconnectTests(unittest.TestCase):
             enrolment.disconnect()
         self.frappe.settings.save.assert_not_called()
 
+    def test_a_token_the_hub_already_revoked_still_disconnects(self):
+        self.hub.call_tool.side_effect = HubError('Hub connection is not authorized', {'provider': 'Hub', 'error': {'http_status': 401}})
+        self.assertTrue(enrolment.disconnect()['disconnected'])
+        self.assertEqual(self.frappe.settings['hub_token'], '')
+
     def test_an_unlinked_site_has_nothing_to_disconnect(self):
         self.settings.clear()
         with self.assertRaises(OnboardingError):
@@ -322,3 +324,7 @@ class DisconnectTests(unittest.TestCase):
                 patch.object(api.enrolment, 'disconnect') as disconnect, self.assertRaises(ValueError):
             api.disconnect_hub(0)
         disconnect.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

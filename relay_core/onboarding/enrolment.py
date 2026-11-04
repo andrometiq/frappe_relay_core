@@ -226,8 +226,10 @@ def disconnect():
         raise OnboardingError('hub_not_connected')
     try:
         HubClient(value('relay_hub_url'), value('relay_hub_token')).call_tool('site.disconnect', {'confirm': True})
-    except HubError:
-        raise OnboardingError('hub_unavailable') from None
+    except HubError as error:
+        # 401: the Hub already revoked the token, e.g. its answer to an earlier disconnect was lost.
+        if error.metadata.get('error', {}).get('http_status') != 401:
+            raise OnboardingError('hub_unavailable') from None
     doc = frappe.get_single('Relay Settings')
     doc.update({'hub_token': '', 'callback_secret': '', 'onboarding_completed': 0})
     doc.save(ignore_permissions=True)
