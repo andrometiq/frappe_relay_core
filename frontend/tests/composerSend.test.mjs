@@ -250,3 +250,13 @@ test('a queued send stays below the stored message of the send before it', async
   await second
 })
 
+test('a later successful send keeps the notice of an earlier failed one', async t => {
+  const { state } = fixture(t, (method, values) => method === 'messaging.send' && values.data.text === 'First'
+    ? { status: 'Rejected', action: 'RELAY-MA-0000000001', error: 'Provider rejected' } : undefined)
+  await state.open('A')
+  state.body.value = 'First'
+  const first = state.send()
+  state.body.value = 'Second'
+  await Promise.all([first, state.send()])
+  assert.equal(state.notice.value, 'Provider rejected')
+})

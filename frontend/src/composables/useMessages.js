@@ -804,10 +804,10 @@ export function useMessages() {
     sessionStorage.setItem('relay-typed-result-'+result.action,storage);
     retireAction(result);
     if(pending) {pending.error=result.error||null;pending.action=result.action;pending.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[result.status]||result.status;}
-    notice.value = result.error || (
-      result.status === "Submitted"
-        ? ""
-        : result.status === "Queued" ? "" : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
+    // A later send that succeeds keeps the notice of an earlier one that failed.
+    const outcome = result.error || (["Submitted", "Queued"].includes(result.status) ? ""
+      : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
+    if (outcome) notice.value = outcome;
     if(result.status==='Submitted')sessionStorage.removeItem(storage);
     restored.value = "";
     // A send from an older page of history opens the newest page, where its bubble belongs.
@@ -834,6 +834,7 @@ export function useMessages() {
     });
     if (!message.request || sendingKeys.has(message.request.request_key)) return;
     message.status = 'Sending';
+    notice.value = '';
     sendingKeys.add(message.request.request_key);
     return queueSend(() => deliver(message.request, message.storage, message, { scope: null }))
       .finally(() => sendingKeys.delete(message.request.request_key));
