@@ -102,6 +102,8 @@ WhatsApp Cloud API cannot send a native poll and does not give business accounts
 | Votes | A tap on an option quotes the poll. Relay counts it as the current vote of that contact and updates the poll card live. A later tap replaces the vote. A tap from another contact or chat is not counted. |
 | Incoming | A customer's poll arrives as Meta type `unsupported` (`poll_creation`, error 131051) without content. Relay shows "WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text." A poll vote (`poll_update`) shows a similar notice. |
 
+The `show_customer_poll_notice` patch gives customer polls and votes stored before this notice the same notice. It changes only the message display data (`message_data`), never the message text or IDs. A row stored without the Meta type gets it from its stored Hub event. A second run changes nothing.
+
 See [Meta unsupported messages webhook](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages/unsupported/), [reply buttons](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-reply-buttons-messages/) and [list messages](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-list-messages/). Checked 2026-11-04.
 
 ## Provider support
