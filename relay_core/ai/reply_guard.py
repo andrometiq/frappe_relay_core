@@ -136,8 +136,10 @@ def check_delivery(run, skill, message, reply):
     decision = json.loads(run.get('decision') or '{}')
     company = frappe.db.get_value('Relay Channel', message.channel, 'company')
     from relay_core.ai.knowledge import prompt
-    knowledge = prompt((message.business_doctype, message.business_name), company)
+    from relay_core.ai.playbooks import copy_texts
+    business = (message.business_doctype, message.business_name)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
-        contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=(knowledge,),
+        contact=message.relay_contact, business=list(business)),
+        evidence=[message.get('content') or '', decision.get('reply_contacts', [])],
+        knowledge=(prompt(business, company), *copy_texts(skill, business, company)),
         read_names=set(decision.get('reply_names', [])))
