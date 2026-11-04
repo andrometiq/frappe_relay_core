@@ -59,6 +59,15 @@ export function tileUnread(tile) {
   return Number(tile.kind === 'record' || tile.kind === 'chat' ? tile.unread : tile.unread_records) || 0
 }
 
+// Fresh first-page tiles in their new order, reusing the shown tile objects so only changed values re-render.
+// Tiles of later loaded pages keep their place below.
+export function mergeTiles(items, fresh) {
+  const shown = new Map(items.map(tile => [tileKey(tile), tile]))
+  const keys = new Set(fresh.map(tileKey))
+  return [...fresh.map(tile => shown.has(tileKey(tile)) ? Object.assign(shown.get(tileKey(tile)), tile) : tile),
+    ...items.filter(tile => !keys.has(tileKey(tile)))]
+}
+
 // An inbox.directory row of a chat that no business record covers, as a tile that opens the chat.
 export const chatTile = row => ({ ...row, kind: 'chat', label: row.title || row.contact || row.name })
 

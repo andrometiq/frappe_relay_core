@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { appendTiles, chatTile, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
+import { listRefresh } from '../src/services/realtimeRefreshQueue.js'
+import { appendTiles, chatTile, mergeTiles, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
@@ -13,7 +14,7 @@ async function component(t, props = {}, api) {
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
   let realtime
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, listRefresh, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, _kinds, refresh) { realtime = refresh }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
@@ -154,7 +155,36 @@ test('reading the open record refreshes only its tile; other changes reload the 
   assert.equal(view.items.value, tiles, 'The shared unread count of the open record changed too')
   assert.equal(calls.length, 2)
   await view.realtime(['reads', 'messages']); await settle()
-  assert.notEqual(view.items.value, tiles)
+  assert.equal(view.items.value[0], tiles[0], 'A new message updates the tiles in place')
+  await view.realtime(['permissions']); await settle()
+  assert.notEqual(view.items.value[0], tiles[0])
+})
+
+test('a send or receipt never reloads the list: receipts read nothing, a new message moves tiles in place', async t => {
+  browser(t, '#/messages'); const calls = []; let first = ['local-1', 'local-2']
+  const view = await component(t, { selected: 'local-2', selectedDoctype: type.doctype }, async (method, values) => {
+    calls.push(values)
+    if (!values.doctype) return { items: [type], next: null }
+    const names = values.start ? ['local-3'] : first
+    return { items: names.map(name => ({ ...record, doctype: type.doctype, name, last_activity: name })), next: values.start ? null : 30 }
+  })
+  view.choose(type); await settle()
+  await view.load(true)
+  const shown = [...view.items.value]
+  calls.length = 0
+  await view.realtime(['receipts']); await settle()
+  assert.equal(calls.length, 0, 'A delivery receipt reads nothing')
+  first = ['local-2', 'local-1']
+  let cleared = false
+  const stop = watch(() => view.items.value.length, length => { if (!length) cleared = true }, { flush: 'sync' })
+  await view.realtime(['messages', 'receipts']); await settle()
+  stop()
+  assert.equal(cleared, false, 'The list is never emptied while it refreshes')
+  assert.equal(view.loading.value, false)
+  assert.equal(calls.length, 1, 'One read of the first page')
+  assert.deepEqual(view.items.value.map(tile => tile.name), ['local-2', 'local-1', 'local-3'])
+  assert.equal(view.items.value[0], shown[1], 'The moved tile is the same object')
+  assert.equal(view.items.value[2], shown[2], 'A tile of a later page stays loaded')
 })
 
 test('a record that moved to the next page between requests is shown once', async t => {

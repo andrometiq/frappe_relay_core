@@ -3,6 +3,7 @@ import { coreApi } from '../services/coreApi'
 import { objectValue } from '../components/messageContent'
 import { effectiveNumber, hasManyNumbers, sendNumberChoice } from '../services/whatsappNumbers'
 import { useRealtimeRefresh } from './useRealtimeRefresh'
+import { isReceiptsOnly } from '../services/realtimeRefreshQueue'
 
 export const sendNumbersKey = Symbol('Send numbers')
 
@@ -27,7 +28,7 @@ export function useSendNumbers(state, capabilities) {
     }
   }
   watch(contact, load, { immediate: true })
-  useRealtimeRefresh([], ['messages'], load)
+  useRealtimeRefresh([], ['messages', 'receipts'], ({ kinds } = {}) => isReceiptsOnly(kinds) ? undefined : load())
 
   // A quote or a chosen business contact sends from its own message; otherwise the pick, else the default.
   const current = computed(() => {

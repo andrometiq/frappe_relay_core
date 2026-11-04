@@ -1,20 +1,28 @@
 // Live inbox updates: fetch only conversations active since the newest loaded one, then move them to the top.
-export const CHANGED_ROW_KINDS = new Set(['messages', 'incoming'])
+const activity = row => row.last_message_at || row.creation || ''
 
 export function newestActivity(rows) {
-  return rows.reduce((newest, row) => {
-    const activity = row.last_message_at || row.creation || ''
-    return activity > newest ? activity : newest
-  }, '')
+  return rows.reduce((newest, row) => activity(row) > newest ? activity(row) : newest, '')
+}
+
+// Fresh rows reuse the shown row objects, so only changed values re-render.
+function reuse(rows, fresh) {
+  const shown = new Map(rows.map(row => [row.name, row]))
+  return fresh.map(row => shown.has(row.name) ? Object.assign(shown.get(row.name), row) : row)
 }
 
 export function mergeChangedRows(rows, changed) {
   const names = new Set(changed.map(row => row.name))
-  return [...changed, ...rows.filter(row => !names.has(row.name))]
+  return [...reuse(rows, changed), ...rows.filter(row => !names.has(row.name))]
 }
 
-export function onlyChangedRows(kinds) {
-  return kinds.size > 0 && [...kinds].every(kind => CHANGED_ROW_KINDS.has(kind))
+// A fresh first page over the shown rows. Loaded rows older than the page stay below it; a shown row within the
+// page's range that the page no longer holds has left this view, such as a read chat in Unread.
+export function mergeFirstPage(rows, page) {
+  const fresh = reuse(rows, page.items)
+  if (!page.next || !fresh.length) return fresh
+  const names = new Set(fresh.map(row => row.name)), oldest = activity(fresh.at(-1))
+  return [...fresh, ...rows.filter(row => !names.has(row.name) && activity(row) < oldest)]
 }
 
 // Only a manager may link an unlinked chat; a business row is already linked.
