@@ -159,7 +159,7 @@ class RetrieverTests(unittest.TestCase):
 
     def test_tool_errors_reach_the_model_as_fixed_text(self):
         context = types.SimpleNamespace(skill=self.skill, user='partner', business=('Customer', 'Kestrel Traders'),
-                                        scope={'company': 'Acme Textiles'})
+                                        scope={'company': 'Acme Textiles'}, sources=[])
         reader = Mock()
         self.enterContext(patch.dict(sys.modules, {
             'relay_core.ai.tools': types.SimpleNamespace(Reader=Mock(return_value=reader)),

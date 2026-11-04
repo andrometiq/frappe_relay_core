@@ -10,8 +10,6 @@ FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as
           'handoff_owner', 'mode', 'daily_limit', 'daily_spend_cap_usd', 'target', 'instructions', 'reply_style',
           'search_confirmation', 'exact_trigger', 'execution_policy', 'allowed_tools', 'allowed_actions',
           'max_tool_calls', 'memory_enabled')
-DEFAULT_TOOL_CALLS = 4
-MAX_TOOL_CALLS = 6
 
 
 def _list(value, label):
@@ -88,6 +86,7 @@ def validate_skill(doc):
         raise ValueError('Choose Shadow or Automatic mode')
     doc.search_confirmation = doc.get('search_confirmation') or 'Always'
     doc.execution_policy = doc.get('execution_policy') or 'Ticket only'
+    from relay_core.ai.registry.loop import DEFAULT_TOOL_CALLS, MAX_TOOL_CALLS
     doc.max_tool_calls = int(doc.get('max_tool_calls') or DEFAULT_TOOL_CALLS)
     if not 1 <= doc.max_tool_calls <= MAX_TOOL_CALLS:
         raise ValueError(f'Use 1–{MAX_TOOL_CALLS} tool calls per reply')

@@ -19,10 +19,13 @@ APPROVAL_NOTICE = 'Thanks. Your request is recorded for staff review. Our team w
 
 
 def capability_hashes(skill):
-    """{key: hash} of the skill's read packs and capability action packs; raises when one is not active."""
+    """{key: hash} of the skill's read packs, code tools and capability action packs; raises when a pack is not
+    active."""
     from relay_core.ai.capabilities import manifest_hash
+    from relay_core.ai.registry.builtin import tool_hashes
     from relay_core.ai.tools import contracts
     hashes = {row['key']: manifest_hash(row) for row in contracts(skill)}
+    hashes.update(tool_hashes(skill))
     if skill.get('allowed_actions') and skill.allowed_actions != '[]':
         from relay_core.ai.configuration import action_contracts
         from relay_core.flows.actions import definitions
@@ -119,6 +122,7 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
     contact details only as placeholders; the decision carries their table as `minimise_table`."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
     from relay_core.ai.minimise import Minimiser
+    from relay_core.ai.registry.builtin import RunRecord
     from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     from relay_core.ai.matching import human_request, human_reason
@@ -137,9 +141,13 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
-            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
+            record = RunRecord()
+            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser,
+                                record=record, **options)
             return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
-                        context=reference.used if reference and not decision.get('decline') else None)
+                        context=reference.used if reference and not decision.get('decline') else None,
+                        run_record={'tool_calls': record.tool_calls, 'usage': record.usage},
+                        **({'sources': sorted(record.sources)} if record.sources else {}))
         if reference and reference.facts:
             reference.facts.pop()
         elif reference and reference.lines:
@@ -492,6 +500,7 @@ def process(name, *, deadline=None):
                 decision = decide(skill, message, run.name, deadline=deadline)
                 used = decision.pop('context', None)
                 table = decision.pop('minimise_table', None)
+                record = decision.pop('run_record', None) or {}
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -502,6 +511,8 @@ def process(name, *, deadline=None):
                 run.decision = json.dumps(decision)
                 run.ai_context = json.dumps(used) if used else None
                 run.minimise_table = json.dumps(table) if table else None
+                run.tool_calls = json.dumps(record['tool_calls']) if record.get('tool_calls') else None
+                run.usage = json.dumps(record['usage']) if record.get('usage') else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
@@ -598,6 +609,9 @@ def delivery_scope(run, skill, message, decision=None):
         check_context(run.ai_context, business, scope['company'])
         from relay_core.ai.fact_memory import check_used
         check_used(run.ai_context, skill, business)
+    if decision.get('sources'):
+        from relay_core.ai.knowledge_base.retriever import check_sources
+        check_sources(skill, business, scope['company'], decision['sources'])
     recheck(skill, user, business, decision.get('reads', []), scope,
         authorize=lambda contract, arguments: authorize_search(run.name, skill, contract, arguments))
 

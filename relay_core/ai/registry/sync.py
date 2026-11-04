@@ -16,7 +16,6 @@ def manifests() -> dict[str, dict]:
     from relay_core.ai.capabilities import KEY
     loaded = {}
     for app in frappe.get_installed_apps():
-        prefix = (frappe.get_hooks('relay_ai_capability_prefix', app_name=app) or [app])[-1]
         for path in frappe.get_hooks(HOOK, app_name=app):
             if not path.startswith(app + '.'):
                 raise ValueError(f'{app} must declare tools from its own module')
@@ -27,13 +26,19 @@ def manifests() -> dict[str, dict]:
                 continue
             if not isinstance(tool, RelayTool):
                 raise ValueError(f'{path} is not a @relay_tool function')
-            key = f'{prefix}.{tool.name}'
+            key = tool_key(app, tool)
             if not re.fullmatch(KEY, key):
-                raise ValueError(f'Tool {key} must be named {prefix}.<lowercase name>')
+                raise ValueError(f'Tool {key} must be named <prefix>.<lowercase name>')
             if key in loaded:
                 raise ValueError(f'Tool {key} is declared twice')
             loaded[key] = manifest(tool, key, app, path)
     return loaded
+
+
+def tool_key(app: str, tool: RelayTool) -> str:
+    """The capability key of an app's tool: the app's capability prefix and the tool name."""
+    prefix = (frappe.get_hooks('relay_ai_capability_prefix', app_name=app) or [app])[-1]
+    return f'{prefix}.{tool.name}'
 
 
 def manifest(tool: RelayTool, key: str, app: str, path: str) -> dict:

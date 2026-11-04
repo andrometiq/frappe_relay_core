@@ -29,6 +29,7 @@ def search_knowledge(query: Annotated[str, 'Words to search for'], *, ctx: ToolC
         Reader(ctx.skill, ctx.user, ctx.business, ctx.scope).check_scope()
         validate({}, ctx.scope, ctx.business)
         found = search(ctx.skill, ctx.business, ctx.scope.get('company'), query)
+        ctx.sources.extend(row['source'] for row in found if row['source'] not in ctx.sources)
     except ValueError:
         # Errors never reach the model: they could name sources or records.
         raise ValueError('Knowledge search is unavailable') from None
@@ -95,7 +96,7 @@ def is_current(row) -> bool:
 
 def is_offered(skill, audience: str = 'customer') -> bool:
     """Offer the tool only on MariaDB and when the skill has an enabled knowledge base of this audience."""
-    if not store.is_supported() or not bound_bases(skill):
+    if not bound_bases(skill) or not store.is_supported():
         return False
     return bool(frappe.get_all(BASE, filters={'name': ['in', bound_bases(skill)], 'enabled': 1, 'audience': audience},
                                limit=1))
@@ -107,3 +108,9 @@ def description(skill, audience: str = 'customer') -> str:
                           fields=['title', 'description'], order_by='title asc')
     lines = [f'- {row.title}: {row.description}' if row.description else f'- {row.title}' for row in rows]
     return '\n'.join([search_knowledge.description, 'Knowledge bases:', *lines]) if lines else search_knowledge.description
+
+
+def check_sources(skill, business: tuple[str, str], company: str | None, names: list[str]) -> None:
+    """Before delivery: every source whose chunks the reply used must still be searchable for this sender."""
+    if set(names) - set(sources(enabled_bases(skill, 'customer', company), business[0], company)):
+        raise ValueError('A knowledge source used by this reply changed or is no longer available')

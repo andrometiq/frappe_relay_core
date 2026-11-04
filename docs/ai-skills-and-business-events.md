@@ -62,7 +62,7 @@ Each action uses a stable command key and input hash. A changed input under the 
 - `load_playbook` loads only enabled, non-global customer playbooks bound to the skill that match the sender company and business type. Any other name gives "Playbook is unavailable".
 - The reply guard verbatim-copy check takes the global text and the text of every bound playbook, loaded or not, before the reply and again at delivery.
 - The patch `move_ai_knowledge_to_playbooks` copied each `Relay AI Knowledge` row (disabled rows too) to a global playbook named `desk/<old name>` and set `migrated_to` on the old row. It stops the migration when a row count or a prompt text differs. `Relay AI Knowledge` is read only for one release.
-- The playbook index and the `load_playbook` tool reach the model when the loop assembly offers registry tools.
+- When the skill has a bound playbook for the sender, the prompt lists the bound playbooks as `name: description` lines and the model gets `load_playbook`.
 
 ## Tool registry
 
@@ -83,9 +83,31 @@ def open_orders(status: Annotated[Literal["Open", "Delivered"], "Order status"] 
 - The schema comes from the type hints: `str`, `int`, `float`, `bool`, `Literal`, `Enum`, `list[...]`, `Optional`, `Annotated` descriptions and `TypedDict` closed objects. Other hints fail at import. The docstring is the model description. Arguments are validated against the schema before the call.
 - `ToolContext` is never shown to the model. It holds the run, skill, user, business and scope from `service.context`. `read_list` and `read_doc` read as the run user, add the business link and company of the sender, allow filters that only narrow them, and apply the read pack field rules (no text, table or sensitive fields). Like a read pack, a read needs a verified sender linked to the business, a sender of the skill business type and, for a DocType with a company field, the channel company.
 - `capabilities.sync` (after migrate) stores each tool as a `Relay AI Capability` of kind Tool named `<prefix>.<name>`. The manifest holds the schema, audience, kind, label and `code_hash` (SHA-256 of the source). A code change gives a new hash and status Changed. A tool that does not import is logged and becomes Missing. Core tools approve themselves; other apps must be in `trusted_adapter_apps`.
-- A skill selects a tool in `allowed_tools` like a read pack. Only approved tools of the run audience and the skill business type are offered. A staff tool never runs for a customer. The approval, audience and code hash are checked again at each call. An `action` tool only proposes through the action journal.
+- A skill selects a tool in `allowed_tools` like a read pack. Only approved tools of the run audience and the skill business type are offered. A staff tool never runs for a customer. The approval, audience and code hash are checked again at each call. An `action` tool is not offered yet: it must first propose through the action journal.
 
-Relay AI Skill also has `max_tool_calls` (default 4, maximum 6), `knowledge_bases`, `playbooks` and `memory_enabled` (off by default). Relay Automation Run has `tool_calls`, `usage`, `feedback_rating` and `feedback_comment`. Relay Settings has `allowed_ai_auth_types`: the AI Provider Account auth types that Relay AI may use, one per line. The default is `ChatGPT Login` only. An empty value also means ChatGPT Login only. Add `API Key` only on purpose, because it uses paid API credit. These fields have no effect until the loop assembly uses them.
+## Reply loop
+
+`adapter.complete` runs one bounded tool loop on frappe_tools `AgentRun` (`registry.loop.SkillRun`). The tool set is built for each run:
+
+| Tool | Offered when |
+|---|---|
+| SEARCH | The skill has read packs for the sender business type |
+| EXECUTE | The skill declares actions |
+| `search_knowledge` | The skill binds an enabled customer knowledge base and the site is on MariaDB |
+| `load_playbook` | The skill binds a playbook that applies to the sender |
+| `remember` | **Customer memory** is on, the sender has a business, the run has a record and the site is on MariaDB |
+| App code tools | Selected in `allowed_tools`, approved, customer audience, kind `read` |
+
+- The model gets at most `max_tool_calls` tool calls per reply (default 4, never more than 6). After the last call, the final turn may not call tools. A model that still calls a tool fails the run, and the run hands off.
+- The takeover check runs before and after each tool batch and before each tool call. A staff takeover between tool turns stops the run.
+- Each tool result to the model is at most 4000 characters. Built-in tools give fixed error texts. An app tool error reaches the model only as "This tool is unavailable". A tool call after an EXECUTE proposal is refused. Two tools with one name fail the run.
+- Reply guard inputs: `search_knowledge` results allow contact values only. App read tool results allow their contact values and record names, like read pack results. Bound playbook texts and Skill-scope facts join the verbatim-copy check.
+- The run records `tool_calls` (name, SHA-256 of the arguments, status and milliseconds; no row data) and `usage` (the turns and the token usage of each attempt's final turn, which is all the engine reports).
+- The capability hashes of a run include the code hash of each tool the skill may offer. A tool change between the decision and delivery stops the reply. The decision lists the knowledge sources whose chunks the run returned, and delivery stops when one of them is no longer searchable for the sender.
+- When more than 40 messages of the sender address wait since the last memory fold, the reply queues `memory.fold` for that address (deduplicated). The next reply reads the new summary. No summary model call runs inside a reply.
+- Provider guard: every Relay AI call (`adapter.route`) refuses an AI Model whose AI Provider Account auth type is not in Relay Settings `allowed_ai_auth_types`. The default is `ChatGPT Login` only, and an empty value means the same. Add `API Key` or `Setup Token` only on purpose, because they use paid API credit. A refused model fails the run, and the run hands off.
+
+Relay Automation Run also has `feedback_rating` and `feedback_comment`, which `fact_memory.rate_run` sets.
 
 Reply prompts trim in this order: memory facts, record memory lines, history, knowledge chunks, events. Recalled fact memory (`reference_data.memory`) never allows a contact value in the reply guard. The guard copy check takes every trusted owner text of the prompt.
 
@@ -153,3 +175,4 @@ The owner-requirement changes are source-only until the orchestrator migrates th
 `tests/automation_queue_site.py` exercises the actual drain and background jobs in an isolated RQ queue. See [automation-queue.md](automation-queue.md) for load and recovery evidence. These tests use `relay.test`, import this worktree first, block external delivery, and delete their inserted fixtures. Local HTTP tests use the Frappe WSGI application. They do not establish that existing web or worker processes have loaded this checkout. See the activation record in [automation-queue.md](automation-queue.md) for remaining checks.
 
 `tests/integration_ai_knowledge_site.py` ingests Text, PDF event, and Project DocType sources on `relay.test` and checks Tamil, Malayalam, Hindi and English queries, the LIKE fallback, base and company scope, the Customer-only event audience, business isolation, row hash skip, filter exit, deletion and approval. `tests/integration_ai_knowledge_http.py` checks the source approval HTTP deny case.
+

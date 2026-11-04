@@ -344,6 +344,7 @@ class ReplyContextTests(unittest.TestCase):
         self.saved = Mock(summary_hash='HASH-1', **{'text.return_value': self.MEMORY,
                                                     'rows.return_value': [_dict(name='MEM-1'), _dict(name='MEM-2')]})
         self.memory = self.enterContext(patch('relay_core.ai.memory.get_memory', return_value=self.saved))
+        self.fold = self.enterContext(patch('relay_core.ai.memory.fold_long_episode'))
         self.enterContext(patch('relay_core.ai.fact_memory.memory_block', return_value=[]))
 
     def context(self):

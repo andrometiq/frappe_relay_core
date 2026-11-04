@@ -719,7 +719,8 @@ class SharedAdapterTests(unittest.TestCase):
         self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0,
                          cost_per_m_input=1, cost_per_m_output=2)
         self.spend = spend_budget(self)
-        self.account = Doc(enabled=1, provider='Test')
+        self.account = Doc(enabled=1, provider='Test', auth_type='ChatGPT Login')
+        self.f.db.get_single_value.return_value = 'ChatGPT Login'
         self.f.get_doc.side_effect = lambda dt, name: self.model if dt == 'AI Model' else self.account
         self.provider = types.SimpleNamespace(user_message=lambda text, images: {'text': text}, continuation=lambda result, output: [])
         self.patches = [patch.object(agent, 'get_known_secrets', return_value=[]),

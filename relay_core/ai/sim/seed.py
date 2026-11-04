@@ -124,7 +124,9 @@ def settings() -> None:
     doc.update({'test_mode': 1, 'enable_ai_features': 1, 'ai_handoff_owner': HANDOFF_OWNER, 'hub_account': HUB_ACCOUNT,
                 'hub_url': 'http://127.0.0.1:18291/mcp', 'monthly_spend_cap_usd': 5, 'ai_log_retention_days': 30,
                 'trusted_adapter_apps': '\n'.join(app for app in ADAPTERS.values() if app in frappe.get_installed_apps()),
-                'company_neutral_types': 'Members' if 'relay_sihma' in frappe.get_installed_apps() else ''})
+                'company_neutral_types': 'Members' if 'relay_sihma' in frappe.get_installed_apps() else '',
+                # The fake tier is an OpenRouter-shaped loopback server with a placeholder key and no API credit.
+                'allowed_ai_auth_types': 'ChatGPT Login\nAPI Key'})
     if not doc.get_password('callback_secret', raise_exception=False):
         doc.callback_secret = frappe.generate_hash(length=48)
     if not doc.get_password('hub_token', raise_exception=False):

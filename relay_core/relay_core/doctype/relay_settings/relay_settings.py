@@ -25,8 +25,9 @@ class RelaySettings(Document):
                 frappe.throw('Credentials must contain at least 32 printable characters')
         if not 0 <= (self.whatsapp_margin_percent or 0) <= 1000:
             frappe.throw('WhatsApp margin percent must be between 0 and 1000')
-        auth_types = {line.strip() for line in (self.get('allowed_ai_auth_types') or '').splitlines() if line.strip()}
-        if auth_types and auth_types - set(frappe.get_meta('AI Provider Account').get_field('auth_type').options.split('\n')):
+        from relay_core.ai.adapter import auth_types
+        allowed = auth_types(self.get('allowed_ai_auth_types'))
+        if allowed and allowed - set(frappe.get_meta('AI Provider Account').get_field('auth_type').options.split('\n')):
             frappe.throw('Allowed AI auth types must be AI Provider Account auth types, one per line')
         if self.transcription_provider:
             provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)

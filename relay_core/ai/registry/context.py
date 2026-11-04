@@ -1,4 +1,5 @@
 """The trusted run context a code tool receives. The model never sees it and cannot change it."""
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,8 @@ class ToolContext:
     scope: dict
     language: str = ''
     deadline: float | None = None
+    # Knowledge sources whose chunks the run returned; delivery checks them again.
+    sources: list = dataclasses.field(default_factory=list)
 
     def read_list(self, doctype: str, *, fields: list[str], filters: dict | None = None, limit: int = 5,
                   order_by: str = 'name asc', business_field: str | None = None) -> list[dict]:

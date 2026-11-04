@@ -119,8 +119,9 @@ class ProviderTests(TestModeCase):
         from relay_core.ai import adapter
         model = frappe._dict(enabled=1, account='Account')
         for base_url, allowed in (('', False), ('https://openrouter.ai/api/v1', False), ('http://127.0.0.1:18300/v1', True)):
-            account = frappe._dict(enabled=1, base_url=base_url)
+            account = frappe._dict(enabled=1, base_url=base_url, auth_type='ChatGPT Login')
             with patch.object(frappe, 'get_doc', side_effect=[model, account]), \
+                    patch.object(frappe, 'db', Mock(**{'get_single_value.return_value': None})), \
                     patch('frappe_tools.ai.client.route_options', return_value={}), \
                     patch('frappe_tools.ai.agent.get_known_secrets', return_value=[]):
                 if allowed:
