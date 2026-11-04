@@ -80,7 +80,18 @@ watch(state, () => load())
 watch(() => JSON.stringify(props.filters), () => navigate({ ...readBrowse(base), query: '' }))
 onMounted(() => { load(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++sequence; window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
-useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'incoming', 'contacts', 'reads', 'chats', 'permissions'], () => load())
+// Reading the open record changes only its unread badge, so only that tile is fetched again.
+async function refreshSelected() {
+  const request = sequence
+  const tile = items.value.find(row => row.kind === 'record' && row.doctype === props.selectedDoctype && row.name === props.selected)
+  if (!tile) return load()
+  const page = await coreApi('business_groups.browse', { doctype: state.value.doctype, path: JSON.stringify(state.value.path),
+    path_fields: JSON.stringify(state.value.pathFields), query: query.value, start: 0, contacts: 0, ...props.filters, business_type: tile.doctype, business_name: tile.name })
+  const row = page.items.find(item => tileKey(item) === tileKey(tile))
+  if (request === sequence && row) Object.assign(tile, row)
+}
+useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'incoming', 'contacts', 'reads', 'chats', 'permissions'],
+  ({ kinds } = {}) => !props.contacts && kinds?.size === 1 && kinds.has('reads') ? refreshSelected() : load())
 </script>
 
 <template>
