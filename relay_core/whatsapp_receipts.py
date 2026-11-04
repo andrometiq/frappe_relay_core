@@ -99,7 +99,7 @@ def apply_batch(updates, channel):
     from relay_core.realtime import changed
     for docs in notifications.values():
         docs[0].doctype = 'Relay Message'
-        changed(docs[0], messages=[doc.name for doc in docs])
+        changed(docs[0], messages=[doc.name for doc in docs], receipt=True)
     return 'Uncategorized' if unresolved else 'Projected'
 
 
