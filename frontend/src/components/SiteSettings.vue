@@ -1,7 +1,7 @@
 <script setup>
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { Badge, Button, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
+import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useWhatsAppIdentity } from '../composables/useWhatsAppIdentity'
 import { useTask } from '../composables/useTask'
@@ -15,6 +15,7 @@ const capabilities = inject('relayCapabilities')
 const channels = ref([])
 const config = ref({}), channel = ref(null), types = ref([]), loaded = ref(false), verified = ref(false)
 const token = ref(''), callbackSecret = ref(''), tab = ref('setup'), setupCode = ref(''), askCode = ref(false)
+const disconnecting = ref(false)
 const margin = ref(''), marginError = ref(''), marginNotice = ref('')
 const { busy, error, notice, run } = useTask()
 async function load() {
@@ -45,6 +46,12 @@ async function reconnect() {
   if (result.error) throw Error(result.error.message)
   askCode.value = false; setupCode.value = ''
   identity.value = null; await refreshIdentity(); notice.value = 'Reconnected to Relay Hub as ' + result.account + '.'; toast('Reconnected'); await load()
+}
+// The Hub revokes this site's key; the site keeps its data and links again with a new setup code.
+async function disconnect() {
+  disconnecting.value = false
+  await coreApi('onboarding.api.disconnect_hub', { confirm: 1 }, true)
+  identity.value = null; askCode.value = true; notice.value = 'Disconnected from Relay Hub. Enter a new setup code to link this site again.'; toast('Disconnected'); await load()
 }
 async function verify() { verified.value = false; await coreApi('settings.verify_connection', {}, true); verified.value = true; notice.value = 'Connection works. Incoming messages are checked on the Activity page.' }
 const features = [
@@ -77,7 +84,8 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
       <BusinessTypeSettings v-if="capabilities.manage" />
       <form id="hub-connection" class="workflow-card" @submit.prevent="run(save)">
         <h2 class="text-lg font-semibold">Hub connection</h2><p class="text-sm">Relay sends and receives messages through Hub.<template v-if="config.account"> This site is linked as {{ config.account }}.</template></p>
-        <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><Button label="Reconnect to Relay Hub" variant="outline" icon-left="refresh-cw" :disabled="busy" @click="run(reconnect)" /><Button variant="outline" label="Check connection" :disabled="busy || !config.token_configured" @click="run(verify)" /></div>
+        <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><Button label="Reconnect to Relay Hub" variant="outline" icon-left="refresh-cw" :disabled="busy" @click="run(reconnect)" /><Button variant="outline" label="Check connection" :disabled="busy || !config.token_configured" @click="run(verify)" /><Button v-if="config.token_configured" variant="outline" theme="red" label="Disconnect from Relay Hub" :disabled="busy" @click="disconnecting = true" /></div>
+        <Dialog v-model="disconnecting" :options="{ title: 'Disconnect from Relay Hub?', size: 'md' }"><div class="space-y-4 text-sm text-ink-gray-8"><p>Relay stops sending and receiving on every channel of this site, and the Hub revokes this site’s key. Chats, contacts and settings stay here. To link again, you need a new setup code from your Relay provider.</p><div class="flex justify-end gap-2"><Button variant="ghost" label="Cancel" @click="disconnecting = false" /><Button variant="solid" theme="red" label="Disconnect" @click="run(disconnect)" /></div></div></Dialog>
         <div v-if="capabilities.configure && askCode" class="settings-fields"><FormControl v-model="setupCode" label="Setup code" autocomplete="off" spellcheck="false" class="font-mono" :disabled="busy" /><p class="text-sm">Enter the setup code or setup link your Relay provider gave you, then select Reconnect to Relay Hub.</p></div>
         <details class="settings-advanced"><summary>Connect manually (advanced)</summary><p class="text-sm">Enter the details your Hub administrator gave you, then save.</p>
         <div class="settings-fields"><FormControl label="Connection address" v-model="config.url" :disabled="busy || !capabilities.configure" /><FormControl label="Account name" v-model="config.account" :disabled="busy || !capabilities.configure" />
@@ -98,8 +106,8 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
         <div><Button type="submit" label="Save service charge" variant="solid" :disabled="busy || margin === ''" /></div>
         <p v-if="marginNotice" role="status" class="workspace-success">{{ marginNotice }}</p>
       </form>
-      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Each channel is set up in Hub. <template v-if="capabilities.configure">Check the Activity page to see that messages arrive.</template><template v-else>Ask a system administrator to check that messages arrive.</template></p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a v-if="capabilities.configure" class="underline" href="#/activity">Open Activity</a></div>
-      <div class="flex flex-wrap gap-3"><a class="v1-link" href="/desk/relay-channel">Configure channel</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Contact numbers and addresses</a></div>
+      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Set up WhatsApp numbers on the <a class="underline" href="#/whatsapp?tab=account">WhatsApp Account</a> page. Relay Hub keeps every key and token. <template v-if="capabilities.configure">Check the Activity page to see that messages arrive.</template><template v-else>Ask a system administrator to check that messages arrive.</template></p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a v-if="capabilities.configure" class="underline" href="#/activity">Open Activity</a></div>
+      <div class="flex flex-wrap gap-3"><a class="v1-link" href="#/whatsapp?tab=account">WhatsApp numbers</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Contact numbers and addresses</a></div>
     </div>
   </section>
 </template>
