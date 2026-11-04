@@ -365,6 +365,21 @@ class SearchGateTests(unittest.TestCase):
                 self.assertIn(word, self.service.CONFIRM_WORDS)
         self.assertIn("'yes'", self.service.SEARCH_CONFIRM)
 
+    def test_search_notice_shows_every_date_filter(self):
+        self.contract['filters'] = {'posting_date': {'type': 'date', 'operators': ['between', '>=', '<=']},
+                                    'due_date': {'type': 'date', 'operators': ['=', '>=', '<=']},
+                                    'debit': {'type': 'number', 'operators': ['>=']}}
+        for filters, shown in (
+                ({'posting_date': ['>=', '2026-10-01'], 'due_date': ['<=', '2026-10-31']}, '≤ 2026-10-31, ≥ 2026-10-01'),
+                ({'posting_date': ['between', ['2026-10-01', '2026-10-31']], 'due_date': '2026-11-05',
+                  'debit': ['>=', 100]}, '2026-11-05, 2026-10-01 – 2026-10-31')):
+            with self.subTest(filters=filters):
+                self.origin.search_plan = None  # The plan is canonical, so filters show in field name order.
+                decision = dict(reply='Searching', handoff=False, reads=[],
+                                search=dict(self.plan, arguments={'filters': filters}))
+                self.service.declare_search(self.origin, self.skill, self.source, decision)
+                self.assertEqual(decision['reply'], f'{self.service.SEARCH_NOTICE} {shown}. {self.service.SEARCH_CONFIRM}')
+
     def test_confirmed_exact_range_reads_and_replay_cannot_consume_twice(self):
         self.confirmed(); self.authorize()
         self.assertEqual(json.loads(self.origin.search_plan)['consumed_by'], 'Run')
