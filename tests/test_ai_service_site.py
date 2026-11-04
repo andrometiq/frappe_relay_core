@@ -188,6 +188,12 @@ class SiteSide(unittest.TestCase):
             raise site.Handed('AR-1')
         self.assertIsNotNone(self.cache.get(site.key('deadline', 'AR-1')))
 
+    def test_a_job_that_fails_ends_the_runs_deadline(self):
+        with self.assertRaises(RuntimeError), patch.object(site, 'is_enabled', return_value=True), site.transport('AR-1'):
+            site.run_deadline('AR-1', 'Event', 60)
+            raise RuntimeError('Deadlock')  # Re-raised by the run, which recovery queues again.
+        self.assertIsNone(self.cache.get(site.key('deadline', 'AR-1')))
+
     def test_outside_a_service_run_job_each_deadline_is_fresh(self):
         site.turn_state.set(None)
         site.run_deadline('AR-1', 'Event', 60)

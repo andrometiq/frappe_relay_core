@@ -84,20 +84,22 @@ def is_active() -> bool:
 
 @contextmanager
 def transport(run: str):
-    """Within one run job, send provider turns through the AI service. A job that does not hand a turn over ends the
-    run's time budget, so a later attempt starts a fresh one."""
+    """Within one run job, send provider turns through the AI service. A job that does not hand a turn over, also one
+    that fails, ends the run's time budget, so a later attempt starts a fresh one."""
     if not is_enabled():
         yield
         return
     state = {'run': run, 'undo': []}
     token = turn_state.set(state)
+    handed = False
     try:
         yield
     except Handed:
+        handed = True
         release(state)
-    else:
-        frappe.cache.delete(key('deadline', run))
     finally:
+        if not handed:
+            frappe.cache.delete(key('deadline', run))
         turn_state.reset(token)
 
 
