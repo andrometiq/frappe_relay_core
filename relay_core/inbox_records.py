@@ -136,17 +136,11 @@ def counts(channels=None, business_type=None, business_name=None):
                            fields=['business_doctype', {'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'},
                                    {'SUM': 'unread_count', 'as': 'messages'}], order_by='business_doctype')
     total, unread = (sum(int(row[field] or 0) for row in rows) for field in ('total', 'unread'))
+    unlinked = frappe.get_list(CHAT, filters=[*scope_filters('all', channels, business_type, business_name),
+        [CHAT, 'business_doctype', '=', CONTACT], unlinked_condition()], fields=[{'COUNT': '*', 'as': 'total'}])
     return {'all': total, 'unread': unread, 'read': total - unread,
-            'unlinked': unlinked_chats(channels, business_type, business_name)[0],
+            'unlinked': int(unlinked[0].total or 0) if unlinked else 0,
             'unread_messages': sum(int(row.messages or 0) for row in rows)}
-
-
-def unlinked_chats(channels=None, business_type=None, business_name=None):
-    """(chats, unread chats) of people with no business link, for the Not linked tab and tile."""
-    rows = frappe.get_list(CHAT, filters=[*scope_filters('all', channels, business_type, business_name),
-        [CHAT, 'business_doctype', '=', CONTACT], unlinked_condition()],
-        fields=[{'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'}])
-    return (int(rows[0].total or 0), int(rows[0].unread or 0)) if rows else (0, 0)
 
 
 def items(rows):

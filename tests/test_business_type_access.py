@@ -214,8 +214,7 @@ class BusinessTypeAccessTests(unittest.TestCase):
                 patch.object(business_groups, 'configuration', return_value=[]), \
                 patch.object(business_groups, 'aggregate', return_value=[{'record_count': 3, 'unread': 2}]) as aggregate, \
                 patch('relay_core.inbox_filters.channel_names', return_value=None), \
-                patch('relay_core.inbox_filters.business_filter'), \
-                patch('relay_core.inbox_records.unlinked_chats', return_value=(0, 0)):
+                patch('relay_core.inbox_filters.business_filter'):
             page = business_groups.browse()
         self.assertEqual(page['items'], [{'kind': 'type', 'doctype': 'Customer', 'label': 'Customer', 'record_count': 3, 'unread': 2}])
         self.assertEqual(aggregate.call_args.args[0], 'Customer')
