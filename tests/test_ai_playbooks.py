@@ -278,6 +278,12 @@ class MovePatchTests(unittest.TestCase):
         self.f.db.set_value.assert_any_call('Relay AI Knowledge', 'RELAY-KB-0000000002', 'migrated_to',
                                             'desk/RELAY-KB-0000000002', update_modified=False)
 
+    def test_a_blank_scope_stays_blank_instead_of_taking_the_default_company(self):
+        with patch.object(move, 'global_text', side_effect=lambda business, company: move.legacy_text(self.rows, business, company)):
+            move.execute()
+        created = self.f.get_doc.call_args_list[0].args[0]
+        self.assertEqual((created['company'], created['business_doctype']), ('', ''))
+
     def test_a_changed_prompt_or_missing_row_fails_the_patch(self):
         with patch.object(move, 'global_text', return_value='Different'), self.assertRaisesRegex(AssertionError, 'differs'):
             move.execute()

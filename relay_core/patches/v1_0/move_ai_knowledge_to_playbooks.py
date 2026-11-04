@@ -17,8 +17,9 @@ def execute():
     for row in pending:
         key = f'desk/{row.name}'
         if not frappe.db.exists(DOCTYPE, key):
+            # An empty string keeps a blank scope blank; None would take the user's default company on insert.
             frappe.get_doc({'doctype': DOCTYPE, 'playbook_key': key, 'title': row.title, 'enabled': row.enabled or 0,
-                            'company': row.company, 'business_doctype': row.business_doctype,
+                            'company': row.company or '', 'business_doctype': row.business_doctype or '',
                             'instructions': row.instructions, 'is_global': 1, 'audience': 'customer',
                             'is_system_generated': 0}).insert(ignore_permissions=True)
         frappe.db.set_value(LEGACY, row.name, 'migrated_to', key, update_modified=False)
