@@ -13,7 +13,7 @@ try:
  run=frappe.get_doc('Relay Flow Run',frappe.get_all('Relay Flow Run',pluck='name',order_by='creation desc',limit_page_length=1)[0])
  for old in frappe.get_all('Relay Case',filters={'source_flow':run.name,'title':'Retailer callback request'},pluck='name'):frappe.delete_doc('Relay Case',old,ignore_permissions=True)
  frappe.db.delete('Relay Flow Action',{'run':run.name,'action':'retailer.create_follow_up'});frappe.db.commit()
- for kind_name in frappe.get_all('Relay Case Type',filters={'type_key':['like','relay.retailer_connect.%']},pluck='name'):
+ for kind_name in frappe.get_all('Relay Case Type',filters={'type_key':['like',retailer.TYPE_PREFIX+'%']},pluck='name'):
   kind=frappe.get_doc('Relay Case Type',kind_name);kind.definition=__import__('json').dumps(retailer.case_definition('Normal' if kind.type_key.endswith('.catalogue') else 'High'));kind.save()
  frappe.db.commit()
  node={'kind':'action','action':'retailer.create_follow_up','arguments':{'action_type':'callback','note':'Call tomorrow','field_values':{'party':'Synthetic retailer','colors':['Red','Blue'],'quantity':2}}}
