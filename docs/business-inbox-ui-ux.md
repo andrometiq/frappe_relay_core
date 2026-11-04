@@ -67,7 +67,7 @@ The business browser uses the whole workspace. There is no empty chat canvas and
 │      │ [ Search businesses…                                      × ]   │
 │      │ [My group ▾]  [Unread]  [Unassigned]                            │
 │      ├──────────────────────────────────────────────────────────────────┤
-│      │ KESTREL TRADERS               2 contacts             10:42   3     │
+│      │ KESTREL TRADERS            2 contacts             10:42   3     │
 │      │ Sampleville Rep            “Please share the ledger…”            │
 │      ├──────────────────────────────────────────────────────────────────┤
 │      │ NORTHWIND HOSIERY          1 contact              Yesterday      │
@@ -85,13 +85,13 @@ Selecting a record animates the business browser into a fixed list pane and open
 
 ```text
 ┌──────┬─────────────────────┬────────────────────────────────────────────┐
-│ rail │ Search businesses…  │ KESTREL TRADERS                         ⋯     │
+│ rail │ Search businesses…  │ KESTREL TRADERS                      ⋯     │
 │      │ My group ▾          │ Customer · Sampleville Rep                 │
 │      ├─────────────────────┼────────────────────────────────────────────┤
-│      │ KESTREL TRADERS     3  │ [All 3] [Alex · …0101 2] [Sam · …0102 1]  │
+│      │ KESTREL TRADERS  3  │ [All 3] [Alex · …0101 2] [Sam · …0102 1]  │
 │      │ latest preview      ├────────────────────────────────────────────┤
 │      ├─────────────────────┤                    Today                   │
-│      │ NORTHWIND HOSIERY   │ Anil                                      │
+│      │ NORTHWIND HOSIERY   │ Alex                                      │
 │      │ latest preview      │ ┌──────────────────────────┐               │
 │      ├─────────────────────┤ │ Please share the ledger. │               │
 │      │ ...                 │ └──────────────────────────┘               │
