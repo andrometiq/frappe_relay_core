@@ -17,11 +17,11 @@ def with_time(times, status, timestamp):
 
 
 def pending_event(row):
-    """Event id and per-status times of a pending receipt; rows from before times were kept hold only the event id."""
+    """Event id, per-status times and failure reason of a pending receipt; rows from before times were kept hold only the event id."""
     if row.event_id.startswith('{'):
         value = json.loads(row.event_id)
-        return value['event_id'], value['times']
-    return row.event_id, with_time({}, row.status, int(row.provider_timestamp))
+        return value['event_id'], value['times'], value.get('error', '')
+    return row.event_id, with_time({}, row.status, int(row.provider_timestamp)), ''
 
 
 def collapse(updates):
@@ -67,17 +67,17 @@ def apply_batch(updates, channel):
             continue
         previous = pending.get(key)
         if previous:
-            event_id, times = pending_event(previous)
+            event_id, times, error = pending_event(previous)
             for status, timestamp in update['times'].items():
                 times = with_time(times, status, timestamp)
             update = dict(update, times=times)
             if not advances(previous.status, update['status'], int(previous.provider_timestamp), update['timestamp']):
-                update = dict(update, status=previous.status, timestamp=int(previous.provider_timestamp), event_id=event_id)
+                update = dict(update, status=previous.status, timestamp=int(previous.provider_timestamp), event_id=event_id, error=error)
         doc = messages.get(key)
         if doc is None:
-            # The pending row has no times field; event_id carries them so no schema change is needed.
+            # The pending row has no times or error field; event_id carries them so no schema change is needed.
             values = {'status': update['status'], 'provider_timestamp': str(update['timestamp']),
-                      'event_id': json.dumps({'event_id': update['event_id'], 'times': update['times']})}
+                      'event_id': json.dumps({'event_id': update['event_id'], 'times': update['times'], 'error': update.get('error', '')})}
             if previous:
                 retained[key] = values
             else:
@@ -125,8 +125,8 @@ def apply_pending(doc):
     row = frappe.db.get_value('Relay Pending Receipt', doc.provider_message_key,
                               ['status', 'provider_timestamp', 'event_id'], as_dict=True)
     if not row: return
-    event_id, times = pending_event(row)
-    values = receipt_values(doc, {'status': row.status, 'timestamp': int(row.provider_timestamp), 'event_id': event_id, 'times': times})
+    event_id, times, error = pending_event(row)
+    values = receipt_values(doc, {'status': row.status, 'timestamp': int(row.provider_timestamp), 'event_id': event_id, 'times': times, 'error': error})
     if values:
         frappe.db.set_value('Relay Message', doc.name, values, update_modified=False)
         doc.update(values)

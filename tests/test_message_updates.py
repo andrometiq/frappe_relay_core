@@ -157,6 +157,17 @@ class DeliveryReceiptTests(unittest.TestCase):
         self.batch.apply_pending(self.doc)
         self.assertEqual((self.doc.status,self.times()),('Read',{'Sent':10,'Delivered':12,'Read':20}))
 
+    def test_early_failed_receipt_keeps_its_reason(self):
+        self.query.run.return_value=[]
+        payload=self.receipt('failed',20)
+        payload['entry'][0]['changes'][0]['value']['statuses'][0]['errors']=[
+            {'code':131026,'title':'Message undeliverable','error_data':{'details':'Message Undeliverable.'}}]
+        self.module.apply_updates(payload,'channel','event')
+        self.apply('sent',10)
+        self.batch.apply_pending(self.doc)
+        self.assertEqual((self.doc.status,self.doc.delivery_error),
+                         ('Failed','Message undeliverable: Message Undeliverable. (code 131026)'))
+
     def test_group_receipts_keep_each_status_earliest_time(self):
         self.doc.provider_context={'group_id':'15551234567'}
         lookups={'Relay Contact Endpoint':'contact','Relay Message':'message'}
