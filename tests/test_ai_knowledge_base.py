@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from test_ai_skills import Doc, framework, module
 from relay_core.ai import reply_guard
 from relay_core.ai.knowledge_base.chunker import chunk_text
+from relay_core.ai.tools import STAFF_ONLY
 from relay_core.ai.registry import ToolContext  # noqa: F401 - loads the registry on the real framework first
 
 SOURCE_MODULE = 'relay_core.relay_core.doctype.relay_ai_knowledge_source.relay_ai_knowledge_source'
@@ -182,7 +183,7 @@ class SourceTests(unittest.TestCase):
         self.enterContext(patch.dict(sys.modules, {
             'frappe_tools.ai.tools': types.SimpleNamespace(get_readable_meta=lambda doctype: meta,
                                                            is_sensitive_field=lambda name: 'password' in name),
-            'relay_core.ai.tools': types.SimpleNamespace(company_neutral=self.neutral)}))
+            'relay_core.ai.tools': types.SimpleNamespace(company_neutral=self.neutral, STAFF_ONLY=STAFF_ONLY)}))
         document = types.SimpleNamespace(Document=type('Document', (Doc,), {}))
         self.controller = module('relay_core/relay_core/doctype/relay_ai_knowledge_source/relay_ai_knowledge_source.py',
                                  self.f, {'frappe.model.document': document, 'relay_core.ai_features': types.SimpleNamespace(required=lambda fn: fn)})
@@ -191,6 +192,15 @@ class SourceTests(unittest.TestCase):
     def source(self, **values):
         return Doc(dict(source_type='DocType', reference_doctype='Project', content_fields='project_name\nnotes',
                         business_field='customer', filters='{"status": "Open"}', approved_hash=None), **values)
+
+    def test_staff_only_doctypes_never_become_customer_sources(self):
+        self.neutral.side_effect = None  # Even a company neutral listing cannot open staff notes.
+        for doctype in ('Relay Internal Comment', 'Comment', 'Relay Ticket'):
+            with self.subTest(doctype=doctype), self.assertRaisesRegex(ValueError, 'staff-only'):
+                self.controller.validate_doctype_source(self.source(reference_doctype=doctype, business_field=None),
+                                                        self.base)
+        self.base.audience = 'staff'
+        self.controller.validate_doctype_source(self.source(reference_doctype='Comment', business_field=None), self.base)
 
     def test_customer_rows_need_a_business_field_unless_company_neutral(self):
         self.controller.validate_doctype_source(self.source(), self.base)

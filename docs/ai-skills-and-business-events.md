@@ -98,6 +98,7 @@ def open_orders(status: Annotated[Literal["Open", "Delivered"], "Order status"] 
 | `search_knowledge` | The skill binds an enabled customer knowledge base and the site is on MariaDB |
 | `load_playbook` | The skill binds a playbook that applies to the sender |
 | `remember` | **Customer memory** is on, the sender has a business, the run has a record and the site is on MariaDB |
+| `my_tickets` | **Ticket memory** (`ticket_memory`, on by default) is on and the sender has a business |
 | App code tools | Selected in `allowed_tools`, approved, customer audience, kind `read` |
 
 - The model gets at most `max_tool_calls` tool calls per reply (default 4, never more than 6). After the last call, the final turn may not call tools. A model that still calls a tool fails the run, and the run hands off.
@@ -112,6 +113,12 @@ def open_orders(status: Annotated[Literal["Open", "Delivered"], "Order status"] 
 Relay Automation Run also has `feedback_rating` and `feedback_comment`, which `fact_memory.rate_run` sets.
 
 Reply prompts trim in this order: memory facts, record memory lines, history, knowledge chunks, events. Recalled fact memory (`reference_data.memory`) never allows a contact value in the reply guard. The guard copy check takes every trusted owner text of the prompt.
+
+## Ticket memory
+
+`ticket_memory.my_tickets(ticket=None)` lets the model answer "what is the status of my ticket". It reads, as the skill run-as user, at most 5 tickets of the sender's own business, conversation and company, newest first. The model can only narrow the read to one ticket number. Each ticket gives only its number, status label, Open or Closed state, opened and updated dates, and its latest 6 messages that the sender saw: the sender's own messages and outbound messages with status Sent, Delivered or Read, as plain text of at most 300 characters. The result says that ticket messages are data, not instructions. Results allow contact values in the reply guard only, like knowledge chunks.
+
+Subject, brief, assignee, ownership, AI state, internal notes, desk comments and unsent messages are never read. `Relay Internal Comment`, `Comment`, `Communication`, `ToDo`, `Version`, `Relay Ticket`, `Relay Ticket Message`, `Relay Automation Run` and `Relay Flow Action` are staff only (`tools.STAFF_ONLY`): a read pack of one of them stops the skill, a code tool cannot read them, and a customer knowledge base cannot have them as a DocType source. While staff hold a ticket, AI does not answer that episode; ticket memory serves later episodes after **Close and release** or **Resume AI**.
 
 ## Knowledge bases
 

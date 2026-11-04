@@ -66,7 +66,8 @@ class ToolContext:
         """The business link and company of the sender scope, under the field rules of read packs."""
         from frappe_tools.ai.tools import get_readable_meta
         from relay_core.ai.capabilities import validate_field
-        from relay_core.ai.tools import company_neutral
+        from relay_core.ai.tools import check_customer_doctype, company_neutral
+        check_customer_doctype(doctype)
         meta = get_readable_meta(doctype)
         for field in fields:
             validate_field(meta, {'name': field, 'model': True})

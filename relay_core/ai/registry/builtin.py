@@ -14,11 +14,12 @@ from relay_core.ai.playbooks import copy_texts, load_playbook
 from relay_core.ai.registry.context import ToolContext
 from relay_core.ai.registry.tool import RelayTool
 from relay_core.ai.render import field_names
+from relay_core.ai.ticket_memory import my_tickets
 from relay_core.ai.tools import PrivacyDenied, check_identity_arguments, own_record_arguments
 from relay_core.automation.contracts import validate_search
 
 UNAVAILABLE = 'This tool is unavailable'
-BUILTINS = (retriever.search_knowledge, load_playbook, remember)
+BUILTINS = (retriever.search_knowledge, load_playbook, remember, my_tickets)
 
 
 @dataclass
@@ -49,11 +50,12 @@ def is_builtin(tool: RelayTool, *names: RelayTool) -> bool:
 
 def skill_tools(skill) -> list[tuple[str, RelayTool]]:
     """(key, tool) of each approved code tool a customer run of the skill may offer: the built-ins its settings ask
-    for (knowledge bases, playbooks, customer memory), then the read tools selected in `allowed_tools`. Action tools
-    are not offered until they propose through the action journal."""
+    for (knowledge bases, playbooks, customer memory, ticket memory), then the read tools selected in
+    `allowed_tools`. Action tools are not offered until they propose through the action journal."""
     from relay_core.ai.registry.sync import tool_key
     from relay_core.ai.registry.tool import load, offered
-    wanted = (retriever.bound_bases(skill), skill.get('playbooks'), skill.get('memory_enabled'))
+    wanted = (retriever.bound_bases(skill), skill.get('playbooks'), skill.get('memory_enabled'),
+              skill.get('ticket_memory'))
     found = []
     for tool in (tool for tool, is_wanted in zip(BUILTINS, wanted) if is_wanted):
         try:
@@ -147,7 +149,8 @@ class CoreTools:
         self.context = context
         usable = ((retriever.search_knowledge, lambda: retriever.is_offered(self.skill)),
                   (load_playbook, lambda: bool(self.playbook_texts)),
-                  (remember, lambda: bool(context.run) and is_available(self.skill, self.business)))
+                  (remember, lambda: bool(context.run) and is_available(self.skill, self.business)),
+                  (my_tickets, lambda: all(self.business)))
         self.code_tools = [(key, tool) for key, tool in skill_tools(self.skill)
                            if all(check() for item, check in usable if is_builtin(tool, item))]
         names = [tool.name for key, tool in self.code_tools]
@@ -174,8 +177,8 @@ class CoreTools:
         except Exception:
             frappe.log_error(title=f'Relay AI tool {key} failed')
             raise ValueError(UNAVAILABLE) from None
-        if is_builtin(tool, retriever.search_knowledge):
-            self.evidence.append(result)  # Chunks allow contact values only, never names or copied text.
+        if is_builtin(tool, retriever.search_knowledge, my_tickets):
+            self.evidence.append(result)  # Chunks and tickets allow contact values only, never names or copied text.
         elif not is_builtin(tool):
             self.read_results.append(result)
         return self.minimiser.mask(result)

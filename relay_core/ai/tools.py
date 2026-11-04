@@ -4,6 +4,16 @@ import hashlib
 from contextlib import contextmanager
 import frappe
 
+# Staff notes, desk comments, ticket internals and run journals. No customer read or knowledge source copies them.
+STAFF_ONLY = frozenset({'Relay Internal Comment', 'Comment', 'Communication', 'ToDo', 'Version', 'Relay Ticket',
+                        'Relay Ticket Message', 'Relay Automation Run', 'Relay Flow Action'})
+
+
+def check_customer_doctype(doctype: str) -> None:
+    """Refuse a customer read of a staff-only DocType."""
+    if doctype in STAFF_ONLY:
+        raise ValueError(f'{doctype} holds staff-only data')
+
 
 @contextmanager
 def as_user(user):
@@ -33,6 +43,8 @@ def contracts(skill):
     manifests = [manifest for manifest in map(active, keys) if manifest['kind'] != 'tool']
     if any(row['kind'] != 'read' or row['business_doctype'] != skill.business_doctype for row in manifests):
         raise ValueError('Choose read capabilities for the skill business type')
+    for row in manifests:
+        check_customer_doctype(row['doctype'])
     return manifests
 
 

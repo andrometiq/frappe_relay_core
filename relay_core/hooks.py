@@ -47,7 +47,7 @@ relay_ai_capabilities = 'relay_core.ai.builtin_capabilities.CAPABILITIES'
 relay_ai_capability_prefix = 'erpnext'
 # AI code tools: dotted paths to @relay_tool functions of the declaring app, e.g. ['acme_app.relay.tools.open_orders'].
 relay_ai_tools = ['relay_core.ai.knowledge_base.retriever.search_knowledge', 'relay_core.ai.playbooks.load_playbook',
-                  'relay_core.ai.fact_memory.remember']
+                  'relay_core.ai.fact_memory.remember', 'relay_core.ai.ticket_memory.my_tickets']
 
 # Realtime invalidations contain no record payload; browser reads recheck permissions.
 from relay_core.realtime import RESOURCES as _realtime_resources

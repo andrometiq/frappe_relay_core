@@ -13,6 +13,7 @@ from test_ai_skills import Doc, framework, module
 from relay_core.ai.registry import ToolContext, relay_tool
 from relay_core.ai.registry import tool as registry_tool
 from relay_core.ai.registry.schema import build_schema
+from relay_core.ai.tools import check_customer_doctype
 
 
 class Size(enum.Enum):
@@ -207,9 +208,15 @@ class OfferedToolTests(unittest.TestCase):
 
     def test_read_packs_skip_selected_tools(self):
         from relay_core.ai import tools
-        self.rows['erpnext.customer_ledger'] = dict(kind='read', business_doctype='Customer')
+        self.rows['erpnext.customer_ledger'] = dict(kind='read', business_doctype='Customer', doctype='GL Entry')
         self.rows['acme.open_orders'] = dict(self.rows['acme.open_orders'], kind='tool')
         self.assertEqual(tools.contracts(self.skill), [self.rows['erpnext.customer_ledger']])
+
+    def test_a_read_pack_of_staff_notes_stops_the_skill(self):
+        from relay_core.ai import tools
+        self.rows['erpnext.customer_ledger'] = dict(kind='read', business_doctype='Customer', doctype='Relay Internal Comment')
+        with self.assertRaisesRegex(ValueError, 'staff-only'):
+            tools.contracts(self.skill)
 
 
 FIELDS = {'customer': Doc(fieldname='customer', fieldtype='Link', options='Customer'),
@@ -232,6 +239,7 @@ class ToolContextTests(unittest.TestCase):
             self.users.append(user)
             yield
         relay_tools = types.SimpleNamespace(as_user=as_user, company_neutral=Mock(side_effect=ValueError('not neutral')),
+            check_customer_doctype=check_customer_doctype,
             Reader=lambda *args: types.SimpleNamespace(check_scope=self.scope_checks))
         self.scoped = Mock(return_value=Doc(name='SO-0001', status='Open', transaction_date='2026-11-01'))
         self.identity = Mock()
@@ -252,6 +260,12 @@ class ToolContextTests(unittest.TestCase):
         self.assertEqual((self.users, self.scope_checks.call_count), (['sam@example.com'], 2))
         self.identity.assert_called_with({}, {'company': 'Acme Textiles'}, ('Customer', 'Acme Textiles'))
         self.assertEqual(self.identity.call_count, 2)
+
+    def test_code_tools_cannot_read_staff_notes_or_ticket_internals(self):
+        for doctype in ('Relay Internal Comment', 'Comment', 'Relay Ticket', 'Relay Automation Run'):
+            with self.subTest(doctype=doctype), self.assertRaisesRegex(ValueError, 'unavailable'):
+                self.ctx.read_list(doctype, fields=['name'])
+        self.f.get_list.assert_not_called()
 
     def test_reads_need_the_linked_sender_the_skill_business_type_and_a_company(self):
         def unlinked(*args):

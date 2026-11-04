@@ -54,9 +54,11 @@ def validate_doctype_source(source, base) -> None:
     either ties each row to its business or holds company neutral reference data."""
     from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
     from relay_core.ai.capabilities import UNREADABLE
-    from relay_core.ai.tools import company_neutral
+    from relay_core.ai.tools import STAFF_ONLY, company_neutral
     if not base.run_as_user:
         frappe.throw('Set Run as user on the knowledge base before adding a DocType source')
+    if base.audience == 'customer' and source.reference_doctype in STAFF_ONLY:
+        frappe.throw(f'{source.reference_doctype} holds staff-only data and cannot be a customer source')
     meta = get_readable_meta(source.reference_doctype)
     fields = content_fields(source)
     if not 1 <= len(fields) <= MAX_CONTENT_FIELDS or len(set(fields)) != len(fields):
