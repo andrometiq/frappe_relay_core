@@ -106,6 +106,15 @@ class WhatsAppTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.api.execute('templates.media_upload',{'content_base64':'JVBERi0xLjc=','mime_type':'application/pdf'})
         self.assertEqual(self.hub.execute.call_count,1)
 
+    def test_call_button_number_gets_the_country_code(self):
+        buttons=lambda number:[{'type':'BUTTONS','buttons':[{'type':'PHONE_NUMBER','text':'Call','phone_number':number}]}]
+        with patch('relay_core.identity.default_region',return_value='IN'):
+            for number in ('9876543210','+91 98765 43210','919876543210'):
+                args={'name':'call_us','language':'en','category':'UTILITY','components':buttons(number)}
+                self.api.execute('templates.create',args)
+                self.assertEqual(self.hub.execute.call_args.args[0]['components'][0]['buttons'][0]['phone_number'],'+919876543210')
+            with self.assertRaisesRegex(ValueError,'with its country code'):
+                self.api.execute('templates.create',{'name':'call_us','language':'en','category':'UTILITY','components':buttons('12')})
     def test_manager_sees_redacted_hub_rejection_and_request_is_audited(self):
         from relay_core import whatsapp_templates
         from relay_core.hub import HubError
