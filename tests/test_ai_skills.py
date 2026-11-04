@@ -1475,7 +1475,7 @@ class EventContractTests(unittest.TestCase):
             targets={'Payment Entry': schema}, output={'type': 'object'})
         self.registered['draft_payment'] = definition
         self.config.validate_skill(self.doc)
-        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'}, {'app': 'relay_yrp'},
+        for changes in ({'ai_safe': False}, {'method': 'erpnext.submit'}, {'effect': 'submit'}, {'app': 'relay_distributor'},
                 {'app': None}, {'approval_policy': 'None'},
                 {'permissions': []}, {'approval_policy': 'anything'}, {'targets': {}}, {'output': {}},
                 {'targets': {'Payment Entry': {'type': 'object', 'properties': {'docstatus': {'type': 'integer'}}}}}):
@@ -1527,7 +1527,6 @@ def site_tests():
     sites = os.environ['SITES_PATH']
     root = Path(__file__).resolve().parents[1]
     os.environ['FRAPPE_STREAM_LOGGING'] = '1'
-    os.environ['SITES_PATH'] = sites
     import frappe
     import frappe.app
     import relay_core
@@ -1539,7 +1538,7 @@ def site_tests():
     created = []
 
     def connect():
-        frappe.init(site='relay.test', sites_path=sites)
+        frappe.init(site='distributor.site', sites_path=sites)
         frappe.connect(); frappe.set_user('Administrator')
         frappe.flags.mute_emails = True
         frappe.conf.relay_automation_enabled = 0
@@ -1590,7 +1589,7 @@ def site_tests():
                 'target': 'Ask staff to review a receipt', 'execution_policy': 'Ticket only'})['name']
             created.append(('Relay AI Skill', second))
             for invalid in ({'target': ''}, {'allowed_tools': json.dumps([{'capability': 'erpnext.customer_ledger'}])},
-                    {'allowed_tools': json.dumps([{'capability': 'yrp.not_installed'}])},
+                    {'allowed_tools': json.dumps([{'capability': 'distributor.not_installed'}])},
                     {'allowed_tools': json.dumps([row | {'fields': ['remarks']}])},
                     {'allowed_actions': '[{"action":"retailer.create_follow_up"}]'}, {'allowed_actions': '[{"action":"frappe.client.submit"}]'}):
                 try:
@@ -1610,7 +1609,7 @@ def site_tests():
                 frappe.conf.relay_automation_enabled = 0
             stack.enter_context(patch.object(frappe.app, 'init_request', init_request))
             def application(environ, start_response):
-                environ['HTTP_X_FRAPPE_SITE_NAME'] = 'relay.test'
+                environ['HTTP_X_FRAPPE_SITE_NAME'] = 'distributor.site'
                 return frappe.app.application(environ, start_response)
             client = Client(application, Response)
             prefix = '/api/method/relay_core.ai.configuration.'

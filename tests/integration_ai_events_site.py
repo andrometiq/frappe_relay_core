@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     sys.addaudithook(confine_writes)
     os.environ.update(FRAPPE_STREAM_LOGGING='1', RELAY_AUTOMATION_TEST_SITES=SITES,
-                      RELAY_TEST_SITE='relay.test', SITES_PATH=SITES)
+                      RELAY_TEST_SITE='relay.test')
     import frappe
     import frappe.app
     import relay_core

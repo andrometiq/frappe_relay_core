@@ -141,7 +141,7 @@ try:
   start=incoming('/support');flows.process(event(start));answer=incoming('yes');count=len(sent);flows.process(event(answer));flows.process(event(answer))
   assert [row[0] for row in sent[count:]]==['Yes branch','Thank you']
   print('PASS explicit branch join skips unrelated steps and terminal message sends once')
-  feedback_graph=frappe.get_attr(os.environ['RELAY_LEGACY_FEEDBACK_GRAPH'])
+  feedback_graph=frappe.get_attr(os.environ['RELAY_LEGACY_FEEDBACK_GRAPH'])  # the legacy adapter's retailer feedback graph
   from relay_core.flows.legacy_graph import convert
   from relay_core.flows.retailer import install_case_types
   install_case_types();frappe.db.commit()

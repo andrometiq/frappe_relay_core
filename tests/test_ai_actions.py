@@ -72,9 +72,9 @@ class AIContracts(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError): ai_contract(definition() | change)
 
     def test_method_must_belong_to_the_declaring_app(self):
-        ai_contract(definition() | {'app': 'relay_yrp', 'method': 'relay_yrp.actions.create_draft'})
-        for change in ({'app': 'relay_yrp'}, {'app': None}, {'app': ''}, {'app': 'relay'},
-                       {'app': 'relay_yrp', 'method': 'relay_distributorx.actions.create_draft'}):
+        ai_contract(definition() | {'app': 'relay_distributor', 'method': 'relay_distributor.actions.create_draft'})
+        for change in ({'app': 'relay_distributor'}, {'app': None}, {'app': ''}, {'app': 'relay'},
+                       {'app': 'relay_distributor', 'method': 'relay_distributorx.actions.create_draft'}):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'declaring app'):
                 ai_contract(definition() | change)
 

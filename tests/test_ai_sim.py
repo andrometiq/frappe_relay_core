@@ -210,8 +210,8 @@ class Checks(unittest.TestCase):
         self.assertTrue(all(checks.is_safety_failure(row) for row in checks.state_diff({'state': diff}, {}, context())))
 
     def test_reads_of_another_business_fail(self):
-        reads = [{'capability': 'yrp.customer_orders', 'business': ['Customer', 'Northwind Hosiery']}]
-        failures = checks.reads_scope({'reads': reads}, {'reads': [{'capability': 'yrp.customer_orders'}]}, context())
+        reads = [{'capability': 'distributor.customer_orders', 'business': ['Customer', 'Northwind Hosiery']}]
+        failures = checks.reads_scope({'reads': reads}, {'reads': [{'capability': 'distributor.customer_orders'}]}, context())
         self.assertEqual([row['check'] for row in failures], ['reads scope', 'reads'])
 
     def test_decision_class_and_skill(self):
@@ -237,7 +237,7 @@ class Checks(unittest.TestCase):
 
 
 def result(passed: bool, *, safety=False, check='outbound text', language='Tamil') -> dict:
-    return {'id': 'yrp.orders.status.ta', 'language': language, 'safety': safety, 'passed': passed, 'trials': 1,
+    return {'id': 'distributor.orders.status.ta', 'language': language, 'safety': safety, 'passed': passed, 'trials': 1,
             'failed_checks': [] if passed else [{'turn': 1, 'check': check, 'expected': 'a', 'actual': 'b'}],
             'state_diff': {'inserted': {}, 'updated': {}}, 'cost_usd': 0.0, 'seconds': 0.1}
 
@@ -245,7 +245,7 @@ def result(passed: bool, *, safety=False, check='outbound text', language='Tamil
 class Report(unittest.TestCase):
     def build(self, results, tier='fake'):
         return report.build(suite='distributor', tier=tier, site='relay-ai-test.local', k=1, results=results,
-                            commits={'core': 'f7a149e', 'adapter': 'abc1234'}, capabilities={'yrp.customer_orders': 'h'})
+                            commits={'core': 'f7a149e', 'adapter': 'abc1234'}, capabilities={'distributor.customer_orders': 'h'})
 
     def test_json_shape(self):
         built = self.build([result(True), result(False, language='English')])
@@ -267,9 +267,9 @@ class Report(unittest.TestCase):
         built = self.build([result(False)])
         with tempfile.TemporaryDirectory() as directory:
             json_path, markdown_path = report.write(built, pathlib.Path(directory), '20261030-120000')
-            self.assertEqual(json_path.name, 'yrp-fake-20261030-120000.json')
+            self.assertEqual(json_path.name, 'distributor-fake-20261030-120000.json')
             self.assertEqual(json.loads(json_path.read_text())['summary']['failed'], 1)
-            self.assertIn('yrp.orders.status.ta: turn 1 outbound text', markdown_path.read_text())
+            self.assertIn('distributor.orders.status.ta: turn 1 outbound text', markdown_path.read_text())
 
 
 if __name__ == '__main__':

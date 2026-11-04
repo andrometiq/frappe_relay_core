@@ -11,7 +11,7 @@ def init():
     sites = Path(os.environ['RELAY_AUTOMATION_TEST_SITES']).resolve()
     site = os.environ.get('RELAY_TEST_SITE', 'relay-ai-test.local')
     if site == 'relay.test':
-        assert sites == Path(os.environ['SITES_PATH'])
+        assert sites == Path(os.environ['SITES_PATH']).resolve()
     else:
         assert site == 'relay-ai-test.local' and sites == root / '.runtime/automation-bench/sites'
     os.chdir(sites)

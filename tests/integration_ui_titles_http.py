@@ -15,7 +15,6 @@ from wsgiref.simple_server import make_server, WSGIRequestHandler
 
 ROOT = Path(__file__).resolve().parents[1]
 SITES = os.environ['SITES_PATH']
-os.environ['SITES_PATH'] = SITES
 os.environ['FRAPPE_STREAM_LOGGING'] = '1'
 sys.path.insert(0, str(ROOT))
 import frappe

@@ -16,7 +16,6 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 ROOT = Path(__file__).resolve().parents[1]
 SITES = os.environ['SITES_PATH']
-os.environ['SITES_PATH'] = SITES
 sys.path.insert(0, str(ROOT))
 import frappe
 import frappe.app

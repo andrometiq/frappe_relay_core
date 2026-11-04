@@ -68,7 +68,7 @@ def local_fixtures():
 
 def main():
     sys.addaudithook(confine_writes)
-    os.environ.update(FRAPPE_STREAM_LOGGING='1', SITES_PATH=SITES, RELAY_AUTOMATION_TEST_SITES=SITES, RELAY_TEST_SITE='relay.test')
+    os.environ.update(FRAPPE_STREAM_LOGGING='1', RELAY_AUTOMATION_TEST_SITES=SITES, RELAY_TEST_SITE='relay.test')
     import frappe
     import relay_core
     from channel_site_fixtures import init
@@ -315,7 +315,6 @@ def sender_scope_cases(fixture):
     created = []
     stamp = fixture.stamp
     sites = os.environ['SITES_PATH']
-    os.environ['SITES_PATH'] = sites
     def connect():
         frappe.init(site='relay.test', sites_path=sites)
         frappe.connect(); frappe.set_user('Administrator')
