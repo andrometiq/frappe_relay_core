@@ -17,8 +17,8 @@ The existing scheduler calls recovery. Redis failure leaves SQL markers intact. 
 Use the bench Python with this worktree first on PYTHONPATH. These commands target only `relay.test`:
 
 ```sh
-cd $HOME/development/relay-wt/core-aiev3
-export PYTHONPATH=$HOME/development/relay-wt/core-aiev3
+cd $RELAY_CORE_PATH
+export PYTHONPATH=$RELAY_CORE_PATH
 $BENCH_PATH/env/bin/python -B -m unittest discover -s tests
 $BENCH_PATH/env/bin/python -B tests/integration_ai_permissions_site.py
 $BENCH_PATH/env/bin/python -B tests/integration_ai_events_site.py

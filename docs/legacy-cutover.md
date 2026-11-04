@@ -202,7 +202,7 @@ Run the reproducible scripts with:
 
 ```bash
 FRAPPE_STREAM_LOGGING=1 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=$HOME/development/relay-wt/core-mig \
+PYTHONPATH=$RELAY_CORE_PATH \
 $BENCH_PATH/env/bin/python \
 tests/rehearse_legacy.py export --frozen --directory /tmp/relay-history-new-run
 ```

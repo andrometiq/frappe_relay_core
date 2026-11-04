@@ -177,7 +177,7 @@ Read the actual legacy retailer action implementation: it creates configured leg
 
 ### Registered action runtime
 
-Added the `relay_flow_actions` installed-hook catalog and runtime action node. Definitions must explicitly declare replay safety; handlers receive contact, run and stable idempotency key. Internal Relay Flow Action journals input hash/result and rejects changed replay inputs. Handlers remain responsible for permission checks on their business records and idempotent external effects if a crash occurs before journaling. Unknown Python paths cannot be invoked from node arguments. Collected references are resolved as bounded literal data (not recursively evaluated expressions). Ten contract tests and the full isolated flow suite pass, including real DB result replay without a second handler call and rejection of changed inputs. No business handler is enabled on distributor yet; UI action editor and retailer adapter remain required. New journal DocType is synced only on isolated test site so far.
+Added the `relay_flow_actions` installed-hook catalog and runtime action node. Definitions must explicitly declare replay safety; handlers receive contact, run and stable idempotency key. Internal Relay Flow Action journals input hash/result and rejects changed replay inputs. Handlers remain responsible for permission checks on their business records and idempotent external effects if a crash occurs before journaling. Unknown Python paths cannot be invoked from node arguments. Collected references are resolved as bounded literal data (not recursively evaluated expressions). Ten contract tests and the full isolated flow suite pass, including real DB result replay without a second handler call and rejection of changed inputs. No business handler is enabled on relay.test yet; UI action editor and retailer adapter remain required. New journal DocType is synced only on isolated test site so far.
 
 ### Business action editor
 
@@ -191,7 +191,7 @@ Read legacy solution_pack.py requirements: catalogue Normal priority; callback/s
 
 ### Configurable case lifecycle backend
 
-Added Relay Case Type (System Manager Desk configuration) and internal Relay Case with pinned lifecycle snapshot, typed fields, priorities, states, allowed transitions and stage-required evidence. Scoped create/read/move APIs enforce readable contact and optimistic edit revisions. Two contract tests and isolated PostgreSQL integration pass: creation replay, evidence enforcement, completion timestamps, stale-edit rejection, lifecycle pinning after type changes, and guest denial. Not installed on distributor; no operator case UI or retailer adapter yet. Further work includes case directories, assigned-operator checks, immutable creation intent hash, initial-terminal closed timestamp, and lifecycle configuration UI documentation. Existing tickets remain separate pending deliberate unified operator navigation.
+Added Relay Case Type (System Manager Desk configuration) and internal Relay Case with pinned lifecycle snapshot, typed fields, priorities, states, allowed transitions and stage-required evidence. Scoped create/read/move APIs enforce readable contact and optimistic edit revisions. Two contract tests and isolated PostgreSQL integration pass: creation replay, evidence enforcement, completion timestamps, stale-edit rejection, lifecycle pinning after type changes, and guest denial. Not installed on relay.test; no operator case UI or retailer adapter yet. Further work includes case directories, assigned-operator checks, immutable creation intent hash, initial-terminal closed timestamp, and lifecycle configuration UI documentation. Existing tickets remain separate pending deliberate unified operator navigation.
 
 ### Case retry and operator boundaries
 
@@ -199,7 +199,7 @@ Case creation now pins an intent hash and rejects changed-title/field retries us
 
 ### Inbox case panel
 
-Added ConversationCases in Inbox with paginated directory, detail, typed fields, allowed-stage selection, required-field hints, update/reload and stale revision passed to server. Case types remain Desk configuration. Frontend build passes; Relay Case Type and Relay Case installed distributor, workers reloaded. Actual mobile Administrator browser opens Cases on the real Telegram conversation and confirms the empty directory with no horizontal overflow. No live case created. Browser save/validation fixtures, manual creation UX, global case operations and retailer adapter still required.
+Added ConversationCases in Inbox with paginated directory, detail, typed fields, allowed-stage selection, required-field hints, update/reload and stale revision passed to server. Case types remain Desk configuration. Frontend build passes; Relay Case Type and Relay Case installed relay.test, workers reloaded. Actual mobile Administrator browser opens Cases on the real Telegram conversation and confirms the empty directory with no horizontal overflow. No live case created. Browser save/validation fixtures, manual creation UX, global case operations and retailer adapter still required.
 
 ### Case browser save and retry recovery
 
@@ -211,11 +211,11 @@ Added the actual `retailer.create_follow_up` hook backed by Relay cases and an e
 
 ### Retailer structured answers and site setup
 
-Added bounded literal JSON field contracts so collected arrays/numbers/nested answers retain their types. Later steps requesting the same follow-up type reuse its existing case and preserve its details, matching legacy behavior. Twelve action-contract tests and real-hook isolated retailer integration pass with structured values and changed later-step note. Frontend build passes. Installed five retailer case definitions on distributor (preserving any existing definitions) and verified the registered action through actual Frappe hooks. No live case or outgoing message created. Browser catalog acceptance, migration and full goal acceptance remain outstanding.
+Added bounded literal JSON field contracts so collected arrays/numbers/nested answers retain their types. Later steps requesting the same follow-up type reuse its existing case and preserve its details, matching legacy behavior. Twelve action-contract tests and real-hook isolated retailer integration pass with structured values and changed later-step note. Frontend build passes. Installed five retailer case definitions on relay.test (preserving any existing definitions) and verified the registered action through actual Frappe hooks. No live case or outgoing message created. Browser catalog acceptance, migration and full goal acceptance remain outstanding.
 
 ### Installed action catalog and collected case fields
 
-Actual distributor mobile browser now selects the registered retailer follow-up action and renders its type/title/note/collected-values controls without overflow; no fixture catalog used and no flow saved. Case detail previously rendered only declared properties, hiding additional collected answers retained in storage. It now includes all saved fields using the additional-property schema, preserving structured display/edit behavior. Frontend build passes; specific extra-field browser fixture remains to verify. Source flow inspection confirms labeled choices with distinct values (HAAN→yes, NAHI→no), nested references `answers.*`, and end-node messages, which graph migration must preserve.
+Actual relay.test mobile browser now selects the registered retailer follow-up action and renders its type/title/note/collected-values controls without overflow; no fixture catalog used and no flow saved. Case detail previously rendered only declared properties, hiding additional collected answers retained in storage. It now includes all saved fields using the additional-property schema, preserving structured display/edit behavior. Frontend build passes; specific extra-field browser fixture remains to verify. Source flow inspection confirms labeled choices with distinct values (HAAN→yes, NAHI→no), nested references `answers.*`, and end-node messages, which graph migration must preserve.
 
 ### Labeled choice values
 
@@ -239,15 +239,15 @@ Added legacy graph file/paste dialog with bounded JSON input, conversion preview
 
 ### Template button routing backend
 
-WhatsApp template button normalization now stores payload separately from displayed text and records button provenance. Added optional per-channel unique button payload trigger to flows, included in version snapshot. Matching requires WhatsApp button provenance and exact stored payload; ordinary text matching that payload does not start the flow. Two normalization tests and isolated flow integration pass matching/ordinary-text rejection plus prior workflow scenarios. New fields synced only on isolated site; UI/import wiring, actual webhook projection integration and distributor schema deployment remain pending. No live webhook/button sent.
+WhatsApp template button normalization now stores payload separately from displayed text and records button provenance. Added optional per-channel unique button payload trigger to flows, included in version snapshot. Matching requires WhatsApp button provenance and exact stored payload; ordinary text matching that payload does not start the flow. Two normalization tests and isolated flow integration pass matching/ordinary-text rejection plus prior workflow scenarios. New fields synced only on isolated site; UI/import wiring, actual webhook projection integration and relay.test schema deployment remain pending. No live webhook/button sent.
 
 ### Installed import preview and trigger editor
 
-Added Template button payload to flow editor, carried imported payload into the draft, and tightened preview to exactly one command plus at most one button trigger; unsupported trigger sets now reject rather than being dropped. Actual retailer-template preview returns /feedback and retailer_feedback_start. Installed Flow/Version fields on distributor and reloaded workers. Actual mobile browser previews a two-node graph through the real endpoint and opens an unsaved draft with /review and review_start intact, no horizontal overflow. No live flow saved or activated. Full webhook-to-flow button integration and stored legacy graph end-to-end acceptance remain outstanding.
+Added Template button payload to flow editor, carried imported payload into the draft, and tightened preview to exactly one command plus at most one button trigger; unsupported trigger sets now reject rather than being dropped. Actual retailer-template preview returns /feedback and retailer_feedback_start. Installed Flow/Version fields on relay.test and reloaded workers. Actual mobile browser previews a two-node graph through the real endpoint and opens an unsaved draft with /review and review_start intact, no horizontal overflow. No live flow saved or activated. Full webhook-to-flow button integration and stored legacy graph end-to-end acceptance remain outstanding.
 
 ### Full converted retailer flow database acceptance
 
-Extended the guarded flow integration to persist/publish the actual converted26step retailer graph on the isolated site and drive the full accepted-A path through the real runtime. Passed consent, three ratings, stable multiple-choice values, catalogue/callback actions, two persisted cases (Normal/High), structured categories, one resolved topic containing all10 accepted incoming messages, and final reply. Provider sending remains mocked; this is not live WhatsApp delivery evidence. Read-only acme.localhost inspection confirms its single saved draft_graph exactly equals the source template tested and converts26→26 with command/template_button metadata. No legacy source mutation or actual distributor flow import performed.
+Extended the guarded flow integration to persist/publish the actual converted26step retailer graph on the isolated site and drive the full accepted-A path through the real runtime. Passed consent, three ratings, stable multiple-choice values, catalogue/callback actions, two persisted cases (Normal/High), structured categories, one resolved topic containing all10 accepted incoming messages, and final reply. Provider sending remains mocked; this is not live WhatsApp delivery evidence. Read-only acme.localhost inspection confirms its single saved draft_graph exactly equals the source template tested and converts26→26 with command/template_button metadata. No legacy source mutation or actual relay.test flow import performed.
 
 ### Retailer branch and projected button acceptance
 
@@ -259,7 +259,7 @@ Added bounded global case search/state directory with keyset continuation and pe
 
 ### Cross-conversation case workspace
 
-Added Cases tab alongside Tickets with server search/state filters, bounded continuation, case cards, direct case details and conversation links. Reuses the Inbox case editor via initial-case selection. Frontend build passes; workers reloaded. Actual distributor Administrator mobile browser opens the real empty workspace and state controls without horizontal overflow. Populated global workspace fixture, manual case creation, case assignment and full operator acceptance remain unfinished.
+Added Cases tab alongside Tickets with server search/state filters, bounded continuation, case cards, direct case details and conversation links. Reuses the Inbox case editor via initial-case selection. Frontend build passes; workers reloaded. Actual relay.test Administrator mobile browser opens the real empty workspace and state controls without horizontal overflow. Populated global workspace fixture, manual case creation, case assignment and full operator acceptance remain unfinished.
 
 ### Manual conversation case creation
 
@@ -267,11 +267,11 @@ Added contact-scoped case type choices and a POST manual-create endpoint with us
 
 ### Manual case browser acceptance
 
-Actual distributor mobile browser opens New case and selects Callback from all five installed types, showing High priority and configured fields with no overflow. Separate isolated browser context intercepts only the create write; submits title/note/type/retry key exactly once and opens returned case details, with no JS errors or horizontal overflow. Read APIs use actual installed site; create result is a fixture. No live case added. Case assignment/global populated-page acceptance and broad product requirements remain outstanding.
+Actual relay.test mobile browser opens New case and selects Callback from all five installed types, showing High priority and configured fields with no overflow. Separate isolated browser context intercepts only the create write; submits title/note/type/retry key exactly once and opens returned case details, with no JS errors or horizontal overflow. Read APIs use actual installed site; create result is a fixture. No live case added. Case assignment/global populated-page acceptance and broad product requirements remain outstanding.
 
 ### Case assignment
 
-Added manager-only case assignment with optimistic revision checks and recipient conversation-read validation; assigning a case does not grant conversation access. Eligible-agent endpoint filters existing Relay agents. Case detail shows assignee and manager assignment control. Isolated DB checks pass allowed assignment, inaccessible-agent denial and ordinary-operator reassignment denial. Build passes and assigned_to field installed distributor; reload requested. Populated browser assignment interaction still pending; no live assignment made.
+Added manager-only case assignment with optimistic revision checks and recipient conversation-read validation; assigning a case does not grant conversation access. Eligible-agent endpoint filters existing Relay agents. Case detail shows assignee and manager assignment control. Isolated DB checks pass allowed assignment, inaccessible-agent denial and ordinary-operator reassignment denial. Build passes and assigned_to field installed relay.test; reload requested. Populated browser assignment interaction still pending; no live assignment made.
 
 ### Populated case workspace and assignment browser fixture
 

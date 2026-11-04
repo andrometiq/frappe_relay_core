@@ -59,26 +59,26 @@ class LoaderTests(CapabilityCase):
         self.assertEqual(self.capabilities.manifests(), {})
 
     def test_key_must_use_the_declaring_app_prefix(self):
-        self.hooks['relay_yrp'] = {'relay_ai_capability_prefix': ['distributor']}
-        for key in ('yrp.Orders', 'distributor', 'erpnext.orders', 'relay_yrp.orders', 'yrp.orders.extra', 3):
+        self.hooks['relay_distributor'] = {'relay_ai_capability_prefix': ['distributor']}
+        for key in ('distributor.Orders', 'distributor', 'erpnext.orders', 'relay_distributor.orders', 'distributor.orders.extra', 3):
             with self.subTest(key=key), self.assertRaises(ValueError):
-                self.capabilities.validate_manifest('relay_yrp', key, READ)
-        self.assertEqual(self.capabilities.validate_manifest('relay_yrp', 'yrp.orders', READ)['app'], 'relay_yrp')
+                self.capabilities.validate_manifest('relay_distributor', key, READ)
+        self.assertEqual(self.capabilities.validate_manifest('relay_distributor', 'distributor.orders', READ)['app'], 'relay_distributor')
 
     def test_identity_render_and_method_must_belong_to_the_declaring_app(self):
-        self.hooks['relay_yrp'] = {'relay_ai_capability_prefix': ['distributor']}
-        for changes in ({'identity': 'relay_sihma.identity.validate'}, {'identity': 'relay_core.ai.identity.validate'},
+        self.hooks['relay_distributor'] = {'relay_ai_capability_prefix': ['distributor']}
+        for changes in ({'identity': 'relay_association.identity.validate'}, {'identity': 'relay_core.ai.identity.validate'},
                         {'render': 'frappe.client.get_list'}, {'render': 42}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                self.capabilities.validate_manifest('relay_yrp', 'yrp.ledger', dict(READ, **changes))
-        checked = self.capabilities.validate_manifest('relay_yrp', 'yrp.ledger', dict(READ, identity='relay_yrp.identity.check'))
-        self.assertEqual(checked['identity'], 'relay_yrp.identity.check')
+                self.capabilities.validate_manifest('relay_distributor', 'distributor.ledger', dict(READ, **changes))
+        checked = self.capabilities.validate_manifest('relay_distributor', 'distributor.ledger', dict(READ, identity='relay_distributor.identity.check'))
+        self.assertEqual(checked['identity'], 'relay_distributor.identity.check')
         with self.assertRaises(ValueError):
             self.capabilities.validate_manifest('relay_core', 'erpnext.draft',
                 dict(CAPABILITIES['erpnext.payment_entry_draft'], method='frappe.client.insert'))
 
     def test_hook_path_from_another_app_is_rejected(self):
-        self.hooks['relay_yrp'] = {'relay_ai_capabilities': ['relay_core.ai.builtin_capabilities.CAPABILITIES']}
+        self.hooks['relay_distributor'] = {'relay_ai_capabilities': ['relay_core.ai.builtin_capabilities.CAPABILITIES']}
         with self.assertRaisesRegex(ValueError, 'own module'):
             self.capabilities.manifests()
 
@@ -142,27 +142,27 @@ class SyncTests(CapabilityCase):
             if name not in filters['name'][1] and self.rows[name].status != 'Missing']
         self.f.db.set_value.side_effect = lambda doctype, name, field, value: self.rows[name].update({field: value})
         self.enterContext(patch.dict(sys.modules, {'frappe.utils': types.SimpleNamespace(now_datetime=lambda: 'now')}))
-        self.adapter_pack = {'yrp.ledger': dict(READ, render='relay_yrp.render.ledger')}
-        self.declare('relay_yrp', 'distributor', self.adapter_pack)
+        self.adapter_pack = {'distributor.ledger': dict(READ, render='relay_distributor.render.ledger')}
+        self.declare('relay_distributor', 'distributor', self.adapter_pack)
 
     def test_new_core_packs_approve_and_adapter_packs_wait(self):
         self.capabilities.sync()
         self.assertEqual(self.rows['erpnext.supplier_ledger'].status, 'Approved')
         self.assertEqual(self.rows['erpnext.supplier_ledger'].approved_by, 'Administrator')
-        self.assertEqual(self.rows['yrp.ledger'].status, 'Pending approval')
-        self.assertEqual((self.rows['yrp.ledger'].kind, self.rows['yrp.ledger'].app), ('Read', 'relay_yrp'))
+        self.assertEqual(self.rows['distributor.ledger'].status, 'Pending approval')
+        self.assertEqual((self.rows['distributor.ledger'].kind, self.rows['distributor.ledger'].app), ('Read', 'relay_distributor'))
 
     def test_changed_hash_marks_changed_and_absent_key_marks_missing(self):
         self.capabilities.sync()
-        row = self.rows['yrp.ledger']
+        row = self.rows['distributor.ledger']
         self.capabilities.mark_approved(row, 'manager')
         self.capabilities.sync()
         self.assertEqual(row.status, 'Approved')
-        self.adapter_pack['yrp.ledger'] = dict(self.adapter_pack['yrp.ledger'], limit=5)
+        self.adapter_pack['distributor.ledger'] = dict(self.adapter_pack['distributor.ledger'], limit=5)
         self.capabilities.sync()
         self.assertEqual(row.status, 'Changed')
         self.assertNotEqual(row.approved_hash, row.current_hash)
-        del self.adapter_pack['yrp.ledger']
+        del self.adapter_pack['distributor.ledger']
         self.capabilities.sync()
         self.assertEqual(row.status, 'Missing')
 
@@ -170,40 +170,40 @@ class SyncTests(CapabilityCase):
 class ActiveTests(CapabilityCase):
     def setUp(self):
         super().setUp()
-        self.row = Doc(app='relay_yrp', enabled=1, status='Approved', approved_hash='h1', current_hash='h1',
+        self.row = Doc(app='relay_distributor', enabled=1, status='Approved', approved_hash='h1', current_hash='h1',
                        manifest=json.dumps(capability()))
-        self.trusted = 'relay_yrp\n'
-        self.f.db.get_value.side_effect = lambda doctype, key, fields, as_dict: self.row if key == 'yrp.ledger' else None
+        self.trusted = 'relay_distributor\n'
+        self.f.db.get_value.side_effect = lambda doctype, key, fields, as_dict: self.row if key == 'distributor.ledger' else None
         self.f.db.get_single_value = lambda doctype, field: self.trusted
 
     def test_only_enabled_approved_unchanged_trusted_packs_are_active(self):
-        self.assertEqual(self.capabilities.active('yrp.ledger')['key'], 'erpnext.ledger')
+        self.assertEqual(self.capabilities.active('distributor.ledger')['key'], 'erpnext.ledger')
         for changes in ({'enabled': 0}, {'status': 'Pending approval'}, {'status': 'Changed'}, {'status': 'Missing'},
                         {'current_hash': 'h2'}):
             original = dict(self.row); self.row.update(changes)
             with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'not approved'):
-                self.capabilities.active('yrp.ledger')
+                self.capabilities.active('distributor.ledger')
             self.row.update(original)
-        self.trusted = 'relay_sihma'
-        with self.assertRaisesRegex(ValueError, 'not approved'): self.capabilities.active('yrp.ledger')
+        self.trusted = 'relay_association'
+        with self.assertRaisesRegex(ValueError, 'not approved'): self.capabilities.active('distributor.ledger')
         self.row.app = 'relay_core'
-        self.capabilities.active('yrp.ledger')
+        self.capabilities.active('distributor.ledger')
         for key in ('unknown.key', None):
             with self.assertRaises(ValueError): self.capabilities.active(key)
 
     def test_approve_needs_a_manager_and_an_installed_pack(self):
-        doc = Doc(name='yrp.ledger', status='Pending approval', current_hash='h2', manifest=json.dumps({'version': 3}), flags=Doc())
+        doc = Doc(name='distributor.ledger', status='Pending approval', current_hash='h2', manifest=json.dumps({'version': 3}), flags=Doc())
         self.f.get_doc.side_effect = lambda doctype, name: doc
         self.enterContext(patch.dict(sys.modules, {'frappe.utils': types.SimpleNamespace(now_datetime=lambda: 'now')}))
         self.enterContext(patch('relay_core.ai_features.is_enabled', return_value=True))
-        result = self.capabilities.approve('yrp.ledger')
-        self.assertEqual(result, {'name': 'yrp.ledger', 'status': 'Approved', 'approved_hash': 'h2'})
+        result = self.capabilities.approve('distributor.ledger')
+        self.assertEqual(result, {'name': 'distributor.ledger', 'status': 'Approved', 'approved_hash': 'h2'})
         self.assertEqual((doc.approved_version, doc.approved_by), (3, 'operator'))
         self.assertIn(unittest.mock.call(manage=True), self.access.call_args_list)
         doc.status = 'Missing'
-        with self.assertRaises(ValueError): self.capabilities.approve('yrp.ledger')
+        with self.assertRaises(ValueError): self.capabilities.approve('distributor.ledger')
         self.access.side_effect = PermissionError('Not permitted')
-        with self.assertRaises(PermissionError): self.capabilities.approve('yrp.ledger')
+        with self.assertRaises(PermissionError): self.capabilities.approve('distributor.ledger')
 
 
 class IdentityTests(unittest.TestCase):
@@ -219,7 +219,7 @@ class IdentityTests(unittest.TestCase):
         self.enterContext(patch.dict(sys.modules, {
             'relay_core.business_access': types.SimpleNamespace(candidates=lambda contact: self.links)}))
         self.scope = dict(channel='CH-1', endpoint='919800000001', contact='CONTACT-1', user='partner@example.invalid')
-        self.manifest = capability(identity='relay_yrp.identity.validate_customer')
+        self.manifest = capability(identity='relay_distributor.identity.validate_customer')
 
     def validate(self, business=('Customer', 'CUST-A')):
         self.identity.validate(self.manifest, self.scope, business)

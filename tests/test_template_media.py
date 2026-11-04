@@ -70,7 +70,7 @@ class HeaderMediaTests(unittest.TestCase):
 
 class HeaderUploadTests(unittest.TestCase):
     def setUp(self):
-        self.channel = FakeChannel(name='acme-1', channel='WhatsApp', enabled=1, account='distributor', denied=False)
+        self.channel = FakeChannel(name='acme-1', channel='WhatsApp', enabled=1, account='acme', denied=False)
         self.hub_upload = Mock(return_value='9001')
         self.save_file = Mock(return_value=SimpleNamespace(name='FILE-1'))
         self.cache = Mock()
@@ -79,7 +79,7 @@ class HeaderUploadTests(unittest.TestCase):
             patch.object(template_media.frappe, 'cache', self.cache),
             patch('relay_core.permissions.require_access'),
             patch.object(template_media.frappe, 'get_doc', return_value=self.channel),
-            patch('relay_core.settings.value', return_value='distributor'),
+            patch('relay_core.settings.value', return_value='acme'),
             patch('relay_core.document_sends.upload', self.hub_upload),
         ]
         for item in self.patches:
@@ -110,7 +110,7 @@ class HeaderUploadTests(unittest.TestCase):
         self.channel.account = 'other'
         with self.assertRaises(frappe.PermissionError):
             self.upload()
-        self.channel.account, self.channel.denied = 'distributor', True
+        self.channel.account, self.channel.denied = 'acme', True
         with self.assertRaises(frappe.PermissionError):
             self.upload()
         self.hub_upload.assert_not_called()

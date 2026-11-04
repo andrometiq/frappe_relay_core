@@ -19,3 +19,4 @@ relay_core.patches.v1_0.capability_contracts
 relay_core.patches.v1_0.use_payment_entry_draft_pack
 relay_core.patches.v1_0.add_memory_company_and_provider
 relay_core.patches.v1_0.mark_existing_onboarded
+relay_core.patches.v1_0.use_neutral_retailer_case_keys

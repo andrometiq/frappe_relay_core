@@ -7,6 +7,7 @@ from relay_core.permissions import require_access
 TYPES = {'catalogue': ('Catalogue','Normal'), 'callback': ('Callback','High'),
          'stocking_interest': ('Stocking Interest','High'), 'mapping_exception': ('Mapping Exception','High'),
          'complaint': ('Complaint','Critical')}
+TYPE_PREFIX = 'relay.retailer_connect.'
 
 
 def case_definition(priority):
@@ -26,7 +27,7 @@ def install_case_types():
     require_access(configure=True)
     result=[]
     for key,(title,priority) in TYPES.items():
-        stable='relay.retailer_connect.'+key
+        stable=TYPE_PREFIX+key
         name=frappe.db.get_value('Relay Case Type',{'type_key':stable},'name')
         if not name:
             doc=frappe.get_doc({'doctype':'Relay Case Type','type_key':stable,'title':title,
@@ -44,18 +45,18 @@ def create_follow_up(*, action_input, relay_contact, business_doctype=None, busi
     run=frappe.get_doc('Relay Flow Run',flow_run)
     if run.relay_contact!=relay_contact or (run.get('business_doctype'),run.get('business_name'))!=(business_doctype,business_name):
         frappe.throw('Flow belongs to another contact',frappe.PermissionError)
-    name=frappe.db.get_value('Relay Case Type',{'type_key':'relay.retailer_connect.'+action_type},'name')
+    name=frappe.db.get_value('Relay Case Type',{'type_key':TYPE_PREFIX+action_type},'name')
     if not name:raise ValueError('Install the retailer case types in Desk first')
     existing=frappe.db.get_value('Relay Case',{'case_type':name,'relay_contact':relay_contact,'source_flow':flow_run},'name')
     if existing:
         result=cases.read(existing)
-        return {'case':result['name'],'case_type':'relay.retailer_connect.'+action_type,'stage':result['stage']}
+        return {'case':result['name'],'case_type':TYPE_PREFIX+action_type,'stage':result['stage']}
     fields=dict(action_input.get('field_values') or {})
     fields.update(action_type=action_type,note=action_input.get('note',''))
     # Legacy deduplicates each action type across all steps of one flow instance.
     result=cases.create(name,relay_contact,action_input.get('title') or 'Retailer '+action_type.replace('_',' ')+' request',
                         fields,'retailer:'+flow_run+':'+action_type,source_flow=flow_run)
-    return {'case':result['name'],'case_type':'relay.retailer_connect.'+action_type,'stage':result['stage']}
+    return {'case':result['name'],'case_type':TYPE_PREFIX+action_type,'stage':result['stage']}
 
 
 ACTION = {'label':'Create retailer follow-up','method':'relay_core.flows.retailer.create_follow_up','replay_safe':True,

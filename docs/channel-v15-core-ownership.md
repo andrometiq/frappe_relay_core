@@ -80,7 +80,7 @@ Run from this worktree with the bench interpreter and these environment values:
 
 ```sh
 export FRAPPE_STREAM_LOGGING=1 PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=$HOME/development/relay-wt/core-c2
+export PYTHONPATH=$RELAY_CORE_PATH
 export RELAY_AUTOMATION_TEST_SITES=$SITES_PATH
 export RELAY_TEST_SITE=relay.test
 $BENCH_PATH/env/bin/python -B -m unittest discover -s tests

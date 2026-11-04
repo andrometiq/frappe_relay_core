@@ -20,7 +20,6 @@ def main():
     os.environ['FRAPPE_STREAM_LOGGING'] = '1'
     os.environ['RELAY_AUTOMATION_TEST_SITES'] = SITES
     os.environ['RELAY_TEST_SITE'] = 'relay.test'
-    os.environ['SITES_PATH'] = SITES
     import frappe
     import frappe.app
     import relay_core
