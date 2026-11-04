@@ -127,5 +127,15 @@ class SiteSide(unittest.TestCase):
         self.assertIsNone(site.turn_state.get())
 
 
+    def test_a_finished_turn_keeps_its_attempt_and_spend_when_a_later_turn_is_handed(self):
+        undone = []
+        with patch.object(site, 'is_enabled', return_value=True), site.transport('AR-1'):
+            site.on_handed(lambda: undone.append('matching spend'))
+            site.settled()
+            site.on_handed(lambda: undone.append('reply spend'))
+            raise site.Handed('AR-1')
+        self.assertEqual(undone, ['reply spend'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -494,6 +494,7 @@ def process(name, *, deadline=None):
                 internal_save(run); frappe.db.commit()
                 remote.on_handed(lambda: undo_attempt(name))
                 decision = decide(skill, message, run.name, deadline=deadline)
+                remote.settled()
                 used = decision.pop('context', None)
                 table = decision.pop('minimise_table', None)
                 frappe.db.commit()
@@ -845,6 +846,7 @@ def admit(run):
         internal_save(run); frappe.db.commit()
         remote.on_handed(lambda name=run.name: undo_attempt(name))
         result = matching.select(message, skills, run.name, deadline, history=history)
+        remote.settled()
         frappe.db.commit()
         run = lock_run(run.name)
         if run.status != 'Deciding' or run.stage != 'Matching':

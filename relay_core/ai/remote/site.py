@@ -66,6 +66,13 @@ def on_handed(undo) -> None:
         state['undo'].append(undo)
 
 
+def settled() -> None:
+    """The turns so far are final: a later hand-over in this job must not undo their attempt or spend."""
+    state = turn_state.get()
+    if state is not None:
+        state['undo'].clear()
+
+
 def is_waiting(run: str) -> bool:
     return bool(frappe.cache.exists(key('waiting', run), shared=True))
 
