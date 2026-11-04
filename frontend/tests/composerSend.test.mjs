@@ -182,3 +182,15 @@ test('Retry of a rejected message resends it once and leaves no duplicate', asyn
   assert.deepEqual(calls.filter(call => call.method === 'messaging.retry').map(call => call.values), [{ action: rejected.action }])
   assert.equal(state.displayRows.value.some(row => row._pending), false)
 })
+
+test('a poll sends its question and filled options and shows as a pending poll', async t => {
+  const { state, sends } = fixture(t)
+  await state.open('A')
+  state.kind.value = 'poll'
+  state.pollQuestion.value = ' Which colour? '
+  state.pollOptions.value = ['Red', ' Blue ', '']
+  const send = state.send()
+  assert.equal(state.displayRows.value.at(-1).content, 'Poll: Which colour?')
+  await send
+  assert.deepEqual(sends().map(values => [values.kind, values.data]), [['poll', { question: 'Which colour?', options: ['Red', 'Blue'] }]])
+})

@@ -95,7 +95,7 @@ try:
         voice = {'from': phone, 'id': wamid('voice'), 'timestamp': str(int(time.time())), 'type': 'audio',
             'audio': {'id': '100000000000001', 'mime_type': 'audio/ogg; codecs=opus', 'voice': True}}
         assert deliver(poll, card, order, system, voice) == 'Projected'
-        assert message(wamid('poll')).content == 'Poll messages are not supported by WhatsApp Business'
+        assert message(wamid('poll')).content == 'Poll: WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text.'
         assert json.loads(message(wamid('poll')).message_data)['unsupported']['details'] == 'Message type is currently not supported.'
         assert json.loads(message(wamid('card')).message_data)['contacts'][0]['name']['formatted_name'] == '+91 99999 55502'
         assert message(wamid('order')).content == 'Order: 1 item · Need these'
@@ -115,6 +115,27 @@ try:
         assert deliver(edit) == 'Projected'
         assert (message(wamid('order')).content, bool(message(wamid('order')).edited_at)) == ('Need three', True)
         print('PASS reaction attaches and removal clears; edit updates the original', flush=True)
+
+        key = __import__('relay_core.message_updates', fromlist=['provider_key']).provider_key
+        poll_data = {'kind': 'poll', 'poll': {'question': 'Which colour?', 'options': ['Red', 'Blue'], 'votes': {}}}
+        sent_poll = insert('Relay Message', relay_contact=contact.name, channel=channel.name, direction='Outgoing', status='Sent',
+            content='Poll: Which colour?', message_type='poll', message_data=json.dumps(poll_data), provider_id=wamid('sent-poll'),
+            sender_endpoint=phone, provider_message_key=key(channel.name, phone, wamid('sent-poll')))
+        vote = lambda number, option, sender=phone, target=wamid('sent-poll'): {'from': sender, 'id': wamid('vote' + number),
+            'timestamp': str(int(time.time()) + 10 + int(number)), 'type': 'interactive', 'context': {'from': '919876543210', 'id': target},
+            'interactive': {'type': 'button_reply', 'button_reply': {'id': 'poll-%d' % (option + 1), 'title': ['Red', 'Blue'][option]}}}
+        votes = lambda: json.loads(frappe.db.get_value('Relay Message', sent_poll.name, 'message_data'))['poll']['votes']
+        assert deliver(vote('1', 1)) == 'Projected'
+        assert {name: row['option'] for name, row in votes().items()} == {contact.name: 1}
+        assert message(wamid('vote1')).content == 'Blue'
+        assert deliver(vote('2', 0)) == 'Projected'
+        assert {name: row['option'] for name, row in votes().items()} == {contact.name: 0}, votes()
+        other_person = insert('Contact', first_name=label + ' other')
+        other = insert('Relay Contact', contact=other_person.name, display_name=label + ' other', automation_paused=1)
+        insert('Relay Contact Endpoint', channel=channel.name, endpoint='919876543210', relay_contact=other.name, verified=1)
+        assert deliver(vote('3', 1, sender='919876543210'), vote('4', 1, target=wamid('order'))) == 'Projected'
+        assert {name: row['option'] for name, row in votes().items()} == {contact.name: 0}, votes()
+        print('PASS a tap on a sent poll is the contact vote, a later tap changes it, other chats are not counted', flush=True)
 
         # The voice step runs in the message hook drain; no provider means an honest status.
         voice_transcripts.on_message(message(wamid('voice')))

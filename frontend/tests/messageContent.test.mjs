@@ -29,7 +29,8 @@ test('voice transcripts show stored text or an honest status', async () => {
 test('unsupported messages show the WhatsApp reason and order lines stay readable', async () => {
   const { unsupportedNotice, orderLines } = await import('../src/components/messageContent.js')
   assert.deepEqual(unsupportedNotice({ kind: 'unsupported', unsupported: { reason: 'Poll messages are not supported by WhatsApp Business', details: 'Message type is currently not supported.', code: 131051 } }),
-    { reason: 'Poll messages are not supported by WhatsApp Business', meta: 'Message type is currently not supported. · code 131051' })
+    { reason: 'Poll messages are not supported by WhatsApp Business', meta: 'Message type is currently not supported. · code 131051', poll: false })
+  assert.equal(unsupportedNotice({ kind: 'unsupported', unsupported: { type: 'poll_creation', reason: 'Poll: WhatsApp does not share poll contents with business accounts.' } }).poll, true)
   assert.equal(unsupportedNotice({ kind: 'unsupported' }).reason, 'This message type is not supported')
   assert.deepEqual(orderLines({ order: { items: [{ product_retailer_id: 'shirt', quantity: 2, item_price: 30, currency: 'INR' }, { product_retailer_id: 'cap' }] } }),
     ['2 × shirt · INR 30', '1 × cap'])
@@ -72,4 +73,12 @@ test('every message with a file offers a download, template headers included', a
   assert.equal(attachmentDownloadURL(message(header({ type: 'image', image: { link: 'javascript:alert(1)' } }))), null)
   assert.equal(attachmentDownloadURL(message({ kind: 'text', text: 'Hi', template: { name: 'plain' } })), null)
   assert.equal(attachmentDownloadURL({ ...message({ kind: 'document' }), _pending: true }), null)
+})
+
+test('a sent poll counts one current vote per contact', async () => {
+  const { pollTally } = await import('../src/components/messageContent.js')
+  const data = { kind: 'poll', poll: { question: 'Which colour?', options: ['Red', 'Blue'],
+    votes: { 'CON-1': { option: 1 }, 'CON-2': { option: 1 }, 'CON-3': { option: 0 }, 'CON-4': { option: 9 } } } }
+  assert.deepEqual(pollTally(data), { question: 'Which colour?', options: [{ label: 'Red', votes: 1 }, { label: 'Blue', votes: 2 }], total: 3 })
+  assert.equal(pollTally({ kind: 'poll', poll: { question: 'Q', options: ['A', 'B'] } }).total, 0)
 })

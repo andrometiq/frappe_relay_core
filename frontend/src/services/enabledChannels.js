@@ -57,7 +57,7 @@ export function onPickedChannel(message, provider) {
 export function composerKinds(capabilities, context) {
   const can = feature => channelCan(capabilities, context.provider, feature)
   const media = ['sticker', 'photo', 'video', 'audio', 'voice', 'document'].filter(kind => can('media.' + kind))
-  const cards = context.group_id ? [] : [['location', 'location'], ['contacts', 'contact']].filter(([feature]) => can(feature))
+  const cards = context.group_id ? [] : [['location', 'location'], ['contacts', 'contact'], ['polls', 'poll']].filter(([feature]) => can(feature))
   return ['text', ...media, ...cards.map(([, kind]) => kind)]
 }
 

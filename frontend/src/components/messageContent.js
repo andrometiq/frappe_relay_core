@@ -99,7 +99,16 @@ export function transcriptState(message) {
 export function unsupportedNotice(data) {
   const value = data.unsupported || {}
   const meta = [value.details || value.title, value.code ? 'code ' + value.code : ''].filter(Boolean).join(' · ')
-  return { reason: value.reason || 'This message type is not supported', meta }
+  return { reason: value.reason || 'This message type is not supported', meta, poll: ['poll_creation', 'poll_update'].includes(value.type) }
+}
+
+// A sent poll with the current vote of each contact counted on its option.
+export function pollTally(data) {
+  const poll = data.poll || {}
+  const options = (poll.options || []).map(label => ({ label, votes: 0 }))
+  const votes = Object.values(poll.votes || {}).filter(vote => options[vote?.option])
+  for (const vote of votes) options[vote.option].votes++
+  return { question: poll.question || '', options, total: votes.length }
 }
 
 export function orderLines(data) {
