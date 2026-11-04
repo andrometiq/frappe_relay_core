@@ -37,7 +37,8 @@ class LoopCase(unittest.TestCase):
     def setUp(self):
         self.shared_setup()
         from relay_core.ai.actions import REPLY
-        self.skill.update(name='Acme Support', allowed_actions='[{"action":"reply"}]', execution_policy='Execute')
+        self.skill.update(name='Acme Support', allowed_actions='[{"action":"reply"}]', execution_policy='Execute',
+                          search_confirmation='When required')
         self.enterContext(patch('relay_core.flows.actions.definitions', return_value={'reply': REPLY}))
         self.tools = [('acme.order_status', order_status)]
         self.enterContext(patch('relay_core.ai.registry.builtin.skill_tools', side_effect=lambda skill: self.tools))
@@ -130,6 +131,61 @@ class ToolLoopTests(LoopCase):
         self.tools.append(('other.order_status', order_status))
         with self.assertRaisesRegex(ValueError, 'share a name'):
             self.complete()
+
+
+class DeclaredToolTests(LoopCase):
+    """With search confirmation Always, an app read tool declares its call and reads only on the confirmed turn."""
+    plan = {'purpose': 'Order status', 'reference': 'acme.order_status', 'fields': [], 'arguments': {'order': 'PO-1'}}
+
+    def setUp(self):
+        super().setUp()
+        self.skill.search_confirmation = 'Always'
+        self.seen = []
+        self.provider.continuation = lambda result, outputs: self.seen.extend(outputs) or []
+        self.authorize = self.enterContext(patch('relay_core.ai.service.authorize_search'))
+
+    def confirmed(self):
+        return self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'yes', 'RUN-1',
+                                     scope={'company': 'Acme Textiles'}, search=self.plan)
+
+    def test_a_call_before_confirmation_is_the_search_declaration_and_reads_nothing(self):
+        self.attempt.side_effect = [self.outcome(calls=[self.call(order='PO-1')]),
+                                    self.outcome(dict(answer(''), data_question=True))]
+        result = self.complete()
+        self.assertEqual(result['search'], self.plan)
+        self.assertEqual(json.loads(self.seen[0][1]), {'status': 'Declaration required', 'search': self.plan})
+        self.assertNotIn('Dispatched', self.seen[0][1])
+        self.authorize.assert_not_called()
+
+    def test_the_confirmed_turn_reads_only_the_authorized_plan(self):
+        self.attempt.side_effect = [self.outcome(calls=[self.call(order='PO-1')]),
+                                    self.outcome(answer('Call 919000000101 about PO-1.'))]
+        self.assertFalse(self.confirmed()['handoff'])
+        self.assertIn('Dispatched', self.seen[0][1])
+        self.assertEqual(self.authorize.call_count, 2)  # Before and after the read.
+        self.assertEqual(self.authorize.call_args.args[2]['key'], 'acme.order_status')
+        self.authorize.side_effect = ValueError('Search differs from the declared plan')
+        self.seen.clear()
+        self.attempt.side_effect = [self.outcome(calls=[self.call(order='PO-2')]),
+                                    self.outcome(answer('Your order is on its way.'))]
+        with self.assertRaisesRegex(ValueError, 'Business data authorization failed'):
+            self.confirmed()
+        self.assertEqual(json.loads(self.seen[0][1]), {'error': 'This tool is unavailable'})
+
+    def test_tool_plans_check_the_tool_arguments_and_always_need_confirmation(self):
+        from relay_core.ai import service
+        from relay_core.ai.registry.builtin import tool_references
+        from relay_core.automation.contracts import validate_search
+        references = tool_references(self.skill, self.tools)
+        declared = {key: self.plan[key] for key in ('purpose', 'reference', 'arguments')}
+        self.assertEqual(validate_search(declared, references), self.plan)
+        for arguments in ({}, {'order': 1}, {'order': 'PO-1', 'customer': 'Northwind Hosiery'}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                validate_search(dict(self.plan, arguments=arguments), references)
+        with patch('relay_core.ai.registry.builtin.search_references', return_value=references):
+            self.assertTrue(service.confirmation_required(self.skill, self.plan))
+        self.skill.search_confirmation = 'When required'
+        self.assertEqual(tool_references(self.skill, self.tools), [])
 
 
 class OfferTests(unittest.TestCase):

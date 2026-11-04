@@ -64,6 +64,21 @@ def skill_tools(skill) -> list[tuple[str, RelayTool]]:
     return found + [(key, tool) for key, tool in offered(skill) if tool.kind == 'read' and not is_builtin(tool)]
 
 
+def tool_references(skill, tools: list[tuple[str, RelayTool]] | None = None) -> list[dict]:
+    """Search references of the app read tools when the skill confirms every search (`search_confirmation` is not
+    "When required"). A call then declares its exact arguments, and the tool runs only on the confirmed turn."""
+    if skill.get('search_confirmation') == 'When required':
+        return []
+    return [dict(key=key, operation='tool', fields=[], filters={}, parameters=tool.parameters, confirmation='Always')
+            for key, tool in (skill_tools(skill) if tools is None else tools) if not is_builtin(tool)]
+
+
+def search_references(skill) -> list[dict]:
+    """Every reference a search declaration can name: the read packs and the declared app read tools."""
+    from relay_core.ai.tools import contracts
+    return contracts(skill) + tool_references(skill)
+
+
 def tool_hashes(skill) -> dict[str, str]:
     """{key: code hash} of the skill's code tools, so a tool change between decision and delivery stops the reply."""
     return {key: tool.code_hash for key, tool in skill_tools(skill)}
@@ -82,7 +97,7 @@ class CoreTools:
         self.evidence = []
         self.playbook_texts = copy_texts(skill, business, (scope or {}).get('company'))
         self.knowledge = list(self.playbook_texts)
-        self.code_tools, self.context = [], None
+        self.code_tools, self.context, self.tool_references = [], None, []
         self.tickets = []  # my_tickets results: they answer a data question about the sender's own tickets.
         if skill.get('allowed_actions') and skill.get('allowed_actions') != '[]':
             from relay_core.ai.configuration import action_contracts
@@ -130,6 +145,19 @@ class CoreTools:
             self.reader.failed = True
             raise ValueError('Search is unavailable') from None
 
+    def declare(self, reference: dict, tool: RelayTool, arguments: dict) -> dict | None:
+        """Before confirmation, the call becomes the turn's one search declaration. On the confirmed turn it may run
+        only as the delivered, confirmed plan."""
+        if self.authorized is not None:
+            self.reader.authorize(reference, arguments)
+            return None
+        plan = validate_search(dict(purpose=tool.label, reference=reference['key'], arguments=arguments),
+                               self.tool_references)
+        if self.proposed and self.proposed[0] != plan:
+            raise ValueError('Only one declared search per turn')
+        self.proposed[:] = [plan]
+        return {'status': 'Declaration required', 'search': plan}
+
     def agent_tools(self, agent) -> list:
         """SEARCH when the skill has reports for this business, EXECUTE when it declares actions."""
         tools = [agent.Tool('SEARCH', 'Declare a search before reading. Only the authorized exact plan may read.',
@@ -153,6 +181,7 @@ class CoreTools:
                   (my_tickets, lambda: all(self.business)))
         self.code_tools = [(key, tool) for key, tool in skill_tools(self.skill)
                            if all(check() for item, check in usable if is_builtin(tool, item))]
+        self.tool_references = tool_references(self.skill, self.code_tools)
         names = [tool.name for key, tool in self.code_tools]
         if len(set(names)) != len(names) or {'SEARCH', 'EXECUTE'} & set(names):
             raise ValueError('Two AI tools share a name')
@@ -171,8 +200,16 @@ class CoreTools:
         from relay_core.ai.registry.tool import call
         if self.actions:
             raise ValueError('Call tools before EXECUTE')
+        arguments = self.minimiser.unmask(arguments)
+        reference = next((row for row in self.tool_references if row['key'] == key), None)
         try:
-            result = call(key, self.minimiser.unmask(arguments), self.context)
+            if reference:
+                declaration = self.declare(reference, tool, arguments)
+                if declaration:
+                    return self.minimiser.mask(declaration)
+            result = call(key, arguments, self.context)
+            if reference:
+                self.reader.authorize(reference, arguments)
         except ValueError as error:
             self.reader.failed = self.reader.failed or not is_builtin(tool)
             raise ValueError(str(error) if is_builtin(tool) else UNAVAILABLE) from None

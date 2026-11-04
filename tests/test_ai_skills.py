@@ -310,6 +310,7 @@ class SearchGateTests(unittest.TestCase):
         self.patch = patch.dict(sys.modules, {'relay_core.ai.tools':self.tools})
         self.patch.start(); self.addCleanup(self.patch.stop)
         self.tools.contracts = lambda skill: [self.contract]
+        self.enterContext(patch('relay_core.ai.registry.builtin.skill_tools', return_value=[]))
         decision = dict(reply='Searching', handoff=False, reads=[], search=self.plan)
         self.service.declare_search(self.origin, self.skill, self.source, decision)
         self.origin.status = 'Completed'
@@ -435,6 +436,31 @@ class SearchGateTests(unittest.TestCase):
             self.f.get_all.return_value=[Doc(name='Origin')]
             self.assertFalse(self.service.continue_search(self.run, self.reply))
         self.assertIsNone(json.loads(self.origin.search_plan)['consumed_by'])
+
+    def test_an_app_read_tool_plan_is_announced_confirmed_and_read_once_as_declared(self):
+        from relay_core.ai.registry import ToolContext, relay_tool
+
+        @relay_tool(audience='customer', label='Order status')
+        def order_status(order: str, *, ctx: ToolContext) -> dict:
+            """The sender's own order status."""
+            return {}
+        self.enterContext(patch('relay_core.ai.registry.builtin.skill_tools',
+                                return_value=[('acme.order_status', order_status)]))
+        self.skill.search_confirmation = 'Always'
+        self.plan = dict(purpose='Order status', reference='acme.order_status', fields=[], arguments={'order': 'PO-1'})
+        self.contract = dict(key='acme.order_status', operation='tool', fields=[])
+        self.tools.contracts = lambda skill: []
+        self.origin.update(search_plan=None, stage='Event')
+        decision = dict(reply='', handoff=False, reads=[], search=self.plan)
+        self.service.declare_search(self.origin, self.skill, self.source, decision)
+        self.assertEqual(decision['reply'], self.service.SEARCH_NOTICE + ' ' + self.service.SEARCH_CONFIRM)
+        self.assertEqual(json.loads(self.origin.search_plan)['plan'], self.plan)
+        self.origin.status = 'Completed'
+        with self.assertRaises(ValueError): self.authorize()
+        self.confirmed(); self.authorize()
+        for arguments in ({'order': 'PO-2'}, {}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError): self.authorize(arguments)
+        self.assertFalse(self.service.continue_search(self.run, self.reply))
 
     def test_clear_nonledger_search_advances_only_after_delivery(self):
         self.contract.update(doctype='Invoice', confirmation='When required',

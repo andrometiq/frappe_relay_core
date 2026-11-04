@@ -269,21 +269,21 @@ def search_scope(scope):
 
 
 def confirmation_required(skill, plan):
-    from relay_core.ai.tools import contracts
-    reference = next(row for row in contracts(skill) if row['key'] == plan['reference'])
+    from relay_core.ai.registry.builtin import search_references
+    reference = next(row for row in search_references(skill) if row['key'] == plan['reference'])
     return (skill.get('search_confirmation') != 'When required' or reference['confirmation'] == 'Always'
             or any(spec.get('required') for spec in reference['filters'].values()))
 
 
 def declare_search(run, skill, message, decision):
-    from relay_core.ai.tools import contracts
+    from relay_core.ai.registry.builtin import search_references
     from relay_core.automation.contracts import validate_search
     if decision.get('handoff') or decision.get('reads') or run.get('search_plan'):
         return
     plan = decision.get('search')
     if not plan:
         return
-    plan = validate_search(plan, contracts(skill))
+    plan = validate_search(plan, search_references(skill))
     user, business, scope = current(run, skill, message)
     record = dict(plan=plan, scope=search_scope(scope), version=str(skill.modified), ticket=run.ticket,
         generation=int(run.generation or 0), ownership_generation=int(frappe.db.get_value(
@@ -324,11 +324,11 @@ def search_request_key(message, user, run=None):
 
 def check_search(run, skill, record):
     """Revalidate the durable declaration and its journal receipt on every read."""
-    from relay_core.ai.tools import contracts
+    from relay_core.ai.registry.builtin import search_references
     from relay_core.automation.contracts import validate_search
     message = frappe.get_doc('Relay Message', run.message)
     user, business, scope = current(run, skill, message)
-    validate_search(record['plan'], contracts(skill))
+    validate_search(record['plan'], search_references(skill))
     if (record['scope'] != search_scope(scope) or record['version'] != str(skill.modified)
             or record['ticket'] != run.ticket or record['generation'] != int(run.generation or 0)
             or record['ownership_generation'] != int(frappe.db.get_value(

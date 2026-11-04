@@ -243,7 +243,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             return decline_decision(user, incoming_text, 'identity')
         if value.get('decline'):
             return decline_decision(user, incoming_text)
-        rejected = declaration_error(value.get('search'), references, business, scope)
+        rejected = declaration_error(value.get('search'), references + core.tool_references, business, scope)
         if rejected and not attempt:
             correction = (f'\nYour search declaration was rejected: {rejected}. Declare a search with only the '
                           "reference's listed filters and limit, or explicitly hand off with a reason.")
@@ -322,7 +322,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                 check_identity_arguments(contract, plan.get('arguments'), business, scope)
         except PrivacyDenied:
             return decline_decision(user, incoming_text)
-        declaration = validate_search(declaration, references)
+        declaration = validate_search(declaration, references + core.tool_references)
         if search is not None and declaration != search:
             raise ValueError('Search changed after confirmation')
     if declaration and search is None and not value['handoff']:
@@ -402,7 +402,7 @@ def declaration_error(declaration, references, business, scope):
     """The shape error of a final-answer search, for one correction turn; another identity still declines later."""
     if declaration is None:
         return None
-    contract = next((row for row in references if isinstance(declaration, dict)
+    contract = next((row for row in references if isinstance(declaration, dict) and row['operation'] != 'tool'
                      and row['key'] == declaration.get('reference')), None)
     try:
         if contract:
