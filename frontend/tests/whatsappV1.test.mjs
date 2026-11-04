@@ -169,6 +169,8 @@ test('navigation puts WhatsApp under Channels with manager campaigns, omits call
   assert.doesNotMatch(text, /name: 'Campaigns'/)
   const section = await readFile(new URL('../src/components/whatsapp/WhatsAppSection.vue', import.meta.url), 'utf8')
   assert.match(section, /\.\.\.whatsappSections\(capabilities\.value\)/)
+  // Agents cannot read number health, so the Account card is for managers and System Managers only.
+  assert.match(section, /<WhatsAppAccounts v-if="configured && capabilities\.manage" \/>/)
   assert.doesNotMatch(text,/name:'Calls'|name:'Groups'|Calls:|Groups:/)
 })
 
