@@ -182,3 +182,51 @@ test('Retry of a rejected message resends it once and leaves no duplicate', asyn
   assert.deepEqual(calls.filter(call => call.method === 'messaging.retry').map(call => call.values), [{ action: rejected.action }])
   assert.equal(state.displayRows.value.some(row => row._pending), false)
 })
+
+test('a send reads no history: the sent bubble waits as Sent for the live update to bring its message', async t => {
+  const { state, calls } = fixture(t, method => method === 'messaging.send' ? { status: 'Submitted', action: 'RELAY-MA-0000000001', message: 'RELAY-MSG-0000000004' } : undefined)
+  await state.open('A')
+  calls.length = 0
+  state.body.value = 'Hello'
+  await state.send()
+  assert.deepEqual(calls.map(call => call.method), ['messaging.send'])
+  assert.deepEqual(state.displayRows.value.filter(row => row._pending).map(row => [row.content, row.status]), [['Hello', 'Sent']])
+  state.rows.value = [...state.rows.value, { ...row('RELAY-MSG-0000000004', '2026-10-28 10:30:00'), direction: 'Outgoing', content: 'Hello' }]
+  await tick()
+  assert.equal(state.displayRows.value.some(row => row._pending), false)
+  assert.equal(state.displayRows.value.filter(row => row.content === 'Hello').length, 1)
+})
+
+test('back-to-back sends of the same text are two messages with their own keys, sent in order', async t => {
+  const responses = [deferred(), deferred()]
+  const { state, sends } = fixture(t, method => method === 'messaging.send' ? responses[sends().length - 1].promise : undefined)
+  await state.open('A')
+  state.body.value = 'ok'
+  const first = state.send()
+  state.body.value = 'ok'
+  const second = state.send()
+  assert.deepEqual(state.displayRows.value.filter(row => row._pending).map(row => [row.content, row.status]), [['ok', 'Sending'], ['ok', 'Sending']])
+  await tick()
+  assert.equal(sends().length, 1, 'The second send waits behind the first')
+  responses[0].resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001' })
+  await first
+  await tick()
+  responses[1].resolve({ status: 'Submitted', action: 'RELAY-MA-0000000002' })
+  await second
+  const keys = sends().map(values => values.request_key)
+  assert.equal(new Set(keys).size, 2)
+  assert.deepEqual(sends().map(values => values.data.text), ['ok', 'ok'])
+})
+
+test('a failed send shows Failed with Retry and does not block the next message', async t => {
+  const { state, sends } = fixture(t, (method, values) => method === 'messaging.send' && values.data.text === 'First'
+    ? { status: 'Rejected', action: 'RELAY-MA-0000000001', error: 'Provider rejected' } : undefined)
+  await state.open('A')
+  state.body.value = 'First'
+  const first = state.send()
+  state.body.value = 'Second'
+  const second = state.send()
+  await Promise.all([first, second])
+  assert.deepEqual(sends().map(values => values.data.text), ['First', 'Second'])
+  assert.deepEqual(state.displayRows.value.filter(row => row._pending).map(row => [row.content, row.status]), [['First', 'Failed']])
+})

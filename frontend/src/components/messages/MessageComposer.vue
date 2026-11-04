@@ -2,6 +2,7 @@
 import { deadlineTime } from "../relativeTime";
 import { inject, computed, watch, ref, onBeforeUnmount, nextTick } from "vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
+import { isReceiptsOnly } from "../../services/realtimeRefreshQueue";
 import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError, attachmentMaxBytes, sizeError, sizeLabel } from "./attachmentFormats";
 import { channelCan } from "../../services/enabledChannels";
@@ -45,11 +46,11 @@ const {
   contactName,
   phone,
   busy: working,
-  sending = ref(0),
   error,
   send,
 } = inject(messagesKey);
-const busy = computed(() => working.value || sending.value > 0);
+// Sends wait in their own queue and show on their bubbles, so a send in flight does not hold the composer.
+const busy = working;
 const capabilities = inject("relayCapabilities", ref({}));
 const can = feature => channelCan(capabilities.value, sourceContext.value.provider, feature);
 // `mode` is "reply" or "note"; the note slot holds the internal note form, so a note never goes to the customer.
@@ -154,7 +155,8 @@ const clockTimer = setInterval(() => { now.value = Date.now(); }, 30000);
 const windowState = ref({ open: true }),
   windowError = ref("");
 let windowGeneration = 0, expiryTimer;
-async function checkWindow() {
+// A live recheck keeps the composer open while it reads; only a new source waits for its window.
+async function checkWindow(live = false) {
   const generation = ++windowGeneration;
   clearTimeout(expiryTimer);
   windowChecking.value = false;
@@ -172,7 +174,7 @@ async function checkWindow() {
     if (chosenWindow.open && Number.isFinite(chosenWindow.remaining_seconds)) expiryTimer = setTimeout(() => { windowState.value = { ...windowState.value, open: false }; }, Math.min(chosenWindow.remaining_seconds * 1000, 2147483647));
     return;
   }
-  windowChecking.value = true;
+  windowChecking.value = live !== true;
   try {
     const result = await coreApi("messaging.reply_window", {
       message: source.value.name,
@@ -200,7 +202,7 @@ watch(
   },
   { immediate: true },
 );
-useRealtimeRefresh([], ['messages'], checkWindow);
+useRealtimeRefresh([], ['messages', 'receipts'], ({ kinds }) => isReceiptsOnly(kinds) ? undefined : checkWindow(true));
 watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
 
 const offReason = computed(() => props.offText || (windowState.value.channel_disabled ? channelOffText(sourceContext.value.provider) : ""));

@@ -7,6 +7,8 @@ record identity in shared rooms. These reads are event-driven, not scheduled
 polls. Sending, searching, pagination and marking messages actually viewed are
 explicit API operations.
 
+A delivery receipt event has `receipt: 1`. The chat lists, queue counts, send numbers and reply window ignore it. An open thread re-reads only the messages that the event names. A new message updates the chat list rows in place: the list does not empty or reload, and it keeps its scroll position and loaded pages. The composer stays open while sends are in flight. Each send shows a pending bubble and goes out in order behind a client queue, with its own request key.
+
 Removed periodic inbox recovery, send reconciliation, presence reads,
 notification reads, reply-window checks, summary fallback and report checks.
 Socket.IO reconnects with backoff and rejoins subscribed rooms. Each mounted

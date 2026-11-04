@@ -308,7 +308,7 @@ export function useMessages() {
   // messages it names; its new messages come from the ingestion cursor instead.
   async function drainSnapshots() {
     if (snapshotting) return;
-    if (busy.value || sending.value) { actionRefreshPending=true; return; }
+    if (busy.value) { actionRefreshPending=true; return; }
     if (!conversationIdentity() || document.visibilityState !== 'visible') return;
     const generation = requestSequence, identity = conversationIdentity();
     const current = () => generation === requestSequence && identity === conversationIdentity();
@@ -361,7 +361,7 @@ export function useMessages() {
     await refreshLive();
   }
   async function refreshDetails(kinds) {
-    if(busy.value || sending.value){actionRefreshPending=true;return;}
+    if(busy.value || sending.value){actionRefreshPending=true;kinds.forEach(kind=>deferredKinds.add(kind));return;}
     const generation=requestSequence, identity=conversationIdentity();
     const current=()=>generation===requestSequence && identity===conversationIdentity();
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('message_actions')) {
@@ -372,24 +372,29 @@ export function useMessages() {
     }
     if(current() && (kinds.has('reconnect') || kinds.has('visible') || kinds.has('contacts'))) await refreshMetadata();
   }
-  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','contacts','message_actions','permissions'],async({kinds,messages})=>{
+  // A delivery receipt re-reads only the messages it names; it brings no new message.
+  useRealtimeRefresh(['Relay Message','Relay Contact'],['messages','receipts','contacts','message_actions','permissions'],async({kinds,messages})=>{
     if(document.visibilityState !== 'visible')return;
     if(kinds.has('reconnect'))pagingError.value='';
     if(kinds.has('permissions')){++requestSequence;windows.clear();rows.value=[];last.value=null;pendingMessages.value=[];clearArrivals();clearRecipient();}
     // Queued before a busy return, so the refresh after the action still re-reads them.
     if(kinds.has('reconnect') || kinds.has('visible'))sweepQueued=true;
     for(const name of messages||[])changedQueued.add(name);
-    if(busy.value){actionRefreshPending=true;return;}
+    if(busy.value){actionRefreshPending=true;kinds.forEach(kind=>deferredKinds.add(kind));return;}
     if(kinds.has('reconnect') || kinds.has('visible') || kinds.has('messages') || kinds.has('permissions') || kinds.has('message_actions')) await refreshLive();
+    else if(kinds.has('receipts')) void drainSnapshots();
     // Recovery and metadata must not hold up the queue's next incoming message.
     void refreshDetails(kinds).catch(()=>{});
   },40);
-  let actionRefreshPending = false;
+  // Events held back during an action or a send run once it ends: the new rows, then only the details they named.
+  let actionRefreshPending = false, deferredKinds = new Set();
   async function refreshActionState() {
     if (busy.value || sending.value) { actionRefreshPending = true; return; }
     actionRefreshPending = false;
+    const kinds = deferredKinds;
+    deferredKinds = new Set();
     await refreshLive();
-    await refreshDetails(new Set(['visible']));
+    if (kinds.size) await refreshDetails(kinds);
   }
   watch(() => busy.value || sending.value > 0, value => {
     if (!value && actionRefreshPending) refreshActionState().catch(()=>{});
@@ -675,6 +680,7 @@ export function useMessages() {
     if (!message) return;
     const submitted = {scope:windowKey(), body:body.value, kind:kind.value, attachment:attachment.value,
       quoting:quoting.value, source:source.value};
+    const typed = !data;
     if (!data) {
       if (["photo", "video", "audio", "voice", "document"].includes(action)) {
         if (!attachment.value) {
@@ -739,8 +745,13 @@ export function useMessages() {
       data,
       ...(extraChannels.length ? { channels: extraChannels } : {}),
     });
-    const storage = "relay-typed-action-" + sha256Hex(intent);
+    let storage = "relay-typed-action-" + sha256Hex(intent);
     let key = sessionStorage.getItem(storage);
+    // The composer clears on Send, so the same text typed again while the first is on its way is a new message.
+    if (typed && key && sendingKeys.has(key)) {
+      key = null;
+      storage += ":" + randomUUID();
+    }
     if (!key) {
       key = randomUUID();
       sessionStorage.setItem(storage, key);
@@ -798,8 +809,13 @@ export function useMessages() {
         : result.status === "Queued" ? "" : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
     if(result.status==='Submitted')sessionStorage.removeItem(storage);
     restored.value = "";
-    await history();
-    if(result.status==='Submitted')pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
+    // A send from an older page of history opens the newest page, where its bubble belongs.
+    if (newer.value) await history();
+    // The sent bubble stays until the live update brings its stored message; no history read is needed.
+    if(pending && result.status==='Submitted') {
+      pending.persistedMessage=result.message;
+      if(!result.message || rows.value.some(row=>row.name===result.message))pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
+    }
     // Unfinished copies on other channels join the same bubble as failed or pending marks.
     if((result.sends||[]).slice(1).some(copy=>!['Submitted','Queued'].includes(copy.status))) {
       notice.value=notice.value||"Some channels did not get this message. Review Message activity for retry options.";
