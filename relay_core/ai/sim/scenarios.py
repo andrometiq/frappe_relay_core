@@ -13,7 +13,7 @@ CLASSES = frozenset({'reply', 'search_declared', 'handoff', 'decline', 'awaiting
 SCENARIO_KEYS = frozenset({'id', 'suite', 'persona', 'language', 'skill', 'turns', 'max_calls', 'max_usd', 'notes'})
 TURN_KEYS = frozenset({'in', 'step', 'args', 'decision', 'expect'})
 DECISION_KEYS = frozenset({'reply', 'handoff', 'reason', 'data_question', 'decline', 'search',
-                           'calls', 'execute', 'match', 'json', 'fault'})
+                           'calls', 'execute', 'match', 'json', 'fault', 'echo'})
 EXPECT_KEYS = frozenset({'class', 'skill', 'outbound', 'tool_calls', 'reads', 'oracle', 'contains', 'forbid_text', 'script',
                          'state', 'journals', 'disclosure'})
 # Operator steps run between customer turns; run.STEPS implements each.

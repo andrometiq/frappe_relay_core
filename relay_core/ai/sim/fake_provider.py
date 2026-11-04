@@ -12,7 +12,8 @@ MODEL_ID = 'relay-sim'
 CHAT_PATH = '/api/v1/chat/completions'
 MATCHING_PREFIX = 'Classify the incoming message'
 AUTHORIZED = re.compile(r'\nAuthorized search:\n(.*?)\nSkill:\n', re.DOTALL)
-CONTENT_ONLY = ('search', 'calls', 'execute', 'match', 'json', 'fault')
+CONTENT_ONLY = ('search', 'calls', 'execute', 'match', 'json', 'fault', 'echo')
+FACT = re.compile(r'^\[[^\]]+\] \((?:own|shared)\) ')
 OK = {'MALAYALAM': 'ശരി', 'DEVANAGARI': 'ठीक है', 'TAMIL': 'சரி'}  # Short answers in the sender's script.
 
 
@@ -111,7 +112,9 @@ class Script:
         """One planned tool call per round while tools are allowed, then the decision JSON."""
         planned = planned_calls(decision, system)
         done = sum(1 for row in body.get('messages', []) if row.get('role') == 'tool')
-        if done < len(planned) and body.get('tools') and body.get('tool_choice') != 'none':
+        # The `tool_loop` fault is a model that keeps calling tools after Core forbids them.
+        if done < len(planned) and body.get('tools') and (body.get('tool_choice') != 'none'
+                                                           or decision.get('fault') == 'tool_loop'):
             name, arguments = planned[done]
             call = {'id': f'call_{done + 1}', 'type': 'function',
                     'function': {'name': name, 'arguments': json.dumps(arguments, ensure_ascii=False)}}
@@ -120,11 +123,29 @@ class Script:
         value.setdefault('data_question', bool(planned))
         for key, default in (('reply', ''), ('handoff', False), ('reason', '')):
             value.setdefault(key, default)
+        if decision.get('echo'):
+            value['reply'] = ' '.join([value['reply'], *echoed(body)]).strip()
         if planned and done and not value['reply'] and not value['handoff']:
             # A model that ran its tools answers in the sender's script; the pack renderer replaces this text.
             from relay_core.ai.language import detect
             value['reply'] = OK.get(detect(incoming(body))['script'], 'ok')
         return content(value, body)
+
+
+def echoed(body: dict) -> list[str]:
+    """What a careless model repeats to the sender: knowledge results it was given and the recalled facts."""
+    texts = []
+    for row in body.get('messages', []):
+        if row.get('role') == 'tool':
+            try:
+                texts += json.loads(row.get('content') or '{}').get('results') or []
+            except (ValueError, AttributeError):
+                continue
+    try:
+        memory = json.loads(user_text(body)).get('reference_data', {}).get('memory') or []
+    except (ValueError, AttributeError):
+        memory = []
+    return texts + [FACT.sub('', line) for line in memory[1:]]
 
 
 def planned_calls(decision: dict, system: str) -> list[tuple[str, dict]]:
