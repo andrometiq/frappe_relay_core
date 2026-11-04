@@ -117,8 +117,11 @@ def route(ai_model, timeout=20):
 
 def reserve_spend(skill, model, prompt_chars: int, options: dict, turns: int = 1) -> dict:
     """Reserve the cost of up to `turns` provider turns before the first one; raise when a cap is reached."""
-    from relay_core.ai.budget import estimate_usd, reserve
-    return reserve(skill, estimate_usd(model, prompt_chars, options['max_tokens']) * turns)
+    from relay_core.ai.budget import estimate_usd, reserve, refund
+    from relay_core.ai.remote.site import on_handed
+    reservation = reserve(skill, estimate_usd(model, prompt_chars, options['max_tokens']) * turns)
+    on_handed(lambda: refund(reservation))
+    return reservation
 
 
 def settle_spend(reservation: dict, model, outcome: dict, turns: int = 1) -> None:

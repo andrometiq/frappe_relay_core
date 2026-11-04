@@ -51,7 +51,7 @@ def reserve(skill, estimate: float) -> dict:
             for added in keys:
                 cache.incrbyfloat(added, -estimate)
             raise ValueError(CAP_REACHED)
-    return {'keys': keys, 'estimate': estimate}
+    return {'keys': keys, 'estimate': estimate, 'charged': estimate}
 
 
 def daily_cap(skill) -> float:
@@ -62,4 +62,10 @@ def settle(reservation: dict, actual: float) -> None:
     """Replace the reserved estimate with the actual cost."""
     cache = frappe.cache
     for key in reservation['keys']:
-        cache.incrbyfloat(key, actual - reservation['estimate'])
+        cache.incrbyfloat(key, actual - reservation.get('charged', reservation['estimate']))
+    reservation['charged'] = actual
+
+
+def refund(reservation: dict) -> None:
+    """Remove what the reservation charged; a run replays a turn handed to the AI service and charges it then."""
+    settle(reservation, 0)
