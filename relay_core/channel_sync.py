@@ -58,6 +58,8 @@ def sync():
         frappe.db.commit()
         result = store(account, listed)
         frappe.db.commit()
+    # Health such as a failed check lives in the Hub, so open Account pages read again even when no row changed.
+    publish()
     return dict(result, synced=True)
 
 
@@ -121,6 +123,12 @@ def keep_one_default(account):
                               filters={'account': account, 'channel': provider, 'enabled': 1})
         if len(rows) > 1 and not any(row.is_default for row in rows):
             save(frappe.get_doc('Relay Channel', rows[0].name), {'is_default': 1})
+
+
+def publish():
+    """Tell open Account pages to read the channels again. No ids or status travel in the event."""
+    frappe.publish_realtime('relay_changed', {'kind': 'channels'}, room=frappe.realtime.get_doctype_room('Relay Channel'),
+                            after_commit=True)
 
 
 def queue_sync():
