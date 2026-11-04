@@ -48,7 +48,7 @@ A flow starts when the customer sends one of these:
 | Hand over to a person | Sends its Message, holds the admission ticket for staff and stops the flow |
 | End the flow | Sends an optional final message |
 
-Each step goes to the following step, or to the step named in **Then go to**. A loop is allowed only when it stops at a question. **Repeat limit** stops a step after a number of visits (default 20). Single choices use up to 3 WhatsApp reply buttons or a list of up to 10 options when the Hub advertises `messages.interactive` in its capability operations. The installed Hub does not currently advertise that operation. Otherwise choices use numbered text; the customer can reply with a number, label or stable value. Long labels, optional choices and multiple-choice questions also use numbered text. Delivery format is pinned per prompt visit so retries cannot change its idempotency payload.
+Each step goes to the following step, or to the step named in **Then go to**. A loop is allowed only when it stops at a question. **Repeat limit** stops a step after a number of visits (default 20). Single choices use up to 3 WhatsApp reply buttons or a list of up to 10 options when the Hub advertises `messages.interactive` in its capability operations. The Hub lists it in `operations` of its `capabilities` reply; Core reads that reply once per prompt visit (cached for 60 seconds). Otherwise choices use numbered text; the customer can reply with a number, label or stable value. Long labels, optional choices and multiple-choice questions also use numbered text. Delivery format is pinned per prompt visit so retries cannot change its idempotency payload.
 
 ## Versions
 
