@@ -81,8 +81,8 @@ class ChannelSetupTests(unittest.TestCase):
 
     def test_default_number_moves_to_the_chosen_enabled_number(self):
         whatsapp.set_default('Support line')
-        defaults = [row.name for row in self.site.rows('Relay Channel', {'is_default': 1})]
-        self.assertEqual(defaults, ['Support line'])
+        self.assertEqual(self.site.rows('Relay Channel', {'name': 'Support line'})[0].is_default, 1)
+        self.publish.assert_called_once()
         with self.assertRaisesRegex(SetupError, 'Turn the number on'):
             whatsapp.set_default('Old line')
 

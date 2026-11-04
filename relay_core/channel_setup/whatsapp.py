@@ -72,10 +72,8 @@ def set_default(name):
     row = relay_channel(name, PROVIDER)
     if not row.enabled:
         fail('number_disabled')
-    for other in frappe.get_all('Relay Channel', pluck='name', filters={
-            'channel': PROVIDER, 'account': connection_value('relay_hub_account'), 'is_default': 1, 'name': ['!=', row.name]}):
-        frappe.db.set_value('Relay Channel', other, 'is_default', 0)
-    frappe.db.set_value('Relay Channel', row.name, 'is_default', 1)
+    from relay_core.channel_sync import save
+    save(frappe.get_doc('Relay Channel', row.name), {'is_default': 1})  # RelayChannel.on_update clears the other default.
     publish()
     return {'default': row.name}
 
@@ -94,7 +92,6 @@ def remove(name, confirm=False):
     result = hub_call('whatsapp.number.remove', {'channel': row.hub_channel, 'confirm': True})
     from relay_core.channel_sync import sync
     sync()
-    publish()
     return {'removed': result.get('removed') is True, 'deregistered': result.get('deregistered') is True,
             'unsubscribed': result.get('unsubscribed') is True}
 
