@@ -10,6 +10,7 @@ from relay_core.tickets import ensure_episode, hold_episode, episode_owner_allow
 
 
 ACKNOWLEDGEMENT = 'Thank you for letting us know. A person from our team will follow up with you.'
+TICKET_REFERENCE = 'Your ticket number is {ticket}.'
 outgoing_notice = ContextVar('relay_handoff_notice', default=False)
 
 
@@ -49,6 +50,13 @@ def queue_acknowledgement(run, ticket, *, user):
     frappe.enqueue('relay_core.ai.handoff.acknowledge', name=run.name, queue=QUEUE, enqueue_after_commit=True)
 
 
+def acknowledgement(message, ticket: str) -> str:
+    """The fixed handoff notice and the ticket number, in the sender's language."""
+    from relay_core.ai.language import message_notice
+    reference = message_notice('ticket', message, TICKET_REFERENCE).format(ticket=ticket)
+    return message_notice('handoff', message, ACKNOWLEDGEMENT) + ' ' + reference
+
+
 def notice_scope(run, message):
     from relay_core.automation.channel import identity, enabled
     from relay_core.automation.service import message_hash, lock_contact
@@ -81,8 +89,7 @@ def authorize_notice(action, message):
     prefix = 'email:' if action.operation == 'email' else ''
     key = hashlib.sha256((prefix + frappe.session.user + ':' + reply_key(message.name, 'handoff', run)).encode()).hexdigest()
     body = payload.get('email_values', {}).get('body') if prefix else payload.get('content', {}).get('text')
-    from relay_core.ai.language import message_notice
-    if action.request_key != key or body != message_notice('handoff', message, ACKNOWLEDGEMENT) or action.operation not in ('text', 'email'):
+    if action.request_key != key or body != acknowledgement(message, run.ticket) or action.operation not in ('text', 'email'):
         raise ValueError('Invalid handoff acknowledgement')
     notice_scope(run, message)
 
@@ -101,8 +108,7 @@ def acknowledge(name):
         with as_user(decision['notice_user']):
             message = frappe.get_doc('Relay Message', run.message)
             notice_scope(run, message)
-            from relay_core.ai.language import message_notice
-            result = send_reply(message, message_notice('handoff', message, ACKNOWLEDGEMENT), slot='handoff')
+            result = send_reply(message, acknowledgement(message, run.ticket), slot='handoff')
             # Queued/uncertain sends are recovered by the existing message journal.
             decision['handoff_notice'] = 'Journaled' if result['status'] in (
                 'Submitted', 'Queued', 'Uncertain', 'Dispatching') else 'Blocked'

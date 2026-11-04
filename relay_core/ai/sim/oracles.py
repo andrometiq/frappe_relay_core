@@ -76,8 +76,14 @@ def decline_text(seed: dict, scenario: dict) -> str:
 
 
 def handoff_text(seed: dict, scenario: dict) -> str:
-    from relay_core.ai.handoff import ACKNOWLEDGEMENT
-    return notice('handoff', ACKNOWLEDGEMENT, scenario)
+    """The handoff notice with the number of the persona's newest ticket, which the handoff raised or reopened."""
+    import frappe
+    from relay_core.ai.handoff import ACKNOWLEDGEMENT, TICKET_REFERENCE
+    doctype, name = business(seed, scenario)
+    ticket = frappe.get_all('Relay Ticket', filters={'business_doctype': doctype, 'business_name': name},
+                            order_by='creation desc', limit=1, pluck='name')
+    reference = notice('ticket', TICKET_REFERENCE, scenario).format(ticket=ticket[0] if ticket else '?')
+    return notice('handoff', ACKNOWLEDGEMENT, scenario) + ' ' + reference
 
 
 def approval_notice_text(seed: dict, scenario: dict) -> str:

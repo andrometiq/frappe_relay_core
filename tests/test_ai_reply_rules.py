@@ -314,7 +314,8 @@ class HandoffNoticeTests(unittest.TestCase):
     def action(self, email=False):
         key = service.reply_key(self.message.name, 'handoff', self.run)
         prefix = 'email:' if email else ''
-        body = {'email_values': {'body': handoff.ACKNOWLEDGEMENT}} if email else {'content': {'text': handoff.ACKNOWLEDGEMENT}}
+        text = handoff.acknowledgement(self.message, self.run.ticket)
+        body = {'email_values': {'body': text}} if email else {'content': {'text': text}}
         return fixtures.Doc(operation='email' if email else 'text',
             request_key=hashlib.sha256((prefix + 'operator:' + key).encode()).hexdigest(),
             payload=json.dumps(dict(automation_run=self.run.name, handoff_notice=True, **body)))
@@ -360,6 +361,20 @@ class HandoffNoticeTests(unittest.TestCase):
         self.message.ticket = 'OTHER'
         with self.assertRaises(ValueError):
             messaging.automation_scope(action, self.message)
+
+    def test_notice_names_the_ticket_in_the_sender_language(self):
+        self.assertEqual(handoff.acknowledgement(self.message, 'TKT-00042'),
+                         handoff.ACKNOWLEDGEMENT + ' Your ticket number is TKT-00042.')
+        self.message.content = 'எனக்கு உதவி வேண்டும்'
+        self.assertTrue(handoff.acknowledgement(self.message, 'TKT-00042').endswith('உங்கள் டிக்கெட் எண் TKT-00042.'))
+
+    def test_notice_with_another_ticket_number_is_never_authorized(self):
+        action = self.action()
+        payload = json.loads(action.payload)
+        payload['content']['text'] = handoff.acknowledgement(self.message, 'TKT-99999')
+        action.payload = json.dumps(payload)
+        with self.assertRaisesRegex(ValueError, 'Invalid handoff'):
+            messaging.delivery_fence(action, self.message, {})
 
     def test_changed_body_is_never_authorized(self):
         action = self.action()
