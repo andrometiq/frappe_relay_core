@@ -46,7 +46,9 @@ class CustomerPollNoticePatchTests(unittest.TestCase):
             {'name': 'MSG-3', 'provider_id': 'wamid.three', 'message_data': json.dumps({'kind': 'unsupported',
                 'unsupported': {'type': 'group_invite', 'reason': 'Group invite messages are not supported by WhatsApp Business'}})},
         ]
-        updates = self.run_patch(messages, [poll_event('wamid.one', 'poll_creation'), 'not json'])
+        legacy_telegram = json.dumps({'channel': 'Telegram', 'direction': 'inbound', 'provider_id': 'tg-1',
+                                      'sender': 'tg-user', 'body': 'What is poll_creation?'})
+        updates = self.run_patch(messages, [poll_event('wamid.one', 'poll_creation'), 'not json', legacy_telegram])
         self.assertEqual([(name, field, modified) for name, field, _, modified in updates],
                          [('MSG-1', 'message_data', False), ('MSG-2', 'message_data', False)])
         first, second = updates[0][2], updates[1][2]
@@ -55,6 +57,12 @@ class CustomerPollNoticePatchTests(unittest.TestCase):
         self.assertEqual(first['unsupported']['reason'], POLL_REASONS['poll_creation'])
         self.assertEqual(second['unsupported'], {'type': 'poll_update', 'code': 131051, 'reason': POLL_REASONS['poll_update']})
         self.assertEqual(self.run_patch(messages, [poll_event('wamid.one', 'poll_creation')]), [], 'A second run changes nothing')
+
+    def test_unavailable_message_keeps_its_reason(self):
+        data = {'kind': 'unsupported', 'unsupported': {'type': 'poll_creation', 'code': 131060,
+                'reason': 'This message is currently unavailable'}}
+        messages = [{'name': 'MSG-1', 'provider_id': 'wamid.one', 'message_data': json.dumps(data)}]
+        self.assertEqual(self.run_patch(messages, []), [])
 
 
 if __name__ == '__main__':

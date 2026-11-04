@@ -17,7 +17,7 @@ def execute():
     for row in rows:
         data = json.loads(row.message_data or '{}')
         detail = from_events.get(row.provider_id) or data.get('unsupported') or {}
-        if detail.get('type') not in POLL_REASONS:
+        if detail.get('type') not in POLL_REASONS or detail.get('code') == 131060:
             continue
         shown = {**data, 'kind': 'unsupported', 'unsupported': {**detail, 'reason': POLL_REASONS[detail['type']]}}
         if shown != data:
@@ -37,7 +37,7 @@ def event_details() -> dict:
         except (ValueError, TypeError, AttributeError):
             continue
         for row in rows:
-            detail = row['message_data'].get('unsupported') or {}
+            detail = (row.get('message_data') or {}).get('unsupported') or {}
             if detail.get('type') in POLL_REASONS:
                 details[row['id']] = detail
     return details
