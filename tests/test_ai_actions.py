@@ -685,6 +685,18 @@ class VerifiedContactExecution(unittest.TestCase):
         self.assertEqual(self.send.call_args.args[2], {'text': 'Noted: 1250 received.'})
         self.handoff.assert_not_called()
 
+    def test_a_knowledge_source_that_left_the_scope_stops_approval_and_execution(self):
+        self.run.decision = json.dumps(dict(json.loads(self.run.decision), sources=['SRC-1']))
+        gone = ValueError('A knowledge source used by this reply changed or is no longer available')
+        with patch('relay_core.ai.knowledge_base.retriever.check_sources', side_effect=gone) as check:
+            with self.assertRaisesRegex(ValueError, 'knowledge source'):
+                self.actions._ai_context(self.run.name, 0)
+            self.assertEqual(check.call_args.args[1:], (('Customer', 'Sim Customer'), 'Sim Company', ['SRC-1']))
+            self.service.process(self.run.name)
+        self.f.get_attr.assert_not_called()
+        self.send.assert_not_called()
+        self.assertIn('knowledge source', self.handoff.call_args.args[2])
+
     def test_action_permission_and_handler_use_the_skill_service_user(self):
         self.skill.run_as_user = 'service'
         handlers = []
