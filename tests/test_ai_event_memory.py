@@ -341,6 +341,7 @@ class ReplyContextTests(unittest.TestCase):
         self.saved = Mock(summary_hash='HASH-1', **{'text.return_value': self.MEMORY,
                                                     'rows.return_value': [_dict(name='MEM-1'), _dict(name='MEM-2')]})
         self.memory = self.enterContext(patch('relay_core.ai.memory.get_memory', return_value=self.saved))
+        self.enterContext(patch('relay_core.ai.fact_memory.memory_block', return_value=[]))
 
     def context(self):
         return event_memory.ReplyContext(*self.KEY)
@@ -392,8 +393,10 @@ class ReplyContextTests(unittest.TestCase):
         class Context(event_memory.ReplyContext):
             def __init__(self, *args):
                 super().__init__(*args)
-                self.facts = [f'[F{index}] (own) ' + 'f' * 2000 for index in range(3)]
                 self.chunks = ['Riverside Traders Association passes are at the desk.']
+
+            def recall(self, skill, query):
+                self.facts = [f'[F{index}] (own) ' + 'f' * 2000 for index in range(3)]
         service = module('relay_core/ai/service.py', framework())
         service.context = Mock(return_value=('partner', ('Customer', 'C1'), {'company': 'Sim Company', 'provider': 'WhatsApp'}))
         service.conversation_history = Mock(return_value=[{'direction': 'Incoming', 'content': 'Earlier question'}])

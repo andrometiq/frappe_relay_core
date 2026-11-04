@@ -357,6 +357,11 @@ class ReplyContext:
                                    for row in self.events]
         return {'reference_data': {'note': self.NOTE, **reference}} if reference else {}
 
+    def recall(self, skill, query: str) -> None:
+        """The skill's fact memory for this business that is relevant to `query`."""
+        from relay_core.ai.fact_memory import memory_block
+        self.facts = memory_block(skill, self.business, query)
+
     def trim_memory(self, overflow: int) -> None:
         """Drop the oldest memory lines until about `overflow` characters are gone."""
         removed = 0
@@ -368,12 +373,14 @@ class ReplyContext:
     def used(self) -> dict | None:
         """What the prompt used, for the run record: the memory key, its rows, a hash of the prompt text, a hash of the
         saved summaries that delivery compares, and event revisions."""
+        from relay_core.ai.fact_memory import used
         memory = self.memory
-        if not memory and not self.events:
+        if not memory and not self.events and not self.facts:
             return None
         return {'memory': {'business': list(self.business), 'address': self.address, 'company': self.company,
                            'provider': self.provider, 'user': self.user, 'rows': self.memory_rows,
                            'sha256': hashlib.sha256(memory.encode()).hexdigest(), 'memory_hash': self.memory_hash,
                            'trimmed_lines': self.trimmed_lines} if memory else None,
                 'events': [{'event': row.name, 'revision': row.memory_revision, 'build': row.memory_build}
-                           for row in self.events]}
+                           for row in self.events],
+                **({'facts': used(self.facts)} if self.facts else {})}

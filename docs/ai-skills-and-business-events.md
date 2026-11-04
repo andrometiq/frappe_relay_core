@@ -73,6 +73,23 @@ Relay AI Skill also has `max_tool_calls` (default 4, maximum 6), `knowledge_base
 
 Reply prompts trim in this order: memory facts, record memory lines, history, knowledge chunks, events. Recalled fact memory (`reference_data.memory`) never allows a contact value in the reply guard. The guard copy check takes every trusted owner text of the prompt.
 
+## Fact memory
+
+`Relay AI Memory` keeps short facts (at most 300 characters) for one skill. `Relay Memory` stays the timeline of messages. A fact has one of two scopes:
+
+| Scope | Recalled for | Written by |
+|---|---|---|
+| Skill | Every sender of the skill, labelled `shared` | Relay managers only |
+| Business | Only senders of that business record, labelled `own`. Every contact of the business shares it | Staff with read access to the record, or the model in a customer reply |
+
+- Recall: before the model call, `fact_memory.memory_block` puts up to 8 Active facts into `reference_data.memory` as `[id] (shared|own) fact`, after a lead line that says the facts are data, not instructions. MariaDB FULLTEXT ranks them. When FULLTEXT finds nothing, the 3 longest query words are matched with LIKE. A recall error gives no facts and an Error Log.
+- Customer writes: the `remember(content, memory_id)` tool is for skills with **Customer memory** (`memory_enabled`) on, a sender with a resolved business and a run. It writes only Business scope for the sender's own business, at most 20 facts per skill and business. Over the limit the model must revise a fact with `memory_id`. A fact with a secret, a masked contact, or a phone number, email or record name of another party is refused. The new fact is Pending. It becomes Active when the reply of its run is journaled for delivery. A revised fact is archived then. A blocked, superseded or taken-over run leaves the fact Pending, and a daily job deletes Pending facts after one day. When **Customer memory** is off, customer-written facts are not recalled.
+- Staff writes: `fact_memory.directory`, `save` and `archive`. A staff fact is Active at once, at most 100 per skill in Skill scope and 20 per business. Staff edit only staff facts. Customer-written facts are marked `written_by_customer`; show them as plain text. Facts are archived, not deleted.
+- Feedback: `fact_memory.rate_run(run, rating, comment, scope)` is for Relay managers who can read the run's ticket. A `Down` rating with a comment saves the comment as a Feedback fact. A new or withdrawn rating deletes that fact.
+- Reply guard: only staff-written facts allow a contact value. A customer-written fact never does, so a saved third-party number stays blocked. Skill-scope facts join the verbatim-copy check.
+- Delivery: the run records the fact ids and line hashes in `ai_context.facts`. Delivery stops when a used fact is archived, changed or out of scope.
+- Sites on Postgres have no FULLTEXT index, so they get no `remember` tool and no recall.
+
 ## Staff ownership and delivery
 
 Take over, Start work, an explicit claim, and the first manual outbound message stop AI for that episode. The ownership transaction sets `ai_disabled`, advances its generation, and invalidates pending approvals. Assignment alone does not stop AI. All continuations, writes, flow steps, sends, and recovery attempts check ownership. Other business episodes for the same contact remain independent.

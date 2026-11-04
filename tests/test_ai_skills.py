@@ -1116,7 +1116,7 @@ class ConversationIdentityTests(unittest.TestCase):
                                        own_message=lambda doc, user=None: bool(doc.get('own')))
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
         no_reference = types.SimpleNamespace(FACTS='memory', ReplyContext=lambda *args: types.SimpleNamespace(
-            lines=[], events=[], facts=[], chunks=[], prompt={}, used=None))
+            lines=[], events=[], facts=[], chunks=[], prompt={}, used=None, recall=lambda skill, query: None))
         names = framework()
         names.db.get_value.return_value = 'Sim Sender'
         self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,

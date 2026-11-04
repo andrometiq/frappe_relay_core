@@ -107,8 +107,7 @@ class SchemaTests(unittest.TestCase):
         ctx = ToolContext(run=None, skill=None, user='sam@example.com', business=('Customer', 'Acme Textiles'), scope={})
         with self.assertRaises(NotImplementedError):
             search_knowledge({'query': 'event pass'}, ctx)
-        with self.assertRaises(NotImplementedError):
-            memory_block(None, ('Customer', 'Acme Textiles'), 'delivery')
+        self.assertEqual(memory_block(None, ('Customer', ''), 'delivery'), [])
 
 
 class ToolSyncTests(CapabilityCase):
