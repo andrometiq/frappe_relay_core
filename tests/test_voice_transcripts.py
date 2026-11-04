@@ -36,7 +36,9 @@ class VoiceTranscriptTests(unittest.TestCase):
             utils=types.SimpleNamespace(now_datetime=lambda: '2026-10-25 23:00:00', add_to_date=lambda *a, **k: '2026-10-25 22:50:00'))
         self.transcribe = Mock(return_value='Please send the invoice')
         self.realtime = Mock()
+        self.allowed = {'ChatGPT Login', 'API Key'}
         stubs = {'frappe': self.frappe,
+                 'relay_core.ai.adapter': types.SimpleNamespace(allowed_auth_types=lambda: self.allowed),
                  'relay_core.automation.queue': types.SimpleNamespace(after_message_commit=lambda handler: handler),
                  'relay_core.automation.service': types.SimpleNamespace(message_hash=lambda doc: doc.get('content', '') + doc.message_type),
                  'relay_core.automation.multimodal': types.SimpleNamespace(transcribe=self.transcribe),
@@ -96,6 +98,15 @@ class VoiceTranscriptTests(unittest.TestCase):
         self.assertEqual(row.transcript_status, 'Failed')
         self.assertEqual(json.loads(row.transcript_details), {'reason': 'Transcription could not be completed', 'attempts': 1})
         self.assertNotIn('synthetic-secret', row.transcript_details)
+
+    def test_api_key_auth_type_must_be_allowed_before_any_audio_is_sent(self):
+        self.allowed = {'ChatGPT Login'}
+        self.receive(); self.module.process('voice')
+        row = self.rows['voice']
+        self.assertEqual(row.transcript_status, 'Failed')
+        self.assertEqual(json.loads(row.transcript_details)['reason'],
+                         'Voice transcription uses an API key, which Relay Settings does not allow')
+        self.transcribe.assert_not_called()
 
     def test_edit_during_transcription_discards_old_audio_text(self):
         def edited(*args, **kwargs):

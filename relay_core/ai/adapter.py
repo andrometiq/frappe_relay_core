@@ -115,15 +115,19 @@ def auth_types(value: str | None) -> set[str]:
     return {line.strip() for line in (value or '').splitlines() if line.strip()}
 
 
+def allowed_auth_types() -> set[str]:
+    """The auth types Relay AI may use. Others use paid API credit; an owner allows them in Relay Settings, never by
+    default."""
+    return auth_types(frappe.db.get_single_value('Relay Settings', 'allowed_ai_auth_types')) or {DEFAULT_AUTH_TYPE}
+
+
 def route(ai_model, timeout=20):
     from frappe_tools.ai import agent, client
     model = frappe.get_doc('AI Model', ai_model)
     account = frappe.get_doc('AI Provider Account', model.account)
     if not model.enabled or not account.enabled:
         raise ValueError('AI Model is unavailable')
-    # Other auth types use paid API credit; an owner allows them in Relay Settings, never by default.
-    allowed = auth_types(frappe.db.get_single_value('Relay Settings', 'allowed_ai_auth_types')) or {DEFAULT_AUTH_TYPE}
-    if account.get('auth_type') not in allowed:
+    if account.get('auth_type') not in allowed_auth_types():
         raise ValueError('The AI Model account auth type is not allowed in Relay Settings')
     from relay_core.test_mode import ensure_allowed
     ensure_allowed(account.get('base_url') or '')

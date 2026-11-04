@@ -150,6 +150,7 @@ class SubmissionTests(TestModeCase):
         with patch.object(voice_transcripts, 'message_hash', return_value='other'), \
                 patch('relay_core.attachments.read', return_value=audio), \
                 patch('relay_core.automation.multimodal.transcribe', return_value='hello') as transcribe, \
+                patch('relay_core.ai.adapter.allowed_auth_types', return_value={'API Key'}), \
                 patch.object(voice_transcripts.frappe, 'db', Mock()), \
                 patch.object(voice_transcripts.frappe, 'get_doc', return_value=source), \
                 patch.object(voice_transcripts.frappe.utils, 'now_datetime', return_value='now'):
