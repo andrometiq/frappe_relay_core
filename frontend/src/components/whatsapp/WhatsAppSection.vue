@@ -49,7 +49,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
         <WhatsAppAccounts v-if="configured" /><p v-else-if="!capabilities.configure">Relay is being set up. Ask your administrator to finish setup.</p>
         <div v-if="capabilities.configure"><a class="relay-button relay-button--solid relay-button--sm" :href="setupRoute('number')">{{ configured ? 'Add another number' : 'Connect WhatsApp' }}</a></div>
       </div>
-      <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Connection settings</a><a class="v1-link" href="/desk/relay-channel">Channel setup in Desk</a></div>
+      <div v-if="capabilities.configure" class="flex flex-wrap gap-3"><a class="v1-link" href="#/settings">Connection settings</a></div>
     </div>
     <component :is="views[tab]" v-else class="channel-section-content" v-bind="tab === 'billing' ? { account } : {}" />
   </section>

@@ -32,7 +32,7 @@ const unavailable = computed(() => !busy.value && (!capabilities.value || (error
       </WorkspaceState>
     </template>
     <template v-else-if="capabilities && !supported">
-      <WorkspaceState title="Template management is disabled" description="Enable message templates in this account’s WhatsApp channel settings in Relay Hub." icon="file-text"><a class="relay-button relay-button--solid" href="#/settings">Open setup</a></WorkspaceState>
+      <WorkspaceState title="Template management is disabled" description="Turn on Message templates for this number on the WhatsApp Account tab." icon="file-text"><a class="relay-button relay-button--solid" href="#/whatsapp?tab=account">Open Account</a></WorkspaceState>
     </template>
     <WhatsAppTemplates v-else-if="capabilities && supported" />
     <template v-else>
