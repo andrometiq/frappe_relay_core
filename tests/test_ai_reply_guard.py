@@ -162,6 +162,9 @@ class ReplyGuardTests(unittest.TestCase):
         self.check(playbook, knowledge=('Short fact.',))
         with self.assertRaises(reply_guard.ReplyBlocked):
             self.check(playbook, knowledge=('Short fact.', playbook))
+        # A plain string would be split into characters and silently pass the copy check.
+        with self.assertRaises(TypeError):
+            self.check(playbook, knowledge=playbook)
 
 
 class GuardWiringTests(unittest.TestCase):

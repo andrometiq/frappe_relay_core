@@ -32,11 +32,15 @@ class ToolContext:
         return rows[0]
 
     def read(self, doctype, fields, filters, limit, order_by, business_field):
+        from relay_core.ai.identity import validate
         from relay_core.ai.tools import Reader, as_user
         from relay_core.business_access import scoped_document
         try:
             reader = Reader(self.skill, self.user, self.business, self.scope)
             reader.check_scope()
+            if self.business[0] != self.skill.business_doctype:
+                raise ValueError('Tool is outside the skill')
+            validate({}, self.scope, self.business)
             fixed = self.fixed_filters(doctype, fields, business_field)
             for key, value in filters.items():
                 if key in fixed and value != fixed[key]:
@@ -49,6 +53,7 @@ class ToolContext:
                     doc = scoped_document(doctype, row.name, fixed, fields)
                     rows.append({field: doc.get(field) for field in fields})
             reader.check_scope()
+            validate({}, self.scope, self.business)
             return rows
         except Exception:
             # Never expose permission errors containing inaccessible document names.
@@ -72,6 +77,8 @@ class ToolContext:
             fixed = {field: self.business[1]}
         company = meta.get_field('company')
         if company and company.fieldtype == 'Link' and company.options == 'Company':
+            if not self.scope.get('company'):
+                raise ValueError('The sender scope has no company')
             fixed['company'] = self.scope['company']
         else:
             company_neutral(doctype)

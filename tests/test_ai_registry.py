@@ -235,11 +235,13 @@ class ToolContextTests(unittest.TestCase):
         relay_tools = types.SimpleNamespace(as_user=as_user, company_neutral=Mock(side_effect=ValueError('not neutral')),
             Reader=lambda *args: types.SimpleNamespace(check_scope=self.scope_checks))
         self.scoped = Mock(return_value=Doc(name='SO-0001', status='Open', transaction_date='2026-11-01'))
+        self.identity = Mock()
         self.enterContext(patch.dict(sys.modules, {'frappe_tools.ai.tools': shared, 'relay_core.ai.tools': relay_tools,
-            'relay_core.business_access': types.SimpleNamespace(scoped_document=self.scoped)}))
-        context = module('relay_core/ai/registry/context.py', self.f)
-        self.ctx = context.ToolContext(run='RUN-1', skill=Doc(), user='sam@example.com',
-                                       business=('Customer', 'Acme Textiles'), scope={'company': 'Acme Textiles'})
+            'relay_core.business_access': types.SimpleNamespace(scoped_document=self.scoped),
+            'relay_core.ai.identity': types.SimpleNamespace(validate=self.identity)}))
+        self.context = module('relay_core/ai/registry/context.py', self.f)
+        self.ctx = self.context.ToolContext(run='RUN-1', skill=Doc(business_doctype='Customer'), user='sam@example.com',
+                                            business=('Customer', 'Acme Textiles'), scope={'company': 'Acme Textiles'})
 
     def test_reads_apply_business_and_company_as_the_run_user(self):
         rows = self.ctx.read_list('Sales Order', fields=['name', 'status'], filters={'status': 'Open'}, limit=3)
@@ -249,6 +251,23 @@ class ToolContextTests(unittest.TestCase):
         self.assertEqual(self.f.get_list.call_args.kwargs['page_length'], 3)
         self.scoped.assert_called_once_with('Sales Order', 'SO-0001', fixed, ['name', 'status'])
         self.assertEqual((self.users, self.scope_checks.call_count), (['sam@example.com'], 2))
+        self.identity.assert_called_with({}, {'company': 'Acme Textiles'}, ('Customer', 'Acme Textiles'))
+        self.assertEqual(self.identity.call_count, 2)
+
+    def test_reads_need_the_linked_sender_the_skill_business_type_and_a_company(self):
+        def unlinked(*args):
+            raise ValueError('The sender is not linked to this business record')
+        self.identity.side_effect = unlinked
+        with self.assertRaisesRegex(ValueError, 'unavailable'):
+            self.ctx.read_list('Sales Order', fields=['name'])
+        self.identity.side_effect = None
+        for business, scope in ((('Supplier', 'Kestrel Traders'), {'company': 'Acme Textiles'}),
+                                (('Customer', 'Acme Textiles'), {'company': None})):
+            ctx = self.context.ToolContext(run='RUN-1', skill=Doc(business_doctype='Customer'), user='sam@example.com',
+                                           business=business, scope=scope)
+            with self.subTest(business=business, scope=scope), self.assertRaisesRegex(ValueError, 'unavailable'):
+                ctx.read_doc(business[0], business[1], fields=['name'])
+        self.f.get_list.assert_not_called()
 
     def test_filters_only_narrow_and_unsafe_fields_or_limits_fail(self):
         for call in (lambda: self.ctx.read_list('Sales Order', fields=['name'], filters={'customer': 'Kestrel Traders'}),

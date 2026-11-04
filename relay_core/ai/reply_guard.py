@@ -86,6 +86,8 @@ def check(reply, skill, scope, *, evidence=(), knowledge=(), read_names=()):
     """
     from relay_core.ai.adapter import DECLINE_REPLIES, SYSTEM_RULES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
+    if isinstance(knowledge, str):
+        raise TypeError('Pass knowledge as a tuple of texts')
     if not reply or reply in (*DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
         return
     # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
