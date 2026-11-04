@@ -257,7 +257,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         if reader.private is True:
             return decline_decision(user, incoming_text)
     if value.get('data_question') and not value['handoff'] and not (reader.evidence or core.read_results or core.proposed
-                                                                     or value.get('search')):
+                                                                     or core.tickets or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)
     value.pop('data_question', None)
     rendered = None

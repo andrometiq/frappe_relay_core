@@ -156,6 +156,11 @@ class TicketToolInLoopTests(LoopCase):
         self.assertIn('Waiting on customer', seen[0][1])
         self.assertFalse(result['handoff'])
 
+    def test_ticket_results_answer_a_data_question(self):
+        self.attempt.side_effect = [self.outcome(calls=[self.call('my_tickets')]), self.outcome(
+            {'reply': 'TKT-00042 is waiting on you.', 'handoff': False, 'reason': '', 'data_question': True})]
+        self.assertFalse(self.complete()['handoff'])
+
     def test_a_reply_repeating_staff_text_is_impossible_because_the_model_never_had_it(self):
         seen = []
         self.provider.continuation = lambda result, outputs: seen.extend(outputs) or []

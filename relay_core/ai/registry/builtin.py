@@ -84,6 +84,7 @@ class CoreTools:
         self.playbook_texts = copy_texts(skill, business, (scope or {}).get('company'))
         self.knowledge = list(self.playbook_texts)
         self.code_tools, self.context = [], None
+        self.tickets = []  # my_tickets results: they answer a data question about the sender's own tickets.
         if skill.get('allowed_actions') and skill.get('allowed_actions') != '[]':
             from relay_core.ai.configuration import action_contracts
             from relay_core.flows.actions import definitions, offered_actions
@@ -177,6 +178,8 @@ class CoreTools:
         except Exception:
             frappe.log_error(title=f'Relay AI tool {key} failed')
             raise ValueError(UNAVAILABLE) from None
+        if is_builtin(tool, my_tickets):
+            self.tickets.append(result)
         if is_builtin(tool, retriever.search_knowledge, my_tickets):
             self.evidence.append(result)  # Chunks and tickets allow contact values only, never names or copied text.
         elif not is_builtin(tool):
