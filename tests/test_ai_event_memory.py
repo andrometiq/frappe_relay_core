@@ -186,11 +186,14 @@ class QueueTests(unittest.TestCase):
         fake.enqueue.side_effect = run_job
         with patch.object(event_memory, 'frappe', fake), patch.object(event_memory, 'get_revision', return_value='R1'), \
              patch('relay_core.ai_features.is_enabled', return_value=True), \
+             patch('relay_core.ai.knowledge_base.ingest.queue_event') as queue_event, \
              patch.object(event_memory.EventBuild, 'run', autospec=True,
                           side_effect=lambda build, force: runs.append((build.event, build.triggered_by, force))):
             event_memory.on_file_change(_dict(attached_to_doctype=event_memory.EVENT, attached_to_name='EV-1'))
             event_memory.rebuild.__wrapped__('EV-2')
         self.assertEqual(runs, [('EV-1', 'owner@example.com', False), ('EV-2', 'owner@example.com', True)])
+        # The event's knowledge source follows its files.
+        queue_event.assert_called_once_with('EV-1')
 
 
 class SourceTests(unittest.TestCase):

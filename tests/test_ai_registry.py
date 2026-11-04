@@ -105,7 +105,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(remember.parameters['properties']['memory_id']['type'], 'string')
         self.assertEqual({tool.audience for tool in (search_knowledge, load_playbook, remember)}, {'customer'})
         ctx = ToolContext(run=None, skill=None, user='sam@example.com', business=('Customer', 'Acme Textiles'), scope={})
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(ValueError, '^Knowledge search is unavailable$'):
             search_knowledge({'query': 'event pass'}, ctx)
         with self.assertRaises(NotImplementedError):
             memory_block(None, ('Customer', 'Acme Textiles'), 'delivery')

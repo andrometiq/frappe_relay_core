@@ -88,9 +88,12 @@ def queue_build(event: str, force: bool = False) -> None:
 
 
 def on_file_change(doc, method=None) -> None:
-    """File hook: an attachment of an event was added, changed or removed."""
+    """File hook: an attachment of an event was added, changed or removed. Its knowledge source follows."""
     if doc.attached_to_doctype == EVENT and doc.attached_to_name:
         queue_build(doc.attached_to_name)
+        if ai_features.is_enabled() and frappe.db.exists(EVENT, doc.attached_to_name):
+            from relay_core.ai.knowledge_base.ingest import queue_event
+            queue_event(doc.attached_to_name)
 
 
 @frappe.whitelist(methods=['POST'])

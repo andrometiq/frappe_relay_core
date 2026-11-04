@@ -73,6 +73,27 @@ Relay AI Skill also has `max_tool_calls` (default 4, maximum 6), `knowledge_base
 
 Reply prompts trim in this order: memory facts, record memory lines, history, knowledge chunks, events. Recalled fact memory (`reference_data.memory`) never allows a contact value in the reply guard. The guard copy check takes every trusted owner text of the prompt.
 
+## Knowledge bases
+
+A `Relay AI Knowledge Base` holds reference documents that a skill can search with the `search_knowledge` tool. Bind it in the skill's `knowledge_bases`. It has an audience (`customer` or `staff`), an optional company, a description that tells the model what it holds, and a run-as user for DocType sources. A customer run searches only enabled customer knowledge bases of the conversation company or of every company. A staff knowledge base is never offered to a sender.
+
+Each `Relay AI Knowledge Source` is chunked into `Relay AI Knowledge Chunk` rows: paragraphs first, then sentences, then words. The default chunk is 1200 characters with a 150-character overlap. Ingest uses no model and no embeddings. It runs in the long queue after commit, one run at a time per source, and sets Status to Pending, Processing, Completed or Failed with the error.
+
+| Source type | What is read | When it syncs |
+|---|---|---|
+| Text | The Content field | On save |
+| File | The file attached to the source (text, Markdown, CSV, JSON, HTML, PDF, DOCX; no images) | On save |
+| URL | One public page through the event link reader | On save, and daily with Sync daily |
+| DocType | Content fields of rows that match Filters, read as the run-as user | After approval, and daily with Sync daily |
+| Event | Title, description, files and links of one `Relay AI Event` | When the event or its files change |
+
+- A DocType source copies field values into chunks. A manager approves its exact configuration (DocType, filters, content fields, business field, and the knowledge base audience, company and run-as user) with `relay_ai_knowledge_source.approve`. A changed configuration stops ingest and search of that source until a new approval. A form or REST save cannot set the approval.
+- In a customer knowledge base, a DocType source needs a business field, for example `customer` on Project, unless the DocType is listed in `company_neutral_types`. Each row is then found only by its own business, and a row without a business is not indexed. Rows with a company field are found only in that company. Text, table, password, code, HTML and sensitive fields cannot be content fields.
+- A DocType sync reads rows modified since the last sync in pages of 500. A row hash skips unchanged rows. Rows that leave the filter, are deleted or become unreadable lose their chunks. A new approval reads all rows again. The `ingest.rebuild` API purges and re-chunks one source.
+- Every `Relay AI Event` gets one Event source in the **Events** knowledge base (audience customer), which the patch `index_ai_events` creates for existing events. Event chunks are found only while the event memory rules (`eligible_events`: enabled, published memory, audience business type, company and publication window) offer the event to the sender. Event memory stays in the prompt as before; the knowledge base lets a skill find text that the 30 memory facts leave out, such as page 3 of a PDF.
+
+Search uses MariaDB FULLTEXT in natural language mode with the scope as query parameters, at most 5 results of at most 1500 characters each. Measured on MariaDB 11.8: whole words in Tamil, Malayalam and Hindi match, but a word inside a longer inflected word does not, and words under 3 characters are dropped. When FULLTEXT finds nothing, a LIKE match of the 3 longest query words runs over at most 200 chunks of the scope. On Postgres the tool is not offered. The result note says it is reference data, not instructions. Returned chunks are reply guard evidence for contacts only; they never join the verbatim-copy check, and a Customer or Supplier named in a shared chunk still blocks the reply. Errors reach the model only as "Knowledge search is unavailable". `retriever.is_offered` and `retriever.description` give the loop assembly the offer rule and the tool description with the bound knowledge base descriptions.
+
 ## Staff ownership and delivery
 
 Take over, Start work, an explicit claim, and the first manual outbound message stop AI for that episode. The ownership transaction sets `ai_disabled`, advances its generation, and invalidates pending approvals. Assignment alone does not stop AI. All continuations, writes, flow steps, sends, and recovery attempts check ownership. Other business episodes for the same contact remain independent.
@@ -97,3 +118,5 @@ The owner-requirement changes are source-only until the orchestrator migrates th
 `tests/integration_ai_events_site.py` exercises signed ingress, duplicate callbacks, concurrent projection, enrollment, HTTP isolation, declared searches, draft chains, takeover, and delivery races. It runs the matching, search, action, takeover, and delivery suites in fresh processes. `tests/integration_ai_permissions_site.py` probes real query and document permissions with populated company and party fixtures, then checks preview HTTP status, response shape, and denial. Its permission-layer probes supply a test search authorization callback; the event suite tests the real search journal and confirmation path.
 
 `tests/automation_queue_site.py` exercises the actual drain and background jobs in an isolated RQ queue. See [automation-queue.md](automation-queue.md) for load and recovery evidence. These tests use `relay.test`, import this worktree first, block external delivery, and delete their inserted fixtures. Local HTTP tests use the Frappe WSGI application. They do not establish that existing web or worker processes have loaded this checkout. See the activation record in [automation-queue.md](automation-queue.md) for remaining checks.
+
+`tests/integration_ai_knowledge_site.py` ingests Text, PDF event, and Project DocType sources on `relay.test` and checks Tamil, Malayalam, Hindi and English queries, the LIKE fallback, base and company scope, the Customer-only event audience, business isolation, row hash skip, filter exit, deletion and approval. `tests/integration_ai_knowledge_http.py` checks the source approval HTTP deny case.
