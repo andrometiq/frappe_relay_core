@@ -260,6 +260,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         core.search(search['purpose'], search['reference'], search['arguments'])
         if reader.private is True:
             return decline_decision(user, incoming_text)
+    if (search is not None and not value['handoff'] and not core.read_results
+            and any(row['key'] == search['reference'] for row in core.tool_references)):
+        # A confirmed app read tool plan answers only from that tool's result.
+        return dict(reply='', handoff=True, reason='The confirmed app read tool did not run', reads=[], user=user)
     if value.get('data_question') and not value['handoff'] and not (reader.evidence or core.read_results or core.proposed
                                                                      or core.tickets or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)

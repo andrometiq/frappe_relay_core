@@ -172,6 +172,16 @@ class DeclaredToolTests(LoopCase):
             self.confirmed()
         self.assertEqual(json.loads(self.seen[0][1]), {'error': 'This tool is unavailable'})
 
+    def test_a_confirmed_turn_that_skips_the_tool_hands_off(self):
+        for decision in (dict(answer('Your order is dispatched.'), search=self.plan),
+                         dict(answer('Your order is dispatched.'), data_question=True)):
+            self.attempt.side_effect = [self.outcome(decision)]
+            with self.subTest(decision=decision):
+                result = self.confirmed()
+                self.assertTrue(result['handoff'])
+                self.assertEqual(result['reply'], '')
+        self.authorize.assert_not_called()
+
     def test_tool_plans_check_the_tool_arguments_and_always_need_confirmation(self):
         from relay_core.ai import service
         from relay_core.ai.registry.builtin import tool_references
