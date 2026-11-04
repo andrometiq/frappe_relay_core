@@ -139,10 +139,14 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
             decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
             return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
                         context=reference.used if reference and not decision.get('decline') else None)
-        if reference and reference.lines:
+        if reference and reference.facts:
+            reference.facts.pop()
+        elif reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
             history.pop(0)
+        elif reference and reference.chunks:
+            reference.chunks.pop()
         elif reference and reference.events:
             reference.events.pop()
         else:

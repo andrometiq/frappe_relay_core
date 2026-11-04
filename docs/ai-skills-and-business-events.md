@@ -48,6 +48,31 @@ A draft action always waits for staff approval. Core records the proposal as `Aw
 
 Each action uses a stable command key and input hash. A changed input under the same key fails. Local writes and their journal results share a transaction. Replies use the existing durable message journal, with Core supplying the destination. An uncertain reply blocks later steps until its receipt is resolved. A retry cannot create a second draft or bypass changed permissions. Bounded image input requires a vision-capable model and attachment access checks.
 
+## Tool registry
+
+SEARCH and EXECUTE are the built-in tools of `relay_core.ai.registry.builtin.CoreTools`. Their behavior is unchanged. An app adds a code tool for logic that a read pack cannot express. Declarative read packs stay the preferred form for plain reads.
+
+```python
+from typing import Annotated, Literal
+from relay_core.ai.registry import ToolContext, relay_tool
+
+@relay_tool(audience="customer", label="Open orders", business_doctype="Customer")
+def open_orders(status: Annotated[Literal["Open", "Delivered"], "Order status"] = "Open", limit: int = 5,
+                *, ctx: ToolContext) -> dict:
+    """List the sender's own open orders."""
+    return {"rows": ctx.read_list("Sales Order", fields=["name", "status"], filters={"status": status}, limit=limit)}
+```
+
+- The app lists the tool in its `relay_ai_tools` hook, for example `relay_ai_tools = ["acme_app.relay.tools.open_orders"]`. The path must start with the app name.
+- The schema comes from the type hints: `str`, `int`, `float`, `bool`, `Literal`, `Enum`, `list[...]`, `Optional`, `Annotated` descriptions and `TypedDict` closed objects. Other hints fail at import. The docstring is the model description. Arguments are validated against the schema before the call.
+- `ToolContext` is never shown to the model. It holds the run, skill, user, business and scope from `service.context`. `read_list` and `read_doc` read as the run user, add the business link and company of the sender, allow filters that only narrow them, and apply the read pack field rules (no text, table or sensitive fields).
+- `capabilities.sync` (after migrate) stores each tool as a `Relay AI Capability` of kind Tool named `<prefix>.<name>`. The manifest holds the schema, audience, kind, label and `code_hash` (SHA-256 of the source). A code change gives a new hash and status Changed. A tool that does not import is logged and becomes Missing. Core tools approve themselves; other apps must be in `trusted_adapter_apps`.
+- A skill selects a tool in `allowed_tools` like a read pack. Only approved tools of the run audience and the skill business type are offered. A staff tool never runs for a customer. The approval, audience and code hash are checked again at each call. An `action` tool only proposes through the action journal.
+
+Relay AI Skill also has `max_tool_calls` (default 4, maximum 6), `knowledge_bases`, `playbooks` and `memory_enabled` (off by default). Relay Automation Run has `tool_calls`, `usage`, `feedback_rating` and `feedback_comment`. Relay Settings has `allowed_ai_auth_types`: the AI Provider Account auth types that Relay AI may use, one per line. The default is `ChatGPT Login` only. An empty value also means ChatGPT Login only. Add `API Key` only on purpose, because it uses paid API credit. These fields have no effect until the loop assembly uses them.
+
+Reply prompts trim in this order: memory facts, record memory lines, history, knowledge chunks, events. Recalled fact memory (`reference_data.memory`) never allows a contact value in the reply guard. The guard copy check takes every trusted owner text of the prompt.
+
 ## Staff ownership and delivery
 
 Take over, Start work, an explicit claim, and the first manual outbound message stop AI for that episode. The ownership transaction sets `ai_disabled`, advances its generation, and invalidates pending approvals. Assignment alone does not stop AI. All continuations, writes, flow steps, sends, and recovery attempts check ownership. Other business episodes for the same contact remain independent.

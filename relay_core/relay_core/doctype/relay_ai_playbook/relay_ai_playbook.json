@@ -1,0 +1,63 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Playbook",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:playbook_key",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "title_field": "title",
+  "description": "Owner or app instructions a skill can load.",
+  "field_order": [
+    "playbook_key",
+    "title",
+    "enabled"
+  ],
+  "fields": [
+    {
+      "fieldname": "playbook_key",
+      "label": "Playbook key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "description": "<app>/<name> for an app playbook, desk/<name> for one made in Relay."
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 12:00:00.000000"
+}

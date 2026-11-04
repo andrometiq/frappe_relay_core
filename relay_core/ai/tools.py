@@ -18,7 +18,7 @@ def as_user(user):
 
 
 def contracts(skill):
-    """The skill's capability rows as approved read manifests for its business type."""
+    """The skill's approved read manifests for its business type; selected code tools are skipped here."""
     rows = json.loads(skill.allowed_tools or '[]')
     if not isinstance(rows, list) or len(rows) > 12:
         raise ValueError('Choose at most 12 read capabilities')
@@ -29,7 +29,8 @@ def contracts(skill):
     if len(set(keys)) != len(keys):
         raise ValueError('Read capabilities must be distinct')
     from relay_core.ai.capabilities import active
-    manifests = [active(key) for key in keys]
+    # Code tools share the selection; registry.tool.offered gates them.
+    manifests = [manifest for manifest in map(active, keys) if manifest['kind'] != 'tool']
     if any(row['kind'] != 'read' or row['business_doctype'] != skill.business_doctype for row in manifests):
         raise ValueError('Choose read capabilities for the skill business type')
     return manifests

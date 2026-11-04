@@ -385,6 +385,33 @@ class ReplyContextTests(unittest.TestCase):
         with self.assertRaises(MemoryAccessError):
             event_memory.check_context(used, ('Customer', 'C1'), 'Sim Company')
 
+    def test_decide_drops_facts_then_record_memory_and_keeps_chunks_while_history_fits(self):
+        from test_ai_skills import Doc, framework, module
+        self.saved.text.return_value = '\n'.join(f'2026-01-01 10:00 | line {index} ' + 'x' * 200 for index in range(40))
+
+        class Context(event_memory.ReplyContext):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.facts = [f'[F{index}] (own) ' + 'f' * 2000 for index in range(3)]
+                self.chunks = ['Riverside Traders Association passes are at the desk.']
+        service = module('relay_core/ai/service.py', framework())
+        service.context = Mock(return_value=('partner', ('Customer', 'C1'), {'company': 'Sim Company', 'provider': 'WhatsApp'}))
+        service.conversation_history = Mock(return_value=[{'direction': 'Incoming', 'content': 'Earlier question'}])
+        service.check_continuation = Mock()
+        prompts = []
+        adapter = types.SimpleNamespace(MAX_PROMPT_LENGTH=6000,
+            complete=lambda *args, **kw: prompts.append(json.loads(args[3])) or {'handoff': True, 'reply': '', 'reason': 'x'})
+        message = Doc(name='MSG-1', content='Where are passes?', message_type='text', sender_endpoint='15550000001',
+                      relay_contact='CONTACT-1')
+        with patch.dict(sys.modules, {'relay_core.ai.adapter': adapter}), patch.object(event_memory, 'ReplyContext', Context):
+            service.decide(Doc(), message)
+        reference = prompts[0]['reference_data']
+        self.assertNotIn(event_memory.FACTS, reference)
+        self.assertLess(len(reference['record_memory'].splitlines()), 40)
+        self.assertEqual(reference[event_memory.CHUNKS], ['Riverside Traders Association passes are at the desk.'])
+        self.assertEqual(prompts[0]['history'], [{'direction': 'Incoming', 'content': 'Earlier question'}])
+        self.assertEqual(reference['events'][0]['memory'], 'festival memory')
+
     def test_decide_trims_oldest_memory_before_history_and_returns_what_it_used(self):
         from test_ai_skills import Doc, framework, module
         self.saved.text.return_value = '\n'.join(f'2026-0{index % 9 + 1}-01 10:00 | line {index} ' + 'x' * 200

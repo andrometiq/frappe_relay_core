@@ -75,8 +75,9 @@ def copied(reply, sources, shortest=12):
     return False
 
 
-def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
-    """Raise without including leaked text. Allow authorized evidence and Company contacts.
+def check(reply, skill, scope, *, evidence=(), knowledge=(), read_names=()):
+    """Raise without including leaked text. Allow authorized evidence and Company contacts. `knowledge` holds the
+    trusted owner texts of the prompt for the verbatim-copy check.
 
     Customer/Supplier checks cover exact capitalised primary-key names up to six words; `read_names` from
     authorized reads are allowed.
@@ -88,7 +89,7 @@ def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
     if not reply or reply in (*DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
         return
     # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
-    if copied(reply, (SYSTEM_RULES, knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
+    if copied(reply, (SYSTEM_RULES, *knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
         raise ReplyBlocked()
     emails = {value.casefold() for value in EMAIL.findall(reply)}
     numbers = phones(reply)
@@ -136,5 +137,5 @@ def check_delivery(run, skill, message, reply):
     knowledge = prompt((message.business_doctype, message.business_name), company)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
         contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge,
+        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=(knowledge,),
         read_names=set(decision.get('reply_names', [])))

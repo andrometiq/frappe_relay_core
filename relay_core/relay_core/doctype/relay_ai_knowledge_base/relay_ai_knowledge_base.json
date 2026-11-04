@@ -1,0 +1,54 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Knowledge Base",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIKB-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "title_field": "title",
+  "description": "Reference documents a skill can search.",
+  "field_order": [
+    "title",
+    "enabled"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 12:00:00.000000"
+}

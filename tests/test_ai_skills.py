@@ -1115,8 +1115,8 @@ class ConversationIdentityTests(unittest.TestCase):
         access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')],
                                        own_message=lambda doc, user=None: bool(doc.get('own')))
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
-        no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
-            lines=[], events=[], prompt={}, used=None))
+        no_reference = types.SimpleNamespace(FACTS='memory', ReplyContext=lambda *args: types.SimpleNamespace(
+            lines=[], events=[], facts=[], chunks=[], prompt={}, used=None))
         names = framework()
         names.db.get_value.return_value = 'Sim Sender'
         self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
@@ -1394,6 +1394,17 @@ class EventContractTests(unittest.TestCase):
         self.config.validate_skill(self.doc)
         self.assertEqual((self.doc.search_confirmation, self.doc.execution_policy), ('Always', 'Ticket only'))
         self.f.get_doc.assert_not_called()
+
+    def test_tool_calls_default_to_four_and_stop_at_six(self):
+        self.config.validate_skill(self.doc)
+        self.assertEqual(self.doc.max_tool_calls, 4)
+        self.doc.max_tool_calls = '6'
+        self.config.validate_skill(self.doc)
+        self.assertEqual(self.doc.max_tool_calls, 6)
+        for value in (7, -1):
+            self.doc.max_tool_calls = value
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'tool calls'):
+                self.config.validate_skill(self.doc)
 
     def test_multiple_targets_share_channel_and_business_without_scope_reservation(self):
         self.enable()

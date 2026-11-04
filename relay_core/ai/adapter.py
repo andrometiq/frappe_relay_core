@@ -146,65 +146,9 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         authorize=lambda contract, arguments: authorize_search(run_id, skill, contract, arguments))
     # The default skill serves other business types without its own type's reports.
     references = contracts(skill) if business[0] == skill.business_doctype else []
-    proposed = []
-    read_results = []
-    actions = []
-    declarations = []
-    action_schemas = []
-    registered = {}
-    if skill.get('allowed_actions') and skill.get('allowed_actions') != '[]':
-        from relay_core.ai.configuration import action_contracts
-        from relay_core.flows.actions import definitions
-        declarations = action_contracts(skill)
-        registered = definitions(context='ai')
-        action_schemas = [dict(row, parameters=registered[row['action']]['parameters'],
-            approval_policy=registered[row['action']]['approval_policy']) for row in declarations]
-    def execute_action(action, parameters):
-        from relay_core.flows.actions import proposal
-        try:
-            if proposed:
-                raise ValueError('Complete the declared search before execution')
-            if len(actions) >= len(declarations) or action != declarations[len(actions)]['action']:
-                raise ValueError('Action differs from the declared sequence')
-            actions.append(proposal(skill, action, minimiser.unmask(parameters)))
-            return {'status': 'Proposed', 'step': len(actions)}
-        except Exception:
-            reader.failed = True
-            raise ValueError('Action is unavailable') from None
-    def search_data(purpose, reference, arguments):
-        purpose, arguments = minimiser.unmask([purpose, arguments])
-        try:
-            contract = next(row for row in references if row['key'] == reference)
-            arguments = own_record_arguments(contract, arguments, business)
-            check_identity_arguments(contract, arguments, business, scope)
-            plan = validate_search(dict(purpose=purpose, reference=reference,
-                fields=field_names(contract, 'model'), arguments=arguments), references)
-            if search is None:
-                if proposed and proposed[0] != plan:
-                    raise ValueError('Only one declared search per turn')
-                proposed[:] = [plan]
-                return {'status': 'Declaration required', 'search': plan}
-            if plan['purpose'] != search['purpose']:
-                raise ValueError('Search purpose changed after declaration')
-            result = reader.read(contract, **arguments)
-            read_results.append(result)
-            return minimiser.mask(result)
-        except PrivacyDenied:
-            reader.private = True
-            raise ValueError('This search is private') from None
-        except Exception:
-            reader.failed = True
-            raise ValueError('Search is unavailable') from None
-    tools = [agent.Tool('SEARCH', 'Declare a search before reading. Only the authorized exact plan may read.',
-        {'type': 'object', 'additionalProperties': False, 'required': ['purpose', 'reference', 'arguments'],
-         'properties': {'purpose': {'type': 'string', 'maxLength': 300},
-                        'reference': {'type': 'string', 'enum': [r['key'] for r in references]},
-                        'arguments': {'type': 'object'}}}, search_data)] if references else []
-    if declarations:
-        tools.append(agent.Tool('EXECUTE', 'Propose an allowed action in event order. Core executes after validating the complete turn.',
-            {'type': 'object', 'additionalProperties': False, 'required': ['action', 'parameters'],
-             'properties': {'action': {'type': 'string', 'enum': [row['action'] for row in declarations]},
-                            'parameters': {'type': 'object'}}}, execute_action))
+    from relay_core.ai.registry.builtin import CoreTools
+    core = CoreTools(skill, business, scope, reader, references, minimiser, search)
+    tools = core.agent_tools(agent)
     class SkillRun(agent.AgentRun):
         rounds = 0
 
@@ -227,7 +171,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
                         reference=call['name'], arguments=arguments)
                     call = dict(call, name='SEARCH')
                 expected = {'SEARCH': {'purpose', 'reference', 'arguments'}, 'EXECUTE': {'action', 'parameters'}}
-                available = ({'SEARCH'} if references else set()) | ({'EXECUTE'} if declarations else set())
+                available = ({'SEARCH'} if references else set()) | ({'EXECUTE'} if core.declarations else set())
                 if call['name'] not in available or not isinstance(arguments, dict) or set(arguments) != expected[call['name']]:
                     raise ValueError('Invalid event tool call')
             except (ValueError, TypeError, KeyError):
@@ -254,7 +198,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     system = (SYSTEM_RULES + '\nReply language:\n' + instruction(incoming_text, language_history)
         + '\nKnowledge base — standing instructions:\n' + (knowledge or '(none)')
         + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(catalogue) +
-        '\nAllowed actions:\n' + json.dumps(action_schemas) +
+        '\nAllowed actions:\n' + json.dumps(core.action_schemas) +
         '\nAuthorized search:\n' + json.dumps(search) + '\nSkill:\n' + skill.instructions +
         '\nOwner reply style:\n' + str(skill.get('reply_style') or '')[:2000])
     options['max_tokens'] = min(options['max_tokens'], 1200)
@@ -302,7 +246,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             correction = (f'\nYour search declaration was rejected: {rejected}. Declare a search with only the '
                           "reference's listed filters and limit, or explicitly hand off with a reason.")
             continue
-        if value['reply'].strip() or value['handoff'] or value.get('search') is not None or proposed or actions:
+        if value['reply'].strip() or value['handoff'] or value.get('search') is not None or core.proposed or core.actions:
             break
         correction = ('\nYour previous answer was empty with no actions, search or handoff. '
                       'Provide a non-empty reply, propose the allowed actions, declare a needed search, '
@@ -311,10 +255,10 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         raise ValueError('Empty skill decision')
     if search is not None and not value['handoff'] and not reader.evidence and is_same_search(value.get('search'), search, references, business):
         # The model repeated the authorized plan instead of calling SEARCH; Core reads exactly that plan.
-        search_data(search['purpose'], search['reference'], search['arguments'])
+        core.search(search['purpose'], search['reference'], search['arguments'])
         if reader.private is True:
             return decline_decision(user, incoming_text)
-    if value.get('data_question') and not value['handoff'] and not (reader.evidence or proposed or value.get('search')):
+    if value.get('data_question') and not value['handoff'] and not (reader.evidence or core.proposed or value.get('search')):
         return dict(reply='', handoff=True, reason='The requested data report is not configured or has not returned authorized results', reads=[], user=user)
     value.pop('data_question', None)
     rendered = None
@@ -323,29 +267,32 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         packs = {row['key']: row for row in references}
         rendered = '\n\n'.join(render(packs[key], result['rows'], language['language'], result['truncated'])
             if result['rows'] else empty_text(language['language']) for key, result in reader.results.items())
-        replies = [row for row in actions if registered[row['action']]['effect'] == 'reply']
+        replies = [row for row in core.actions if core.registered[row['action']]['effect'] == 'reply']
         for row in replies:
             row['parameters']['text'] = rendered
         value['reply'] = '' if replies else rendered
     if not value['handoff']:
         from relay_core.ai.reply_guard import check, contacts, record_names, ReplyBlocked, REASON
+        from relay_core.ai.event_memory import FACTS
         try:
             prompt = json.loads(text)
-            evidence = [prompt.get('incoming', ''), prompt.get('reference_data', {})]
+            # Recalled fact memory may be customer-written, so it never allows a contact value.
+            reference_data = {key: item for key, item in (prompt.get('reference_data') or {}).items() if key != FACTS}
+            evidence = [prompt.get('incoming', ''), reference_data]
         except (ValueError, AttributeError):
             evidence = [text]
         evidence = minimiser.unmask(evidence)
-        allowed_contacts = contacts(*evidence, *read_results)
-        allowed_names = record_names(*read_results)
-        replies = [value['reply'], *(row['parameters']['text'] for row in actions
-            if registered[row['action']]['effect'] == 'reply')]
+        allowed_contacts = contacts(*evidence, *core.read_results, *core.evidence)
+        allowed_names = record_names(*core.read_results)
+        replies = [value['reply'], *(row['parameters']['text'] for row in core.actions
+            if core.registered[row['action']]['effect'] == 'reply')]
         try:
             for reply in replies:
                 # Pack renderers localize labels around record values, which keep their own script.
                 if reply.strip() and reply != rendered and not matches(reply, language):
                     return dict(reply='', handoff=True, reason='Reply language did not match the latest customer message; staff translation required', reads=[], user=user)
                 check(reply, skill, dict(scope or {}, business=list(business)), evidence=allowed_contacts,
-                      knowledge=knowledge, read_names=set(allowed_names))
+                      knowledge=(knowledge, *core.knowledge), read_names=set(allowed_names))
         except ReplyBlocked:
             return dict(reply='', handoff=True, reason=REASON, reads=[], user=user)
         value = dict(value, reply_contacts=allowed_contacts, reply_names=allowed_names)
@@ -354,8 +301,8 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         if not value['reason']:
             raise ValueError('Handoff requires a specific reason for the customer request')
     declaration = value.pop('search', None)
-    if declaration is None and proposed:
-        declaration = proposed[0]
+    if declaration is None and core.proposed:
+        declaration = core.proposed[0]
     if declaration is not None:
         plan = declaration if isinstance(declaration, dict) else {}
         contract = next((row for row in references if row['key'] == plan.get('reference')), None)
@@ -376,19 +323,19 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
         # Older providers return final text. It still needs the declared reply
         # step, its position, and the same journal as native EXECUTE proposals.
         if value['reply'].strip():
-            reply_steps = [row for row in declarations if registered[row['action']]['effect'] == 'reply']
-            step = declarations[len(actions)] if len(actions) < len(declarations) else None
-            if not actions and reply_steps and step not in reply_steps:
+            reply_steps = [row for row in core.declarations if core.registered[row['action']]['effect'] == 'reply']
+            step = core.declarations[len(core.actions)] if len(core.actions) < len(core.declarations) else None
+            if not core.actions and reply_steps and step not in reply_steps:
                 step = reply_steps[0]  # A plain answer needs no draft step.
             if step not in reply_steps:
                 raise ValueError('Reply is outside the declared action sequence')
-            actions.append(proposal(skill, step['action'], {'text': value['reply']}))
+            core.actions.append(proposal(skill, step['action'], {'text': value['reply']}))
             value['reply'] = ''
-        validate_sequence(skill, actions)
-    if actions and not value['handoff']:
+        validate_sequence(skill, core.actions)
+    if core.actions and not value['handoff']:
         if declaration and search is None:
             raise ValueError('Declare searches before proposing actions')
-        value['actions'] = actions
+        value['actions'] = core.actions
     return dict(value, reads=reader.evidence, user=user)
 
 

@@ -25,6 +25,10 @@
     "instructions",
     "allowed_tools",
     "allowed_actions",
+    "max_tool_calls",
+    "knowledge_bases",
+    "playbooks",
+    "memory_enabled",
     "sample_key"
   ],
   "fields": [
@@ -161,6 +165,35 @@
       "fieldtype": "JSON",
       "default": "[]",
       "description": "Ordered AI-safe Core execution steps. Each action runs once, in this order; include a reply step to send a business reply. Draft actions declare their DocType and typed fields; staff submit drafts."
+    },
+    {
+      "fieldname": "max_tool_calls",
+      "label": "Max tool calls",
+      "fieldtype": "Int",
+      "default": "4",
+      "non_negative": 1,
+      "description": "Tool calls the model may make in one reply, from 1 to 6. Empty uses 4."
+    },
+    {
+      "fieldname": "knowledge_bases",
+      "label": "Knowledge bases",
+      "fieldtype": "Table MultiSelect",
+      "options": "Relay AI Skill Knowledge Base",
+      "description": "Customer knowledge bases the model may search."
+    },
+    {
+      "fieldname": "playbooks",
+      "label": "Playbooks",
+      "fieldtype": "Table MultiSelect",
+      "options": "Relay AI Skill Playbook",
+      "description": "Playbooks the model may load by name."
+    },
+    {
+      "fieldname": "memory_enabled",
+      "label": "Customer memory",
+      "fieldtype": "Check",
+      "default": "0",
+      "description": "Let the model save short facts about the sender's business. Every contact of that business shares them. Off by default."
     }
   ],
   "permissions": [
@@ -185,5 +218,5 @@
     }
   ],
   "title_field": "title",
-  "modified": "2026-10-30 12:00:00.000000"
+  "modified": "2026-11-04 12:00:00.000000"
 }
