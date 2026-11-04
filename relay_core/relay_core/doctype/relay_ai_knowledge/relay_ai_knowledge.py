@@ -3,6 +3,7 @@ from frappe.model.document import Document
 
 
 class RelayAIKnowledge(Document):
+    """Read only: the patch move_ai_knowledge_to_playbooks moved each row to Relay AI Playbook."""
+
     def validate(self):
-        if not isinstance(self.instructions, str) or not 1 <= len(self.instructions.strip()) <= 8000:
-            frappe.throw('Use 1–8000 standing instruction characters')
+        frappe.throw('Standing instructions moved to Relay AI Playbook')

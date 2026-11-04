@@ -169,8 +169,9 @@ def ai_model() -> str:
 
 
 def knowledge() -> None:
-    if not frappe.db.exists('Relay AI Knowledge', {'title': 'Sim Co support rules'}):
-        frappe.get_doc({'doctype': 'Relay AI Knowledge', 'title': 'Sim Co support rules', 'enabled': 1, 'company': COMPANY,
+    if not frappe.db.exists('Relay AI Playbook', {'title': 'Sim Co support rules'}):
+        frappe.get_doc({'doctype': 'Relay AI Playbook', 'playbook_key': 'desk/sim-co-support-rules',
+                        'title': 'Sim Co support rules', 'enabled': 1, 'is_global': 1, 'company': COMPANY,
                         'instructions': 'Answer only about the sender\'s own records. Dispatch is closed on Sundays.'}
                        ).insert(ignore_permissions=True)
 

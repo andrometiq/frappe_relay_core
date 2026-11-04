@@ -1,5 +1,6 @@
 """Built-in model tools. SEARCH reads one declared report after its declaration; EXECUTE proposes declared actions
 in order. Knowledge, playbook and memory tools add their reply guard inputs here."""
+from relay_core.ai.playbooks import copy_texts
 from relay_core.ai.render import field_names
 from relay_core.ai.tools import PrivacyDenied, check_identity_arguments, own_record_arguments
 from relay_core.automation.contracts import validate_search
@@ -14,8 +15,9 @@ class CoreTools:
         self.proposed, self.read_results, self.actions = [], [], []
         self.declarations, self.action_schemas, self.registered = [], [], {}
         # Reply guard slots: `evidence` allows contact values (returned knowledge chunks, staff memory);
-        # `knowledge` texts join the verbatim-copy check (loaded playbooks, skill memory).
-        self.evidence, self.knowledge = [], []
+        # `knowledge` texts join the verbatim-copy check (bound playbooks, skill memory).
+        self.evidence = []
+        self.knowledge = list(copy_texts(skill, business, (scope or {}).get('company')))
         if skill.get('allowed_actions') and skill.get('allowed_actions') != '[]':
             from relay_core.ai.configuration import action_contracts
             from relay_core.flows.actions import definitions

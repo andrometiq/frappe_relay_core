@@ -2,7 +2,7 @@
 
 ## Knowledge, events and skills
 
-**Knowledge base** stores standing owner instructions ("work like this") in `Relay AI Knowledge`. Each record has plain-text instructions and optional company/business-type scope. The prompt labels these trusted instructions separately from the skill instructions. Verbatim-copy checks include applicable Knowledge instructions both before proposing a reply and at delivery. At most 100 enabled records and 8000 applicable instruction characters are accepted; an oversized configuration stops inference for staff review rather than silently dropping rules.
+**Knowledge base** (standing owner instructions, "work like this") is the set of global desk playbooks in `Relay AI Playbook` (see [Playbooks](#playbooks)). The AI knowledge screen and its API (`ai.knowledge.directory` and `ai.knowledge.save`) read and write only these rows. Each row has plain-text instructions and optional company/business-type scope. The prompt labels these trusted instructions separately from the skill instructions. Verbatim-copy checks include applicable instructions both before proposing a reply and at delivery. At most 100 enabled global playbooks and 8000 applicable instruction characters are accepted; an oversized configuration stops inference for staff review rather than silently dropping rules.
 
 **AI events** stores facts about an occurrence in the existing `Relay AI Event`, for example "Riverside Traders Association event on 5 November at Sampleville". It has its own screen, description, audience, company and publication window. Text-only events publish their description through the existing memory-build job without a model call. Attachments and links still use the existing bounded source reader and configured event-memory model. Only published, enabled events within the audience/company/window enter the reply. Events and the sender's conversation memory appear in the input's `reference_data`, labelled as facts, never instructions. The existing revision check fences delivery if an event changes.
 
@@ -48,6 +48,22 @@ A draft action always waits for staff approval. Core records the proposal as `Aw
 
 Each action uses a stable command key and input hash. A changed input under the same key fails. Local writes and their journal results share a transaction. Replies use the existing durable message journal, with Core supplying the destination. An uncertain reply blocks later steps until its receipt is resolved. A retry cannot create a second draft or bypass changed permissions. Bounded image input requires a vision-capable model and attachment access checks.
 
+## Playbooks
+
+`Relay AI Playbook` holds owner and app instructions. A playbook is trusted owner text under the system rules. It never widens tools, scope or identity. Customer replies use only playbooks with audience `customer`.
+
+| Kind | Name | Edited by | In the prompt |
+|---|---|---|---|
+| Global (`is_global`) | `desk/<name>` | Relay managers | Full text in every prompt of matching company and business type |
+| Bound to a skill (`Relay AI Skill.playbooks`) | `desk/<name>` or `<app>/<name>` | Relay managers or the app file | Only `name: description` in an index; the model loads the text with `load_playbook(name)`, which counts as a tool call |
+
+- An app ships a playbook as `skills/<name>/SKILL.md` at its source root, the folder that Frappe Flow also reads. The frontmatter needs `name` (the folder name), `description` (at most 1024 characters) and `relay: customer` or `relay: staff`. Relay ignores a file without `relay:`. Example: `skills/handoff-etiquette/SKILL.md` in this repository.
+- `playbooks.sync` runs after migrate. It writes each file as a locked row named `<app>/<name>` and deletes the app rows whose file is gone or has no `relay:` key. An invalid file is logged and keeps its old row. A folder with more than 2000 entries is skipped and keeps all rows of that app. Sync never changes or deletes desk rows. Owners can enable, disable, scope or make global an app playbook, but its text changes only through its file.
+- `load_playbook` loads only enabled, non-global customer playbooks bound to the skill that match the sender company and business type. Any other name gives "Playbook is unavailable".
+- The reply guard verbatim-copy check takes the global text and the text of every bound playbook, loaded or not, before the reply and again at delivery.
+- The patch `move_ai_knowledge_to_playbooks` copied each `Relay AI Knowledge` row (disabled rows too) to a global playbook named `desk/<old name>` and set `migrated_to` on the old row. It stops the migration when a row count or a prompt text differs. `Relay AI Knowledge` is read only for one release.
+- The playbook index and the `load_playbook` tool reach the model when the loop assembly offers registry tools.
+
 ## Tool registry
 
 SEARCH and EXECUTE are the built-in tools of `relay_core.ai.registry.builtin.CoreTools`. Their behavior is unchanged. An app adds a code tool for logic that a read pack cannot express. Declarative read packs stay the preferred form for plain reads.
@@ -91,7 +107,7 @@ The document hook records an immutable delivery intent in the business transacti
 
 ## Local acceptance
 
-The owner-requirement changes are source-only until the orchestrator migrates the development site. New metadata: `Relay AI Knowledge`; `Relay AI Skill` changes labels/help only. No custom fields or fixtures are added. Local unit tests cover gated APIs, default seeding/fallback, prompt separation, report boundaries, script checks, Unicode phones and voice transcripts. Provider and send boundaries are mocked. These tests and the frontend build do not establish site activation or process reload.
+The owner-requirement changes are source-only until the orchestrator migrates the development site. New metadata: `Relay AI Playbook` (standing instructions); `Relay AI Skill` changes labels/help only. No custom fields or fixtures are added. Local unit tests cover gated APIs, default seeding/fallback, prompt separation, report boundaries, script checks, Unicode phones and voice transcripts. Provider and send boundaries are mocked. These tests and the frontend build do not establish site activation or process reload.
 
 
 `tests/integration_ai_events_site.py` exercises signed ingress, duplicate callbacks, concurrent projection, enrollment, HTTP isolation, declared searches, draft chains, takeover, and delivery races. It runs the matching, search, action, takeover, and delivery suites in fresh processes. `tests/integration_ai_permissions_site.py` probes real query and document permissions with populated company and party fixtures, then checks preview HTTP status, response shape, and denial. Its permission-layer probes supply a test search authorization callback; the event suite tests the real search journal and confirmation path.

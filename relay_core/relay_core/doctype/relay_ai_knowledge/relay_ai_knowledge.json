@@ -11,45 +11,56 @@
     "enabled",
     "company",
     "business_doctype",
-    "instructions"
+    "instructions",
+    "migrated_to"
   ],
   "fields": [
     {
       "fieldname": "title",
       "label": "Title",
       "fieldtype": "Data",
-      "reqd": 1
+      "reqd": 1,
+      "read_only": 1
     },
     {
       "fieldname": "enabled",
       "label": "Enabled",
-      "fieldtype": "Check"
+      "fieldtype": "Check",
+      "read_only": 1
     },
     {
       "fieldname": "company",
       "label": "Company (blank for all)",
       "fieldtype": "Link",
-      "options": "Company"
+      "options": "Company",
+      "read_only": 1
     },
     {
       "fieldname": "business_doctype",
       "label": "Business type (blank for all)",
       "fieldtype": "Link",
-      "options": "DocType"
+      "options": "DocType",
+      "read_only": 1
     },
     {
       "fieldname": "instructions",
       "label": "Standing instructions",
       "fieldtype": "Long Text",
-      "reqd": 1
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "migrated_to",
+      "label": "Moved to",
+      "fieldtype": "Link",
+      "options": "Relay AI Playbook",
+      "read_only": 1
     }
   ],
   "permissions": [
     {
       "role": "Relay Communication Manager",
       "read": 1,
-      "write": 1,
-      "create": 1,
       "report": 1,
       "export": 1,
       "print": 1
@@ -57,12 +68,11 @@
     {
       "role": "System Manager",
       "read": 1,
-      "write": 1,
-      "create": 1,
-      "delete": 1,
       "report": 1,
       "export": 1,
       "print": 1
     }
-  ]
+  ],
+  "description": "Read only. Standing instructions moved to Relay AI Playbook.",
+  "modified": "2026-11-04 18:00:00.000000"
 }
