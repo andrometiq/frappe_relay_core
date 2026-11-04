@@ -56,8 +56,11 @@ export function tileCount(count, noun) {
 }
 
 export function tileUnread(tile) {
-  return Number(tile.kind === 'record' ? tile.unread : tile.unread_records) || 0
+  return Number(tile.kind === 'record' || tile.kind === 'chat' ? tile.unread : tile.unread_records) || 0
 }
+
+// An inbox.directory row of a chat that no business record covers, as a tile that opens the chat.
+export const chatTile = row => ({ ...row, kind: 'chat', label: row.title || row.contact || row.name })
 
 export function levelLabel(state, fields = []) {
   if (state.record || state.unlinked) return 'Contacts'

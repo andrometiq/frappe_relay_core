@@ -365,6 +365,21 @@ class SearchGateTests(unittest.TestCase):
                 self.assertIn(word, self.service.CONFIRM_WORDS)
         self.assertIn("'yes'", self.service.SEARCH_CONFIRM)
 
+    def test_search_notice_shows_every_date_filter(self):
+        self.contract['filters'] = {'posting_date': {'type': 'date', 'operators': ['between', '>=', '<=']},
+                                    'due_date': {'type': 'date', 'operators': ['=', '>=', '<=']},
+                                    'debit': {'type': 'number', 'operators': ['>=']}}
+        for filters, shown in (
+                ({'posting_date': ['>=', '2026-10-01'], 'due_date': ['<=', '2026-10-31']}, '≤ 2026-10-31, ≥ 2026-10-01'),
+                ({'posting_date': ['between', ['2026-10-01', '2026-10-31']], 'due_date': '2026-11-05',
+                  'debit': ['>=', 100]}, '2026-11-05, 2026-10-01 – 2026-10-31')):
+            with self.subTest(filters=filters):
+                self.origin.search_plan = None  # The plan is canonical, so filters show in field name order.
+                decision = dict(reply='Searching', handoff=False, reads=[],
+                                search=dict(self.plan, arguments={'filters': filters}))
+                self.service.declare_search(self.origin, self.skill, self.source, decision)
+                self.assertEqual(decision['reply'], f'{self.service.SEARCH_NOTICE} {shown}. {self.service.SEARCH_CONFIRM}')
+
     def test_confirmed_exact_range_reads_and_replay_cannot_consume_twice(self):
         self.confirmed(); self.authorize()
         self.assertEqual(json.loads(self.origin.search_plan)['consumed_by'], 'Run')
@@ -892,6 +907,28 @@ class SharedAdapterTests(unittest.TestCase):
                 self.attempt.side_effect = [self.outcome(calls=[{'name':'SEARCH','arguments':invalid,'id':'one'}])]
                 with self.assertRaises(ValueError): self.adapter.complete(self.skill,'partner',('Supplier','SUP-A'),'Ledger please')
             reader.read.assert_not_called()
+
+    def test_deeply_nested_model_output_is_invalid_not_a_crash(self):
+        deep = '[' * 100000 + ']' * 100000
+        reader = types.SimpleNamespace(private=False, failed=False, evidence=[], results={}, read=Mock())
+        with patch.object(self.adapter, 'contracts', return_value=[capability()]), \
+                patch.object(self.adapter, 'Reader', return_value=reader):
+            for outcome in (self.outcome(calls=[{'name': 'SEARCH', 'arguments': deep, 'id': 'one'}]),
+                            self.outcome(dict(reply='', handoff=False, reason='', search=dict(
+                                purpose='Review your ledger', reference='erpnext.ledger', arguments=deep)))):
+                self.attempt.side_effect = [outcome]
+                with self.subTest(outcome=str(outcome)[:80]), self.assertRaises(ValueError):
+                    self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Ledger please')
+        reader.read.assert_not_called()
+
+    def test_model_json_bounds_depth(self):
+        self.assertEqual(self.adapter.model_json('{"a": [1, {"b": 2}]}'), {'a': [1, {'b': 2}]})
+        nested = [1]
+        for _ in range(40):
+            nested = [nested]
+        for value in ('[' * 100000 + ']' * 100000, '{"a": ' * 5000 + '1' + '}' * 5000, nested):
+            with self.subTest(value=str(value)[:20]), self.assertRaisesRegex(ValueError, 'nested too deeply'):
+                self.adapter.model_json(value)
 
     def test_rejected_declaration_gets_one_correction_turn(self):
         good = dict(purpose='Review your ledger', reference='erpnext.ledger', fields=['posting_date', 'debit', 'credit'],

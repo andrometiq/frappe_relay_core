@@ -294,12 +294,6 @@ def browse(doctype=None, path=None, query='', start=0, medium=None, channel=None
             from relay_core.business_access import people_query
             count = people_query(fields=[{'COUNT': 'name', 'as': 'total'}], filters=[unlinked_people()]).run(as_dict=True)[0]['total']
             items.append({'kind': 'unlinked', 'label': 'Not linked', 'contact_count': int(count)})
-        elif not business_type and not business_name and channels != [] and matches(query, 'Not linked'):
-            # Chats count unlinked people in All, so they get a tile too, or a first chat shows nowhere.
-            from relay_core.inbox_records import unlinked_chats
-            chats, unread = unlinked_chats(channels)
-            if chats:
-                items.append({'kind': 'unlinked', 'label': 'Not linked', 'chat_count': chats, 'unread_records': unread})
         return {'items': items, 'next': None, 'kind': 'type', 'fields': []}
     check_type(doctype)
     fields = configuration(doctype)

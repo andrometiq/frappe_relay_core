@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { appendTiles, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
+import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { useLoadMore } from '../../composables/useLoadMore'
@@ -10,19 +10,31 @@ import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
 
 const props = defineProps({ selected: String, selectedDoctype: String, busy: Boolean, contacts: Boolean, filters: Object })
-const emit = defineEmits(['select', 'contact', 'navigate', 'unlinked'])
+const emit = defineEmits(['select', 'contact', 'chat', 'navigate'])
 const base = props.contacts ? '#/contacts' : '#/messages'
 const state = ref(readBrowse(location.hash)), query = ref(state.value.query), items = ref([]), fields = ref([])
 const loading = ref(false), error = ref(''), next = ref(null), heading = ref(null)
 // Search filters the shown level; contacts are searched only inside a record and in Not linked.
 const people = computed(() => props.contacts && !!(state.value.record || state.value.unlinked))
 const crumbs = computed(() => browseCrumbs(state.value, fields.value))
+// Chats All counts the chats that no business record covers, so its root lists them below the type tiles.
+const rootChats = computed(() => !props.contacts && !state.value.doctype && !props.filters?.business_type && !props.filters?.business_name)
 let sequence = 0
+async function chatPage(after) {
+  const page = await coreApi('inbox.directory', { rows: 'business', mode: 'unlinked', query: query.value, ...props.filters, ...(after ? { after } : {}) })
+  return { items: page.items.map(chatTile), next: page.next?.after ?? null }
+}
 async function load(append = false) {
   const request = ++sequence
   loading.value = true; error.value = ''
   if (!append) { items.value = []; next.value = null }
   try {
+    if (rootChats.value && append) {
+      const chats = await chatPage(next.value)
+      if (request !== sequence) return
+      items.value = appendTiles(items.value, chats.items); next.value = chats.next
+      return
+    }
     const page = people.value
       ? await coreApi('api.contact_directory', { query: query.value, after: append ? next.value : null,
         business_type: state.value.doctype || null, business_name: state.value.record || null, unlinked: state.value.unlinked ? 1 : 0 })
@@ -35,10 +47,12 @@ async function load(append = false) {
       state.value = { ...state.value, path: page.path, pathFields: page.path_fields, record: '', recordLabel: '' }
       return window.history.replaceState(window.history.state, '', browseRoute(base, { ...state.value, query: query.value }))
     }
+    const chats = rootChats.value ? await chatPage(null) : null
+    if (request !== sequence) return
     const rows = people.value ? page.items.map(row => ({ ...row, kind: 'contact', label: row.full_name || row.name })) : page.items
-    items.value = append ? appendTiles(items.value, rows) : rows
+    items.value = append ? appendTiles(items.value, rows) : chats ? [...rows, ...chats.items] : rows
     if (!people.value) fields.value = page.fields || []
-    next.value = page.next
+    next.value = chats ? chats.next : page.next
   } catch (e) { if (request === sequence) error.value = e.message }
   finally { if (request === sequence) loading.value = false }
 }
@@ -65,8 +79,8 @@ function navigate(value) {
 function choose(tile) {
   saveSearch()
   if (tile.kind === 'contact') return emit('contact', tile.name)
+  if (tile.kind === 'chat') return emit('chat', tile.name)
   if (tile.kind === 'record' && !props.contacts) return emit('select', state.value.doctype, tile)
-  if (tile.kind === 'unlinked' && !props.contacts) return emit('unlinked')
   navigate(enterBrowse(state.value, tile))
 }
 function readRoute() {
@@ -112,16 +126,16 @@ useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['message
       <LoadingRows v-if="loading && !items.length" label="Loading records…" />
       <button v-for="tile in items" :key="tileKey(tile)" type="button" class="business-tile"
         :disabled="busy" :aria-pressed="tile.kind === 'record' && selectedDoctype === tile.doctype && selected === tile.name" @click="choose(tile)">
-        <Avatar v-if="tile.kind === 'contact' || tile.kind === 'record'" :label="tile.label" />
+        <Avatar v-if="['contact', 'record', 'chat'].includes(tile.kind)" :label="tile.label" />
         <span v-else class="business-tile-icon" aria-hidden="true"><FeatherIcon :name="tile.kind === 'unlinked' ? 'users' : 'folder'" :size="20" /></span>
         <span class="business-tile-copy"><strong>{{ tile.label }}</strong>
           <small v-if="contacts && tile.kind !== 'contact'">{{ tileCount(tile.contact_count, 'contact') }}</small>
           <small v-else-if="tile.kind === 'type' || tile.kind === 'group'">{{ tileCount(tile.record_count, 'record') }}</small>
           <small v-else-if="tile.kind === 'record'">{{ tile.last_activity ? 'Last activity ' + listTime(tile.last_activity) : 'No activity yet' }}</small>
           <small v-else-if="tile.kind === 'contact'">{{ tile.mobile_no || tile.name }}</small>
-          <small v-else-if="tile.kind === 'unlinked'">{{ tileCount(tile.chat_count, 'chat') }}</small>
+          <small v-else-if="tile.kind === 'chat'">{{ tile.latest_preview || 'No messages yet' }}</small>
         </span>
-        <span v-if="!contacts && tileUnread(tile)" class="directory-unread" :aria-label="tileCount(tileUnread(tile), tile.kind === 'record' ? 'unread message' : 'unread record')">{{ tileUnread(tile) }}</span>
+        <span v-if="!contacts && tileUnread(tile)" class="directory-unread" :aria-label="tileCount(tileUnread(tile), ['record', 'chat'].includes(tile.kind) ? 'unread message' : 'unread record')">{{ tileUnread(tile) }}</span>
         <FeatherIcon name="chevron-right" :size="16" aria-hidden="true" />
       </button>
       <p v-if="!loading && !error && !items.length" class="business-empty">No matching {{ people ? 'contacts' : 'records' }}.</p>

@@ -9,6 +9,7 @@ from relay_core.ai.render import field_names
 
 MAX_PROMPT_LENGTH = 12000
 MAX_JSON_PROMPT_LENGTH = 48000
+MAX_MODEL_JSON_DEPTH = 32
 # The reserved input size of one image observation: about 2,000 tokens.
 IMAGE_PROMPT_CHARS = 8000
 PRIVACY_REPLY = 'Sorry, I can only help with business questions about your own records and customer-facing information.'
@@ -220,7 +221,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             # Existing single-event providers can still name a declared reference.
             # Normalize it through SEARCH; it never bypasses the declaration gate.
             try:
-                arguments = json.loads(call['arguments']) if isinstance(call['arguments'], str) else call['arguments']
+                arguments = model_json(call['arguments'])
                 if call['name'] in {row['key'] for row in references}:
                     arguments = dict(purpose=skill.get('target') or 'Requested search',
                         reference=call['name'], arguments=arguments)
@@ -282,7 +283,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
             if re.search(r'timed?\s*out|deadline|time budget', error, re.IGNORECASE):
                 raise TimeoutError('AI model did not answer in time')
             raise ValueError(('AI provider error: ' + llm.redact_secrets(error, secrets))[:500])
-        value = outcome['result']['data']
+        value = model_json(outcome['result']['data'])
         if (not isinstance(value, dict) or not DECISION_KEYS <= set(value)
                 or set(value) - set(RESPONSE['properties'])):
             raise ValueError('Invalid skill decision')
@@ -391,12 +392,28 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     return dict(value, reads=reader.evidence, user=user)
 
 
+def model_json(value):
+    """A model JSON value, parsing text; nesting deeper than any contract needs is invalid output."""
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except RecursionError:
+        raise ValueError('Model output is nested too deeply') from None
+    pending = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > MAX_MODEL_JSON_DEPTH:
+            raise ValueError('Model output is nested too deeply')
+        if isinstance(item, (dict, list)):
+            pending.extend((child, depth + 1) for child in (item.values() if isinstance(item, dict) else item))
+    return value
+
+
 def search_declaration(declaration):
     """Read strict-mode search arguments sent as JSON text; text that is not a JSON object stays for validation."""
     if not isinstance(declaration, dict) or not isinstance(declaration.get('arguments'), str):
         return declaration
     try:
-        arguments = json.loads(declaration['arguments'] or '{}')
+        arguments = model_json(declaration['arguments'] or '{}')
     except ValueError:
         return declaration
     return dict(declaration, arguments=arguments) if isinstance(arguments, dict) else declaration

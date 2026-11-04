@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { appendTiles, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
+import { appendTiles, chatTile, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
@@ -13,7 +13,7 @@ async function component(t, props = {}, api) {
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
   let realtime
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, _kinds, refresh) { realtime = refresh }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
@@ -32,6 +32,7 @@ function api(calls, contacts = false) {
   return async (method, values) => {
     calls.push([method, values])
     if (method === 'api.contact_directory') return { items: [{ name: 'person-1', full_name: 'Local person', mobile_no: '555001' }], next: null }
+    if (method === 'inbox.directory') return { items: [], next: null }
     const path = JSON.parse(values.path)
     const items = !values.doctype ? (contacts ? [type, { kind: 'unlinked', contact_count: 1 }] : [type]) : path.length === 0 ? [blank] : path.length === 1 ? [team] : [record]
     return { items, next: null, fields: values.doctype ? [{ fieldname: 'region', label: 'Region' }, { fieldname: 'team', label: 'Team' }] : [] }
@@ -85,6 +86,30 @@ test('Contacts has no flat root, unlinked is one root tile, and record contacts 
   view.navigate(rootBrowse()); await settle()
   view.choose({ kind: 'unlinked' }); await settle()
   assert.equal(calls.at(-1)[1].unlinked, 1)
+})
+
+test('Chats All lists the chats no business record covers below the type tiles and pages them', async t => {
+  browser(t, '#/messages'); const calls = []
+  const chat = after => ({ name: after ? 'RELAY-CON-2' : 'RELAY-CON-1', title: after ? 'Second chat' : '9876543210', latest_preview: 'Hello', unread: 2 })
+  const props = reactive({ filters: { channels: '["ch1"]' } })
+  const view = await component(t, props, async (method, values) => {
+    calls.push([method, values])
+    if (method === 'inbox.directory') return { items: [chat(values.after)], next: values.after ? null : { after: 'cursor-1' } }
+    return { items: [type], next: null, fields: [] }
+  })
+  assert.deepEqual(view.items.value.map(row => [row.kind, row.label]), [['type', 'Suppliers'], ['chat', '9876543210']])
+  assert.deepEqual(calls.at(-1), ['inbox.directory', { rows: 'business', mode: 'unlinked', query: '', channels: '["ch1"]' }])
+  assert.equal(tileUnread(view.items.value[1]), 2)
+  await view.load(true)
+  assert.deepEqual(calls.at(-1)[1].after, 'cursor-1')
+  assert.deepEqual(view.items.value.map(row => row.name), [undefined, 'RELAY-CON-1', 'RELAY-CON-2'])
+  assert.equal(view.next.value, null)
+  view.choose(view.items.value[1])
+  assert.deepEqual(view.emitted.at(-1), ['chat', 'RELAY-CON-1'])
+  props.filters = { business_type: 'Local Supplier' }; await settle()
+  assert.equal(calls.at(-1)[0], 'business_groups.browse', 'A business type filter has no unlinked chats')
+  view.choose(type); await settle()
+  assert.equal(calls.filter(([method]) => method === 'inbox.directory').length, 2)
 })
 
 test('a no-group type goes straight to records; paging and failed requests can retry', async t => {
@@ -219,7 +244,7 @@ test('rendered root has one Business types label and Contacts tiles have contact
   const render = new Function('Vue', compile(template, { mode: 'function', prefixIdentifiers: true }).code)(Vue)
   for (const contacts of [false, true]) {
     browser(t, contacts ? '#/contacts' : '#/messages')
-    const view = await component(t, { contacts }, async () => ({ items: [
+    const view = await component(t, { contacts }, async method => method === 'inbox.directory' ? { items: [], next: null } : ({ items: [
       { kind: 'type', label: 'Local', record_count: 1, contact_count: 2, unread: 4278, unread_records: 121 },
     ], fields: [], next: null }))
     const app = Vue.createSSRApp({ render, setup: () => ({ ...view, contacts, busy: false,
@@ -247,7 +272,9 @@ test('search filters the shown level and the placeholder names it', async t => {
     const placeholder = () => searchLabel(view.state.value, view.fields.value)
     assert.equal(placeholder(), 'Search business types')
     view.query.value = 'Supp'; await settle(); await view.search()
-    assert.deepEqual([calls.at(-1)[0], calls.at(-1)[1].query, calls.at(-1)[1].doctype], ['business_groups.browse', 'Supp', null])
+    const root = calls.findLast(([method]) => method === 'business_groups.browse')
+    assert.deepEqual([root[1].query, root[1].doctype], ['Supp', null])
+    if (!contacts) assert.deepEqual([calls.at(-1)[0], calls.at(-1)[1].query], ['inbox.directory', 'Supp'], 'Chats All also searches its chats')
     view.choose(type); await settle()
     assert.equal(placeholder(), 'Search Region')
     view.query.value = 'North'; await settle(); await view.search()
@@ -294,7 +321,7 @@ test('a URL saved under an older grouping restarts at the level the server answe
 
 test('record tiles use the coloured initials avatar and group tiles keep the folder icon', async () => {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
-  assert.match(source, /<Avatar v-if="tile\.kind === 'contact' \|\| tile\.kind === 'record'" :label="tile\.label" \/>/)
+  assert.match(source, /<Avatar v-if="\['contact', 'record', 'chat'\]\.includes\(tile\.kind\)" :label="tile\.label" \/>/)
   assert.doesNotMatch(source, /file-text/)
   assert.match(source, /'folder'/)
 })

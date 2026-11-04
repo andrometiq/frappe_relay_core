@@ -136,7 +136,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads',
   </div>
   <InboxFilterPanel v-model="filters" v-model:open="filtersOpen" :anchor="isMobile ? mobileFilterButton : filterButton" :options="options" @browse="browse" />
   <InboxFolders v-if="capabilities.folders && !groupingView" v-model="folder" />
-  <BusinessDirectory v-if="groupingView" :filters="{ ...params, medium: medium === 'all' ? undefined : medium }" :selected="businessName" :selected-doctype="businessType" :busy="busy" @navigate="emit('navigate')" @select="(doctype, record) => emit('business', doctype, record)" @unlinked="mode = 'unlinked'" />
+  <BusinessDirectory v-if="groupingView" :filters="{ ...params, medium: medium === 'all' ? undefined : medium }" :selected="businessName" :selected-doctype="businessType" :busy="busy" @navigate="emit('navigate')" @select="(doctype, record) => emit('business', doctype, record)" @chat="name => emit('select', name)" />
   <template v-else>
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">

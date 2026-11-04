@@ -3,6 +3,7 @@ import json
 import time
 import hashlib
 import traceback
+from datetime import date
 import frappe
 from relay_core.automation.queue import QUEUE
 from relay_core.ai.tools import as_user, is_company_scoped
@@ -279,13 +280,27 @@ def declare_search(run, skill, message, decision):
     run.search_plan, run.stage = json.dumps(record), 'Search'
     from relay_core.ai.language import message_notice
     statement = message_notice('search', message, SEARCH_NOTICE)
-    dates = [value[1] for value in plan['arguments'].get('filters', {}).values()
-             if isinstance(value, list) and value[0] == 'between']
+    dates = date_filters(plan['arguments'].get('filters', {}))
     if dates:
-        statement += f' {dates[0][0]} – {dates[0][1]}.'  # ISO dates read the same in every language.
+        statement += f' {", ".join(dates)}.'
     if confirmation_required(skill, plan):
         statement += ' ' + message_notice('search_confirm', message, SEARCH_CONFIRM)
     decision.update(reply=statement, search=plan)
+
+
+def date_filters(filters):
+    """Each date filter as ISO dates and symbols, which read the same in every language."""
+    shown = []
+    for value in filters.values():
+        operator, operand = value if isinstance(value, list) and len(value) == 2 else ('=', value)
+        operands = operand if operator == 'between' else [operand]
+        try:
+            [date.fromisoformat(item) for item in operands]
+        except (TypeError, ValueError):
+            continue
+        shown.append(' – '.join(operands) if operator == 'between'
+                     else operand if operator == '=' else {'>=': '≥ ', '<=': '≤ '}[operator] + operand)
+    return shown
 
 
 def search_request_key(message, user, run=None):
