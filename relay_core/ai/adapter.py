@@ -274,14 +274,20 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     if not value['handoff']:
         from relay_core.ai.reply_guard import check, contacts, record_names, ReplyBlocked, REASON
         from relay_core.ai.event_memory import FACTS
+        from relay_core.ai.fact_memory import guard_texts, used
+        facts = []
         try:
             prompt = json.loads(text)
-            # Recalled fact memory may be customer-written, so it never allows a contact value.
+            # Recalled fact memory may be customer-written, so only staff facts from the store allow a contact value.
             reference_data = {key: item for key, item in (prompt.get('reference_data') or {}).items() if key != FACTS}
             evidence = [prompt.get('incoming', ''), reference_data]
+            facts = [row['memory'] for row in used((prompt.get('reference_data') or {}).get(FACTS) or [])]
         except (ValueError, AttributeError):
             evidence = [text]
         evidence = minimiser.unmask(evidence)
+        staff, shared = guard_texts(facts, skill, business)
+        core.evidence.extend(staff)
+        core.knowledge.extend(shared)
         allowed_contacts = contacts(*evidence, *core.read_results, *core.evidence)
         allowed_names = record_names(*core.read_results)
         replies = [value['reply'], *(row['parameters']['text'] for row in core.actions

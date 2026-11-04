@@ -95,6 +95,7 @@ def decide(skill, message, run_id=None, *, deadline=None):
     # its business type.
     reference = ReplyContext(business, scope['company'], scope['provider'],
                              message.sender_endpoint or message.relay_contact, user)
+    reference.recall(skill, text)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image
@@ -595,6 +596,8 @@ def delivery_scope(run, skill, message, decision=None):
     if run.get('ai_context'):
         from relay_core.ai.event_memory import check_context
         check_context(run.ai_context, business, scope['company'])
+        from relay_core.ai.fact_memory import check_used
+        check_used(run.ai_context, skill, business)
     recheck(skill, user, business, decision.get('reads', []), scope,
         authorize=lambda contract, arguments: authorize_search(run.name, skill, contract, arguments))
 
@@ -630,7 +633,8 @@ def decline_notices(message) -> dict:
 
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
-    if slot != 'approval_notice' and reply not in decline_notices(message).values():
+    guarded = slot != 'approval_notice' and reply not in decline_notices(message).values()
+    if guarded:
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
@@ -642,6 +646,10 @@ def dispatch_reply(run, skill, message, reply, *, slot):
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
         raise ValueError('Reply delivery requires review')
+    if guarded and skill.get('memory_enabled'):
+        # Facts the reply saved count from the transaction that journals the reply.
+        from relay_core.ai.fact_memory import activate
+        activate(run.name)
     return result
 
 
