@@ -106,7 +106,7 @@ def keep_header(result, kind, data):
     if not file.is_private or file.attached_to_doctype or file.owner != frappe.session.user:
         return None
     from relay_core.document_sends import keep_copy
-    if message := keep_copy(result, file.file_name, file.get_content()):
+    if message := keep_copy(result, file.file_name, file.get_content(encodings=())):
         file.delete(ignore_permissions=True)
         frappe.cache.delete_value(key)
     return message

@@ -52,8 +52,8 @@ def file_content(name,source):
     file=frappe.get_doc('File',name)
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
-    raw=file.get_content()
-    if isinstance(raw,str):raw=raw.encode()
+    # No encodings: Frappe would decode a binary file that happens to read as windows-1250 into text.
+    raw=file.get_content(encodings=())
     if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
     return file,raw
 

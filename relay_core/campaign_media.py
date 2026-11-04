@@ -249,4 +249,4 @@ def sent_header(source, campaign):
     limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[header_type(doc)])
     if error := size_error(os.path.getsize(path), limit, 'Header attachment'):
         raise ValidationError(error)
-    return item['filename'], file.get_content()
+    return item['filename'], file.get_content(encodings=())
