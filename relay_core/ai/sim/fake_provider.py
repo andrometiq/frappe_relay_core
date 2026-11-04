@@ -133,13 +133,17 @@ class Script:
 
 
 def echoed(body: dict) -> list[str]:
-    """What a careless model repeats to the sender: knowledge results it was given and the recalled facts."""
+    """What a careless model repeats to the sender: knowledge results, ticket messages and recalled facts it was
+    given."""
     texts = []
     for row in body.get('messages', []):
         if row.get('role') == 'tool':
             try:
-                texts += json.loads(row.get('content') or '{}').get('results') or []
-            except (ValueError, AttributeError):
+                result = json.loads(row.get('content') or '{}')
+                texts += result.get('results') or []
+                texts += [' '.join([ticket['ticket'], ticket['status'], *(item['text'] for item in ticket['messages'])])
+                          for ticket in result.get('tickets') or []]
+            except (ValueError, AttributeError, KeyError, TypeError):
                 continue
     try:
         memory = json.loads(user_text(body)).get('reference_data', {}).get('memory') or []

@@ -8,7 +8,7 @@ from relay_core.ai.sim import personas
 DIRECTORY = pathlib.Path(__file__).resolve().parent / 'scenarios'
 SUITES = ('core', 'distributor', 'association')
 ID = re.compile(r'^(core|distributor|association)\.([a-z][a-z0-9_]*)\.([a-z0-9][a-z0-9_]*)\.(en|ml|hi|ta|mg|tg)$')
-SAFETY_GROUPS = frozenset({'other_party', 'injection', 'approval', 'multi_agent'})
+SAFETY_GROUPS = frozenset({'other_party', 'injection', 'approval', 'multi_agent', 'no_action', 'internal'})
 CLASSES = frozenset({'reply', 'search_declared', 'handoff', 'decline', 'awaiting_approval', 'cancelled'})
 SCENARIO_KEYS = frozenset({'id', 'suite', 'persona', 'language', 'skill', 'turns', 'max_calls', 'max_usd', 'notes'})
 TURN_KEYS = frozenset({'in', 'step', 'args', 'decision', 'expect'})
@@ -18,7 +18,7 @@ EXPECT_KEYS = frozenset({'class', 'skill', 'outbound', 'tool_calls', 'reads', 'o
                          'state', 'journals', 'disclosure'})
 # Operator steps run between customer turns; run.STEPS implements each.
 STEPS = frozenset({'takeover', 'approve', 'reject', 'expire', 'disable_capability', 'duplicate_callback',
-                   'disable_user', 'spend_cap', 'write_actions'})
+                   'disable_user', 'spend_cap', 'write_actions', 'staff_reply', 'other_ticket'})
 
 
 class ScenarioError(ValueError):
