@@ -89,8 +89,15 @@ def config_hash(source, base) -> str:
 
 
 def is_approved(source, base) -> bool:
+    """The exact configuration is approved, and a customer source without a business field still holds company
+    neutral reference data (a new Company or a settings change ends that)."""
+    from relay_core.ai.tools import company_neutral
+    if source.source_type != 'DocType':
+        return True
     try:
-        return source.source_type != 'DocType' or bool(source.approved_hash) and source.approved_hash == config_hash(source, base)
+        if base.audience == 'customer' and not source.business_field:
+            company_neutral(source.reference_doctype)
+        return bool(source.approved_hash) and source.approved_hash == config_hash(source, base)
     except ValueError:
         return False
 

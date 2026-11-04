@@ -129,6 +129,15 @@ class RetrieverTests(unittest.TestCase):
         self.assertEqual(sorted(self.store.search.call_args.args[0]), ['S-EVENT', 'S-ROWS', 'S-TEXT'])
         self.events.assert_called_with('Supplier', 'Acme Textiles', limit=None)
 
+    def test_doctype_chunks_count_only_after_a_sweep_under_the_current_approval(self):
+        self.approved.return_value = True
+        rows = next(row for row in self.rows if row.name == 'S-ROWS')
+        for revision, approved_hash, found in (('h-old', 'h-new', False), (None, 'h-new', False), ('h-new', 'h-new', True)):
+            rows.revision, rows.approved_hash = revision, approved_hash
+            with self.subTest(revision=revision):
+                self.search()
+                self.assertEqual('S-ROWS' in self.store.search.call_args.args[0], found)
+
     def test_no_bound_base_raises_and_invalid_input_is_refused(self):
         self.skill.knowledge_bases = []
         with self.assertRaises(ValueError):
@@ -204,6 +213,14 @@ class SourceTests(unittest.TestCase):
             with self.subTest(changed=changed, audience=base.audience):
                 self.assertFalse(self.controller.is_approved(Doc(source, **changed), base))
         self.assertTrue(self.controller.is_approved(Doc(source_type='Text'), self.base))
+
+    def test_a_shared_customer_source_stops_when_its_doctype_is_no_longer_company_neutral(self):
+        self.neutral.side_effect = None
+        source = self.source(business_field=None)
+        source.approved_hash = self.controller.config_hash(source, self.base)
+        self.assertTrue(self.controller.is_approved(source, self.base))
+        self.neutral.side_effect = ValueError('This business type is not company neutral')
+        self.assertFalse(self.controller.is_approved(source, self.base))
 
     def test_a_form_save_cannot_set_the_approval(self):
         doc = self.controller.RelayAIKnowledgeSource(self.source(source_type='Text', content='Hi', chunk_size=1200,
