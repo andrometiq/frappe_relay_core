@@ -20,11 +20,12 @@ export function useMessages() {
   const attachment = ref(null);
   const pendingMessages=ref([]), pendingCursor=ref(null);
   const rowTime=row=>Date.parse(String(row.sent_at||row.creation||'').replace(' ','T'));
-  // A pending or failed send sits at its own time among the loaded messages; one without a time goes last.
+  // A pending or failed send sits at its own time among the loaded messages. One without a time goes last, and so does
+  // a send still in this tab's queue: the server stamps its message only after the provider answers.
   const displayRows=computed(()=>{
     const merged=[...rows.value];
     for(const row of pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))){
-      const time=rowTime(row), index=Number.isNaN(time)?-1:merged.findIndex(item=>rowTime(item)>time);
+      const time=rowTime(row), index=Number.isNaN(time)||row.request&&row.status==='Sending'?-1:merged.findIndex(item=>rowTime(item)>time);
       if(index<0)merged.push(row);else merged.splice(index,0,row);
     }
     return merged;

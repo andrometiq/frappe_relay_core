@@ -230,3 +230,23 @@ test('a failed send shows Failed with Retry and does not block the next message'
   assert.deepEqual(sends().map(values => values.data.text), ['First', 'Second'])
   assert.deepEqual(state.displayRows.value.filter(row => row._pending).map(row => [row.content, row.status]), [['First', 'Failed']])
 })
+
+test('a queued send stays below the stored message of the send before it', async t => {
+  const responses = [deferred(), deferred()]
+  const { state, sends } = fixture(t, method => method === 'messaging.send' ? responses[sends().length - 1].promise : undefined)
+  await state.open('A')
+  state.body.value = 'First'
+  const first = state.send()
+  state.body.value = 'Second'
+  const second = state.send()
+  responses[0].resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001', message: 'RELAY-MSG-0000000004' })
+  await first
+  // The server stores a message after the provider answers, so its time is later than the queued bubble's.
+  const stored = new Date(Date.now() + 60000).toISOString()
+  state.rows.value = [...state.rows.value, { ...row('RELAY-MSG-0000000004', stored), direction: 'Outgoing', content: 'First' }]
+  await tick()
+  assert.deepEqual(state.displayRows.value.slice(-2).map(row => row.content), ['First', 'Second'])
+  responses[1].resolve({ status: 'Submitted', action: 'RELAY-MA-0000000002' })
+  await second
+})
+
