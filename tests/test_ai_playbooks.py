@@ -11,6 +11,7 @@ from relay_core.ai import knowledge, playbooks, reply_guard
 from relay_core.ai.registry import ToolContext
 from relay_core.ai.registry.builtin import CoreTools
 from relay_core.patches.v1_0 import move_ai_knowledge_to_playbooks as move
+from relay_core.relay_core.doctype.relay_ai_playbook import relay_ai_playbook as controller
 
 ETIQUETTE = '''---
 name: handoff-etiquette
@@ -294,3 +295,20 @@ class MovePatchTests(unittest.TestCase):
     def test_scopes_cover_each_company_and_business_type(self):
         self.assertEqual(move.scopes(self.rows), {(('Customer', ''), 'Acme Textiles'), (('Customer', ''), ''),
                                                   (('', ''), 'Acme Textiles'), (('', ''), '')})
+
+
+class GlobalCapTests(unittest.TestCase):
+    def validate(self, **flags):
+        doc = controller.RelayAIPlaybook.__new__(controller.RelayAIPlaybook)
+        doc.__dict__.update(doctype=playbooks.DOCTYPE, name='desk/RELAY-KB-0000000101', playbook_key='desk/RELAY-KB-0000000101',
+                            is_system_generated=0, enabled=1, is_global=1, description='', instructions='Be brief.')
+        with patch.multiple(controller.frappe, db=Mock(count=Mock(return_value=100)), flags=Doc(flags),
+                            throw=Mock(side_effect=ValueError)):
+            doc.validate()
+
+    def test_a_desk_save_over_the_global_cap_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.validate()
+
+    def test_the_knowledge_move_copies_rows_over_the_global_cap(self):
+        self.validate(in_patch=True)

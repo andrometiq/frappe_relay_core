@@ -18,7 +18,8 @@ class RelayAIPlaybook(Document):
             frappe.throw('A playbook that is not in every prompt needs a description for the playbook index')
         if not isinstance(self.instructions, str) or not 1 <= len(self.instructions.strip()) <= MAX_INSTRUCTIONS:
             frappe.throw(f'Use 1–{MAX_INSTRUCTIONS} instruction characters')
-        if self.enabled and self.is_global and frappe.db.count(
+        # The knowledge move copies every legacy row; over the cap, the prompt refuses as it did before the move.
+        if self.enabled and self.is_global and not frappe.flags.in_patch and frappe.db.count(
                 self.doctype, {'enabled': 1, 'is_global': 1, 'name': ['!=', self.name or '']}) >= MAX_GLOBAL_ROWS:
             frappe.throw(f'At most {MAX_GLOBAL_ROWS} playbooks can be in every prompt')
 
