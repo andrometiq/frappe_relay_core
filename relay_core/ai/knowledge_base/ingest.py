@@ -211,7 +211,8 @@ def events_base() -> str:
     name = frappe.db.get_value(BASE, {'is_events': 1})
     if name:
         return name
-    doc = frappe.get_doc(dict(doctype=BASE, title='Events', audience='customer', enabled=1, is_events=1,
+    # Each event keeps its own company; an empty company stops the user's default company on insert.
+    doc = frappe.get_doc(dict(doctype=BASE, title='Events', audience='customer', enabled=1, is_events=1, company='',
                               description='Owner business events: dates, offers, rules and how to take part.'))
     doc.flags.events_base = True
     doc.insert(ignore_permissions=True)

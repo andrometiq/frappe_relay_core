@@ -149,7 +149,8 @@ def ensure(name: str, definition: dict) -> bool:
     row = frappe.db.get_value(DOCTYPE, name, list(definition), as_dict=True)
     if row and all(row[key] == value for key, value in definition.items()):
         return True
-    doc = frappe.get_doc(DOCTYPE, name) if row else frappe.get_doc({'doctype': DOCTYPE, 'playbook_key': name})
+    # A new app playbook applies to every company; a None company would take the user's default on insert.
+    doc = frappe.get_doc(DOCTYPE, name) if row else frappe.get_doc({'doctype': DOCTYPE, 'playbook_key': name, 'company': ''})
     doc.update(definition)
     try:
         doc.save(ignore_permissions=True)

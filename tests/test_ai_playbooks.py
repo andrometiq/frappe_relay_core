@@ -100,7 +100,8 @@ class SyncTests(unittest.TestCase):
     def test_a_new_file_creates_a_locked_row_during_sync_only(self):
         self.write('handoff-etiquette', ETIQUETTE)
         self.assertEqual(playbooks.sync(), ['acme_app/handoff-etiquette'])
-        self.f.get_doc.assert_called_once_with({'doctype': playbooks.DOCTYPE, 'playbook_key': 'acme_app/handoff-etiquette'})
+        self.f.get_doc.assert_called_once_with({'doctype': playbooks.DOCTYPE, 'playbook_key': 'acme_app/handoff-etiquette',
+                                                'company': ''})
         self.assertEqual((self.doc.app, self.doc.audience, self.doc.is_system_generated), ('acme_app', 'customer', 1))
         self.assertEqual(self.flags, [True])
         self.assertFalse(self.f.flags.in_playbook_sync)

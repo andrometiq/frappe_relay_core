@@ -251,5 +251,16 @@ class ChunkGuardTests(unittest.TestCase):
                               evidence=['Northwind Hosiery also parks there.'], knowledge=())
 
 
+class EventsBaseTests(unittest.TestCase):
+    def test_the_events_base_is_for_every_company_not_the_users_default(self):
+        from relay_core.ai.knowledge_base import ingest
+        f = framework()
+        f.db.get_value.return_value = None
+        f.get_doc.side_effect = lambda values: Doc(values, name='KB-EVENTS', flags=Doc())
+        with patch.object(ingest, 'frappe', f):
+            self.assertEqual(ingest.events_base(), 'KB-EVENTS')
+        self.assertEqual(f.get_doc.call_args.args[0].get('company'), '')
+
+
 if __name__ == '__main__':
     unittest.main()
