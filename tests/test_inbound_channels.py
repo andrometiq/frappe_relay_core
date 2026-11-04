@@ -76,6 +76,26 @@ class ReceiveTests(unittest.TestCase):
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         self.assertEqual((rows[0]['event_key'], rows[0]['hub_channel']), ('statuses:' + digest, None))
 
+    def test_a_failed_status_keeps_the_meta_reason_for_every_error_shape(self):
+        from relay_core.message_updates import extract_updates
+        undeliverable = {'code': 131026, 'title': 'Message undeliverable', 'message': 'Message Undeliverable.'}
+        engagement = {'code': 131049, 'title': 'Not delivered to maintain healthy ecosystem engagement.',
+                      'message': 'Not delivered to maintain healthy ecosystem engagement.'}
+        failed = [dict(status(1), status='failed', error=undeliverable), dict(status(2), status='failed', error=engagement),
+                  dict(status(3), status='failed')]
+        rows = self.receive('receive_statuses', {'account': 'site-a', 'statuses': failed})
+        updates = extract_updates(json.loads(rows[0]['payload']))
+        self.assertEqual([row.get('error') for row in updates], [
+            'Message undeliverable: Message Undeliverable. (code 131026)',
+            'Not delivered to maintain healthy ecosystem engagement. (code 131049)', None])
+        for error in (dict(undeliverable, code='131026'), dict(undeliverable, extra=1), dict(undeliverable, title=5), 'text'):
+            raw, stamp, signature = signed({'account': 'site-a', 'statuses': [dict(failed[0], error=error)]})
+            with self.subTest(error=error), self.assertRaises(ValueError):
+                inbound.validate_status_callback(raw, stamp, signature, SECRET, 'site-a')
+        raw, stamp, signature = signed({'account': 'site-a', 'statuses': [dict(status(1), error=undeliverable)]})
+        with self.assertRaises(ValueError):
+            inbound.validate_status_callback(raw, stamp, signature, SECRET, 'site-a')
+
     def test_channel_status_and_bulk_batches_accept_the_channel_key(self):
         row = {'id': 1, 'delivery_id': 4, 'request_key': 'key', 'operation': 'whatsapp.execute', 'state': 'cancelled',
                'receipt': {}, 'occurred_at': '2026-10-27T00:00:00Z', 'channel_key': 'wa-2', 'to': '+91'}
