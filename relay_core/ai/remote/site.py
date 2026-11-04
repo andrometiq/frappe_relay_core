@@ -160,7 +160,7 @@ def hand(run: str, turn: str, account: str, url: str, body: dict, timeout: float
     if not frappe.cache.set(key('spec', identifier), json.dumps(spec), nx=True, ex=RESULT_SECONDS):
         return
     frappe.cache.zadd(key('inflight'), {identifier: deadline})
-    queue_connection().xadd(protocol.STREAM, protocol.signed_entry(secret(), site, identifier),
+    queue_connection().xadd(protocol.stream(site), protocol.signed_entry(secret(), site, identifier),
                             maxlen=100000, approximate=True)
 
 
@@ -181,11 +181,12 @@ def spec_for(identifier) -> dict | None:
     return json.loads(raw) if raw else None
 
 
-def authenticated() -> dict:
+def authenticated(purpose: str) -> dict:
     if not is_enabled():
         frappe.throw('The AI service is off on this site', frappe.PermissionError)
     try:
-        return protocol.verify(secret(), frappe.request.get_data(), frappe.request.headers.get('X-Relay-AI-Timestamp'),
+        return protocol.verify(secret(), purpose, frappe.request.get_data(),
+                               frappe.request.headers.get('X-Relay-AI-Timestamp'),
                                frappe.request.headers.get('X-Relay-AI-Signature'))
     except (protocol.InvalidSignature, ValueError):
         frappe.throw('Invalid AI service request', frappe.PermissionError)
@@ -194,7 +195,7 @@ def authenticated() -> dict:
 @frappe.whitelist(allow_guest=True, methods=['POST'])
 def request(**_ignored) -> dict:
     """The provider request with credentials current now; frappe_tools refreshes a ChatGPT login token."""
-    spec = spec_for(authenticated().get('id'))
+    spec = spec_for(authenticated('request').get('id'))
     if not spec or frappe.cache.exists(key('result', spec['run'], spec['turn']), shared=True):
         return {'status': 'gone'}
     from frappe_tools.ai import accounts, client
@@ -211,7 +212,7 @@ def request(**_ignored) -> dict:
 @frappe.whitelist(allow_guest=True, methods=['POST'])
 def result(**_ignored) -> dict:
     """Store the first result of a request and resume its run; a repeated result changes nothing."""
-    value = authenticated()
+    value = authenticated('result')
     spec = spec_for(value.get('id'))
     if not spec:
         return {'status': 'gone'}

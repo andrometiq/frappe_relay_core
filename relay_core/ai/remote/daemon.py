@@ -52,46 +52,59 @@ class Service:
     def __init__(self, redis, http: httpx.AsyncClient, sites: dict[str, str], callback: str, *,
                  site_limit: int = 20, total_limit: int = 200, consumer: str | None = None):
         self.redis, self.http, self.sites, self.callback_url = redis, http, sites, callback.rstrip('/')
-        self.site_limit, self.total = site_limit, asyncio.Semaphore(total_limit)
-        self.capacity = total_limit + site_limit  # Entries read ahead of a free slot wait in memory, unacknowledged.
+        self.site_limit, self.total_limit, self.total = site_limit, total_limit, asyncio.Semaphore(total_limit)
         self.limits: dict[str, asyncio.Semaphore] = {}
         self.consumer = consumer or f'{socket.gethostname()}:{os.getpid()}'
         self.tasks: set[asyncio.Task] = set()
-        self.counts, self.active = Counter(), Counter()
+        self.held: set[tuple[str, str]] = set()  # (site, entry id) of every entry this process works on.
+        self.groups: set[str] = set()
+        self.counts, self.active, self.taken = Counter(), Counter(), Counter()
         self.stopping = asyncio.Event()
 
     async def run(self, sites_path: str | None = None) -> None:
-        with contextlib.suppress(ResponseError):  # BUSYGROUP: the group exists.
-            await self.redis.xgroup_create(protocol.STREAM, protocol.GROUP, id='0', mkstream=True)
+        await self.ensure_groups()
         loops = [self.read(), self.reclaim(), self.beat(sites_path)]
         await asyncio.gather(*loops)
         if self.tasks:
             await asyncio.wait(self.tasks, timeout=30)
 
+    async def ensure_groups(self) -> None:
+        for site in set(self.sites) - self.groups:
+            with contextlib.suppress(ResponseError):  # BUSYGROUP: the group exists.
+                await self.redis.xgroup_create(protocol.stream(site), protocol.GROUP, id='0', mkstream=True)
+            self.groups.add(site)
+
     async def read(self) -> None:
+        """Read ahead at most `site_limit` entries per site, so one site's backlog cannot hold back another site."""
         while not self.stopping.is_set():
-            room = self.capacity - len(self.tasks)
-            if room <= 0:
+            room = {protocol.stream(site): '>' for site in self.sites
+                    if site in self.groups and self.taken[site] < self.site_limit}
+            if not room or len(self.tasks) >= self.total_limit + self.site_limit:
                 await asyncio.sleep(0.05)
                 continue
-            batches = await self.redis.xreadgroup(protocol.GROUP, self.consumer, {protocol.STREAM: '>'},
-                                                  count=room, block=1000)
-            for _, entries in batches or []:
+            batches = await self.redis.xreadgroup(protocol.GROUP, self.consumer, room, count=self.site_limit, block=1000)
+            for stream, entries in batches or []:
+                site = (stream.decode() if isinstance(stream, bytes) else stream).removeprefix(protocol.STREAM_PREFIX)
                 for entry_id, fields in entries:
-                    self.spawn(entry_id, fields, 1)
+                    self.spawn(site, entry_id, fields, 1)
 
     async def reclaim(self) -> None:
-        """Take over entries a crashed service read but never acknowledged."""
+        """Take over entries a crashed service read but never acknowledged; skip entries this process still holds."""
         while not self.stopping.is_set():
-            start = '0-0'
-            while True:
-                start, entries, _ = await self.redis.xautoclaim(protocol.STREAM, protocol.GROUP, self.consumer,
-                                                                RECLAIM_IDLE_MS, start_id=start, count=50)
-                for entry_id, fields in entries:
-                    pending = await self.redis.xpending_range(protocol.STREAM, protocol.GROUP, entry_id, entry_id, 1)
-                    self.spawn(entry_id, fields, pending[0]['times_delivered'] if pending else protocol.MAX_DELIVERIES + 1)
-                if start in ('0-0', b'0-0'):
-                    break
+            for site in list(self.groups):
+                start = '0-0'
+                while True:
+                    start, entries, _ = await self.redis.xautoclaim(protocol.stream(site), protocol.GROUP, self.consumer,
+                                                                    RECLAIM_IDLE_MS, start_id=start, count=50)
+                    for entry_id, fields in entries:
+                        if (site, entry_id) in self.held:
+                            continue
+                        pending = await self.redis.xpending_range(protocol.stream(site), protocol.GROUP, entry_id,
+                                                                  entry_id, 1)
+                        self.spawn(site, entry_id, fields,
+                                   pending[0]['times_delivered'] if pending else protocol.MAX_DELIVERIES + 1)
+                    if start in ('0-0', b'0-0'):
+                        break
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.stopping.wait(), 30)
 
@@ -99,6 +112,7 @@ class Service:
         while not self.stopping.is_set():
             if sites_path:
                 self.sites = load_sites(sites_path)
+                await self.ensure_groups()
             await self.redis.set(protocol.HEARTBEAT, json.dumps(self.status), ex=protocol.HEARTBEAT_SECONDS)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.stopping.wait(), 5)
@@ -108,20 +122,30 @@ class Service:
         return {'ts': time.time(), 'consumer': self.consumer, 'in_flight': sum(self.active.values()),
                 'queued': len(self.tasks), 'active': dict(self.active), 'counts': dict(self.counts)}
 
-    def spawn(self, entry_id, fields: dict, deliveries: int) -> None:
-        task = asyncio.create_task(self.handle(entry_id, fields, deliveries))
+    def spawn(self, stream_site: str, entry_id, fields: dict, deliveries: int) -> None:
+        held = (stream_site, entry_id)
+        self.held.add(held)
+        self.taken[stream_site] += 1
+        task = asyncio.create_task(self.handle(stream_site, entry_id, fields, deliveries))
         self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
 
-    async def handle(self, entry_id, fields: dict, deliveries: int) -> None:
+        def done(task):
+            self.tasks.discard(task)
+            self.held.discard(held)
+            self.taken[stream_site] -= 1
+        task.add_done_callback(done)
+
+    async def handle(self, stream_site: str, entry_id, fields: dict, deliveries: int) -> None:
         fields = {key.decode() if isinstance(key, bytes) else key: value.decode() if isinstance(value, bytes) else value
                   for key, value in fields.items()}
         try:
             site, identifier = protocol.verify_entry(self.sites, fields)
+            if site != stream_site:
+                raise protocol.InvalidSignature("Entry is on another site's stream")
         except protocol.InvalidSignature as error:
             log.warning('dropped entry %s: %s', entry_id, error)  # The site's watchdog fails its run.
             self.counts['rejected'] += 1
-            await self.redis.xack(protocol.STREAM, protocol.GROUP, entry_id)
+            await self.redis.xack(protocol.stream(stream_site), protocol.GROUP, entry_id)
             return
         try:
             if deliveries > protocol.MAX_DELIVERIES:
@@ -135,7 +159,7 @@ class Service:
                         self.active[site] -= 1
             if outcome is not None:
                 await self.callback(site, 'result', dict(outcome, id=identifier))
-            await self.redis.xack(protocol.STREAM, protocol.GROUP, entry_id)
+            await self.redis.xack(protocol.stream(site), protocol.GROUP, entry_id)
             self.counts['error' if outcome and outcome.get('error') else 'done'] += 1
         except (CallbackError, httpx.HTTPError) as error:
             log.warning('site %s request %s left for reclaim: %s', site, identifier[:12], error)
@@ -176,7 +200,7 @@ class Service:
             await asyncio.sleep(delay)
             timestamp = int(time.time())
             headers = {'Host': site, 'Content-Type': 'application/json', 'X-Relay-AI-Timestamp': str(timestamp),
-                       'X-Relay-AI-Signature': protocol.sign(self.sites[site], raw, timestamp)}
+                       'X-Relay-AI-Signature': protocol.sign(self.sites[site], method, raw, timestamp)}
             try:
                 answer = await self.http.post(url, content=raw, headers=headers, timeout=CALLBACK_TIMEOUT)
             except httpx.HTTPError as exc:

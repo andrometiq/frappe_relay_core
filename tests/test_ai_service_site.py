@@ -80,7 +80,7 @@ class SiteSide(unittest.TestCase):
         self.hand()  # The per-minute recovery or a duplicate job replays the same turn.
         self.assertEqual(len(self.stream), 1)
         stream, entry = self.stream[0]
-        self.assertEqual((stream, protocol.verify_entry({'a.local': SECRET_A}, entry)), (protocol.STREAM, ('a.local', self.identifier())))
+        self.assertEqual((stream, protocol.verify_entry({'a.local': SECRET_A}, entry)), (protocol.stream('a.local'), ('a.local', self.identifier())))
         stored = b''.join(value for value in self.cache.values.values() if isinstance(value, bytes))
         self.assertNotIn(b'Bearer', stored)
         self.assertTrue(site.is_waiting('AR-1'))
@@ -125,7 +125,6 @@ class SiteSide(unittest.TestCase):
         self.assertEqual(undone, ['spend', 'attempt'])
         self.frappe.db.rollback.assert_called_once()
         self.assertIsNone(site.turn_state.get())
-
 
     def test_a_finished_turn_keeps_its_attempt_and_spend_when_a_later_turn_is_handed(self):
         undone = []
