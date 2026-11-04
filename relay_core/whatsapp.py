@@ -45,6 +45,19 @@ def business_contacts(doctype, name, after=None):
     return {'contacts':rows[:50], 'has_more':len(rows)>50}
 
 
+def international_phone_buttons(components):
+    """Meta rejects a call button number without its country code (code 192); add the site's default one."""
+    from relay_core.identity import phone_number
+    for component in components:
+        for button in (component.get('buttons') or []) if isinstance(component, dict) else []:
+            if not isinstance(button, dict) or button.get('type') != 'PHONE_NUMBER':
+                continue
+            number = phone_number(button.get('phone_number'))
+            if not number:
+                frappe.throw(f"Enter the call button number of '{button.get('text') or ''}' with its country code")
+            button['phone_number'] = '+' + number
+
+
 def prepare(operation, arguments=None, contact=None, business_doctype=None, business_name=None):
     if not isinstance(operation,str) or operation not in READ | MANAGE | SEND | UPLOAD:frappe.throw('Unsupported WhatsApp operation')
     if operation in MANAGE:
@@ -65,6 +78,8 @@ def prepare(operation, arguments=None, contact=None, business_doctype=None, busi
         if not isinstance(content,str) or not 1 <= len(content) <= encoded_length(limit):frappe.throw(f'The attachment must be at most {size_label(limit)}')
         if arguments.get('media_url') or arguments.get('media_id'):frappe.throw('Choose one media source')
     if 'request_key' in arguments:frappe.throw('Request keys are managed by the message submission endpoint')
+    if operation in {'templates.create','templates.update'}:
+        international_phone_buttons(arguments.get('components') or [])
     payload={**arguments,'operation':operation}
     if operation=='templates.send':
         from relay_core.template_media import check_header
