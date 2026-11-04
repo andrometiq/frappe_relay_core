@@ -12,14 +12,15 @@ async function component(t, props = {}, api) {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
+  let realtime
   const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
-    onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh() {}, coreApi: api }
+    onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, _kinds, refresh) { realtime = refresh }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
   t.after(() => scope.stop())
   for (const callback of mounted) callback()
   await settle()
-  return { ...state, emitted }
+  return { ...state, emitted, realtime: kinds => realtime({ kinds: new Set(kinds) }) }
 }
 
 const type = { kind: 'type', doctype: 'Local Supplier', label: 'Suppliers', unread: 12 }
@@ -106,6 +107,29 @@ test('a no-group type goes straight to records; paging and failed requests can r
   assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2'])
   assert.equal(view.next.value, null)
   assert.deepEqual(JSON.parse(calls.at(-1).path), [])
+})
+
+test('reading the open record refreshes only its tile; other changes reload the level', async t => {
+  browser(t, '#/messages'); const calls = []; let unread = 12
+  const view = await component(t, { selected: record.name, selectedDoctype: type.doctype }, async (method, values) => {
+    calls.push(values)
+    if (!values.doctype) return { items: [type], next: null }
+    const rows = [{ ...record, doctype: type.doctype, unread }, { ...record, doctype: type.doctype, name: 'local-2' }]
+    return { items: rows.filter(row => !values.business_name || row.name === values.business_name), next: null }
+  })
+  view.choose(type); await settle()
+  const tiles = view.items.value, other = tiles[1]
+  unread = 0; calls.length = 0
+  await view.realtime(['reads'])
+  assert.equal(view.items.value, tiles, 'The list is not replaced or cleared')
+  assert.equal(view.items.value[0].unread, 0)
+  assert.equal(view.items.value[1], other)
+  assert.deepEqual(calls.map(values => [values.business_type, values.business_name]), [[type.doctype, record.name]])
+  await view.realtime(['reads', 'chats'])
+  assert.equal(view.items.value, tiles, 'The shared unread count of the open record changed too')
+  assert.equal(calls.length, 2)
+  await view.realtime(['reads', 'messages']); await settle()
+  assert.notEqual(view.items.value, tiles)
 })
 
 test('a record that moved to the next page between requests is shown once', async t => {

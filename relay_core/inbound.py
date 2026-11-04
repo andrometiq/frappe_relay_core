@@ -195,7 +195,7 @@ def validate_status_callback(raw, timestamp, signature, secret, expected_account
     previous = (0, -1)
     for row in statuses:
         required={'event_id','position','message_id','recipient','status','timestamp'}
-        if not isinstance(row, dict) or not required.issubset(row) or set(row)-required-{'participant','recipient_type'}-ROUTING:
+        if not isinstance(row, dict) or not required.issubset(row) or set(row)-required-{'participant','recipient_type','error'}-ROUTING:
             raise ValueError('Invalid compact status')
         routing(row)
         if type(row['event_id']) is not int or not 1 <= row['event_id'] <= 9223372036854775807:
@@ -217,7 +217,19 @@ def validate_status_callback(raw, timestamp, signature, secret, expected_account
             raise ValueError('Invalid receipt participant')
         if type(row['timestamp']) is not int or not 0 <= row['timestamp'] <= 9223372036854775807:
             raise ValueError('Invalid receipt timestamp')
+        if 'error' in row:
+            failure_reason(row)
     return payload
+
+
+def failure_reason(row):
+    """The Hub's {code, title, message} failure reason in Meta's receipt errors shape."""
+    error = row['error']
+    if row['status'] != 'failed' or not isinstance(error, dict) or set(error) - {'code', 'title', 'message'} or type(error.get('code')) is not int:
+        raise ValueError('Invalid receipt error')
+    if any(not isinstance(error.get(field, ''), str) or len(error.get(field, '')) > 1000 for field in ('title', 'message')):
+        raise ValueError('Invalid receipt error')
+    return [{'code': error['code'], 'title': error.get('title', ''), 'error_data': {'details': error.get('message', '')}}]
 
 
 @frappe.whitelist(methods=['POST'])
@@ -248,7 +260,8 @@ def receive_statuses(**_ignored):
         statuses = [{'id':row['message_id'],'recipient_id':row['recipient'],
                      'status':row['status'],'timestamp':str(row['timestamp']),
                      **({'recipient_type':row['recipient_type']} if 'recipient_type' in row else {}),
-                     **({'recipient_participant_id':row['participant']} if 'participant' in row else {})} for row in rows]
+                     **({'recipient_participant_id':row['participant']} if 'participant' in row else {}),
+                     **({'errors':failure_reason(row)} if 'error' in row else {})} for row in rows]
         projection = {'entry':[{'changes':[{'value':{'statuses':statuses}}]}]}
         insert_event({'doctype':'Relay Hub Event','event_key':key,'account':account,'hub_channel':hub_channel,
             'hub_event_id':str(rows[-1]['event_id']),
