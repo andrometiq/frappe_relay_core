@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from test_ai_skills import Doc, framework, module
 from relay_core.ai import reply_guard
 from relay_core.ai.knowledge_base.chunker import chunk_text
-from relay_core.ai.tools import STAFF_ONLY
+from relay_core.ai.tools import STAFF_ONLY, check_customer_doctype
 from relay_core.ai.registry import ToolContext  # noqa: F401 - loads the registry on the real framework first
 
 SOURCE_MODULE = 'relay_core.relay_core.doctype.relay_ai_knowledge_source.relay_ai_knowledge_source'
@@ -139,6 +139,19 @@ class RetrieverTests(unittest.TestCase):
                 self.search()
                 self.assertEqual('S-ROWS' in self.store.search.call_args.args[0], found)
 
+    def test_a_staff_only_source_saved_earlier_is_skipped_and_its_sync_reports_it(self):
+        self.rows.append(Doc(doctype='Relay AI Knowledge Source', name='S-NOTES', knowledge_base='KB-SHARED',
+                             source_type='DocType', reference_doctype='Relay Internal Comment', status='Completed'))
+        queue = Mock()
+        self.enterContext(patch.dict(sys.modules, {
+            'relay_core.ai.knowledge_base.ingest': types.SimpleNamespace(queue_sync=queue)}))
+        self.search()
+        self.assertNotIn('S-NOTES', self.store.search.call_args.args[0])
+        queue.assert_called_once_with('S-NOTES')
+        self.rows[-1].status = 'Failed'
+        self.search()
+        queue.assert_called_once()
+
     def test_no_bound_base_raises_and_invalid_input_is_refused(self):
         self.skill.knowledge_bases = []
         with self.assertRaises(ValueError):
@@ -183,7 +196,8 @@ class SourceTests(unittest.TestCase):
         self.enterContext(patch.dict(sys.modules, {
             'frappe_tools.ai.tools': types.SimpleNamespace(get_readable_meta=lambda doctype: meta,
                                                            is_sensitive_field=lambda name: 'password' in name),
-            'relay_core.ai.tools': types.SimpleNamespace(company_neutral=self.neutral, STAFF_ONLY=STAFF_ONLY)}))
+            'relay_core.ai.tools': types.SimpleNamespace(company_neutral=self.neutral, STAFF_ONLY=STAFF_ONLY,
+                                                         check_customer_doctype=check_customer_doctype)}))
         document = types.SimpleNamespace(Document=type('Document', (Doc,), {}))
         self.controller = module('relay_core/relay_core/doctype/relay_ai_knowledge_source/relay_ai_knowledge_source.py',
                                  self.f, {'frappe.model.document': document, 'relay_core.ai_features': types.SimpleNamespace(required=lambda fn: fn)})
@@ -201,6 +215,23 @@ class SourceTests(unittest.TestCase):
                                                         self.base)
         self.base.audience = 'staff'
         self.controller.validate_doctype_source(self.source(reference_doctype='Comment', business_field=None), self.base)
+
+    def test_a_staff_only_source_saved_before_the_rule_is_never_approved_or_swept(self):
+        self.neutral.side_effect = None
+        source = self.source(reference_doctype='Relay Internal Comment', business_field=None)
+        source.approved_hash = self.controller.config_hash(source, self.base)
+        self.assertFalse(self.controller.is_approved(source, self.base))
+        tools = sys.modules['relay_core.ai.tools']
+        self.enterContext(patch.dict(sys.modules, {SOURCE_MODULE: self.controller,
+                                                   'relay_core.ai.tools': types.SimpleNamespace(vars(tools), as_user=Mock())}))
+        ingest = module('relay_core/ai/knowledge_base/ingest.py', self.f, {
+            'relay_core.ai_features': types.SimpleNamespace(when_enabled=lambda fn: fn, required=lambda fn: fn),
+            'relay_core.ai.knowledge_base': types.SimpleNamespace(store=Mock())})
+        sync = ingest.SourceSync.__new__(ingest.SourceSync)
+        sync.doc, sync.base = source, self.base
+        with self.assertRaisesRegex(ValueError, 'Relay Internal Comment holds staff-only data'):
+            sync.sweep(False)
+        self.f.get_list.assert_not_called()
 
     def test_customer_rows_need_a_business_field_unless_company_neutral(self):
         self.controller.validate_doctype_source(self.source(), self.base)

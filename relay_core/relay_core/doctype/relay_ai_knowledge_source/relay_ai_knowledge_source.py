@@ -54,11 +54,13 @@ def validate_doctype_source(source, base) -> None:
     either ties each row to its business or holds company neutral reference data."""
     from frappe_tools.ai.tools import get_readable_meta, is_sensitive_field
     from relay_core.ai.capabilities import UNREADABLE
-    from relay_core.ai.tools import STAFF_ONLY, company_neutral
+    from relay_core.ai.tools import company_neutral
     if not base.run_as_user:
         frappe.throw('Set Run as user on the knowledge base before adding a DocType source')
-    if base.audience == 'customer' and source.reference_doctype in STAFF_ONLY:
-        frappe.throw(f'{source.reference_doctype} holds staff-only data and cannot be a customer source')
+    try:
+        check_audience(source, base)
+    except ValueError as error:
+        frappe.throw(f'{error} and cannot be a customer source')
     meta = get_readable_meta(source.reference_doctype)
     fields = content_fields(source)
     if not 1 <= len(fields) <= MAX_CONTENT_FIELDS or len(set(fields)) != len(fields):
@@ -82,6 +84,14 @@ def validate_doctype_source(source, base) -> None:
             frappe.throw('A customer knowledge base needs a business field unless the DocType is company neutral')
 
 
+def check_audience(source, base) -> None:
+    """A customer knowledge base never holds a staff-only DocType. Save, ingest and search all check it, so a source
+    saved before this rule is skipped too."""
+    from relay_core.ai.tools import check_customer_doctype
+    if base.audience == 'customer':
+        check_customer_doctype(source.reference_doctype)
+
+
 def config_hash(source, base) -> str:
     """Everything that decides which rows reach which audience; a new value needs a new approval."""
     from relay_core.ai.knowledge_base.store import content_hash
@@ -91,12 +101,14 @@ def config_hash(source, base) -> str:
 
 
 def is_approved(source, base) -> bool:
-    """The exact configuration is approved, and a customer source without a business field still holds company
-    neutral reference data (a new Company or a settings change ends that)."""
+    """The exact configuration is approved, a customer source holds no staff-only DocType, and a customer source
+    without a business field still holds company neutral reference data (a new Company or a settings change ends
+    that)."""
     from relay_core.ai.tools import company_neutral
     if source.source_type != 'DocType':
         return True
     try:
+        check_audience(source, base)
         if base.audience == 'customer' and not source.business_field:
             company_neutral(source.reference_doctype)
         return bool(source.approved_hash) and source.approved_hash == config_hash(source, base)

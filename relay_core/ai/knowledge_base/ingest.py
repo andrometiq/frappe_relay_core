@@ -126,7 +126,8 @@ class SourceSync:
     def sweep(self, rebuild: bool) -> None:
         from relay_core.ai.tools import as_user
         from relay_core.relay_core.doctype.relay_ai_knowledge_source.relay_ai_knowledge_source import (
-            filters_of, is_approved)
+            check_audience, filters_of, is_approved)
+        check_audience(self.doc, self.base)
         if not is_approved(self.doc, self.base):
             raise ValueError('A manager must approve this source configuration')
         # A newly approved configuration reads every row again.

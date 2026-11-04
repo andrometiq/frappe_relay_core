@@ -10,6 +10,7 @@ import frappe
 
 from relay_core.ai.knowledge_base import store
 from relay_core.ai.registry import ToolContext, relay_tool
+from relay_core.ai.tools import STAFF_ONLY
 
 BASE = 'Relay AI Knowledge Base'
 SOURCE = 'Relay AI Knowledge Source'
@@ -74,7 +75,7 @@ def sources(bases: list[str], business_doctype: str, company: str | None) -> lis
         return []
     rows = frappe.get_all(SOURCE, filters={'knowledge_base': ['in', bases]}, order_by='name asc',
                           fields=['name', 'knowledge_base', 'source_type', 'event', 'reference_doctype', 'filters',
-                                  'content_fields', 'business_field', 'approved_hash', 'revision'])
+                                  'content_fields', 'business_field', 'approved_hash', 'revision', 'status'])
     events = {row.name for row in eligible_events(business_doctype, company, limit=None)} \
         if any(row.source_type == 'Event' for row in rows) else set()
     allowed = []
@@ -84,7 +85,15 @@ def sources(bases: list[str], business_doctype: str, company: str | None) -> lis
                 allowed.append(row.name)
         elif row.source_type != 'DocType' or is_current(row):
             allowed.append(row.name)
+        elif row.status != 'Failed' and is_staff_only(row):
+            # Saved before the staff-only rule: its sync fails and reports why.
+            from relay_core.ai.knowledge_base.ingest import queue_sync
+            queue_sync(row.name)
     return allowed
+
+
+def is_staff_only(row) -> bool:
+    return row.reference_doctype in STAFF_ONLY and frappe.get_cached_doc(BASE, row.knowledge_base).audience == 'customer'
 
 
 def is_current(row) -> bool:
