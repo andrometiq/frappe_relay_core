@@ -177,11 +177,19 @@ class DeliveryTests(MemoryCase):
 
     def test_activation_makes_pending_facts_active_and_archives_the_revised_fact(self):
         self.f.get_all.return_value = [fixtures.Doc(name='N1', revises='OLD'), fixtures.Doc(name='N2', revises=None)]
+        self.f.db.get_value.return_value = 'Active'
         fact_memory.activate('AR-1')
         self.assertEqual(self.f.get_all.call_args.kwargs['filters'], {'source_run': 'AR-1', 'status': 'Pending', 'source': 'Agent'})
         self.assertEqual([call.args for call in self.f.db.set_value.call_args_list],
-                         [('Relay AI Memory', {'name': 'OLD', 'status': 'Active'}, 'status', 'Archived'),
+                         [('Relay AI Memory', 'OLD', 'status', 'Archived'),
                           ('Relay AI Memory', 'N1', 'status', 'Active'), ('Relay AI Memory', 'N2', 'status', 'Active')])
+
+    def test_activation_skips_a_spent_revision_and_a_full_business(self):
+        self.f.get_all.return_value = [fixtures.Doc(name='N1', revises='OLD'), fixtures.Doc(name='N2', revises=None)]
+        self.f.db.get_value.return_value = 'Archived'
+        self.f.db.count.return_value = 20
+        fact_memory.activate('AR-1')
+        self.f.db.set_value.assert_not_called()
 
     def test_purge_deletes_only_old_pending_facts(self):
         fact_memory.purge_pending()

@@ -167,6 +167,18 @@ class FactMemorySiteTests(unittest.TestCase):
         self.skill.memory_enabled = 0
         self.assertEqual(self.recalled(KESTREL, 'allowed accounts'), '')
 
+    def test_activation_keeps_the_business_limit(self):
+        old = self.fact('Prefers rail transport')
+        frappe.db.set_value('Relay AI Memory', old, 'source', 'Agent')
+        first = fact_memory.remember.function(f'Prefers road transport {TAG}', old, ctx=self.ctx())['memory_id']
+        second = fact_memory.remember.function(f'Prefers air transport {TAG}', old, ctx=self.ctx())['memory_id']
+        for index in range(19):
+            self.fact(f'Fact {index}')
+        fact_memory.activate(RUN)
+        statuses = {name: frappe.db.get_value('Relay AI Memory', name, 'status') for name in (old, first, second)}
+        self.assertEqual(statuses, {old: 'Archived', first: 'Active', second: 'Pending'})
+        self.assertEqual(frappe.db.count('Relay AI Memory', {'business_name': KESTREL[1], 'status': 'Active'}), 20)
+
     def test_limits_and_purge(self):
         for index in range(20):
             frappe.get_doc(dict(doctype='Relay AI Memory', skill=self.skill.name, scope='Business', business_doctype='Customer',

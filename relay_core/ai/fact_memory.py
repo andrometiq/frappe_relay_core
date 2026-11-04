@@ -148,12 +148,19 @@ def guard_texts(names: list[str], skill, business: tuple[str, str]) -> tuple[lis
 
 
 def activate(run: str) -> None:
-    """At delivery: the facts the run's reply saved become Active and the facts they revise are archived."""
+    """At delivery: the facts the run's reply saved become Active and the facts they revise are archived. A fact
+    whose revised fact is gone, or that would pass the Business limit, stays Pending and is purged."""
     for row in frappe.get_all(DOCTYPE, filters={'source_run': run, 'status': 'Pending', 'source': 'Agent'},
-                              fields=['name', 'revises']):
+                              fields=['name', 'revises', 'skill', 'business_doctype', 'business_name'],
+                              order_by='name asc'):
         if row.revises:
-            frappe.db.set_value(DOCTYPE, {'name': row.revises, 'status': 'Active'}, 'status', 'Archived')
-        frappe.db.set_value(DOCTYPE, row.name, 'status', 'Active')
+            if frappe.db.get_value(DOCTYPE, row.revises, 'status', for_update=True) != 'Active':
+                continue
+            frappe.db.set_value(DOCTYPE, row.revises, 'status', 'Archived')
+        active = dict(skill=row.skill, scope='Business', business_doctype=row.business_doctype,
+                      business_name=row.business_name, status='Active')
+        if frappe.db.count(DOCTYPE, active) < LIMITS['Business']:
+            frappe.db.set_value(DOCTYPE, row.name, 'status', 'Active')
 
 
 def purge_pending() -> None:
