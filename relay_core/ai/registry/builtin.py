@@ -166,16 +166,19 @@ class CoreTools:
         return lambda **arguments: self.call(key, tool, arguments)
 
     def call(self, key: str, tool: RelayTool, arguments: dict):
-        """Run one code tool. Built-in tools give their fixed error texts; app tool errors never reach the model."""
+        """Run one code tool. Built-in tools give their fixed error texts. An app tool error never reaches the model and
+        fails the read, so the run hands off instead of answering without the data."""
         from relay_core.ai.registry.tool import call
         if self.actions:
             raise ValueError('Call tools before EXECUTE')
         try:
             result = call(key, self.minimiser.unmask(arguments), self.context)
         except ValueError as error:
+            self.reader.failed = self.reader.failed or not is_builtin(tool)
             raise ValueError(str(error) if is_builtin(tool) else UNAVAILABLE) from None
         except Exception:
             frappe.log_error(title=f'Relay AI tool {key} failed')
+            self.reader.failed = self.reader.failed or not is_builtin(tool)
             raise ValueError(UNAVAILABLE) from None
         if is_builtin(tool, my_tickets):
             self.tickets.append(result)

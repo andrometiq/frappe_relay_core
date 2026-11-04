@@ -14,6 +14,8 @@ def order_status(order: Annotated[str, 'Order number'], *, ctx: ToolContext) -> 
     """The sender's own order status."""
     if order == 'missing':
         raise ValueError('Order PO-NORTHWIND-9 of Northwind Hosiery is not readable')
+    if order == 'crash':
+        raise RuntimeError('Database is down')
     return {'order': order, 'status': 'Dispatched', 'contact': '919000000101', 'rows': ['x' * 9000]}
 
 
@@ -90,12 +92,17 @@ class ToolLoopTests(LoopCase):
         self.assertNotIn('Dispatched', json.dumps(record.tool_calls))
         self.assertEqual(record.usage['turns'], 2)
 
-    def test_app_tool_errors_reach_the_model_as_fixed_text(self):
+    def test_app_tool_errors_reach_the_model_as_fixed_text_and_hand_off(self):
         seen = []
         self.provider.continuation = lambda result, outputs: seen.extend(outputs) or []
-        self.attempt.side_effect = [self.outcome(calls=[self.call(order='missing')]), self.outcome(answer('Sorry.'))]
-        self.complete()
-        self.assertEqual(json.loads(seen[0][1]), {'error': 'This tool is unavailable'})
+        self.enterContext(patch('relay_core.ai.registry.builtin.frappe'))
+        for order in ('missing', 'crash'):
+            seen.clear()
+            self.attempt.side_effect = [self.outcome(calls=[self.call(order=order)]),
+                                        self.outcome(answer('Your order is on its way.'))]
+            with self.subTest(order=order), self.assertRaisesRegex(ValueError, 'Business data authorization failed'):
+                self.complete()
+            self.assertEqual(json.loads(seen[0][1]), {'error': 'This tool is unavailable'})
 
     def test_app_tool_results_allow_their_contact_values_in_the_reply(self):
         self.attempt.side_effect = [self.outcome(calls=[self.call(order='PO-1')]),
@@ -115,7 +122,8 @@ class ToolLoopTests(LoopCase):
                                     self.outcome(answer())]
         seen = []
         self.provider.continuation = lambda result, outputs: seen.extend(outputs) or []
-        self.complete()
+        with self.assertRaisesRegex(ValueError, 'Business data authorization failed'):
+            self.complete()
         self.assertEqual(json.loads(seen[0][1]), {'error': 'This tool is unavailable'})
 
     def test_two_tools_with_one_name_fail_closed(self):
