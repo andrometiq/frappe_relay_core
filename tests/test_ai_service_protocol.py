@@ -154,5 +154,19 @@ class Service(unittest.TestCase):
         self.assertEqual((self.calls, self.acked), ([], ['1-0']))
 
 
+class Deploy(unittest.TestCase):
+    def test_the_supervisor_and_systemd_entries_run_the_service_command_line(self):
+        import os
+        import shlex
+        folder = os.path.join(os.path.dirname(daemon.__file__), 'deploy')
+        for name, prefix in (('supervisor.conf', 'command='), ('relay-ai-service.service', 'ExecStart=')):
+            with self.subTest(name=name), open(os.path.join(folder, name), encoding='utf-8') as file:
+                line = next(row for row in file if row.startswith(prefix))
+                words = shlex.split(line.removeprefix(prefix).replace('BENCH_PATH', '/bench').replace('WEB_PORT', '8000'))
+                self.assertEqual(words[:3], ['/bench/env/bin/python', '-m', 'relay_core.ai.remote.daemon'])
+                arguments = daemon.parse(words[3:])
+                self.assertEqual((arguments.sites, arguments.callback), ('/bench/sites', 'http://127.0.0.1:8000'))
+
+
 if __name__ == '__main__':
     unittest.main()

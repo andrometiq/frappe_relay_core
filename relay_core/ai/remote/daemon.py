@@ -235,14 +235,19 @@ def bench_redis(sites_path: str) -> str:
         return json.load(file)['redis_queue']
 
 
-def main() -> None:
+def parse(argv: list[str] | None = None) -> argparse.Namespace:
+    """The command line; `deploy/` holds supervisor and systemd entries that run it."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--sites', required=True, help='The bench sites folder')
     parser.add_argument('--callback', required=True, help='The bench web server, for example http://127.0.0.1:8000')
     parser.add_argument('--redis', help="Redis URL of the request stream; the bench's redis_queue by default")
     parser.add_argument('--site-limit', type=int, default=20, help='Provider calls in flight per site')
     parser.add_argument('--total-limit', type=int, default=200, help='Provider calls in flight for the bench')
-    arguments = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    arguments = parse()
     arguments.redis = arguments.redis or bench_redis(arguments.sites)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     logging.getLogger('httpx').setLevel(logging.WARNING)

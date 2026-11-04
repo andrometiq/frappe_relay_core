@@ -256,3 +256,24 @@ def expire_overdue(now: float | None = None) -> int:
             frappe.cache.zrem(key('inflight'), identifier)
     return len(overdue)
 
+
+@frappe.whitelist(methods=['GET'])
+def health() -> dict:
+    """This site's view of the AI service for managers: heartbeat, stream backlog and in-flight requests."""
+    from relay_core.permissions import require_access
+    require_access(configure=True)
+    site, connection = frappe.local.site, queue_connection()
+    beat = json.loads(connection.get(protocol.HEARTBEAT) or '{}')
+    stream = protocol.stream(site)
+    try:
+        pending = connection.xpending(stream, protocol.GROUP)['pending']
+    except RedisError:  # The service has not created this site's group yet.
+        pending = 0
+    age = time.time() - float(beat['ts']) if beat.get('ts') else None
+    return {'enabled': is_enabled(), 'alive': age is not None and age < protocol.HEARTBEAT_SECONDS,
+            'heartbeat_age_s': None if age is None else round(age, 1), 'consumer': beat.get('consumer'),
+            'site_in_flight': int((beat.get('active') or {}).get(site, 0)), 'service_in_flight': beat.get('in_flight'),
+            'service_queued': beat.get('queued'), 'service_counts': beat.get('counts') or {},
+            'stream_length': connection.xlen(stream), 'unacknowledged': pending,
+            'waiting_turns': frappe.cache.zcard(key('inflight')),
+            'overdue_turns': frappe.cache.zcount(key('inflight'), 0, time.time())}

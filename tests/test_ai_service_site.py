@@ -52,12 +52,18 @@ class FakeCache:
     def zrangebyscore(self, key, low, high, start=0, num=None):
         return [member.encode() for member, score in self.sorted.get(key, {}).items() if low <= score <= high][:num]
 
+    def zcard(self, key):
+        return len(self.sorted.get(key, {}))
+
+    def zcount(self, key, low, high):
+        return len(self.zrangebyscore(key, low, high))
 
 
 class SiteSide(unittest.TestCase):
     def setUp(self):
         self.cache, self.stream, self.jobs, self.beat = FakeCache(), [], [], {'ts': time.time()}
-        connection = SimpleNamespace(get=lambda key: json.dumps(self.beat), xadd=lambda *args, **kwargs: self.stream.append(args))
+        connection = SimpleNamespace(get=lambda key: json.dumps(self.beat), xadd=lambda *args, **kwargs: self.stream.append(args),
+                                     xlen=lambda stream: len(self.stream), xpending=lambda stream, group: {'pending': 1})
         self.frappe = SimpleNamespace(cache=self.cache, local=SimpleNamespace(site='a.local'), set_user=Mock(),
             session=SimpleNamespace(user='Guest'),
             conf={'relay_ai_service': 1, 'relay_ai_service_secret': SECRET_A}, db=Mock(),
@@ -195,6 +201,24 @@ class SiteSide(unittest.TestCase):
             self.assertIs(client.requests, requests)
             self.assertIs(client.accounts, accounts)
             self.assertTrue(site.is_active())
+
+    def test_health_shows_only_this_sites_share_of_the_service(self):
+        self.beat.update(consumer='host:1', in_flight=7, queued=9, active={'a.local': 3, 'b.local': 4},
+                         counts={'done': 5})
+        self.hand()
+        with patch('relay_core.permissions.require_access') as access:
+            health = site.health()
+        access.assert_called_once_with(configure=True)
+        self.assertEqual({key: health[key] for key in ('enabled', 'alive', 'site_in_flight', 'service_in_flight',
+                                                       'stream_length', 'unacknowledged', 'waiting_turns', 'overdue_turns')},
+                         {'enabled': True, 'alive': True, 'site_in_flight': 3, 'service_in_flight': 7,
+                          'stream_length': 1, 'unacknowledged': 1, 'waiting_turns': 1, 'overdue_turns': 0})
+        self.assertNotIn('b.local', json.dumps(health))
+
+    def test_health_refuses_a_user_who_cannot_configure_relay(self):
+        with patch('relay_core.permissions.require_access', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                site.health()
 
 
 if __name__ == '__main__':

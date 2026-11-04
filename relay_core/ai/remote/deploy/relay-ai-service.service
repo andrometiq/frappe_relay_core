@@ -1,0 +1,21 @@
+# Relay AI service for one bench. Replace BENCH_PATH, BENCH_USER and WEB_PORT (the bench webserver_port, 8000 by
+# default), copy to /etc/systemd/system/, then run `sudo systemctl daemon-reload && sudo systemctl enable --now
+# relay-ai-service`.
+[Unit]
+Description=Relay AI service (BENCH_PATH)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=BENCH_USER
+WorkingDirectory=BENCH_PATH/sites
+ExecStart=BENCH_PATH/env/bin/python -m relay_core.ai.remote.daemon --sites BENCH_PATH/sites --callback http://127.0.0.1:WEB_PORT
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=40
+MemoryMax=512M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
