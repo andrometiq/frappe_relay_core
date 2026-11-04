@@ -98,7 +98,7 @@ def open_orders(status: Annotated[Literal["Open", "Delivered"], "Order status"] 
 | `search_knowledge` | The skill binds an enabled customer knowledge base and the site is on MariaDB |
 | `load_playbook` | The skill binds a playbook that applies to the sender |
 | `remember` | **Customer memory** is on, the sender has a business, the run has a record and the site is on MariaDB |
-| `my_tickets` | **Ticket memory** (`ticket_memory`, on by default) is on and the sender has a business |
+| `my_tickets` | Always, when the sender has a business |
 | App code tools | Selected in `allowed_tools`, approved, customer audience, kind `read` |
 
 - The model gets at most `max_tool_calls` tool calls per reply (default 4, never more than 6). After the last call, the final turn may not call tools. A model that still calls a tool fails the run, and the run hands off.

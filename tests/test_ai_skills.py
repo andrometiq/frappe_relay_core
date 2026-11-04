@@ -55,7 +55,7 @@ def framework():
     f = types.SimpleNamespace(session=Doc(user='operator'), flags=Doc(), local=Doc(site='test.local'),
         whitelist=lambda **kw: lambda fn: fn, db=Mock(), get_doc=Mock(), get_all=Mock(), get_list=Mock(),
         get_meta=Mock(), get_roles=Mock(return_value=['System Manager']),
-        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError,
+        enqueue=Mock(), log_error=Mock(), get_hooks=Mock(return_value=[]), PermissionError=PermissionError,
         QueryDeadlockError=QueryDeadlockError)
     f.set_user = lambda user: setattr(f.session, 'user', user)
     f.db.get_value.return_value = 1
@@ -700,6 +700,7 @@ class SkillDeliveryTests(unittest.TestCase):
 
 class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')))
         self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
         # Privacy lookup data is supplied by the dedicated reply guard tests.
         guard_db = framework()
@@ -1095,6 +1096,7 @@ class SharedAdapterTests(unittest.TestCase):
 
 class ConversationIdentityTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')))
         from contextvars import ContextVar
         self.f = framework()
         self.tools = module('relay_core/ai/tools.py', self.f)

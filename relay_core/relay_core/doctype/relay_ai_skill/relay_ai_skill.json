@@ -29,7 +29,6 @@
     "knowledge_bases",
     "playbooks",
     "memory_enabled",
-    "ticket_memory",
     "sample_key"
   ],
   "fields": [
@@ -195,13 +194,6 @@
       "fieldtype": "Check",
       "default": "0",
       "description": "Let the model save short facts about the sender's business. Every contact of that business shares them. Off by default."
-    },
-    {
-      "fieldname": "ticket_memory",
-      "label": "Ticket memory",
-      "fieldtype": "Check",
-      "default": "1",
-      "description": "Let the model read the sender's own tickets: number, status, dates and the messages the sender saw. Internal notes and staff fields are never read."
     }
   ],
   "permissions": [

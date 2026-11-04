@@ -181,7 +181,7 @@ class SkillToolTests(unittest.TestCase):
         def load(key, skill, audience):
             loaded[key] = audience
             return {'erpnext.search_knowledge': builtin.retriever.search_knowledge,
-                    'erpnext.remember': builtin.remember}[key]
+                    'erpnext.remember': builtin.remember, 'erpnext.my_tickets': builtin.my_tickets}[key]
         drafts = Mock(kind='action', function=Mock())
         with patch('relay_core.ai.registry.tool.load', side_effect=load), \
                 patch('relay_core.ai.registry.sync.tool_key', side_effect=lambda app, tool: 'erpnext.' + tool.name), \
@@ -189,7 +189,8 @@ class SkillToolTests(unittest.TestCase):
                     ('acme.order_status', order_status), ('acme.drafts', drafts),
                     ('erpnext.load_playbook', builtin.load_playbook)]):
             found = builtin.skill_tools(Doc(knowledge_bases=[Doc(knowledge_base='KB-1')], memory_enabled=1))
-        self.assertEqual([key for key, tool in found], ['erpnext.search_knowledge', 'erpnext.remember', 'acme.order_status'])
+        self.assertEqual([key for key, tool in found],
+                         ['erpnext.search_knowledge', 'erpnext.remember', 'erpnext.my_tickets', 'acme.order_status'])
         self.assertEqual(set(loaded.values()), {'customer'})
 
 

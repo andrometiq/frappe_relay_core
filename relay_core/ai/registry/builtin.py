@@ -50,12 +50,11 @@ def is_builtin(tool: RelayTool, *names: RelayTool) -> bool:
 
 def skill_tools(skill) -> list[tuple[str, RelayTool]]:
     """(key, tool) of each approved code tool a customer run of the skill may offer: the built-ins its settings ask
-    for (knowledge bases, playbooks, customer memory, ticket memory), then the read tools selected in
+    for (knowledge bases, playbooks, customer memory), ticket memory always, then the read tools selected in
     `allowed_tools`. Action tools are not offered until they propose through the action journal."""
     from relay_core.ai.registry.sync import tool_key
     from relay_core.ai.registry.tool import load, offered
-    wanted = (retriever.bound_bases(skill), skill.get('playbooks'), skill.get('memory_enabled'),
-              skill.get('ticket_memory'))
+    wanted = (retriever.bound_bases(skill), skill.get('playbooks'), skill.get('memory_enabled'), True)
     found = []
     for tool in (tool for tool, is_wanted in zip(BUILTINS, wanted) if is_wanted):
         try:
