@@ -28,6 +28,17 @@ test('every Account card waits for a burst of channels events to end before it a
   }
 })
 
+test('every Account card disables the on switch of a channel a Hub admin turned off and says why', async () => {
+  for (const path of CARDS) {
+    const card = await read(path)
+    assert.match(card, /is on" :model-value="row\.enabled" :disabled="!!busy \|\| adminLocked\(row\)"/, path)
+    assert.match(card, /<p v-if="adminLocked\(row\)" class="text-sm text-ink-gray-5">\{\{ ADMIN_OFF_TEXT \}\}<\/p>/, path)
+  }
+  const whatsapp = await read('components/whatsapp/WhatsAppAccounts.vue')
+  assert.match(whatsapp, /\(item\.name === 'enabled' && adminLocked\(row\)\)/)
+  assert.match(whatsapp, /item\.name === 'enabled' && adminLocked\(row\) \? ADMIN_OFF_TEXT : item\.help/)
+})
+
 test('a burst of channels events reloads an Account card once', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const { ACCOUNTS_RELOAD_DELAY } = await import('../src/services/channelSetup.js')

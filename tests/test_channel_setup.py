@@ -62,6 +62,13 @@ class ChannelSetupTests(unittest.TestCase):
         self.answers['channels.health'] = {'WhatsApp': []}
         self.assertEqual(whatsapp.accounts(), [])
 
+    def test_the_hub_admin_lock_reaches_the_card_and_its_refusal_reads_as_relay_text(self):
+        self.answers['channels.health'] = {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', admin_off=True, connection_status='disabled')]}
+        self.assertEqual([row['health']['admin_off'] for row in whatsapp.accounts()], [None, True])
+        self.answers['whatsapp.number.settings'] = rejected('admin_off', 'A Relay Hub admin turned this channel off.')
+        with self.assertRaisesRegex(SetupError, 'Ask your Relay provider to turn it on'):
+            whatsapp.save_settings('Support line', {'enabled': '1'})
+
     def test_a_hub_without_the_batch_tool_is_asked_once_per_number(self):
         from relay_core.hub import OlderHubError
         self.answers['channels.health'] = OlderHubError('no such tool')

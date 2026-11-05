@@ -30,6 +30,7 @@ TEXT = {
     'bot_changed': 'This token belongs to another bot. Connect that bot as a new bot instead.',
     'telegram_unavailable': 'Telegram is not answering. Try again in a few minutes.',
     'channel_disabled': 'Turn the channel on first.',
+    'admin_off': 'A Relay Hub admin turned this channel off. Ask your Relay provider to turn it on.',
     'in_use': 'This bot or mailbox is already connected to Relay. Remove it there first.',
     'not_available': 'Your Relay Hub does not let sites connect channels yet. Ask your Relay provider.',
     'rate_limited': 'Too many tries. Wait an hour, then try again.',

@@ -20,6 +20,10 @@ export function connectionBadge(account) {
   return { label, theme }
 }
 
+// A Hub admin turned the channel off, so only the admin can turn it on again.
+export const adminLocked = account => account?.health?.admin_off === true
+export const ADMIN_OFF_TEXT = 'A Relay Hub admin turned this off. Ask your Relay provider to turn it on.'
+
 // Only Embedded Signup gives Relay new access, so these accounts show Connect again instead of Check.
 export function needsReconnect(account) {
   const health = account?.health || {}

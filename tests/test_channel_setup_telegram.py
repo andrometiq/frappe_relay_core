@@ -60,6 +60,13 @@ class TelegramSetupTests(unittest.TestCase):
         self.assertEqual(rows[0]['health']['webhook_status'], 'registered')
         self.assertNotIn('unexpected', rows[0]['health'])
 
+    def test_the_hub_admin_lock_reaches_the_card(self):
+        self.answers['channels.health'] = {'Telegram': [dict(HEALTH, enabled=False, admin_off=True)]}
+        self.assertTrue(telegram.accounts()[0]['health']['admin_off'])
+        self.answers['telegram.bot.settings'] = rejected('admin_off')
+        with self.assertRaisesRegex(SetupError, 'Ask your Relay provider to turn it on'):
+            telegram.save_settings('Acme bot', {'enabled': '1'})
+
     def test_a_hub_without_the_batch_tool_is_asked_once_per_bot(self):
         from relay_core.hub import OlderHubError
         self.answers['channels.health'] = OlderHubError('no such tool')

@@ -12,7 +12,7 @@ SERVER = ('host', 'username', 'imap_host', 'imap_username', 'imap_folder', 'trus
 PORTS = ('port', 'imap_port')
 SECRETS = ('password', 'imap_password')
 HEALTH = ('address', 'connection_status', 'smtp_status', 'imap_status', 'checked_at', 'check_error', 'password_saved',
-          'imap_password_saved', 'rejected')
+          'imap_password_saved', 'rejected', 'admin_off')
 SYNC = ('last_sync', 'error', 'failures', 'backoff')
 
 

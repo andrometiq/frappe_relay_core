@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { ACCOUNTS_RELOAD_DELAY, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, withSecrets } from '../../services/channelSetup'
+import { ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, withSecrets } from '../../services/channelSetup'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 
@@ -95,7 +95,8 @@ onBeforeUnmount(() => stop?.())
       </dl>
       <p class="text-sm text-ink-gray-5">{{ checkedText(row.health) }}</p>
       <template v-if="canConfigure">
-        <FormControl type="checkbox" label="Mailbox is on" :model-value="row.enabled" :disabled="!!busy" @update:model-value="value => toggle(row, value)" />
+        <FormControl type="checkbox" label="Mailbox is on" :model-value="row.enabled" :disabled="!!busy || adminLocked(row)" @update:model-value="value => toggle(row, value)" />
+        <p v-if="adminLocked(row)" class="text-sm text-ink-gray-5">{{ ADMIN_OFF_TEXT }}</p>
         <div class="flex flex-wrap gap-2">
           <Button variant="outline" icon-left="activity" label="Check sign-in" :loading="busy === row.name + ':check'" :disabled="!!busy || !row.enabled" @click="check(row)" />
           <Button v-if="!row.is_default && row.enabled" variant="outline" label="Make default" :loading="busy === row.name + ':default'" :disabled="!!busy" @click="makeDefault(row)" />

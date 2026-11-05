@@ -7,7 +7,8 @@ from relay_core.channel_sync import publish
 
 PROVIDER = 'Telegram'
 FIELDS = ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default']
-HEALTH = ('username', 'bot_id', 'webhook_status', 'checked_at', 'check_error', 'token_saved', 'webhook_missing', 'pending_updates')
+HEALTH = ('username', 'bot_id', 'webhook_status', 'checked_at', 'check_error', 'token_saved', 'webhook_missing', 'pending_updates',
+          'admin_off')
 SETTINGS = ('enabled', 'label', 'bot_token')
 
 

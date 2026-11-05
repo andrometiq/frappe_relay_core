@@ -63,6 +63,10 @@ class MailboxSetupTests(unittest.TestCase):
         self.assertEqual(row['health']['sync'], [{'last_sync': '2026-11-01 10:00', 'error': '', 'failures': 0, 'backoff': False}])
         self.assertNotIn('never', repr(row))
 
+    def test_the_hub_admin_lock_reaches_the_card(self):
+        self.answers['channels.health'] = {'Email': [dict(HEALTH, enabled=False, admin_off=True)]}
+        self.assertTrue(email.accounts()[0]['health']['admin_off'])
+
     def test_connect_sends_the_filled_fields_once(self):
         self.answers['email.mailbox.connect'] = dict(HEALTH, channel='mail-2')
         result = email.connect(FORM)
