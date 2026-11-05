@@ -255,7 +255,7 @@ The WhatsApp Account tab and the Telegram and Email tabs in Settings use these m
 | Telegram | `bot_token`, optional `label` | `enabled`, `label`, `bot_token` (same bot only) |
 | Email | `from`, `host`, `password`, optional `label`, `port`, `username`, `imap_host`, `imap_port`, `imap_username`, `imap_password`, `imap_folder`, `trusted_authserv_id`, `trusted_dsn_domain` | `enabled`, `label` and the server keys of `connect` |
 
-Core sends a token or a password to the Hub only over HTTPS or a local Hub address. Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
+Core sends a token or a password to the Hub only over HTTPS, or over plain HTTP to a Hub on the same machine (127.0.0.1 or ::1). Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
 
 ## Workspace directories
 

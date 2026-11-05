@@ -9,6 +9,7 @@ from wsgiref.simple_server import make_server, WSGIRequestHandler
 import requests
 import frappe
 import frappe.app
+from relay_core import channel_setup
 from relay_core.channel_setup import whatsapp
 
 site = os.environ['RELAY_HTTP_TEST_SITE']
@@ -47,6 +48,10 @@ base = f'http://127.0.0.1:{server.server_port}/api/method/relay_core.'
 WRITES = [('channels_api.check_number', {'channel': 'missing'}), ('channels_api.save_number_settings', {'channel': 'missing', 'settings': {'templates': 1}}),
           ('channels_api.set_default', {'channel': 'missing'}), ('channels_api.reset_pin', {'channel': 'missing'}),
           ('channels_api.remove_number', {'channel': 'missing', 'confirm': 1}), ('channels_api.save_number_profile', {'channel': 'missing', 'profile': {'about': 'Acme Textiles'}}),
+          ('channels_api.connect', {'channel': 'Telegram', 'values': {'bot_token': '123456:fake-token'}}),
+          ('channels_api.connect', {'channel': 'Email', 'values': {'from': 'sales@example.com', 'host': 'smtp.example.com', 'password': 'fake-password'}}),
+          ('channels_api.check', {'channel': 'missing'}), ('channels_api.save_settings', {'channel': 'missing', 'settings': {'enabled': 1}}),
+          ('channels_api.remove', {'channel': 'missing', 'confirm': 1}),
           ('onboarding.api.disconnect_hub', {'confirm': 0})]
 
 
@@ -58,13 +63,17 @@ def call(method, values=None, kind=None, write=True):
 
 
 def fake_hub(tool, arguments):
-    return {'channels': []} if tool == 'channels.list' else {}
+    """Readers may list channels; any other Hub tool means a refusal came too late."""
+    if tool != 'channels.list':
+        raise AssertionError('Hub called: ' + tool)
+    return {'channels': []}
 
 
 try:
-    with patch.object(whatsapp, 'hub_call', side_effect=fake_hub), patch('relay_core.onboarding.enrolment.HubClient', side_effect=AssertionError('Hub called')):
+    with patch.object(whatsapp, 'hub_call', side_effect=fake_hub), patch.object(channel_setup, 'hub_call', side_effect=fake_hub), patch('relay_core.onboarding.enrolment.HubClient', side_effect=AssertionError('Hub called')):
         for kind in (None, 'agent'):
-            assert call('channels_api.accounts', kind=kind, write=False).status_code == 403, kind
+            for provider in ('WhatsApp', 'Telegram', 'Email'):
+                assert call('channels_api.accounts', {'channel': provider}, kind=kind, write=False).status_code == 403, (kind, provider)
             assert call('channels_api.number_profile', {'channel': 'missing'}, kind=kind, write=False).status_code == 403, kind
         for kind in (None, 'agent', 'manager'):
             for method, values in WRITES:
@@ -76,6 +85,14 @@ try:
         # A System Manager passes the gate; an unknown number is refused without a Hub call.
         response = call('channels_api.check_number', {'channel': 'missing'}, 'admin')
         assert response.status_code not in (200, 403), response.status_code
+        for method in ('check', 'save_settings', 'remove'):
+            values = dict(next(v for m, v in WRITES if m == 'channels_api.' + method))
+            response = call('channels_api.' + method, values, 'admin')
+            assert response.status_code not in (200, 403), (method, response.status_code)
+        # An unknown provider and a non-object value are refused before the Hub; no answer echoes the token.
+        for values in ({'channel': 'SMS', 'values': {'bot_token': '123456:fake-token'}}, {'channel': 'Telegram', 'values': '123456:fake-token'}):
+            response = call('channels_api.connect', values, 'admin')
+            assert response.status_code not in (200, 403) and 'fake-token' not in response.text, response.text[:300]
         assert call('onboarding.api.disconnect_hub', {'confirm': 0}, 'admin').status_code not in (200, 403)
     print('PASS channel setup HTTP: guests and agents refused, managers read only, System Manager configures')
 finally:
