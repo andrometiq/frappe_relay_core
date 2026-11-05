@@ -128,8 +128,8 @@ def connected(provider, result):
 
 
 def secret_value(values, field):
-    """A token or password from the form, or '' when the person left it blank. Never stored or echoed."""
+    """A token or password from the form as typed, or '' when the person left it blank. Never stored or echoed."""
     value = values.get(field) if isinstance(values, dict) else None
     if value is not None and not isinstance(value, str):
         frappe.throw('Enter the value as text')
-    return (value or '').strip()
+    return value if value and value.strip() else ''

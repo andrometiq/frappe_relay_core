@@ -65,6 +65,11 @@ class MailboxSetupTests(unittest.TestCase):
         self.assertEqual(result['name'], 'New mail')
         self.assertNotIn('smtp-local-only', repr(result) + repr(self.site.tables))
 
+    def test_a_password_goes_to_the_hub_as_typed(self):
+        self.answers['email.mailbox.connect'] = dict(HEALTH, channel='mail-2')
+        email.connect(dict(FORM, password=' local only pass '))
+        self.assertEqual(self.tools()[0][1]['password'], ' local only pass ')
+
     def test_connect_checks_the_form_before_the_hub(self):
         for change in ({'from': 'not an address'}, {'port': 'abc'}, {'imap_port': 70000}, {'host': 5}, {'password': 7}):
             with self.assertRaises(ValueError):
