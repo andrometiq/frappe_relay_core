@@ -1,6 +1,6 @@
 <script setup>
 import { linkedTitle } from '../services/linkedTitle'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
 import { useWhatsAppIdentity } from '../composables/useWhatsAppIdentity'
@@ -10,11 +10,14 @@ import WorkspaceHeading from './WorkspaceHeading.vue'
 import SavedRepliesWorkspace from './SavedRepliesWorkspace.vue'
 import BusinessTypeSettings from './BusinessTypeSettings.vue'
 import { channelEnabled } from '../services/enabledChannels'
+import { routeTab } from '../useViewRoute'
+import TelegramAccounts from './telegram/TelegramAccounts.vue'
+import EmailAccounts from './email/EmailAccounts.vue'
 const { identity, load: refreshIdentity } = useWhatsAppIdentity({ immediate: false })
 const capabilities = inject('relayCapabilities')
 const channels = ref([])
 const config = ref({}), channel = ref(null), types = ref([]), loaded = ref(false), verified = ref(false)
-const token = ref(''), callbackSecret = ref(''), tab = ref('setup'), setupCode = ref(''), askCode = ref(false)
+const token = ref(''), callbackSecret = ref(''), tab = ref(routeTab(location.hash, 'setup')), setupCode = ref(''), askCode = ref(false)
 const disconnecting = ref(false)
 const margin = ref(''), marginError = ref(''), marginNotice = ref('')
 const { busy, error, notice, run } = useTask()
@@ -59,24 +62,35 @@ const features = [
   { key: 'folders', label: 'Enable chat folders', help: 'Lets people sort chats into folders in the Chats list.' },
   { key: 'flows', label: 'Enable automations', help: 'Shows the Flows page, where managers build automatic replies and steps.' },
 ]
+// A tab is part of the hash, so a checklist link opens it and the browser back button returns.
+const tabs = computed(() => [
+  { key: 'setup', label: 'Setup & connection' },
+  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ key: provider.toLowerCase(), label: provider })),
+  { key: 'replies', label: 'Saved replies' },
+])
+function show(key) { if (key !== tab.value) window.location.hash = key === 'setup' ? '#/settings' : '#/settings?tab=' + key }
+function readTab() { tab.value = routeTab(location.hash, 'setup') }
 const checklist = computed(() => [
   ...(capabilities.value.configure ? [{ label: 'Get started', icon: 'play', ready: !capabilities.value.onboarding?.required, state: capabilities.value.onboarding?.required ? 'Guided setup is not finished' : 'Finished', href: '#/setup' }] : []),
   { label: 'Hub connection', icon: 'link', ready: verified.value, state: !loaded.value ? 'Not checked' : verified.value ? 'Checked just now' : config.value.url && config.value.account && config.value.token_configured ? 'Saved · select Check connection' : 'Needs setup', href: '#hub-connection' },
   { label: 'Incoming message secret', icon: 'lock', ready: config.value.callback_configured, state: !loaded.value ? 'Not checked' : config.value.callback_configured ? 'Saved' : 'Missing', href: '#hub-connection' },
-  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? (capabilities.value.configure ? 'Enabled locally · confirm incoming messages in Activity' : 'Enabled locally · ask an administrator to confirm incoming messages') : 'Needs setup', href: '/desk/relay-channel' })),
-  { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '/desk/relay-channel' },
+  ...['Telegram', 'Email'].filter(provider => channelEnabled(capabilities.value, provider)).map(provider => ({ label: provider + ' channel', icon: provider === 'Email' ? 'mail' : 'send', ready: channels.value.some(row => row.channel === provider && row.enabled), state: channels.value.some(row => row.channel === provider && row.enabled) ? (capabilities.value.configure ? 'Enabled locally · confirm incoming messages in Activity' : 'Enabled locally · ask an administrator to confirm incoming messages') : 'Needs setup', href: '#/settings?tab=' + provider.toLowerCase() })),
+  { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '#/whatsapp?tab=account' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '/desk/relay-contact-type' },
   { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },
   ...(capabilities.value.configure ? [{ label: 'Incoming messages and recovery', icon: 'activity', state: 'See what arrived and retry failures', href: '#/activity' }] : []),
 ])
-onMounted(() => run(load))
+onMounted(() => { run(load); window.addEventListener('hashchange', readTab) })
+onBeforeUnmount(() => window.removeEventListener('hashchange', readTab))
 watch(() => capabilities.value?.configure, configure => { if (configure) loadMargin() }, { immediate: true })
 function followStep(event, step) { if (step.href === '#hub-connection') { event.preventDefault(); document.getElementById('hub-connection')?.scrollIntoView({ block: 'start' }) } }
 </script>
 <template>
   <section class="v1-screen">
-    <nav class="v1-tabs" aria-label="Settings sections"><Button label="Setup & connection" :variant="tab === 'setup' ? 'solid' : 'ghost'" @click="tab = 'setup'" /><Button label="Saved replies" :variant="tab === 'replies' ? 'solid' : 'ghost'" @click="tab = 'replies'" /></nav>
+    <nav class="v1-tabs" aria-label="Settings sections"><Button v-for="item in tabs" :key="item.key" :label="item.label" :variant="tab === item.key ? 'solid' : 'ghost'" @click="show(item.key)" /></nav>
     <SavedRepliesWorkspace v-if="tab === 'replies'" />
+    <div v-else-if="tab === 'telegram' && channelEnabled(capabilities, 'Telegram')" class="v1-content space-y-5"><WorkspaceHeading description="Connect Telegram bots. Relay Hub keeps each bot token." /><TelegramAccounts /></div>
+    <div v-else-if="tab === 'email' && channelEnabled(capabilities, 'Email')" class="v1-content space-y-5"><WorkspaceHeading description="Connect mailboxes. Relay Hub keeps each password." /><EmailAccounts /></div>
     <div v-else class="v1-content space-y-5">
       <WorkspaceHeading description="Connect your account and prepare your workspace for conversations."><Button variant="outline" label="Refresh setup" icon-left="refresh-cw" :loading="busy" @click="run(load)" /></WorkspaceHeading>
       <ErrorMessage :message="error" /><LoadingRows v-if="busy && !loaded" :count="2" label="Checking configuration…" />
@@ -106,7 +120,7 @@ function followStep(event, step) { if (step.href === '#hub-connection') { event.
         <div><Button type="submit" label="Save service charge" variant="solid" :disabled="busy || margin === ''" /></div>
         <p v-if="marginNotice" role="status" class="workspace-success">{{ marginNotice }}</p>
       </form>
-      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Set up WhatsApp numbers on the <a class="underline" href="#/whatsapp?tab=account">WhatsApp Account</a> page. Relay Hub keeps every key and token. <template v-if="capabilities.configure">Check the Activity page to see that messages arrive.</template><template v-else>Ask a system administrator to check that messages arrive.</template></p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a v-if="capabilities.configure" class="underline" href="#/activity">Open Activity</a></div>
+      <div class="workflow-card"><h2 class="font-semibold">Channels</h2><p>Set up WhatsApp numbers on the <a class="underline" href="#/whatsapp?tab=account">WhatsApp Account</a> page<template v-if="tabs.length > 2">, and Telegram bots and mailboxes on their tabs above</template>. Relay Hub keeps every key and token. <template v-if="capabilities.configure">Check the Activity page to see that messages arrive.</template><template v-else>Ask a system administrator to check that messages arrive.</template></p><p v-for="item in channels" :key="item.name">{{ linkedTitle('Relay Channel', item.name, item.channel) }} <Badge :label="item.enabled ? 'Enabled locally' : 'Disabled'" /></p><a v-if="capabilities.configure" class="underline" href="#/activity">Open Activity</a></div>
       <div class="flex flex-wrap gap-3"><a class="v1-link" href="#/whatsapp?tab=account">WhatsApp numbers</a><a class="v1-link" href="/desk/relay-contact-type">Configure business types and grouping</a><a class="v1-link" href="/desk/relay-contact-endpoint">Contact numbers and addresses</a></div>
     </div>
   </section>
