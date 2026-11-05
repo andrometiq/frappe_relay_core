@@ -118,6 +118,12 @@ class ChannelSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, 'Try again in a few minutes'):
             whatsapp.reset_pin('Sales line')
 
+    def test_a_number_a_hub_admin_turned_off_says_who_can_turn_it_on(self):
+        self.answers['whatsapp.number.settings'] = rejected('admin_off')
+        with self.assertRaisesRegex(SetupError, 'A Relay Hub admin turned this channel off. Ask your Relay provider'):
+            whatsapp.save_settings('Sales line', {'enabled': 1})
+        self.sync.assert_not_called()
+
     def test_profile_fields_and_photo_are_checked_before_the_hub(self):
         with self.assertRaises(ValueError):
             whatsapp.save_profile('Sales line', {'phone': '919999999999'})

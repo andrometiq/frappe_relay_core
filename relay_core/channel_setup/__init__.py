@@ -32,6 +32,7 @@ TEXT = {
     'channel_disabled': 'Turn the channel on first.',
     'in_use': 'This bot or mailbox is already connected to Relay. Remove it there first.',
     'not_available': 'Your Relay Hub does not let sites connect channels yet. Ask your Relay provider.',
+    'admin_off': 'A Relay Hub admin turned this channel off. Ask your Relay provider to turn it on.',
     'rate_limited': 'Too many tries. Wait an hour, then try again.',
     'no_mailbox': 'This site has no mailbox yet. Connect one first.',
     'host_refused': 'Relay can only reach mail servers on the public internet. Check the host names.',
