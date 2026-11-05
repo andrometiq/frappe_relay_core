@@ -279,7 +279,10 @@ def ledger(name: str) -> list[dict]:
 
 def link_person(person: people.Persona, business: list[str], channel: str, login: str | None) -> dict:
     """Contact (with the adapter's login, if any), Relay Contact and verified WhatsApp endpoint."""
-    contact = frappe.db.get_value('Contact', {'first_name': person.full_name}, 'name')
+    # Another harness on the same site may own a Contact of the same name; only one linked to this business is ours.
+    contact = next(iter(frappe.get_all('Contact', filters=[['first_name', '=', person.full_name],
+        ['Dynamic Link', 'link_doctype', '=', business[0]], ['Dynamic Link', 'link_name', '=', business[1]]],
+        pluck='name', limit=1)), None)
     if not contact:
         contact = frappe.get_doc({'doctype': 'Contact', 'first_name': person.full_name, 'user': login,
                                   'email_ids': [{'email_id': person.email, 'is_primary': 1}],
@@ -290,7 +293,15 @@ def link_person(person: people.Persona, business: list[str], channel: str, login
     if not relay:
         relay = frappe.get_doc({'doctype': 'Relay Contact', 'contact': contact, 'display_name': person.full_name}
                                ).insert(ignore_permissions=True).name
-    endpoint = frappe.db.get_value('Relay Contact Endpoint', {'channel': channel, 'endpoint': person.phone}, 'name')
+    endpoint = frappe.db.get_value('Relay Contact Endpoint', {'channel': channel, 'endpoint': person.phone},
+                                   ['name', 'relay_contact'], as_dict=True)
+    if endpoint and endpoint.relay_contact != relay:
+        # Endpoint ownership is immutable: a sim phone bound to another contact is revoked, then enrolled again.
+        frappe.delete_doc('Relay Contact Endpoint', endpoint.name, ignore_permissions=True, force=True)
+        endpoint = None
+    # Routing state of an earlier binding of this phone would refuse every message as a changed binding.
+    frappe.db.delete('Relay Business Routing', {'channel': channel, 'endpoint': person.phone, 'relay_contact': ['!=', relay]})
+    endpoint = endpoint and endpoint.name
     if not endpoint:
         endpoint = frappe.get_doc({'doctype': 'Relay Contact Endpoint', 'channel': channel, 'relay_contact': relay,
                                    'endpoint': person.phone, 'verified': 1}).insert(ignore_permissions=True).name

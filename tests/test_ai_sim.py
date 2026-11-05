@@ -142,6 +142,29 @@ class SiteGuard(unittest.TestCase):
             seed.user('sim.agent@example.invalid', ['Accounts User', 'Relay Communication Manager'])
             doc.add_roles.assert_called_once_with('Relay Communication Manager')
 
+    def test_a_phone_bound_to_another_contact_is_enrolled_again_for_the_persona(self):
+        """Another harness on the site may own a same-name Contact and, through it, the persona's phone."""
+        person = personas.get('school_students/arjun')
+        business = ['Customer', person.full_name]
+        values = {'Relay Contact': 'RELAY-CON-OWN',
+                  'Relay Contact Endpoint': frappe._dict(name='RELAY-CE-OLD', relay_contact='RELAY-CON-OTHER')}
+        inserted = []
+        def get_doc(values):
+            inserted.append(values)
+            return SimpleNamespace(insert=lambda **kwargs: SimpleNamespace(name='NEW-' + values['doctype']))
+        db = SimpleNamespace(get_value=lambda doctype, *args, **kwargs: values[doctype], delete=unittest.mock.Mock())
+        with patch.object(seed.frappe, 'db', db, create=True), patch.object(seed.frappe, 'get_doc', get_doc), \
+                patch.object(seed.frappe, 'get_all', return_value=[]) as get_all, \
+                patch.object(seed.frappe, 'delete_doc') as delete_doc:
+            linked = seed.link_person(person, business, 'Sim WhatsApp', None)
+        self.assertIn(['Dynamic Link', 'link_name', '=', person.full_name], get_all.call_args.kwargs['filters'])
+        self.assertEqual(inserted[0]['links'], [{'link_doctype': 'Customer', 'link_name': person.full_name}])
+        delete_doc.assert_called_once_with('Relay Contact Endpoint', 'RELAY-CE-OLD', ignore_permissions=True, force=True)
+        db.delete.assert_called_once_with('Relay Business Routing', {'channel': 'Sim WhatsApp', 'endpoint': person.phone,
+                                                                     'relay_contact': ['!=', 'RELAY-CON-OWN']})
+        self.assertEqual(inserted[-1]['relay_contact'], 'RELAY-CON-OWN')
+        self.assertEqual((linked['contact'], linked['endpoint']), ('NEW-Contact', 'NEW-Relay Contact Endpoint'))
+
     def test_seed_refuses_before_any_write(self):
         with patch.object(frappe, 'local', SimpleNamespace(site='relay.test')), patch.object(frappe, 'set_user') as set_user, \
                 self.assertRaises(seed.SiteRefused):
