@@ -44,7 +44,7 @@ class FakeSite:
                 Doc(ticket='TKT-00099', direction='Incoming', status='Read', content='Acme Textiles internal',
                     message_type='text', creation='2026-11-02 09:00:00', business_doctype='Customer',
                     business_name='Northwind Hosiery', conversation_key='whatsapp:919000000101')],
-            'Relay Internal Comment': [Doc(body='INTERNAL-NOTE: call Alex Rivera before refund', business_doctype=OWN[0],
+            'Relay Internal Comment': [Doc(body='INTERNAL-NOTE: call Alex Demo before refund', business_doctype=OWN[0],
                                            business_name=OWN[1])],
             'Comment': [Doc(content='INTERNAL-NOTE from the desk', reference_name='TKT-00042')]}
         self.queries = []
@@ -99,7 +99,7 @@ class TicketToolTests(unittest.TestCase):
 
     def test_staff_fields_internal_notes_and_unsent_messages_never_leave_the_module(self):
         text = json.dumps(my_tickets({}, context()))
-        for part in (*STAFF_TEXT, 'Alex Rivera', 'ai_disabled', 'assigned_to'):
+        for part in (*STAFF_TEXT, 'Alex Demo', 'ai_disabled', 'assigned_to'):
             self.assertNotIn(part, text)
         self.assertEqual({doctype for doctype, fields in self.site.queries},
                          {'Relay Ticket', 'Relay Message', 'Relay Ticket Status'})

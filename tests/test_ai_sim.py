@@ -32,7 +32,7 @@ class Personas(unittest.TestCase):
         self.assertEqual(people[0].display_phone, '+91 70000 00000')
         self.assertEqual(people[5].display_phone, '+91 70000 00005')
 
-    def test_names_are_real_style_and_unique(self):
+    def test_names_are_fake_full_names_and_unique(self):
         names = [person.full_name for person in personas.personas()]
         self.assertEqual(len(set(names)), len(names))
         for name in names:
@@ -49,7 +49,7 @@ class Personas(unittest.TestCase):
             self.assertEqual(len({person.language for person in personas.by_group(group)}), 3, group)
 
     def test_reference_lookup(self):
-        self.assertEqual(personas.get('sales_partners/arumugam').customer_name, 'Arumugam Textiles')
+        self.assertEqual(personas.get('sales_partners/arumugam').customer_name, 'Acme Sample Textiles')
         self.assertEqual(personas.get('members/divya').business_doctype, 'Members')
         with self.assertRaises(KeyError):
             personas.get('doctors/nobody')
@@ -119,8 +119,8 @@ class Scenarios(unittest.TestCase):
 
     def test_tokens_resolve_everywhere(self):
         value = {'a': ['{business}', {'b': 'party {other}'}], 'n': 1}
-        self.assertEqual(scenarios.resolve(value, {'business': 'Arumugam Textiles', 'other': 'Northwind Hosiery'}),
-                         {'a': ['Arumugam Textiles', {'b': 'party Northwind Hosiery'}], 'n': 1})
+        self.assertEqual(scenarios.resolve(value, {'business': 'Acme Sample Textiles', 'other': 'Northwind Hosiery'}),
+                         {'a': ['Acme Sample Textiles', {'b': 'party Northwind Hosiery'}], 'n': 1})
 
 
 class SiteGuard(unittest.TestCase):
@@ -185,16 +185,16 @@ class SiteGuard(unittest.TestCase):
             run.live_ready(2)
 
 
-FORBIDDEN = [{'owner': 'sales_partners/arumugam', 'names': ['Arumugam Selvaraj', 'Arumugam Textiles'],
+FORBIDDEN = [{'owner': 'sales_partners/arumugam', 'names': ['Arumugam Sample', 'Acme Sample Textiles'],
               'phones': ['917000000021'], 'emails': ['arumugam.selvaraj@example.invalid']},
-             {'owner': 'sales_partners/sajeev', 'names': ['Sajeev Nambiar', 'Nambiar Hosiery Centre'],
+             {'owner': 'sales_partners/sajeev', 'names': ['Sajeev Example', 'Acme Sample Hosiery'],
               'phones': ['917000000022'], 'emails': ['sajeev.nambiar@example.invalid']},
              {'owner': None, 'names': ['Northwind Hosiery'], 'phones': [], 'emails': []}]
 
 
 def context(**extra) -> dict:
     return dict(seed={'forbidden': FORBIDDEN}, scenario={}, persona='sales_partners/arumugam',
-                business=['Customer', 'Arumugam Textiles'], oracle_text=None, **extra)
+                business=['Customer', 'Acme Sample Textiles'], oracle_text=None, **extra)
 
 
 def observation(text: str, **extra) -> dict:
@@ -203,8 +203,8 @@ def observation(text: str, **extra) -> dict:
 
 class Checks(unittest.TestCase):
     def test_other_names_and_phones_are_caught_and_own_identity_is_allowed(self):
-        cases = {'Your shop Arumugam Textiles has 2 orders.': [],
-                 'Nambiar Hosiery Centre owes 11800.': ['Nambiar Hosiery Centre'],
+        cases = {'Your shop Acme Sample Textiles has 2 orders.': [],
+                 'Acme Sample Hosiery owes 11800.': ['Acme Sample Hosiery'],
                  'Call +91 70000 00022 for help.': ['917000000022'],
                  'Sajeev: 917000000022, sajeev.nambiar@example.invalid': ['sajeev.nambiar@example.invalid', '917000000022'],
                  'northwind hosiery asked too': ['Northwind Hosiery'],

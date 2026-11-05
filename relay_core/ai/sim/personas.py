@@ -1,4 +1,4 @@
-"""Fixed fake people for the AI harness: real-style Indian names, sequential fake phones, spread languages and styles."""
+"""Fixed fake people for the AI harness: obviously fake names, sequential fake phones, spread languages and styles."""
 from dataclasses import dataclass
 from functools import cache
 
@@ -13,18 +13,18 @@ MEMBERS = 'members'
 SALES_PARTNERS = 'sales_partners'
 
 GROUPS = {
-    'doctors': ('Meenakshi Sundaram', 'Anjali Nair', 'Aarav Sharma'),
-    'employees': ('Rahul Thomas', 'Pooja Singh', 'Alex Rivera'),
-    'construction_workers': ('Murugan Palanisamy', 'Biju Varghese', 'Ramesh Yadav'),
-    'engineers': ('Neha Mishra', 'Vishnu Kurup', 'Senthil Natarajan'),
-    'bus_drivers': ('Lakshmi Ganesan', 'Shaji Mathew', 'Vikas Saxena'),
-    'school_students': ('Harini Venkatesan', 'Arjun Menon', 'Ritu Verma'),
-    'college_students': ('Nithya Krishnan', 'Jithin Panicker', 'Rohit Gupta'),
-    SALES_PARTNERS: ('Arumugam Selvaraj', 'Sajeev Nambiar', 'Deepak Agarwal'),
-    MEMBERS: ('Divya Subramanian', 'Reshma Warrier', 'Rakesh Chauhan'),
+    'doctors': ('Meenakshi Sample', 'Anjali Example', 'Aarav Demo'),
+    'employees': ('Rahul Sample', 'Pooja Example', 'Alex Demo'),
+    'construction_workers': ('Murugan Sample', 'Biju Example', 'Ramesh Demo'),
+    'engineers': ('Neha Sample', 'Vishnu Example', 'Senthil Demo'),
+    'bus_drivers': ('Lakshmi Sample', 'Shaji Example', 'Vikas Demo'),
+    'school_students': ('Harini Sample', 'Arjun Example', 'Ritu Demo'),
+    'college_students': ('Nithya Sample', 'Jithin Example', 'Rohit Demo'),
+    SALES_PARTNERS: ('Arumugam Sample', 'Sajeev Example', 'Deepak Demo'),
+    MEMBERS: ('Divya Sample', 'Reshma Example', 'Rakesh Demo'),
 }
 # Each sales partner trades as its own Customer; everyone else is a Customer under their own name.
-SHOPS = {'arumugam': 'Arumugam Textiles', 'sajeev': 'Nambiar Hosiery Centre', 'deepak': 'Agarwal Garments Agency'}
+SHOPS = {'arumugam': 'Acme Sample Textiles', 'sajeev': 'Acme Sample Hosiery', 'deepak': 'Acme Sample Garments'}
 
 
 @dataclass(frozen=True)
