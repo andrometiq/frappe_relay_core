@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import types
@@ -8,7 +9,7 @@ from unittest.mock import Mock, patch
 
 class EmailPermissionsTests(unittest.TestCase):
     def setUp(self):
-        self.f = types.SimpleNamespace(whitelist=lambda **kw: lambda f: f, PermissionError=PermissionError,
+        self.f = types.SimpleNamespace(whitelist=lambda **kw: lambda f: f, PermissionError=PermissionError, parse_json=json.loads,
             db=types.SimpleNamespace(get_value=Mock(return_value='RELAY-CON-0000000001')),
             get_list=Mock(return_value=[types.SimpleNamespace(name='RELAY-CH-0000000001')]), get_doc=Mock())
         def reject(message, exception): raise exception(message)
@@ -51,6 +52,14 @@ class EmailPermissionsTests(unittest.TestCase):
         self.f.get_doc.assert_not_called()
         self.f.db.get_value.assert_not_called()
         self.wa.client.assert_not_called()
+
+    def test_form_posted_recipient_lists_are_parsed_at_the_boundary(self):
+        checked = Mock(side_effect=LookupError)
+        self.service.recipient_lists = checked
+        with self.assertRaises(LookupError):
+            self.service.send(to='["a@example.test"]', cc='["b@example.test"]', bcc='[]', attachment_ids='[]',
+                              subject='Subject', body='Body', request_key='form')
+        checked.assert_called_once_with(['a@example.test'], ['b@example.test'], [])
 
     def test_reload_status_returns_permission_checked_durable_action(self):
         source=types.SimpleNamespace(channel='channel',relay_contact='contact',name='source')

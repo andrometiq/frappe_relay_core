@@ -88,6 +88,9 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
     from relay_core.ticket_notifications import outgoing_notification
     from relay_core.automation.service import outgoing_run
     from relay_core.business_events import outgoing_event
+    # A form post carries the lists as JSON text.
+    to, cc, bcc, attachment_ids = (frappe.parse_json(value) if isinstance(value, str) else value
+                                   for value in (to, cc, bcc, attachment_ids))
     recipient_lists(to, cc, bcc)
     values=dict(to=to,subject=subject,body=body,cc=cc,bcc=bcc,message=message,
         html=html,attachment_ids=attachment_ids,forward=forward,auto_submitted=auto_submitted)
