@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { chatListRefresh } from '../src/services/realtimeRefreshQueue.js'
+import { chatListRefresh, realtimeRefreshQueue, scheduleEvent } from '../src/services/realtimeRefreshQueue.js'
 import { announceOwnSend, lastOwnSend, ownSendOf, recordOwnMessages } from '../src/services/ownSends.js'
 import { appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
@@ -14,15 +14,17 @@ async function component(t, props = {}, api) {
   const source = await readFile(new URL('../src/components/messages/BusinessDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
-  let realtime
+  let realtime, liveKinds
   const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, chatListRefresh, lastOwnSend, ownSendOf, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
-    onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, _kinds, refresh) { realtime = refresh }, coreApi: api }
+    onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, kinds, refresh) { realtime = refresh; liveKinds = kinds }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
   t.after(() => scope.stop())
   for (const callback of mounted) callback()
   await settle()
-  return { ...state, emitted, realtime: kinds => realtime({ kinds: new Set(kinds) }), live: batch => realtime(batch) }
+  return { ...state, emitted, realtime: kinds => realtime({ kinds: new Set(kinds) }), live: batch => realtime(batch),
+    // Live events as the socket delivers them, through the same kind filter and queue as useRealtimeRefresh.
+    events: async list => { const queue = realtimeRefreshQueue(realtime, () => true, 0); for (const event of list) scheduleEvent(queue, liveKinds, event); await new Promise(resolve => setTimeout(resolve, 5)); await settle(); queue.dispose() } }
 }
 
 const type = { kind: 'type', doctype: 'Local Supplier', label: 'Suppliers', unread: 12 }
@@ -225,6 +227,33 @@ test('own sends move their tile at once and their live events read nothing; a ch
   recordOwnMessages({ ...conversation, business_name: 'local-9' }, ['RELAY-MSG-OWN-9'])
   await view.live(sendBatch(['RELAY-MSG-OWN-9'])); await settle()
   assert.equal(calls.length, 1, 'A send to a record that is not shown reads the first page')
+})
+
+// The socket events of one send to an open record chat, in the order a real send brings them: the Hub event
+// changes of the send and of its status callbacks, the message in both rooms, and its receipt in both rooms.
+const sendEvents = name => [{ kind: 'message_actions' }, { kind: 'incoming' },
+  { change: 'c-' + name, kind: 'messages', messages: [name] }, { change: 'c-' + name, kind: 'messages' }, { kind: 'incoming' },
+  { change: 'r-' + name, kind: 'messages', messages: [name], receipt: 1 }, { change: 'r-' + name, kind: 'messages', receipt: 1 }, { kind: 'incoming' }]
+
+test('the socket events of three own sends, status callbacks included, read nothing', async t => {
+  browser(t, '#/messages'); const calls = []
+  const view = await component(t, { selected: 'local-2', selectedDoctype: type.doctype }, async (method, values) => {
+    calls.push([method, values])
+    if (!values.doctype) return { items: [type], next: null }
+    return { items: ['local-1', 'local-2'].map(name => ({ ...record, doctype: type.doctype, name, last_activity: '2026-11-05 09:00:00' })), next: null }
+  })
+  view.choose(type); await settle()
+  calls.length = 0
+  const conversation = { contact: '', business_doctype: type.doctype, business_name: 'local-2', preview: 'Order ready' }
+  for (const index of [1, 2, 3]) {
+    announceOwnSend(conversation); await settle()
+    recordOwnMessages(conversation, ['RELAY-MSG-SEND-' + index])
+    await view.events(sendEvents('RELAY-MSG-SEND-' + index))
+  }
+  assert.deepEqual(view.items.value.map(tile => tile.name), ['local-2', 'local-1'])
+  assert.deepEqual(calls, [], 'No page or row read for own sends')
+  await view.events([{ change: 'c-elsewhere', kind: 'messages' }])
+  assert.deepEqual(calls.map(([method]) => method), ['business_groups.browse'], 'A change elsewhere still reads the first page')
 })
 
 test('a batch is in the open conversation only when every change also came with its message names', () => {

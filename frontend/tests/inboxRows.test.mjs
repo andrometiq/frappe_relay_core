@@ -23,7 +23,7 @@ test('receipts change no row, reads refresh the open row, new messages move rows
   assert.equal(listRefresh(new Set(['receipts'])), 'none')
   assert.equal(listRefresh(new Set(['reads', 'chats', 'receipts'])), 'selected')
   assert.equal(listRefresh(new Set(['messages'])), 'loaded')
-  assert.equal(listRefresh(new Set(['messages', 'incoming', 'reads', 'receipts'])), 'loaded')
+  assert.equal(listRefresh(new Set(['messages', 'reads', 'receipts'])), 'loaded')
   assert.equal(listRefresh(new Set(['messages', 'reconnect'])), 'reload')
   assert.equal(listRefresh(new Set(['inbox'])), 'reload')
   assert.equal(listRefresh(new Set()), 'reload')

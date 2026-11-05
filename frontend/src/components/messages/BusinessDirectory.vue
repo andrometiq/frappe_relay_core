@@ -136,7 +136,8 @@ function liveRefresh(batch) {
   return refreshes[kind]()
 }
 const refreshes = { none: () => {}, own: () => {}, selected: refreshSelected, loaded: refreshLoaded, reload: () => load() }
-useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'receipts', 'incoming', 'contacts', 'reads', 'chats', 'permissions'],
+// Hub event changes ('incoming') are not chat changes: a status callback of a send would read the page again.
+useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'receipts', 'contacts', 'reads', 'chats', 'permissions'],
   liveRefresh, LIVE_DELAY)
 </script>
 

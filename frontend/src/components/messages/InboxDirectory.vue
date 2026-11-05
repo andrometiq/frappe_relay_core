@@ -127,7 +127,7 @@ function refresh({ kinds } = {}) {
   if (kind === 'reload') return load()
   return kind === 'loaded' && !kinds.has('reads') && !kinds.has('chats') ? refreshChanged() : refreshFirstPage()
 }
-useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'incoming', 'reads', 'chats', 'permissions', 'contacts'], refresh)
+useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads', 'chats', 'permissions', 'contacts'], refresh)
 </script>
 <template>
   <header class="inbox-list-head">

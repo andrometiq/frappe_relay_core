@@ -9,7 +9,7 @@ export function realtimeRefreshQueue(refresh, visible, delay = 150) {
     if (disposed) return
     if (kind) kinds.add(kind)
     for (const name of names) messages.add(name)
-    if (kind === 'messages' || kind === 'incoming') {
+    if (kind === 'messages') {
       if (!change) unknown = true
       else { changes.add(change); if (names.length) open.add(change) }
     }
@@ -29,6 +29,13 @@ export function realtimeRefreshQueue(refresh, visible, delay = 150) {
   return { schedule, dispose() { disposed = true; clearTimeout(timer); clear() } }
 }
 
+// Queue one live event for a view that lists `kinds`; an event of another kind is not the view's.
+// A view that lists 'receipts' gets a delivery status change under that kind instead of 'messages'.
+export function scheduleEvent(queue, kinds, event) {
+  const kind = event?.receipt && kinds.includes('receipts') ? 'receipts' : event?.kind
+  if (kind === 'reconnect' || kind === 'permissions' || kinds.includes(kind)) queue.schedule(kind, Array.isArray(event.messages) ? event.messages : [], event.change)
+}
+
 // True when a batch holds only delivery status changes, which change no list row, count or reply window.
 export function isReceiptsOnly(kinds) {
   return kinds?.size > 0 && [...kinds].every(kind => kind === 'receipts')
@@ -40,7 +47,7 @@ export function listRefresh(kinds) {
   const only = allowed => kinds?.size > 0 && [...kinds].every(kind => allowed.includes(kind))
   if (only(['receipts'])) return 'none'
   if (only(['receipts', 'reads', 'chats'])) return 'selected'
-  if (only(['receipts', 'reads', 'chats', 'messages', 'incoming'])) return 'loaded'
+  if (only(['receipts', 'reads', 'chats', 'messages'])) return 'loaded'
   return 'reload'
 }
 
