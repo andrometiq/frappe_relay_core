@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows } from '../../services/channelSetup'
+import { ACCOUNTS_RELOAD_DELAY, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows } from '../../services/channelSetup'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 
@@ -73,7 +73,7 @@ async function remove() {
 }
 const checkedText = health => health.checked_at ? 'Checked ' + dateTime(health.checked_at) + '.' : 'Not checked yet.'
 
-onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels'], load) })
+onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels'], load, ACCOUNTS_RELOAD_DELAY) })
 onBeforeUnmount(() => stop?.())
 </script>
 <template>

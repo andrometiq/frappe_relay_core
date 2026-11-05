@@ -99,14 +99,25 @@ def provider_of(name):
     return provider
 
 
-def site_channels(provider, fields):
-    """The site's Relay Channels of one provider that the Hub still lists, oldest first."""
-    listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
-              if isinstance(row, dict) and row.get('provider') == provider}
-    rows = frappe.get_all('Relay Channel', filters={'channel': provider, 'account': connection_value('relay_hub_account'),
+def site_rows(provider, fields):
+    """The site's Relay Channels of one provider with a Hub key, oldest first."""
+    return frappe.get_all('Relay Channel', filters={'channel': provider, 'account': connection_value('relay_hub_account'),
                                                     'hub_channel': ['is', 'set']},
                           fields=fields, order_by='creation asc', limit_page_length=50)
-    return [row for row in rows if row.hub_channel in listed]
+
+
+def site_accounts(provider, fields, health_tool, shown, health_of):
+    """The site's channels of one provider that the Hub still lists, each with its Hub health, oldest first.
+
+    One channels.health call reads every channel. An older Hub without it is asked channels.list and then each health."""
+    batch = hub_call('channels.health', {'provider': provider}, older={})
+    if provider not in batch:
+        listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
+                  if isinstance(row, dict) and row.get('provider') == provider}
+        return [dict(shown(row), health=health_of(hub_call(health_tool, {'channel': row.hub_channel}, older={})))
+                for row in site_rows(provider, fields) if row.hub_channel in listed]
+    health = {item.get('channel'): item for item in batch[provider] or [] if isinstance(item, dict)}
+    return [dict(shown(row), health=health_of(health[row.hub_channel])) for row in site_rows(provider, fields) if row.hub_channel in health]
 
 
 def make_default(name, provider, disabled='number_disabled'):

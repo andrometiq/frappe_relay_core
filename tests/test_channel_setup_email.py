@@ -27,7 +27,8 @@ class MailboxSetupTests(unittest.TestCase):
              'is_default': 1, 'mailbox_aliases': 'orders@example.com', 'triage_owner': 'owner@example.com'},
             {'name': 'Other mail', 'channel': 'Email', 'account': 'site-b', 'hub_channel': 'mail-9', 'enabled': 1}])
         self.hub = Mock()
-        self.answers = {'channels.list': {'channels': [{'key': 'mail-1', 'provider': 'Email'}]}, 'email.mailbox.health': HEALTH}
+        self.answers = {'channels.list': {'channels': [{'key': 'mail-1', 'provider': 'Email'}]}, 'email.mailbox.health': HEALTH,
+                        'channels.health': {'Email': [HEALTH, dict(HEALTH, channel='mail-9')]}}
         self.hub.call_tool.side_effect = self.answer
         self.sync, self.publish = Mock(side_effect=self.synced), Mock()
         for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(email, 'frappe', self.site.frappe),
@@ -51,7 +52,10 @@ class MailboxSetupTests(unittest.TestCase):
         return [call.args for call in self.hub.call_tool.call_args_list]
 
     def test_health_keeps_only_known_fields_and_never_a_password(self):
-        row = email.accounts()[0]
+        rows = email.accounts()
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'Email'})])
+        self.assertEqual([row['name'] for row in rows], ['Acme sales'])
+        row = rows[0]
         self.assertEqual(row['health']['server'], {'host': 'smtp.example.com', 'port': 587, 'imap_host': 'imap.example.com'})
         self.assertEqual(row['health']['sync'], [{'last_sync': '2026-11-01 10:00', 'error': '', 'failures': 0, 'backoff': False}])
         self.assertNotIn('never', repr(row))

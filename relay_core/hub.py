@@ -14,7 +14,7 @@ from . import file_limits
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 SIGNUP_TOOLS = ('whatsapp.signup.start', 'whatsapp.signup.get', 'whatsapp.signup.resume', 'whatsapp.signup.cancel')
 # Site tools that set up the site's own numbers and its Hub link; none takes or returns a credential.
-SETUP_TOOLS = ('whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
+SETUP_TOOLS = ('channels.health', 'whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
                'whatsapp.number.remove', 'site.disconnect', 'telegram.bot.health', 'telegram.bot.check', 'telegram.bot.remove',
                'email.mailbox.health', 'email.mailbox.check', 'email.mailbox.remove')
 # Site tools that carry a bot token or a mail password to the Hub. Core forwards it once and never keeps it.

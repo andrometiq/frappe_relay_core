@@ -248,7 +248,7 @@ The WhatsApp Account tab and the Telegram and Email tabs in Settings use these m
 | POST | `relay_core.channels_api.remove_number` (`confirm=1`) | System Manager |
 | POST | `relay_core.channels_api.save_number_profile` (`profile`, optional `photo_base64`, `photo_type`) | System Manager |
 
-`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
+`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. It reads the health of all the provider's channels in one Hub `channels.health` call; an older Hub without that tool is asked once per channel. The Account cards reload on `channels` events at most once a second. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
 
 | Provider | `connect` values | `save_settings` keys |
 | --- | --- | --- |

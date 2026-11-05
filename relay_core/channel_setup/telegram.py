@@ -2,7 +2,7 @@
 
 The bot token is a function argument only: it goes straight to the Hub and is never kept in Core."""
 import frappe
-from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_channels
+from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_accounts
 from relay_core.channel_sync import publish
 
 PROVIDER = 'Telegram'
@@ -23,8 +23,7 @@ def shown(row):
 
 def accounts():
     """The site's bots that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    return [dict(shown(row), health=health_of(hub_call('telegram.bot.health', {'channel': row.hub_channel}, older={})))
-            for row in site_channels(PROVIDER, FIELDS)]
+    return site_accounts(PROVIDER, FIELDS, 'telegram.bot.health', shown, health_of)
 
 
 def account(name):

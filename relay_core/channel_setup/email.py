@@ -3,7 +3,7 @@
 The SMTP and IMAP passwords are function arguments only: they go straight to the Hub and are never kept in Core.
 The mailbox address list, company and triage owner stay on the Relay Channel, because only Core uses them."""
 import frappe
-from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_channels
+from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_accounts
 from relay_core.channel_sync import publish
 
 PROVIDER = 'Email'
@@ -34,8 +34,7 @@ def shown(row):
 
 def accounts():
     """The site's mailboxes that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    return [dict(shown(row), health=health_of(hub_call('email.mailbox.health', {'channel': row.hub_channel}, older={})))
-            for row in site_channels(PROVIDER, FIELDS)]
+    return site_accounts(PROVIDER, FIELDS, 'email.mailbox.health', shown, health_of)
 
 
 def account(name):

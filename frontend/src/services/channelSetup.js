@@ -1,6 +1,9 @@
 // Labels and choices for the channel accounts a site sets up in Relay. The Hub keeps every credential; these
 // helpers only read the status it reports. WhatsApp numbers, Telegram bots and mailboxes share them.
 
+// A check or sync sends several channels events; an Account card reloads once a second at most, since each reload asks the Hub.
+export const ACCOUNTS_RELOAD_DELAY = 1000
+
 const CONNECTION = {
   connected: ['Connected', 'green'],
   unchecked: ['Not checked yet', 'gray'],
