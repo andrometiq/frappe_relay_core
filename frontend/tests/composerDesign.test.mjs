@@ -126,11 +126,18 @@ test('quoting another message in the same conversation keeps the current draft',
 })
 
 
-test('an in-flight chat send locks conflicting composer actions without changing the send queue', async t => {
+test('a send in flight leaves the composer open for the next message', async t => {
   const {state,view,sends}=fixture(t);await settle();state.body.value='Quantity 25';state.sending.value=1
-  assert.equal(view.canSend.value,false);assert.ok(view.actions.value.filter(a=>a.id!=='details').every(a=>a.disabled))
-  view.keydown({key:'Enter',preventDefault(){}});assert.equal(sends.length,0)
-  state.sending.value=0;assert.equal(view.canSend.value,true)
+  assert.equal(view.canSend.value,true);assert.ok(view.actions.value.every(a=>!a.disabled))
+  view.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(sends,['Quantity 25'])
+  state.busy.value=true;assert.equal(view.canSend.value,false)
+})
+
+test('a live reply window recheck keeps Send open; a new source waits for its window', async t => {
+  const {state,view}=fixture(t);await settle();state.body.value='Next message'
+  const live=view.checkWindow(true);assert.equal(view.canSend.value,true);await live
+  const opening=view.checkWindow();assert.equal(view.canSend.value,false);await opening
+  assert.equal(view.canSend.value,true)
 })
 
 

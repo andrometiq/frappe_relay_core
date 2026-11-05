@@ -21,3 +21,18 @@ export function realtimeRefreshQueue(refresh, visible, delay = 150) {
   }
   return { schedule, dispose() { disposed = true; clearTimeout(timer); kinds.clear(); messages.clear() } }
 }
+
+// True when a batch holds only delivery status changes, which change no list row, count or reply window.
+export function isReceiptsOnly(kinds) {
+  return kinds?.size > 0 && [...kinds].every(kind => kind === 'receipts')
+}
+
+// How a chat list answers a batch of live events: receipts change no row, reads change the open one,
+// new messages move rows in place, and anything else reloads.
+export function listRefresh(kinds) {
+  const only = allowed => kinds?.size > 0 && [...kinds].every(kind => allowed.includes(kind))
+  if (only(['receipts'])) return 'none'
+  if (only(['receipts', 'reads', 'chats'])) return 'selected'
+  if (only(['receipts', 'reads', 'chats', 'messages', 'incoming'])) return 'loaded'
+  return 'reload'
+}

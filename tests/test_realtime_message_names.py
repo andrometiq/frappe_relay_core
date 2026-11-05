@@ -32,6 +32,18 @@ class ConversationEventNames(unittest.TestCase):
         realtime.contact_changed('RELAY-CON-0000000001', messages=['RELAY-MSG-0000000003', 'RELAY-MSG-0000000001', 'RELAY-MSG-0000000003'])
         self.assertEqual(self.events(), [({'kind': 'messages', 'messages': ['RELAY-MSG-0000000001', 'RELAY-MSG-0000000003']}, 'RELAY-CON-0000000001')])
 
+    def test_receipt_change_is_marked_in_every_room_and_keeps_counts(self):
+        doc = _dict(doctype='Relay Message', name='RELAY-MSG-0000000002', relay_contact='RELAY-CON-0000000001',
+                    business_doctype='Customer', business_name='CUST-1')
+        with patch('relay_core.queue_counts.invalidate') as invalidate:
+            realtime.changed(doc, receipt=True)
+        self.assertEqual(self.events(), [
+            ({'kind': 'messages', 'receipt': 1}, 'room:Relay Message'),
+            ({'kind': 'messages', 'messages': ['RELAY-MSG-0000000002'], 'receipt': 1}, 'RELAY-CON-0000000001'),
+            ({'kind': 'messages', 'messages': ['RELAY-MSG-0000000002'], 'receipt': 1}, 'CUST-1'),
+        ])
+        invalidate.assert_not_called()
+
     def test_other_changes_carry_no_names(self):
         realtime.changed(_dict(doctype='Relay Contact', name='RELAY-CON-0000000001'))
         realtime.contact_changed('RELAY-CON-0000000001', 'reads')

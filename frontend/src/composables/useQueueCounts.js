@@ -2,11 +2,13 @@ import { computed, onScopeDispose, shallowRef, unref, watch } from 'vue'
 import { coreApi } from '../services/coreApi'
 import { countLabel, sharedQueueCounts } from '../services/queueCounts'
 import { watchRealtime } from './useRealtimeRefresh'
+import { isReceiptsOnly } from '../services/realtimeRefreshQueue'
 
 // One live count per medium and filter set for the whole app; refetched on the inbox realtime events, never polled.
 const acquire = sharedQueueCounts(
   params => coreApi('queue_counts.read', params),
-  load => watchRealtime(['Relay Message'], ['messages', 'inbox', 'reads', 'chats', 'permissions', 'contacts'], load),
+  load => watchRealtime(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads', 'chats', 'permissions', 'contacts'],
+    ({ kinds } = {}) => isReceiptsOnly(kinds) ? undefined : load()),
 )
 
 export function useQueueCounts(medium, filters = {}) {
