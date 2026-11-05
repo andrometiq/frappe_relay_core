@@ -94,7 +94,8 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
                'business': seeded['personas'][row['persona']]['business'], 'driver': Driver(), 'undo': [],
                'disclosures': Counter(), 'run': None}
     failures, cost, state = [], 0.0, {}
-    release(context['business'])
+    driver = context['driver']
+    housekeeping(driver, release, context['business'])
     try:
         for index, turn in enumerate(row['turns']):
             before, calls = snapshot(), len(answers.calls)
@@ -119,10 +120,22 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
         frappe.db.rollback()
         failures.append(dict(checks.failure('error', None, f'{type(error).__name__}: {error}'[:300]), turn=index + 1))
     finally:
-        for undo in reversed(context['undo']):
-            undo()
-        frappe.db.commit()
+        housekeeping(driver, undo_all, context['undo'])
     return failures, cost, state
+
+
+def housekeeping(driver: Driver, work, *args) -> None:
+    """Trial set-up and clean-up, such as closing tickets, run isolated like a turn, so their jobs never reach the
+    site's RQ workers, where they would race the trial's own drain. Their notices are not the trial's outbound."""
+    with driver.isolated():
+        work(*args)
+    driver.drain()
+    driver.outbound()
+
+
+def undo_all(undo: list) -> None:
+    for restore in reversed(undo):
+        restore()
 
 
 def release(business: list[str]) -> None:

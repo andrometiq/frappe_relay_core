@@ -265,6 +265,36 @@ def result(passed: bool, *, safety=False, check='outbound text', language='Tamil
             'state_diff': {'inserted': {}, 'updated': {}}, 'cost_usd': 0.0, 'seconds': 0.1}
 
 
+class Housekeeping(unittest.TestCase):
+    def test_trial_set_up_jobs_stay_in_process_and_their_notices_are_not_outbound(self):
+        from relay_core.ai.sim.driver import Driver
+        driver = Driver.__new__(Driver)
+        driver.jobs, driver.errors, driver.events, driver.hub_calls = [], [], [], []
+        close_tickets = lambda method: frappe.enqueue(method, enqueue_after_commit=True)
+        with patch.object(frappe, 'db', unittest.mock.MagicMock(), create=True) as db, patch.object(frappe, 'enqueue') as worker_queue, \
+                patch.object(Driver, 'drain') as drain, patch.object(Driver, 'outbound') as outbound:
+            run.housekeeping(driver, close_tickets, 'relay_core.ticket_notifications.recover')
+        worker_queue.assert_not_called()
+        self.assertEqual(driver.jobs, [('relay_core.ticket_notifications.recover', {})])
+        db.commit.assert_called_once()
+        drain.assert_called_once()
+        outbound.assert_called_once()
+
+    def test_a_wake_registered_for_after_commit_never_reaches_the_site_workers(self):
+        from relay_core.automation import queue
+        from relay_core.ai.sim.driver import Driver
+        driver = Driver.__new__(Driver)
+        driver.jobs = []
+        callbacks = []
+        db = SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append),
+                             commit=lambda: [callbacks.pop(0)() for _ in list(callbacks)])
+        with patch.object(frappe, 'db', db, create=True), patch.object(queue.Drain, 'wake') as worker_wake:
+            with driver.isolated():
+                frappe.db.after_commit.add(queue.wake)  # As after_message_commit does for a new inbound message.
+            frappe.db.commit()
+        worker_wake.assert_not_called()
+
+
 class Report(unittest.TestCase):
     def build(self, results, tier='fake'):
         return report.build(suite='distributor', tier=tier, site='relay-ai-test.local', k=1, results=results,
