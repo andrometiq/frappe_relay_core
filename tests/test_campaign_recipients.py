@@ -188,7 +188,7 @@ class ScheduleTests(unittest.TestCase):
                 patch.object(bulk_campaigns, 'check_ready', return_value={}) as check_ready, \
                 patch.object(bulk_campaigns, 'internal_save'), patch.object(bulk_campaigns, 'read'), \
                 patch.object(bulk_campaigns, 'enqueue') as enqueue, patch('frappe.cache', cache), \
-                patch('frappe.session', _dict(user='manager@example.com')):
+                patch.object(bulk_campaigns, 'lock_campaign'), patch('frappe.session', _dict(user='manager@example.com')):
             bulk_campaigns.control(doc.name, 'schedule', '2026-10-28 09:00:00')
             self.assertEqual((doc.status, doc.scheduled_at, doc.execution_user),
                              ('Scheduled', datetime(2026, 10, 28, 9, 0), 'manager@example.com'))

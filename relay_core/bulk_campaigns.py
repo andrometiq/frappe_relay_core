@@ -156,6 +156,14 @@ def is_bulk(doc):
     return doc.operation in OPERATIONS and bool(doc.arguments) and 'message' in json.loads(doc.arguments)
 
 
+def lock_campaign(name):
+    """The campaign status, read under its row lock as the first read of a new transaction. Counters have one
+    writer (bulk_updates.recount); every save of the whole row takes this lock first, so the two wait for each
+    other instead of failing with MariaDB error 1020 or writing older counters or status back."""
+    frappe.db.commit()
+    return frappe.db.get_value('Relay Campaign', name, 'status', for_update=True)
+
+
 def bulk(name, statuses=None):
     document_name(name)
     require_access('Relay Campaign', 'write')
@@ -733,6 +741,7 @@ def control(name, action, scheduled_at=None):
     checked = target in ('Running', 'Scheduled')
     media = check_ready(bulk(name, allowed)) if checked else {}  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
+        lock_campaign(name)
         doc = bulk(name, allowed)
         if checked:
             check_validation(doc)
@@ -762,7 +771,7 @@ def retry_failed(name):
         return read(name)
     media = check_ready(doc)  # Hub calls stay outside the lock.
     with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
-        frappe.db.commit()  # A fresh snapshot sees a retry that another request committed.
+        lock_campaign(name)  # A fresh snapshot sees a retry that another request committed.
         doc = bulk(name)
         if not retry_needed(doc):
             return read(name)
@@ -905,9 +914,11 @@ def push(doc, deadline):
             continue
         except (ValueError, OSError, ValidationError, PermissionError) as exc:
             frappe.log_error(title='Campaign preparation failed')
-            doc.status, doc.last_error = 'Paused', friendly_reason(str(exc), snapshot['fields'])
-            phase(doc, 'Paused')
-            internal_save(doc)
+            if lock_campaign(doc.name) == 'Running':  # A manager's pause or cancel since the slice began stays.
+                doc.reload()
+                doc.status, doc.last_error = 'Paused', friendly_reason(str(exc), snapshot['fields'])
+                phase(doc, 'Paused')
+                internal_save(doc)
             frappe.db.commit()
             return False
         if has_attachments:

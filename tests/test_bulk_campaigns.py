@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 import frappe
@@ -261,6 +262,33 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual((publish.call_count, recount.call_count), (2, 2))
         self.assertTrue(db.commit.called)  # The count after the wait reads a fresh snapshot.
 
+    def test_recount_locks_the_campaign_row_in_a_new_transaction_before_it_counts(self):
+        """A manager's save between the count and the write made recount fail with MariaDB error 1020."""
+        order = []
+        db = Mock(commit=Mock(side_effect=lambda: order.append('commit')),
+                  get_value=Mock(side_effect=lambda *args, **kwargs: order.append(('status', kwargs)) or 'Paused'),
+                  sql=Mock(side_effect=lambda *args: order.append('count') or [('Sent', 2, 0)]),
+                  set_value=Mock(side_effect=lambda *args, **kwargs: order.append('write')))
+        fake = SimpleNamespace(db=db)
+        with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_campaigns, 'frappe', fake):
+            result = bulk_updates.recount('Winter launch')
+        self.assertEqual(order, ['commit', ('status', {'for_update': True}), 'count', 'write', 'commit'])
+        self.assertEqual(result['status'], 'Paused')  # The locked status: a pause is never completed over.
+        self.assertNotIn('status', db.set_value.call_args.args[2])
+
+    def test_a_manager_action_saves_the_campaign_under_its_row_lock(self):
+        doc = _dict(name='Winter launch', status='Running', arguments='{}', reply_window_hours=72)
+        order = []
+        with patch.object(bulk_campaigns, 'require_access'), patch.object(bulk_campaigns, 'read'), \
+                patch.object(bulk_campaigns, 'enqueue'), patch.object(bulk_campaigns, 'phase'), \
+                patch.object(bulk_campaigns, 'lock_campaign', side_effect=lambda name: order.append('lock')), \
+                patch.object(bulk_campaigns, 'bulk', side_effect=lambda *args: order.append('read') or doc), \
+                patch.object(bulk_campaigns, 'internal_save', side_effect=lambda doc: order.append('save')), \
+                patch('frappe.cache', SimpleNamespace(lock=lambda *args, **kwargs: nullcontext(), delete_value=Mock())):
+            bulk_campaigns.control('Winter launch', 'pause')
+        self.assertEqual(order, ['lock', 'read', 'save'])
+        self.assertEqual(doc.status, 'Paused')
+
     def test_reply_links_by_context_then_number_and_is_gated(self):
         db = Mock()
         db.sql.side_effect = [[_dict(name='row-1', campaign='Winter launch')], None]
@@ -419,6 +447,23 @@ class SenderTests(unittest.TestCase):
         with patch.object(bulk_campaigns.whatsapp, 'client', return_value=hub):
             bulk_campaigns.push(self.doc, time.monotonic() + 30)
         self.assertEqual(order, ['hub', ('reserve', 3), 'admit', 'admit', 'admit', ('record', 41)])
+
+    def test_a_preparation_failure_pauses_under_the_row_lock_and_keeps_a_managers_cancel(self):
+        for locked, saved in (('Running', 'Paused'), ('Cancelling', None)):
+            with self.subTest(locked=locked):
+                self.selects([self.rows(2)])
+                self.doc.update(status='Running', reload=Mock(side_effect=lambda: self.doc.update(status=locked)))
+                self.db.get_value.reset_mock(return_value=True)
+                self.db.get_value.return_value = 'Running'
+                self.db.get_value.side_effect = lambda *args, **kwargs: locked if kwargs.get('for_update') else 'Running'
+                with patch.object(bulk_campaigns.whatsapp, 'client', return_value=self.hub()), \
+                        patch.object(bulk_campaigns, 'prepare_messages', side_effect=ValueError('Missing header attachment')), \
+                        patch.object(bulk_campaigns, 'friendly_reason', return_value='Missing header attachment'), \
+                        patch.object(bulk_campaigns, 'internal_save') as save, patch.object(self.fake, 'log_error', Mock(), create=True):
+                    self.assertFalse(bulk_campaigns.push(self.doc, time.monotonic() + 30))
+                self.assertEqual(save.call_args.args[0].status if save.called else None, saved)
+                self.assertIn(('Relay Campaign', 'Winter launch', 'status'), [call.args for call in self.db.get_value.call_args_list
+                                                                              if call.kwargs.get('for_update')])
 
     def test_a_later_accepted_batch_clears_the_retry_error(self):
         self.selects([self.rows(5), []])
