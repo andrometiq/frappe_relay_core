@@ -231,11 +231,15 @@ contain 32–512 printable characters when supplied. Values are stored in the
 
 ## Channel setup
 
-The WhatsApp Account tab uses these methods. The Hub keeps every credential and the two-step PIN; no method returns a token or a secret. `channel` is a Relay Channel name of this site's Hub account. Hub refusals come back as plain errors.
+The WhatsApp Account tab and the Telegram and Email tabs in Settings use these methods. The Hub keeps every credential and the two-step PIN. Core does not keep, log or return a bot token or a password. For `connect`, `channel` is the provider (`Telegram` or `Email`). For the other methods, `channel` is a Relay Channel name of this site's Hub account. Hub refusals come back as plain errors.
 
 | Method | Route | Access |
 | --- | --- | --- |
-| GET | `relay_core.channels_api.accounts` (`channel=WhatsApp`) | Manager or System Manager |
+| GET | `relay_core.channels_api.accounts` (`channel=WhatsApp`, `Telegram` or `Email`) | Manager or System Manager |
+| POST | `relay_core.channels_api.connect` (`channel=Telegram` or `Email`, `values`) | System Manager |
+| POST | `relay_core.channels_api.check` (`repair`, default 1) | System Manager |
+| POST | `relay_core.channels_api.save_settings` (`settings`) | System Manager |
+| POST | `relay_core.channels_api.remove` (`confirm=1`) | System Manager |
 | GET | `relay_core.channels_api.number_profile` | Manager or System Manager |
 | POST | `relay_core.channels_api.check_number` (`repair`, default 1) | System Manager |
 | POST | `relay_core.channels_api.save_number_settings` (`settings` with `enabled`, `templates`, `sync_metadata`) | System Manager |
@@ -244,7 +248,14 @@ The WhatsApp Account tab uses these methods. The Hub keeps every credential and 
 | POST | `relay_core.channels_api.remove_number` (`confirm=1`) | System Manager |
 | POST | `relay_core.channels_api.save_number_profile` (`profile`, optional `photo_base64`, `photo_type`) | System Manager |
 
-`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`; Email and Telegram can add one later.
+`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
+
+| Provider | `connect` values | `save_settings` keys |
+| --- | --- | --- |
+| Telegram | `bot_token`, optional `label` | `enabled`, `label`, `bot_token` (same bot only) |
+| Email | `from`, `host`, `password`, optional `label`, `port`, `username`, `imap_host`, `imap_port`, `imap_username`, `imap_password`, `imap_folder`, `trusted_authserv_id`, `trusted_dsn_domain` | `enabled`, `label` and the server keys of `connect` |
+
+Core sends a token or a password to the Hub only over HTTPS or a local Hub address. Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
 
 ## Workspace directories
 

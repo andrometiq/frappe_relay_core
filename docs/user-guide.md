@@ -375,6 +375,8 @@ Hub connection:
 | WhatsApp numbers | Opens WhatsApp > Account, where a System Manager sets up each number. |
 | Configure business types and grouping | Opens Relay Contact Type in Desk: which DocTypes are customers (such as Customer, Supplier) and the grouping field. |
 | Review endpoint bindings | Opens the list of verified numbers in Desk. |
+| Telegram tab | Shows when Telegram is on. A System Manager connects and manages bots here. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
+| Email tab | Shows when Email is on. A System Manager connects and manages mailboxes here. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
 | Saved replies tab | Lists saved replies. "Create in Desk" and "Edit in Desk" open the Relay Canned Reply form. Tick "Published" so staff see it. |
 
 More switches are only in Desk at Relay Settings:
@@ -611,7 +613,29 @@ These tasks are not on this page:
 | --- | --- |
 | Change the display name | Meta WhatsApp Manager. Meta reviews each name change. |
 | WhatsApp groups and calls | Not available in this version. |
-| Email and Telegram accounts | Not set up from Relay yet. |
+| Email and Telegram accounts | Settings > Telegram and Settings > Email. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
+
+### 5.13 Set up Telegram and Email from Relay Core
+
+Who: System Manager. Managers can see the state but cannot change it.
+
+Open Settings > Telegram or Settings > Email. The tab shows only when the channel is on for this site. Each bot or mailbox shows a card. The card updates by itself when something changes.
+
+| Task | What to do | What happens |
+| --- | --- | --- |
+| Connect a bot | In Telegram, make a bot with @BotFather and copy its token. Paste the token in **Bot token** and click **Connect bot**. | The Hub checks the token with Telegram, keeps it and tells Telegram to send the bot's messages to Relay. Relay never shows the token again. |
+| Connect a mailbox | Enter the mailbox address, the SMTP server and the password, and the IMAP values when they are different. Click **Connect mailbox**. Use an app password when your mail provider has one. | The Hub signs in to SMTP and IMAP first. It keeps nothing when the sign-in fails. Relay never shows a password again. |
+| Check | Click **Check connection** (bot) or **Check sign-in** (mailbox). | The Hub checks the bot with Telegram and registers its webhook again when it stopped, or it signs in to the mail server. No mail is sent or read. |
+| Turn on or off | Use **Bot is on** or **Mailbox is on**. | When off, Relay does not send or receive on it. |
+| Make default | Click **Make default**. | New chats use this bot or mailbox when nothing else picks one. |
+| Change | Click **Rename or new token** (bot) or **Change settings** (mailbox). Leave a password field blank to keep the saved one. | A new bot token must belong to the same bot. The Hub signs in with new mailbox settings before it saves them. |
+| Remove | Click **Remove bot** or **Remove mailbox** and confirm. | The Hub deletes the token or the passwords, and the bot's webhook. The chats stay in Relay. |
+
+Notes:
+
+- Telegram needs the Hub to have a public HTTPS address. Relay does not read Telegram by polling.
+- The Hub does not connect to mail servers on private network addresses.
+- Too many connects or checks in one hour are refused for a short time. Wait and try again.
 
 ## 6. What happens if
 
