@@ -5,7 +5,7 @@ FEATURES = (
     'reply_quote', 'reactions', 'edits',
     'read_receipts', 'group_receipts',
     'templates', 'reply_window_hours', 'bulk_campaigns', 'forms', 'voice_calls',
-    'groups', 'topics', 'email_threading', 'ai_automation', 'saved_replies',
+    'groups', 'topics', 'email_threading', 'ai_automation', 'saved_replies', 'polls',
 )
 ANY_FILE = '*/*'
 MEGABYTE = 1024 * 1024

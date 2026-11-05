@@ -10,5 +10,5 @@ class Email(Channel):
         'location': False, 'contacts': False, 'reply_quote': True, 'reactions': False, 'edits': False,
         'read_receipts': False, 'group_receipts': False,
         'templates': False, 'reply_window_hours': None, 'bulk_campaigns': False, 'forms': False, 'voice_calls': False,
-        'groups': False, 'topics': False, 'email_threading': True, 'ai_automation': True, 'saved_replies': False,
+        'groups': False, 'topics': False, 'email_threading': True, 'ai_automation': True, 'saved_replies': False, 'polls': False,
     }

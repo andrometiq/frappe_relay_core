@@ -262,6 +262,9 @@ def project(name, business_overrides=None):
                 frappe.set_user(actor)
         else:
             message.insert(ignore_permissions=True)
+        if medium == 'WhatsApp':
+            from relay_core.polls import record_vote
+            record_vote(message)
     frappe.db.set_value('Relay Hub Event', name, 'routing_decisions', json.dumps(decisions, sort_keys=True))
     frappe.db.set_value('Relay Hub Event', name, 'projection_status', 'Uncategorized' if unresolved else 'Projected' if incoming or template_update or copied or update_status == 'Projected' else 'Ignored')
     from relay_core.realtime import changed

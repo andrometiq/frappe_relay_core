@@ -21,7 +21,7 @@ test('an account without the Hub template flag hides templates', () => {
 
 test('composer offers every WhatsApp type in private chats and media only in groups', () => {
   assert.deepEqual(composerKinds(capabilities, { provider: 'WhatsApp' }),
-    ['text', 'sticker', 'photo', 'video', 'audio', 'voice', 'document', 'location', 'contact'])
+    ['text', 'sticker', 'photo', 'video', 'audio', 'voice', 'document', 'location', 'contact', 'poll'])
   assert.deepEqual(composerKinds(capabilities, { provider: 'WhatsApp', group_id: 'group' }),
     ['text', 'sticker', 'photo', 'video', 'audio', 'voice', 'document'])
   assert.deepEqual(composerKinds(capabilities, { provider: 'Telegram' }), ['text'])

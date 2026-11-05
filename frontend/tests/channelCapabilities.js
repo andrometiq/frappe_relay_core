@@ -15,7 +15,7 @@ export const whatsappCapabilities = {
       location: true, contacts: true, reply_quote: true, reactions: true, edits: false,
       read_receipts: true, group_receipts: true, templates: true, reply_window_hours: 24,
       bulk_campaigns: true, forms: true, voice_calls: true, groups: true, topics: false,
-      email_threading: false, ai_automation: true, saved_replies: true,
+      email_threading: false, ai_automation: true, saved_replies: true, polls: true,
     },
   },
 }

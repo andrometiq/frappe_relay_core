@@ -271,7 +271,7 @@ test('Send via switches the source channel without filtering the timeline',async
   assert.equal(fixture.state.channel.value,'')
   assert.equal(fixture.state.rows.value.length,3)
   assert.deepEqual(calls,[])
-  assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact'])
+  assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact','poll'])
   fixture.stop()
 })
 

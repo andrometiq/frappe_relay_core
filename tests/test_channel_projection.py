@@ -112,8 +112,8 @@ class WhatsAppWebhookShapeTests(unittest.TestCase):
         data = row['message_data']
         self.assertEqual(data['unsupported'], {'type': 'poll_creation', 'code': 131051, 'title': 'Message type unknown',
             'details': 'Message type is currently not supported.',
-            'reason': 'Poll messages are not supported by WhatsApp Business'})
-        self.assertEqual(preview(data), 'Poll messages are not supported by WhatsApp Business')
+            'reason': 'Poll: WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text.'})
+        self.assertEqual(preview(data), 'Poll: WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text.')
 
     def test_unavailable_and_unknown_unsupported_types(self):
         from relay_core.message_types import preview

@@ -7,11 +7,13 @@ import {
   mapURL,
   reactionLabels,
   unsupportedNotice,
+  pollTally,
   orderLines,
   templateParts,
   templateHeaderView,
 } from "./messageContent";
 import {messagesKey} from '../composables/messagesContext';
+import { FeatherIcon } from "@relay/ui";
 import { deliveryError } from '../services/serverError';
 const chat=inject(messagesKey,null), translationOpen=ref(false);
 const translationEnabled=computed(()=>chat?.channels.value.some(row=>row.value===props.message.channel&&row.translation_enabled));
@@ -26,6 +28,7 @@ const props = defineProps({ message: { type: Object, required: true }, showReply
 watch(translationEnabled,value=>{if(!value)translationOpen.value=false});
 const data = computed(() => messageData(props.message));
 const template = computed(() => templateParts(data.value));
+const poll = computed(() => data.value.kind === "poll" && data.value.poll ? pollTally(data.value) : null);
 const header = computed(() => template.value && templateHeaderView(props.message));
 const headerData = computed(() => header.value && { kind: header.value.type, media: { file_name: header.value.fileName } });
 const context = computed(() => objectValue(props.message.provider_context));
@@ -186,7 +189,16 @@ const video = computed(
       {{ message.content || "WhatsApp system update" }}
     </p>
     <p v-else-if="data.kind === 'revoked'" class="text-ink-gray-5 italic">Message deleted by sender</p>
+    <div v-else-if="poll" class="rounded border p-3 space-y-2" aria-label="Poll">
+      <strong class="flex items-center gap-1"><FeatherIcon name="vote" :size="14" />{{ poll.question }}</strong>
+      <div v-for="(option, index) in poll.options" :key="index" class="space-y-1">
+        <div class="flex justify-between gap-2"><span class="break-words">{{ option.label }}</span><span class="text-ink-gray-5">{{ option.votes }}</span></div>
+        <div class="h-1 rounded bg-surface-gray-2"><div class="h-1 rounded bg-surface-gray-7" :style="{ width: (poll.total ? option.votes / poll.total * 100 : 0) + '%' }" /></div>
+      </div>
+      <p class="text-xs text-ink-gray-5">{{ poll.total }} {{ poll.total === 1 ? 'vote' : 'votes' }}</p>
+    </div>
     <div v-else-if="data.kind === 'unsupported'" class="space-y-1" role="note">
+      <strong v-if="unsupportedNotice(data).poll" class="flex items-center gap-1"><FeatherIcon name="vote" :size="14" />Poll from customer</strong>
       <p class="text-ink-gray-7">{{ unsupportedNotice(data).reason }}</p>
       <p v-if="unsupportedNotice(data).meta" class="text-xs text-ink-gray-5">WhatsApp: {{ unsupportedNotice(data).meta }}</p>
     </div>

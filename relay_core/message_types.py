@@ -37,11 +37,15 @@ def telegram_vcard(card):
 KINDS = {'text', 'image', 'photo', 'video', 'audio', 'voice', 'document', 'animation',
          'video_note', 'sticker', 'location', 'contact', 'contacts', 'poll', 'order', 'system', 'unsupported'}
 # Meta's unsupported.type values, named for staff.
-UNSUPPORTED_LABELS = {'poll_creation': 'Poll', 'poll_update': 'Poll vote', 'edit': 'Edited', 'gif': 'GIF',
+UNSUPPORTED_LABELS = {'edit': 'Edited', 'gif': 'GIF',
     'group_invite': 'Group invite', 'hsm': 'Template', 'keep_in_chat': 'Keep-in-chat', 'link_preview': 'Link preview',
     'media_placeholder': 'View-once or unavailable media', 'pin': 'Pinned', 'product': 'Product', 'list': 'List',
     'button': 'Button', 'errors': 'Error', 'image': 'Image', 'interactive': 'Interactive', 'location': 'Location',
     'order': 'Order', 'reaction': 'Reaction', 'view_once': 'View-once'}
+# WhatsApp Cloud API gives business accounts no poll question, options or votes.
+POLL_REASONS = {
+    'poll_creation': 'Poll: WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text.',
+    'poll_update': 'Poll vote: WhatsApp does not share poll votes with business accounts. Ask the customer to reply in text.'}
 SYSTEM_PREVIEWS = {'user_changed_number': 'Customer changed their WhatsApp number',
     'user_changed_user_id': 'Customer WhatsApp identity changed',
     'customer_identity_changed': 'Customer WhatsApp identity changed',
@@ -114,6 +118,8 @@ def unsupported(detail, errors):
     result.update(meta_error(errors))
     if result.get('code') == 131060:
         result['reason'] = result.get('title') or 'This message is currently unavailable'
+    elif kind in POLL_REASONS:
+        result['reason'] = POLL_REASONS[kind]
     elif isinstance(kind, str) and kind != 'unknown':
         label = UNSUPPORTED_LABELS.get(kind) or kind.replace('_', ' ').capitalize()
         result['reason'] = label + ' messages are not supported by WhatsApp Business'
@@ -272,6 +278,8 @@ def preview(value):
         details = value.get('order') or {}; count = len(details.get('items') or [])
         label = 'Order: %d item%s' % (count, '' if count == 1 else 's')
         return label + (' · ' + details['text'] if details.get('text') else '')
+    if value.get('kind') == 'poll' and isinstance(value.get('poll'), dict):
+        return 'Poll: ' + value['poll'].get('question', '')
     if value.get('kind') == 'revoked':
         return 'Message deleted by sender'
     if value.get('kind') == 'audio' and (value.get('media') or {}).get('voice') and not value.get('caption'):

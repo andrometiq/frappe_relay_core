@@ -63,6 +63,7 @@ All examples below use the same endpoint and source-message binding.
 | `reaction` | `{"emoji":""}` | Clear that reaction |
 | `sticker` | `{}` | Resend the selected readable incoming sticker; do not pass a URL or local path |
 | `location` | `{"latitude":13.0827,"longitude":80.2707}` | Share a fixed coordinate |
+| `poll` | `{"question":"Which colour?","options":["Red","Blue"]}` | WhatsApp only: send a poll that the customer answers with one tap |
 
 For a contact card:
 
@@ -91,6 +92,20 @@ Core's typed facade exposes ordinary emoji reactions; Telegram custom
 emoji reactions are available in Hub's lower-level typed API, subject to provider
 eligibility.
 
+## Polls
+
+WhatsApp Cloud API cannot send a native poll and does not give business accounts the content of a customer's poll. Relay therefore works as follows:
+
+| Direction | Behavior |
+| --- | --- |
+| Outgoing | A poll with 2-3 options goes as reply buttons (up to 20 characters each). A poll with 4-10 options goes as a list (up to 24 characters each). The reply window must be open. |
+| Votes | A tap on an option quotes the poll. Relay counts it as the current vote of that contact and updates the poll card live. A later tap replaces the vote. A tap from another contact or chat is not counted. |
+| Incoming | A customer's poll arrives as Meta type `unsupported` (`poll_creation`, error 131051) without content. Relay shows "WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text." A poll vote (`poll_update`) shows a similar notice. |
+
+The `show_customer_poll_notice` patch gives customer polls and votes stored before this notice the same notice. It changes only the message display data (`message_data`), never the message text or IDs. A row stored without the Meta type gets it from its stored Hub event. A second run changes nothing.
+
+See [Meta unsupported messages webhook](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages/unsupported/), [reply buttons](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-reply-buttons-messages/) and [list messages](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-list-messages/). Checked 2026-11-04.
+
 ## Provider support
 
 | Content | WhatsApp direct | WhatsApp group | Telegram private/group/topic |
@@ -100,6 +115,7 @@ eligibility.
 | Set/clear reactions | Supported | Rejected | Supported when bot/chat allows |
 | Static location | Supported | Rejected | Supported |
 | Contact card | Supported | Rejected | Supported, one card |
+| Poll | Supported as buttons or list | Rejected | Not offered |
 
 This table describes Relay's implemented paths and local tests, not approval of
 a specific provider account. Meta lists text, media, and templates for groups;

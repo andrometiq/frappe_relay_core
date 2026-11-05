@@ -150,6 +150,8 @@ export function useMessages() {
     longitude = ref("");
   const contactName = ref(""),
     phone = ref(""),
+    pollQuestion = ref(""),
+    pollOptions = ref(["", ""]),
     alsoVia = ref([]),
     // The WhatsApp number staff picked in "Send via"; empty lets the server reply from the newest incoming number.
     viaNumber = ref(""),
@@ -170,7 +172,7 @@ export function useMessages() {
   const windowKey = () => businessName.value
     ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
-  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,attachment,quoting,source,alsoVia,viaNumber};
+  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,pollQuestion,pollOptions,attachment,quoting,source,alsoVia,viaNumber};
   function clearRecipient() {
     resetRecipient(draftFields);
     error.value = ""; notice.value = "";
@@ -708,6 +710,8 @@ export function useMessages() {
           return;
         }
       }
+      if (action === "poll")
+        data = { question: pollQuestion.value.trim(), options: pollOptions.value.map(option => option.trim()).filter(Boolean) };
       if (action === "contact")
         data = {
           contacts: [
@@ -754,7 +758,7 @@ export function useMessages() {
     if(action!=='reaction') {
       pending=pendingMessages.value.find(row=>row.name==='pending:'+key);
       if(!pending) {pending={name:'pending:'+key,contact:selected.value,scope:selected.value||businessType.value+':'+businessName.value,channel:message.channel,provider_context:message.provider_context,
-        direction:'Outgoing',status:'Sending',content:data.text||data.caption||attachment.value?.filename||action,
+        direction:'Outgoing',status:'Sending',content:data.text||data.caption||(data.question&&'Poll: '+data.question)||attachment.value?.filename||action,
         creation:new Date().toISOString(),_pending:true,storage};pendingMessages.value.push(pending);pending=pendingMessages.value.at(-1);}
       else pending.status='Sending';
       pending.request=request;
@@ -908,6 +912,8 @@ export function useMessages() {
     longitude,
     contactName,
     phone,
+    pollQuestion,
+    pollOptions,
     busy,
     error,
     connectionError,

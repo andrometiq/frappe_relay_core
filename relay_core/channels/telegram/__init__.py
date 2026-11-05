@@ -15,5 +15,5 @@ class Telegram(Channel):
         'location': True, 'contacts': True, 'reply_quote': True, 'reactions': True, 'edits': False,
         'read_receipts': False, 'group_receipts': False,
         'templates': False, 'reply_window_hours': None, 'bulk_campaigns': False, 'forms': False, 'voice_calls': False,
-        'groups': True, 'topics': True, 'email_threading': False, 'ai_automation': True, 'saved_replies': True,
+        'groups': True, 'topics': True, 'email_threading': False, 'ai_automation': True, 'saved_replies': True, 'polls': False,
     }
