@@ -1,4 +1,5 @@
 """WhatsApp numbers are set up from Relay through the Hub's site tools; no credential crosses to Core."""
+import json
 import unittest
 from unittest.mock import Mock, patch
 
@@ -163,6 +164,27 @@ class ChannelsApiPermissionTests(unittest.TestCase):
         self.assertEqual([tuple(call) for call in module.method_calls], [
             ('check', ('Sales line', False), {}), ('check', ('Sales line', True), {}),
             ('save_settings', ('Sales line', {'enabled': 1}), {}), ('set_default', ('Sales line',), {}), ('remove', ('Sales line', True), {})])
+
+    def test_tokens_and_passwords_are_masked_in_the_request_form(self):
+        import frappe
+        module, secret = Mock(), '111111:acme_bot_token_local_only_aaaa'
+        cases = ((channels_api.connect, 'Telegram', 'values', {'bot_token': secret, 'label': 'Acme Textiles'}),
+                 (channels_api.connect, 'Email', 'values', {'from': 'sales@example.com', 'password': secret, 'imap_password': secret}),
+                 (channels_api.save_settings, 'Acme bot', 'settings', {'bot_token': secret}))
+        with patch.object(channels_api, 'system_manager'), patch.object(channels_api, 'provider_of', return_value='Telegram'), \
+                patch.dict(channels_api.PROVIDERS, {'Telegram': module, 'Email': module}):
+            for endpoint, channel, field, values in cases:
+                for sent in (values, json.dumps(values)):
+                    frappe.local.form_dict = frappe._dict({'channel': channel, field: sent})
+                    self.addCleanup(lambda: delattr(frappe.local, 'form_dict') if hasattr(frappe.local, 'form_dict') else None)
+                    endpoint(channel, sent)
+                    self.assertNotIn(secret, repr(frappe.local.form_dict))
+                    self.assertEqual(module.method_calls[-1].args[-1], values)
+            frappe.local.form_dict = frappe._dict({'channel': 'Acme bot', 'settings': '{"bot_token": "' + secret})
+            with patch.object(channels_api, 'owner', return_value=module):
+                channels_api.save_settings('Acme bot', frappe.local.form_dict.settings)
+            self.assertNotIn(secret, repr(frappe.local.form_dict))
+            self.assertIsNone(module.method_calls[-1].args[-1])
 
     def test_a_channel_of_another_site_has_no_provider(self):
         site = FakeSite(Relay_Channel=[{'name': 'Other site', 'channel': 'WhatsApp', 'account': 'site-b', 'hub_channel': 'wa-130', 'enabled': 1}])

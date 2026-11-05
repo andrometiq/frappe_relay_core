@@ -1,5 +1,6 @@
 """Channel setup endpoints. A System Manager configures; communication managers may read where things stand."""
 import frappe
+from frappe.utils.logger import sanitized_dict
 from relay_core.channel_setup import email, provider_of, telegram, whatsapp
 from relay_core.onboarding.api import system_manager
 from relay_core.permissions import can_configure, can_manage, require_access
@@ -34,15 +35,24 @@ def owner(channel):
     return provider(provider_of(channel))
 
 
-def parsed(values):
-    return frappe.parse_json(values) if isinstance(values, str) else values
+def parsed(name, values):
+    """The JSON form value `name`. An Error Log records the request form, so its tokens and passwords are masked there."""
+    try:
+        values = frappe.parse_json(values) if isinstance(values, str) else values
+    except ValueError:
+        values = None
+    form = getattr(frappe.local, 'form_dict', None)
+    if isinstance(form, dict) and name in form:
+        form[name] = sanitized_dict(values) if isinstance(values, dict) else '********'
+    return values
 
 
 @frappe.whitelist(methods=['POST'])
 def connect(channel, values):
     """Connect a bot or mailbox of one provider. The token or password in values goes to the Hub only."""
+    values = parsed('values', values)
     system_manager()
-    module, values = provider(channel), parsed(values)
+    module = provider(channel)
     if not hasattr(module, 'connect') or not isinstance(values, dict):
         frappe.throw(f'{channel} accounts are connected from the setup page')
     return module.connect(values)
@@ -56,8 +66,9 @@ def check(channel, repair=1):
 
 @frappe.whitelist(methods=['POST'])
 def save_settings(channel, settings):
+    settings = parsed('settings', settings)
     system_manager()
-    return owner(channel).save_settings(channel, parsed(settings))
+    return owner(channel).save_settings(channel, settings)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -103,4 +114,4 @@ def number_profile(channel):
 @frappe.whitelist(methods=['POST'])
 def save_number_profile(channel, profile, photo_base64='', photo_type=''):
     system_manager()
-    return whatsapp.save_profile(channel, parsed(profile), photo_base64, photo_type)
+    return whatsapp.save_profile(channel, parsed('profile', profile), photo_base64, photo_type)
