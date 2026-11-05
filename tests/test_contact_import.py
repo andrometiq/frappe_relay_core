@@ -211,7 +211,7 @@ class ContactImportTests(TestCase):
 
     def test_file_limit_headers_and_excel_numeric_cells(self):
         from openpyxl import Workbook
-        with TemporaryDirectory(dir='.runtime/phase2') as directory:
+        with TemporaryDirectory() as directory:
             path = Path(directory) / 'contacts.xlsx'
             book = Workbook(); sheet = book.active; sheet.append(service.COLUMNS)
             sheet.append([919876543210, '', 'Local', '', '']); sheet['A2'].number_format = '0.00E+00'
@@ -228,7 +228,7 @@ class ContactImportTests(TestCase):
 
     def test_parser_failures_return_friendly_preview_errors(self):
         friendly = 'The file could not be read. Save it as Excel (.xlsx) or UTF-8 CSV.'
-        with TemporaryDirectory(dir='.runtime/phase2') as directory:
+        with TemporaryDirectory() as directory:
             for name, content in (('contacts.csv', b'Mobile,Email\n\xff,private'), ('contacts.xlsx', b'not a workbook')):
                 with self.subTest(name=name):
                     path = Path(directory) / name
