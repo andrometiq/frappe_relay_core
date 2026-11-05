@@ -22,6 +22,7 @@ QUESTION_WORDS = {
 # Whole words common in Marathi and absent from Hindi; Devanagari without them stays Hindi.
 MARATHI_WORDS = {'आहे', 'आहेत', 'नाही', 'काय', 'कधी', 'कुठे', 'किती', 'मला', 'तुम्ही', 'आम्ही', 'आणि', 'पाहिजे', 'मिळेल'}
 HINDI_WORDS = {'है', 'हैं', 'नहीं', 'क्या', 'कब', 'कहाँ', 'कहां', 'मुझे', 'और', 'चाहिए', 'मिलेगा'}
+UNSPACED = {'CJK', 'HIRAGANA', 'KATAKANA', 'THAI'}
 ACKNOWLEDGEMENTS = {'ok', 'okay', 'yes', 'no', 'thanks', 'thank you', 'sure', 'yep', 'nope'}
 CURRENCY_CODES = re.compile(r'\b(?:INR|USD|EUR|GBP|AED|SAR|JPY|CNY|Rs)\b\.?', re.IGNORECASE)
 
@@ -32,14 +33,9 @@ def detect(text):
     amount = CURRENCY_CODES.sub('', text)
     if any(char.isdecimal() for char in amount) and not any(char.isalpha() for char in amount):
         return {'language': 'undetermined', 'script': None}
-    counts = Counter()
-    for char in text:
-        if char.isalpha():
-            script = unicodedata.name(char, '').split(' ')[0]
-            if script in SCRIPTS:
-                counts[script] += 1
+    counts = script_words(text)
     words = ' '.join(re.findall(r'[^\W\d_]+', text.casefold()))
-    if not counts or (set(counts) == {'LATIN'} and (counts['LATIN'] <= 2 or words in ACKNOWLEDGEMENTS)):
+    if not counts or (set(counts) == {'LATIN'} and (len(words.replace(' ', '')) <= 2 or words in ACKNOWLEDGEMENTS)):
         return {'language': 'undetermined', 'script': None}
     questions = {script: count for script, count in counts.items()
                  if script in QUESTION_WORDS and re.search(QUESTION_WORDS[script], text)}
@@ -49,6 +45,22 @@ def detect(text):
     if script == 'DEVANAGARI' and is_marathi(text):
         return {'language': 'Marathi', 'script': script}
     return {'language': SCRIPTS[script], 'script': script}
+
+
+def script_words(text):
+    """Words per script, so a long Latin name inside a native-script sentence does not outweigh it.
+
+    Scripts written without spaces count letters instead of words."""
+    counts, in_word = Counter(), False
+    for char in text:
+        if char.isalpha():
+            script = unicodedata.name(char, '').split(' ')[0]
+            if script in SCRIPTS and (script in UNSPACED or not in_word):
+                counts[script] += 1
+            in_word = script not in UNSPACED
+        elif not unicodedata.category(char).startswith('M'):
+            in_word = False
+    return counts
 
 
 def is_marathi(text):
