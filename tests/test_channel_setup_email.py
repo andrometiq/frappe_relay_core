@@ -1,11 +1,12 @@
 """Mailboxes are connected from Relay through the Hub; SMTP and IMAP passwords go to the Hub once and are never kept in Core."""
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import FakeSite
 from relay_core import channel_setup
 from relay_core.channel_setup import SetupError, email
-from relay_core.hub import HubError
+from relay_core.hub import HubError, revealed
 
 SETTINGS = {'relay_hub_account': 'site-a', 'relay_hub_url': 'https://hub.example.com/mcp', 'relay_hub_token': 't'}
 HEALTH = {'channel': 'mail-1', 'label': 'Acme sales', 'address': 'sales@example.com', 'enabled': True, 'connection_status': 'connected',
@@ -49,7 +50,9 @@ class MailboxSetupTests(unittest.TestCase):
             self.site.add('Relay Channel', {'name': 'New mail', 'channel': 'Email', 'account': 'site-a', 'hub_channel': 'mail-2', 'enabled': 1})
 
     def tools(self):
-        return [call.args for call in self.hub.call_tool.call_args_list]
+        """The tool calls as the Hub gets them: a Secret is revealed only in the request body."""
+        return [(tool, json.loads(json.dumps(arguments, default=revealed))) for tool, arguments in
+                (call.args for call in self.hub.call_tool.call_args_list)]
 
     def test_health_keeps_only_known_fields_and_never_a_password(self):
         rows = email.accounts()

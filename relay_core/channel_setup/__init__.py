@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 import frappe
-from relay_core.hub import CREDENTIAL_TOOLS, HubError, OlderHubError, protected_transport
+from relay_core.hub import CREDENTIAL_TOOLS, HubError, OlderHubError, Secret, protected_transport
 from relay_core.settings import value as connection_value
 
 TEXT = {
@@ -43,6 +43,8 @@ TEXT = {
 # The Hub's own words are the reason for these codes, and they never carry a credential.
 HUB_WORDS = ('meta_rejected', 'login_failed', 'invalid_settings', 'host_unknown')
 CODE = re.compile(r'\bcode ([a-z][a-z_]{1,60})\b')
+# The form fields that hold a bot token or a mail password.
+SECRET_FIELDS = ('bot_token', 'password', 'imap_password')
 
 
 class SetupError(frappe.ValidationError):
@@ -143,9 +145,13 @@ def connected(provider, result):
     return name
 
 
-def secret_value(values, field):
-    """A token or password from the form as typed, or '' when the person left it blank. Never stored or echoed."""
+def secret_value(values, field, strip=False):
+    """A token or password from the form as a Secret, as typed or stripped, or '' when the person left it blank.
+
+    Never stored or echoed: a Secret shows masked in a traceback until the Hub request reveals it."""
     value = values.get(field) if isinstance(values, dict) else None
     if value is not None and not isinstance(value, str):
         frappe.throw('Enter the value as text')
-    return value if value and value.strip() else ''
+    if not value or not value.strip():
+        return ''
+    return Secret(value.strip() if strip else value)

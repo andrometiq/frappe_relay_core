@@ -168,6 +168,14 @@ export function mailboxConnect(form) {
   return values
 }
 
+// The request fields of a connect or settings change. Tokens and passwords go in their own secrets field, which Frappe
+// masks in an Error Log traceback; field names the other values, values for connect and settings for a change.
+export function withSecrets(field, values) {
+  const plain = {}, secrets = {}
+  for (const [name, value] of Object.entries(values)) (SECRET_FIELDS.includes(name) ? secrets : plain)[name] = value
+  return { [field]: plain, secrets }
+}
+
 // Clears every token and password of a form after a submit, sent or not.
 export function clearSecrets(form) {
   for (const name of SECRET_FIELDS) if (name in form) form[name] = ''

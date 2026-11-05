@@ -33,7 +33,7 @@ def account(name):
 
 def connect(values):
     """Connect a bot with its @BotFather token. The Hub checks it, keeps it and registers the webhook."""
-    bot_token = secret_value(values, 'bot_token').strip()
+    bot_token = secret_value(values, 'bot_token', strip=True)
     if not bot_token:
         frappe.throw('Paste the bot token from @BotFather')
     label = values.get('label') if isinstance(values.get('label'), str) else ''
@@ -59,7 +59,7 @@ def save_settings(name, settings):
         changes['enabled'] = str(settings['enabled']) in ('1', 'true', 'True')
     if isinstance(settings.get('label'), str) and settings['label'].strip():
         changes['label'] = settings['label'].strip()[:140]
-    if bot_token := secret_value(settings, 'bot_token').strip():
+    if bot_token := secret_value(settings, 'bot_token', strip=True):
         changes['bot_token'] = bot_token
     if not changes:
         frappe.throw('Choose enabled, label or bot_token')

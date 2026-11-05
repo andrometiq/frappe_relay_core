@@ -12,6 +12,8 @@ test('the bot and mailbox cards keep secrets write-only and refresh on the socke
     assert.match(card, /type="password"|type: 'password'/, path)
     assert.match(card, /new-password/, path)
     assert.match(card, /clearSecrets\(adding\); clearSecrets\(draft\)/, path)
+    assert.match(card, /\{ channel: '(Telegram|Email)', \.\.\.withSecrets\('values', /, path)
+    assert.match(card, /'save_settings', \{ channel: row\.name, \.\.\.withSecrets\('settings', settings\) \}/, path)
     assert.match(card, /watchRealtime\(\['Relay Channel'\], \['channels'\], load, ACCOUNTS_RELOAD_DELAY\)/, path)
     assert.doesNotMatch(card, /setInterval|setTimeout|console\./, path)
     assert.match(card, /v-if="canConfigure"/, path)

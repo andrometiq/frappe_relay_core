@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { ACCOUNTS_RELOAD_DELAY, botBadge, botRows, clearSecrets } from '../../services/channelSetup'
+import { ACCOUNTS_RELOAD_DELAY, botBadge, botRows, clearSecrets, withSecrets } from '../../services/channelSetup'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 
@@ -34,8 +34,8 @@ async function run(key, method, values, done) {
 }
 
 async function connect() {
-  const values = { label: adding.label, bot_token: adding.bot_token }
-  if (await run('connect', 'connect', { channel: 'Telegram', values }, () => 'Bot connected.')) adding.label = ''
+  const request = { channel: 'Telegram', ...withSecrets('values', { label: adding.label, bot_token: adding.bot_token }) }
+  if (await run('connect', 'connect', request, () => 'Bot connected.')) adding.label = ''
 }
 const check = row => run(row.name + ':check', 'check', { channel: row.name, repair: 1 }, () => 'Connection checked.')
 const toggle = (row, value) => run(row.name + ':enabled', 'save_settings', { channel: row.name, settings: { enabled: value ? 1 : 0 } }, () => 'Saved.')
@@ -47,7 +47,7 @@ async function saveEdit() {
   if (draft.label.trim() && draft.label.trim() !== row.label) settings.label = draft.label.trim()
   if (draft.bot_token.trim()) settings.bot_token = draft.bot_token.trim()
   editing.value = null
-  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, settings }, () => 'Saved.')
+  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, ...withSecrets('settings', settings) }, () => 'Saved.')
   else clearSecrets(draft)
 }
 async function remove() {

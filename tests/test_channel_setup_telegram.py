@@ -1,11 +1,12 @@
 """Telegram bots are connected from Relay through the Hub; the bot token goes to the Hub once and is never kept in Core."""
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import FakeSite
 from relay_core import channel_setup, channels_api
 from relay_core.channel_setup import SetupError, telegram
-from relay_core.hub import HubError
+from relay_core.hub import HubError, revealed
 
 SETTINGS = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
 TOKEN = '111111:acme_bot_token_local_only_aaaa'
@@ -48,7 +49,9 @@ class TelegramSetupTests(unittest.TestCase):
             self.site.add('Relay Channel', {'name': 'New bot', 'channel': 'Telegram', 'account': 'site-a', 'hub_channel': 'tg-3', 'enabled': 1})
 
     def tools(self):
-        return [call.args for call in self.hub.call_tool.call_args_list]
+        """The tool calls as the Hub gets them: a Secret is revealed only in the request body."""
+        return [(tool, json.loads(json.dumps(arguments, default=revealed))) for tool, arguments in
+                (call.args for call in self.hub.call_tool.call_args_list)]
 
     def test_accounts_list_only_the_bots_the_hub_still_lists(self):
         rows = telegram.accounts()

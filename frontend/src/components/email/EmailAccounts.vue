@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { ACCOUNTS_RELOAD_DELAY, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows } from '../../services/channelSetup'
+import { ACCOUNTS_RELOAD_DELAY, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, withSecrets } from '../../services/channelSetup'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 
@@ -47,7 +47,7 @@ async function run(key, method, values, done) {
 }
 
 async function connect() {
-  if (await run('connect', 'connect', { channel: 'Email', values: mailboxConnect(adding) }, () => 'Mailbox connected.')) Object.assign(adding, blankForm())
+  if (await run('connect', 'connect', { channel: 'Email', ...withSecrets('values', mailboxConnect(adding)) }, () => 'Mailbox connected.')) Object.assign(adding, blankForm())
 }
 const check = row => run(row.name + ':check', 'check', { channel: row.name }, () => 'Sign-in checked.')
 const toggle = (row, value) => run(row.name + ':enabled', 'save_settings', { channel: row.name, settings: { enabled: value ? 1 : 0 } }, () => 'Saved.')
@@ -62,7 +62,7 @@ async function saveEdit() {
   const row = editing.value, settings = mailboxChanges(row.health, draft)
   if (draft.label.trim() && draft.label.trim() !== row.label) settings.label = draft.label.trim()
   editing.value = null
-  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, settings }, () => 'Saved.')
+  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, ...withSecrets('settings', settings) }, () => 'Saved.')
   else clearSecrets(draft)
 }
 function closeEdit() { editing.value = null; clearSecrets(draft) }
