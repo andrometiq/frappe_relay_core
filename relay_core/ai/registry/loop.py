@@ -1,7 +1,9 @@
-"""The bounded tool loop of a customer reply on frappe_tools' AgentRun."""
+"""The bounded tool loop of a customer reply on Relay's AI service-aware AgentRun."""
 import time
 
 from frappe_tools.ai import agent
+
+from relay_core.ai.remote import turns
 
 DEFAULT_TOOL_CALLS = 4
 MAX_TOOL_CALLS = 6  # The hard cap for customer channels.
@@ -14,7 +16,7 @@ def tool_limit(skill) -> int:
     return min(int(skill.get('max_tool_calls') or DEFAULT_TOOL_CALLS), MAX_TOOL_CALLS)
 
 
-class SkillRun(agent.AgentRun):
+class SkillRun(turns.AgentRun):
     """AgentRun with the takeover check around each tool batch, strict tool names, short results and a call log."""
     rounds = 0
 

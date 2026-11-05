@@ -195,6 +195,10 @@ that same business. A note reply can inherit its authorized parent's business
 when no explicit pair is supplied. Unreferenced notes, manual cases and empty
 topics require the active pair; the server never chooses among shared businesses.
 
+## AI service health
+
+`GET relay_core.ai.remote.site.health` returns the bench AI service status for the current site: heartbeat, this site's stream backlog and in-flight requests. It requires write access to Relay Settings. See [Bench AI service](ai-service.md#check-the-service).
+
 ## Errors and limits
 
 Unknown methods, extra arguments, invalid references, and permission failures

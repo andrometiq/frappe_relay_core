@@ -287,10 +287,14 @@ class AutomationQueueTests(unittest.TestCase):
     def test_ai_recovery_keeps_work_off_both_projection_queues(self):
         fake = SimpleNamespace(conf={'relay_automation_enabled': 1}, enqueue=Mock(),
             get_all=Mock(side_effect=[[], [], [_dict(name='outbox')]]))
+        from relay_core.ai.remote import site as remote
         with patch.object(service, 'frappe', fake), patch.object(queue, 'recover'), patch.object(skills, 'recover_deliveries'), \
-                patch.object(skills, 'recoverable_runs', return_value=['run']):
+                patch.object(skills, 'recoverable_runs', return_value=['run', 'waiting']), \
+                patch.object(remote, 'expire_overdue') as expire, patch.object(remote, 'is_waiting', side_effect=lambda name: name == 'waiting'):
             service.recover()
         self.assertEqual([c.kwargs['queue'] for c in fake.enqueue.call_args_list], ['default', 'default'])
+        self.assertEqual(fake.enqueue.call_args_list[0].kwargs['name'], 'run')  # A run waiting on the AI service stays put.
+        expire.assert_called_once()
 
     def test_recovery_leaves_runs_awaiting_approval_after_their_notice_is_journaled(self):
         import sqlite3

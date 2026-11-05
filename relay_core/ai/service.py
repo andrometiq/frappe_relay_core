@@ -9,8 +9,10 @@ from relay_core.automation.queue import QUEUE
 from relay_core.ai.tools import as_user, is_company_scoped
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import action_key
+from relay_core.ai.remote import site as remote
 
 REPLY_TIMEOUT = 60
+MATCHING_TIMEOUT = 40  # Matching has its own budget; a reply gets REPLY_TIMEOUT.
 SEARCH_NOTICE = 'I will check your records for this.'
 SEARCH_CONFIRM = "Reply 'yes' to continue, or tell me what to change."
 CONFIRM_WORDS = ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please',
@@ -462,6 +464,13 @@ def current(run, skill, message):
     return resolved
 
 
+def undo_attempt(name):
+    """A turn handed to the AI service is not an attempt; its result resumes the same attempt."""
+    run = lock_run(name)
+    run.attempts = max(int(run.attempts or 0) - 1, 0)
+    internal_save(run)
+
+
 def log_failure(run, exc):
     """Preserve failed inference logs, its traceback and a bounded explanation."""
     try:
@@ -497,7 +506,10 @@ def process(name, *, deadline=None):
                 reserve_attempt(skill)
                 run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
                 internal_save(run); frappe.db.commit()
+                remote.on_handed(lambda: undo_attempt(name))
+                deadline = deadline or remote.run_deadline(name, run.stage, REPLY_TIMEOUT)
                 decision = decide(skill, message, run.name, deadline=deadline)
+                remote.settled()
                 used = decision.pop('context', None)
                 table = decision.pop('minimise_table', None)
                 record = decision.pop('run_record', None) or {}
@@ -824,7 +836,7 @@ def admit(run):
     from relay_core.ai import matching
     from relay_core.ai.tools import fingerprint
     from relay_core.automation.service import episode, triage
-    deadline = time.monotonic() + 40  # Matching budget; replies get their own REPLY_TIMEOUT.
+    deadline = remote.run_deadline(run.name, 'Matching', MATCHING_TIMEOUT)
     message = frappe.get_doc('Relay Message', run.message)
     try:
         ticket = episode(run, message)
@@ -860,7 +872,9 @@ def admit(run):
             raise ValueError('Matching attempt limit reached')
         run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
         internal_save(run); frappe.db.commit()
+        remote.on_handed(lambda name=run.name: undo_attempt(name))
         result = matching.select(message, skills, run.name, deadline, history=history)
+        remote.settled()
         frappe.db.commit()
         run = lock_run(run.name)
         if run.status != 'Deciding' or run.stage != 'Matching':
