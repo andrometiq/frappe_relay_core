@@ -1,10 +1,10 @@
 """Channel setup endpoints. A System Manager configures; communication managers may read where things stand."""
 import frappe
-from relay_core.channel_setup import provider_of, telegram, whatsapp
+from relay_core.channel_setup import email, provider_of, telegram, whatsapp
 from relay_core.onboarding.api import system_manager
 from relay_core.permissions import can_configure, can_manage, require_access
 
-PROVIDERS = {'WhatsApp': whatsapp, 'Telegram': telegram}
+PROVIDERS = {'WhatsApp': whatsapp, 'Telegram': telegram, 'Email': email}
 
 
 def provider(name):

@@ -149,7 +149,7 @@ class ChannelsApiPermissionTests(unittest.TestCase):
     def test_a_provider_without_setup_is_refused(self):
         frappe = Mock(throw=Mock(side_effect=ValueError('not yet')))
         with patch.object(channels_api, 'frappe', frappe), patch.object(channels_api, 'readers'), self.assertRaises(ValueError):
-            channels_api.accounts('Email')
+            channels_api.accounts('SMS')
 
     def test_endpoints_go_to_the_provider_of_the_channel_and_old_names_still_work(self):
         module = Mock()

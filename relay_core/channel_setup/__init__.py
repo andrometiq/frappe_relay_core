@@ -33,9 +33,15 @@ TEXT = {
     'in_use': 'This bot or mailbox is already connected to Relay. Remove it there first.',
     'not_available': 'Your Relay Hub does not let sites connect channels yet. Ask your Relay provider.',
     'rate_limited': 'Too many tries. Wait an hour, then try again.',
+    'no_mailbox': 'This site has no mailbox yet. Connect one first.',
+    'host_refused': 'Relay can only reach mail servers on the public internet. Check the host names.',
+    'port_refused': 'Use SMTP port 25, 465, 587 or 2525 and IMAP port 143 or 993.',
+    'login_failed': 'Relay could not sign in to the mailbox. Check the host, port, username and password.',
+    'invalid_settings': 'Check the mailbox settings.',
+    'host_unknown': 'Relay could not find the mail server. Check the host name.',
 }
 # The Hub's own words are the reason for these codes, and they never carry a credential.
-HUB_WORDS = ('meta_rejected',)
+HUB_WORDS = ('meta_rejected', 'login_failed', 'invalid_settings', 'host_unknown')
 CODE = re.compile(r'\bcode ([a-z][a-z_]{1,60})\b')
 
 
