@@ -1,6 +1,7 @@
 """Event memory: audience, window and company matching, race-safe publishing, partial builds, size limits, link
 safety, injected source text and the reply context that records memory rows and event revisions."""
 import datetime
+import hashlib
 import io
 import json
 import socket
@@ -208,7 +209,7 @@ class SourceTests(unittest.TestCase):
 
     def test_text_and_docx_files_are_read_and_images_need_vision(self):
         text = _dict(name='FILE-2', file_name='rules.txt', file_url='/files/rules.txt', file_size=20,
-                     get_content=lambda: 'Entry is free.\n\n\nBring ID.')
+                     get_content=lambda encodings=None: b'Entry is free.\n\n\nBring ID.')
         self.assertEqual(event_sources.read_file(text, MB).text, 'Entry is free.\n\nBring ID.')
         archive = io.BytesIO()
         import zipfile
@@ -216,10 +217,19 @@ class SourceTests(unittest.TestCase):
             docx.writestr('word/document.xml', '<w:p><w:t>Gate 3 &amp; Gate 4</w:t></w:p>')
         self.assertEqual(event_sources.extract(archive.getvalue(), event_sources.DOCX), 'Gate 3 & Gate 4')
         image = _dict(name='FILE-3', file_name='poster.png', file_url='/files/poster.png', file_size=10,
-                      get_content=lambda: b'png')
+                      get_content=lambda encodings=None: b'png')
         self.assertIn('vision', event_sources.read_file(image, MB).reason)
         self.assertEqual(event_sources.read_file(image, MB, describe=lambda raw, mime: 'Poster: 20 Nov').text,
                          'Poster: 20 Nov')
+
+    def test_binary_file_is_read_byte_exact(self):
+        png = bytes.fromhex('89504e470d0a1a0a0000000d49484452')  # Frappe's windows-1250 fallback decodes these bytes.
+        seen = []
+        image = _dict(name='FILE-4', file_name='poster.png', file_url='/files/poster.png', file_size=len(png),
+                      get_content=lambda encodings=None: png if encodings == () else png.decode('windows-1250'))
+        source = event_sources.read_file(image, MB, describe=lambda raw, mime: seen.append(raw) or 'Poster')
+        self.assertEqual(seen, [png])
+        self.assertEqual((source.bytes, source.sha256), (len(png), hashlib.sha256(png).hexdigest()))
 
     def test_budget_cuts_and_skips_explicitly(self):
         sources = [Source(id=f's{index}', kind='File', label=f's{index}', text='x' * 30) for index in range(3)]

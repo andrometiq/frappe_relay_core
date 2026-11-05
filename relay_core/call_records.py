@@ -212,8 +212,8 @@ def recording_content(name):
     file=frappe.get_doc('File',record.file)
     if not file.is_private or file.attached_to_doctype!='Relay Call Recording' or file.attached_to_name!=record.name:
         frappe.throw('Recording file binding is invalid',frappe.PermissionError)
-    content=file.get_content()
-    if isinstance(content,str):content=content.encode("utf-8")
+    # No encodings: Frappe would decode a binary recording that happens to read as windows-1250 into text.
+    content=file.get_content(encodings=())
     if not isinstance(content,bytes) or len(content)!=record.file_size or hashlib.sha256(content).hexdigest()!=record.checksum:
         frappe.throw('Recording file is missing or changed')
     return record,content
