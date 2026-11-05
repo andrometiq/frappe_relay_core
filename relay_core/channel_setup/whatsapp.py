@@ -22,7 +22,7 @@ def health_of(result):
 def accounts():
     """The site's numbers that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
     rows = site_channels(PROVIDER, ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default', 'connection_type'])
-    return [dict(shown(row), health=health_of(hub_call('whatsapp.number.health', {'channel': row.hub_channel}))) for row in rows]
+    return [dict(shown(row), health=health_of(hub_call('whatsapp.number.health', {'channel': row.hub_channel}, older={}))) for row in rows]
 
 
 def shown(row):

@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 import frappe
-from relay_core.hub import CREDENTIAL_TOOLS, HubError, protected_transport
+from relay_core.hub import CREDENTIAL_TOOLS, HubError, OlderHubError, protected_transport
 from relay_core.settings import value as connection_value
 
 TEXT = {
@@ -57,8 +57,9 @@ def fail(code, detail=''):
     frappe.throw(text, SetupError)
 
 
-def hub_call(tool, arguments):
-    """One Hub site tool. A refusal becomes the customer text of its Hub code.
+def hub_call(tool, arguments, older=None):
+    """One Hub site tool. A refusal becomes the customer text of its Hub code. A Hub version without the tool
+    returns `older` when it is given, so a list still shows the site's channels, else it is not_available.
 
     A token or password in arguments goes only to an HTTPS or loopback Hub; it is never stored, logged or shown."""
     if not (connection_value('relay_hub_url') and connection_value('relay_hub_token')):
@@ -68,6 +69,10 @@ def hub_call(tool, arguments):
     from relay_core.whatsapp import client
     try:
         return client().call_tool(tool, arguments)
+    except OlderHubError:
+        if older is not None:
+            return older
+        fail('not_available')
     except HubError as error:
         detail = error.detail or ''
         found = CODE.search(detail)

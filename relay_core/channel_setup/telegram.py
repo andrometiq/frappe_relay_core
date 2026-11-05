@@ -23,7 +23,7 @@ def shown(row):
 
 def accounts():
     """The site's bots that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    return [dict(shown(row), health=health_of(hub_call('telegram.bot.health', {'channel': row.hub_channel})))
+    return [dict(shown(row), health=health_of(hub_call('telegram.bot.health', {'channel': row.hub_channel}, older={})))
             for row in site_channels(PROVIDER, FIELDS)]
 
 

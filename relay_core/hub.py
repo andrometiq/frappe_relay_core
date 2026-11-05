@@ -108,6 +108,10 @@ def whatsapp_rejection(error):
     return one_line(f'WhatsApp rejected this request{code}' + (f': {detail}' if detail else ''))
 
 
+class OlderHubError(HubError):
+    """The Hub runs a version without the called tool."""
+
+
 def protected_transport(parsed):
     """HTTPS, or plain HTTP that never leaves this machine."""
     return parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"})
@@ -173,6 +177,9 @@ class HubClient:
         if not isinstance(result, dict) or result.get("id") != request_id or result.get("jsonrpc") != "2.0":
             raise HubError("Invalid MCP response envelope")
         if "error" in result:
+            message = result["error"].get("message") if isinstance(result["error"], dict) else None
+            if isinstance(message, str) and message.startswith("unknown tool"):
+                raise OlderHubError("This Relay Hub version does not have this tool")
             raise HubError("Hub rejected the MCP operation")
         if not isinstance(result.get("result"), dict):
             raise HubError("Missing MCP result")

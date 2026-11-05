@@ -58,6 +58,16 @@ class ChannelSetupTests(unittest.TestCase):
         self.assertEqual(rows[0]['health']['connection_status'], 'connected')
         self.assertIn(('whatsapp.number.health', {'channel': 'wa-121'}), self.tools())
 
+    def test_an_older_hub_without_site_tools_still_lists_the_numbers(self):
+        from relay_core.hub import OlderHubError
+        self.answers['whatsapp.number.health'] = OlderHubError('no such tool')
+        rows = whatsapp.accounts()
+        self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
+        self.assertIsNone(rows[0]['health']['connection_status'])
+        self.answers['whatsapp.number.check'] = OlderHubError('no such tool')
+        with self.assertRaisesRegex(SetupError, 'does not let sites'):
+            whatsapp.check('Sales line')
+
     def test_a_number_of_another_site_or_unknown_is_not_found(self):
         for name in ('Other site', 'Missing', None):
             with self.assertRaisesRegex(SetupError, 'no longer connected'):
