@@ -10,7 +10,7 @@ import {messageData,objectValue} from '../src/components/messageContent.js'
 import {sha256Hex} from '../src/services/crypto.js'
 
 const source=(await readFile(new URL('../src/composables/useMessages.js',import.meta.url),'utf8'))
-  .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','function')
+  .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','const announceOwnSend=()=>{},recordOwnMessages=()=>{}\nfunction')
 const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','inject','composerKinds','defaultSendSource','"use strict";\n'+source+'\nreturn useMessages();')
 function storage(){
   const value={}

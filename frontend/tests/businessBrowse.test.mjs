@@ -2,8 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { listRefresh } from '../src/services/realtimeRefreshQueue.js'
-import { appendTiles, chatTile, mergeTiles, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
+import { chatListRefresh } from '../src/services/realtimeRefreshQueue.js'
+import { announceOwnSend, lastOwnSend, ownSendOf, recordOwnMessages } from '../src/services/ownSends.js'
+import { appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
 import { useLoadMore } from '../src/composables/useLoadMore.js'
 import { browser } from './browserHistory.js'
@@ -14,14 +15,14 @@ async function component(t, props = {}, api) {
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
   let realtime
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, listRefresh, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, chatListRefresh, lastOwnSend, ownSendOf, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, _kinds, refresh) { realtime = refresh }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
   t.after(() => scope.stop())
   for (const callback of mounted) callback()
   await settle()
-  return { ...state, emitted, realtime: kinds => realtime({ kinds: new Set(kinds) }) }
+  return { ...state, emitted, realtime: kinds => realtime({ kinds: new Set(kinds) }), live: batch => realtime(batch) }
 }
 
 const type = { kind: 'type', doctype: 'Local Supplier', label: 'Suppliers', unread: 12 }
@@ -185,6 +186,57 @@ test('a send or receipt never reloads the list: receipts read nothing, a new mes
   assert.deepEqual(view.items.value.map(tile => tile.name), ['local-2', 'local-1', 'local-3'])
   assert.equal(view.items.value[0], shown[1], 'The moved tile is the same object')
   assert.equal(view.items.value[2], shown[2], 'A tile of a later page stays loaded')
+})
+
+// A send's events as the queue batches them: the shared room's event has only the change key, the open record's room
+// event names the message too. Three sends make three such pairs.
+const sendBatch = (names, extra = {}) => ({ kinds: new Set(['messages', 'receipts']), messages: new Set(names),
+  changes: new Set(names.map(name => 'change-' + name)), open: new Set(names.map(name => 'change-' + name)), unknown: false, ...extra })
+
+test('own sends move their tile at once and their live events read nothing; a change elsewhere reads the page once', async t => {
+  browser(t, '#/messages'); const calls = []
+  const view = await component(t, { selected: 'local-2', selectedDoctype: type.doctype }, async (method, values) => {
+    calls.push([method, values])
+    if (!values.doctype) return { items: [type], next: null }
+    return { items: ['local-1', 'local-2'].map(name => ({ ...record, doctype: type.doctype, name, last_activity: '2026-11-05 09:00:00' })), next: null }
+  })
+  view.choose(type); await settle()
+  const shown = [...view.items.value]
+  calls.length = 0
+  const conversation = { contact: '', business_doctype: type.doctype, business_name: 'local-2', preview: 'Order ready' }
+  for (const index of [1, 2, 3]) {
+    announceOwnSend(conversation); await settle()
+    recordOwnMessages(conversation, ['RELAY-MSG-OWN-' + index])
+    await view.live(sendBatch(['RELAY-MSG-OWN-' + index])); await settle()
+  }
+  assert.deepEqual(view.items.value.map(tile => tile.name), ['local-2', 'local-1'], 'The sent tile moved to the top')
+  assert.equal(view.items.value[0], shown[1], 'The moved tile is the same object')
+  assert.notEqual(view.items.value[0].last_activity, '2026-11-05 09:00:00')
+  assert.deepEqual(calls, [], 'Three sends and their status updates read nothing')
+  await view.live(sendBatch(['RELAY-MSG-OWN-1'], { kinds: new Set(['receipts']) })); await settle()
+  assert.deepEqual(calls, [], 'A receipt reads nothing')
+  await view.live(sendBatch(['RELAY-MSG-IN-1'])); await settle()
+  assert.deepEqual(calls.map(([, values]) => values.business_name), ['local-2'], 'A customer reply in the open record reads only its tile')
+  calls.length = 0
+  await view.live({ ...sendBatch([]), changes: new Set(['change-elsewhere']), open: new Set() }); await settle()
+  assert.deepEqual(calls.map(([method]) => method), ['business_groups.browse'], 'A change in another conversation reads the first page once')
+  assert.ok(shown.every(tile => view.items.value.includes(tile)), 'and keeps the shown tile objects')
+  calls.length = 0
+  recordOwnMessages({ ...conversation, business_name: 'local-9' }, ['RELAY-MSG-OWN-9'])
+  await view.live(sendBatch(['RELAY-MSG-OWN-9'])); await settle()
+  assert.equal(calls.length, 1, 'A send to a record that is not shown reads the first page')
+})
+
+test('a batch is in the open conversation only when every change also came with its message names', () => {
+  const own = name => name.startsWith('own')
+  assert.equal(chatListRefresh(sendBatch(['own-1', 'own-2']), own), 'own')
+  assert.equal(chatListRefresh(sendBatch(['own-1', 'in-1']), own), 'selected')
+  assert.equal(chatListRefresh(sendBatch(['own-1'], { kinds: new Set(['messages', 'reads']) }), own), 'selected')
+  assert.equal(chatListRefresh(sendBatch(['own-1'], { unknown: true }), own), 'loaded', 'A change without a key may be anywhere')
+  assert.equal(chatListRefresh({ ...sendBatch(['own-1']), changes: new Set(['change-own-1', 'other']) }, own), 'loaded')
+  assert.equal(chatListRefresh({ kinds: new Set(['messages']) }, own), 'loaded', 'An older server sends no change keys')
+  assert.equal(chatListRefresh({ kinds: new Set(['receipts']) }, own), 'none')
+  assert.equal(chatListRefresh({ kinds: new Set(['permissions']) }, own), 'reload')
 })
 
 test('a record that moved to the next page between requests is shown once', async t => {

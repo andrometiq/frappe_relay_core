@@ -10,7 +10,7 @@ import { messageData, objectValue } from '../src/components/messageContent.js'
 import { coordinates } from '../src/components/formValidation.js'
 
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
-  .replace(/^import .*\n/gm, '').replace('export function', 'function')
+  .replace(/^import .*\n/gm, '').replace('export function', 'const announceOwnSend = () => {}, recordOwnMessages = () => {}\nfunction')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
   'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', 'defaultSendSource', source + '\nreturn useMessages();')
 const deferred = () => { let resolve; const promise = new Promise(done => resolve = done); return { promise, resolve } }

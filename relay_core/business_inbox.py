@@ -59,9 +59,9 @@ def _assert_messages(doctype,name,names):
     return unique,rows
 
 
-def changed(doctype,name,kind='reads',messages=None,receipt=False):
+def changed(doctype,name,kind='reads',messages=None,receipt=False,change=None):
     from relay_core.realtime import conversation_event
-    frappe.publish_realtime('relay_changed',conversation_event(kind,messages,receipt),doctype=doctype,docname=name,after_commit=True)
+    frappe.publish_realtime('relay_changed',conversation_event(kind,messages,receipt,change),doctype=doctype,docname=name,after_commit=True)
 
 
 @frappe.whitelist(methods=['GET'])

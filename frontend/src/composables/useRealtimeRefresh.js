@@ -8,7 +8,7 @@ export function watchRealtime(doctypes, kinds, refresh, delay) {
   const queue = realtimeRefreshQueue(refresh, () => document.visibilityState === 'visible', delay)
   function changed(event) {
     const kind = event?.receipt && kinds.includes('receipts') ? 'receipts' : event?.kind
-    if (kind === 'reconnect' || kind === 'permissions' || kinds.includes(kind)) queue.schedule(kind, Array.isArray(event.messages) ? event.messages : [])
+    if (kind === 'reconnect' || kind === 'permissions' || kinds.includes(kind)) queue.schedule(kind, Array.isArray(event.messages) ? event.messages : [], event.change)
   }
   function visible() {
     if (document.visibilityState === 'visible') queue.schedule('visible')

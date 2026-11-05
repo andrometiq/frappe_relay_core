@@ -8,11 +8,13 @@ import { resetRecipient } from '../src/services/recipientContext.js'
 import { sha256Hex } from '../src/services/crypto.js'
 import { messageData, objectValue } from '../src/components/messageContent.js'
 import { coordinates } from '../src/components/formValidation.js'
+import { announceOwnSend, lastOwnSend, ownSendOf, recordOwnMessages } from '../src/services/ownSends.js'
 
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
   .replace(/^import .*\n/gm, '').replace('export function', 'function')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
-  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', 'defaultSendSource', source + '\nreturn useMessages();')
+  'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', 'defaultSendSource',
+  'announceOwnSend', 'recordOwnMessages', source + '\nreturn useMessages();')
 const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail }); return { promise, resolve, reject } }
 const tick = () => new Promise(resolve => setImmediate(resolve))
 const row = (name, time) => ({ name, channel: 'whatsapp', direction: 'Incoming', content: name, creation: time,
@@ -43,7 +45,7 @@ function fixture(t, override = () => {}) {
     throw Error('Unexpected method: ' + method)
   }
   const state = scope.run(() => make(ref, computed, watch, () => {}, () => {}, () => {}, api, resetRecipient, sha256Hex,
-    () => 'key-' + ++uuid, messageData, objectValue, coordinates, injectCapabilities, composerKinds, defaultSendSource))
+    () => 'key-' + ++uuid, messageData, objectValue, coordinates, injectCapabilities, composerKinds, defaultSendSource, announceOwnSend, recordOwnMessages))
   t.after(() => { scope.stop(); for (const [key, value] of Object.entries(previous)) globalThis[key] = value })
   return { state, calls, sends: () => calls.filter(call => call.method === 'messaging.send').map(call => call.values) }
 }
@@ -60,6 +62,21 @@ test('Send clears the composer and shows the pending message before the server a
   response.resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001' })
   await send
   assert.equal(state.displayRows.value.some(row => row._pending), false)
+})
+
+test('Send tells the chat list at once, and names its stored messages when the server answers', async t => {
+  const response = deferred()
+  const { state } = fixture(t, method => method === 'messaging.send' ? response.promise : undefined)
+  await state.open('A')
+  state.body.value = 'Order ready'
+  const send = state.send()
+  assert.equal(lastOwnSend.value.contact, 'A')
+  assert.equal(lastOwnSend.value.preview, 'Order ready', 'The list moves the row before the server answers')
+  response.resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001', message: 'RELAY-MSG-0000000009',
+    sends: [{ message: 'RELAY-MSG-0000000009' }, { message: 'RELAY-MSG-0000000010' }] })
+  await send
+  assert.equal(ownSendOf('RELAY-MSG-0000000009').contact, 'A')
+  assert.equal(ownSendOf('RELAY-MSG-0000000010').contact, 'A', 'A copy on another channel is an own send too')
 })
 
 test('a rapid second Send of the same message sends it once', async t => {

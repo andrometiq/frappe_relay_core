@@ -7,6 +7,7 @@ import { coordinates } from "../components/formValidation";
 import { coreApi } from "../services/coreApi";
 import { messageData, objectValue } from "../components/messageContent";
 import { closeRoute, openRoute } from "../useViewRoute.js";
+import { announceOwnSend, recordOwnMessages } from "../services/ownSends.js";
 
 export function useMessages() {
   const capabilities = inject('relayCapabilities', ref({}));
@@ -774,6 +775,8 @@ export function useMessages() {
         creation:new Date().toISOString(),_pending:true,storage};pendingMessages.value.push(pending);pending=pendingMessages.value.at(-1);}
       else pending.status='Sending';
       pending.request=request;
+      pending.conversation={contact:selected.value,business_doctype:businessType.value,business_name:businessName.value,preview:pending.content};
+      announceOwnSend(pending.conversation);
       quoting.value = false;
       body.value = "";
       attachment.value = null;
@@ -806,6 +809,7 @@ export function useMessages() {
     try { result = await call("relay_core.messaging.send", request, true); }
     catch(err) {if(pending){pending.status='Unconfirmed';restoreDraft(submitted);}throw err;}
     sessionStorage.setItem('relay-typed-result-'+result.action,storage);
+    if(pending?.conversation)recordOwnMessages(pending.conversation,[result.message,...(result.sends||[]).map(copy=>copy.message)]);
     retireAction(result);
     if(pending) {pending.error=result.error||null;pending.action=result.action;pending.status=({Submitted:'Sent',Dispatching:'Sending',Rejected:'Failed',Uncertain:'Unconfirmed'})[result.status]||result.status;}
     // A later send that succeeds keeps the notice of an earlier one that failed.

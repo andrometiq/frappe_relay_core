@@ -1,4 +1,5 @@
 """Payload-free invalidation; clients refetch through permission-checked APIs."""
+import secrets
 from contextlib import contextmanager
 from contextvars import ContextVar
 import frappe
@@ -26,36 +27,45 @@ def changed(doc, method=None, messages=None, receipt=False):
     kind = RESOURCES.get(doc.doctype)
     if not kind:
         return
+    if doc.doctype == 'Relay Message':
+        messages = messages or [doc.name]
+    change = new_change() if messages else None
     # No document IDs, message text, addresses or identities in shared events.
     # Conversation rooms are permission checked, so they name the changed messages for a re-read of only those.
-    frappe.publish_realtime('relay_changed', conversation_event(kind, receipt=receipt),
+    frappe.publish_realtime('relay_changed', conversation_event(kind, receipt=receipt, change=change),
         room=frappe.realtime.get_doctype_room('Relay Ticket' if kind == 'tickets' else doc.doctype), after_commit=True)
     if doc.doctype == 'Relay Business Event Delivery' or doc.doctype == 'Relay Message' and doc.get('ticket'):
         frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
             room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
-    if doc.doctype == 'Relay Message':
-        messages = messages or [doc.name]
     contact = doc.get('relay_contact')
     if contact:
-        contact_changed(contact, kind, messages, receipt)
+        contact_changed(contact, kind, messages, receipt, change)
     if doc.get('business_doctype') and doc.get('business_name'):
         from relay_core.business_inbox import changed as business_changed
-        business_changed(doc.business_doctype,doc.business_name,kind,messages,receipt)
+        business_changed(doc.business_doctype,doc.business_name,kind,messages,receipt,change)
 
 
 COUNTED_KINDS = frozenset({'messages', 'reads', 'contacts', 'permissions'})
 
 
-def conversation_event(kind, messages=None, receipt=False):
+def new_change():
+    """A random key that one message change carries in each room it is sent to. A chat list that gets it also from
+    the open conversation's room knows the change is in that conversation; it is no document ID."""
+    return secrets.token_hex(8)
+
+
+def conversation_event(kind, messages=None, receipt=False, change=None):
     event = {'kind': kind, 'messages': sorted(set(messages))} if messages else {'kind': kind}
+    if messages or change:
+        event['change'] = change or new_change()
     return dict(event, receipt=1) if receipt else event
 
 
-def contact_changed(contact, kind='messages', messages=None, receipt=False):
+def contact_changed(contact, kind='messages', messages=None, receipt=False, change=None):
     if kind in COUNTED_KINDS and not receipt:
         from relay_core.queue_counts import invalidate
         invalidate()
-    frappe.publish_realtime('relay_changed', conversation_event(kind, messages, receipt),
+    frappe.publish_realtime('relay_changed', conversation_event(kind, messages, receipt, change),
         doctype='Relay Contact', docname=contact, after_commit=True)
 
 

@@ -2,10 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, mergeTiles, readBrowse, searchLabel, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
+import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, mergeTiles, moveSentTile, readBrowse, searchLabel, sentTile, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
-import { listRefresh } from '../../services/realtimeRefreshQueue'
+import { chatListRefresh } from '../../services/realtimeRefreshQueue'
+import { lastOwnSend, ownSendOf } from '../../services/ownSends'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
@@ -21,6 +22,8 @@ const crumbs = computed(() => browseCrumbs(state.value, fields.value))
 // Chats All counts the chats that no business record covers, so its root lists them below the type tiles.
 const rootChats = computed(() => !props.contacts && !state.value.doctype && !props.filters?.business_type && !props.filters?.business_name)
 let sequence = 0
+// Live events of one send arrive over a few hundred milliseconds; they are answered together.
+const LIVE_DELAY = 300
 async function chatPage(after) {
   const page = await coreApi('inbox.directory', { rows: 'business', mode: 'unlinked', query: query.value, ...props.filters, ...(after ? { after } : {}) })
   return { items: page.items.map(chatTile), next: page.next?.after ?? null }
@@ -98,7 +101,7 @@ watch(state, () => load())
 watch(() => JSON.stringify(props.filters), () => navigate({ ...readBrowse(base), query: '' }))
 onMounted(() => { load(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++sequence; window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
-// A new message re-reads the first page and updates the shown tiles in place: no reload, and scroll and loaded pages stay.
+// A message elsewhere re-reads the first page and updates the shown tiles in place: no reload, and scroll and loaded pages stay.
 async function refreshLoaded() {
   if (loading.value || error.value || !items.value.length) return load()
   const request = sequence
@@ -120,9 +123,21 @@ async function refreshSelected() {
   const row = page.items.find(item => tileKey(item) === tileKey(tile))
   if (request === sequence && row) Object.assign(tile, row)
 }
-const refreshes = { none: () => {}, selected: refreshSelected, loaded: refreshLoaded, reload: () => load() }
+// A send from this browser moves its tile here at once and reads nothing; its live events then read nothing either.
+watch(lastOwnSend, sent => {
+  const tile = !props.contacts && sentTile(items.value, sent)
+  if (tile) items.value = moveSentTile(items.value, tile, sent)
+})
+// Live events of the open conversation change one tile; a change elsewhere reads the first page once per burst.
+function liveRefresh(batch) {
+  let kind = chatListRefresh(batch, name => !!ownSendOf(name))
+  if (kind === 'own' && ![...batch.messages].every(name => sentTile(items.value, ownSendOf(name)))) kind = 'loaded'
+  if (props.contacts && !['none', 'own'].includes(kind)) kind = 'reload'
+  return refreshes[kind]()
+}
+const refreshes = { none: () => {}, own: () => {}, selected: refreshSelected, loaded: refreshLoaded, reload: () => load() }
 useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'receipts', 'incoming', 'contacts', 'reads', 'chats', 'permissions'],
-  ({ kinds } = {}) => { const kind = listRefresh(kinds); return refreshes[props.contacts && kind !== 'none' ? 'reload' : kind]() })
+  liveRefresh, LIVE_DELAY)
 </script>
 
 <template>
