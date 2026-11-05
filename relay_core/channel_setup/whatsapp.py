@@ -2,9 +2,8 @@
 import base64
 
 import frappe
-from relay_core.channel_setup import fail, hub_call, relay_channel
+from relay_core.channel_setup import fail, hub_call, make_default, relay_channel, site_channels
 from relay_core.channel_sync import publish
-from relay_core.settings import value as connection_value
 
 PROVIDER = 'WhatsApp'
 SWITCHES = ('enabled', 'templates', 'sync_metadata')
@@ -22,14 +21,8 @@ def health_of(result):
 
 def accounts():
     """The site's numbers that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
-              if isinstance(row, dict) and row.get('provider') == PROVIDER}
-    rows = frappe.get_all('Relay Channel', filters={'channel': PROVIDER, 'account': connection_value('relay_hub_account'),
-                                                    'hub_channel': ['is', 'set']},
-                          fields=['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default', 'connection_type'],
-                          order_by='creation asc', limit_page_length=50)
-    return [dict(shown(row), health=health_of(hub_call('whatsapp.number.health', {'channel': row.hub_channel})))
-            for row in rows if row.hub_channel in listed]
+    rows = site_channels(PROVIDER, ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default', 'connection_type'])
+    return [dict(shown(row), health=health_of(hub_call('whatsapp.number.health', {'channel': row.hub_channel}))) for row in rows]
 
 
 def shown(row):
@@ -68,14 +61,7 @@ def save_settings(name, settings):
 
 
 def set_default(name):
-    """The number new conversations and API sends use when nothing else picks one. Relay owns this choice."""
-    row = relay_channel(name, PROVIDER)
-    if not row.enabled:
-        fail('number_disabled')
-    from relay_core.channel_sync import save
-    save(frappe.get_doc('Relay Channel', row.name), {'is_default': 1})  # RelayChannel.on_update clears the other default.
-    publish()
-    return {'default': row.name}
+    return make_default(name, PROVIDER)
 
 
 def reset_pin(name):

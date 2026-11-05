@@ -33,8 +33,9 @@ class ChannelSetupTests(unittest.TestCase):
         self.hub.call_tool.side_effect = self.answer
         self.sync, self.publish = Mock(), Mock()
         for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(whatsapp, 'frappe', self.site.frappe),
-                     patch.object(channel_setup, 'connection_value', SETTINGS.get), patch.object(whatsapp, 'connection_value', SETTINGS.get),
-                     patch.object(whatsapp, 'publish', self.publish), patch('relay_core.channel_sync.sync', self.sync),
+                     patch.object(channel_setup, 'connection_value', SETTINGS.get),
+                     patch.object(whatsapp, 'publish', self.publish), patch('relay_core.channel_sync.publish', self.publish),
+                     patch('relay_core.channel_sync.sync', self.sync),
                      patch('relay_core.whatsapp.client', return_value=self.hub), patch('relay_core.whatsapp.clear_hub_capabilities')):
             item.start()
             self.addCleanup(item.stop)
@@ -149,3 +150,23 @@ class ChannelsApiPermissionTests(unittest.TestCase):
         frappe = Mock(throw=Mock(side_effect=ValueError('not yet')))
         with patch.object(channels_api, 'frappe', frappe), patch.object(channels_api, 'readers'), self.assertRaises(ValueError):
             channels_api.accounts('Email')
+
+    def test_endpoints_go_to_the_provider_of_the_channel_and_old_names_still_work(self):
+        module = Mock()
+        with patch.object(channels_api, 'system_manager'), patch.object(channels_api, 'provider_of', return_value='WhatsApp'), \
+                patch.dict(channels_api.PROVIDERS, {'WhatsApp': module}):
+            channels_api.check('Sales line', 0)
+            channels_api.check_number('Sales line')
+            channels_api.save_number_settings('Sales line', '{"enabled": 1}')
+            channels_api.set_default('Sales line')
+            channels_api.remove_number('Sales line', 1)
+        self.assertEqual([tuple(call) for call in module.method_calls], [
+            ('check', ('Sales line', False), {}), ('check', ('Sales line', True), {}),
+            ('save_settings', ('Sales line', {'enabled': 1}), {}), ('set_default', ('Sales line',), {}), ('remove', ('Sales line', True), {})])
+
+    def test_a_channel_of_another_site_has_no_provider(self):
+        site = FakeSite(Relay_Channel=[{'name': 'Other site', 'channel': 'WhatsApp', 'account': 'site-b', 'hub_channel': 'wa-130', 'enabled': 1}])
+        with patch.object(channel_setup, 'frappe', site.frappe), patch.object(channel_setup, 'connection_value', SETTINGS.get):
+            for name in ('Other site', 'Missing', None):
+                with self.assertRaisesRegex(SetupError, 'no longer connected'):
+                    channel_setup.provider_of(name)

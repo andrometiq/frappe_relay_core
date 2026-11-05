@@ -1,8 +1,7 @@
 """Channel setup from Relay: every account a site uses is configured here, never in the Hub admin.
 
-Each provider module (only `whatsapp` today) lists its accounts and runs their setup actions through
-the Hub's site tools. Credentials stay in the Hub: no action sends or receives one. A later provider,
-such as Email or Telegram, adds its module to PROVIDERS and the Account card shows it the same way."""
+Each provider module lists its accounts and runs their setup actions through the Hub's site tools, and
+`channels_api.PROVIDERS` sends each endpoint to it. Credentials stay in the Hub: no action receives one."""
 import re
 
 import frappe
@@ -61,3 +60,33 @@ def relay_channel(name, provider):
     if not row or not row.hub_channel:
         fail('not_found')
     return row
+
+
+def provider_of(name):
+    """The provider of one Relay Channel of this site, or not_found."""
+    provider = frappe.db.get_value('Relay Channel', {'name': name, 'account': connection_value('relay_hub_account')}, 'channel') \
+        if isinstance(name, str) and name else None
+    if not provider:
+        fail('not_found')
+    return provider
+
+
+def site_channels(provider, fields):
+    """The site's Relay Channels of one provider that the Hub still lists, oldest first."""
+    listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
+              if isinstance(row, dict) and row.get('provider') == provider}
+    rows = frappe.get_all('Relay Channel', filters={'channel': provider, 'account': connection_value('relay_hub_account'),
+                                                    'hub_channel': ['is', 'set']},
+                          fields=fields, order_by='creation asc', limit_page_length=50)
+    return [row for row in rows if row.hub_channel in listed]
+
+
+def make_default(name, provider, disabled='number_disabled'):
+    """The channel new conversations and API sends use when nothing else picks one. Relay owns this choice."""
+    row = relay_channel(name, provider)
+    if not row.enabled:
+        fail(disabled)
+    from relay_core.channel_sync import publish, save
+    save(frappe.get_doc('Relay Channel', row.name), {'is_default': 1})  # RelayChannel.on_update clears the other default.
+    publish()
+    return {'default': row.name}
