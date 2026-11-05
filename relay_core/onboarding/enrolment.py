@@ -217,6 +217,26 @@ def save(result, callback_secret, source):
     frappe.db.commit()
 
 
+def disconnect():
+    """End this site's Hub link. The Hub turns the site off and revokes its token; Relay forgets the token and the
+    callback secret and opens Get started again. The Hub address and account stay, so a new setup code links the
+    same site with its channels and history. A token in the site config is the operator's and stays."""
+    from relay_core.settings import value
+    if not (value('relay_hub_url') and value('relay_hub_token')):
+        raise OnboardingError('hub_not_connected')
+    try:
+        HubClient(value('relay_hub_url'), value('relay_hub_token')).call_tool('site.disconnect', {'confirm': True})
+    except HubError as error:
+        # 401: the Hub already revoked the token, e.g. its answer to an earlier disconnect was lost.
+        if error.metadata.get('error', {}).get('http_status') != 401:
+            raise OnboardingError('hub_unavailable') from None
+    doc = frappe.get_single('Relay Settings')
+    doc.update({'hub_token': '', 'callback_secret': '', 'onboarding_completed': 0})
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {'disconnected': True, 'site_config_token': bool(frappe.conf.get('relay_hub_token'))}
+
+
 def proof(nonce, challenge):
     """HMAC_SHA256(callback secret, nonce:challenge:origin) for the one pending nonce, used once."""
     if HUB_SERVICE not in frappe.get_roles():

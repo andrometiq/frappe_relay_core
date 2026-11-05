@@ -21,6 +21,8 @@ class ChannelSyncTests(unittest.TestCase):
         hub.call_tool.side_effect = result if isinstance(result, Exception) else None
         hub.call_tool.return_value = result
         settings = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
+        site.frappe.publish_realtime = Mock()
+        site.frappe.realtime = Mock(get_doctype_room=lambda doctype: 'doctype:' + doctype)
         with patch.object(channel_sync, 'frappe', site.frappe), \
                 patch.object(channel_sync, 'connection_value', settings.get), \
                 patch('relay_core.whatsapp.client', return_value=hub):
@@ -33,6 +35,8 @@ class ChannelSyncTests(unittest.TestCase):
             {'key': 'wa-2', 'label': 'Support', 'display_number': '+91 90000 00002', 'waba_id': '111'}))
         hub.call_tool.assert_called_once_with('channels.list', {})
         self.assertEqual(result, {'synced': True, 'channels': 2, 'added': 1, 'changed': 1, 'disabled': 0})
+        site.frappe.publish_realtime.assert_called_once_with('relay_changed', {'kind': 'channels'},
+                                                             room='doctype:Relay Channel', after_commit=True)
         legacy, second = site.rows('Relay Channel')
         self.assertEqual((legacy.address, legacy.waba_id, legacy.title, legacy.is_default), ('+91 90000 00001', '111', 'Shop', 1))
         self.assertEqual((second.hub_channel, second.label, second.enabled, second.title), ('wa-2', 'Support', 1, 'Support'))

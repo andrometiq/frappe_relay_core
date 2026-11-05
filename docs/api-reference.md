@@ -227,6 +227,24 @@ origin. Tokens therefore need `account:read`. The callback signing secret must
 contain 32–512 printable characters when supplied. Values are stored in the
 `Relay Settings` Single DocType, with encrypted Frappe Password fields.
 
+`POST relay_core.onboarding.api.disconnect_hub` (System Manager, `confirm=1`) calls Hub `site.disconnect`, then clears the saved token and callback secret and opens Get started again. It returns `disconnected` and `site_config_token` (true when an operator token in the site config stays).
+
+## Channel setup
+
+The WhatsApp Account tab uses these methods. The Hub keeps every credential and the two-step PIN; no method returns a token or a secret. `channel` is a Relay Channel name of this site's Hub account. Hub refusals come back as plain errors.
+
+| Method | Route | Access |
+| --- | --- | --- |
+| GET | `relay_core.channels_api.accounts` (`channel=WhatsApp`) | Manager or System Manager |
+| GET | `relay_core.channels_api.number_profile` | Manager or System Manager |
+| POST | `relay_core.channels_api.check_number` (`repair`, default 1) | System Manager |
+| POST | `relay_core.channels_api.save_number_settings` (`settings` with `enabled`, `templates`, `sync_metadata`) | System Manager |
+| POST | `relay_core.channels_api.set_default` | System Manager |
+| POST | `relay_core.channels_api.reset_pin` | System Manager |
+| POST | `relay_core.channels_api.remove_number` (`confirm=1`) | System Manager |
+| POST | `relay_core.channels_api.save_number_profile` (`profile`, optional `photo_base64`, `photo_type`) | System Manager |
+
+`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`; Email and Telegram can add one later.
 
 ## Workspace directories
 

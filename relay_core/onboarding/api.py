@@ -50,6 +50,16 @@ def connect_hub(setup_code='', reconnect=0):
 
 
 @frappe.whitelist(methods=['POST'])
+@readable_errors
+def disconnect_hub(confirm=0):
+    """Disconnect this site from the Hub after the person confirmed it; the channels keep their history."""
+    system_manager()
+    if str(confirm) not in ('1', 'true', 'True'):
+        frappe.throw('Confirm that this site should be disconnected from Relay Hub')
+    return enrolment.disconnect()
+
+
+@frappe.whitelist(methods=['POST'])
 def enrolment_proof(nonce=None, challenge=None):
     return enrolment.proof(nonce, challenge)
 

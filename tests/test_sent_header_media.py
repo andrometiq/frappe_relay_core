@@ -46,7 +46,7 @@ class CampaignHeaderTests(unittest.TestCase):
                 return SimpleNamespace(destination=self.row['destination'], arguments=json.dumps({'values': self.row['values']}))
             return 'FILE-1' if filters['file_url'].startswith('/private/files/') else None
 
-        def content():
+        def content(encodings=None):
             with open(self.path, 'rb') as handle:
                 return handle.read()
 
@@ -101,7 +101,7 @@ class CampaignHeaderTests(unittest.TestCase):
 class OneToOneHeaderTests(unittest.TestCase):
     def setUp(self):
         self.file = SimpleNamespace(name='FILE-9', is_private=1, attached_to_doctype=None, file_name='offer.mp4', owner='staff@example.com',
-                                    get_content=lambda: b'video', delete=Mock())
+                                    get_content=lambda encodings=None: b'video', delete=Mock())
         self.cache = {template_media.UPLOADS + '9001': {'file': 'FILE-9', 'channel': 'wa-1'}}
         cache = SimpleNamespace(get_value=self.cache.get, delete_value=self.cache.pop)
         boundary = SimpleNamespace(cache=cache, get_doc=lambda doctype, name: self.file, session=SimpleNamespace(user='staff@example.com'),
@@ -146,7 +146,7 @@ class OneToOneHeaderTests(unittest.TestCase):
         self.assertIn(template_media.UPLOADS + '9001', self.cache)
 
     def test_missing_upload_file_raises_and_keeps_the_record(self):
-        def gone():
+        def gone(encodings=None):
             raise FileNotFoundError('offer.mp4')
         self.file.get_content = gone
         with patch('relay_core.document_sends.keep_copy') as keep_copy, self.assertRaises(FileNotFoundError):
