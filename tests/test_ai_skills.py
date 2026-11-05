@@ -55,7 +55,7 @@ def framework():
     f = types.SimpleNamespace(session=Doc(user='operator'), flags=Doc(), local=Doc(site='test.local'),
         whitelist=lambda **kw: lambda fn: fn, db=Mock(), get_doc=Mock(), get_all=Mock(), get_list=Mock(),
         get_meta=Mock(), get_roles=Mock(return_value=['System Manager']),
-        enqueue=Mock(), log_error=Mock(), PermissionError=PermissionError,
+        enqueue=Mock(), log_error=Mock(), get_hooks=Mock(return_value=[]), PermissionError=PermissionError,
         QueryDeadlockError=QueryDeadlockError)
     f.set_user = lambda user: setattr(f.session, 'user', user)
     f.db.get_value.return_value = 1
@@ -310,6 +310,7 @@ class SearchGateTests(unittest.TestCase):
         self.patch = patch.dict(sys.modules, {'relay_core.ai.tools':self.tools})
         self.patch.start(); self.addCleanup(self.patch.stop)
         self.tools.contracts = lambda skill: [self.contract]
+        self.enterContext(patch('relay_core.ai.registry.builtin.skill_tools', return_value=[]))
         decision = dict(reply='Searching', handoff=False, reads=[], search=self.plan)
         self.service.declare_search(self.origin, self.skill, self.source, decision)
         self.origin.status = 'Completed'
@@ -435,6 +436,31 @@ class SearchGateTests(unittest.TestCase):
             self.f.get_all.return_value=[Doc(name='Origin')]
             self.assertFalse(self.service.continue_search(self.run, self.reply))
         self.assertIsNone(json.loads(self.origin.search_plan)['consumed_by'])
+
+    def test_an_app_read_tool_plan_is_announced_confirmed_and_read_once_as_declared(self):
+        from relay_core.ai.registry import ToolContext, relay_tool
+
+        @relay_tool(audience='customer', label='Order status')
+        def order_status(order: str, *, ctx: ToolContext) -> dict:
+            """The sender's own order status."""
+            return {}
+        self.enterContext(patch('relay_core.ai.registry.builtin.skill_tools',
+                                return_value=[('acme.order_status', order_status)]))
+        self.skill.search_confirmation = 'Always'
+        self.plan = dict(purpose='Order status', reference='acme.order_status', fields=[], arguments={'order': 'PO-1'})
+        self.contract = dict(key='acme.order_status', operation='tool', fields=[])
+        self.tools.contracts = lambda skill: []
+        self.origin.update(search_plan=None, stage='Event')
+        decision = dict(reply='', handoff=False, reads=[], search=self.plan)
+        self.service.declare_search(self.origin, self.skill, self.source, decision)
+        self.assertEqual(decision['reply'], self.service.SEARCH_NOTICE + ' ' + self.service.SEARCH_CONFIRM)
+        self.assertEqual(json.loads(self.origin.search_plan)['plan'], self.plan)
+        self.origin.status = 'Completed'
+        with self.assertRaises(ValueError): self.authorize()
+        self.confirmed(); self.authorize()
+        for arguments in ({'order': 'PO-2'}, {}):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError): self.authorize(arguments)
+        self.assertFalse(self.service.continue_search(self.run, self.reply))
 
     def test_clear_nonledger_search_advances_only_after_delivery(self):
         self.contract.update(doctype='Invoice', confirmation='When required',
@@ -700,6 +726,7 @@ class SkillDeliveryTests(unittest.TestCase):
 
 class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')))
         self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
         # Privacy lookup data is supplied by the dedicated reply guard tests.
         guard_db = framework()
@@ -719,7 +746,8 @@ class SharedAdapterTests(unittest.TestCase):
         self.model = Doc(enabled=1, supports_vision=1, account='ACCOUNT-1', model_id='test-model', max_tokens=1200, temperature=0,
                          cost_per_m_input=1, cost_per_m_output=2)
         self.spend = spend_budget(self)
-        self.account = Doc(enabled=1, provider='Test')
+        self.account = Doc(enabled=1, provider='Test', auth_type='ChatGPT Login')
+        self.f.db.get_single_value.return_value = 'ChatGPT Login'
         self.f.get_doc.side_effect = lambda dt, name: self.model if dt == 'AI Model' else self.account
         self.provider = types.SimpleNamespace(user_message=lambda text, images: {'text': text}, continuation=lambda result, output: [])
         self.patches = [patch.object(agent, 'get_known_secrets', return_value=[]),
@@ -1094,6 +1122,7 @@ class SharedAdapterTests(unittest.TestCase):
 
 class ConversationIdentityTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')))
         from contextvars import ContextVar
         self.f = framework()
         self.tools = module('relay_core/ai/tools.py', self.f)
@@ -1115,8 +1144,8 @@ class ConversationIdentityTests(unittest.TestCase):
         access = types.SimpleNamespace(reference=lambda doc: ('Supplier', 'SUP-A'), candidates=lambda contact: [('Supplier', 'SUP-A')],
                                        own_message=lambda doc, user=None: bool(doc.get('own')))
         self.company_allowed = self.enterContext(patch('relay_core.permissions.company_allowed', return_value=True))
-        no_reference = types.SimpleNamespace(ReplyContext=lambda *args: types.SimpleNamespace(
-            lines=[], events=[], prompt={}, used=None))
+        no_reference = types.SimpleNamespace(FACTS='memory', ReplyContext=lambda *args: types.SimpleNamespace(
+            lines=[], events=[], facts=[], chunks=[], prompt={}, used=None, recall=lambda skill, query: None))
         names = framework()
         names.db.get_value.return_value = 'Sim Sender'
         self.patch = patch.dict(sys.modules, {'relay_core.business_access': access, 'frappe': self.f,
@@ -1394,6 +1423,17 @@ class EventContractTests(unittest.TestCase):
         self.config.validate_skill(self.doc)
         self.assertEqual((self.doc.search_confirmation, self.doc.execution_policy), ('Always', 'Ticket only'))
         self.f.get_doc.assert_not_called()
+
+    def test_tool_calls_default_to_four_and_stop_at_six(self):
+        self.config.validate_skill(self.doc)
+        self.assertEqual(self.doc.max_tool_calls, 4)
+        self.doc.max_tool_calls = '6'
+        self.config.validate_skill(self.doc)
+        self.assertEqual(self.doc.max_tool_calls, 6)
+        for value in (7, -1):
+            self.doc.max_tool_calls = value
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'tool calls'):
+                self.config.validate_skill(self.doc)
 
     def test_multiple_targets_share_channel_and_business_without_scope_reservation(self):
         self.enable()

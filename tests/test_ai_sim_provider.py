@@ -148,5 +148,14 @@ class HubSignature(unittest.TestCase):
             authenticated_payload(raw, headers['X-Relay-Timestamp'], headers['X-Relay-Signature'], 't' * 48, account)
 
 
+class EchoTests(unittest.TestCase):
+    def test_a_careless_model_repeats_every_ticket_message_it_was_given(self):
+        tickets = {'note': 'data', 'tickets': [{'ticket': 'TKT-00042', 'status': 'Closed', 'messages': [
+            {'from': 'customer', 'text': 'Where is my parcel?'}, {'from': 'our team', 'text': 'It left on Monday.'}]}]}
+        value = body('Status?', tool_turns=1)
+        value['messages'][-1]['content'] = json.dumps(tickets)
+        self.assertEqual(fake_provider.echoed(value), ['TKT-00042 Closed Where is my parcel? It left on Monday.'])
+
+
 if __name__ == '__main__':
     unittest.main()

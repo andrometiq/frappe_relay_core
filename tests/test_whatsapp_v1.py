@@ -139,6 +139,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
             patch.object(service, 'message_hash', return_value='hash'),
             patch.object(service, 'latest_message', return_value=True),
             patch.object(service, 'context', side_effect=context), patch.object(tools, 'recheck', self.recheck),
+            patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')),
         ):
             fixture.start(); self.addCleanup(fixture.stop)
 

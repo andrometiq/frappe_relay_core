@@ -1,0 +1,127 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Memory",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIM-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "description": "Short facts a skill recalls in later replies. Skill scope is shared by every sender of the skill and only staff write it. Business scope belongs to one business record and is shared by all of its contacts. A fact a customer reply saves stays Pending until that reply is delivered.",
+  "field_order": [
+    "skill",
+    "scope",
+    "business_doctype",
+    "business_name",
+    "company",
+    "status",
+    "source",
+    "source_run",
+    "revises",
+    "content"
+  ],
+  "fields": [
+    {
+      "fieldname": "skill",
+      "label": "Skill",
+      "fieldtype": "Link",
+      "options": "Relay AI Skill",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "scope",
+      "label": "Scope",
+      "fieldtype": "Select",
+      "options": "Business\nSkill",
+      "default": "Business",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "depends_on": "eval:doc.scope=='Business'"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business record",
+      "fieldtype": "Data",
+      "depends_on": "eval:doc.scope=='Business'",
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Active\nPending\nArchived",
+      "default": "Active",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "source",
+      "label": "Written by",
+      "fieldtype": "Select",
+      "options": "Manual\nFeedback\nAgent",
+      "default": "Manual",
+      "reqd": 1,
+      "read_only": 1,
+      "in_list_view": 1,
+      "description": "Agent means the model saved it in a customer reply: treat it as customer-written text."
+    },
+    {
+      "fieldname": "source_run",
+      "label": "Source run",
+      "fieldtype": "Link",
+      "options": "Relay Automation Run",
+      "read_only": 1
+    },
+    {
+      "fieldname": "revises",
+      "label": "Revises",
+      "fieldtype": "Link",
+      "options": "Relay AI Memory",
+      "read_only": 1,
+      "description": "The fact this one replaces when it becomes Active."
+    },
+    {
+      "fieldname": "content",
+      "label": "Fact",
+      "fieldtype": "Small Text",
+      "reqd": 1,
+      "description": "One short fact of at most 300 characters."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 15:00:00.000000"
+}

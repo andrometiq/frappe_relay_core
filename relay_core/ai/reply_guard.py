@@ -58,25 +58,29 @@ def record_names(*rows):
     return sorted(found)
 
 
+def words(text):
+    """Casefolded words of `text`; combining marks stay inside a word, so Indic words are not cut."""
+    return ''.join(char if char.isalnum() or unicodedata.category(char).startswith('M') else ' '
+                   for char in text.casefold()).split()
+
+
 def copied(reply, sources, shortest=12):
     """A copied 12-word run of a source; a source of `shortest` to 12 words counts when copied whole."""
-    def words_of(text):
-        return ''.join(char if char.isalnum() or unicodedata.category(char).startswith('M') else ' '
-                       for char in text.casefold()).split()
-    reply_words = words_of(reply)
+    reply_words = words(reply)
     for source in sources:
-        words = words_of(source or '')
-        size = min(12, len(words))
+        source_words = words(source or '')
+        size = min(12, len(source_words))
         if size < shortest:
             continue
         runs = {tuple(reply_words[i:i + size]) for i in range(len(reply_words) - size + 1)}
-        if any(tuple(words[i:i + size]) in runs for i in range(len(words) - size + 1)):
+        if any(tuple(source_words[i:i + size]) in runs for i in range(len(source_words) - size + 1)):
             return True
     return False
 
 
-def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
-    """Raise without including leaked text. Allow authorized evidence and Company contacts.
+def check(reply, skill, scope, *, evidence=(), knowledge=(), read_names=()):
+    """Raise without including leaked text. Allow authorized evidence and Company contacts. `knowledge` holds the
+    trusted owner texts of the prompt for the verbatim-copy check.
 
     Customer/Supplier checks cover exact capitalised primary-key names up to six words; `read_names` from
     authorized reads are allowed.
@@ -85,10 +89,12 @@ def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
     """
     from relay_core.ai.adapter import DECLINE_REPLIES, SYSTEM_RULES
     from relay_core.ai.handoff import ACKNOWLEDGEMENT
+    if isinstance(knowledge, str):
+        raise TypeError('Pass knowledge as a tuple of texts')
     if not reply or reply in (*DECLINE_REPLIES.values(), ACKNOWLEDGEMENT):
         return
     # Short skill instructions are private too; short knowledge is often a fact the reply should repeat.
-    if copied(reply, (SYSTEM_RULES, knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
+    if copied(reply, (SYSTEM_RULES, *knowledge)) or copied(reply, (skill.get('instructions'), skill.get('reply_style')), 6):
         raise ReplyBlocked()
     emails = {value.casefold() for value in EMAIL.findall(reply)}
     numbers = phones(reply)
@@ -102,12 +108,12 @@ def check(reply, skill, scope, *, evidence=(), knowledge='', read_names=()):
     # At most 6 * the reply's word count candidates, in three indexed IN queries.
     names = set()
     for phrase in re.findall(r"\b[^\W\d_]\w*(?:[-'’][\w]+)*(?:[ \t]+[^\W\d_]\w*(?:[-'’][\w]+)*)*", reply):
-        words = phrase.split()
-        for start, word in enumerate(words):
+        phrase_words = phrase.split()
+        for start, word in enumerate(phrase_words):
             if not word[0].isupper():
                 continue
-            for end in range(start + 1, min(start + 6, len(words)) + 1):
-                names.add(' '.join(words[start:end]))
+            for end in range(start + 1, min(start + 6, len(phrase_words)) + 1):
+                names.add(' '.join(phrase_words[start:end]))
     if not names:
         return
     own = {tuple(scope['business'])} if scope.get('business') else set()
@@ -133,8 +139,13 @@ def check_delivery(run, skill, message, reply):
     decision = json.loads(run.get('decision') or '{}')
     company = frappe.db.get_value('Relay Channel', message.channel, 'company')
     from relay_core.ai.knowledge import prompt
-    knowledge = prompt((message.business_doctype, message.business_name), company)
+    from relay_core.ai.playbooks import copy_texts
+    from relay_core.ai.fact_memory import guard_texts
+    business = (message.business_doctype, message.business_name)
+    facts = [row['memory'] for row in json.loads(run.get('ai_context') or '{}').get('facts') or []]
+    staff, shared = guard_texts(facts, skill, business)
     check(reply, skill, dict(endpoint=message.sender_endpoint, company=company,
-        contact=message.relay_contact, business=[message.business_doctype, message.business_name]),
-        evidence=[message.get('content') or '', decision.get('reply_contacts', [])], knowledge=knowledge,
+        contact=message.relay_contact, business=list(business)),
+        evidence=[message.get('content') or '', decision.get('reply_contacts', []), staff],
+        knowledge=(prompt(business, company), *copy_texts(skill, business, company), *shared),
         read_names=set(decision.get('reply_names', [])))

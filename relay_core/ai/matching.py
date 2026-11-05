@@ -45,7 +45,17 @@ def human_request(text):
                 or re.search(r'\b(?:manager|supervisor|staff|human|agent|aal|aalu|oruvar) '
                              r'(?:(?:kitta|kittae|kitte|kooda|oda) )?(?:pesanum|pesanumnu|pesavendum|pesunga|connect pannunga)\b', value)
                 or re.search(r'\b(?:complaint|pugaar|pugar) (?:pannanum|pannum|pannuren|sollanum|irukku|kodukkanum)\b', value)
-                or re.search(r'\bescalate (?:pannunga|pannanum|seiyunga)\b', value))
+                or re.search(r'\bescalate (?:pannunga|pannanum|seiyunga)\b', value)
+                or not_helpful(value))
+
+
+def not_helpful(value):
+    """The sender says an answer did not help; staff take over on a ticket."""
+    negation = r"(?:n't|n’t| not)"
+    return bool(re.search(r'\b(?:not (?:helpful|useful)|unhelpful'
+                          rf'|(?:did|does|is|was|are|were){negation} (?:help|helping|helpful|useful)'
+                          rf'|(?:did|does){negation} answer my question|you did{negation} understand'
+                          r'|(?:help|useful|use) (?:aagala|agala|aagalai|illa|ille|aayilla))\b', value))
 
 
 def human_reason(text):

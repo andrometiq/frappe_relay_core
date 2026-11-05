@@ -34,7 +34,8 @@ class CapabilityCase(unittest.TestCase):
         meta = Doc(get_field=lambda key: FIELDS.get(key))
         shared = types.SimpleNamespace(get_readable_meta=lambda doctype: meta,
             is_sensitive_field=lambda name: 'secret' in name)
-        self.enterContext(patch.dict(sys.modules, {'frappe_tools.ai.tools': shared}))
+        self.enterContext(patch.dict(sys.modules, {'frappe_tools.ai.tools': shared,
+            'relay_core.ai.registry.sync': module('relay_core/ai/registry/sync.py', self.f)}))
         self.capabilities = module('relay_core/ai/capabilities.py', self.f, {
             'relay_core.business_access': types.SimpleNamespace(document_name=lambda name: name),
             'relay_core.permissions': types.SimpleNamespace(require_access=self.access)})

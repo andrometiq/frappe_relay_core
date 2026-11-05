@@ -157,6 +157,15 @@ class ReplyGuardTests(unittest.TestCase):
             with self.subTest(reply=reply), self.assertRaises(reply_guard.ReplyBlocked):
                 reply_guard.check_delivery(run, self.skill, message, reply)
 
+    def test_every_knowledge_text_joins_the_copy_check(self):
+        playbook = 'Ask for the order number, the delivery town and the preferred time before any promise is made.'
+        self.check(playbook, knowledge=('Short fact.',))
+        with self.assertRaises(reply_guard.ReplyBlocked):
+            self.check(playbook, knowledge=('Short fact.', playbook))
+        # A plain string would be split into characters and silently pass the copy check.
+        with self.assertRaises(TypeError):
+            self.check(playbook, knowledge=playbook)
+
 
 class GuardWiringTests(unittest.TestCase):
     def adapter_case(self):
@@ -188,6 +197,16 @@ class GuardWiringTests(unittest.TestCase):
                     message = fixtures.Doc(channel='CHANNEL-1', sender_endpoint='sender@example.test',
                         business_doctype='Supplier', business_name='SELF', content=prompt['incoming'])
                     reply_guard.check_delivery(run, case.skill, message, text)
+
+    def test_fact_memory_never_allows_a_contact_value(self):
+        case = self.adapter_case()
+        reply = 'Call 919000000101 for your order.'
+        for key, handoff in (('memory', True), ('record_memory', False)):
+            with self.subTest(key=key):
+                prompt = {'incoming': 'Hi', 'reference_data': {key: ['[M1] (own) ' + reply]}}
+                case.attempt.side_effect = [case.outcome(dict(reply=reply, handoff=False, reason=''))]
+                result = case.adapter.complete(case.skill, 'partner', ('Supplier', 'SELF'), json.dumps(prompt))
+                self.assertEqual(result['handoff'], handoff)
 
     def test_adapter_search_contacts_survive_saved_decision_and_delivery(self):
         case = self.adapter_case()

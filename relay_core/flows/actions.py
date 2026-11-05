@@ -144,6 +144,23 @@ def execute(run, node, answers, key):
         business_doctype=run.get('business_doctype'), business_name=run.get('business_name'), flow_run=run.name))
 
 
+def writes_allowed() -> bool:
+    """Whether AI runs may offer and run actions other than a reply. Relay Settings keeps this off by default."""
+    return bool(frappe.db.get_single_value('Relay Settings', 'allow_ai_write_actions'))
+
+
+def check_write(definition) -> None:
+    """Refuse an AI action other than a reply while AI write actions are off."""
+    if (definition or {}).get('effect') != 'reply' and not writes_allowed():
+        raise ValueError('AI write actions are off')
+
+
+def offered_actions(declared: list[dict], registered: dict) -> list[dict]:
+    """The declared steps an AI run may propose: every step when AI write actions are on, else the reply steps."""
+    replies = [row for row in declared if registered[row['action']]['effect'] == 'reply']
+    return declared if len(replies) == len(declared) or writes_allowed() else replies
+
+
 def proposal(skill, action, parameters):
     """Validate an ordered model proposal without writes (also used by preview)."""
     from relay_core.ai.configuration import action_contracts
@@ -151,6 +168,7 @@ def proposal(skill, action, parameters):
     if not declared:
         raise ValueError('Action is outside the event')
     definition = definitions(context='ai').get(action)
+    check_write(definition)
     return dict(action=action, parameters=ai_inputs(parameters, definition, declared))
 
 
@@ -209,6 +227,7 @@ def _ai_context(run_name, step):
         if not declaration:
             raise ValueError('Action is outside the event')
         definition = definitions(context='ai').get(item['action'])
+        check_write(definition)
         values = ai_inputs(item['parameters'], definition, declaration)
     # current() verified the sender login and its business; effects act as the skill service user.
     with as_user(sender(run, skill)):

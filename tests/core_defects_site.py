@@ -89,6 +89,9 @@ def ai_fixture(tag, links):
     server = ThreadingHTTPServer(('127.0.0.1', 0), LocalAI)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     skill = None
+    # The fixture model is a loopback API Key server; allow that auth type only while the fixture runs.
+    allowed = frappe.db.get_single_value('Relay Settings', 'allowed_ai_auth_types')
+    frappe.db.set_single_value('Relay Settings', 'allowed_ai_auth_types', 'ChatGPT Login\nAPI Key')
     try:
         previous_import = frappe.flags.in_import
         frappe.flags.in_import = True
@@ -114,7 +117,8 @@ def ai_fixture(tag, links):
             skill.reload()
             skill.enabled = 0
             skill.save(ignore_permissions=True)
-            frappe.db.commit()
+        frappe.db.set_single_value('Relay Settings', 'allowed_ai_auth_types', allowed)
+        frappe.db.commit()
         server.shutdown()
         server.server_close()
 

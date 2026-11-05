@@ -44,7 +44,8 @@ def action_key(message, slot):
 
 
 def validate_search(value, references):
-    """A declaration can only narrow one approved capability; Core sets `fields` from the approved pack."""
+    """A declaration can only narrow one approved capability; Core sets `fields` from the approved pack. An app read
+    tool reference takes the tool's own arguments."""
     from relay_core.ai.render import field_names
     if not isinstance(value, dict) or not {'purpose', 'reference', 'arguments'} <= set(value) <= {
             'purpose', 'reference', 'fields', 'arguments'}:
@@ -65,7 +66,10 @@ def validate_search(value, references):
     args = value['arguments']
     if not isinstance(args, dict):
         raise ValueError('Invalid search arguments')
-    if contract['operation'] == 'get_doc':
+    if contract['operation'] == 'tool':
+        from relay_core.flows.action_contracts import validate
+        validate(args, contract['parameters'])
+    elif contract['operation'] == 'get_doc':
         if set(args) != {'name'} or not isinstance(args['name'], str) or not 1 <= len(args['name']) <= 140:
             raise ValueError('Declare a document name')
     else:

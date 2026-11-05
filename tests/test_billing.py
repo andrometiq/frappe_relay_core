@@ -120,6 +120,21 @@ class BillingTests(unittest.TestCase):
         with self.assertRaisesRegex(frappe.ValidationError, 'between 0 and 1000'):
             RelaySettings.validate(settings)
 
+    def test_allowed_ai_auth_types_must_be_provider_auth_types(self):
+        self.roles = ['System Manager']
+        auth_type = SimpleNamespace(options='API Key\nChatGPT Login\nSetup Token')
+        values = {'allowed_ai_auth_types': 'ChatGPT Login\nAPI Key'}
+        settings = SimpleNamespace(hub_url='', hub_account='', transcription_provider='', whatsapp_margin_percent=30,
+                                   get=values.get, get_doc_before_save=lambda: None)
+        with patch.object(frappe, 'get_meta', return_value=SimpleNamespace(get_field=lambda name: auth_type)):
+            RelaySettings.validate(settings)
+            values['allowed_ai_auth_types'] = 'ChatGPT Login\nFree credit'
+            with self.assertRaisesRegex(frappe.ValidationError, 'auth types'):
+                RelaySettings.validate(settings)
+        with open(billing.__file__.replace('billing.py', 'relay_core/doctype/relay_settings/relay_settings.json')) as file:
+            fields = {field['fieldname']: field for field in json.load(file)['fields']}
+        self.assertEqual(fields['allowed_ai_auth_types']['default'], 'ChatGPT Login')
+
     def test_only_system_managers_read_and_save_the_margin(self):
         settings = Mock(whatsapp_margin_percent=30)
         self.frappe.get_single.return_value = settings

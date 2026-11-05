@@ -455,8 +455,9 @@ class ExecutionAdapter(unittest.TestCase):
         self.skill.execution_policy = 'Execute'
         contracts = types.SimpleNamespace(action_contracts=lambda skill: [declared])
         from relay_core.flows.actions import validate_sequence
+        # These skills run with AI write actions turned on.
         actions = types.SimpleNamespace(validate_sequence=validate_sequence, definitions=lambda context=None: {'draft_payment': definition()},
-            proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(parameters, definition(), declared)))
+            offered_actions=lambda declared, registered: declared, proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(parameters, definition(), declared)))
         patcher = patch.dict(sys.modules, {'relay_core.ai.configuration': contracts, 'relay_core.flows.actions': actions})
         patcher.start(); self.addCleanup(patcher.stop)
 
@@ -468,6 +469,18 @@ class ExecutionAdapter(unittest.TestCase):
         result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Payment', 'RUN-1')
         self.assertEqual([step['parameters']['paid_amount'] for step in result['actions']], [1250])
         self.f.db.commit.assert_not_called()
+
+    def system(self):
+        return self.attempt.call_args.args[2](types.SimpleNamespace(build_turn=lambda *args: args[2]), None, None)
+
+    def test_read_only_rule_is_in_the_prompt_only_without_a_write_action(self):
+        self.allow_reply()
+        self.attempt.return_value = self.outcome(dict(reply='', handoff=True, reason='Customer asked to cancel order'))
+        self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Cancel my order', 'RUN-1')
+        self.assertIn(self.adapter.READ_ONLY_RULE, self.system())
+        self.prepare()
+        self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Record my payment', 'RUN-1')
+        self.assertNotIn(self.adapter.READ_ONLY_RULE, self.system())
 
     def test_repeated_or_out_of_order_steps_fail_before_execution(self):
         self.prepare()
@@ -496,7 +509,7 @@ class ExecutionAdapter(unittest.TestCase):
         self.skill.allowed_actions, self.skill.execution_policy = json.dumps(declared), 'Execute'
         self.enterContext(patch('relay_core.flows.actions.definitions', return_value=registered))
         actions = types.SimpleNamespace(validate_sequence=validate_sequence, definitions=lambda context=None: registered,
-            proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(
+            offered_actions=lambda declared, registered: declared, proposal=lambda skill, action, parameters: dict(action=action, parameters=ai_inputs(
                 parameters, registered[action], next(row for row in declared if row['action'] == action))))
         self.enterContext(patch.dict(sys.modules, {'relay_core.flows.actions': actions,
             'relay_core.ai.configuration': types.SimpleNamespace(action_contracts=lambda skill: declared)}))
@@ -672,6 +685,18 @@ class VerifiedContactExecution(unittest.TestCase):
         self.assertEqual(self.send.call_args.args[2], {'text': 'Noted: 1250 received.'})
         self.handoff.assert_not_called()
 
+    def test_a_knowledge_source_that_left_the_scope_stops_approval_and_execution(self):
+        self.run.decision = json.dumps(dict(json.loads(self.run.decision), sources=['SRC-1']))
+        gone = ValueError('A knowledge source used by this reply changed or is no longer available')
+        with patch('relay_core.ai.knowledge_base.retriever.check_sources', side_effect=gone) as check:
+            with self.assertRaisesRegex(ValueError, 'knowledge source'):
+                self.actions._ai_context(self.run.name, 0)
+            self.assertEqual(check.call_args.args[1:], (('Customer', 'Sim Customer'), 'Sim Company', ['SRC-1']))
+            self.service.process(self.run.name)
+        self.f.get_attr.assert_not_called()
+        self.send.assert_not_called()
+        self.assertIn('knowledge source', self.handoff.call_args.args[2])
+
     def test_action_permission_and_handler_use_the_skill_service_user(self):
         self.skill.run_as_user = 'service'
         handlers = []
@@ -813,3 +838,75 @@ class ApprovalDelivery(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: action if dt == 'Relay Message Action' else self.message
         self.service.complete_delivery(action.name)
         self.assertEqual(self.run.status, 'Deciding')
+
+
+class WriteActionGate(unittest.TestCase):
+    """AI runs only read and reply unless Relay Settings turns AI write actions on."""
+    def setUp(self):
+        from relay_core.ai.actions import REPLY
+        self.f = framework()
+        self.f.db.get_single_value.return_value = None  # A site that never set the flag.
+        self.actions = module('relay_core/flows/actions.py', self.f)
+        self.registered = {'draft_payment': definition(), 'reply': REPLY}
+        self.actions.definitions = lambda **kw: self.registered
+        self.declared = [dict(action='draft_payment', doctype='Payment Entry', fields=['paid_amount']), dict(action='reply')]
+
+    def test_the_setting_is_off_by_default(self):
+        from pathlib import Path
+        meta = json.loads(Path('relay_core/relay_core/doctype/relay_settings/relay_settings.json').read_text())
+        field = next(row for row in meta['fields'] if row['fieldname'] == 'allow_ai_write_actions')
+        self.assertEqual((field['fieldtype'], field['default']), ('Check', '0'))
+
+    def test_only_reply_steps_are_offered_while_writes_are_off(self):
+        self.assertEqual(self.actions.offered_actions(self.declared, self.registered), [dict(action='reply')])
+        self.f.db.get_single_value.assert_called_once_with('Relay Settings', 'allow_ai_write_actions')
+        self.f.db.get_single_value.return_value = 1
+        self.assertEqual(self.actions.offered_actions(self.declared, self.registered), self.declared)
+
+    def test_a_reply_only_skill_never_reads_the_setting(self):
+        self.assertEqual(self.actions.offered_actions(self.declared[1:], self.registered), self.declared[1:])
+        self.f.db.get_single_value.assert_not_called()
+
+    def test_proposal_refuses_a_write_and_keeps_the_reply(self):
+        contracts = types.SimpleNamespace(action_contracts=lambda skill: self.declared)
+        with patch.dict(sys.modules, {'relay_core.ai.configuration': contracts}):
+            with self.assertRaisesRegex(ValueError, 'AI write actions are off'):
+                self.actions.proposal(Doc(), 'draft_payment', {'paid_amount': 1250})
+            self.assertEqual(self.actions.proposal(Doc(), 'reply', {'text': 'Noted.'}),
+                             dict(action='reply', parameters={'text': 'Noted.'}))
+
+    def test_execution_refuses_a_persisted_write_step_before_any_effect(self):
+        """A decision made while writes were on, or a staff approval, cannot run once they are off."""
+        run = Doc(name='Sim Run', status='Pending', skill='Sim Skill', ticket='Sim Ticket', execution_user='partner',
+                  decision=json.dumps({'actions': [dict(action='draft_payment', parameters={'paid_amount': 1250})]}))
+        skill = Doc(name='Sim Skill', mode='Automatic', execution_policy='Execute')
+        ticket = Doc(ai_disabled=0, company='Sim Company', conversation_key='conversation',
+                     business_doctype='Supplier', business_name='SUP-A')
+        self.f.get_doc.side_effect = lambda doctype, name=None: {'Relay AI Skill': skill, 'Relay Ticket': ticket}.get(doctype, Doc())
+        service = types.SimpleNamespace(sender=lambda run, skill=None: 'service', delivery_scope=Mock(),
+            current=lambda run, skill, message: ('partner', ('Supplier', 'SUP-A'),
+                                                 {'company': 'Sim Company', 'conversation': 'conversation'}))
+        self.actions.validate_sequence = Mock()
+        self.f.has_permission, self.f.get_attr = Mock(), Mock()
+        with patch.dict(sys.modules, {'relay_core.ai.service': service,
+                'relay_core.ai.configuration': types.SimpleNamespace(action_contracts=lambda skill: self.declared),
+                'relay_core.ai.tools': types.SimpleNamespace(as_user=lambda user: nullcontext()),
+                'relay_core.automation.service': types.SimpleNamespace(lock_run=lambda name: run)}):
+            with self.assertRaisesRegex(ValueError, 'AI write actions are off'):
+                self.actions.execute_ai(run.name, 0)
+        self.f.has_permission.assert_not_called()
+        self.f.get_attr.assert_not_called()
+
+    def test_the_model_sees_no_write_action_while_writes_are_off(self):
+        from relay_core.ai.registry.builtin import CoreTools
+        skill = Doc(allowed_actions=json.dumps(self.declared), execution_policy='Execute')
+        with patch('relay_core.ai.registry.builtin.copy_texts', return_value=()), \
+                patch('relay_core.ai.configuration.action_contracts', return_value=self.declared), \
+                patch('relay_core.flows.actions.definitions', return_value=self.registered), \
+                patch('relay_core.flows.actions.writes_allowed', return_value=False):
+            core = CoreTools(skill, ('Supplier', 'SUP-A'), {'company': 'Sim Company'}, Mock(), [], Mock(), None)
+            tools = core.agent_tools(types.SimpleNamespace(Tool=lambda *args: args))
+        self.assertEqual(tools[0][2]['properties']['action']['enum'], ['reply'])
+        self.assertEqual([row['action'] for row in core.action_schemas], ['reply'])
+        with self.assertRaisesRegex(ValueError, 'Action is unavailable'):
+            core.execute('draft_payment', {'paid_amount': 1250})

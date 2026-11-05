@@ -1,0 +1,25 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Skill Playbook",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AISP-.##########",
+  "naming_rule": "Expression (old style)",
+  "istable": 1,
+  "field_order": [
+    "playbook"
+  ],
+  "fields": [
+    {
+      "fieldname": "playbook",
+      "label": "Playbook",
+      "fieldtype": "Link",
+      "options": "Relay AI Playbook",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "The skill may load this playbook."
+    }
+  ],
+  "permissions": [],
+  "modified": "2026-11-04 12:00:00.000000"
+}

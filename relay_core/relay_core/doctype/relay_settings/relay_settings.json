@@ -21,6 +21,8 @@
     "max_ai_file_size_mb",
     "trusted_adapter_apps",
     "company_neutral_types",
+    "allowed_ai_auth_types",
+    "allow_ai_write_actions",
     "monthly_spend_cap_usd",
     "ai_log_retention_days",
     "send_whatsapp_read_receipts",
@@ -145,6 +147,21 @@
       "description": "One DocType per line. A capability without a company field can read these types only while the site has one Company."
     },
     {
+      "fieldname": "allowed_ai_auth_types",
+      "label": "Allowed AI auth types",
+      "fieldtype": "Small Text",
+      "default": "ChatGPT Login",
+      "description": "AI Provider Account auth types that Relay AI may use, one per line. Empty means ChatGPT Login only. API Key and Setup Token accounts use paid API credit: add them only on purpose."
+    },
+    {
+      "fieldname": "allow_ai_write_actions",
+      "label": "Allow AI write actions",
+      "fieldtype": "Check",
+      "default": "0",
+      "depends_on": "enable_ai_features",
+      "description": "Off: AI only reads and replies. It offers and runs no draft or other write action, also for skills that declare one. On: declared draft actions still wait for staff approval."
+    },
+    {
       "fieldname": "monthly_spend_cap_usd",
       "label": "Monthly AI spend cap (USD)",
       "fieldtype": "Currency",
@@ -249,5 +266,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-11-02 12:00:00.000000"
+  "modified": "2026-11-04 15:00:00.000000"
 }

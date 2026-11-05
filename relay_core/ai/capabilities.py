@@ -1,4 +1,4 @@
-"""App-declared AI capability packs. The AI uses a pack only after an owner approves its exact hash."""
+"""App-declared AI capability packs and code tools. The AI uses one only after an owner approves its exact hash."""
 import hashlib
 import json
 import re
@@ -173,8 +173,12 @@ def manifest_hash(manifest: dict) -> str:
 
 def sync():
     """after_migrate: one row per declared pack. A new or changed pack waits for approval; Core packs are
-    reviewed with Core and approve themselves."""
-    loaded = manifests()
+    reviewed with Core and approve themselves. Code tools from `relay_ai_tools` are rows of kind Tool."""
+    from relay_core.ai.registry.sync import manifests as tool_manifests
+    loaded, tools = manifests(), tool_manifests()
+    if set(loaded) & set(tools):
+        raise ValueError(f'Capability keys {sorted(set(loaded) & set(tools))} are declared as packs and as tools')
+    loaded.update(tools)
     for key, manifest in loaded.items():
         digest = manifest_hash(manifest)
         exists = frappe.db.exists(DOCTYPE, key)
@@ -234,7 +238,7 @@ def trusted_apps() -> set[str]:
 
 
 def packs(kind: str, **filters) -> list[dict]:
-    """Active manifests of one kind ('Read' or 'Action'), in key order."""
+    """Active manifests of one kind ('Read', 'Action' or 'Tool'), in key order."""
     keys = frappe.get_all(DOCTYPE, filters=dict(filters, kind=kind, enabled=1, status='Approved'),
                           pluck='name', order_by='name asc')
     active_packs = []

@@ -1,0 +1,238 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Knowledge Source",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIKS-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "title_field": "title",
+  "description": "One document, page, file, DocType or event that is chunked into a knowledge base.",
+  "field_order": [
+    "title",
+    "knowledge_base",
+    "source_type",
+    "content",
+    "file",
+    "url",
+    "event",
+    "doctype_section",
+    "reference_doctype",
+    "filters",
+    "content_fields",
+    "business_field",
+    "current_hash",
+    "approved_hash",
+    "approved_by",
+    "approved_on",
+    "sync_section",
+    "auto_sync",
+    "chunk_size",
+    "chunk_overlap",
+    "column_break_status",
+    "status",
+    "chunk_count",
+    "last_synced_at",
+    "revision",
+    "error_log"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "knowledge_base",
+      "label": "Knowledge base",
+      "fieldtype": "Link",
+      "options": "Relay AI Knowledge Base",
+      "reqd": 1,
+      "in_list_view": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "source_type",
+      "label": "Source type",
+      "fieldtype": "Select",
+      "options": "Text\nFile\nURL\nDocType\nEvent",
+      "default": "Text",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "content",
+      "label": "Content",
+      "fieldtype": "Long Text",
+      "depends_on": "eval:doc.source_type==\"Text\""
+    },
+    {
+      "fieldname": "file",
+      "label": "File",
+      "fieldtype": "Attach",
+      "depends_on": "eval:doc.source_type==\"File\""
+    },
+    {
+      "fieldname": "url",
+      "label": "URL",
+      "fieldtype": "Data",
+      "options": "URL",
+      "depends_on": "eval:doc.source_type==\"URL\""
+    },
+    {
+      "fieldname": "event",
+      "label": "Event",
+      "fieldtype": "Link",
+      "options": "Relay AI Event",
+      "read_only": 1,
+      "depends_on": "eval:doc.source_type==\"Event\""
+    },
+    {
+      "fieldname": "doctype_section",
+      "label": "DocType rows",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.source_type==\"DocType\""
+    },
+    {
+      "fieldname": "reference_doctype",
+      "label": "DocType",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "filters",
+      "label": "Filters",
+      "fieldtype": "JSON",
+      "description": "A filter object, for example {\"disabled\": 0}."
+    },
+    {
+      "fieldname": "content_fields",
+      "label": "Content fields",
+      "fieldtype": "Small Text",
+      "description": "Fields to index, one per line."
+    },
+    {
+      "fieldname": "business_field",
+      "label": "Business field",
+      "fieldtype": "Data",
+      "description": "The Link field to the business (for example customer). Each row is then found only by that business. Required in a customer knowledge base unless the DocType is company neutral reference data."
+    },
+    {
+      "fieldname": "current_hash",
+      "label": "Configuration hash",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "approved_hash",
+      "label": "Approved hash",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "A changed configuration stops ingest and search until a manager approves it."
+    },
+    {
+      "fieldname": "approved_by",
+      "label": "Approved by",
+      "fieldtype": "Link",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "approved_on",
+      "label": "Approved on",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sync_section",
+      "label": "Sync",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "auto_sync",
+      "label": "Sync daily",
+      "fieldtype": "Check",
+      "default": "0",
+      "description": "DocType and URL sources only."
+    },
+    {
+      "fieldname": "chunk_size",
+      "label": "Chunk size",
+      "fieldtype": "Int",
+      "default": "1200",
+      "non_negative": 1,
+      "description": "Characters, 200 to 4000."
+    },
+    {
+      "fieldname": "chunk_overlap",
+      "label": "Chunk overlap",
+      "fieldtype": "Int",
+      "default": "150",
+      "non_negative": 1,
+      "description": "Characters, less than half the chunk size."
+    },
+    {
+      "fieldname": "column_break_status",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Pending\nProcessing\nCompleted\nFailed",
+      "default": "Pending",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "chunk_count",
+      "label": "Chunks",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_synced_at",
+      "label": "Last synced at",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "revision",
+      "label": "Revision",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "hidden": 1
+    },
+    {
+      "fieldname": "error_log",
+      "label": "Error",
+      "fieldtype": "Small Text",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 14:00:00.000000"
+}

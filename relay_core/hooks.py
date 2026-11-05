@@ -5,7 +5,7 @@ app_description = "Multi-channel business communication"
 app_email = "support@andrometiq.com"
 app_license = "MIT"
 before_install = "relay_core.permissions.install_roles"
-after_migrate = ["relay_core.permissions.after_migrate", "relay_core.ai.capabilities.sync"]
+after_migrate = ["relay_core.permissions.after_migrate", "relay_core.ai.capabilities.sync", "relay_core.ai.playbooks.sync"]
 after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
 
@@ -23,7 +23,8 @@ scheduler_events = {
     },
     "hourly": ["relay_core.scheduled_jobs.expire_approvals"],
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels",
-              "relay_core.scheduled_jobs.purge_ai_payloads"],
+              "relay_core.scheduled_jobs.purge_ai_payloads", "relay_core.scheduled_jobs.sync_ai_knowledge",
+              "relay_core.scheduled_jobs.purge_ai_memory"],
 }
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
@@ -44,6 +45,9 @@ relay_flow_actions['reply'] = _reply_action
 # AI capability packs: a dotted path per app, because get_hooks would merge nested dict values into lists.
 relay_ai_capabilities = 'relay_core.ai.builtin_capabilities.CAPABILITIES'
 relay_ai_capability_prefix = 'erpnext'
+# AI code tools: dotted paths to @relay_tool functions of the declaring app, e.g. ['acme_app.relay.tools.open_orders'].
+relay_ai_tools = ['relay_core.ai.knowledge_base.retriever.search_knowledge', 'relay_core.ai.playbooks.load_playbook',
+                  'relay_core.ai.fact_memory.remember', 'relay_core.ai.ticket_memory.my_tickets']
 
 # Realtime invalidations contain no record payload; browser reads recheck permissions.
 from relay_core.realtime import RESOURCES as _realtime_resources
@@ -88,11 +92,15 @@ page_renderer = ["relay_core.whatsapp_redirects.WhatsAppRedirectPage"]
 
 # A Relay AI Event rebuilds its memory when one of its attachments is added, changed or removed.
 doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for event in ('on_update', 'after_delete')}
+# Each Relay AI Event is one knowledge source; its chunks follow the event.
+doc_events.setdefault('Relay AI Event', {}).update(
+    {event: 'relay_core.ai.knowledge_base.ingest.on_event_change' for event in ('on_update', 'on_trash')})
 
 # Cover generic Desk/REST access as well as the dedicated AI APIs.
 for _doctype in ('Relay AI Skill', 'Relay AI Knowledge', 'Relay AI Event', 'Relay AI Event Build',
                  'Relay Memory', 'Relay AI Provider', 'Relay Learned Procedure', 'Relay Automation Policy',
-                 'Relay Conversation Summary', 'Relay Message Translation'):
+                 'Relay Conversation Summary', 'Relay Message Translation', 'Relay AI Playbook',
+                 'Relay AI Knowledge Base', 'Relay AI Knowledge Source', 'Relay AI Knowledge Chunk', 'Relay AI Memory'):
     has_permission[_doctype] = 'relay_core.ai_features.document_permission'
     permission_query_conditions[_doctype] = 'relay_core.ai_features.query_condition'
     doc_events.setdefault(_doctype, {})['validate'] = 'relay_core.ai_features.validate_document'
