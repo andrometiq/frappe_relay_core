@@ -51,6 +51,7 @@ class BoundaryTests(unittest.TestCase):
         self.module('frappe.permissions', has_permission=Mock(return_value=True))
         self.frappe.db.get_value.return_value = None
         self.frappe.db.exists.return_value = False
+        self.load('relay_core.locks')
         self.identity = self.load('relay_core.identity')
         self.contacts = self.load('relay_core.contacts')
         self.lifecycle = self.load('relay_core.contact_lifecycle')

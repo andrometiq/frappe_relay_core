@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from frappe import _dict
 from channel_fakes import FakeSite
-from relay_core import contact_lifecycle
+from relay_core import contact_lifecycle, locks
 from relay_core.automation import projection
 
 NUMBER = '919999999999'
@@ -29,7 +29,8 @@ def site(*endpoints, channels=None):
 
 class SiblingContactTests(unittest.TestCase):
     def bind(self, fake, channel='Support', endpoint=NUMBER):
-        with patch.object(contact_lifecycle, 'frappe', fake.frappe), patch('frappe.get_all', fake.get_all):
+        with patch.object(contact_lifecycle, 'frappe', fake.frappe), patch.object(locks, 'frappe', fake.frappe), \
+                patch('frappe.get_all', fake.get_all):
             return contact_lifecycle.sibling_contact(channel, endpoint)
 
     def test_same_customer_on_two_numbers_is_one_contact_with_two_endpoints(self):

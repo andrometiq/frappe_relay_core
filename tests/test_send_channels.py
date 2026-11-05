@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from frappe import _dict
 from channel_fakes import FakeSite
-from relay_core import channel_statuses, hub_channels, messaging, whatsapp_presence
+from relay_core import channel_statuses, hub_channels, locks, messaging, whatsapp_presence
 
 SHOP = {'name': 'Shop', 'channel': 'WhatsApp', 'account': 'site-a', 'hub_channel': 'site-a', 'enabled': 1, 'label': 'Shop',
         'address': '+91 1', 'title': 'Shop'}
@@ -228,7 +228,7 @@ class StartChannelTests(unittest.TestCase):
              'endpoint_key': key('Shop', '919999999999')}],
             on_insert={'Relay Contact Endpoint': lambda row: row.update(endpoint_key=key(row['channel'], row['endpoint']))})
         with patch.object(conversation_start, 'frappe', site.frappe), patch.object(contact_lifecycle, 'frappe', site.frappe), \
-                patch('frappe.get_all', site.get_all), patch.object(conversation_start, 'readable_contact'), \
+                patch.object(locks, 'frappe', site.frappe), patch('frappe.get_all', site.get_all), patch.object(conversation_start, 'readable_contact'), \
                 patch.object(conversation_start, 'connection_value', return_value='site-a'):
             return conversation_start.channel_endpoint('C1', 'E1', channel), site
 

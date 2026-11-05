@@ -183,7 +183,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_schedule_checks_now_and_unschedule_returns_to_draft(self):
         doc = campaign(scheduled_at=None)
-        cache = SimpleNamespace(lock=lambda *args, **kwargs: nullcontext(), delete_value=Mock())
+        cache = SimpleNamespace(lock=lambda *args, **kwargs: nullcontext(), make_key=str, delete_value=Mock())
         with patch.object(bulk_campaigns, 'require_access'), patch.object(bulk_campaigns, 'bulk', return_value=doc), \
                 patch.object(bulk_campaigns, 'check_ready', return_value={}) as check_ready, \
                 patch.object(bulk_campaigns, 'internal_save'), patch.object(bulk_campaigns, 'read'), \

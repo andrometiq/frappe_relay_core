@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, build_opener
 
 import frappe
-from relay_core import test_mode
+from relay_core import test_mode, locks
 from relay_core.hub import HubClient, HubError, NoRedirect
 from relay_core.onboarding.messages import OnboardingError
 from relay_core.permissions import HUB_SERVICE
@@ -162,7 +162,7 @@ def connect(setup_code='', reconnect=False):
 
     Every call, also on an existing link, reads the Hub channels and checks the link again, so Try again re-checks."""
     from relay_core.settings import value
-    with frappe.cache.lock(frappe.cache.make_key('relay-enrolment'), timeout=120, blocking_timeout=60):
+    with locks.lock('relay-enrolment', timeout=120, blocking_timeout=60):
         if not reconnect and value('relay_hub_url') and value('relay_hub_token') and value('relay_hub_account'):
             result = {'site_id': value('relay_hub_account'), 'mcp_url': value('relay_hub_url'),
                       'hub_token': value('relay_hub_token'), 're_enrolled': False}

@@ -4,7 +4,7 @@ from io import BytesIO
 
 import frappe
 from relay_core.business_access import document_name
-from relay_core import bulk_sheet, contacts, identity
+from relay_core import bulk_sheet, contacts, identity, locks
 
 COLUMNS = ('Mobile', 'Email', 'Contact name', 'Business type', 'Business record')
 MAX_ROWS = 2000
@@ -201,12 +201,12 @@ def run(file_url, channel=None, *, apply=False):
     except RowProblem as exc:
         return {'error': str(exc)}
     # Shared phone mutex with inbound enrollment; serialize imports across all identities.
-    with ExitStack() as locks:
+    with ExitStack() as held:
         if apply:
-            locks.enter_context(frappe.cache.lock('relay-contact-import', timeout=900, blocking_timeout=5))
+            held.enter_context(locks.lock('relay-contact-import', timeout=900, blocking_timeout=5))
             numbers = sorted({bulk_sheet.sheet_phone(values['Mobile'], region) for _, values in rows} - {None})
             for number in numbers:
-                locks.enter_context(frappe.cache.lock('relay-whatsapp-person:' + number, timeout=900))
+                held.enter_context(locks.lock('relay-whatsapp-person:' + number, timeout=900))
         result = process(rows, region, apply=apply, channel=channel)
         if apply:
             # Keep import/enrollment mutexes until the created identities are visible

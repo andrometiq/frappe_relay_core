@@ -8,6 +8,7 @@ from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
 from relay_core.automation.service import internal_save
 from relay_core.timeline import provider_time
+from relay_core import locks
 
 
 def active_channel(name=None):
@@ -180,7 +181,7 @@ def _store_recording(provider_id, content):
     else:frappe.throw('Choose a WebM, Ogg or MP4 audio recording')
     checksum=hashlib.sha256(content).hexdigest()
     key=hashlib.sha256((doc.name+':'+frappe.session.user+':'+checksum).encode()).hexdigest()
-    with frappe.cache.lock('relay-call-recording-'+key,timeout=30,blocking_timeout=3):
+    with locks.lock('relay-call-recording-'+key,timeout=30,blocking_timeout=3):
         existing=frappe.db.get_value('Relay Call Recording',{'recording_key':key},'name')
         if existing:return {'name':existing}
         record=frappe.get_doc(dict(doctype='Relay Call Recording',call=doc.name,uploaded_by=frappe.session.user,checksum=checksum,
@@ -242,7 +243,7 @@ def admit_call(payload,channel,contact,request_key):
     if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}',request_key):frappe.throw('A stable call request key is required')
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
     lock=call_key(channel,payload['to'])
-    with frappe.cache.lock('relay-call-admission:'+lock,timeout=30,blocking_timeout=3):
+    with locks.lock('relay-call-admission:'+lock,timeout=30,blocking_timeout=3):
         name=frappe.db.get_value('Relay Call Attempt',{'request_key':key},'name')
         if name:
             attempt=frappe.get_doc('Relay Call Attempt',name)
@@ -338,7 +339,7 @@ def resolve_attempt(name, outcome, evidence, provider_id=None):
     doc = frappe.get_doc('Relay Call Attempt', name)
     readable_contact(doc.relay_contact)
     frappe.get_doc('Relay Channel', doc.channel).check_permission('read')
-    with frappe.cache.lock('relay-call-admission:' + call_key(doc.channel, doc.endpoint), timeout=30, blocking_timeout=3):
+    with locks.lock('relay-call-admission:' + call_key(doc.channel, doc.endpoint), timeout=30, blocking_timeout=3):
         frappe.db.get_value('Relay Call Attempt', name, 'name', for_update=True)
         doc.reload()
         linked = None

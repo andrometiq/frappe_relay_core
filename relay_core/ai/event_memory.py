@@ -12,7 +12,7 @@ import frappe
 from relay_core.business_access import document_name
 from frappe.utils import cint, getdate, now_datetime
 
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.ai.event_sources import MB, Source, SourceError, fit, read_file, read_link
 
 EVENT = 'Relay AI Event'
@@ -106,8 +106,7 @@ def rebuild(event: str) -> None:
 
 @ai_features.when_enabled
 def build(relay_event: str, triggered_by: str | None = None, force: bool = False) -> None:
-    key = frappe.cache.make_key('relay-ai-event:' + relay_event)
-    with frappe.cache.lock(key, timeout=LOCK_TIMEOUT, blocking_timeout=LOCK_TIMEOUT):
+    with locks.lock('relay-ai-event:' + relay_event, timeout=LOCK_TIMEOUT, blocking_timeout=LOCK_TIMEOUT):
         EventBuild(relay_event, triggered_by).run(force)
 
 

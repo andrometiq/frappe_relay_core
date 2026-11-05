@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns, bulk_sheet, bulk_updates, inbound
+from relay_core import bulk_campaigns, bulk_sheet, bulk_updates, inbound, locks
 from relay_core.hub import HubError
 
 
@@ -284,7 +284,7 @@ class ApplyTests(unittest.TestCase):
                 patch.object(bulk_campaigns, 'lock_campaign', side_effect=lambda name: order.append('lock')), \
                 patch.object(bulk_campaigns, 'bulk', side_effect=lambda *args: order.append('read') or doc), \
                 patch.object(bulk_campaigns, 'internal_save', side_effect=lambda doc: order.append('save')), \
-                patch('frappe.cache', SimpleNamespace(lock=lambda *args, **kwargs: nullcontext(), delete_value=Mock())):
+                patch('frappe.cache', SimpleNamespace(lock=lambda *args, **kwargs: nullcontext(), make_key=str, delete_value=Mock())):
             bulk_campaigns.control('Winter launch', 'pause')
         self.assertEqual(order, ['lock', 'read', 'save'])
         self.assertEqual(doc.status, 'Paused')
@@ -381,6 +381,7 @@ class SenderTests(unittest.TestCase):
         self.db.get_value.return_value = 'Running'
         self.fake = SimpleNamespace(db=self.db, utils=UTILS, cache=self.cache, enqueue=Mock(), session=_dict(user='manager@example.invalid'))
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.enterContext(patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())))
         self.timeline = self.enterContext(patch('relay_core.bulk_timeline.record'))
         self.reserve = self.enterContext(patch('relay_core.bulk_timeline.reserve', return_value=41))
@@ -591,13 +592,13 @@ class SenderTests(unittest.TestCase):
 class ControlTests(unittest.TestCase):
     def test_start_checks_the_template_before_taking_the_lock_and_rechecks_status_inside(self):
         order = []
-        cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()), delete_value=Mock())
+        cache = SimpleNamespace(lock=MagicMock(side_effect=lambda *a, **k: order.append('lock') or MagicMock()), make_key=str, delete_value=Mock())
         fake = SimpleNamespace(db=Mock(exists=Mock(return_value=True), count=Mock(return_value=1)), cache=cache, utils=UTILS, enqueue=Mock(),
                                session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Draft', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72)
         hub = Mock()
-        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(locks, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
                 patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, patch.object(bulk_campaigns, 'whatsapp_channel'), \
                 patch.object(bulk_campaigns.whatsapp, 'checked_client', side_effect=lambda: order.append('hub') or (hub, {})), \
                 patch.object(bulk_campaigns, 'approved_template'), patch.object(bulk_campaigns, 'internal_save'), \
@@ -617,7 +618,7 @@ class ControlTests(unittest.TestCase):
                                enqueue=Mock(), session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError))
         doc = _dict(name='Winter launch', status='Paused', channel='WA', template_name='notice', language='en', last_error='',
                     reply_window_hours=72, started_at='2026-10-26 09:00:00')
-        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(locks, 'frappe', fake), patch.object(bulk_campaigns, 'require_access'), \
                 patch.object(bulk_campaigns, 'bulk', return_value=doc), patch.object(bulk_campaigns, 'whatsapp_channel'), \
                 patch.object(bulk_campaigns.whatsapp, 'checked_client', return_value=(Mock(), {})), \
                 patch.object(bulk_campaigns, 'approved_template'), patch.object(bulk_campaigns, 'internal_save'), \
@@ -819,8 +820,8 @@ class JsonRowTests(unittest.TestCase):
                                get_all=Mock(return_value=[_dict(destination='919876543210', arguments=json.dumps({'values': {'text:name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'}}))]))
         rows = [{'phone': '9876543210', 'name': 'Asha', 'media_url': 'https://cdn.example/a.jpg'},
                 {'phone': '9876543211', 'name': 'Ravi', 'media_url': 'https://cdn.example/b.jpg'}]
-        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, \
-                patch.object(bulk_campaigns, 'read', return_value='read'), patch('relay_core.bulk_updates.changed'), \
+        with patch.object(bulk_campaigns, 'frappe', fake), patch.object(locks, 'frappe', fake), \
+                patch.object(bulk_campaigns, 'bulk', return_value=doc) as bulk, patch.object(bulk_campaigns, 'read', return_value='read'), patch('relay_core.bulk_updates.changed'), \
                 patch.object(bulk_campaigns, 'endpoint_facts', return_value=({}, set())):
             self.assertEqual(bulk_campaigns.append_rows('Promo', rows), 'read')
             bulk.assert_called_once_with('Promo', ('Draft',))

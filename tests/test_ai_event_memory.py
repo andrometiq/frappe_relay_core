@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
 
-from relay_core import test_mode
+from relay_core import locks, test_mode
 from relay_core.ai import event_memory, event_sources
 from relay_core.ai.event_sources import MB, Source, SourceError
 
@@ -185,7 +185,8 @@ class QueueTests(unittest.TestCase):
             event_memory.build(**job_kwargs)
 
         fake.enqueue.side_effect = run_job
-        with patch.object(event_memory, 'frappe', fake), patch.object(event_memory, 'get_revision', return_value='R1'), \
+        with patch.object(event_memory, 'frappe', fake), patch.object(locks, 'frappe', fake), \
+             patch.object(event_memory, 'get_revision', return_value='R1'), \
              patch('relay_core.ai_features.is_enabled', return_value=True), \
              patch('relay_core.ai.knowledge_base.ingest.queue_event') as queue_event, \
              patch.object(event_memory.EventBuild, 'run', autospec=True,

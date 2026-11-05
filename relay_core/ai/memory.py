@@ -18,7 +18,7 @@ import frappe
 from frappe.query_builder.functions import IfNull, Max
 from frappe.utils import add_days, add_months, get_first_day, get_last_day, getdate
 
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.ai.adapter import MAX_JSON_PROMPT_LENGTH, complete_json
 from relay_core.automation.service import internal_save
 from relay_core.relay_chats import key_of
@@ -187,8 +187,7 @@ class Memory:
         frappe.db.commit()
 
     def lock(self):
-        return frappe.cache.lock('relay-memory:' + json.dumps(self.key, sort_keys=True), timeout=1800,
-                                 blocking_timeout=1)
+        return locks.lock('relay-memory:' + json.dumps(self.key, sort_keys=True), timeout=1800, blocking_timeout=1)
 
     def get_cursor(self, since: date) -> str:
         """The last folded message of the rows from `since` on."""

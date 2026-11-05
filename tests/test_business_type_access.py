@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import frappe
 from frappe import _dict
-from relay_core import business_access as access, business_inbox, business_groups, permissions, api
+from relay_core import business_access as access, business_inbox, business_groups, permissions, api, locks
 
 
 class BusinessTypeAccessTests(unittest.TestCase):
@@ -241,13 +241,14 @@ class BusinessTypeAccessTests(unittest.TestCase):
             ('R1' if isinstance(name, dict) else 'customer') if dt == 'Relay Contact' else
             'WhatsApp' if dt == 'Relay Channel' else 'WA' if dt == 'Relay Contact Endpoint' else None)
         self.fake.db.commit = Mock()
-        self.fake.cache = SimpleNamespace(lock=lambda *a, **kw: nullcontext())
+        self.fake.cache = SimpleNamespace(lock=lambda *a, **kw: nullcontext(), make_key=str)
         self.fake.ValidationError = frappe.ValidationError
         self.fake.get_all = lambda dt, **kw: [_dict(name='E1')] if dt == 'Relay Contact Endpoint' else self.get_all(dt, **kw)
         hub = Mock()
         hub.call_tool.return_value = {'message_id': 'local-provider-id'}
         with patch.dict(sys.modules, {'frappe': self.fake}), \
-                patch.object(start, 'frappe', self.fake), patch.object(start, 'connection_value', return_value='local-test'), \
+                patch.object(start, 'frappe', self.fake), patch.object(locks, 'frappe', self.fake), \
+                patch.object(start, 'connection_value', return_value='local-test'), \
                 patch.object(start, 'enroll_business_contact'), patch.object(start, 'internal_save'), \
                 patch.object(access, 'candidates', return_value=[('Customer', 'LOCAL-C1')]), \
                 patch('relay_core.hub_channels.is_current', return_value=True), \

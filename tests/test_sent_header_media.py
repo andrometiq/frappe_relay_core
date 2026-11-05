@@ -159,7 +159,7 @@ class OneToOneHeaderTests(unittest.TestCase):
         lock = MagicMock()
         with patch.object(conversation_start, 'channel_endpoint', return_value='EP-1'), \
                 patch.object(conversation_start, 'send_locked', return_value=result), \
-                patch.object(conversation_start.frappe, 'cache', SimpleNamespace(lock=lambda *args, **kwargs: lock)), \
+                patch.object(conversation_start.frappe, 'cache', SimpleNamespace(lock=lambda *args, **kwargs: lock, make_key=str)), \
                 patch.object(conversation_start.frappe, 'session', SimpleNamespace(user='staff@example.com')), \
                 patch.object(conversation_start.frappe, 'log_error') as log_error, \
                 patch.object(template_media, 'keep_header', side_effect=FileNotFoundError('offer.mp4')):

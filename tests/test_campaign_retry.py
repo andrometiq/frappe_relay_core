@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns as bulk
+from relay_core import bulk_campaigns as bulk, locks
 
 USER = 'local-campaign-manager@example.invalid'
 
@@ -30,9 +30,10 @@ class DeliveryReasonTests(unittest.TestCase):
 class RetryFailedTests(unittest.TestCase):
     def setUp(self):
         self.db = Mock(exists=Mock(return_value=True))
-        self.fake = SimpleNamespace(db=self.db, cache=SimpleNamespace(lock=MagicMock(), delete_value=Mock()),
+        self.fake = SimpleNamespace(db=self.db, cache=SimpleNamespace(lock=MagicMock(), make_key=str, delete_value=Mock()),
                                     session=_dict(user=USER), utils=SimpleNamespace(now=lambda: '2026-10-30 12:00:00'))
         self.enterContext(patch.object(bulk, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.doc = _dict(name='Local retry', status='Completed', reply_window_hours=72, finished_at='2026-10-30 11:00:00',
                          arguments=json.dumps({'fields': [], 'phases': [{'phase': 'Retrying failed'}]}))
         self.enterContext(patch.object(bulk, 'bulk', return_value=self.doc))
@@ -53,7 +54,8 @@ class RetryFailedTests(unittest.TestCase):
         self.assertEqual((self.doc.status, self.doc.finished_at, self.doc.media_id), ('Running', None, '42'))
         self.assertEqual(json.loads(self.doc.arguments)['phases'][-1]['phase'], 'Retrying failed')
         self.enqueue.assert_called_once_with('send_job', self.doc.name, slot='control')
-        self.fake.cache.lock.assert_called_once_with('relay-bulk-control:' + self.doc.name, timeout=30)
+        self.fake.cache.lock.assert_called_once_with(locks.PREFIX + 'relay-bulk-control:' + self.doc.name, timeout=30,
+                                                    blocking_timeout=None)
         self.assertEqual(self.db.commit.call_count, 2)  # Fresh snapshot inside the lock, then the retry.
 
     def test_repeated_call_or_no_failed_rows_changes_nothing(self):

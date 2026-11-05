@@ -2,7 +2,7 @@
 from collections import defaultdict
 import hashlib
 import frappe
-from relay_core import summaries
+from relay_core import summaries, locks
 from relay_core.automation.contracts import canonical
 
 
@@ -22,7 +22,7 @@ def daily(contact,channel,day,evidence):
     if not policy_name:frappe.throw('Enable summaries in the channel’s Desk AI policy before requesting a summary report')
     policy=frappe.get_doc('Relay Automation Policy',policy_name)
     key=hashlib.sha256(canonical(['daily-report',frappe.session.user,contact,channel,day,policy.name,str(policy.modified),summaries.digest(evidence)]).encode()).hexdigest()
-    with frappe.cache.lock('relay-daily-summary:'+key,timeout=180,blocking_timeout=150):
+    with locks.lock('relay-daily-summary:'+key,timeout=180,blocking_timeout=150):
         name=frappe.db.get_value('Relay Conversation Summary',{'request_key':key},'name')
         if name:
             doc=frappe.get_doc('Relay Conversation Summary',name)

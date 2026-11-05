@@ -5,7 +5,7 @@ import re
 import frappe
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
-from relay_core import whatsapp
+from relay_core import whatsapp, locks
 from relay_core.automation.provenance import email_message_id
 
 
@@ -104,7 +104,7 @@ def send(to, subject, body, cc=None, bcc=None, request_key=None, message=None, h
     if len(encoded.encode())>1024*1024:raise ValueError('Email request exceeds 1 MiB')
     digest=hashlib.sha256(encoded.encode()).hexdigest()
     key=hashlib.sha256(('email:'+frappe.session.user+':'+request_key).encode()).hexdigest()
-    with frappe.cache.lock('relay-email-attempt:'+key,timeout=120,blocking_timeout=3):
+    with locks.lock('relay-email-attempt:'+key,timeout=120,blocking_timeout=3):
         notification=outgoing_notification.get()
         keys=[key,request_key] if notification and not message else [key]
         existing=frappe.db.get_value('Relay Message Action',{'request_key':['in',keys],'owner':frappe.session.user},'name',for_update=True)

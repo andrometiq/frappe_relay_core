@@ -9,7 +9,7 @@ import types
 import frappe
 from frappe.utils import now_datetime, nowdate
 
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.ai.knowledge_base import store
 from relay_core.ai.knowledge_base.chunker import chunk_text
 
@@ -34,8 +34,7 @@ def queue_sync(source: str, rebuild: bool = False, revision: str | None = None) 
 def sync(source: str, rebuild: bool = False) -> None:
     if not frappe.db.exists(SOURCE, source):
         return
-    key = frappe.cache.make_key('relay-ai-knowledge:' + source)
-    with frappe.cache.lock(key, timeout=LOCK_TIMEOUT, blocking_timeout=LOCK_TIMEOUT):
+    with locks.lock('relay-ai-knowledge:' + source, timeout=LOCK_TIMEOUT, blocking_timeout=LOCK_TIMEOUT):
         SourceSync(source).run(rebuild)
 
 

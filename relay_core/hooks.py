@@ -105,7 +105,6 @@ for _doctype in ('Relay AI Skill', 'Relay AI Knowledge', 'Relay AI Event', 'Rela
     permission_query_conditions[_doctype] = 'relay_core.ai_features.query_condition'
     doc_events.setdefault(_doctype, {})['validate'] = 'relay_core.ai_features.validate_document'
 
-# frappe.clear_cache() (migrate, install, site setup) deletes every site-scoped key. Site-scoped locks and the
+# frappe.clear_cache() (migrate, install, site setup) deletes every site-scoped key. relay_core.locks keys and the
 # bulk refresh marks keep theirs, so a running job still owns its lock and no other job takes it.
-persistent_cache_keys = ['relay-ai-knowledge:*', 'relay-ai-event:*', 'relay-mcp-chat:*', 'relay-signup:*',
-                         'relay-enrolment', 'relay-bulk-dirty']
+persistent_cache_keys = ['relay-lock:*', 'relay-bulk-dirty']

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import DuplicateEntryError, FakeSite
-from relay_core import channel_sync
+from relay_core import channel_sync, locks
 from relay_core.automation import projection
 from relay_core.hub import HubError
 
@@ -23,7 +23,7 @@ class ChannelSyncTests(unittest.TestCase):
         settings = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
         site.frappe.publish_realtime = Mock()
         site.frappe.realtime = Mock(get_doctype_room=lambda doctype: 'doctype:' + doctype)
-        with patch.object(channel_sync, 'frappe', site.frappe), \
+        with patch.object(channel_sync, 'frappe', site.frappe), patch.object(locks, 'frappe', site.frappe), \
                 patch.object(channel_sync, 'connection_value', settings.get), \
                 patch('relay_core.whatsapp.client', return_value=hub):
             return channel_sync.sync(), hub
@@ -49,7 +49,7 @@ class ChannelSyncTests(unittest.TestCase):
         lock = Mock()
         lock.__enter__ = Mock(side_effect=lambda: events.append('lock'))
         lock.__exit__ = Mock(side_effect=lambda *args: events.append('unlock'))
-        frappe.cache = Mock(lock=Mock(return_value=lock))
+        frappe.cache = Mock(lock=Mock(return_value=lock), make_key=str)
         frappe.db.commit = Mock(side_effect=lambda: events.append('commit'))
         with patch.object(channel_sync, 'store', side_effect=lambda *args: events.append('store') or {}):
             self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'}))

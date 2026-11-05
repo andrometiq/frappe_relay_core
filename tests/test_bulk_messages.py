@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns, bulk_sheet, service_window
+from relay_core import bulk_campaigns, bulk_sheet, locks, service_window
 from test_bulk_campaigns import NAMED, POSITIONAL, UTILS, FakeCache
 from site_file_limit import use_relay_file_limit
 
@@ -151,6 +151,7 @@ class MediaUploadTests(unittest.TestCase):
                                     session=_dict(user='manager@example.invalid'), throw=Mock(side_effect=frappe.ValidationError),
                                     log_error=Mock())
         self.enterContext(patch.object(bulk_campaigns, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         for name in ('require_access', 'whatsapp_channel', 'read'):
             self.enterContext(patch.object(bulk_campaigns, name))
         self.save = self.enterContext(patch.object(bulk_campaigns, 'internal_save'))

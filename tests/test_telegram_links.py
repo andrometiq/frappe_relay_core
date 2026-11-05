@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlsplit, parse_qs
 
 from frappe import _dict
-from relay_core import telegram_links as links
+from relay_core import locks, telegram_links as links
 
 CHANNELS = {'Acme bot': 'site-a', 'Sales bot': 'site-a'}
 
@@ -25,6 +25,9 @@ class FakeCache:
     def delete_value(self, key):
         self.values.pop(key, None)
 
+    def make_key(self, key):
+        return key
+
     def lock(self, *args, **kwargs):
         return nullcontext()
 
@@ -36,6 +39,7 @@ class TelegramLinkTests(unittest.TestCase):
                                     db=SimpleNamespace(get_value=lambda doctype, name, field: CHANNELS.get(name)),
                                     publish_realtime=Mock())
         self.enterContext(patch.object(links, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.enterContext(patch.object(links, 'connection_value', lambda key: self.account))
         self.enroll = self.enterContext(patch('relay_core.contact_lifecycle.enroll', return_value=_dict(name='CE-1')))
         self.changed = self.enterContext(patch('relay_core.realtime.contact_changed'))

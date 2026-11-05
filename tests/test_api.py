@@ -5,7 +5,7 @@ import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
-from relay_core import file_limits
+from relay_core import file_limits, locks
 from site_file_limit import use_relay_file_limit
 
 class ApiTests(unittest.TestCase):
@@ -18,6 +18,7 @@ class ApiTests(unittest.TestCase):
         def throw(message,*args):raise ValueError(message)
         self.f=types.SimpleNamespace(whitelist=whitelist,throw=throw,get_doc=Mock(),get_list=Mock(return_value=[]))
         self.enterContext(patch('relay_core.business_access.frappe', self.f))
+        self.enterContext(patch.object(locks, 'frappe', self.f))
         spec=importlib.util.spec_from_file_location('tested_relay_api',Path('relay_core/api.py'))
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)
@@ -291,7 +292,7 @@ class ChannelUITests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda dt, name: binding if dt == 'Relay Contact Endpoint' else Mock()
         self.f.db = types.SimpleNamespace(get_value=Mock(side_effect=['person', None]))
         self.f.new_doc = Mock(return_value=doc)
-        self.f.cache = types.SimpleNamespace(lock=lambda *a, **kw:nullcontext())
+        self.f.cache = types.SimpleNamespace(lock=lambda *a, **kw:nullcontext(), make_key=str)
         modules={'relay_core.conversation_start':types.SimpleNamespace(business_contact=Mock()),
                  'relay_core.channel_preferences':types.SimpleNamespace(scope_key=lambda *a:'scope')}
         with patch.dict(sys.modules, modules):

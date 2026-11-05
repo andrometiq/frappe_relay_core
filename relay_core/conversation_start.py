@@ -6,7 +6,7 @@ import frappe
 from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
-from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates
+from relay_core import messaging, whatsapp, service_window, template_media, whatsapp_templates, locks
 from relay_core.automation.service import internal_save
 from relay_core.message_types import text
 
@@ -254,7 +254,7 @@ def send(contact, endpoint, kind, data, request_key, business_doctype=None, busi
     if not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,120}',request_key):raise ValueError('A stable request key is required')
     endpoint=channel_endpoint(contact,endpoint,channel)
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
-    with frappe.cache.lock('relay-start:'+key,timeout=120,blocking_timeout=3):
+    with locks.lock('relay-start:'+key,timeout=120,blocking_timeout=3):
         result=send_locked(contact,endpoint,kind,data,request_key,business_doctype,business_name)
         try:
             template_media.keep_header(result,kind,messaging.object_value(data))

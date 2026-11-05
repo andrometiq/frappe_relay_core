@@ -10,6 +10,7 @@ import time
 import frappe
 from relay_core.permissions import readable_contact, require_access
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 CODE_SECONDS = 15 * 60
 CACHE = 'relay-telegram-link:'
@@ -36,7 +37,7 @@ def own_contact():
     """The Relay Contact of the Frappe Contact that belongs to the session user, made on first use."""
     from relay_core.contacts import ensure_relay
     user = frappe.session.user
-    with frappe.cache.lock('relay-own-contact:' + user, timeout=30):
+    with locks.lock('relay-own-contact:' + user, timeout=30):
         name = frappe.db.get_value('Contact', {'user': user}, 'name', order_by='creation asc')
         if name:
             return ensure_relay(frappe.get_doc('Contact', name))
@@ -85,7 +86,7 @@ def redeem(channel, row, context):
     row['text'] = {'body': '/start'}
     row['message_data'] = {'kind': 'text', 'text': '/start'}
     key = CACHE + digest(code)
-    with frappe.cache.lock('relay-telegram-link-redeem:' + digest(code), timeout=10):
+    with locks.lock('relay-telegram-link-redeem:' + digest(code), timeout=10):
         link = frappe.cache.get_value(key, expires=True)
         frappe.cache.delete_value(key)
     account = connection_value('relay_hub_account')

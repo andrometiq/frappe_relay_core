@@ -4,6 +4,7 @@ import frappe
 from relay_core.hub import HubError
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 PROVIDERS = ('WhatsApp', 'Telegram', 'Email')
 KEY = re.compile(r'[A-Za-z0-9_.:-]{1,140}')
@@ -54,7 +55,7 @@ def sync():
         listed = listed_channels(client().call_tool('channels.list', {}))
     except (HubError, ValueError) as error:
         return {'synced': False, 'error': getattr(error, 'detail', '') or str(error)}
-    with frappe.cache.lock('relay-channel-sync', timeout=60, blocking_timeout=10):
+    with locks.lock('relay-channel-sync', timeout=60, blocking_timeout=10):
         frappe.db.commit()
         result = store(account, listed)
         frappe.db.commit()

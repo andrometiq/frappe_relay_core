@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import frappe
 import relay_core.mcp_tools  # noqa: F401  Registers every tool.
+from relay_core import locks
 from relay_core.mcp_tools import chats, coordination, registry
 
 CON, KEY = 'RELAY-CON-0000000001', 'agent-key-0001'
@@ -95,7 +96,7 @@ class CoordinationTests(unittest.TestCase):
         fake = self.site
         self.takeover = Mock(side_effect=self.pause)
         self.send = Mock(side_effect=lambda message, kind, data, request_key, **kwargs: self.site.send(data['text'], request_key))
-        self.patches = [patch.object(coordination, 'frappe', fake), patch.object(chats, 'frappe', fake),
+        self.patches = [patch.object(coordination, 'frappe', fake), patch.object(locks, 'frappe', fake), patch.object(chats, 'frappe', fake),
                         patch('relay_core.permissions.readable_contact'), patch('relay_core.automation.service.takeover', self.takeover),
                         patch('relay_core.messaging.actions', return_value={'items': []}), patch('relay_core.messaging.send', self.send)]
         for item in self.patches:

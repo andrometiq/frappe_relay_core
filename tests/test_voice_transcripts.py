@@ -8,6 +8,8 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
+from relay_core import locks
+
 
 class VoiceTranscriptTests(unittest.TestCase):
     def setUp(self):
@@ -31,7 +33,7 @@ class VoiceTranscriptTests(unittest.TestCase):
         self.enqueue = Mock()
         self.frappe = types.SimpleNamespace(db=db, enqueue=self.enqueue, ValidationError=type('ValidationError', (Exception,), {}),
             get_doc=lambda doctype, name: self.provider if doctype == 'Relay AI Provider' else _dict(self.rows[name]),
-            cache=types.SimpleNamespace(lock=lambda *args, **kwargs: contextlib.nullcontext()),
+            cache=types.SimpleNamespace(lock=lambda *args, **kwargs: contextlib.nullcontext(), make_key=str),
             session=types.SimpleNamespace(user='Guest'), set_user=Mock(),
             utils=types.SimpleNamespace(now_datetime=lambda: '2026-10-25 23:00:00', add_to_date=lambda *a, **k: '2026-10-25 22:50:00'))
         self.transcribe = Mock(return_value='Please send the invoice')
@@ -47,6 +49,7 @@ class VoiceTranscriptTests(unittest.TestCase):
                  'relay_core.realtime': types.SimpleNamespace(changed=self.realtime)}
         patcher = patch.dict(sys.modules, stubs)
         patcher.start(); self.addCleanup(patcher.stop)
+        self.enterContext(patch.object(locks, 'frappe', self.frappe))
         path = pathlib.Path(__file__).parents[1] / 'relay_core/voice_transcripts.py'
         spec = importlib.util.spec_from_file_location('voice_transcripts_under_test', path)
         self.module = importlib.util.module_from_spec(spec)

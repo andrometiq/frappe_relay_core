@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from frappe import _dict
+from relay_core import locks
 from relay_core.hub import HubError
 from relay_core.onboarding import enrolment
 from relay_core.onboarding.messages import OnboardingError
@@ -120,7 +121,7 @@ class ConnectTests(unittest.TestCase):
                    patch.object(enrolment, 'service_user', return_value=user),
                    patch.object(enrolment, 'rotate_secret', return_value=('key', 'new-secret', 'old-secret')),
                    patch.object(enrolment, 'restore_secret'), patch.object(enrolment, 'check'),
-                   patch('relay_core.channel_sync.sync')]
+                   patch('relay_core.channel_sync.sync'), patch.object(locks, 'frappe', self.frappe)]
         self.mocks = [item.start() for item in patches]
         for item in patches:
             self.addCleanup(item.stop)
@@ -172,7 +173,7 @@ class ConnectTests(unittest.TestCase):
         with self.hub() as enrol:
             self.assertEqual(enrolment.connect()['account'], 'acme-localhost')
         enrol.assert_not_called()
-        self.frappe.cache.lock.assert_called_once_with('site:relay-enrolment', timeout=120, blocking_timeout=60)
+        self.frappe.cache.lock.assert_called_once_with('site:relay-lock:relay-enrolment', timeout=120, blocking_timeout=60)
 
     def test_try_again_on_a_linked_site_syncs_and_checks_the_saved_link(self):
         self.settings.update(relay_hub_url=HUB + '/mcp', relay_hub_token='t' * 40, relay_hub_account='acme-localhost')

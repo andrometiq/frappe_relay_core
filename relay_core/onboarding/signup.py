@@ -8,6 +8,7 @@ from relay_core.hub import HubError, safe_text
 from relay_core.onboarding.messages import TEXT, OnboardingError, text
 from relay_core.permissions import MANAGER
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 DOCTYPE = 'Relay WhatsApp Signup'
 SESSION = re.compile(r'sus_[a-f0-9]{32}')
@@ -180,7 +181,7 @@ def store(session, actor=None):
     worker never write from an older snapshot (MariaDB error 1020)."""
     session = checked_session(session)
     name = session['session_id']
-    with frappe.cache.lock(frappe.cache.make_key('relay-signup:' + name), timeout=60, blocking_timeout=30):
+    with locks.lock('relay-signup:' + name, timeout=60, blocking_timeout=30):
         frappe.db.commit()
         exists = frappe.db.exists(DOCTYPE, name)
         doc = frappe.get_doc(DOCTYPE, name) if exists else frappe.get_doc(

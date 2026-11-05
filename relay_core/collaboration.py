@@ -6,6 +6,7 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.api import validate_reference
+from relay_core import locks
 
 
 def save(doc):
@@ -144,7 +145,7 @@ def add(contact, body, request_key, messages=None, reply_to=None, assigned_to=No
         if parent.relay_contact!=contact or parent.deleted:
             frappe.throw('Reply belongs to another conversation or was removed',frappe.PermissionError)
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
-    with frappe.cache.lock('relay-comment-'+key,timeout=10,blocking_timeout=3):
+    with locks.lock('relay-comment-'+key,timeout=10,blocking_timeout=3):
         existing=frappe.db.get_value('Relay Internal Comment',{'request_key':key},'name')
         if existing:
             doc=frappe.get_doc('Relay Internal Comment',existing)

@@ -9,7 +9,7 @@ import json
 from contextvars import ContextVar
 import frappe
 from relay_core.business_access import document_name, business_document
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access, can_manage
@@ -444,9 +444,8 @@ def process(name):
     from relay_core.ai.remote.site import is_enabled
     if is_enabled():
         return process_run(name)  # The AI service bounds model calls; a job holds a worker only between turns.
-    cache = frappe.cache()
     for slot in range(2):
-        lease = cache.lock(cache.make_key(f'relay-ai-slot:{slot}'), timeout=240, blocking_timeout=0)
+        lease = locks.lock(f'relay-ai-slot:{slot}', timeout=240, blocking_timeout=0)
         if lease.acquire(blocking=False):
             try:
                 return process_run(name)
@@ -460,8 +459,7 @@ def process(name):
 
 def process_run(name):
     from relay_core.ai.remote.site import transport
-    cache = frappe.cache()
-    run_lease = cache.lock(cache.make_key(f'relay-ai-run:{name}'), timeout=240, blocking_timeout=0)
+    run_lease = locks.lock(f'relay-ai-run:{name}', timeout=240, blocking_timeout=0)
     if not run_lease.acquire(blocking=False):
         return
     try:
