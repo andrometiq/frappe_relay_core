@@ -15,7 +15,9 @@ MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 SIGNUP_TOOLS = ('whatsapp.signup.start', 'whatsapp.signup.get', 'whatsapp.signup.resume', 'whatsapp.signup.cancel')
 # Site tools that set up the site's own numbers and its Hub link; none takes or returns a credential.
 SETUP_TOOLS = ('whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
-               'whatsapp.number.remove', 'site.disconnect')
+               'whatsapp.number.remove', 'site.disconnect', 'telegram.bot.health', 'telegram.bot.check', 'telegram.bot.remove')
+# Site tools that carry a bot token or a mail password to the Hub. Core forwards it once and never keeps it.
+CREDENTIAL_TOOLS = ('telegram.bot.connect', 'telegram.bot.settings')
 
 MEDIA_CHECKS = {
     'account': 'an account-scoped credential is required',
@@ -105,6 +107,11 @@ def whatsapp_rejection(error):
     return one_line(f'WhatsApp rejected this request{code}' + (f': {detail}' if detail else ''))
 
 
+def protected_transport(parsed):
+    """HTTPS, or plain HTTP that never leaves this machine."""
+    return parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"})
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise HubError("Hub redirects are not allowed")
@@ -115,9 +122,7 @@ class HubClient:
         parsed = urlsplit(url)
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("Invalid Hub endpoint")
-        if parsed.scheme != "https" and not (
-            parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"}
-        ):
+        if not protected_transport(parsed):
             raise ValueError("Hub requires HTTPS outside loopback")
         if not parsed.hostname or not parsed.path.endswith("/mcp") or any(part in {".", ".."} for part in parsed.path.split("/")) or "%" in parsed.path or "//" in parsed.path:
             raise ValueError("Hub endpoint must end in /mcp")
@@ -184,7 +189,7 @@ class HubClient:
         return self.call_tool("whatsapp.execute", arguments)
 
     def call_tool(self, name, arguments):
-        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment", *SIGNUP_TOOLS, *SETUP_TOOLS}:
+        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment", *SIGNUP_TOOLS, *SETUP_TOOLS, *CREDENTIAL_TOOLS}:
             raise HubError("Unsupported Hub tool")
         if name == "email.send":
             test_mode.ensure_email_allowed()

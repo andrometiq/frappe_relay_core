@@ -1,10 +1,10 @@
 """Channel setup endpoints. A System Manager configures; communication managers may read where things stand."""
 import frappe
-from relay_core.channel_setup import provider_of, whatsapp
+from relay_core.channel_setup import provider_of, telegram, whatsapp
 from relay_core.onboarding.api import system_manager
 from relay_core.permissions import can_configure, can_manage, require_access
 
-PROVIDERS = {'WhatsApp': whatsapp}
+PROVIDERS = {'WhatsApp': whatsapp, 'Telegram': telegram}
 
 
 def provider(name):
@@ -36,6 +36,16 @@ def owner(channel):
 
 def parsed(values):
     return frappe.parse_json(values) if isinstance(values, str) else values
+
+
+@frappe.whitelist(methods=['POST'])
+def connect(channel, values):
+    """Connect a bot or mailbox of one provider. The token or password in values goes to the Hub only."""
+    system_manager()
+    module, values = provider(channel), parsed(values)
+    if not hasattr(module, 'connect') or not isinstance(values, dict):
+        frappe.throw(f'{channel} accounts are connected from the setup page')
+    return module.connect(values)
 
 
 @frappe.whitelist(methods=['POST'])

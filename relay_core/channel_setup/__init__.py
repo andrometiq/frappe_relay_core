@@ -1,15 +1,17 @@
 """Channel setup from Relay: every account a site uses is configured here, never in the Hub admin.
 
 Each provider module lists its accounts and runs their setup actions through the Hub's site tools, and
-`channels_api.PROVIDERS` sends each endpoint to it. Credentials stay in the Hub: no action receives one."""
+`channels_api.PROVIDERS` sends each endpoint to it. A bot token or mail password goes to the Hub once, in the
+connect or settings call, and stays there: Core never stores, logs or returns it."""
 import re
+from urllib.parse import urlsplit
 
 import frappe
-from relay_core.hub import HubError
+from relay_core.hub import CREDENTIAL_TOOLS, HubError, protected_transport
 from relay_core.settings import value as connection_value
 
 TEXT = {
-    'not_found': 'This number is no longer connected to this site. Refresh the page.',
+    'not_found': 'This channel is no longer connected to this site. Refresh the page.',
     'no_number': 'This site has no WhatsApp number yet. Connect one first.',
     'channel_required': 'Choose the number to change.',
     'number_disabled': 'Turn the number on first.',
@@ -22,7 +24,18 @@ TEXT = {
     'invalid_request': 'Choose a setting to change.',
     'hub_not_connected': 'Connect this site to Relay Hub first.',
     'hub_unavailable': 'Relay Hub could not finish this. Try again in a few minutes.',
+    'insecure_hub': 'Relay sends tokens and passwords only over HTTPS. Ask your Relay provider for the HTTPS Hub address.',
+    'no_bot': 'This site has no Telegram bot yet. Connect one first.',
+    'invalid_token': 'Telegram did not accept this bot token. Copy the token from @BotFather again.',
+    'bot_changed': 'This token belongs to another bot. Connect that bot as a new bot instead.',
+    'telegram_unavailable': 'Telegram is not answering. Try again in a few minutes.',
+    'channel_disabled': 'Turn the channel on first.',
+    'in_use': 'This bot or mailbox is already connected to Relay. Remove it there first.',
+    'not_available': 'Your Relay Hub does not let sites connect channels yet. Ask your Relay provider.',
+    'rate_limited': 'Too many tries. Wait an hour, then try again.',
 }
+# The Hub's own words are the reason for these codes, and they never carry a credential.
+HUB_WORDS = ('meta_rejected',)
 CODE = re.compile(r'\bcode ([a-z][a-z_]{1,60})\b')
 
 
@@ -33,15 +46,19 @@ class SetupError(frappe.ValidationError):
 def fail(code, detail=''):
     """Stop with the customer text of a code; Meta's own words follow where they are the reason."""
     text = TEXT.get(code, TEXT['hub_unavailable'])
-    if code == 'meta_rejected' and detail:
+    if code in HUB_WORDS and detail:
         text = detail
     frappe.throw(text, SetupError)
 
 
 def hub_call(tool, arguments):
-    """One Hub site tool. A refusal becomes the customer text of its Hub code."""
+    """One Hub site tool. A refusal becomes the customer text of its Hub code.
+
+    A token or password in arguments goes only to an HTTPS or loopback Hub; it is never stored, logged or shown."""
     if not (connection_value('relay_hub_url') and connection_value('relay_hub_token')):
         fail('hub_not_connected')
+    if tool in CREDENTIAL_TOOLS and not protected_transport(urlsplit(connection_value('relay_hub_url'))):
+        fail('insecure_hub')
     from relay_core.whatsapp import client
     try:
         return client().call_tool(tool, arguments)
@@ -90,3 +107,23 @@ def make_default(name, provider, disabled='number_disabled'):
     save(frappe.get_doc('Relay Channel', row.name), {'is_default': 1})  # RelayChannel.on_update clears the other default.
     publish()
     return {'default': row.name}
+
+
+def connected(provider, result):
+    """The Relay Channel of a channel the Hub just connected, after Core read the channel list again."""
+    from relay_core.channel_sync import sync
+    sync()
+    key = result.get('channel') if isinstance(result, dict) else None
+    name = frappe.db.get_value('Relay Channel', {'channel': provider, 'hub_channel': key, 'account': connection_value('relay_hub_account')}, 'name') \
+        if isinstance(key, str) and key else None
+    if not name:
+        fail('hub_unavailable')
+    return name
+
+
+def secret_value(values, field):
+    """A token or password from the form, or '' when the person left it blank. Never stored or echoed."""
+    value = values.get(field) if isinstance(values, dict) else None
+    if value is not None and not isinstance(value, str):
+        frappe.throw('Enter the value as text')
+    return (value or '').strip()
