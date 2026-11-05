@@ -183,6 +183,9 @@ def project(name, business_overrides=None):
         message_key = provider_key(channel, row['from'], context.get('message_id') or row['id'])
         if frappe.db.exists('Relay Message', {'source_key': key}) or frappe.db.exists('Relay Message', {'provider_message_key': message_key}):
             continue
+        if medium == 'Telegram':
+            from relay_core.telegram_links import redeem
+            redeem(channel, row, context)
         endpoint_key = hashlib.sha256((channel + ':' + row['from']).encode()).hexdigest()
         contact = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key, 'verified': 1}, 'relay_contact')
         if not contact and not context.get('group_id'):

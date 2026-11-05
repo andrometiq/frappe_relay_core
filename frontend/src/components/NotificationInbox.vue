@@ -4,12 +4,26 @@ import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
 import { coreApi } from "../services/coreApi";
+import { useEnabledChannels } from "../composables/useEnabledChannels";
+import TelegramLink from "./telegram/TelegramLink.vue";
 const open = ref(false),
   rows = ref([]),
   next = ref(null),
   busy = ref(false),
   error = ref("");
 let disposed = false;
+const channelEnabled = useEnabledChannels();
+const telegramChats = ref([]);
+// Ticket notifications go to the user's own verified chats; the panel shows the Telegram ones.
+async function loadTelegram() {
+  if (!channelEnabled("Telegram")) return;
+  try {
+    const data = await coreApi("ticket_notifications.destinations");
+    if (!disposed) telegramChats.value = data.items.filter((row) => row.label.startsWith("Telegram"));
+  } catch (e) {
+    if (!disposed) error.value = e.message;
+  }
+}
 async function load(before) {
   if (busy.value) return;
   busy.value = true;
@@ -51,7 +65,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
       :aria-expanded="open"
       @click="
         open = !open;
-        if (open) load();
+        if (open) { load(); loadTelegram(); }
       "
     >
       <svg
@@ -89,6 +103,11 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
         </p>
         <div v-if="next" ref="moreSentinel" class="h-px" aria-hidden="true" />
       </div>
+      <footer v-if="channelEnabled('Telegram')" class="notification-telegram">
+        <h3>Ticket updates on Telegram</h3>
+        <p v-for="chat in telegramChats" :key="chat.value">{{ chat.label }}</p>
+        <TelegramLink @linked="loadTelegram" />
+      </footer>
     </aside>
   </div>
 </template>
@@ -169,6 +188,17 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
   line-height: 1.5;
   overflow-wrap: anywhere;
   margin: 4px 0;
+}
+.notification-telegram {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--outline-gray-2);
+  font-size: 12px;
+}
+.notification-telegram h3 {
+  font-weight: 600;
 }
 .notification-rows .notification-empty {
   padding: 20px;

@@ -8,6 +8,7 @@ import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import ChannelPreferences from './ChannelPreferences.vue'
 import ContactLinks from './ContactLinks.vue'
+import TelegramLink from './telegram/TelegramLink.vue'
 import { useEnabledChannels } from '../composables/useEnabledChannels'
 import { useMobileLayout } from '../composables/useMobileLayout'
 const channelEnabled = useEnabledChannels()
@@ -66,6 +67,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
           </li>
         </ul>
         <p v-else class="info-hint">No saved numbers yet. A number is saved when this person messages you.</p>
+        <TelegramLink v-if="channelEnabled('Telegram')" :contact="detail.name" />
         <a class="info-link" href="#/contacts?tab=unlinked">Review new senders</a>
         <h4 class="info-group-title">Number to use per business record</h4>
         <div class="info-card info-card-body"><ChannelPreferences :key="detail.name + JSON.stringify(detail.endpoints)" :contact="detail.name" :links="detail.links" :endpoints="detail.endpoints" :editable="capabilities.configure" /></div>
