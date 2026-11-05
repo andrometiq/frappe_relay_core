@@ -236,9 +236,9 @@ The WhatsApp Account tab and the Telegram and Email tabs in Settings use these m
 | Method | Route | Access |
 | --- | --- | --- |
 | GET | `relay_core.channels_api.accounts` (`channel=WhatsApp`, `Telegram` or `Email`) | Manager or System Manager |
-| POST | `relay_core.channels_api.connect` (`channel=Telegram` or `Email`, `values`) | System Manager |
+| POST | `relay_core.channels_api.connect` (`channel=Telegram` or `Email`, `values`, `secrets`) | System Manager |
 | POST | `relay_core.channels_api.check` (`repair`, default 1) | System Manager |
-| POST | `relay_core.channels_api.save_settings` (`settings`) | System Manager |
+| POST | `relay_core.channels_api.save_settings` (`settings`, `secrets`) | System Manager |
 | POST | `relay_core.channels_api.remove` (`confirm=1`) | System Manager |
 | GET | `relay_core.channels_api.number_profile` | Manager or System Manager |
 | POST | `relay_core.channels_api.check_number` (`repair`, default 1) | System Manager |
@@ -248,14 +248,14 @@ The WhatsApp Account tab and the Telegram and Email tabs in Settings use these m
 | POST | `relay_core.channels_api.remove_number` (`confirm=1`) | System Manager |
 | POST | `relay_core.channels_api.save_number_profile` (`profile`, optional `photo_base64`, `photo_type`) | System Manager |
 
-`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
+`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. It reads the health of all the provider's channels in one Hub `channels.health` call; an older Hub without that tool is asked once per channel. The Account cards reload on `channels` events at most once a second. The Hub `health` has `admin_off` set when a Hub admin turned the channel off; the card then disables the on switch and says that only the Relay provider can turn it on. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
 
 | Provider | `connect` values | `save_settings` keys |
 | --- | --- | --- |
 | Telegram | `bot_token`, optional `label` | `enabled`, `label`, `bot_token` (same bot only) |
 | Email | `from`, `host`, `password`, optional `label`, `port`, `username`, `imap_host`, `imap_port`, `imap_username`, `imap_password`, `imap_folder`, `trusted_authserv_id`, `trusted_dsn_domain` | `enabled`, `label` and the server keys of `connect` |
 
-Core sends a token or a password to the Hub only over HTTPS, or over plain HTTP to a Hub on the same machine (127.0.0.1 or ::1). Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
+Send `bot_token`, `password` and `imap_password` in `secrets`, for example `{"channel": "Telegram", "values": {"label": "Acme Textiles"}, "secrets": {"bot_token": "..."}}`. Frappe masks a field of that name in a developer-mode traceback, and Core keeps each one masked until it writes the Hub request. Core still reads them from `values` or `settings` for older pages. Core sends a token or a password to the Hub only over HTTPS, or over plain HTTP to a Hub on the same machine (127.0.0.1 or ::1). Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
 
 ## Workspace directories
 

@@ -14,7 +14,7 @@ from . import file_limits
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 SIGNUP_TOOLS = ('whatsapp.signup.start', 'whatsapp.signup.get', 'whatsapp.signup.resume', 'whatsapp.signup.cancel')
 # Site tools that set up the site's own numbers and its Hub link; none takes or returns a credential.
-SETUP_TOOLS = ('whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
+SETUP_TOOLS = ('channels.health', 'whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
                'whatsapp.number.remove', 'site.disconnect', 'telegram.bot.health', 'telegram.bot.check', 'telegram.bot.remove',
                'email.mailbox.health', 'email.mailbox.check', 'email.mailbox.remove')
 # Site tools that carry a bot token or a mail password to the Hub. Core forwards it once and never keeps it.
@@ -63,6 +63,30 @@ def tool_detail(result):
         if not any(text in earlier for earlier in shown):  # Hub's text often already carries Meta's fields.
             shown.append(text)
     return ' · '.join(shown)
+
+
+class Secret:
+    """A bot token or mail password on its way to the Hub. Every repr shows it masked, so a developer-mode traceback
+    with local variables never prints it; only the Hub request body reveals it."""
+    __slots__ = ('_value',)
+
+    def __init__(self, value):
+        self._value = value
+
+    def __repr__(self):
+        return "'********'"
+
+    __str__ = __repr__
+
+    def reveal(self):
+        return self._value
+
+
+def revealed(value):
+    """The json.dumps default of a Hub request body: the value of a Secret."""
+    if isinstance(value, Secret):
+        return value.reveal()
+    raise TypeError(f'{type(value).__name__} is not JSON serializable')
 
 
 class HubError(RuntimeError):
@@ -117,6 +141,13 @@ def protected_transport(parsed):
     return parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"})
 
 
+class HubRequest(Request):
+    """A Hub request whose repr leaves out the bearer token and the body, which a traceback would otherwise show."""
+
+    def __repr__(self):
+        return f'<HubRequest {self.get_method()} {self.full_url}>'
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise HubError("Hub redirects are not allowed")
@@ -133,7 +164,7 @@ class HubClient:
             raise ValueError("Hub endpoint must end in /mcp")
         if len(token) < 32 or "\n" in token or "\r" in token:
             raise ValueError("A Hub token of at least 32 characters is required")
-        self.url, self.token = url, token
+        self.url, self.token = url, Secret(token)
         self.protocol = None
         self.opener = build_opener(NoRedirect)
 
@@ -146,11 +177,11 @@ class HubClient:
         body = {"jsonrpc": "2.0", "method": method, "params": params}
         if request_id is not None:
             body["id"] = request_id
-        headers = {"Authorization": f"Bearer {self.token}",
+        headers = {"Authorization": f"Bearer {self.token.reveal()}",
                    "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.protocol:
             headers["MCP-Protocol-Version"] = self.protocol
-        req = Request(self.url, data=json.dumps(body).encode(), headers=headers)
+        req = HubRequest(self.url, data=json.dumps(body, default=revealed).encode(), headers=headers)
         test_mode.ensure_allowed(self.url)
         try:
             with self.opener.open(req, timeout=30) as response:

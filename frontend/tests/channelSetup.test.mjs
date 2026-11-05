@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {botBadge, botRows, clearSecrets, connectionBadge, deliveryRows, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText} from '../src/services/channelSetup.js';
+import {botBadge, botRows, clearSecrets, connectionBadge, deliveryRows, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText, withSecrets, adminLocked, ADMIN_OFF_TEXT} from '../src/services/channelSetup.js';
 
 const account = (health = {}, enabled = true) => ({ enabled, health: { connection_status: 'connected', partner_status: 'active', ...health } });
 
@@ -97,3 +97,19 @@ test('a new mailbox leaves blank fields out and the form forgets its secrets', (
   clearSecrets(form)
   assert.deepEqual(form, { from: 'sales@example.com', password: '', imap_password: '', bot_token: '' })
 })
+
+test('tokens and passwords go in their own secrets field, apart from the other values', () => {
+  assert.deepEqual(withSecrets('values', { label: 'Acme Textiles', bot_token: '111111:acme_bot_token_local_only_aaaa' }),
+    { values: { label: 'Acme Textiles' }, secrets: { bot_token: '111111:acme_bot_token_local_only_aaaa' } });
+  assert.deepEqual(withSecrets('settings', { host: 'smtp.example.com', password: 'smtp-local-only', imap_password: 'imap-local-only' }),
+    { settings: { host: 'smtp.example.com' }, secrets: { password: 'smtp-local-only', imap_password: 'imap-local-only' } });
+  assert.deepEqual(withSecrets('settings', { enabled: 0 }), { settings: { enabled: 0 }, secrets: {} });
+});
+
+test('only a channel the Hub reports as admin_off is locked', () => {
+  assert.equal(adminLocked(account({ admin_off: true }, false)), true);
+  assert.equal(adminLocked(account({ admin_off: false }, false)), false);
+  assert.equal(adminLocked(account({}, false)), false);
+  assert.equal(adminLocked(undefined), false);
+  assert.match(ADMIN_OFF_TEXT, /Relay Hub admin/);
+});

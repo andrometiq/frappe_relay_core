@@ -2,12 +2,13 @@
 
 The bot token is a function argument only: it goes straight to the Hub and is never kept in Core."""
 import frappe
-from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_channels
+from relay_core.channel_setup import connected, fail, hub_call, make_default, relay_channel, secret_value, site_accounts
 from relay_core.channel_sync import publish
 
 PROVIDER = 'Telegram'
 FIELDS = ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default']
-HEALTH = ('username', 'bot_id', 'webhook_status', 'checked_at', 'check_error', 'token_saved', 'webhook_missing', 'pending_updates')
+HEALTH = ('username', 'bot_id', 'webhook_status', 'checked_at', 'check_error', 'token_saved', 'webhook_missing', 'pending_updates',
+          'admin_off')
 SETTINGS = ('enabled', 'label', 'bot_token')
 
 
@@ -23,8 +24,7 @@ def shown(row):
 
 def accounts():
     """The site's bots that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    return [dict(shown(row), health=health_of(hub_call('telegram.bot.health', {'channel': row.hub_channel}, older={})))
-            for row in site_channels(PROVIDER, FIELDS)]
+    return site_accounts(PROVIDER, FIELDS, 'telegram.bot.health', shown, health_of)
 
 
 def account(name):
@@ -34,7 +34,7 @@ def account(name):
 
 def connect(values):
     """Connect a bot with its @BotFather token. The Hub checks it, keeps it and registers the webhook."""
-    bot_token = secret_value(values, 'bot_token').strip()
+    bot_token = secret_value(values, 'bot_token', strip=True)
     if not bot_token:
         frappe.throw('Paste the bot token from @BotFather')
     label = values.get('label') if isinstance(values.get('label'), str) else ''
@@ -60,7 +60,7 @@ def save_settings(name, settings):
         changes['enabled'] = str(settings['enabled']) in ('1', 'true', 'True')
     if isinstance(settings.get('label'), str) and settings['label'].strip():
         changes['label'] = settings['label'].strip()[:140]
-    if bot_token := secret_value(settings, 'bot_token').strip():
+    if bot_token := secret_value(settings, 'bot_token', strip=True):
         changes['bot_token'] = bot_token
     if not changes:
         frappe.throw('Choose enabled, label or bot_token')

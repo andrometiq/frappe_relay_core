@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlsplit
 
 import frappe
-from relay_core.hub import CREDENTIAL_TOOLS, HubError, OlderHubError, protected_transport
+from relay_core.hub import CREDENTIAL_TOOLS, HubError, OlderHubError, Secret, protected_transport
 from relay_core.settings import value as connection_value
 
 TEXT = {
@@ -30,6 +30,7 @@ TEXT = {
     'bot_changed': 'This token belongs to another bot. Connect that bot as a new bot instead.',
     'telegram_unavailable': 'Telegram is not answering. Try again in a few minutes.',
     'channel_disabled': 'Turn the channel on first.',
+    'admin_off': 'A Relay Hub admin turned this channel off. Ask your Relay provider to turn it on.',
     'in_use': 'This bot or mailbox is already connected to Relay. Remove it there first.',
     'not_available': 'Your Relay Hub does not let sites connect channels yet. Ask your Relay provider.',
     'admin_off': 'A Relay Hub admin turned this channel off. Ask your Relay provider to turn it on.',
@@ -44,6 +45,8 @@ TEXT = {
 # The Hub's own words are the reason for these codes, and they never carry a credential.
 HUB_WORDS = ('meta_rejected', 'login_failed', 'invalid_settings', 'host_unknown')
 CODE = re.compile(r'\bcode ([a-z][a-z_]{1,60})\b')
+# The form fields that hold a bot token or a mail password.
+SECRET_FIELDS = ('bot_token', 'password', 'imap_password')
 
 
 class SetupError(frappe.ValidationError):
@@ -100,14 +103,25 @@ def provider_of(name):
     return provider
 
 
-def site_channels(provider, fields):
-    """The site's Relay Channels of one provider that the Hub still lists, oldest first."""
-    listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
-              if isinstance(row, dict) and row.get('provider') == provider}
-    rows = frappe.get_all('Relay Channel', filters={'channel': provider, 'account': connection_value('relay_hub_account'),
+def site_rows(provider, fields):
+    """The site's Relay Channels of one provider with a Hub key, oldest first."""
+    return frappe.get_all('Relay Channel', filters={'channel': provider, 'account': connection_value('relay_hub_account'),
                                                     'hub_channel': ['is', 'set']},
                           fields=fields, order_by='creation asc', limit_page_length=50)
-    return [row for row in rows if row.hub_channel in listed]
+
+
+def site_accounts(provider, fields, health_tool, shown, health_of):
+    """The site's channels of one provider that the Hub still lists, each with its Hub health, oldest first.
+
+    One channels.health call reads every channel. An older Hub without it is asked channels.list and then each health."""
+    batch = hub_call('channels.health', {'provider': provider}, older={})
+    if provider not in batch:
+        listed = {row.get('key') for row in (hub_call('channels.list', {}).get('channels') or [])
+                  if isinstance(row, dict) and row.get('provider') == provider}
+        return [dict(shown(row), health=health_of(hub_call(health_tool, {'channel': row.hub_channel}, older={})))
+                for row in site_rows(provider, fields) if row.hub_channel in listed]
+    health = {item.get('channel'): item for item in batch[provider] or [] if isinstance(item, dict)}
+    return [dict(shown(row), health=health_of(health[row.hub_channel])) for row in site_rows(provider, fields) if row.hub_channel in health]
 
 
 def make_default(name, provider, disabled='number_disabled'):
@@ -133,9 +147,13 @@ def connected(provider, result):
     return name
 
 
-def secret_value(values, field):
-    """A token or password from the form as typed, or '' when the person left it blank. Never stored or echoed."""
+def secret_value(values, field, strip=False):
+    """A token or password from the form as a Secret, as typed or stripped, or '' when the person left it blank.
+
+    Never stored or echoed: a Secret shows masked in a traceback until the Hub request reveals it."""
     value = values.get(field) if isinstance(values, dict) else None
     if value is not None and not isinstance(value, str):
         frappe.throw('Enter the value as text')
-    return value if value and value.strip() else ''
+    if not value or not value.strip():
+        return ''
+    return Secret(value.strip() if strip else value)

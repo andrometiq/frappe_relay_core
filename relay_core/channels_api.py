@@ -1,7 +1,7 @@
 """Channel setup endpoints. A System Manager configures; communication managers may read where things stand."""
 import frappe
 from frappe.utils.logger import sanitized_dict
-from relay_core.channel_setup import email, provider_of, telegram, whatsapp
+from relay_core.channel_setup import SECRET_FIELDS, email, provider_of, telegram, whatsapp
 from relay_core.onboarding.api import system_manager
 from relay_core.permissions import can_configure, can_manage, require_access
 
@@ -47,10 +47,19 @@ def parsed(name, values):
     return values
 
 
+def with_secrets(values, secrets):
+    """values with the tokens and passwords that a page sends apart in `secrets`. Frappe masks a field of that name in
+    the local variables of a traceback, where a token inside `values` would show. Older pages send them in values."""
+    secrets = parsed('secrets', secrets)
+    if not isinstance(values, dict) or not isinstance(secrets, dict):
+        return values
+    return {**values, **{name: secrets[name] for name in SECRET_FIELDS if name in secrets}}
+
+
 @frappe.whitelist(methods=['POST'])
-def connect(channel, values):
-    """Connect a bot or mailbox of one provider. The token or password in values goes to the Hub only."""
-    values = parsed('values', values)
+def connect(channel, values, secrets=None):
+    """Connect a bot or mailbox of one provider. The token or password goes to the Hub only."""
+    values = with_secrets(parsed('values', values), secrets)
     system_manager()
     module = provider(channel)
     if not hasattr(module, 'connect') or not isinstance(values, dict):
@@ -65,8 +74,8 @@ def check(channel, repair=1):
 
 
 @frappe.whitelist(methods=['POST'])
-def save_settings(channel, settings):
-    settings = parsed('settings', settings)
+def save_settings(channel, settings, secrets=None):
+    settings = with_secrets(parsed('settings', settings), secrets)
     system_manager()
     return owner(channel).save_settings(channel, settings)
 

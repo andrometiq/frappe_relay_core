@@ -2,7 +2,7 @@
 import base64
 
 import frappe
-from relay_core.channel_setup import fail, hub_call, make_default, relay_channel, site_channels
+from relay_core.channel_setup import fail, hub_call, make_default, relay_channel, site_accounts
 from relay_core.channel_sync import publish
 
 PROVIDER = 'WhatsApp'
@@ -11,7 +11,7 @@ PROFILE_FIELDS = ('about', 'address', 'description', 'email', 'websites', 'verti
 PHOTO_TYPES = ('image/jpeg', 'image/png')
 PHOTO_BYTES = 5 * 1024 * 1024
 HEALTH = ('connection_status', 'partner_status', 'verified_at', 'checked_at', 'check_error', 'webhook_subscribed',
-          'pin_kept', 'settings', 'delivery')
+          'pin_kept', 'settings', 'delivery', 'admin_off')
 
 
 def health_of(result):
@@ -21,8 +21,8 @@ def health_of(result):
 
 def accounts():
     """The site's numbers that the Hub still lists, with their Relay Channel and Hub health, oldest first."""
-    rows = site_channels(PROVIDER, ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default', 'connection_type'])
-    return [dict(shown(row), health=health_of(hub_call('whatsapp.number.health', {'channel': row.hub_channel}, older={}))) for row in rows]
+    return site_accounts(PROVIDER, ['name', 'hub_channel', 'label', 'title', 'address', 'enabled', 'is_default', 'connection_type'],
+                         'whatsapp.number.health', shown, health_of)
 
 
 def shown(row):

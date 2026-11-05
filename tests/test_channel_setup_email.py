@@ -1,11 +1,12 @@
 """Mailboxes are connected from Relay through the Hub; SMTP and IMAP passwords go to the Hub once and are never kept in Core."""
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import FakeSite
 from relay_core import channel_setup
 from relay_core.channel_setup import SetupError, email
-from relay_core.hub import HubError
+from relay_core.hub import HubError, revealed
 
 SETTINGS = {'relay_hub_account': 'site-a', 'relay_hub_url': 'https://hub.example.com/mcp', 'relay_hub_token': 't'}
 HEALTH = {'channel': 'mail-1', 'label': 'Acme sales', 'address': 'sales@example.com', 'enabled': True, 'connection_status': 'connected',
@@ -27,7 +28,8 @@ class MailboxSetupTests(unittest.TestCase):
              'is_default': 1, 'mailbox_aliases': 'orders@example.com', 'triage_owner': 'owner@example.com'},
             {'name': 'Other mail', 'channel': 'Email', 'account': 'site-b', 'hub_channel': 'mail-9', 'enabled': 1}])
         self.hub = Mock()
-        self.answers = {'channels.list': {'channels': [{'key': 'mail-1', 'provider': 'Email'}]}, 'email.mailbox.health': HEALTH}
+        self.answers = {'channels.list': {'channels': [{'key': 'mail-1', 'provider': 'Email'}]}, 'email.mailbox.health': HEALTH,
+                        'channels.health': {'Email': [HEALTH, dict(HEALTH, channel='mail-9')]}}
         self.hub.call_tool.side_effect = self.answer
         self.sync, self.publish = Mock(side_effect=self.synced), Mock()
         for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(email, 'frappe', self.site.frappe),
@@ -48,13 +50,22 @@ class MailboxSetupTests(unittest.TestCase):
             self.site.add('Relay Channel', {'name': 'New mail', 'channel': 'Email', 'account': 'site-a', 'hub_channel': 'mail-2', 'enabled': 1})
 
     def tools(self):
-        return [call.args for call in self.hub.call_tool.call_args_list]
+        """The tool calls as the Hub gets them: a Secret is revealed only in the request body."""
+        return [(tool, json.loads(json.dumps(arguments, default=revealed))) for tool, arguments in
+                (call.args for call in self.hub.call_tool.call_args_list)]
 
     def test_health_keeps_only_known_fields_and_never_a_password(self):
-        row = email.accounts()[0]
+        rows = email.accounts()
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'Email'})])
+        self.assertEqual([row['name'] for row in rows], ['Acme sales'])
+        row = rows[0]
         self.assertEqual(row['health']['server'], {'host': 'smtp.example.com', 'port': 587, 'imap_host': 'imap.example.com'})
         self.assertEqual(row['health']['sync'], [{'last_sync': '2026-11-01 10:00', 'error': '', 'failures': 0, 'backoff': False}])
         self.assertNotIn('never', repr(row))
+
+    def test_the_hub_admin_lock_reaches_the_card(self):
+        self.answers['channels.health'] = {'Email': [dict(HEALTH, enabled=False, admin_off=True)]}
+        self.assertTrue(email.accounts()[0]['health']['admin_off'])
 
     def test_connect_sends_the_filled_fields_once(self):
         self.answers['email.mailbox.connect'] = dict(HEALTH, channel='mail-2')

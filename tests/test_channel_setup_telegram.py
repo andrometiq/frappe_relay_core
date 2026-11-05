@@ -1,11 +1,12 @@
 """Telegram bots are connected from Relay through the Hub; the bot token goes to the Hub once and is never kept in Core."""
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import FakeSite
 from relay_core import channel_setup, channels_api
 from relay_core.channel_setup import SetupError, telegram
-from relay_core.hub import HubError
+from relay_core.hub import HubError, revealed
 
 SETTINGS = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
 TOKEN = '111111:acme_bot_token_local_only_aaaa'
@@ -26,7 +27,7 @@ class TelegramSetupTests(unittest.TestCase):
             {'name': 'Other bot', 'channel': 'Telegram', 'account': 'site-b', 'hub_channel': 'tg-9', 'enabled': 1}])
         self.hub = Mock()
         self.answers = {'channels.list': {'channels': [{'key': 'tg-1', 'provider': 'Telegram'}, {'key': 'wa-120', 'provider': 'WhatsApp'}]},
-                        'telegram.bot.health': HEALTH}
+                        'telegram.bot.health': HEALTH, 'channels.health': {'Telegram': [HEALTH]}}
         self.hub.call_tool.side_effect = self.answer
         self.sync, self.publish = Mock(side_effect=self.synced), Mock()
         for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(telegram, 'frappe', self.site.frappe),
@@ -48,13 +49,29 @@ class TelegramSetupTests(unittest.TestCase):
             self.site.add('Relay Channel', {'name': 'New bot', 'channel': 'Telegram', 'account': 'site-a', 'hub_channel': 'tg-3', 'enabled': 1})
 
     def tools(self):
-        return [call.args for call in self.hub.call_tool.call_args_list]
+        """The tool calls as the Hub gets them: a Secret is revealed only in the request body."""
+        return [(tool, json.loads(json.dumps(arguments, default=revealed))) for tool, arguments in
+                (call.args for call in self.hub.call_tool.call_args_list)]
 
     def test_accounts_list_only_the_bots_the_hub_still_lists(self):
         rows = telegram.accounts()
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'Telegram'})])
         self.assertEqual([row['name'] for row in rows], ['Acme bot'])
         self.assertEqual(rows[0]['health']['webhook_status'], 'registered')
         self.assertNotIn('unexpected', rows[0]['health'])
+
+    def test_the_hub_admin_lock_reaches_the_card(self):
+        self.answers['channels.health'] = {'Telegram': [dict(HEALTH, enabled=False, admin_off=True)]}
+        self.assertTrue(telegram.accounts()[0]['health']['admin_off'])
+        self.answers['telegram.bot.settings'] = rejected('admin_off')
+        with self.assertRaisesRegex(SetupError, 'Ask your Relay provider to turn it on'):
+            telegram.save_settings('Acme bot', {'enabled': '1'})
+
+    def test_a_hub_without_the_batch_tool_is_asked_once_per_bot(self):
+        from relay_core.hub import OlderHubError
+        self.answers['channels.health'] = OlderHubError('no such tool')
+        self.assertEqual([row['name'] for row in telegram.accounts()], ['Acme bot'])
+        self.assertEqual(self.tools()[1:], [('channels.list', {}), ('telegram.bot.health', {'channel': 'tg-1'})])
 
     def test_connect_sends_the_token_once_and_returns_no_credential(self):
         self.answers['telegram.bot.connect'] = dict(HEALTH, channel='tg-3')

@@ -30,7 +30,9 @@ class ChannelSetupTests(unittest.TestCase):
         self.hub = Mock()
         self.answers = {'channels.list': {'channels': [{'key': 'wa-120', 'provider': 'WhatsApp'}, {'key': 'wa-121', 'provider': 'WhatsApp'},
                                                        {'key': 'wa-130', 'provider': 'WhatsApp'}]},
-                        'whatsapp.number.health': HEALTH}
+                        'whatsapp.number.health': HEALTH,
+                        'channels.health': {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', connection_status='failed'),
+                                                         dict(HEALTH, channel='wa-130')]}}
         self.hub.call_tool.side_effect = self.answer
         self.sync, self.publish = Mock(), Mock()
         for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(whatsapp, 'frappe', self.site.frappe),
@@ -50,16 +52,35 @@ class ChannelSetupTests(unittest.TestCase):
     def tools(self):
         return [call.args for call in self.hub.call_tool.call_args_list]
 
-    def test_accounts_list_only_the_numbers_the_hub_still_lists_for_this_site(self):
+    def test_accounts_read_the_health_of_every_number_in_one_hub_call(self):
         rows = whatsapp.accounts()
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'WhatsApp'})])
         self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
         self.assertTrue(rows[0]['is_default'])
         self.assertNotIn('unexpected', rows[0]['health'])
+        self.assertEqual([row['health']['connection_status'] for row in rows], ['connected', 'failed'])
+        self.answers['channels.health'] = {'WhatsApp': []}
+        self.assertEqual(whatsapp.accounts(), [])
+
+    def test_the_hub_admin_lock_reaches_the_card_and_its_refusal_reads_as_relay_text(self):
+        self.answers['channels.health'] = {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', admin_off=True, connection_status='disabled')]}
+        self.assertEqual([row['health']['admin_off'] for row in whatsapp.accounts()], [None, True])
+        self.answers['whatsapp.number.settings'] = rejected('admin_off', 'A Relay Hub admin turned this channel off.')
+        with self.assertRaisesRegex(SetupError, 'Ask your Relay provider to turn it on'):
+            whatsapp.save_settings('Support line', {'enabled': '1'})
+
+    def test_a_hub_without_the_batch_tool_is_asked_once_per_number(self):
+        from relay_core.hub import OlderHubError
+        self.answers['channels.health'] = OlderHubError('no such tool')
+        rows = whatsapp.accounts()
+        self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
         self.assertEqual(rows[0]['health']['connection_status'], 'connected')
-        self.assertIn(('whatsapp.number.health', {'channel': 'wa-121'}), self.tools())
+        self.assertEqual(self.tools()[1:], [('channels.list', {}), ('whatsapp.number.health', {'channel': 'wa-120'}),
+                                            ('whatsapp.number.health', {'channel': 'wa-121'})])
 
     def test_an_older_hub_without_site_tools_still_lists_the_numbers(self):
         from relay_core.hub import OlderHubError
+        self.answers['channels.health'] = OlderHubError('no such tool')
         self.answers['whatsapp.number.health'] = OlderHubError('no such tool')
         rows = whatsapp.accounts()
         self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])

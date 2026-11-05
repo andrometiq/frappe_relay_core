@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows } from '../../services/channelSetup'
+import { ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, clearSecrets, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, withSecrets } from '../../services/channelSetup'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 
@@ -47,7 +47,7 @@ async function run(key, method, values, done) {
 }
 
 async function connect() {
-  if (await run('connect', 'connect', { channel: 'Email', values: mailboxConnect(adding) }, () => 'Mailbox connected.')) Object.assign(adding, blankForm())
+  if (await run('connect', 'connect', { channel: 'Email', ...withSecrets('values', mailboxConnect(adding)) }, () => 'Mailbox connected.')) Object.assign(adding, blankForm())
 }
 const check = row => run(row.name + ':check', 'check', { channel: row.name }, () => 'Sign-in checked.')
 const toggle = (row, value) => run(row.name + ':enabled', 'save_settings', { channel: row.name, settings: { enabled: value ? 1 : 0 } }, () => 'Saved.')
@@ -62,7 +62,7 @@ async function saveEdit() {
   const row = editing.value, settings = mailboxChanges(row.health, draft)
   if (draft.label.trim() && draft.label.trim() !== row.label) settings.label = draft.label.trim()
   editing.value = null
-  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, settings }, () => 'Saved.')
+  if (Object.keys(settings).length) await run(row.name + ':edit', 'save_settings', { channel: row.name, ...withSecrets('settings', settings) }, () => 'Saved.')
   else clearSecrets(draft)
 }
 function closeEdit() { editing.value = null; clearSecrets(draft) }
@@ -73,7 +73,7 @@ async function remove() {
 }
 const checkedText = health => health.checked_at ? 'Checked ' + dateTime(health.checked_at) + '.' : 'Not checked yet.'
 
-onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels'], load) })
+onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels'], load, ACCOUNTS_RELOAD_DELAY) })
 onBeforeUnmount(() => stop?.())
 </script>
 <template>
@@ -95,7 +95,8 @@ onBeforeUnmount(() => stop?.())
       </dl>
       <p class="text-sm text-ink-gray-5">{{ checkedText(row.health) }}</p>
       <template v-if="canConfigure">
-        <FormControl type="checkbox" label="Mailbox is on" :model-value="row.enabled" :disabled="!!busy" @update:model-value="value => toggle(row, value)" />
+        <FormControl type="checkbox" label="Mailbox is on" :model-value="row.enabled" :disabled="!!busy || adminLocked(row)" @update:model-value="value => toggle(row, value)" />
+        <p v-if="adminLocked(row)" class="text-sm text-ink-gray-5">{{ ADMIN_OFF_TEXT }}</p>
         <div class="flex flex-wrap gap-2">
           <Button variant="outline" icon-left="activity" label="Check sign-in" :loading="busy === row.name + ':check'" :disabled="!!busy || !row.enabled" @click="check(row)" />
           <Button v-if="!row.is_default && row.enabled" variant="outline" label="Make default" :loading="busy === row.name + ':default'" :disabled="!!busy" @click="makeDefault(row)" />

@@ -1,6 +1,9 @@
 // Labels and choices for the channel accounts a site sets up in Relay. The Hub keeps every credential; these
 // helpers only read the status it reports. WhatsApp numbers, Telegram bots and mailboxes share them.
 
+// A check or sync sends several channels events; an Account card reloads once a second at most, since each reload asks the Hub.
+export const ACCOUNTS_RELOAD_DELAY = 1000
+
 const CONNECTION = {
   connected: ['Connected', 'green'],
   unchecked: ['Not checked yet', 'gray'],
@@ -16,6 +19,10 @@ export function connectionBadge(account) {
   const [label, theme] = CONNECTION[account?.health?.connection_status] || ['Not checked yet', 'gray']
   return { label, theme }
 }
+
+// A Hub admin turned the channel off, so only the admin can turn it on again.
+export const adminLocked = account => account?.health?.admin_off === true
+export const ADMIN_OFF_TEXT = 'A Relay Hub admin turned this off. Ask your Relay provider to turn it on.'
 
 // Only Embedded Signup gives Relay new access, so these accounts show Connect again instead of Check.
 export function needsReconnect(account) {
@@ -163,6 +170,14 @@ export function mailboxConnect(form) {
   const values = {}
   for (const [name, value] of Object.entries(form)) if (String(value ?? '').trim()) values[name] = SECRET_FIELDS.includes(name) ? value : String(value).trim()
   return values
+}
+
+// The request fields of a connect or settings change. Tokens and passwords go in their own secrets field, which Frappe
+// masks in an Error Log traceback; field names the other values, values for connect and settings for a change.
+export function withSecrets(field, values) {
+  const plain = {}, secrets = {}
+  for (const [name, value] of Object.entries(values)) (SECRET_FIELDS.includes(name) ? secrets : plain)[name] = value
+  return { [field]: plain, secrets }
 }
 
 // Clears every token and password of a form after a submit, sent or not.
