@@ -24,6 +24,14 @@ export function connectionBadge(account) {
 export const adminLocked = account => account?.health?.admin_off === true
 export const ADMIN_OFF_TEXT = 'A Relay Hub admin turned this off. Ask your Relay provider to turn it on.'
 
+// The Meta sync state of each number that is on, by Relay Channel name. The Hub sends it with the batched health;
+// an older Hub without it is asked once per number by `read`.
+export async function accountMetadata(accounts, read) {
+  const enabled = accounts.filter(row => row.enabled)
+  const rows = await Promise.all(enabled.map(row => row.health?.metadata || read(row)))
+  return Object.fromEntries(enabled.map((row, index) => [row.name, rows[index]]))
+}
+
 // Only Embedded Signup gives Relay new access, so these accounts show Connect again instead of Check.
 export function needsReconnect(account) {
   const health = account?.health || {}

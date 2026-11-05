@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { whatsappHealth } from '../../services/whatsappHealth'
-import { ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, connectionBadge, deliveryRows, needsReconnect, PIN_TEXT, removalText, SWITCHES, switchValue, webhookText } from '../../services/channelSetup'
+import { accountMetadata, ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, connectionBadge, deliveryRows, needsReconnect, PIN_TEXT, removalText, SWITCHES, switchValue, webhookText } from '../../services/channelSetup'
 import { setupRoute } from '../../services/onboarding'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
@@ -19,10 +19,8 @@ async function load() {
   try {
     const result = await coreApi('channels_api.accounts', { channel: 'WhatsApp' })
     accounts.value = result.accounts; canConfigure.value = result.can_configure
-    const enabled = result.accounts.filter(row => row.enabled)
-    const rows = await Promise.all(enabled.map(row =>
-      coreApi('whatsapp.execute', { operation: 'account.metadata', channel: row.name }, true).catch(() => null)))
-    metadata.value = Object.fromEntries(enabled.map((row, index) => [row.name, rows[index]]))
+    metadata.value = await accountMetadata(result.accounts, row =>
+      coreApi('whatsapp.execute', { operation: 'account.metadata', channel: row.name }, true).catch(() => null))
   } catch (e) { error.value = e.message }
   finally { loaded.value = true }
 }

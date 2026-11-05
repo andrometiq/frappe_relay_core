@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {botBadge, botRows, clearSecrets, connectionBadge, deliveryRows, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText, withSecrets, adminLocked, ADMIN_OFF_TEXT} from '../src/services/channelSetup.js';
+import {botBadge, botRows, clearSecrets, connectionBadge, deliveryRows, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText, withSecrets, adminLocked, ADMIN_OFF_TEXT, accountMetadata} from '../src/services/channelSetup.js';
 
 const account = (health = {}, enabled = true) => ({ enabled, health: { connection_status: 'connected', partner_status: 'active', ...health } });
 
@@ -112,4 +112,16 @@ test('only a channel the Hub reports as admin_off is locked', () => {
   assert.equal(adminLocked(account({}, false)), false);
   assert.equal(adminLocked(undefined), false);
   assert.match(ADMIN_OFF_TEXT, /Relay Hub admin/);
+});
+
+test('the WhatsApp card takes the Meta sync state from the batched health and asks an older Hub once per number', async () => {
+  const ready = { status: 'ready', last_success: '2026-11-05T10:00:00Z', profile: { verified_name: 'Acme Textiles' } };
+  const reads = [];
+  const read = async row => { reads.push(row.name); return { status: 'syncing' }; };
+  const rows = [{ name: 'Sales', enabled: true, health: { metadata: ready } }, { name: 'Old', enabled: false, health: {} }];
+  assert.deepEqual(await accountMetadata(rows, read), { Sales: ready });
+  assert.deepEqual(reads, []);
+  const older = [{ name: 'Sales', enabled: true, health: {} }, { name: 'Support', enabled: true, health: {} }, rows[1]];
+  assert.deepEqual(await accountMetadata(older, read), { Sales: { status: 'syncing' }, Support: { status: 'syncing' } });
+  assert.deepEqual(reads, ['Sales', 'Support']);
 });

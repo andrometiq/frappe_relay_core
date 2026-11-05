@@ -11,7 +11,7 @@ PROFILE_FIELDS = ('about', 'address', 'description', 'email', 'websites', 'verti
 PHOTO_TYPES = ('image/jpeg', 'image/png')
 PHOTO_BYTES = 5 * 1024 * 1024
 HEALTH = ('connection_status', 'partner_status', 'verified_at', 'checked_at', 'check_error', 'webhook_subscribed',
-          'pin_kept', 'settings', 'delivery', 'admin_off')
+          'pin_kept', 'settings', 'delivery', 'admin_off', 'metadata')
 
 
 def health_of(result):

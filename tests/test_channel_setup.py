@@ -62,6 +62,12 @@ class ChannelSetupTests(unittest.TestCase):
         self.answers['channels.health'] = {'WhatsApp': []}
         self.assertEqual(whatsapp.accounts(), [])
 
+    def test_the_meta_sync_state_comes_with_the_batched_health(self):
+        synced = {'status': 'ready', 'last_success': '2026-11-05T10:00:00Z', 'last_error': '', 'profile': {'verified_name': 'Acme'}}
+        self.answers['channels.health'] = {'WhatsApp': [dict(HEALTH, metadata=synced), dict(HEALTH, channel='wa-121')]}
+        self.assertEqual([row['health']['metadata'] for row in whatsapp.accounts()], [synced, None])
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'WhatsApp'})])
+
     def test_the_hub_admin_lock_reaches_the_card_and_its_refusal_reads_as_relay_text(self):
         self.answers['channels.health'] = {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', admin_off=True, connection_status='disabled')]}
         self.assertEqual([row['health']['admin_off'] for row in whatsapp.accounts()], [None, True])
