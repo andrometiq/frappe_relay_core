@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {connectionBadge, deliveryRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText} from '../src/services/channelSetup.js';
+import {botBadge, botRows, clearSecrets, connectionBadge, deliveryRows, mailboxBadge, mailboxChanges, mailboxConnect, mailboxDraft, mailboxRows, needsReconnect, photoProblem, profileChanges, profileDraft, removalText, switchValue, webhookText} from '../src/services/channelSetup.js';
 
 const account = (health = {}, enabled = true) => ({ enabled, health: { connection_status: 'connected', partner_status: 'active', ...health } });
 
@@ -57,3 +57,43 @@ test('removal text says whether the number can move', () => {
   assert.match(removalText({ removed: true, deregistered: false }), /WhatsApp Manager/);
   assert.equal(removalText({}), '');
 });
+
+test('a bot badge shows off first, then the webhook state', () => {
+  const bot = (health, enabled = true) => ({ enabled, health })
+  assert.deepEqual(botBadge(bot({ webhook_status: 'registered' })), { label: 'Connected', theme: 'green' })
+  assert.deepEqual(botBadge(bot({ webhook_status: 'not_registered' })), { label: 'Not receiving', theme: 'orange' })
+  assert.deepEqual(botBadge(bot({ webhook_status: 'registered' }, false)), { label: 'Off', theme: 'gray' })
+  assert.deepEqual(botBadge(bot({})), { label: 'Not checked yet', theme: 'gray' })
+})
+
+test('bot rows explain a missing HTTPS Hub and never show the token', () => {
+  const rows = botRows({ username: 'acme_textiles_bot', webhook_status: 'not_registered', webhook_missing: 'The Hub has no public HTTPS URL.', token_saved: true })
+  assert.deepEqual(rows.map(row => row.text), ['@acme_textiles_bot', 'The Hub has no public HTTPS URL.', 'Kept by Relay Hub'])
+  assert.match(botRows({ webhook_status: 'not_registered' })[1].text, /repair/)
+  assert.match(botRows({})[2].text, /Missing/)
+})
+
+test('mailbox badge and rows read the sign-in and sync state', () => {
+  assert.deepEqual(mailboxBadge({ enabled: true, health: { connection_status: 'failed' } }), { label: 'Check failed', theme: 'red' })
+  assert.deepEqual(mailboxBadge({ enabled: false, health: { connection_status: 'connected' } }), { label: 'Off', theme: 'gray' })
+  const rows = mailboxRows({ smtp_status: 'connected', imap_status: 'not_configured', rejected: 2, sync: [{ last_sync: '2026-11-01 10:00' }] }, value => 'at ' + value)
+  assert.deepEqual(rows.map(row => row.text), ['Signed in', 'Not set up', 'at 2026-11-01 10:00', '2'])
+  assert.equal(mailboxRows({ sync: [{ error: 'Mailbox synchronization failed' }] })[2].text, 'Mailbox synchronization failed')
+})
+
+test('a mailbox change sends only changed fields and typed passwords', () => {
+  const health = { server: { host: 'smtp.example.com', port: 587, imap_host: 'imap.example.com' } }
+  const draft = mailboxDraft(health)
+  assert.equal(draft.port, '587')
+  assert.equal(draft.password, '')
+  assert.deepEqual(mailboxChanges(health, draft), {})
+  assert.deepEqual(mailboxChanges(health, { ...draft, imap_folder: ' Support ', host: 'smtp.example.com', password: 'local-only' }), { imap_folder: 'Support', password: 'local-only' })
+})
+
+test('a new mailbox leaves blank fields out and the form forgets its secrets', () => {
+  assert.deepEqual(mailboxConnect({ from: ' sales@example.com ', host: 'smtp.example.com', port: '587', imap_host: '', password: ' pass word ' }),
+    { from: 'sales@example.com', host: 'smtp.example.com', port: '587', password: ' pass word ' })
+  const form = { from: 'sales@example.com', password: 'local-only', imap_password: 'local-only', bot_token: '111111:local' }
+  clearSecrets(form)
+  assert.deepEqual(form, { from: 'sales@example.com', password: '', imap_password: '', bot_token: '' })
+})

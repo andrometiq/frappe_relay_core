@@ -1,5 +1,5 @@
 // Labels and choices for the channel accounts a site sets up in Relay. The Hub keeps every credential; these
-// helpers only read the status it reports. A later Email or Telegram account uses the same badge and rows.
+// helpers only read the status it reports. WhatsApp numbers, Telegram bots and mailboxes share them.
 
 const CONNECTION = {
   connected: ['Connected', 'green'],
@@ -94,4 +94,78 @@ export function photoProblem(file) {
   if (!PHOTO_TYPES.includes(file.type)) return 'Choose a JPEG or PNG photo.'
   if (file.size > PHOTO_BYTES) return 'The photo must be at most 5 MB.'
   return ''
+}
+
+const WEBHOOK = {
+  registered: ['Connected', 'green'],
+  not_registered: ['Not receiving', 'orange'],
+  failed: ['Check failed', 'red'],
+  removed: ['Removed', 'gray'],
+}
+
+// The badge of a Telegram bot: off wins, then the webhook state of the last check.
+export function botBadge(account) {
+  if (account && !account.enabled) return { label: 'Off', theme: 'gray' }
+  const [label, theme] = WEBHOOK[account?.health?.webhook_status] || ['Not checked yet', 'gray']
+  return { label, theme }
+}
+
+export function botRows(health = {}) {
+  const receiving = {
+    registered: 'Telegram sends this bot’s messages to Relay.',
+    failed: 'The last check failed. Select Check connection to try again.',
+  }[health.webhook_status] || health.webhook_missing || 'Telegram is not sending this bot’s messages to Relay. Select Check connection to repair it.'
+  return [
+    { name: 'Bot', text: health.username ? '@' + health.username : 'Not read yet' },
+    { name: 'Messages from Telegram', text: receiving },
+    { name: 'Bot token', text: health.token_saved ? 'Kept by Relay Hub' : 'Missing. Save a new token.' },
+  ]
+}
+
+const SIGN_IN = { connected: 'Signed in', failed: 'Sign-in failed', not_configured: 'Not set up' }
+
+// The badge of a mailbox: off wins, then the last sign-in check.
+export function mailboxBadge(account) {
+  return connectionBadge({ enabled: account?.enabled, health: { connection_status: account?.health?.connection_status } })
+}
+
+export function mailboxRows(health = {}, format = value => value) {
+  const sync = (health.sync || [])[0] || {}
+  return [
+    { name: 'Sending (SMTP)', text: SIGN_IN[health.smtp_status] || 'Not checked yet' },
+    { name: 'Receiving (IMAP)', text: SIGN_IN[health.imap_status] || 'Not checked yet' },
+    { name: 'Last mail check', text: sync.error || (sync.last_sync ? format(sync.last_sync) : 'Not yet') },
+    { name: 'Rejected messages', text: health.rejected ? String(health.rejected) : 'None' },
+  ]
+}
+
+// Mailbox form fields. Passwords are write-only: the form starts them blank and never shows a saved one.
+export const MAIL_FIELDS = ['host', 'port', 'username', 'imap_host', 'imap_port', 'imap_username', 'imap_folder', 'trusted_authserv_id', 'trusted_dsn_domain']
+export const SECRET_FIELDS = ['password', 'imap_password', 'bot_token']
+
+export function mailboxDraft(health = {}) {
+  const server = health.server || {}
+  const draft = { password: '', imap_password: '' }
+  for (const name of MAIL_FIELDS) draft[name] = server[name] == null ? '' : String(server[name])
+  return draft
+}
+
+// Only fields the person changed, and only passwords the person typed, go to the Hub.
+export function mailboxChanges(health, draft) {
+  const before = mailboxDraft(health), changes = {}
+  for (const name of MAIL_FIELDS) if (String(draft[name] ?? '').trim() !== before[name].trim() && String(draft[name] ?? '').trim()) changes[name] = String(draft[name]).trim()
+  for (const name of ['password', 'imap_password']) if (draft[name]) changes[name] = draft[name]
+  return changes
+}
+
+// A new mailbox: blank optional fields are left out, so the Hub uses its defaults.
+export function mailboxConnect(form) {
+  const values = {}
+  for (const [name, value] of Object.entries(form)) if (String(value ?? '').trim()) values[name] = SECRET_FIELDS.includes(name) ? value : String(value).trim()
+  return values
+}
+
+// Clears every token and password of a form after a submit, sent or not.
+export function clearSecrets(form) {
+  for (const name of SECRET_FIELDS) if (name in form) form[name] = ''
 }
