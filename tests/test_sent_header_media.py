@@ -188,7 +188,7 @@ class KeepCopyTests(unittest.TestCase):
             return json.dumps({'attachment': 'FILE-1'}) if field == 'message_data' else values[doctype]
 
         with patch.object(document_sends.frappe, 'db', SimpleNamespace(get_value=get_value, set_value=Mock())) as db, \
-                patch('frappe.utils.file_manager.save_file') as save_file:
+                patch('relay_core.attachments.private_file') as save_file:
             self.assertEqual(document_sends.keep_copy({'action': 'ACT-1'}, 'offer.mp4', b'video'), 'RELAY-MSG-1')
         save_file.assert_not_called()
         db.set_value.assert_not_called()

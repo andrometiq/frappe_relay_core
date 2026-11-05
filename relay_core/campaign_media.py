@@ -95,10 +95,9 @@ def unpack(path, campaign, media_type):
 
 
 def save_private(filename, raw, campaign):
-    """A private File of the campaign holding raw. Not file_manager.save_file: its File re-reads the written file
-    and stores binary content that decodes as Windows-1252, such as a small PNG, as UTF-8 text."""
-    return frappe.get_doc({'doctype': 'File', 'file_name': filename, 'attached_to_doctype': 'Relay Campaign',
-                           'attached_to_name': campaign, 'is_private': 1, 'content': raw}).insert(ignore_permissions=True)
+    """A private File of the campaign holding raw byte for byte."""
+    from relay_core.attachments import private_file
+    return private_file(filename, raw, 'Relay Campaign', campaign)
 
 
 def check_attachment(value, fields):

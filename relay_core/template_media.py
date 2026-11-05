@@ -85,9 +85,9 @@ def upload(channel, media_type, filename, content_base64):
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:
         frappe.throw(failure_message(error))
-    from frappe.utils.file_manager import save_file
+    from relay_core.attachments import private_file
     from relay_core.bulk_campaigns import MEDIA_DAYS
-    file = save_file(filename, raw, None, None, is_private=1)
+    file = private_file(filename, raw)
     frappe.cache.set_value(UPLOADS + media_id, {'file': file.name, 'channel': sender.name}, expires_in_sec=MEDIA_DAYS * 86400)
     return {'id': media_id, 'filename': filename, 'size': len(raw)}
 
