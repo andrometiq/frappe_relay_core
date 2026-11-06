@@ -29,7 +29,7 @@ export function sharedQueueCounts(read, watchChanges) {
         const result = await read(params)
         if (ticket === generation) counts.value = { ...EMPTY_COUNTS, ...result }
       } catch {
-        if (ticket === generation) counts.value = { ...EMPTY_COUNTS }
+        // A failed read keeps the last known counts; the next live event or reconnect reads them again.
       }
     }
     const entry = { counts, users: 0, stop: watchChanges(load) }
