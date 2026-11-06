@@ -6,12 +6,12 @@ import { computed, effectScope, nextTick, ref, watch } from 'vue'
 import { coreApi } from '../src/services/coreApi.js'
 import { defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
 import { mergeChangedRows, mergeFirstPage, newestActivity } from '../src/services/inboxRows.js'
-import { listRefresh } from '../src/services/realtimeRefreshQueue.js'
+import { heldRefresh, listRefresh } from '../src/services/realtimeRefreshQueue.js'
 import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, storageKey, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
 
 const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'useChatFolders',
+const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'heldRefresh', 'useChatFolders',
   'hasManyNumbers', 'INBOX_ROWS', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
   script + '\nreturn { mode, filters, activeFilters };').bind(null, useLoadMore)
 const capabilities = { enabled_channels: ['WhatsApp'], inbox_channels: [
@@ -31,7 +31,7 @@ test('saved filters and tab drive the list and counts, and every change is saved
   let mount, counted
   const state = scope.run(() => {
     return make(() => ({}), () => () => {}, () => ref(capabilities), fn => mount = fn, () => {}, computed, ref, watch, coreApi, () => {}, mediumOptions,
-      (medium, params) => { counted = params; return { counts: ref({}) } }, defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh,
+      (medium, params) => { counted = params; return { counts: ref({}) } }, defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh, heldRefresh,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
       () => false, { rows: 'business' }, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters)
   })

@@ -5,7 +5,7 @@ import { coreApi } from '../../services/coreApi'
 import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, mergeTiles, moveSentTile, readBrowse, searchLabel, sentTile, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
-import { chatListRefresh } from '../../services/realtimeRefreshQueue'
+import { chatListRefresh, heldRefresh } from '../../services/realtimeRefreshQueue'
 import { lastOwnSend, ownSendOf } from '../../services/ownSends'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { listTime } from '../relativeTime'
@@ -61,7 +61,7 @@ async function load(append = false) {
     if (!people.value) fields.value = page.fields || []
     next.value = chats ? chats.next : page.next
   } catch (e) { if (request === sequence) error.value = e.message }
-  finally { if (request === sequence) loading.value = false }
+  finally { if (request === sequence) { loading.value = false; live.release() } }
 }
 const moreSentinel = useLoadMore({ loading, hasMore: () => next.value != null, error, load: () => load(true) })
 const search = useDebouncedSearch(query, () => load(), () => { ++sequence; items.value = []; next.value = null; loading.value = true })
@@ -102,22 +102,22 @@ watch(() => JSON.stringify(props.filters), () => navigate({ ...readBrowse(base),
 onMounted(() => { load(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++sequence; window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
 // A message elsewhere re-reads the first page and updates the shown tiles in place: no reload, and scroll and loaded pages stay.
-async function refreshLoaded() {
-  if (loading.value || error.value || !items.value.length) return load()
+async function refreshLoaded(batch) {
+  if (error.value || !items.value.length) return load()
   const request = sequence
   try {
     const page = await levelPage(false)
     const chats = rootChats.value ? await chatPage(null) : null
-    if (request !== sequence) return
+    if (request !== sequence) return live.hold(batch?.kinds)
     if (page.path && JSON.stringify(page.path) !== JSON.stringify(state.value.path)) return load()
     items.value = mergeTiles(items.value, [...page.items, ...(chats?.items || [])])
   } catch { if (request === sequence) return load() }
 }
 // Reading the open record sends `reads` and, when its shared unread count drops, `chats`; only that tile is fetched again.
-async function refreshSelected() {
+async function refreshSelected(batch) {
   const request = sequence
   const tile = items.value.find(row => row.kind === 'record' && row.doctype === props.selectedDoctype && row.name === props.selected)
-  if (!tile) return refreshLoaded()
+  if (!tile) return refreshLoaded(batch)
   const page = await coreApi('business_groups.browse', { doctype: state.value.doctype, path: JSON.stringify(state.value.path),
     path_fields: JSON.stringify(state.value.pathFields), query: query.value, start: 0, contacts: 0, ...props.filters, business_type: tile.doctype, business_name: tile.name })
   const row = page.items.find(item => tileKey(item) === tileKey(tile))
@@ -133,12 +133,13 @@ function liveRefresh(batch) {
   let kind = chatListRefresh(batch, name => !!ownSendOf(name))
   if (kind === 'own' && ![...batch.messages].every(name => sentTile(items.value, ownSendOf(name)))) kind = 'loaded'
   if (props.contacts && !['none', 'own'].includes(kind)) kind = 'reload'
-  return refreshes[kind]()
+  return refreshes[kind](batch)
 }
 const refreshes = { none: () => {}, own: () => {}, selected: refreshSelected, loaded: refreshLoaded, reload: () => load() }
 // Hub event changes ('incoming') are not chat changes: a status callback of a send would read the page again.
+const live = heldRefresh(() => loading.value, liveRefresh)
 useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'receipts', 'contacts', 'reads', 'chats', 'permissions'],
-  liveRefresh, LIVE_DELAY)
+  live.refresh, LIVE_DELAY)
 </script>
 
 <template>
