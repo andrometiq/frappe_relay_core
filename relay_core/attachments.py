@@ -52,8 +52,8 @@ def file_content(name,source):
     file=frappe.get_doc('File',name)
     if not file.is_private or file.attached_to_doctype!='Relay Message' or file.attached_to_name!=source.name:
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
-    raw=file.get_content()
-    if isinstance(raw,str):raw=raw.encode()
+    # No encodings: Frappe would decode a binary file that happens to read as windows-1250 into text.
+    raw=file.get_content(encodings=())
     if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
     return file,raw
 
@@ -73,11 +73,17 @@ def upload(message,filename,content_base64):
     return {'name':file.name,'filename':file.file_name,'size':len(raw)}
 
 
+def private_file(filename,raw,doctype=None,name=None):
+    """A private File holding raw byte for byte. Not file_manager.save_file: its File re-reads the written file
+    and stores binary content that decodes as Windows-1252, such as a small PNG, as UTF-8 text."""
+    return frappe.get_doc({'doctype':'File','file_name':filename,'attached_to_doctype':doctype,'attached_to_name':name,
+                           'is_private':1,'content':raw}).insert(ignore_permissions=True)
+
+
 def save_attachment(filename,raw,message):
     """A private File on the message that keeps the chosen name. Frappe adds a hash suffix to a reused
     name on disk; only file_url carries it, so the name sent and downloaded stays the original."""
-    from frappe.utils.file_manager import save_file
-    file=save_file(filename,raw,'Relay Message',message,is_private=1)
+    file=private_file(filename,raw,'Relay Message',message)
     if file.file_name!=filename:
         file.db_set('file_name',filename,update_modified=False)
     return file

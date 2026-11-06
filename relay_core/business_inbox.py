@@ -7,6 +7,7 @@ from relay_core.api import validate_reference
 from relay_core.business_access import require_type, business_document, allowed_types
 from relay_core.conversation_state import fresh_write
 from relay_core.message_reads import insert_reads
+from relay_core import locks
 
 
 def check_type(doctype):
@@ -59,9 +60,9 @@ def _assert_messages(doctype,name,names):
     return unique,rows
 
 
-def changed(doctype,name,kind='reads',messages=None):
+def changed(doctype,name,kind='reads',messages=None,receipt=False,change=None):
     from relay_core.realtime import conversation_event
-    frappe.publish_realtime('relay_changed',conversation_event(kind,messages),doctype=doctype,docname=name,after_commit=True)
+    frappe.publish_realtime('relay_changed',conversation_event(kind,messages,receipt,change),doctype=doctype,docname=name,after_commit=True)
 
 
 @frappe.whitelist(methods=['GET'])
@@ -90,7 +91,7 @@ def save_view(doctype,name,message,offset=0,at_bottom=0):
         state.chat_view=json.dumps({'name':message,'offset':offset,'atBottom':str(at_bottom)=='1'})
         state.last_seen=frappe.utils.now_datetime()
         state.save(ignore_permissions=True);frappe.db.commit()
-    with frappe.cache.lock('relay-business-inbox-'+key,timeout=10,blocking_timeout=3):
+    with locks.lock('relay-business-inbox-'+key,timeout=10,blocking_timeout=3):
         fresh_write(write)
     return {'saved':True}
 
@@ -110,7 +111,7 @@ def mark_visible(doctype,name,messages,last_read=None):
         mark_read((doctype,name),max(names))
         frappe.db.commit()
         return state.last_read
-    with frappe.cache.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):
+    with locks.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):
         cursor=fresh_write(write)
     return {'marked':names,'last_read':cursor}
 

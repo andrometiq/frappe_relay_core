@@ -151,13 +151,14 @@ def tally(rows):
 
 
 def recount(name):
+    from relay_core.bulk_campaigns import lock_campaign
+    status = lock_campaign(name)  # Before the count: the counts and the status written below are current.
     # A reply counts once Hub reports the provider ID of a send that did not fail.
     rows = frappe.db.sql(f'''SELECT status, COUNT(*), CAST(SUM(replied_at IS NOT NULL AND IFNULL(provider_id, '')!=''
         AND status NOT IN ('Failed', 'Rejected')) AS SIGNED)
         FROM `tab{RECIPIENT}` WHERE campaign=%s GROUP BY status''', name)
     counts = tally([(status, int(total), int(replied or 0)) for status, total, replied in rows])
     values = {key + '_count': value for key, value in counts.items()}
-    status = frappe.db.get_value('Relay Campaign', name, 'status')
     if status == 'Running' and counts['queued'] == 0:
         values.update(status='Completed', finished_at=frappe.utils.now_datetime())
         from relay_core.bulk_campaigns import phase

@@ -75,7 +75,7 @@ class HeaderUploadTests(unittest.TestCase):
         self.save_file = Mock(return_value=SimpleNamespace(name='FILE-1'))
         self.cache = Mock()
         self.patches = [
-            patch('frappe.utils.file_manager.save_file', self.save_file),
+            patch('relay_core.attachments.private_file', self.save_file),
             patch.object(template_media.frappe, 'cache', self.cache),
             patch('relay_core.permissions.require_access'),
             patch.object(template_media.frappe, 'get_doc', return_value=self.channel),
@@ -92,7 +92,7 @@ class HeaderUploadTests(unittest.TestCase):
     def test_upload_returns_the_hub_media_id(self):
         self.assertEqual(self.upload(), {'id': '9001', 'filename': 'offer.png', 'size': 9})
         self.hub_upload.assert_called_once_with(self.channel, 'offer.png', b'\x89PNG data', 'image', 'image/png')
-        self.save_file.assert_called_once_with('offer.png', b'\x89PNG data', None, None, is_private=1)
+        self.save_file.assert_called_once_with('offer.png', b'\x89PNG data')
         self.cache.set_value.assert_called_once_with(template_media.UPLOADS + '9001', {'file': 'FILE-1', 'channel': 'acme-1'},
                                                      expires_in_sec=29 * 86400)
         self.assertEqual(self.upload('bill.pdf', b'%PDF', 'document')['id'], '9001')

@@ -76,6 +76,14 @@ class LanguageRegression(unittest.TestCase):
         for text in ('5', '൫', '५', '2026-11-05', '₹4,200.00', 'INR 4,200.00', 'Rs. 500', '👍'):
             self.assertTrue(language.matches(text, language.detect(history[0]['content'])))
 
+    def test_long_latin_names_do_not_outweigh_native_words(self):
+        for text, expected in [('Northwind Hosiery का अक्टूबर का खाता भेजो।', 'Hindi'),
+                               ('Northwind Hosiery-யின் அக்டோபர் கணக்கு அனுப்பு', 'Tamil'),
+                               ('What does பற்று mean in my statement?', 'English'),
+                               ('注文はどこですか', 'Japanese')]:
+            with self.subTest(text=text):
+                self.assertEqual(language.detect(text)['language'], expected)
+
     def test_language_context_reads_scoped_permitted_customer_transcripts_without_old_answers(self):
         f = fixtures.framework()
         local = fixtures.module('relay_core/ai/service.py', f)

@@ -7,6 +7,7 @@ from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 ACTIVE=('Pending','Dispatching','Queued','Uncertain')
 
@@ -80,7 +81,7 @@ def read(name,after=None,status=None):
 def process(name,refresh_only=False):
     if frappe.db.get_value('Relay Campaign', name, 'operation') in ('messages.send', 'messages.media', 'templates.send'):
         return
-    with frappe.cache.lock('relay-campaign:'+name,timeout=150,blocking_timeout=1):
+    with locks.lock('relay-campaign:'+name,timeout=150,blocking_timeout=1):
         original=frappe.session.user
         deadline=time.monotonic()+55
         try:

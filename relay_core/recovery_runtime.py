@@ -8,6 +8,7 @@ import time
 
 import frappe
 from relay_core.operations import JOBS
+from relay_core import locks
 
 HEARTBEAT = 'relay-scoped-recovery-heartbeat'
 
@@ -18,7 +19,7 @@ def tick():
     if frappe.conf.get('maintenance_mode'):
         return {'state':'maintenance'}
     result={'state':'running','checked_at':str(frappe.utils.now_datetime()),'enqueued':0,'missing':0,'stopped':0,'errors':0}
-    with frappe.cache.lock('relay-scoped-recovery-tick',timeout=55,blocking_timeout=1):
+    with locks.lock('relay-scoped-recovery-tick',timeout=55,blocking_timeout=1):
         rows=frappe.get_all('Scheduled Job Type',filters={'method':['in',list(JOBS)]},fields=['name','method','stopped'],limit_page_length=100)
         indexed={row.method:row for row in rows}
         for method in JOBS:

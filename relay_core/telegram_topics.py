@@ -6,6 +6,7 @@ from relay_core.automation.provenance import integer
 from relay_core.automation.service import internal_save
 from relay_core.permissions import require_access, readable_contact
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 
 def remember(channel, chat_id, thread_id, *, title=None, state=None, timestamp=None):
@@ -15,7 +16,7 @@ def remember(channel, chat_id, thread_id, *, title=None, state=None, timestamp=N
     if state is not None and state not in ('Open','Closed','Hidden','Deleted'):raise ValueError('Invalid topic state')
     key=hashlib.sha256(f'{channel}:{chat_id}:{thread_id}'.encode()).hexdigest()
     stamp=frappe.utils.get_datetime(timestamp or frappe.utils.now_datetime())
-    with frappe.cache.lock('relay-telegram-topic:'+key,timeout=30,blocking_timeout=5):
+    with locks.lock('relay-telegram-topic:'+key,timeout=30,blocking_timeout=5):
         name=frappe.db.get_value('Relay Telegram Topic',{'topic_key':key},'name')
         doc=frappe.get_doc('Relay Telegram Topic',name) if name else frappe.get_doc({'doctype':'Relay Telegram Topic','topic_key':key,'channel':channel,'chat_id':str(chat_id),'thread_id':str(thread_id),'title':'General' if thread_id==1 else f'Topic {thread_id}','state':'Open'})
         if name and title is None and state is None:return

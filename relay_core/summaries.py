@@ -3,7 +3,7 @@ import hashlib
 import re
 import frappe
 from relay_core.business_access import document_name, business_document
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.permissions import require_access,readable_contact
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import check_actor,business_scope,complete_with_fallback,internal_save
@@ -133,7 +133,7 @@ def generate(contact,channel,period,request_key,business_doctype=None,business_n
     else:readable_contact(contact)
     if period not in ('7','30','90','all') or not isinstance(request_key,str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,100}',request_key):frappe.throw('Invalid summary request')
     key=hashlib.sha256((frappe.session.user+':'+request_key).encode()).hexdigest()
-    with frappe.cache.lock('relay-summary:'+key,timeout=15):
+    with locks.lock('relay-summary:'+key,timeout=15):
         existing=frappe.db.get_value('Relay Conversation Summary',{'request_key':key},'name')
         if existing:
             doc=frappe.get_doc('Relay Conversation Summary',existing)
@@ -230,7 +230,7 @@ def latest(contact=None,business_doctype=None,business_name=None):
 
 @ai_features.when_enabled
 def process(name):
-    with frappe.cache.lock('relay-summary-process:'+name,timeout=150,blocking_timeout=1):
+    with locks.lock('relay-summary-process:'+name,timeout=150,blocking_timeout=1):
         doc=frappe.get_doc('Relay Conversation Summary',name)
         if doc.status not in ('Pending','Running'):return
         original=frappe.session.user

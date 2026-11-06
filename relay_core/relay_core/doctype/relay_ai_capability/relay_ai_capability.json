@@ -25,7 +25,7 @@
   "fields": [
     {"fieldname": "capability_key", "label": "Capability key", "fieldtype": "Data", "reqd": 1, "unique": 1, "read_only": 1, "in_list_view": 1},
     {"fieldname": "app", "label": "App", "fieldtype": "Data", "read_only": 1, "in_list_view": 1},
-    {"fieldname": "kind", "label": "Kind", "fieldtype": "Select", "options": "Read\nAction", "read_only": 1},
+    {"fieldname": "kind", "label": "Kind", "fieldtype": "Select", "options": "Read\nAction\nTool", "read_only": 1},
     {"fieldname": "business_doctype", "label": "Business type", "fieldtype": "Link", "options": "DocType", "read_only": 1},
     {"fieldname": "label", "label": "Label", "fieldtype": "Data", "read_only": 1},
     {"fieldname": "enabled", "label": "Enabled", "fieldtype": "Check", "default": "1", "description": "Turn off to stop the AI from using this capability."},
@@ -43,5 +43,5 @@
   ],
   "sort_field": "modified",
   "sort_order": "DESC",
-  "modified": "2026-10-30 12:00:00.000000"
+  "modified": "2026-11-04 12:00:00.000000"
 }

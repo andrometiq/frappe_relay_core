@@ -82,13 +82,18 @@ class KeptFileTests(unittest.TestCase):
     def setUp(self):
         self.source = SimpleNamespace(name='RELAY-MSG-0000000002')
         self.file = SimpleNamespace(is_private=1, attached_to_doctype='Relay Message', attached_to_name=self.source.name,
-            file_name='Order.pdf', get_content=lambda: b'pdf', check_permission=Mock(side_effect=PermissionError('Only the uploader')))
+            file_name='Order.pdf', get_content=lambda encodings=None: b'pdf', check_permission=Mock(side_effect=PermissionError('Only the uploader')))
         def reject(message, *args): raise ValueError(message, *args)
         fixture = patch.object(attachments, 'frappe', SimpleNamespace(get_doc=lambda doctype, name: self.file, throw=reject, PermissionError=PermissionError))
         fixture.start(); self.addCleanup(fixture.stop)
 
     def test_file_bound_to_the_readable_source_is_served_to_any_reader(self):
         self.assertEqual(attachments.file_content('FILE-1', self.source), (self.file, b'pdf'))
+
+    def test_binary_file_is_read_byte_exact(self):
+        png = bytes.fromhex('89504e470d0a1a0a0000000d49484452')  # Frappe's windows-1250 fallback decodes these bytes.
+        self.file.get_content = lambda encodings=None: png if encodings == () else png.decode('windows-1250')
+        self.assertEqual(attachments.file_content('FILE-1', self.source)[1], png)
 
     def test_file_of_another_message_is_denied(self):
         self.file.attached_to_name = 'RELAY-MSG-0000000003'

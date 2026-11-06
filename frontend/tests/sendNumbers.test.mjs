@@ -4,11 +4,12 @@ import { readFile } from 'node:fs/promises'
 import { computed, nextTick, ref, watch } from 'vue'
 import { objectValue } from '../src/components/messageContent.js'
 import { effectiveNumber, hasManyNumbers, sendNumberChoice } from '../src/services/whatsappNumbers.js'
+import { isReceiptsOnly } from '../src/services/realtimeRefreshQueue.js'
 
 const source = (await readFile(new URL('../src/composables/useSendNumbers.js', import.meta.url), 'utf8'))
   .replace(/^import .*$/gm, '').replace(/^export /gm, '')
 const make = new Function('computed', 'ref', 'watch', 'coreApi', 'objectValue', 'effectiveNumber', 'hasManyNumbers', 'sendNumberChoice',
-  'useRealtimeRefresh', source + '\nreturn useSendNumbers;')
+  'useRealtimeRefresh', 'isReceiptsOnly', source + '\nreturn useSendNumbers;')
 
 const capabilities = ref({ whatsapp_numbers: [{ name: 'WA-1', label: 'Sales line' }, { name: 'WA-2', label: 'Support line' }] })
 const item = (channel, open) => ({ channel, label: channel, address: '', has_chat: true, window: { open, remaining_seconds: open ? 3600 : 0 } })
@@ -21,8 +22,8 @@ function setup(responses) {
   const state = { source: ref(message), selected: ref('C1'), quoting: ref(false), pinnedSource: ref(null), viaNumber: ref('') }
   state.pickNumber = value => { state.viaNumber.value = value }
   const numbers = make(computed, ref, watch, api, objectValue, effectiveNumber, hasManyNumbers, sendNumberChoice,
-    (rooms, kinds, fn) => { assert.deepEqual(kinds, ['messages']); refresh = fn })(state, capabilities)
-  return { calls, numbers, state, refresh: () => refresh() }
+    (rooms, kinds, fn) => { assert.deepEqual(kinds, ['messages', 'receipts']); refresh = fn }, isReceiptsOnly)(state, capabilities)
+  return { calls, numbers, state, refresh: (kinds = ['messages']) => refresh({ kinds: new Set(kinds) }) }
 }
 const settle = async () => { await new Promise(resolve => setImmediate(resolve)); await nextTick() }
 
@@ -37,6 +38,8 @@ test('a new incoming message moves the default number through the socket refresh
   assert.equal(fixture.numbers.current.value, 'WA-2')
   assert.equal(fixture.numbers.chosen.value.window.open, true)
   assert.deepEqual(fixture.calls.map(([method, args]) => [method, args.contact]), [['messaging.send_numbers', 'C1'], ['messaging.send_numbers', 'C1']])
+  await fixture.refresh(['receipts'])
+  assert.equal(fixture.calls.length, 2, 'A delivery receipt does not read the numbers again')
 })
 
 test('a staff pick wins over the default and a quote keeps its own number', async () => {

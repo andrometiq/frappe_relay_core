@@ -60,7 +60,6 @@ class Driver:
         frappe.db.commit()  # Each callback is its own HTTP transaction.
         with patch.object(frappe, 'request', request, create=True), self.isolated():
             inbound.receive()
-        frappe.db.commit()
         self.events.append((event_id, payload))
 
     def repeat_last(self) -> None:
@@ -79,6 +78,8 @@ class Driver:
         with patch.object(frappe, 'enqueue', side_effect=self.collect), patch.object(queue.Drain, 'wake', lambda self: None), \
                 patch.object(frappe, 'publish_realtime'), patch.object(HubClient, 'call_tool', hub):
             yield
+            # After-commit hooks, such as the automation drain wake, must run while still patched.
+            frappe.db.commit()
 
     def drain(self, rounds: int = 50) -> int:
         """Project Hub events, run the message hooks and every job they queue, until nothing is left."""

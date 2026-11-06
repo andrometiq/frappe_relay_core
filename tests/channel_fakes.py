@@ -126,7 +126,7 @@ class FakeSite:
             self.rows(doctype, {'name': filters} if isinstance(filters, str) else filters)),
             set_value=self.set_value, commit=Mock(), count=lambda doctype, filters=None: len(self.rows(doctype, filters)))
         return SimpleNamespace(db=db, flags=SimpleNamespace(), get_all=self.get_all, get_list=self.get_all, get_doc=self.get_doc,
-                               cache=SimpleNamespace(lock=lambda *a, **k: nullcontext()),
+                               cache=SimpleNamespace(lock=lambda *a, **k: nullcontext(), make_key=str),
                                enqueue=lambda *a, **k: self.queued.append((a, k)), throw=throw,
                                PermissionError=PermissionError, ValidationError=ValueError, DuplicateEntryError=DuplicateEntryError,
                                session=_dict(user='Administrator'), whitelist=lambda **k: (lambda f: f))

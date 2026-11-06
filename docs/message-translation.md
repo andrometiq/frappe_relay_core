@@ -2,7 +2,7 @@
 
 A System Manager configures **Relay Automation Policy** in Frappe Desk for the intended channel and business DocType. Choose an enabled provider, a dedicated execution user with access to that business, and a daily attempt limit. Enable **Automatically translate incoming messages to English** to queue new incoming text messages independently of automated replies. Existing historical messages are not silently backfilled. The site's existing AI automation switch must also be enabled.
 
-For voice/audio, enable **Allow Voice Transcription** and choose a transcription provider. Reply inference and translation reuse the same source-version transcript. The original audio and original-language transcript remain available. The English translation is stored separately. Disabling a policy prevents pending jobs from invoking the provider.
+For voice/audio, enable **Allow Voice Transcription** and choose a transcription provider. Reply inference and translation reuse the same source-version transcript. The original audio and original-language transcript remain available. The English translation is stored separately. Disabling a policy prevents pending jobs from invoking the provider. The provider uses an API key, so transcription runs only while Relay Settings `allowed_ai_auth_types` includes `API Key`.
 
 Operators with current conversation access use **View in English** / **View original**. This only reads a stored result. **View transcript** reads the voice transcript. Provider/model/time information is available in details; unknown historical provenance is not guessed. Permission revocation or a source edit prevents access to stale derived text.
 

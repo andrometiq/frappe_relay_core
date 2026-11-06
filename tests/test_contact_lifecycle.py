@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from frappe import _dict
-from relay_core import business_access, contact_lifecycle as lifecycle, identity
+from relay_core import business_access, contact_lifecycle as lifecycle, identity, locks
 
 
 def person(name='Contact-A', phones=(), emails=()):
@@ -66,8 +66,9 @@ class ContactUpdateTests(unittest.TestCase):
             'RELAY-CON-A' if doctype == 'Relay Contact' else providers[filters]))
         self.fake = SimpleNamespace(db=db, get_doc=Mock(side_effect=get_doc), flags=SimpleNamespace(),
                                     get_all=Mock(return_value=list(self.endpoints.values())),
-                                    get_roles=lambda: self.roles, cache=SimpleNamespace(lock=MagicMock()))
+                                    get_roles=lambda: self.roles, cache=SimpleNamespace(lock=MagicMock(), make_key=str))
         self.enterContext(patch.object(lifecycle, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.enterContext(patch.object(lifecycle, 'can_manage', lambda: 'Relay Communication Manager' in self.roles))
         self.enterContext(patch.object(identity, 'default_region', return_value='IN'))
         self.verified = self.enterContext(patch.object(lifecycle, 'set_verified'))

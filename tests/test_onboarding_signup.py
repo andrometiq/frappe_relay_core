@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from channel_fakes import FakeSite
+from relay_core import locks
 from relay_core.automation import projection
 from relay_core.hub import HubError
 from relay_core.onboarding import api, details, progress, signup, test_message
@@ -53,7 +54,8 @@ class SignupTests(unittest.TestCase):
         self.site = SignupSite(Relay_Channel=[{'channel': 'WhatsApp', 'hub_channel': 'wa-120', 'name': 'Acme-001'}])
         self.hub = Mock()
         self.sync = Mock()
-        for item in (patch.object(signup, 'frappe', self.site.frappe), patch.object(signup, 'hub', return_value=self.hub),
+        for item in (patch.object(signup, 'frappe', self.site.frappe), patch.object(locks, 'frappe', self.site.frappe),
+                     patch.object(signup, 'hub', return_value=self.hub),
                      patch('relay_core.channel_sync.sync', self.sync)):
             item.start()
             self.addCleanup(item.stop)

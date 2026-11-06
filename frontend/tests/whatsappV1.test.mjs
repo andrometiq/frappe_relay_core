@@ -10,7 +10,7 @@ import {messageData,objectValue} from '../src/components/messageContent.js'
 import {sha256Hex} from '../src/services/crypto.js'
 
 const source=(await readFile(new URL('../src/composables/useMessages.js',import.meta.url),'utf8'))
-  .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','function')
+  .replace(/^import[\s\S]*?from ["'][^"']+["'];?\n/gm,'').replace('export function','const announceOwnSend=()=>{},recordOwnMessages=()=>{}\nfunction')
 const factory=new Function('useRealtimeRefresh','sha256Hex','randomUUID','computed','onMounted','onBeforeUnmount','ref','watch','reactive','coordinates','coreApi','messageData','objectValue','resetRecipient','inject','composerKinds','defaultSendSource','"use strict";\n'+source+'\nreturn useMessages();')
 function storage(){
   const value={}
@@ -169,6 +169,8 @@ test('navigation puts WhatsApp under Channels with manager campaigns, omits call
   assert.doesNotMatch(text, /name: 'Campaigns'/)
   const section = await readFile(new URL('../src/components/whatsapp/WhatsAppSection.vue', import.meta.url), 'utf8')
   assert.match(section, /\.\.\.whatsappSections\(capabilities\.value\)/)
+  // Agents cannot read number health, so the Account card is for managers and System Managers only.
+  assert.match(section, /<WhatsAppAccounts v-if="configured && capabilities\.manage" \/>/)
   assert.doesNotMatch(text,/name:'Calls'|name:'Groups'|Calls:|Groups:/)
 })
 
@@ -271,7 +273,7 @@ test('Send via switches the source channel without filtering the timeline',async
   assert.equal(fixture.state.channel.value,'')
   assert.equal(fixture.state.rows.value.length,3)
   assert.deepEqual(calls,[])
-  assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact'])
+  assert.deepEqual(fixture.state.kinds.value,['text','sticker','photo','video','audio','voice','document','location','contact','poll'])
   fixture.stop()
 })
 

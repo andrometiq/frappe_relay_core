@@ -2,7 +2,7 @@
 import hashlib
 import frappe
 from relay_core.business_access import document_name
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.permissions import require_access
 from relay_core.automation.contracts import canonical,validate_decision
 from relay_core.automation.service import internal_save,check_actor,replies,complete_with_fallback,business_scope
@@ -105,7 +105,7 @@ def evaluate(name):
 
 @ai_features.when_enabled
 def process(name):
-    with frappe.cache.lock('relay-procedure-evaluation-'+name,timeout=400,blocking_timeout=1):
+    with locks.lock('relay-procedure-evaluation-'+name,timeout=400,blocking_timeout=1):
         evaluation=frappe.get_doc('Relay Procedure Evaluation',name)
         if evaluation.status not in ('Pending','Running'):return
         original=frappe.session.user
@@ -134,7 +134,7 @@ def publish(name,evaluation,review_note):
     document_name(name)
     require_access(configure=True)
     if not isinstance(review_note,str) or not 10<=len(review_note.strip())<=2000:raise ValueError('Record your review in 10–2000 characters')
-    with frappe.cache.lock('relay-procedure-publish-'+name,timeout=15,blocking_timeout=3):
+    with locks.lock('relay-procedure-publish-'+name,timeout=15,blocking_timeout=3):
         frappe.db.get_value('Relay Learned Procedure',name,'name',for_update=True)
         doc=frappe.get_doc('Relay Learned Procedure',name);policy=frappe.get_doc('Relay Automation Policy',doc.policy)
         checked=frappe.get_doc('Relay Procedure Evaluation',evaluation);h,p=hashes(doc,policy)

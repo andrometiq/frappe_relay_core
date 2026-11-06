@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import frappe
 from frappe import _dict
-from relay_core import bulk_campaigns as bulk, bulk_sheet, campaign_media, contact_lifecycle
+from relay_core import bulk_campaigns as bulk, bulk_sheet, campaign_media, contact_lifecycle, locks
 from site_file_limit import use_relay_file_limit
 
 NUMBER = '919876543210'
@@ -27,8 +27,9 @@ def setUpModule():
 
 class SheetContactTests(unittest.TestCase):
     def setUp(self):
-        self.fake = SimpleNamespace(db=Mock(get_value=Mock(return_value=None)), cache=SimpleNamespace(lock=MagicMock()))
+        self.fake = SimpleNamespace(db=Mock(get_value=Mock(return_value=None)), cache=SimpleNamespace(lock=MagicMock(), make_key=str))
         self.enterContext(patch.object(bulk, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.sibling = self.enterContext(patch.object(contact_lifecycle, 'sibling_contact', return_value=None))
         self.create = self.enterContext(patch.object(contact_lifecycle, 'whatsapp_contact', return_value='RELAY-C1'))
 

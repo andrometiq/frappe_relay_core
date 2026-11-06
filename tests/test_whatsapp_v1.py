@@ -139,6 +139,7 @@ class InitialSkillSubmissionTests(unittest.TestCase):
             patch.object(service, 'message_hash', return_value='hash'),
             patch.object(service, 'latest_message', return_value=True),
             patch.object(service, 'context', side_effect=context), patch.object(tools, 'recheck', self.recheck),
+            patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')),
         ):
             fixture.start(); self.addCleanup(fixture.stop)
 
@@ -354,7 +355,7 @@ class OutgoingProjectionTests(unittest.TestCase):
         changed.assert_called_once_with(source)
 
     def test_immediate_reaction_acknowledgement_projects_on_loaded_message(self):
-        from relay_core import conversation_start, messaging, whatsapp
+        from relay_core import conversation_start, locks, messaging, whatsapp
         source = _dict(relay_contact='contact', channel='channel', sender_endpoint='15550000001',
                        business_doctype='Customer', business_name='customer')
         quoted = _dict(source, doctype='Relay Message', name='quoted',
@@ -379,11 +380,11 @@ class OutgoingProjectionTests(unittest.TestCase):
             'Relay Message Action':None, 'Relay Contact':'person', 'Relay Message':'quoted',
         }[dt]
         fake = SimpleNamespace(db=db, get_doc=get_doc, session=SimpleNamespace(user='sender'),
-                               cache=SimpleNamespace(lock=lambda *a, **kw: nullcontext()),
+                               cache=SimpleNamespace(lock=lambda *a, **kw: nullcontext(), make_key=str),
                                PermissionError=PermissionError, ValidationError=ValueError)
         hub = Mock()
         hub.call_tool.return_value = {'success':True}
-        with patch.object(conversation_start,'frappe',fake), patch.object(messaging,'frappe',fake), \
+        with patch.object(conversation_start,'frappe',fake), patch.object(messaging,'frappe',fake), patch.object(locks,'frappe',fake), \
              patch.object(conversation_start,'target',side_effect=lambda *a:(_dict(source),channel,{'provider':'WhatsApp'})), \
              patch.object(whatsapp,'prepare',return_value=args), patch.object(whatsapp,'client',return_value=hub), \
              patch.object(conversation_start.service_window,'require_open'), \

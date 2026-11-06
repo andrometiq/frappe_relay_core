@@ -2,9 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FeatherIcon, TextInput } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
-import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
+import { appendTiles, browseCrumbs, chatTile, browseRoute, enterBrowse, levelLabel, mergeTiles, moveSentTile, readBrowse, searchLabel, sentTile, tileCount, tileKey, tileUnread } from '../../services/businessBrowse'
 import { useDebouncedSearch } from '../../composables/useDebouncedSearch'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
+import { chatListRefresh } from '../../services/realtimeRefreshQueue'
+import { lastOwnSend, ownSendOf } from '../../services/ownSends'
 import { useLoadMore } from '../../composables/useLoadMore'
 import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
@@ -20,9 +22,19 @@ const crumbs = computed(() => browseCrumbs(state.value, fields.value))
 // Chats All counts the chats that no business record covers, so its root lists them below the type tiles.
 const rootChats = computed(() => !props.contacts && !state.value.doctype && !props.filters?.business_type && !props.filters?.business_name)
 let sequence = 0
+// Live events of one send arrive over a few hundred milliseconds; they are answered together.
+const LIVE_DELAY = 300
 async function chatPage(after) {
   const page = await coreApi('inbox.directory', { rows: 'business', mode: 'unlinked', query: query.value, ...props.filters, ...(after ? { after } : {}) })
   return { items: page.items.map(chatTile), next: page.next?.after ?? null }
+}
+function levelPage(append) {
+  return people.value
+    ? coreApi('api.contact_directory', { query: query.value, after: append ? next.value : null,
+      business_type: state.value.doctype || null, business_name: state.value.record || null, unlinked: state.value.unlinked ? 1 : 0 })
+    : coreApi('business_groups.browse', { doctype: state.value.doctype || null,
+      path: JSON.stringify(state.value.path), path_fields: JSON.stringify(state.value.pathFields), query: query.value,
+      start: append ? next.value : 0, contacts: props.contacts ? 1 : 0, ...props.filters })
 }
 async function load(append = false) {
   const request = ++sequence
@@ -35,12 +47,7 @@ async function load(append = false) {
       items.value = appendTiles(items.value, chats.items); next.value = chats.next
       return
     }
-    const page = people.value
-      ? await coreApi('api.contact_directory', { query: query.value, after: append ? next.value : null,
-        business_type: state.value.doctype || null, business_name: state.value.record || null, unlinked: state.value.unlinked ? 1 : 0 })
-      : await coreApi('business_groups.browse', { doctype: state.value.doctype || null,
-        path: JSON.stringify(state.value.path), path_fields: JSON.stringify(state.value.pathFields), query: query.value,
-        start: append ? next.value : 0, contacts: props.contacts ? 1 : 0, ...props.filters })
+    const page = await levelPage(append)
     if (request !== sequence) return
     if (page.path && JSON.stringify(page.path) !== JSON.stringify(state.value.path)) {
       // The grouping changed since this URL was saved: show the type level the server answered.
@@ -94,18 +101,44 @@ watch(state, () => load())
 watch(() => JSON.stringify(props.filters), () => navigate({ ...readBrowse(base), query: '' }))
 onMounted(() => { load(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { ++sequence; window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
+// A message elsewhere re-reads the first page and updates the shown tiles in place: no reload, and scroll and loaded pages stay.
+async function refreshLoaded() {
+  if (loading.value || error.value || !items.value.length) return load()
+  const request = sequence
+  try {
+    const page = await levelPage(false)
+    const chats = rootChats.value ? await chatPage(null) : null
+    if (request !== sequence) return
+    if (page.path && JSON.stringify(page.path) !== JSON.stringify(state.value.path)) return load()
+    items.value = mergeTiles(items.value, [...page.items, ...(chats?.items || [])])
+  } catch { if (request === sequence) return load() }
+}
 // Reading the open record sends `reads` and, when its shared unread count drops, `chats`; only that tile is fetched again.
 async function refreshSelected() {
   const request = sequence
   const tile = items.value.find(row => row.kind === 'record' && row.doctype === props.selectedDoctype && row.name === props.selected)
-  if (!tile) return load()
+  if (!tile) return refreshLoaded()
   const page = await coreApi('business_groups.browse', { doctype: state.value.doctype, path: JSON.stringify(state.value.path),
     path_fields: JSON.stringify(state.value.pathFields), query: query.value, start: 0, contacts: 0, ...props.filters, business_type: tile.doctype, business_name: tile.name })
   const row = page.items.find(item => tileKey(item) === tileKey(tile))
   if (request === sequence && row) Object.assign(tile, row)
 }
-useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'incoming', 'contacts', 'reads', 'chats', 'permissions'],
-  ({ kinds } = {}) => !props.contacts && kinds?.size && [...kinds].every(kind => kind === 'reads' || kind === 'chats') ? refreshSelected() : load())
+// A send from this browser moves its tile here at once and reads nothing; its live events then read nothing either.
+watch(lastOwnSend, sent => {
+  const tile = !props.contacts && sentTile(items.value, sent)
+  if (tile) items.value = moveSentTile(items.value, tile, sent)
+})
+// Live events of the open conversation change one tile; a change elsewhere reads the first page once per burst.
+function liveRefresh(batch) {
+  let kind = chatListRefresh(batch, name => !!ownSendOf(name))
+  if (kind === 'own' && ![...batch.messages].every(name => sentTile(items.value, ownSendOf(name)))) kind = 'loaded'
+  if (props.contacts && !['none', 'own'].includes(kind)) kind = 'reload'
+  return refreshes[kind]()
+}
+const refreshes = { none: () => {}, own: () => {}, selected: refreshSelected, loaded: refreshLoaded, reload: () => load() }
+// Hub event changes ('incoming') are not chat changes: a status callback of a send would read the page again.
+useRealtimeRefresh(['Relay Message', 'Contact', 'Relay Contact Type'], ['messages', 'receipts', 'contacts', 'reads', 'chats', 'permissions'],
+  liveRefresh, LIVE_DELAY)
 </script>
 
 <template>

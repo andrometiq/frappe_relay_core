@@ -1,0 +1,98 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Knowledge Base",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIKB-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "title_field": "title",
+  "description": "Reference documents a skill can search. Customer knowledge bases reach WhatsApp senders.",
+  "field_order": [
+    "title",
+    "enabled",
+    "audience",
+    "company",
+    "run_as_user",
+    "description",
+    "is_events"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "audience",
+      "label": "Audience",
+      "fieldtype": "Select",
+      "options": "customer\nstaff",
+      "default": "customer",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "customer: replies to senders may use it. staff: never offered to a sender."
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company",
+      "description": "Empty means every company."
+    },
+    {
+      "fieldname": "run_as_user",
+      "label": "Run as user",
+      "fieldtype": "Link",
+      "options": "User",
+      "description": "DocType sources are read with this user's permissions. Required for DocType sources."
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Small Text",
+      "description": "Tells the model what it can find here. At most 300 characters."
+    },
+    {
+      "fieldname": "is_events",
+      "label": "Holds events",
+      "fieldtype": "Check",
+      "default": "0",
+      "read_only": 1,
+      "hidden": 1,
+      "description": "The knowledge base that holds one source per Relay AI Event."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 14:00:00.000000"
+}

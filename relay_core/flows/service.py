@@ -8,7 +8,7 @@ from relay_core.automation.queue import QUEUE, after_message_commit
 from relay_core.permissions import require_access, readable_contact, can_manage
 from relay_core.automation.service import internal_save, check_actor, message_hash
 from relay_core.automation.provenance import context_of, conversation_key
-from relay_core import features
+from relay_core import features, locks
 from relay_core.flows.contracts import DEFAULT_VISITS, LAST_INPUT, definition, parse_input, prompt, render, matches
 
 COMMAND = r'/[a-z][a-z0-9_]{0,31}'
@@ -298,7 +298,7 @@ def publish(name):
     document_name(name)
     require_access(manage=True)
     features.require('flows')
-    with frappe.cache.lock('relay-flow-publish-'+name,timeout=15,blocking_timeout=3):
+    with locks.lock('relay-flow-publish-'+name,timeout=15,blocking_timeout=3):
         doc=frappe.get_doc('Relay Flow',name);doc.check_permission('write')
         validate_compatibility(doc, definition(doc.nodes))
         data={key:doc.get(key) for key in ('nodes','channel','execution_user','business_doctype','template_button','command','keywords')}
@@ -317,7 +317,7 @@ def set_enabled(name,enabled):
     features.require('flows')
     if enabled not in (0,1,False,True,'0','1'):
         frappe.throw('Enabled must be 0 or 1')
-    with frappe.cache.lock('relay-flow-state-'+name,timeout=15,blocking_timeout=3):
+    with locks.lock('relay-flow-state-'+name,timeout=15,blocking_timeout=3):
         doc=frappe.get_doc('Relay Flow',name);doc.check_permission('write')
         doc.enabled=int(str(enabled) in ('1','True'))
         doc.save()
@@ -602,7 +602,7 @@ def _process(event):
 def process(name):
     actor=frappe.session.user
     event=frappe.get_doc('Relay Flow Event',name)
-    with frappe.cache.lock('relay-flow-conversation-'+event.conversation_key,timeout=300,blocking_timeout=1):
+    with locks.lock('relay-flow-conversation-'+event.conversation_key,timeout=300,blocking_timeout=1):
         event.reload()
         if event.status!='Pending':return
         if not features.is_enabled('flows'):
@@ -690,7 +690,7 @@ def cancel(name):
     require_access(manage=True)
     features.require('flows')
     run=frappe.get_doc('Relay Flow Run',name);readable_run(run)
-    with frappe.cache.lock('relay-flow-conversation-'+run.conversation_key,timeout=10,blocking_timeout=3):
+    with locks.lock('relay-flow-conversation-'+run.conversation_key,timeout=10,blocking_timeout=3):
         run.reload()
         if run.status in ('Running','Waiting'):
             run.status='Cancelled';run.reason='Cancelled by an agent';internal_save(run)

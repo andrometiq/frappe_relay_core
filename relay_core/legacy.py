@@ -9,6 +9,7 @@ from relay_core.message_updates import provider_key
 from relay_core.message_types import normalize
 from relay_core.automation.provenance import conversation_key
 from relay_core import legacy_bundle as bundles
+from relay_core import locks
 
 SOURCE = 'WhatsApp Core Message'
 MEDIA = {'image', 'video', 'audio', 'document', 'sticker'}
@@ -326,7 +327,7 @@ def preview(name):
 def run_batch(name):
     require_access(configure=True)
     # Site-wide serialization prevents competing jobs from splitting one source identity.
-    with frappe.cache.lock('relay-legacy-import', timeout=600):
+    with locks.lock('relay-legacy-import', timeout=600):
         job, manifest, endpoint = mapping(name)
         if job.status == 'Completed':
             return {'status': job.status, 'imported': job.imported, 'skipped': job.skipped}

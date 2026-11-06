@@ -1,0 +1,93 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Knowledge Chunk",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-AIKC-.##########",
+  "naming_rule": "Expression (old style)",
+  "in_create": 1,
+  "read_only": 1,
+  "description": "A searchable piece of a knowledge source. Ingest writes it; nobody edits it.",
+  "field_order": [
+    "knowledge_base",
+    "source",
+    "chunk_index",
+    "content",
+    "content_hash",
+    "reference_doctype",
+    "reference_name",
+    "company",
+    "business_doctype",
+    "business_name"
+  ],
+  "fields": [
+    {
+      "fieldname": "knowledge_base",
+      "label": "Knowledge base",
+      "fieldtype": "Link",
+      "options": "Relay AI Knowledge Base",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "source",
+      "label": "Source",
+      "fieldtype": "Link",
+      "options": "Relay AI Knowledge Source",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "chunk_index",
+      "label": "Chunk index",
+      "fieldtype": "Int"
+    },
+    {
+      "fieldname": "content",
+      "label": "Content",
+      "fieldtype": "Long Text"
+    },
+    {
+      "fieldname": "content_hash",
+      "label": "Content hash",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "reference_doctype",
+      "label": "Reference DocType",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "reference_name",
+      "label": "Reference name",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "business_name",
+      "label": "Business",
+      "fieldtype": "Data"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1,
+      "delete": 1
+    }
+  ],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 14:00:00.000000"
+}

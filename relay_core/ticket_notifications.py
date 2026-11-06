@@ -4,7 +4,7 @@ from contextvars import ContextVar
 import frappe
 from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
-from relay_core import tickets
+from relay_core import tickets, locks
 
 
 outgoing_notification = ContextVar('relay_ticket_notification', default=None)
@@ -60,7 +60,7 @@ def subscribe(ticket, endpoint='', enabled=1):
     if str(enabled) not in ('0', '1', 'True', 'False'):
         frappe.throw('Invalid subscription flag')
     key = digest(ticket, frappe.session.user)
-    with frappe.cache.lock('relay-ticket-subscription-'+ticket, timeout=10, blocking_timeout=3):
+    with locks.lock('relay-ticket-subscription-'+ticket, timeout=10, blocking_timeout=3):
         name = frappe.db.get_value('Relay Ticket Subscription', {'subscription_key': key}, 'name')
         if not name and len(frappe.get_all('Relay Ticket Subscription', filters={'ticket':ticket}, pluck='name', limit_page_length=100)) >= 100:
             frappe.throw('This ticket has reached its subscriber limit')
@@ -243,7 +243,7 @@ def defer(row):
 
 def dispatch(name):
     from relay_core import messaging
-    with frappe.cache.lock('relay-ticket-notification-'+name, timeout=90, blocking_timeout=1):
+    with locks.lock('relay-ticket-notification-'+name, timeout=90, blocking_timeout=1):
         row = frappe.get_doc('Relay Ticket Notification', name)
         if row.status != 'Pending': return
         sub = frappe.get_doc('Relay Ticket Subscription', row.subscription)

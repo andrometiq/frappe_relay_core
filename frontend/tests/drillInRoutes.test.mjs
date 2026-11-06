@@ -12,7 +12,7 @@ import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
 
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
-  .replace(/^import .*\n/gm, '').replace('export function', 'function')
+  .replace(/^import .*\n/gm, '').replace('export function', 'const announceOwnSend = () => {}, recordOwnMessages = () => {}\nfunction')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
   'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds',
   'defaultSendSource', 'openRoute', 'closeRoute', source + '\nreturn useMessages();')

@@ -307,10 +307,9 @@ class ValidationTests(unittest.TestCase):
 
     def test_completion_adds_phase_without_losing_validation_history(self):
         bulk.phase(self.doc, 'Validated', validated=True)
-        fake = SimpleNamespace(db=Mock(sql=Mock(return_value=[('Sent', 1, 0), ('Failed', 1, 0)]),
-                                      get_value=Mock(return_value='Running')), get_doc=Mock(return_value=self.doc),
-                               utils=SimpleNamespace(now_datetime=lambda: NOW))
-        with patch.object(bulk_updates, 'frappe', fake):
+        fake = SimpleNamespace(db=Mock(sql=Mock(return_value=[('Sent', 1, 0), ('Failed', 1, 0)])),
+                               get_doc=Mock(return_value=self.doc), utils=SimpleNamespace(now_datetime=lambda: NOW))
+        with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk, 'lock_campaign', return_value='Running'):
             result = bulk_updates.recount(self.doc.name)
         self.assertEqual(result['status'], 'Completed')
         saved = fake.db.set_value.call_args.args[2]

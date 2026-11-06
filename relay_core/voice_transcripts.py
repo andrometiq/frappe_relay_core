@@ -1,13 +1,15 @@
 """Received voice notes keep their transcript on the Relay Message."""
 import json
 import frappe
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.automation.providers import ProviderError
 from relay_core.automation.queue import after_message_commit
 from relay_core.automation.service import message_hash
 
 AUDIO_KINDS = ('audio', 'voice')
 MAX_ATTEMPTS = 3
+# A Relay AI Provider pays with its API key.
+AUTH_TYPE = 'API Key'
 
 
 def configured_provider():
@@ -21,7 +23,7 @@ def configured_provider():
 
 def lock(source):
     # Shared with reply inference and translation so one audio file is sent once.
-    return frappe.cache.lock('relay-voice-' + message_hash(source), timeout=120, blocking_timeout=90)
+    return locks.lock('relay-voice-' + message_hash(source), timeout=120, blocking_timeout=90)
 
 
 def stored(source):
@@ -33,9 +35,13 @@ def stored(source):
 
 
 def create(source, provider, reserve=None):
-    """Caller holds lock(source). Never call with a database row lock held."""
+    """Caller holds lock(source). Never call with a database row lock held. The provider guard of AI models also
+    applies here."""
+    from relay_core.ai.adapter import allowed_auth_types
     from relay_core.attachments import read
     from relay_core.automation.multimodal import transcribe
+    if AUTH_TYPE not in allowed_auth_types():
+        raise ProviderError('Voice transcription uses an API key, which Relay Settings does not allow')
     digest = message_hash(source)
     response = read(source.name)
     if reserve:

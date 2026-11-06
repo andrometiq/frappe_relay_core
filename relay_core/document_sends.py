@@ -156,8 +156,8 @@ def keep_copy(result, name, raw):
     data = json.loads(frappe.db.get_value('Relay Message', message, 'message_data') or '{}') if message else {}
     if not message or data.get('attachment'):
         return message
-    from frappe.utils.file_manager import save_file
-    file = save_file(name, raw, 'Relay Message', message, is_private=1)
+    from relay_core.attachments import private_file
+    file = private_file(name, raw, 'Relay Message', message)
     data.update(attachment=file.name, attachment_source=message)
     frappe.db.set_value('Relay Message', message, 'message_data', json.dumps(data, ensure_ascii=False), update_modified=False)
     return message

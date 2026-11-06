@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { overlayKeydown } from '../src/services/overlayFocus.js'
-import { composerActions, attachmentKinds } from '../src/services/composerActions.js'
+import { composerActions, attachmentKinds, pollProblem } from '../src/services/composerActions.js'
 import { channelCan, composerKinds } from '../src/services/enabledChannels.js'
 import { sha256Hex } from '../src/services/crypto.js'
 import { messageData } from '../src/components/messageContent.js'
@@ -22,7 +22,7 @@ function fixture(t, { provider = 'WhatsApp', window = {open:true,remaining_secon
   globalThis.document = { getElementById: () => ({dataset:{user:'local-composer-test'}}), visibilityState:'visible' }
   globalThis.sessionStorage = {getItem:key => storage.get(key),setItem:(key,value) => storage.set(key,value),removeItem:key=>storage.delete(key)}
   const source = ref({name:'local-message',channel:'local-channel',relay_contact:'local-contact',sender_endpoint:'local-recipient',provider_context:{provider}})
-  const state = Object.fromEntries(Object.entries({selected:'local-contact',businessType:'',businessName:'',rows:[],attachment:null,quoting:false,kind:'text',body:'',latitude:'',longitude:'',contactName:'',phone:'',busy:false,sending:0,error:''}).map(([key,value]) => [key,ref(value)]))
+  const state = Object.fromEntries(Object.entries({selected:'local-contact',businessType:'',businessName:'',rows:[],attachment:null,quoting:false,kind:'text',body:'',latitude:'',longitude:'',contactName:'',phone:'',pollQuestion:'',pollOptions:['',''],busy:false,sending:0,error:''}).map(([key,value]) => [key,ref(value)]))
   Object.assign(state, {source,sourceContext:computed(()=>source.value.provider_context),kinds:computed(()=>composerKinds(whatsappCapabilities,source.value.provider_context)),cancelReply:()=>state.quoting.value=false,send:()=>sends.push(state.body.value),uploadAttachment:async()=>{state.attachment.value=null;state.error.value='Upload failed'}})
   if (legacyDraft) storage.set('relay-draft-' + sha256Hex(compositionScope(source.value, 'local-composer-test')), JSON.stringify(legacyDraft))
   const sends = [], events = [], props = reactive({mode:'reply',offText:off})
@@ -31,7 +31,7 @@ function fixture(t, { provider = 'WhatsApp', window = {open:true,remaining_secon
     defineProps:()=>props, defineEmits:()=>(...args)=>events.push(args), useMobileLayout:()=>ref(false), useRealtimeRefresh:()=>{},
     coreApi:async method => { if(method==='messaging.reply_window') {if(response instanceof Error) throw response; return response} return {} },
     useWhatsAppIdentity:()=>({identity:ref(null),load:()=>{}}), channelCan, channelOffText:provider=>`${provider} is switched off`,
-    compositionScope, telegramLimit, composerActions, attachmentKinds, messageData, sha256Hex, useSendChannel:()=>({choices:ref(new Map())}), sendNumbersKey:'numbers',messagesKey:'messages',
+    compositionScope, telegramLimit, composerActions, attachmentKinds, pollProblem, messageData, sha256Hex, useSendChannel:()=>({choices:ref(new Map())}), sendNumbersKey:'numbers',messagesKey:'messages',
     inject:(key, fallback)=>key==='messages'?state:key==='relayCapabilities'?ref(whatsappCapabilities):fallback,
     setInterval:()=>0, clearInterval:()=>{},setTimeout:()=>0,clearTimeout:()=>{},attachmentFormatError:()=>'',formatBytes:()=>'',attachmentMaxBytes,sizeError,sizeLabel }
   function mount(code, values, exposed) { const scope=effectScope();scopes.push(scope);return scope.run(()=>evaluate(code,{...base,...values},exposed)) }
@@ -47,7 +47,7 @@ function fixture(t, { provider = 'WhatsApp', window = {open:true,remaining_secon
 test('more actions follow capabilities, named kinds and stable ordering', () => {
   const can = key => channelCan(whatsappCapabilities,'WhatsApp',key)
   const actions = composerActions({can,kinds:composerKinds(whatsappCapabilities,{provider:'WhatsApp'})})
-  assert.deepEqual(actions.map(a=>a.id),['saved','template','photo','video','audio','voice','document','location','contact','sticker','emoji','note','details'])
+  assert.deepEqual(actions.map(a=>a.id),['saved','template','photo','video','audio','voice','document','location','contact','poll','sticker','emoji','note','details'])
   assert.equal(actions.find(a=>a.id==='voice').label,'Voice file')
   assert.deepEqual(composerActions({kinds:['text','photo']}).map(a=>a.id),['photo','emoji','note','details'])
   assert.deepEqual(composerActions({can,closed:true}).map(a=>a.id),['template','note','details'])
@@ -126,11 +126,18 @@ test('quoting another message in the same conversation keeps the current draft',
 })
 
 
-test('an in-flight chat send locks conflicting composer actions without changing the send queue', async t => {
+test('a send in flight leaves the composer open for the next message', async t => {
   const {state,view,sends}=fixture(t);await settle();state.body.value='Quantity 25';state.sending.value=1
-  assert.equal(view.canSend.value,false);assert.ok(view.actions.value.filter(a=>a.id!=='details').every(a=>a.disabled))
-  view.keydown({key:'Enter',preventDefault(){}});assert.equal(sends.length,0)
-  state.sending.value=0;assert.equal(view.canSend.value,true)
+  assert.equal(view.canSend.value,true);assert.ok(view.actions.value.every(a=>!a.disabled))
+  view.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(sends,['Quantity 25'])
+  state.busy.value=true;assert.equal(view.canSend.value,false)
+})
+
+test('a live reply window recheck keeps Send open; a new source waits for its window', async t => {
+  const {state,view}=fixture(t);await settle();state.body.value='Next message'
+  const live=view.checkWindow(true);assert.equal(view.canSend.value,true);await live
+  const opening=view.checkWindow();assert.equal(view.canSend.value,false);await opening
+  assert.equal(view.canSend.value,true)
 })
 
 
@@ -166,4 +173,24 @@ test('location details do not inherit a Telegram caption limit from the saved te
   const {state,view}=fixture(t,{provider:'Telegram'});await settle()
   state.body.value='😀'.repeat(4097);view.moreAction('location');state.latitude.value='11.0168';state.longitude.value='76.9558'
   assert.equal(view.canSend.value,true);assert.ok(!view.showCount.value);assert.equal(state.body.value.length,8194)
+})
+
+test('a poll needs a question and 2-10 different options within the WhatsApp limits', async () => {
+  const { pollProblem } = await import('../src/services/composerActions.js')
+  assert.equal(pollProblem('Which colour?', ['Red', 'Blue', '']), '')
+  assert.equal(pollProblem(' ', ['Red', 'Blue']), 'Add a question')
+  assert.equal(pollProblem('Q', ['Red', '']), 'Add 2 to 10 options')
+  assert.equal(pollProblem('Q', Array.from({ length: 11 }, (_, i) => 'Option ' + i)), 'Add 2 to 10 options')
+  assert.equal(pollProblem('Q', ['x'.repeat(21), 'B']), 'Keep each option to 20 characters with 2 options')
+  assert.equal(pollProblem('Q', ['x'.repeat(21), 'B', 'C', 'D']), '')
+  assert.equal(pollProblem('Q', ['Red', 'red']), 'Each option must be different')
+})
+
+test('the Poll action opens poll fields and Send waits for a valid poll', async t => {
+  const {state,view}=fixture(t);await settle()
+  view.moreAction('poll')
+  assert.equal(state.kind.value,'poll')
+  assert.equal(view.canSend.value,false)
+  state.pollQuestion.value='Which colour?';state.pollOptions.value=['Red','Blue']
+  assert.equal(view.canSend.value,true)
 })

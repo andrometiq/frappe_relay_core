@@ -22,7 +22,7 @@ class BudgetMath(unittest.TestCase):
         estimate = self.budget.estimate_usd(self.model, 4000, 1000)
         self.assertAlmostEqual(estimate, 1000 * 3 / 1e6 + 1000 * 15 / 1e6)
         reservation = self.budget.reserve(self.skill, estimate)
-        self.assertEqual(reservation, {'keys': [MONTH, DAY], 'estimate': estimate})
+        self.assertEqual(reservation, {'keys': [MONTH, DAY], 'estimate': estimate, 'charged': estimate})
         self.assertAlmostEqual(self.spend.cache.values[MONTH], estimate)
         actual = self.budget.actual_usd(self.model, {'prompt_tokens': 800, 'completion_tokens': 100})
         self.assertAlmostEqual(actual, 800 * 3 / 1e6 + 100 * 15 / 1e6)
@@ -30,6 +30,9 @@ class BudgetMath(unittest.TestCase):
         self.assertAlmostEqual(self.spend.cache.values[MONTH], actual)
         self.assertAlmostEqual(self.spend.cache.values[DAY], actual)
         self.assertEqual(self.budget.actual_usd(self.model, {'cost': 0.25, 'prompt_tokens': 10 ** 6}), 0.25)
+        self.budget.refund(reservation)  # A turn handed to the AI service is charged again when its run replays it.
+        self.assertAlmostEqual(self.spend.cache.values[MONTH], 0)
+        self.assertAlmostEqual(self.spend.cache.values[DAY], 0)
 
     def test_missing_model_rates_raise(self):
         for rates in ({'cost_per_m_input': 0, 'cost_per_m_output': 15}, {'cost_per_m_input': 3, 'cost_per_m_output': None}):

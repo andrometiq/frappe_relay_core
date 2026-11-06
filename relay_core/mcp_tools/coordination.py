@@ -9,6 +9,7 @@ import time
 import frappe
 
 from relay_core.mcp_tools.registry import READ, ToolError
+from relay_core import locks
 
 CLAIMS = 'relay-mcp-claims'
 CLIENT = 'relay-mcp-client:'
@@ -59,8 +60,7 @@ def run(entry, arguments):
 
 def chat_lock(contact):
     """One sender at a time per chat, across web workers, for the guard check and the send."""
-    return frappe.cache.lock(frappe.cache.make_key('relay-mcp-chat:' + contact), timeout=LOCK_SECONDS,
-                             blocking_timeout=LOCK_SECONDS)
+    return locks.lock('relay-mcp-chat:' + contact, timeout=LOCK_SECONDS, blocking_timeout=LOCK_SECONDS)
 
 
 def chat_of(arguments, after=None):

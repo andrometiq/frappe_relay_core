@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from frappe import _dict
 from channel_fakes import FakeSite
-from relay_core import channel_statuses, hub_channels, messaging, whatsapp_presence
+from relay_core import channel_statuses, hub_channels, locks, messaging, whatsapp_presence
 
 SHOP = {'name': 'Shop', 'channel': 'WhatsApp', 'account': 'site-a', 'hub_channel': 'site-a', 'enabled': 1, 'label': 'Shop',
         'address': '+91 1', 'title': 'Shop'}
@@ -148,7 +148,7 @@ class RebindAttachmentTests(Patched):
 
     def rebind(self, site):
         with self.patched(site), patch('relay_core.attachments.file_content', return_value=(self.file, b'pdf')) as content, \
-                patch('frappe.utils.file_manager.save_file', return_value=_dict(name='F2', file_name='bill.pdf')) as save:
+                patch('relay_core.attachments.private_file', return_value=_dict(name='F2', file_name='bill.pdf')) as save:
             result = messaging.rebind_attachment({'attachment': 'F1', 'caption': 'Bill'}, 'M1', 'M2')
         return result, content, save
 
@@ -156,7 +156,7 @@ class RebindAttachmentTests(Patched):
         result, content, save = self.rebind(fake_site([message('M1', 'Shop'), message('M2', 'Support')], File=[]))
         self.assertEqual(result, {'attachment': 'F2', 'caption': 'Bill'})
         self.assertEqual(content.call_args.args[1]['name'], 'M1')
-        save.assert_called_once_with('bill.pdf', b'pdf', 'Relay Message', 'M2', is_private=1)
+        save.assert_called_once_with('bill.pdf', b'pdf', 'Relay Message', 'M2')
 
     def test_a_retry_reuses_the_copy(self):
         copy = {'name': 'F3', 'attached_to_doctype': 'Relay Message', 'attached_to_name': 'M2', 'is_private': 1,
@@ -228,7 +228,7 @@ class StartChannelTests(unittest.TestCase):
              'endpoint_key': key('Shop', '919999999999')}],
             on_insert={'Relay Contact Endpoint': lambda row: row.update(endpoint_key=key(row['channel'], row['endpoint']))})
         with patch.object(conversation_start, 'frappe', site.frappe), patch.object(contact_lifecycle, 'frappe', site.frappe), \
-                patch('frappe.get_all', site.get_all), patch.object(conversation_start, 'readable_contact'), \
+                patch.object(locks, 'frappe', site.frappe), patch('frappe.get_all', site.get_all), patch.object(conversation_start, 'readable_contact'), \
                 patch.object(conversation_start, 'connection_value', return_value='site-a'):
             return conversation_start.channel_endpoint('C1', 'E1', channel), site
 

@@ -59,6 +59,31 @@ export function tileUnread(tile) {
   return Number(tile.kind === 'record' || tile.kind === 'chat' ? tile.unread : tile.unread_records) || 0
 }
 
+// Fresh first-page tiles in their new order, reusing the shown tile objects so only changed values re-render.
+// Tiles of later loaded pages keep their place below.
+export function mergeTiles(items, fresh) {
+  const shown = new Map(items.map(tile => [tileKey(tile), tile]))
+  const keys = new Set(fresh.map(tileKey))
+  return [...fresh.map(tile => shown.has(tileKey(tile)) ? Object.assign(shown.get(tileKey(tile)), tile) : tile),
+    ...items.filter(tile => !keys.has(tileKey(tile)))]
+}
+
+// The shown tile of a conversation this browser sent to: its record tile, or the chat tile of a chat without a record.
+export function sentTile(items, sent) {
+  return sent && items.find(tile => sent.business_name
+    ? tile.kind === 'record' && tile.doctype === sent.business_doctype && tile.name === sent.business_name
+    : tile.kind === 'chat' && tile.name === sent.contact)
+}
+
+// The sent tile shows the send at once and moves before the other tiles of its kind, as newest activity orders them.
+export function moveSentTile(items, tile, sent) {
+  Object.assign(tile, { last_activity: new Date(sent.at).toISOString(), ...(tile.kind === 'chat' && sent.preview ? { latest_preview: sent.preview } : {}) })
+  const others = items.filter(row => row !== tile)
+  const first = others.findIndex(row => row.kind === tile.kind)
+  others.splice(first < 0 ? others.length : first, 0, tile)
+  return others
+}
+
 // An inbox.directory row of a chat that no business record covers, as a tile that opens the chat.
 export const chatTile = row => ({ ...row, kind: 'chat', label: row.title || row.contact || row.name })
 

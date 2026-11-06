@@ -5,6 +5,7 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core.permissions import require_access, readable_contact
 from relay_core.case_contracts import lifecycle, transition
+from relay_core import locks
 
 
 def validate_type(doc):
@@ -58,7 +59,7 @@ def create(case_type, contact, title, field_values, request_key, source_flow=Non
         business = choose_business(contact, business_doctype, business_name)
     intent=hashlib.sha256(json.dumps([case_type,contact,title.strip(),field_values,source_flow,business],sort_keys=True,allow_nan=False).encode()).hexdigest()
     key=hashlib.sha256(json.dumps([case_type,contact,request_key]).encode()).hexdigest()
-    with frappe.cache.lock('relay-case-'+key,timeout=30,blocking_timeout=3):
+    with locks.lock('relay-case-'+key,timeout=30,blocking_timeout=3):
         previous=frappe.db.get_value('Relay Case',{'request_key':key},'name')
         if previous:
             if frappe.db.get_value('Relay Case',previous,'intent_hash')!=intent:frappe.throw('Case request changed after creation')
@@ -82,7 +83,7 @@ def move(name, stage, values, modified):
     require_access()
     if isinstance(values,str):values=frappe.parse_json(values)
     if not isinstance(values,dict):frappe.throw('Case fields must be an object')
-    with frappe.cache.lock('relay-case-edit-'+hashlib.sha256(name.encode()).hexdigest(),timeout=30,blocking_timeout=3):
+    with locks.lock('relay-case-edit-'+hashlib.sha256(name.encode()).hexdigest(),timeout=30,blocking_timeout=3):
         doc=frappe.get_doc('Relay Case',name);authorize(doc)
         if str(doc.modified)!=str(modified):frappe.throw('This case changed. Reload before saving.')
         merged={**json.loads(doc.field_values),**values}
@@ -147,7 +148,7 @@ def assign(name, user, modified):
     document_name(name)
     require_access(manage=True)
     if not isinstance(user,str):frappe.throw('Choose an agent')
-    with frappe.cache.lock('relay-case-edit-'+hashlib.sha256(name.encode()).hexdigest(),timeout=30,blocking_timeout=3):
+    with locks.lock('relay-case-edit-'+hashlib.sha256(name.encode()).hexdigest(),timeout=30,blocking_timeout=3):
         doc=frappe.get_doc('Relay Case',name);authorize(doc)
         if str(doc.modified)!=str(modified):frappe.throw('This case changed. Reload before assigning.')
         if user: authorize(doc, user)

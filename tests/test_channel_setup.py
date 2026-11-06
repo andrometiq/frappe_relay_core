@@ -1,0 +1,237 @@
+"""WhatsApp numbers are set up from Relay through the Hub's site tools; no credential crosses to Core."""
+import json
+import unittest
+from unittest.mock import Mock, patch
+
+from channel_fakes import FakeSite
+from relay_core import channel_setup, channels_api
+from relay_core.channel_setup import SetupError, whatsapp
+from relay_core.hub import HubError
+
+SETTINGS = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
+HEALTH = {'channel': 'wa-120', 'connection_status': 'connected', 'partner_status': 'active', 'verified_at': '2026-11-01T10:00:00Z',
+          'checked_at': '', 'check_error': '', 'webhook_subscribed': True, 'pin_kept': True,
+          'settings': {'templates': True, 'sync_metadata': True}, 'delivery': {'callback_pending': 0}, 'unexpected': 'dropped'}
+
+
+def rejected(code, message='Hub refused'):
+    return HubError('Hub operation was rejected', None, f'{code}: {message} · code {code}')
+
+
+class ChannelSetupTests(unittest.TestCase):
+    def setUp(self):
+        self.site = FakeSite(Relay_Channel=[
+            {'name': 'Sales line', 'channel': 'WhatsApp', 'account': 'site-a', 'hub_channel': 'wa-120', 'label': 'Sales line',
+             'address': '+91 99999 99120', 'enabled': 1, 'is_default': 1},
+            {'name': 'Support line', 'channel': 'WhatsApp', 'account': 'site-a', 'hub_channel': 'wa-121', 'label': 'Support line',
+             'enabled': 1, 'is_default': 0},
+            {'name': 'Old line', 'channel': 'WhatsApp', 'account': 'site-a', 'hub_channel': 'wa-99', 'enabled': 0},
+            {'name': 'Other site', 'channel': 'WhatsApp', 'account': 'site-b', 'hub_channel': 'wa-130', 'enabled': 1}])
+        self.hub = Mock()
+        self.answers = {'channels.list': {'channels': [{'key': 'wa-120', 'provider': 'WhatsApp'}, {'key': 'wa-121', 'provider': 'WhatsApp'},
+                                                       {'key': 'wa-130', 'provider': 'WhatsApp'}]},
+                        'whatsapp.number.health': HEALTH,
+                        'channels.health': {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', connection_status='failed'),
+                                                         dict(HEALTH, channel='wa-130')]}}
+        self.hub.call_tool.side_effect = self.answer
+        self.sync, self.publish = Mock(), Mock()
+        for item in (patch.object(channel_setup, 'frappe', self.site.frappe), patch.object(whatsapp, 'frappe', self.site.frappe),
+                     patch.object(channel_setup, 'connection_value', SETTINGS.get),
+                     patch.object(whatsapp, 'publish', self.publish), patch('relay_core.channel_sync.publish', self.publish),
+                     patch('relay_core.channel_sync.sync', self.sync),
+                     patch('relay_core.whatsapp.client', return_value=self.hub), patch('relay_core.whatsapp.clear_hub_capabilities')):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def answer(self, tool, arguments):
+        result = self.answers.get(tool, {})
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def tools(self):
+        return [call.args for call in self.hub.call_tool.call_args_list]
+
+    def test_accounts_read_the_health_of_every_number_in_one_hub_call(self):
+        rows = whatsapp.accounts()
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'WhatsApp'})])
+        self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
+        self.assertTrue(rows[0]['is_default'])
+        self.assertNotIn('unexpected', rows[0]['health'])
+        self.assertEqual([row['health']['connection_status'] for row in rows], ['connected', 'failed'])
+        self.answers['channels.health'] = {'WhatsApp': []}
+        self.assertEqual(whatsapp.accounts(), [])
+
+    def test_the_meta_sync_state_comes_with_the_batched_health(self):
+        synced = {'status': 'ready', 'last_success': '2026-11-05T10:00:00Z', 'last_error': '', 'profile': {'verified_name': 'Acme'}}
+        self.answers['channels.health'] = {'WhatsApp': [dict(HEALTH, metadata=synced), dict(HEALTH, channel='wa-121')]}
+        self.assertEqual([row['health']['metadata'] for row in whatsapp.accounts()], [synced, None])
+        self.assertEqual(self.tools(), [('channels.health', {'provider': 'WhatsApp'})])
+
+    def test_the_hub_admin_lock_reaches_the_card_and_its_refusal_reads_as_relay_text(self):
+        self.answers['channels.health'] = {'WhatsApp': [HEALTH, dict(HEALTH, channel='wa-121', admin_off=True, connection_status='disabled')]}
+        self.assertEqual([row['health']['admin_off'] for row in whatsapp.accounts()], [None, True])
+        self.answers['whatsapp.number.settings'] = rejected('admin_off', 'A Relay Hub admin turned this channel off.')
+        with self.assertRaisesRegex(SetupError, 'Ask your Relay provider to turn it on'):
+            whatsapp.save_settings('Support line', {'enabled': '1'})
+
+    def test_a_hub_without_the_batch_tool_is_asked_once_per_number(self):
+        from relay_core.hub import OlderHubError
+        self.answers['channels.health'] = OlderHubError('no such tool')
+        rows = whatsapp.accounts()
+        self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
+        self.assertEqual(rows[0]['health']['connection_status'], 'connected')
+        self.assertEqual(self.tools()[1:], [('channels.list', {}), ('whatsapp.number.health', {'channel': 'wa-120'}),
+                                            ('whatsapp.number.health', {'channel': 'wa-121'})])
+
+    def test_an_older_hub_without_site_tools_still_lists_the_numbers(self):
+        from relay_core.hub import OlderHubError
+        self.answers['channels.health'] = OlderHubError('no such tool')
+        self.answers['whatsapp.number.health'] = OlderHubError('no such tool')
+        rows = whatsapp.accounts()
+        self.assertEqual([row['name'] for row in rows], ['Sales line', 'Support line'])
+        self.assertIsNone(rows[0]['health']['connection_status'])
+        self.answers['whatsapp.number.check'] = OlderHubError('no such tool')
+        with self.assertRaisesRegex(SetupError, 'does not let sites'):
+            whatsapp.check('Sales line')
+
+    def test_a_number_of_another_site_or_unknown_is_not_found(self):
+        for name in ('Other site', 'Missing', None):
+            with self.assertRaisesRegex(SetupError, 'no longer connected'):
+                whatsapp.check(name)
+        self.assertEqual(self.tools(), [])
+
+    def test_check_names_the_hub_key_and_asks_to_repair(self):
+        self.answers['whatsapp.number.check'] = dict(HEALTH, connection_status='reconnect_required', reconnect_required=True,
+                                                     profile={'verified_name': 'Acme Textiles'})
+        result = whatsapp.check('Support line')
+        self.assertEqual(self.tools()[-1], ('whatsapp.number.check', {'channel': 'wa-121', 'repair': True}))
+        self.assertTrue(result['reconnect_required'])
+        self.assertEqual(result['profile'], {'verified_name': 'Acme Textiles'})
+        self.publish.assert_called_once()
+
+    def test_settings_send_only_known_switches_and_resync(self):
+        whatsapp.save_settings('Support line', {'enabled': '0', 'templates': True})
+        self.assertIn(('whatsapp.number.settings', {'channel': 'wa-121', 'enabled': False, 'templates': True}), self.tools())
+        self.sync.assert_called_once()
+        for wrong in ({}, {'groups': True}, 'enabled'):
+            with self.assertRaises(ValueError):
+                whatsapp.save_settings('Support line', wrong)
+
+    def test_default_number_moves_to_the_chosen_enabled_number(self):
+        whatsapp.set_default('Support line')
+        self.assertEqual(self.site.rows('Relay Channel', {'name': 'Support line'})[0].is_default, 1)
+        self.publish.assert_called_once()
+        with self.assertRaisesRegex(SetupError, 'Turn the number on'):
+            whatsapp.set_default('Old line')
+
+    def test_remove_needs_confirm_and_keeps_the_relay_channel(self):
+        with self.assertRaisesRegex(SetupError, 'Confirm'):
+            whatsapp.remove('Support line', False)
+        self.answers['whatsapp.number.remove'] = {'removed': True, 'deregistered': True, 'unsubscribed': False}
+        self.assertEqual(whatsapp.remove('Support line', True), {'removed': True, 'deregistered': True, 'unsubscribed': False})
+        self.assertIn(('whatsapp.number.remove', {'channel': 'wa-121', 'confirm': True}), self.tools())
+        self.sync.assert_called_once()
+        self.assertTrue(self.site.rows('Relay Channel', {'name': 'Support line'}))
+
+    def test_hub_codes_become_relay_text_and_meta_words_pass_through(self):
+        self.answers['whatsapp.number.pin_reset'] = rejected('reconnect_required')
+        with self.assertRaisesRegex(SetupError, 'Connect again'):
+            whatsapp.reset_pin('Sales line')
+        self.answers['whatsapp.number.pin_reset'] = rejected('meta_rejected', 'Meta did not take the new PIN. Meta says: Invalid PIN')
+        with self.assertRaisesRegex(SetupError, 'Meta says: Invalid PIN'):
+            whatsapp.reset_pin('Sales line')
+        self.answers['whatsapp.number.pin_reset'] = HubError('Unsupported Hub tool')
+        with self.assertRaisesRegex(SetupError, 'Try again in a few minutes'):
+            whatsapp.reset_pin('Sales line')
+
+    def test_a_number_a_hub_admin_turned_off_says_who_can_turn_it_on(self):
+        self.answers['whatsapp.number.settings'] = rejected('admin_off')
+        with self.assertRaisesRegex(SetupError, 'A Relay Hub admin turned this channel off. Ask your Relay provider'):
+            whatsapp.save_settings('Sales line', {'enabled': 1})
+        self.sync.assert_not_called()
+
+    def test_profile_fields_and_photo_are_checked_before_the_hub(self):
+        with self.assertRaises(ValueError):
+            whatsapp.save_profile('Sales line', {'phone': '919999999999'})
+        with self.assertRaises(ValueError):
+            whatsapp.save_profile('Sales line', {'websites': 'https://example.com'})
+        with self.assertRaises(ValueError):
+            whatsapp.save_profile('Sales line', {}, 'aGVsbG8=', 'application/pdf')
+        self.assertEqual(self.tools(), [])
+        self.answers['whatsapp.execute'] = {'profile': {'about': 'Fabrics for every season', 'id': 'dropped'}}
+        result = whatsapp.save_profile('Sales line', {'about': 'Fabrics for every season'}, 'aGVsbG8=', 'image/png')
+        self.assertEqual(self.tools()[0], ('whatsapp.execute', {'operation': 'profile.update', 'channel': 'wa-120',
+                                                               'profile': {'about': 'Fabrics for every season'},
+                                                               'content_base64': 'aGVsbG8=', 'mime_type': 'image/png'}))
+        self.assertEqual(result['about'], 'Fabrics for every season')
+        self.assertNotIn('id', result)
+
+    def test_a_site_without_a_hub_link_is_told_to_connect(self):
+        with patch.object(channel_setup, 'connection_value', {}.get), self.assertRaisesRegex(SetupError, 'Connect this site'):
+            channel_setup.hub_call('channels.list', {})
+
+
+class ChannelsApiPermissionTests(unittest.TestCase):
+    def test_only_a_system_manager_configures(self):
+        for endpoint, arguments in ((channels_api.check_number, ('Sales line',)), (channels_api.save_number_settings, ('Sales line', '{"enabled": 1}')),
+                                    (channels_api.set_default, ('Sales line',)), (channels_api.reset_pin, ('Sales line',)),
+                                    (channels_api.remove_number, ('Sales line', 1)), (channels_api.save_number_profile, ('Sales line', '{}'))):
+            with patch.object(channels_api, 'system_manager', side_effect=PermissionError('Only a System Manager can set up Relay')), \
+                    patch.object(channels_api, 'whatsapp') as provider, self.assertRaises(PermissionError):
+                endpoint(*arguments)
+            self.assertEqual(provider.method_calls, [])
+
+    def test_readers_need_configure_or_manage_rights(self):
+        frappe = Mock(PermissionError=PermissionError, throw=Mock(side_effect=PermissionError('Not permitted')))
+        with patch.object(channels_api, 'frappe', frappe), patch.object(channels_api, 'require_access'), \
+                patch.object(channels_api, 'can_configure', return_value=False), patch.object(channels_api, 'can_manage', return_value=False), \
+                patch.object(channels_api, 'whatsapp') as provider, self.assertRaises(PermissionError):
+            channels_api.accounts()
+        self.assertEqual(provider.method_calls, [])
+
+    def test_a_provider_without_setup_is_refused(self):
+        frappe = Mock(throw=Mock(side_effect=ValueError('not yet')))
+        with patch.object(channels_api, 'frappe', frappe), patch.object(channels_api, 'readers'), self.assertRaises(ValueError):
+            channels_api.accounts('SMS')
+
+    def test_endpoints_go_to_the_provider_of_the_channel_and_old_names_still_work(self):
+        module = Mock()
+        with patch.object(channels_api, 'system_manager'), patch.object(channels_api, 'provider_of', return_value='WhatsApp'), \
+                patch.dict(channels_api.PROVIDERS, {'WhatsApp': module}):
+            channels_api.check('Sales line', 0)
+            channels_api.check_number('Sales line')
+            channels_api.save_number_settings('Sales line', '{"enabled": 1}')
+            channels_api.set_default('Sales line')
+            channels_api.remove_number('Sales line', 1)
+        self.assertEqual([tuple(call) for call in module.method_calls], [
+            ('check', ('Sales line', False), {}), ('check', ('Sales line', True), {}),
+            ('save_settings', ('Sales line', {'enabled': 1}), {}), ('set_default', ('Sales line',), {}), ('remove', ('Sales line', True), {})])
+
+    def test_tokens_and_passwords_are_masked_in_the_request_form(self):
+        import frappe
+        module, secret = Mock(), '111111:acme_bot_token_local_only_aaaa'
+        cases = ((channels_api.connect, 'Telegram', 'values', {'bot_token': secret, 'label': 'Acme Textiles'}),
+                 (channels_api.connect, 'Email', 'values', {'from': 'sales@example.com', 'password': secret, 'imap_password': secret}),
+                 (channels_api.save_settings, 'Acme bot', 'settings', {'bot_token': secret}))
+        with patch.object(channels_api, 'system_manager'), patch.object(channels_api, 'provider_of', return_value='Telegram'), \
+                patch.dict(channels_api.PROVIDERS, {'Telegram': module, 'Email': module}):
+            for endpoint, channel, field, values in cases:
+                for sent in (values, json.dumps(values)):
+                    frappe.local.form_dict = frappe._dict({'channel': channel, field: sent})
+                    self.addCleanup(lambda: delattr(frappe.local, 'form_dict') if hasattr(frappe.local, 'form_dict') else None)
+                    endpoint(channel, sent)
+                    self.assertNotIn(secret, repr(frappe.local.form_dict))
+                    self.assertEqual(module.method_calls[-1].args[-1], values)
+            frappe.local.form_dict = frappe._dict({'channel': 'Acme bot', 'settings': '{"bot_token": "' + secret})
+            with patch.object(channels_api, 'owner', return_value=module):
+                channels_api.save_settings('Acme bot', frappe.local.form_dict.settings)
+            self.assertNotIn(secret, repr(frappe.local.form_dict))
+            self.assertIsNone(module.method_calls[-1].args[-1])
+
+    def test_a_channel_of_another_site_has_no_provider(self):
+        site = FakeSite(Relay_Channel=[{'name': 'Other site', 'channel': 'WhatsApp', 'account': 'site-b', 'hub_channel': 'wa-130', 'enabled': 1}])
+        with patch.object(channel_setup, 'frappe', site.frappe), patch.object(channel_setup, 'connection_value', SETTINGS.get):
+            for name in ('Other site', 'Missing', None):
+                with self.assertRaisesRegex(SetupError, 'no longer connected'):
+                    channel_setup.provider_of(name)

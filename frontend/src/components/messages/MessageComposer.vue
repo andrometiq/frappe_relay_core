@@ -2,6 +2,7 @@
 import { deadlineTime } from "../relativeTime";
 import { inject, computed, watch, ref, onBeforeUnmount, nextTick } from "vue";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
+import { isReceiptsOnly } from "../../services/realtimeRefreshQueue";
 import { coreApi } from "../../services/coreApi";
 import { attachmentAccept, attachmentFormatError, attachmentMaxBytes, sizeError, sizeLabel } from "./attachmentFormats";
 import { channelCan } from "../../services/enabledChannels";
@@ -10,7 +11,7 @@ import { Button, FormControl, FeatherIcon } from "@relay/ui";
 import { useWhatsAppIdentity } from "../../composables/useWhatsAppIdentity";
 import { useMobileLayout } from "../../composables/useMobileLayout";
 import ComposerMore from "./ComposerMore.vue";
-import { attachmentKinds, composerActions } from "../../services/composerActions";
+import { attachmentKinds, composerActions, pollProblem } from "../../services/composerActions";
 import { sha256Hex } from "../../services/crypto";
 import { messageData } from "../messageContent";
 import { formatBytes } from "../../services/mediaCache";
@@ -44,12 +45,14 @@ const {
   longitude,
   contactName,
   phone,
+  pollQuestion,
+  pollOptions,
   busy: working,
-  sending = ref(0),
   error,
   send,
 } = inject(messagesKey);
-const busy = computed(() => working.value || sending.value > 0);
+// Sends wait in their own queue and show on their bubbles, so a send in flight does not hold the composer.
+const busy = working;
 const capabilities = inject("relayCapabilities", ref({}));
 const can = feature => channelCan(capabilities.value, sourceContext.value.provider, feature);
 // `mode` is "reply" or "note"; the note slot holds the internal note form, so a note never goes to the customer.
@@ -64,9 +67,11 @@ const draftScope = computed(() => compositionScope(source.value ? {
   relay_contact: selected.value || source.value.relay_contact,
 } : null, document.getElementById('app')?.dataset.user));
 useStoredDraft(() => draftScope.value,
-  () => ({ body: body.value, kind: kind.value, attachment: attachment.value, latitude: latitude.value, longitude: longitude.value, contactName: contactName.value, phone: phone.value }),
+  () => ({ body: body.value, kind: kind.value, attachment: attachment.value, latitude: latitude.value, longitude: longitude.value, contactName: contactName.value, phone: phone.value,
+    pollQuestion: pollQuestion.value, pollOptions: pollOptions.value }),
   saved => { body.value = saved.body || ''; kind.value = saved.kind || 'text'; attachment.value = saved.attachment || null;
-    latitude.value = saved.latitude || ''; longitude.value = saved.longitude || ''; contactName.value = saved.contactName || ''; phone.value = saved.phone || ''; },
+    latitude.value = saved.latitude || ''; longitude.value = saved.longitude || ''; contactName.value = saved.contactName || ''; phone.value = saved.phone || '';
+    pollQuestion.value = saved.pollQuestion || ''; pollOptions.value = saved.pollOptions || ['', '']; },
   // Restore drafts saved by the previous, per-message composer on first use of the conversation key.
   () => JSON.parse(sessionStorage.getItem('relay-draft-' + sha256Hex(compositionScope(source.value, document.getElementById('app')?.dataset.user))) || 'null') || {});
 const limit = computed(() => sourceContext.value.provider === 'Telegram' && ['text', 'photo', 'video', 'audio', 'voice', 'document'].includes(kind.value) ? telegramLimit(kind.value) : null);
@@ -93,6 +98,7 @@ const hasSticker = computed(() => rows.value.some(row => messageData(row).kind =
 const mediaKind = computed(() => ['photo', 'video', 'audio', 'voice', 'document'].includes(kind.value));
 const captionAllowed = computed(() => !(sourceContext.value.provider === 'WhatsApp' && ['audio', 'voice'].includes(kind.value)));
 const characterCount = computed(() => [...body.value].length);
+const pollError = computed(() => kind.value === 'poll' ? pollProblem(pollQuestion.value, pollOptions.value) : '');
 const showCount = computed(() => limit.value && characterCount.value >= limit.value * .9 && (editing.value || characterCount.value > limit.value));
 async function focusDraft() { await nextTick(); resizeDraft(); draftInput.value?.focus({ preventScroll: true }); }
 function clearQuote() { cancelReply(); focusDraft(); }
@@ -104,7 +110,7 @@ function moreAction(action) {
   if (action === 'saved') showReplies.value = true;
   else if (action === 'template') emit('template');
   else if (action === 'note') { stopTyping(); emit('mode', 'note'); }
-  else if (['location', 'contact'].includes(action)) { kind.value = action; attachment.value = null; }
+  else if (['location', 'contact', 'poll'].includes(action)) { kind.value = action; attachment.value = null; }
   else chooseAttachment(action);
 }
 function insertEmoji(value) { body.value += value; focusDraft(); }
@@ -154,7 +160,8 @@ const clockTimer = setInterval(() => { now.value = Date.now(); }, 30000);
 const windowState = ref({ open: true }),
   windowError = ref("");
 let windowGeneration = 0, expiryTimer;
-async function checkWindow() {
+// A live recheck keeps the composer open while it reads; only a new source waits for its window.
+async function checkWindow(live = false) {
   const generation = ++windowGeneration;
   clearTimeout(expiryTimer);
   windowChecking.value = false;
@@ -172,7 +179,7 @@ async function checkWindow() {
     if (chosenWindow.open && Number.isFinite(chosenWindow.remaining_seconds)) expiryTimer = setTimeout(() => { windowState.value = { ...windowState.value, open: false }; }, Math.min(chosenWindow.remaining_seconds * 1000, 2147483647));
     return;
   }
-  windowChecking.value = true;
+  windowChecking.value = live !== true;
   try {
     const result = await coreApi("messaging.reply_window", {
       message: source.value.name,
@@ -200,7 +207,7 @@ watch(
   },
   { immediate: true },
 );
-useRealtimeRefresh([], ['messages'], checkWindow);
+useRealtimeRefresh([], ['messages', 'receipts'], ({ kinds }) => isReceiptsOnly(kinds) ? undefined : checkWindow(true));
 watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
 
 const offReason = computed(() => props.offText || (windowState.value.channel_disabled ? channelOffText(sourceContext.value.provider) : ""));
@@ -225,13 +232,15 @@ const canSend = computed(
           ? latitude.value !== "" && longitude.value !== ""
           : kind.value === "contact"
             ? !!contactName.value.trim() && !!phone.value.trim()
-            : false),
+            : kind.value === "poll"
+              ? !pollError.value
+              : false),
 );
 const busyReason = "Wait for the current send to finish";
 const sendTitle = computed(() => windowError.value ? "Check the reply window before sending" : windowChecking.value ? "Checking reply window" : busy.value ? busyReason
   : limit.value && [...body.value].length > limit.value ? "The message is too long for this channel"
   : canSend.value ? "Send · Enter"
-  : kind.value === "text" ? "Type a message first" : "Add the file or details first");
+  : kind.value === "text" ? "Type a message first" : pollError.value || "Add the file or details first");
 let lastTyping = 0,
   typingRequest = null, typingTimeout;
 function stopTyping() {
@@ -309,6 +318,18 @@ function keydown(event) {
             <template v-if="kind === 'location'"><FormControl v-model="latitude" type="number" step="any" min="-90" max="90" label="Latitude" :disabled="busy" /><FormControl v-model="longitude" type="number" step="any" min="-180" max="180" label="Longitude" :disabled="busy" /></template>
             <template v-else><FormControl v-model="contactName" label="Contact name" :disabled="busy" /><FormControl v-model="phone" label="Phone number" :disabled="busy" /></template>
           </div>
+        </div>
+        <div v-if="kind === 'poll'" class="composer-detail-fields">
+          <div class="composer-context"><strong>Send a poll</strong><Button label="Cancel" variant="ghost" :disabled="busy" @click="clearAttachment" /></div>
+          <FormControl v-model="pollQuestion" label="Question" maxlength="1024" :disabled="busy" />
+          <div class="composer-field-grid">
+            <FormControl v-for="(option, index) in pollOptions" :key="index" v-model="pollOptions[index]" :label="'Option ' + (index + 1)" maxlength="24" :disabled="busy" />
+          </div>
+          <div class="composer-context">
+            <Button v-if="pollOptions.length < 10" label="Add option" icon-left="plus" variant="ghost" :disabled="busy" @click="pollOptions.push('')" />
+            <Button v-if="pollOptions.length > 2" label="Remove last option" variant="ghost" :disabled="busy" @click="pollOptions.pop()" />
+          </div>
+          <p class="composer-status" role="status">{{ pollError || (pollOptions.filter(option => option.trim()).length <= 3 ? 'Sends as reply buttons.' : 'Sends as a list.') + ' The customer taps one option; a new tap changes the vote.' }}</p>
         </div>
         <p v-if="showCount" class="composer-status" :class="{ 'composer-error': characterCount > limit }" :role="characterCount > limit ? 'alert' : 'status'">{{ characterCount.toLocaleString() }} / {{ limit.toLocaleString() }}<template v-if="characterCount > limit"> · {{ characterCount - limit }} over limit</template></p>
       </template>

@@ -18,7 +18,7 @@ import frappe
 from frappe.query_builder.functions import IfNull, Max
 from frappe.utils import add_days, add_months, get_first_day, get_last_day, getdate
 
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.ai.adapter import MAX_JSON_PROMPT_LENGTH, complete_json
 from relay_core.automation.service import internal_save
 from relay_core.relay_chats import key_of
@@ -32,6 +32,7 @@ MESSAGE_FIELDS = ['name', 'relay_contact', 'channel', 'direction', 'sent_at', 'c
                   'legacy_triage']
 ROLLS = (('Day', 'Week'), ('Week', 'Month'), ('Month', 'Year'))
 KEEP_DAYS = 7
+FOLD_AFTER = 40
 BATCH = 50
 MAX_LINES = 80
 MAX_LINE_LENGTH = 280
@@ -186,8 +187,7 @@ class Memory:
         frappe.db.commit()
 
     def lock(self):
-        return frappe.cache.lock('relay-memory:' + json.dumps(self.key, sort_keys=True), timeout=1800,
-                                 blocking_timeout=1)
+        return locks.lock('relay-memory:' + json.dumps(self.key, sort_keys=True), timeout=1800, blocking_timeout=1)
 
     def get_cursor(self, since: date) -> str:
         """The last folded message of the rows from `since` on."""
@@ -422,6 +422,16 @@ def run() -> None:
     for key, last in targets(since).items():
         if last > done.get(key, ''):
             queue('fold', key)
+
+
+def fold_long_episode(memory: Memory) -> None:
+    """Queue a fold when more than FOLD_AFTER messages wait since the last fold, so the next reply reads a fresh
+    summary without a model call inside the reply."""
+    if not memory_model():
+        return
+    since = window_start()
+    if len(memory.messages(since, after=memory.get_cursor(since), limit=FOLD_AFTER + 1)) > FOLD_AFTER:
+        queue('fold', tuple(memory.key.values()))
 
 
 @ai_features.when_enabled

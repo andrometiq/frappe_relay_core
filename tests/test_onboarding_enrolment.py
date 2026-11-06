@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from frappe import _dict
+from relay_core import locks
+from relay_core.hub import HubError
 from relay_core.onboarding import enrolment
 from relay_core.onboarding.messages import OnboardingError
 
@@ -119,7 +121,7 @@ class ConnectTests(unittest.TestCase):
                    patch.object(enrolment, 'service_user', return_value=user),
                    patch.object(enrolment, 'rotate_secret', return_value=('key', 'new-secret', 'old-secret')),
                    patch.object(enrolment, 'restore_secret'), patch.object(enrolment, 'check'),
-                   patch('relay_core.channel_sync.sync')]
+                   patch('relay_core.channel_sync.sync'), patch.object(locks, 'frappe', self.frappe)]
         self.mocks = [item.start() for item in patches]
         for item in patches:
             self.addCleanup(item.stop)
@@ -171,7 +173,7 @@ class ConnectTests(unittest.TestCase):
         with self.hub() as enrol:
             self.assertEqual(enrolment.connect()['account'], 'acme-localhost')
         enrol.assert_not_called()
-        self.frappe.cache.lock.assert_called_once_with('site:relay-enrolment', timeout=120, blocking_timeout=60)
+        self.frappe.cache.lock.assert_called_once_with('site:relay-lock:relay-enrolment', timeout=120, blocking_timeout=60)
 
     def test_try_again_on_a_linked_site_syncs_and_checks_the_saved_link(self):
         self.settings.update(relay_hub_url=HUB + '/mcp', relay_hub_token='t' * 40, relay_hub_account='acme-localhost')
@@ -277,6 +279,52 @@ class RequestTests(unittest.TestCase):
         with self.assertRaises(OnboardingError) as caught:
             enrolment.request_enrolment('http://127.0.0.1:9', TOKEN, {})
         self.assertEqual(caught.exception.code, 'hub_unavailable')
+
+
+
+class DisconnectTests(unittest.TestCase):
+    def setUp(self):
+        self.frappe = fake_frappe()
+        self.settings = {'relay_hub_url': HUB + '/mcp', 'relay_hub_token': 'relay_' + 'a' * 64, 'relay_hub_account': 'acme-localhost'}
+        self.hub = Mock()
+        for item in (patch.object(enrolment, 'frappe', self.frappe), patch('relay_core.settings.value', side_effect=self.settings.get),
+                     patch.object(enrolment, 'HubClient', return_value=self.hub)):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_disconnect_ends_the_link_and_forgets_the_token(self):
+        self.assertEqual(enrolment.disconnect(), {'disconnected': True, 'site_config_token': False})
+        self.hub.call_tool.assert_called_once_with('site.disconnect', {'confirm': True})
+        saved = self.frappe.settings
+        self.assertEqual((saved['hub_token'], saved['callback_secret'], saved['onboarding_completed']), ('', '', 0))
+        self.assertNotIn('hub_url', saved)
+
+    def test_a_hub_refusal_keeps_the_link(self):
+        self.hub.call_tool.side_effect = HubError('Hub operation was rejected')
+        with self.assertRaises(OnboardingError):
+            enrolment.disconnect()
+        self.frappe.settings.save.assert_not_called()
+
+    def test_a_token_the_hub_already_revoked_still_disconnects(self):
+        self.hub.call_tool.side_effect = HubError('Hub connection is not authorized', {'provider': 'Hub', 'error': {'http_status': 401}})
+        self.assertTrue(enrolment.disconnect()['disconnected'])
+        self.assertEqual(self.frappe.settings['hub_token'], '')
+
+    def test_an_unlinked_site_has_nothing_to_disconnect(self):
+        self.settings.clear()
+        with self.assertRaises(OnboardingError):
+            enrolment.disconnect()
+        self.hub.call_tool.assert_not_called()
+
+    def test_only_a_confirmed_system_manager_disconnects(self):
+        from relay_core.onboarding import api
+        with patch.object(api, 'system_manager', side_effect=PermissionError('Only a System Manager can set up Relay')), \
+                patch.object(api.enrolment, 'disconnect') as disconnect, self.assertRaises(PermissionError):
+            api.disconnect_hub(1)
+        with patch.object(api, 'system_manager'), patch.object(api, 'frappe', self.frappe), \
+                patch.object(api.enrolment, 'disconnect') as disconnect, self.assertRaises(ValueError):
+            api.disconnect_hub(0)
+        disconnect.assert_not_called()
 
 
 if __name__ == '__main__':

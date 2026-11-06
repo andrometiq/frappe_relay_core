@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from channel_fakes import DuplicateEntryError, FakeSite
-from relay_core import channel_sync
+from relay_core import channel_sync, locks
 from relay_core.automation import projection
 from relay_core.hub import HubError
 
@@ -21,7 +21,9 @@ class ChannelSyncTests(unittest.TestCase):
         hub.call_tool.side_effect = result if isinstance(result, Exception) else None
         hub.call_tool.return_value = result
         settings = {'relay_hub_account': 'site-a', 'relay_hub_url': 'http://127.0.0.1/mcp', 'relay_hub_token': 't'}
-        with patch.object(channel_sync, 'frappe', site.frappe), \
+        site.frappe.publish_realtime = Mock()
+        site.frappe.realtime = Mock(get_doctype_room=lambda doctype: 'doctype:' + doctype)
+        with patch.object(channel_sync, 'frappe', site.frappe), patch.object(locks, 'frappe', site.frappe), \
                 patch.object(channel_sync, 'connection_value', settings.get), \
                 patch('relay_core.whatsapp.client', return_value=hub):
             return channel_sync.sync(), hub
@@ -33,6 +35,8 @@ class ChannelSyncTests(unittest.TestCase):
             {'key': 'wa-2', 'label': 'Support', 'display_number': '+91 90000 00002', 'waba_id': '111'}))
         hub.call_tool.assert_called_once_with('channels.list', {})
         self.assertEqual(result, {'synced': True, 'channels': 2, 'added': 1, 'changed': 1, 'disabled': 0})
+        site.frappe.publish_realtime.assert_called_once_with('relay_changed', {'kind': 'channels'},
+                                                             room='doctype:Relay Channel', after_commit=True)
         legacy, second = site.rows('Relay Channel')
         self.assertEqual((legacy.address, legacy.waba_id, legacy.title, legacy.is_default), ('+91 90000 00001', '111', 'Shop', 1))
         self.assertEqual((second.hub_channel, second.label, second.enabled, second.title), ('wa-2', 'Support', 1, 'Support'))
@@ -45,7 +49,7 @@ class ChannelSyncTests(unittest.TestCase):
         lock = Mock()
         lock.__enter__ = Mock(side_effect=lambda: events.append('lock'))
         lock.__exit__ = Mock(side_effect=lambda *args: events.append('unlock'))
-        frappe.cache = Mock(lock=Mock(return_value=lock))
+        frappe.cache = Mock(lock=Mock(return_value=lock), make_key=str)
         frappe.db.commit = Mock(side_effect=lambda: events.append('commit'))
         with patch.object(channel_sync, 'store', side_effect=lambda *args: events.append('store') or {}):
             self.run_sync(site, listed({'key': 'site-a', 'label': 'Shop'}))

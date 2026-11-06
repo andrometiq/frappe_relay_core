@@ -36,6 +36,14 @@ class MatchingTests(unittest.TestCase):
                      'Please hand this to a person', 'I need an operator', 'person', 'Staff.'):
             with self.subTest(text=text): self.assertTrue(matching.human_request(text))
 
+    def test_an_answer_that_did_not_help_reaches_a_person(self):
+        for text in ('That was not helpful.', "This doesn't help", 'It did not help me', 'You did not answer my question',
+                     'Your reply is unhelpful', 'idhu help aagala', 'You did not understand me'):
+            with self.subTest(text=text): self.assertTrue(matching.human_request(text))
+        for text in ('Thanks, that helped', 'Which shirt is useful for summer?', "Don't help me with the ledger now",
+                     'Can you help me with my order?'):
+            with self.subTest(text=text): self.assertFalse(matching.human_request(text))
+
     def test_malformed_and_untrusted_output(self):
         valid = {'scores':[{'id':'one','score':.95}], 'human_request':False}
         for value in (None, [], {}, dict(valid, extra=True), dict(valid, human_request=1),

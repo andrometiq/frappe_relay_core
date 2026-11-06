@@ -195,6 +195,10 @@ that same business. A note reply can inherit its authorized parent's business
 when no explicit pair is supplied. Unreferenced notes, manual cases and empty
 topics require the active pair; the server never chooses among shared businesses.
 
+## AI service health
+
+`GET relay_core.ai.remote.site.health` returns the bench AI service status for the current site: heartbeat, this site's stream backlog and in-flight requests. It requires write access to Relay Settings. See [Bench AI service](ai-service.md#check-the-service).
+
 ## Errors and limits
 
 Unknown methods, extra arguments, invalid references, and permission failures
@@ -223,6 +227,35 @@ origin. Tokens therefore need `account:read`. The callback signing secret must
 contain 32–512 printable characters when supplied. Values are stored in the
 `Relay Settings` Single DocType, with encrypted Frappe Password fields.
 
+`POST relay_core.onboarding.api.disconnect_hub` (System Manager, `confirm=1`) calls Hub `site.disconnect`, then clears the saved token and callback secret and opens Get started again. It returns `disconnected` and `site_config_token` (true when an operator token in the site config stays).
+
+## Channel setup
+
+The WhatsApp Account tab and the Telegram and Email tabs in Settings use these methods. The Hub keeps every credential and the two-step PIN. Core does not keep, log or return a bot token or a password. For `connect`, `channel` is the provider (`Telegram` or `Email`). For the other methods, `channel` is a Relay Channel name of this site's Hub account. Hub refusals come back as plain errors.
+
+| Method | Route | Access |
+| --- | --- | --- |
+| GET | `relay_core.channels_api.accounts` (`channel=WhatsApp`, `Telegram` or `Email`) | Manager or System Manager |
+| POST | `relay_core.channels_api.connect` (`channel=Telegram` or `Email`, `values`, `secrets`) | System Manager |
+| POST | `relay_core.channels_api.check` (`repair`, default 1) | System Manager |
+| POST | `relay_core.channels_api.save_settings` (`settings`, `secrets`) | System Manager |
+| POST | `relay_core.channels_api.remove` (`confirm=1`) | System Manager |
+| GET | `relay_core.channels_api.number_profile` | Manager or System Manager |
+| POST | `relay_core.channels_api.check_number` (`repair`, default 1) | System Manager |
+| POST | `relay_core.channels_api.save_number_settings` (`settings` with `enabled`, `templates`, `sync_metadata`) | System Manager |
+| POST | `relay_core.channels_api.set_default` | System Manager |
+| POST | `relay_core.channels_api.reset_pin` | System Manager |
+| POST | `relay_core.channels_api.remove_number` (`confirm=1`) | System Manager |
+| POST | `relay_core.channels_api.save_number_profile` (`profile`, optional `photo_base64`, `photo_type`) | System Manager |
+
+`accounts` returns `accounts` (each with `name`, `label`, `address`, `enabled`, `is_default`, `coexistence` and the Hub `health`) and `can_configure`. It reads the health of all the provider's channels in one Hub `channels.health` call; an older Hub without that tool is asked once per channel. The Account cards reload on `channels` events at most once a second. A WhatsApp `health` also has `metadata`, the Meta sync state and profile that the card shows; for an older Hub without it the card asks `account.metadata` once per number that is on. The Hub `health` has `admin_off` set when a Hub admin turned the channel off; the card then disables the on switch and says that only the Relay provider can turn it on. Changes send the `relay_changed` event with kind `channels` to the Relay Channel room. Each provider is one module in `relay_core.channel_setup`. `check`, `save_settings` and `remove` find the module from the Relay Channel. `check_number`, `save_number_settings` and `remove_number` stay for WhatsApp clients.
+
+| Provider | `connect` values | `save_settings` keys |
+| --- | --- | --- |
+| Telegram | `bot_token`, optional `label` | `enabled`, `label`, `bot_token` (same bot only) |
+| Email | `from`, `host`, `password`, optional `label`, `port`, `username`, `imap_host`, `imap_port`, `imap_username`, `imap_password`, `imap_folder`, `trusted_authserv_id`, `trusted_dsn_domain` | `enabled`, `label` and the server keys of `connect` |
+
+Send `bot_token`, `password` and `imap_password` in `secrets`, for example `{"channel": "Telegram", "values": {"label": "Acme Textiles"}, "secrets": {"bot_token": "..."}}`. Frappe masks a field of that name in a developer-mode traceback, and Core keeps each one masked until it writes the Hub request. Core still reads them from `values` or `settings` for older pages. Core sends a token or a password to the Hub only over HTTPS, or over plain HTTP to a Hub on the same machine (127.0.0.1 or ::1). Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
 
 ## Workspace directories
 

@@ -277,7 +277,7 @@ Pick Month or Year and a period. The cards show all messages, free replies (insi
 
 #### Account
 
-Shows the Hub account and the sending number with its verified name and quality rating. Links go to the Hub connection and to the channel setup.
+Shows each WhatsApp number of this site: its connection state, whether Meta sends its messages to Relay, the last message from Meta, the verified name, the quality rating and the messaging limit. The page updates by itself when a number changes. A System Manager also sets up each number here. See [5.12 Set up WhatsApp from Relay Core](#512-set-up-whatsapp-from-relay-core). Managers see the same page without the controls.
 
 ### 4.5 Business events
 
@@ -371,9 +371,12 @@ Hub connection:
 | Enable AI features | Shows or hides all AI pages and controls. Off by default. |
 | WhatsApp billing: Service charge (%) | Added to Meta's price on the Billing page. |
 | Channel readiness | The numbers the Hub gave to this site and whether each is enabled. |
-| Configure channel | Opens Relay Channel in Desk: label, default number, Company and Triage owner. |
+| Disconnect from Relay Hub | Ends this site's link to the Hub after you confirm. See [5.12](#512-set-up-whatsapp-from-relay-core). |
+| WhatsApp numbers | Opens WhatsApp > Account, where a System Manager sets up each number. |
 | Configure business types and grouping | Opens Relay Contact Type in Desk: which DocTypes are customers (such as Customer, Supplier) and the grouping field. |
 | Review endpoint bindings | Opens the list of verified numbers in Desk. |
+| Telegram tab | Shows when Telegram is on. A System Manager connects and manages bots here. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
+| Email tab | Shows when Email is on. A System Manager connects and manages mailboxes here. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
 | Saved replies tab | Lists saved replies. "Create in Desk" and "Edit in Desk" open the Relay Canned Reply form. Tick "Published" so staff see it. |
 
 More switches are only in Desk at Relay Settings:
@@ -406,12 +409,25 @@ Who: System Manager.
 
 ### 5.1 First setup (owner or IT, System Manager)
 
+The Relay provider links your site to the Hub once. After that, you do the rest in Relay:
+
+1. Open `/relay`. Click **Get started**.
+2. Follow the steps. **Connect to Relay** links the site. If Relay asks for a setup code, enter the setup code or setup link that your Relay provider gave you.
+3. In the **WhatsApp number** step, pick a new number, a WhatsApp Business app number or a number on another provider. A Meta window opens. Sign in to Meta and follow it.
+4. When the number shows in the step, finish Get started. Then open WhatsApp > Account and follow [5.12](#512-set-up-whatsapp-from-relay-core).
+
+You never type a Meta token, a Hub token or a PIN. The Hub keeps them.
+
+#### Manual setup (advanced)
+
+Use this only when your Relay provider tells you to.
+
 1. Ask the Hub administrator for four things: the Hub MCP URL, the Hub account name, a Hub API token with `account:read`, and confirmation that the Hub has your site URL. The site URL in the Hub must be the same as the site's `host_name`.
 2. Make a callback secret: a random text of at least 32 characters. Keep it in your password manager.
 3. In Desk, make an API user for the Hub. Open User > New. Use an email such as `relay-hub@yourcompany.com`. Give it only the role Relay Hub Service. Save. Open Settings > API Access > Generate Keys. Copy the API key and API secret.
 4. Give the Hub administrator the API key, the API secret, the callback secret and your site URL. The Hub sends callbacks to `/api/method/relay_core.inbound.receive` on your site.
 5. In `/relay`, open Settings & Setup. Fill Hub MCP URL, Hub account, Replace API token and Replace callback signing secret. Click "Save connection". Then click "Verify saved connection".
-6. Check the WhatsApp channel card says "Ready". Click "Configure channel" and set a Company and a Triage owner on each number.
+6. Check the WhatsApp channel card says "Ready". Open Relay Channel in Desk and set a Company and a Triage owner on each number.
 7. Click "Configure business types and grouping". Add an enabled Relay Contact Type for Customer (and Supplier if needed). Optional: set a Grouping Field, such as territory.
 8. Send a WhatsApp message from your own phone to the business number. Open Activity & Health and check "Latest authenticated callback" shows a recent time. Open the Inbox or Contacts > Unlinked senders to see the message.
 
@@ -552,7 +568,7 @@ Messages are not arriving:
 
 1. Activity & Health: is "Latest authenticated callback" recent? If not, the Hub cannot reach Core. Check the Hub has the right site URL, API key and secret of the Relay Hub Service user, and the same callback secret as Core.
 2. Is the sender new? Look in Contacts > Unlinked / ambiguous senders and link the sender.
-3. Does "Channel setup required" show there? Open Configure channel and enable the number. Then click "Verify saved connection" in Settings.
+3. Does "Channel setup required" show there? Open WhatsApp > Account, turn the number on and click **Check connection**.
 4. Recovery scheduling must say Active. If not, ask IT to start the Frappe scheduler and workers.
 5. A staff member does not see a chat? Check their Relay role and their assignment to the enabled business type in Settings.
 
@@ -569,6 +585,57 @@ A template was rejected:
 1. Open WhatsApp > Templates and click the template. Read "Reason from Meta".
 2. Fix the cause: wrong category, a variable at the start or end, missing samples, or a promotion in a Utility template.
 3. Click "Edit", change it and click "Submit changes", or make a new template with a new name.
+
+### 5.12 Set up WhatsApp from Relay Core
+
+Who: System Manager. Managers can see the state but cannot change it.
+
+Open WhatsApp > Account. Each number shows a card. Do these tasks there:
+
+| Task | What to do | What happens |
+| --- | --- | --- |
+| Add a number | Click **Add another number** (or **Connect WhatsApp**) and follow the Meta window. | The Hub connects the number. It shows on this page in a few seconds. |
+| Check a number | Click **Check connection**. | The Hub asks Meta about the number and subscribes Meta's messages to Relay again if they stopped. The card shows the result and the time of the check. |
+| Connect a number again | When the card says **Connect again** or **Removed by Meta**, click **Connect again** and follow the Meta window. | Meta gives Relay new access. The number keeps its chats. |
+| Turn a number on or off | Use **Number is on**. | When off, Relay does not send or receive on it. When you turn it on, Relay checks it at once. |
+| Templates and sync | Use **Message templates** and **Hourly Meta sync**. | Templates turns template and form management on for the number. Sync reads quality, limits and templates from Meta every hour. |
+| Make a number the default | Click **Make default**. | New chats and API sends use this number when nothing else picks one. |
+| Edit the profile | Click **Edit profile**. Change About, Description, Address, Email, Websites, Business category or the photo (JPEG or PNG, up to 5 MB). Click **Save profile**. | Customers see the new profile in WhatsApp. Only the fields you changed are sent. |
+| Reset the PIN | Click **Reset PIN** and confirm. | The Hub sets a new two-step PIN on the number and keeps it. Nobody needs to know it. WhatsApp Business app numbers do not have this button. |
+| Remove a number | Click **Remove number** and confirm. | Relay stops using the number and deregisters it, so it can move to another provider. The chats stay in Relay. |
+| Disconnect the site | In Settings, click **Disconnect from Relay Hub** and confirm. | The Hub revokes this site's key. All numbers stop. Chats, contacts and settings stay. To link again, get a new setup code from your Relay provider. |
+
+Errors show on the card or at the top of the page in plain words, such as "Meta no longer gives Relay access to this number. Connect it again."
+
+These tasks are not on this page:
+
+| Task | Where |
+| --- | --- |
+| Change the display name | Meta WhatsApp Manager. Meta reviews each name change. |
+| WhatsApp groups and calls | Not available in this version. |
+| Email and Telegram accounts | Settings > Telegram and Settings > Email. See [5.13](#513-set-up-telegram-and-email-from-relay-core). |
+
+### 5.13 Set up Telegram and Email from Relay Core
+
+Who: System Manager. Managers can see the state but cannot change it.
+
+Open Settings > Telegram or Settings > Email. The tab shows only when the channel is on for this site. Each bot or mailbox shows a card. The card updates by itself when something changes.
+
+| Task | What to do | What happens |
+| --- | --- | --- |
+| Connect a bot | In Telegram, make a bot with @BotFather and copy its token. Paste the token in **Bot token** and click **Connect bot**. | The Hub checks the token with Telegram, keeps it and tells Telegram to send the bot's messages to Relay. Relay never shows the token again. |
+| Connect a mailbox | Enter the mailbox address, the SMTP server and the password, and the IMAP values when they are different. Click **Connect mailbox**. Use an app password when your mail provider has one. | The Hub signs in to SMTP and IMAP first. It keeps nothing when the sign-in fails. Relay never shows a password again. |
+| Check | Click **Check connection** (bot) or **Check sign-in** (mailbox). | The Hub checks the bot with Telegram and registers its webhook again when it stopped, or it signs in to the mail server. No mail is sent or read. |
+| Turn on or off | Use **Bot is on** or **Mailbox is on**. | When off, Relay does not send or receive on it. |
+| Make default | Click **Make default**. | New chats use this bot or mailbox when nothing else picks one. |
+| Change | Click **Rename or new token** (bot) or **Change settings** (mailbox). Leave a password field blank to keep the saved one. | A new bot token must belong to the same bot. The Hub signs in with new mailbox settings before it saves them. |
+| Remove | Click **Remove bot** or **Remove mailbox** and confirm. | The Hub deletes the token or the passwords, and the bot's webhook. The chats stay in Relay. |
+
+Notes:
+
+- Telegram needs the Hub to have a public HTTPS address. Relay does not read Telegram by polling.
+- The Hub does not connect to mail servers on private network addresses.
+- Too many connects or checks in one hour are refused for a short time. Wait and try again.
 
 ## 6. What happens if
 

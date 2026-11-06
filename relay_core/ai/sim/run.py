@@ -1,4 +1,5 @@
 """Harness entry: `bench --site relay-ai-test.local execute relay_core.ai.sim.run.main --kwargs "{'suite': 'core'}"`."""
+import hashlib
 import json
 import pathlib
 import subprocess
@@ -93,7 +94,8 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
                'business': seeded['personas'][row['persona']]['business'], 'driver': Driver(), 'undo': [],
                'disclosures': Counter(), 'run': None}
     failures, cost, state = [], 0.0, {}
-    release(context['business'])
+    driver = context['driver']
+    housekeeping(driver, release, context['business'])
     try:
         for index, turn in enumerate(row['turns']):
             before, calls = snapshot(), len(answers.calls)
@@ -118,21 +120,35 @@ def run_trial(row: dict, seeded: dict, answers) -> tuple[list[dict], float, dict
         frappe.db.rollback()
         failures.append(dict(checks.failure('error', None, f'{type(error).__name__}: {error}'[:300]), turn=index + 1))
     finally:
-        for undo in reversed(context['undo']):
-            undo()
-        frappe.db.commit()
+        housekeeping(driver, undo_all, context['undo'])
     return failures, cost, state
 
 
+def housekeeping(driver: Driver, work, *args) -> None:
+    """Trial set-up and clean-up, such as closing tickets, run isolated like a turn, so their jobs never reach the
+    site's RQ workers, where they would race the trial's own drain. Their notices are not the trial's outbound."""
+    with driver.isolated():
+        work(*args)
+    driver.drain()
+    driver.outbound()
+
+
+def undo_all(undo: list) -> None:
+    for restore in reversed(undo):
+        restore()
+
+
 def release(business: list[str]) -> None:
-    """Each trial starts a new conversation: close the persona's open episode, as a manager would, and age its
-    earlier AI proposals past the duplicate window so a repeated scripted request is new again."""
+    """Each trial starts a new conversation: close the persona's open episode, as a manager would, age its
+    earlier AI proposals past the duplicate window so a repeated scripted request is new again, and forget the facts
+    its earlier trials saved."""
     from relay_core.flows.actions import DUPLICATE_DAYS
     from relay_core.tickets import close_and_release
     filters = {'business_doctype': business[0], 'business_name': business[1]}
     with acting_as(MANAGER):
         for name in frappe.get_all('Relay Ticket', filters=dict(filters, active_scope_key=['is', 'set']), pluck='name'):
             close_and_release(name)
+    frappe.db.delete('Relay AI Memory', filters)
     tickets = frappe.get_all('Relay Ticket', filters=filters, pluck='name')
     if tickets:
         frappe.db.sql('update `tabRelay Flow Action` set creation = creation - interval %s day '
@@ -247,6 +263,46 @@ def step_spend_cap(context: dict, usd: float, skill: str) -> None:
     switch(context, 'Relay AI Skill', frappe.db.get_value('Relay AI Skill', {'title': skill}), 'daily_spend_cap_usd', usd)
 
 
+def step_staff_reply(context: dict, text: str, note: str) -> None:
+    """Staff answer the held ticket of the last turn, add an internal note on it, then close and release it."""
+    from relay_core.collaboration import add
+    from relay_core.messaging import send
+    from relay_core.tickets import close_and_release
+    run = frappe.get_doc('Relay Automation Run', context['run']['name'])
+    message = frappe.get_doc('Relay Message', run.message)
+    key = hashlib.sha256(run.name.encode()).hexdigest()[:32]
+    with acting_as(STAFF):
+        send(message.name, 'text', {'text': text}, 'sim-staff-' + key)
+        frappe.db.commit()
+        add(message.relay_contact, note, 'sim-note-' + key, business_doctype=message.business_doctype,
+            business_name=message.business_name)
+    context['driver'].drain()
+    with acting_as(MANAGER):
+        close_and_release(run.ticket)
+    frappe.db.commit()
+
+
+def step_other_ticket(context: dict, persona: str, text: str) -> None:
+    """Another customer asks for a person, so a ticket of theirs exists; it is released after the trial."""
+    from relay_core.tickets import close_and_release
+    context['driver'].post_inbound({'persona': persona}, {'in': text})
+    context['driver'].drain()
+    context['driver'].outbound()  # Their handoff notice is not this scenario's outbound.
+    business = context['seed']['personas'][persona]['business']
+
+    def undo():
+        with acting_as(MANAGER):
+            for name in frappe.get_all('Relay Ticket', pluck='name', filters={'business_doctype': business[0],
+                    'business_name': business[1], 'active_scope_key': ['is', 'set']}):
+                close_and_release(name)
+    context['undo'].append(undo)
+
+
+def step_write_actions(context: dict, enabled: int = 1) -> None:
+    """Turn AI write actions on (they are off by default) for this trial."""
+    switch(context, 'Relay Settings', 'Relay Settings', 'allow_ai_write_actions', enabled)
+
+
 def step_duplicate_callback(context: dict) -> None:
     context['driver'].repeat_last()
 
@@ -261,7 +317,8 @@ def switch(context: dict, doctype: str, name: str, field: str, value) -> None:
 
 STEPS = {'takeover': step_takeover, 'approve': step_approve, 'reject': step_reject, 'expire': step_expire,
          'disable_capability': step_disable_capability, 'disable_user': step_disable_user,
-         'spend_cap': step_spend_cap, 'duplicate_callback': step_duplicate_callback}
+         'spend_cap': step_spend_cap, 'duplicate_callback': step_duplicate_callback, 'write_actions': step_write_actions,
+         'staff_reply': step_staff_reply, 'other_ticket': step_other_ticket}
 
 
 def capability_hashes() -> dict:

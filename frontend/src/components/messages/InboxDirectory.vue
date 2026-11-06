@@ -11,7 +11,8 @@ import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
 import { defaultMedium, mediumChips } from '../../services/enabledChannels'
 import { countLabel } from '../../services/queueCounts'
-import { mergeChangedRows, newestActivity, onlyChangedRows } from '../../services/inboxRows'
+import { mergeChangedRows, mergeFirstPage, newestActivity } from '../../services/inboxRows'
+import { listRefresh } from '../../services/realtimeRefreshQueue'
 import { INBOX_ROWS, useQueueCounts } from '../../composables/useQueueCounts'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 import InboxFilterPanel from './InboxFilterPanel.vue'
@@ -110,8 +111,23 @@ async function refreshChanged() {
     rows.value = mergeChangedRows(rows.value, page.items)
   } catch { if (ticket === generation) return load() }
 }
-useRealtimeRefresh(['Relay Message'], ['messages', 'inbox', 'incoming', 'reads', 'chats', 'permissions', 'contacts'],
-  ({ kinds } = {}) => !groupingView.value && kinds && onlyChangedRows(kinds) ? refreshChanged() : load())
+// A read state change re-reads the first page in place, so the list keeps its rows and scroll.
+async function refreshFirstPage() {
+  if (loading.value || error.value || !rows.value.length) return load()
+  const ticket = ++generation
+  try {
+    const page = await directoryPage({})
+    if (ticket === generation) rows.value = mergeFirstPage(rows.value, page)
+  } catch { if (ticket === generation) return load() }
+}
+// Receipts change no row; new messages alone fetch only the changed rows.
+function refresh({ kinds } = {}) {
+  const kind = listRefresh(kinds)
+  if (groupingView.value || kind === 'none') return
+  if (kind === 'reload') return load()
+  return kind === 'loaded' && !kinds.has('reads') && !kinds.has('chats') ? refreshChanged() : refreshFirstPage()
+}
+useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads', 'chats', 'permissions', 'contacts'], refresh)
 </script>
 <template>
   <header class="inbox-list-head">

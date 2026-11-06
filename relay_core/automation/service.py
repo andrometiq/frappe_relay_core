@@ -9,7 +9,7 @@ import json
 from contextvars import ContextVar
 import frappe
 from relay_core.business_access import document_name, business_document
-from relay_core import ai_features
+from relay_core import ai_features, locks
 from relay_core.automation.queue import QUEUE, after_message_commit
 from frappe.utils import now_datetime, add_to_date
 from relay_core.permissions import require_access, can_manage
@@ -276,6 +276,8 @@ def reserve_attempt(policy):
     key=frappe.cache().make_key(f'relay-ai-budget:{policy.name}:{now_datetime().date()}')
     count=frappe.cache().incr(key)
     if count==1:frappe.cache().expire(key,172800)
+    from relay_core.ai.remote.site import on_handed
+    on_handed(lambda: frappe.cache().decr(key))
     if count>int(policy.daily_limit):raise ValueError('Daily AI limit reached')
 
 
@@ -411,7 +413,11 @@ def recover():
             out.status = 'Uncertain'
         internal_save(out)
     from relay_core.ai.service import recoverable_runs
+    from relay_core.ai.remote.site import expire_overdue, is_waiting
+    expire_overdue()
     for name in recoverable_runs():
+        if is_waiting(name):
+            continue  # The AI service answers it, or expire_overdue fails it.
         frappe.enqueue('relay_core.automation.service.process', name=name, queue=QUEUE, timeout=180)
     for row in frappe.get_all('Relay Automation Outbox', filters={'status': 'Pending'}, fields=['name'], limit_page_length=20, order_by='creation asc'):
         frappe.enqueue('relay_core.automation.service.dispatch', name=row.name, queue=QUEUE, timeout=90)
@@ -435,27 +441,35 @@ def takeover(contact, paused=1):
 def process(name):
     # Two bounded model slots per site, one worker per run; database fencing
     # remains authoritative if a Redis lease expires.
-    cache = frappe.cache()
+    from relay_core.ai.remote.site import is_enabled
+    if is_enabled():
+        return process_run(name)  # The AI service bounds model calls; a job holds a worker only between turns.
     for slot in range(2):
-        lease = cache.lock(cache.make_key(f'relay-ai-slot:{slot}'), timeout=240, blocking_timeout=0)
+        lease = locks.lock(f'relay-ai-slot:{slot}', timeout=240, blocking_timeout=0)
         if lease.acquire(blocking=False):
             try:
-                run_lease = cache.lock(cache.make_key(f'relay-ai-run:{name}'), timeout=240, blocking_timeout=0)
-                if not run_lease.acquire(blocking=False):
-                    return
-                try:
-                    return _process(name)
-                finally:
-                    try:
-                        run_lease.release()
-                    except Exception:
-                        pass
+                return process_run(name)
             finally:
                 try:
                     lease.release()
                 except Exception:
                     pass
     # Durable Pending run is recovered later; no busy waiting or dropped event.
+
+
+def process_run(name):
+    from relay_core.ai.remote.site import transport
+    run_lease = locks.lock(f'relay-ai-run:{name}', timeout=240, blocking_timeout=0)
+    if not run_lease.acquire(blocking=False):
+        return
+    try:
+        with transport(name):
+            return _process(name)
+    finally:
+        try:
+            run_lease.release()
+        except Exception:
+            pass
 
 
 @frappe.whitelist(methods=['GET'])

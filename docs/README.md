@@ -18,6 +18,7 @@ Owners, managers and staff: start with the [user guide](user-guide.md).
 - [Frontend development](../frontend/README.md).
 - [Run tests and understand their coverage](testing.md).
 - [Resolve common setup and delivery problems](troubleshooting.md).
+- [Run the bench AI service](ai-service.md).
 
 ## Reference
 

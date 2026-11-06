@@ -6,6 +6,7 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core.permissions import can_manage, readable_contact, require_access
 from relay_core.business_access import business_document, allowed_types, require_person
+from relay_core import locks
 
 
 def business_links(links):
@@ -61,7 +62,7 @@ def create(name, phone, channel, links=None):
         frappe.throw('Enter a valid phone number')
     links = business_links(links or [])
     key = hashlib.sha256((channel.name + ':' + number).encode()).hexdigest()
-    with frappe.cache.lock('relay-enroll:' + key, timeout=30):
+    with locks.lock('relay-enroll:' + key, timeout=30):
         if any(bindings(channel.name, 'WhatsApp', number)):
             frappe.throw('This number already belongs to a contact', frappe.DuplicateEntryError)
         person = new_person(name, number, links)
@@ -81,7 +82,7 @@ def new_person(name, number, links=(), *, ignore_permissions=False, email=None):
 
 def ensure_relay(person):
     """One Relay conversation per Frappe Contact, including concurrent channel enrollment."""
-    with frappe.cache.lock('relay-person:' + person.name, timeout=30):
+    with locks.lock('relay-person:' + person.name, timeout=30):
         name = frappe.db.get_value('Relay Contact', {'contact': person.name}, 'name')
         if name:
             return name

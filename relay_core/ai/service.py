@@ -9,8 +9,10 @@ from relay_core.automation.queue import QUEUE
 from relay_core.ai.tools import as_user, is_company_scoped
 from relay_core.automation.service import internal_save, lock_run, lock_contact, message_hash, latest_message, outgoing_run
 from relay_core.automation.contracts import action_key
+from relay_core.ai.remote import site as remote
 
 REPLY_TIMEOUT = 60
+MATCHING_TIMEOUT = 40  # Matching has its own budget; a reply gets REPLY_TIMEOUT.
 SEARCH_NOTICE = 'I will check your records for this.'
 SEARCH_CONFIRM = "Reply 'yes' to continue, or tell me what to change."
 CONFIRM_WORDS = ('yes', 'confirm', 'confirmed', 'yes please', 'yes, please',
@@ -19,10 +21,13 @@ APPROVAL_NOTICE = 'Thanks. Your request is recorded for staff review. Our team w
 
 
 def capability_hashes(skill):
-    """{key: hash} of the skill's read packs and capability action packs; raises when one is not active."""
+    """{key: hash} of the skill's read packs, code tools and capability action packs; raises when a pack is not
+    active."""
     from relay_core.ai.capabilities import manifest_hash
+    from relay_core.ai.registry.builtin import tool_hashes
     from relay_core.ai.tools import contracts
     hashes = {row['key']: manifest_hash(row) for row in contracts(skill)}
+    hashes.update(tool_hashes(skill))
     if skill.get('allowed_actions') and skill.allowed_actions != '[]':
         from relay_core.ai.configuration import action_contracts
         from relay_core.flows.actions import definitions
@@ -95,6 +100,7 @@ def decide(skill, message, run_id=None, *, deadline=None):
     # its business type.
     reference = ReplyContext(business, scope['company'], scope['provider'],
                              message.sender_endpoint or message.relay_contact, user)
+    reference.recall(skill, text)
     if message.message_type in ('photo', 'image'):
         from relay_core.automation.multimodal import context as media_context
         from relay_core.ai.adapter import observe_image
@@ -118,6 +124,7 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
     contact details only as placeholders; the decision carries their table as `minimise_table`."""
     from relay_core.ai.adapter import complete, MAX_PROMPT_LENGTH
     from relay_core.ai.minimise import Minimiser
+    from relay_core.ai.registry.builtin import RunRecord
     from relay_core.ai.tools import fingerprint
     deadline = deadline or time.monotonic() + REPLY_TIMEOUT
     from relay_core.ai.matching import human_request, human_reason
@@ -136,13 +143,21 @@ def decide_text(skill, text, user, business, scope, history, reference=None, run
                 if run.get('search_plan') and run.stage == 'Event':
                     options['search'] = json.loads(run.search_plan)['plan']
             check_continuation(run_id)
-            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser, **options)
+            record = RunRecord()
+            decision = complete(skill, user, business, prompt, run_id, scope=scope, minimiser=minimiser,
+                                record=record, **options)
             return dict(decision, scope=fingerprint(scope), minimise_table=minimiser.table,
-                        context=reference.used if reference and not decision.get('decline') else None)
-        if reference and reference.lines:
+                        context=reference.used if reference and not decision.get('decline') else None,
+                        run_record={'tool_calls': record.tool_calls, 'usage': record.usage},
+                        **({'sources': sorted(record.sources)} if record.sources else {}))
+        if reference and reference.facts:
+            reference.facts.pop()
+        elif reference and reference.lines:
             reference.trim_memory(overflow)
         elif history:
             history.pop(0)
+        elif reference and reference.chunks:
+            reference.chunks.pop()
         elif reference and reference.events:
             reference.events.pop()
         else:
@@ -256,21 +271,21 @@ def search_scope(scope):
 
 
 def confirmation_required(skill, plan):
-    from relay_core.ai.tools import contracts
-    reference = next(row for row in contracts(skill) if row['key'] == plan['reference'])
+    from relay_core.ai.registry.builtin import search_references
+    reference = next(row for row in search_references(skill) if row['key'] == plan['reference'])
     return (skill.get('search_confirmation') != 'When required' or reference['confirmation'] == 'Always'
             or any(spec.get('required') for spec in reference['filters'].values()))
 
 
 def declare_search(run, skill, message, decision):
-    from relay_core.ai.tools import contracts
+    from relay_core.ai.registry.builtin import search_references
     from relay_core.automation.contracts import validate_search
     if decision.get('handoff') or decision.get('reads') or run.get('search_plan'):
         return
     plan = decision.get('search')
     if not plan:
         return
-    plan = validate_search(plan, contracts(skill))
+    plan = validate_search(plan, search_references(skill))
     user, business, scope = current(run, skill, message)
     record = dict(plan=plan, scope=search_scope(scope), version=str(skill.modified), ticket=run.ticket,
         generation=int(run.generation or 0), ownership_generation=int(frappe.db.get_value(
@@ -311,11 +326,11 @@ def search_request_key(message, user, run=None):
 
 def check_search(run, skill, record):
     """Revalidate the durable declaration and its journal receipt on every read."""
-    from relay_core.ai.tools import contracts
+    from relay_core.ai.registry.builtin import search_references
     from relay_core.automation.contracts import validate_search
     message = frappe.get_doc('Relay Message', run.message)
     user, business, scope = current(run, skill, message)
-    validate_search(record['plan'], contracts(skill))
+    validate_search(record['plan'], search_references(skill))
     if (record['scope'] != search_scope(scope) or record['version'] != str(skill.modified)
             or record['ticket'] != run.ticket or record['generation'] != int(run.generation or 0)
             or record['ownership_generation'] != int(frappe.db.get_value(
@@ -449,6 +464,13 @@ def current(run, skill, message):
     return resolved
 
 
+def undo_attempt(name):
+    """A turn handed to the AI service is not an attempt; its result resumes the same attempt."""
+    run = lock_run(name)
+    run.attempts = max(int(run.attempts or 0) - 1, 0)
+    internal_save(run)
+
+
 def log_failure(run, exc):
     """Preserve failed inference logs, its traceback and a bounded explanation."""
     try:
@@ -484,9 +506,13 @@ def process(name, *, deadline=None):
                 reserve_attempt(skill)
                 run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
                 internal_save(run); frappe.db.commit()
+                remote.on_handed(lambda: undo_attempt(name))
+                deadline = deadline or remote.run_deadline(name, run.stage, REPLY_TIMEOUT)
                 decision = decide(skill, message, run.name, deadline=deadline)
+                remote.settled()
                 used = decision.pop('context', None)
                 table = decision.pop('minimise_table', None)
+                record = decision.pop('run_record', None) or {}
                 frappe.db.commit()
                 run = lock_run(name)
                 if run.status != 'Deciding':
@@ -497,6 +523,8 @@ def process(name, *, deadline=None):
                 run.decision = json.dumps(decision)
                 run.ai_context = json.dumps(used) if used else None
                 run.minimise_table = json.dumps(table) if table else None
+                run.tool_calls = json.dumps(record['tool_calls']) if record.get('tool_calls') else None
+                run.usage = json.dumps(record['usage']) if record.get('usage') else None
                 internal_save(run); frappe.db.commit()
             if skill.mode == 'Shadow':
                 run.status = 'Shadow'; internal_save(run); frappe.db.commit(); return
@@ -591,6 +619,11 @@ def delivery_scope(run, skill, message, decision=None):
     if run.get('ai_context'):
         from relay_core.ai.event_memory import check_context
         check_context(run.ai_context, business, scope['company'])
+        from relay_core.ai.fact_memory import check_used
+        check_used(run.ai_context, skill, business)
+    if decision.get('sources'):
+        from relay_core.ai.knowledge_base.retriever import check_sources
+        check_sources(skill, business, scope['company'], decision['sources'])
     recheck(skill, user, business, decision.get('reads', []), scope,
         authorize=lambda contract, arguments: authorize_search(run.name, skill, contract, arguments))
 
@@ -626,7 +659,8 @@ def decline_notices(message) -> dict:
 
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
-    if slot != 'approval_notice' and reply not in decline_notices(message).values():
+    guarded = slot != 'approval_notice' and reply not in decline_notices(message).values()
+    if guarded:
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
     token = outgoing_run.set(run.name)
@@ -638,6 +672,10 @@ def dispatch_reply(run, skill, message, reply, *, slot):
         outgoing_run.reset(token)
     if result['status'] not in ('Submitted', 'Queued', 'Uncertain', 'Dispatching'):
         raise ValueError('Reply delivery requires review')
+    if guarded and skill.get('memory_enabled'):
+        # Facts the reply saved count from the transaction that journals the reply.
+        from relay_core.ai.fact_memory import activate
+        activate(run.name)
     return result
 
 
@@ -798,7 +836,7 @@ def admit(run):
     from relay_core.ai import matching
     from relay_core.ai.tools import fingerprint
     from relay_core.automation.service import episode, triage
-    deadline = time.monotonic() + 40  # Matching budget; replies get their own REPLY_TIMEOUT.
+    deadline = remote.run_deadline(run.name, 'Matching', MATCHING_TIMEOUT)
     message = frappe.get_doc('Relay Message', run.message)
     try:
         ticket = episode(run, message)
@@ -834,7 +872,9 @@ def admit(run):
             raise ValueError('Matching attempt limit reached')
         run.status, run.attempts = 'Deciding', int(run.attempts or 0) + 1
         internal_save(run); frappe.db.commit()
+        remote.on_handed(lambda name=run.name: undo_attempt(name))
         result = matching.select(message, skills, run.name, deadline, history=history)
+        remote.settled()
         frappe.db.commit()
         run = lock_run(run.name)
         if run.status != 'Deciding' or run.stage != 'Matching':

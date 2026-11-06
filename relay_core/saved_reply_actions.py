@@ -11,6 +11,7 @@ from relay_core.business_access import document_name
 from relay_core.permissions import require_access
 from relay_core.flows.actions import definitions
 from relay_core.flows.action_contracts import inputs, resolve
+from relay_core import locks
 
 
 def configured_action(reply):
@@ -45,7 +46,7 @@ def execute(message, reply, request_key):
     actor=frappe.session.user
     key=hashlib.sha256(json.dumps([actor,request_key]).encode()).hexdigest()
     fingerprint=hashlib.sha256(json.dumps([source.name,source.relay_contact,doc.name,definition['method'],values],sort_keys=True).encode()).hexdigest()
-    with frappe.cache.lock('relay-saved-action-'+key,timeout=300,blocking_timeout=3):
+    with locks.lock('relay-saved-action-'+key,timeout=300,blocking_timeout=3):
         previous=frappe.db.get_value('Relay Saved Reply Action',{'request_key':key},['name','input_hash','result'],as_dict=True)
         if previous:
             if previous.input_hash!=fingerprint:frappe.throw('This request belongs to a different saved reply action')

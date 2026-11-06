@@ -1,6 +1,7 @@
 """Event memory: audience, window and company matching, race-safe publishing, partial builds, size limits, link
 safety, injected source text and the reply context that records memory rows and event revisions."""
 import datetime
+import hashlib
 import io
 import json
 import socket
@@ -12,7 +13,7 @@ from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe import _dict
 
-from relay_core import test_mode
+from relay_core import locks, test_mode
 from relay_core.ai import event_memory, event_sources
 from relay_core.ai.event_sources import MB, Source, SourceError
 
@@ -184,13 +185,17 @@ class QueueTests(unittest.TestCase):
             event_memory.build(**job_kwargs)
 
         fake.enqueue.side_effect = run_job
-        with patch.object(event_memory, 'frappe', fake), patch.object(event_memory, 'get_revision', return_value='R1'), \
+        with patch.object(event_memory, 'frappe', fake), patch.object(locks, 'frappe', fake), \
+             patch.object(event_memory, 'get_revision', return_value='R1'), \
              patch('relay_core.ai_features.is_enabled', return_value=True), \
+             patch('relay_core.ai.knowledge_base.ingest.queue_event') as queue_event, \
              patch.object(event_memory.EventBuild, 'run', autospec=True,
                           side_effect=lambda build, force: runs.append((build.event, build.triggered_by, force))):
             event_memory.on_file_change(_dict(attached_to_doctype=event_memory.EVENT, attached_to_name='EV-1'))
             event_memory.rebuild.__wrapped__('EV-2')
         self.assertEqual(runs, [('EV-1', 'owner@example.com', False), ('EV-2', 'owner@example.com', True)])
+        # The event's knowledge source follows its files.
+        queue_event.assert_called_once_with('EV-1')
 
 
 class SourceTests(unittest.TestCase):
@@ -205,7 +210,7 @@ class SourceTests(unittest.TestCase):
 
     def test_text_and_docx_files_are_read_and_images_need_vision(self):
         text = _dict(name='FILE-2', file_name='rules.txt', file_url='/files/rules.txt', file_size=20,
-                     get_content=lambda: 'Entry is free.\n\n\nBring ID.')
+                     get_content=lambda encodings=None: b'Entry is free.\n\n\nBring ID.')
         self.assertEqual(event_sources.read_file(text, MB).text, 'Entry is free.\n\nBring ID.')
         archive = io.BytesIO()
         import zipfile
@@ -213,10 +218,19 @@ class SourceTests(unittest.TestCase):
             docx.writestr('word/document.xml', '<w:p><w:t>Gate 3 &amp; Gate 4</w:t></w:p>')
         self.assertEqual(event_sources.extract(archive.getvalue(), event_sources.DOCX), 'Gate 3 & Gate 4')
         image = _dict(name='FILE-3', file_name='poster.png', file_url='/files/poster.png', file_size=10,
-                      get_content=lambda: b'png')
+                      get_content=lambda encodings=None: b'png')
         self.assertIn('vision', event_sources.read_file(image, MB).reason)
         self.assertEqual(event_sources.read_file(image, MB, describe=lambda raw, mime: 'Poster: 20 Nov').text,
                          'Poster: 20 Nov')
+
+    def test_binary_file_is_read_byte_exact(self):
+        png = bytes.fromhex('89504e470d0a1a0a0000000d49484452')  # Frappe's windows-1250 fallback decodes these bytes.
+        seen = []
+        image = _dict(name='FILE-4', file_name='poster.png', file_url='/files/poster.png', file_size=len(png),
+                      get_content=lambda encodings=None: png if encodings == () else png.decode('windows-1250'))
+        source = event_sources.read_file(image, MB, describe=lambda raw, mime: seen.append(raw) or 'Poster')
+        self.assertEqual(seen, [png])
+        self.assertEqual((source.bytes, source.sha256), (len(png), hashlib.sha256(png).hexdigest()))
 
     def test_budget_cuts_and_skips_explicitly(self):
         sources = [Source(id=f's{index}', kind='File', label=f's{index}', text='x' * 30) for index in range(3)]
@@ -341,6 +355,8 @@ class ReplyContextTests(unittest.TestCase):
         self.saved = Mock(summary_hash='HASH-1', **{'text.return_value': self.MEMORY,
                                                     'rows.return_value': [_dict(name='MEM-1'), _dict(name='MEM-2')]})
         self.memory = self.enterContext(patch('relay_core.ai.memory.get_memory', return_value=self.saved))
+        self.fold = self.enterContext(patch('relay_core.ai.memory.fold_long_episode'))
+        self.enterContext(patch('relay_core.ai.fact_memory.memory_block', return_value=[]))
 
     def context(self):
         return event_memory.ReplyContext(*self.KEY)
@@ -384,6 +400,35 @@ class ReplyContextTests(unittest.TestCase):
         self.memory.side_effect = MemoryAccessError('denied')
         with self.assertRaises(MemoryAccessError):
             event_memory.check_context(used, ('Customer', 'C1'), 'Sim Company')
+
+    def test_decide_drops_facts_then_record_memory_and_keeps_chunks_while_history_fits(self):
+        from test_ai_skills import Doc, framework, module
+        self.saved.text.return_value = '\n'.join(f'2026-01-01 10:00 | line {index} ' + 'x' * 200 for index in range(40))
+
+        class Context(event_memory.ReplyContext):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.chunks = ['Riverside Traders Association passes are at the desk.']
+
+            def recall(self, skill, query):
+                self.facts = [f'[F{index}] (own) ' + 'f' * 2000 for index in range(3)]
+        service = module('relay_core/ai/service.py', framework())
+        service.context = Mock(return_value=('partner', ('Customer', 'C1'), {'company': 'Sim Company', 'provider': 'WhatsApp'}))
+        service.conversation_history = Mock(return_value=[{'direction': 'Incoming', 'content': 'Earlier question'}])
+        service.check_continuation = Mock()
+        prompts = []
+        adapter = types.SimpleNamespace(MAX_PROMPT_LENGTH=6000,
+            complete=lambda *args, **kw: prompts.append(json.loads(args[3])) or {'handoff': True, 'reply': '', 'reason': 'x'})
+        message = Doc(name='MSG-1', content='Where are passes?', message_type='text', sender_endpoint='15550000001',
+                      relay_contact='CONTACT-1')
+        with patch.dict(sys.modules, {'relay_core.ai.adapter': adapter}), patch.object(event_memory, 'ReplyContext', Context):
+            service.decide(Doc(), message)
+        reference = prompts[0]['reference_data']
+        self.assertNotIn(event_memory.FACTS, reference)
+        self.assertLess(len(reference['record_memory'].splitlines()), 40)
+        self.assertEqual(reference[event_memory.CHUNKS], ['Riverside Traders Association passes are at the desk.'])
+        self.assertEqual(prompts[0]['history'], [{'direction': 'Incoming', 'content': 'Earlier question'}])
+        self.assertEqual(reference['events'][0]['memory'], 'festival memory')
 
     def test_decide_trims_oldest_memory_before_history_and_returns_what_it_used(self):
         from test_ai_skills import Doc, framework, module

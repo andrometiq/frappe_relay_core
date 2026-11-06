@@ -85,9 +85,9 @@ def upload(channel, media_type, filename, content_base64):
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:
         frappe.throw(failure_message(error))
-    from frappe.utils.file_manager import save_file
+    from relay_core.attachments import private_file
     from relay_core.bulk_campaigns import MEDIA_DAYS
-    file = save_file(filename, raw, None, None, is_private=1)
+    file = private_file(filename, raw)
     frappe.cache.set_value(UPLOADS + media_id, {'file': file.name, 'channel': sender.name}, expires_in_sec=MEDIA_DAYS * 86400)
     return {'id': media_id, 'filename': filename, 'size': len(raw)}
 
@@ -106,7 +106,7 @@ def keep_header(result, kind, data):
     if not file.is_private or file.attached_to_doctype or file.owner != frappe.session.user:
         return None
     from relay_core.document_sends import keep_copy
-    if message := keep_copy(result, file.file_name, file.get_content()):
+    if message := keep_copy(result, file.file_name, file.get_content(encodings=())):
         file.delete(ignore_permissions=True)
         frappe.cache.delete_value(key)
     return message

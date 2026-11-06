@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from frappe import _dict
-from relay_core import business_access as access, business_types, contacts, contact_lifecycle
+from relay_core import business_access as access, business_types, contacts, contact_lifecycle, locks
 from test_contact_primary import fake_frappe
 
 
@@ -18,6 +18,7 @@ class ContactApiTests(unittest.TestCase):
         self.enterContext(patch.object(contacts, 'allowed_types', self.types))
         self.enterContext(patch.object(contacts, 'require_person'))
         self.enterContext(patch.object(contact_lifecycle, 'frappe', self.fake))
+        self.enterContext(patch.object(locks, 'frappe', self.fake))
         self.enterContext(patch.object(contact_lifecycle, 'bindings', return_value=iter(())))
         self.enterContext(patch.object(contacts, 'can_manage_links', return_value=False))
         self.fake.db.get_value.return_value = None

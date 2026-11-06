@@ -2,7 +2,7 @@
 import re
 import frappe
 from relay_core.business_access import document_name
-from relay_core import ai_features, features
+from relay_core import ai_features, features, locks
 from relay_core.permissions import (require_access, readable_contact, contact_query, can_manage,
                                     can_configure, sees_all_teams)
 
@@ -371,7 +371,7 @@ def save_contact_preference(contact, business_doctype, business_name, endpoint, 
     if consent == 'Granted' and not binding.verified:
         frappe.throw('Review the revoked identity before granting consent')
     scope = scope_key(contact, business_doctype, business_name)
-    with frappe.cache.lock('relay-preference:' + scope, timeout=10):
+    with locks.lock('relay-preference:' + scope, timeout=10):
         name = frappe.db.get_value('Relay Channel Preference', {'scope_key': scope, 'endpoint': endpoint}, 'name')
         doc = frappe.get_doc('Relay Channel Preference', name) if name else frappe.new_doc('Relay Channel Preference')
         doc.update(dict(contact=contact, business_doctype=business_doctype, business_name=business_name,

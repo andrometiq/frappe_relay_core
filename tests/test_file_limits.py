@@ -56,7 +56,7 @@ class AttachmentUploadLimitTests(unittest.TestCase):
                      patch.object(attachments.frappe, 'throw', side_effect=throw)):
             item.start()
             self.addCleanup(item.stop)
-        saved = patch('frappe.utils.file_manager.save_file', return_value=frappe._dict(name='FILE-1', file_name='a.pdf'))
+        saved = patch('relay_core.attachments.private_file', return_value=frappe._dict(name='FILE-1', file_name='a.pdf'))
         self.save = saved.start()
         self.addCleanup(saved.stop)
 

@@ -17,9 +17,9 @@ def saved(file_name):
 class SaveAttachmentTests(unittest.TestCase):
     def save(self, stored_name):
         file = saved(stored_name)
-        with patch('frappe.utils.file_manager.save_file', return_value=file) as save:
+        with patch.object(attachments, 'private_file', return_value=file) as save:
             result = attachments.save_attachment('invoice.pdf', b'pdf', 'MSG-1')
-        save.assert_called_once_with('invoice.pdf', b'pdf', 'Relay Message', 'MSG-1', is_private=1)
+        save.assert_called_once_with('invoice.pdf', b'pdf', 'Relay Message', 'MSG-1')
         return result
 
     def test_a_suffixed_duplicate_name_is_set_back_to_the_chosen_name(self):
@@ -35,6 +35,14 @@ class SaveAttachmentTests(unittest.TestCase):
         file.db_set.side_effect = lambda field, value, **_: setattr(file, field, value)
         with patch.object(attachments.messaging, 'readable_source', return_value=(source, channel, {})), \
                 patch.object(attachments.file_limits, 'get_max_bytes', return_value=1024), \
-                patch('frappe.utils.file_manager.save_file', return_value=file):
+                patch.object(attachments, 'private_file', return_value=file):
             result = attachments.upload('MSG-1', 'invoice.pdf', base64.b64encode(b'pdf').decode())
         self.assertEqual(result, {'name': 'FILE-1', 'filename': 'invoice.pdf', 'size': 3})
+
+    def test_a_file_is_stored_with_its_exact_bytes(self):
+        raw = b'\x89PNG\r\n\x1a\n'  # Also valid Windows-1252 text, which file_manager.save_file would rewrite.
+        with patch.object(attachments.frappe, 'get_doc') as get_doc:
+            attachments.private_file('swatch.png', raw, 'Relay Message', 'MSG-1')
+        get_doc.assert_called_once_with({'doctype': 'File', 'file_name': 'swatch.png', 'attached_to_doctype': 'Relay Message',
+                                         'attached_to_name': 'MSG-1', 'is_private': 1, 'content': raw})
+        get_doc.return_value.insert.assert_called_once_with(ignore_permissions=True)

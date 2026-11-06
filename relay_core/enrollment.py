@@ -6,6 +6,7 @@ from relay_core.business_access import document_name, business_document
 from relay_core.permissions import require_access, readable_contact
 from relay_core.automation.projection import extract_messages, project
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 
 def event_rows(name):
@@ -85,7 +86,7 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
     business_document(*business)
     from relay_core.identity import bindings, normalize
     endpoint=normalize(medium, matches[0]['from']);key=hashlib.sha256((channel+':'+endpoint).encode()).hexdigest()
-    with frappe.cache.lock('relay-enroll:'+key,timeout=30):
+    with locks.lock('relay-enroll:'+key,timeout=30):
         aliases = list(bindings(channel, medium, endpoint))
         if len(aliases) > 1:frappe.throw('Conflicting legacy bindings require administrator review')
         existing = aliases[0] if aliases else None

@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import frappe
 from relay_core.identity import bindings, contact_identities, normalize
 from relay_core.permissions import can_manage
+from relay_core import locks
 
 
 def relay_contact(person_name):
@@ -52,7 +53,7 @@ def on_update(person, method=None):
 
 def enroll(relay, channel, provider, value, *, locked=False):
     """Shared or revoked values stay with their existing binding; nothing is reassigned."""
-    with nullcontext() if locked else frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
+    with nullcontext() if locked else locks.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
         existing = list(bindings(channel, provider, value))
         if existing:
             if len(existing) == 1 and existing[0].relay_contact == relay and existing[0].verified:
@@ -71,8 +72,8 @@ def whatsapp_contact(channel, number, profile_name=None, *, locked=False):
     if not number.isdigit() or phone_number('+' + number) != number:
         return None
     # Serialize first messages across channels before finding/creating the Frappe Contact.
-    with nullcontext() if locked else frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
-        with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, number), timeout=30):
+    with nullcontext() if locked else locks.lock('relay-whatsapp-person:' + number, timeout=30):
+        with locks.lock('relay-enroll:' + endpoint_key(channel, number), timeout=30):
             existing = list(bindings(channel, 'WhatsApp', number))
             if existing:
                 return existing[0].relay_contact if len(existing) == 1 and existing[0].verified else None
@@ -105,7 +106,7 @@ def new_sender_contact(channel, provider, endpoint, name=None):
         return None
     if provider == 'Telegram' and not value.isdigit():
         return None
-    with frappe.cache.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
+    with locks.lock('relay-enroll:' + endpoint_key(channel, value), timeout=30):
         existing = list(bindings(channel, provider, value))
         if existing:
             return existing[0].relay_contact if len(existing) == 1 and existing[0].verified else None

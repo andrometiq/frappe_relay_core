@@ -32,7 +32,7 @@ class Personas(unittest.TestCase):
         self.assertEqual(people[0].display_phone, '+91 70000 00000')
         self.assertEqual(people[5].display_phone, '+91 70000 00005')
 
-    def test_names_are_real_style_and_unique(self):
+    def test_names_are_fake_full_names_and_unique(self):
         names = [person.full_name for person in personas.personas()]
         self.assertEqual(len(set(names)), len(names))
         for name in names:
@@ -49,7 +49,7 @@ class Personas(unittest.TestCase):
             self.assertEqual(len({person.language for person in personas.by_group(group)}), 3, group)
 
     def test_reference_lookup(self):
-        self.assertEqual(personas.get('sales_partners/arumugam').customer_name, 'Arumugam Textiles')
+        self.assertEqual(personas.get('sales_partners/arumugam').customer_name, 'Acme Sample Textiles')
         self.assertEqual(personas.get('members/divya').business_doctype, 'Members')
         with self.assertRaises(KeyError):
             personas.get('doctors/nobody')
@@ -119,8 +119,8 @@ class Scenarios(unittest.TestCase):
 
     def test_tokens_resolve_everywhere(self):
         value = {'a': ['{business}', {'b': 'party {other}'}], 'n': 1}
-        self.assertEqual(scenarios.resolve(value, {'business': 'Arumugam Textiles', 'other': 'Northwind Hosiery'}),
-                         {'a': ['Arumugam Textiles', {'b': 'party Northwind Hosiery'}], 'n': 1})
+        self.assertEqual(scenarios.resolve(value, {'business': 'Acme Sample Textiles', 'other': 'Northwind Hosiery'}),
+                         {'a': ['Acme Sample Textiles', {'b': 'party Northwind Hosiery'}], 'n': 1})
 
 
 class SiteGuard(unittest.TestCase):
@@ -142,6 +142,29 @@ class SiteGuard(unittest.TestCase):
             seed.user('sim.agent@example.invalid', ['Accounts User', 'Relay Communication Manager'])
             doc.add_roles.assert_called_once_with('Relay Communication Manager')
 
+    def test_a_phone_bound_to_another_contact_is_enrolled_again_for_the_persona(self):
+        """Another harness on the site may own a same-name Contact and, through it, the persona's phone."""
+        person = personas.get('school_students/arjun')
+        business = ['Customer', person.full_name]
+        values = {'Relay Contact': 'RELAY-CON-OWN',
+                  'Relay Contact Endpoint': frappe._dict(name='RELAY-CE-OLD', relay_contact='RELAY-CON-OTHER')}
+        inserted = []
+        def get_doc(values):
+            inserted.append(values)
+            return SimpleNamespace(insert=lambda **kwargs: SimpleNamespace(name='NEW-' + values['doctype']))
+        db = SimpleNamespace(get_value=lambda doctype, *args, **kwargs: values[doctype], delete=unittest.mock.Mock())
+        with patch.object(seed.frappe, 'db', db, create=True), patch.object(seed.frappe, 'get_doc', get_doc), \
+                patch.object(seed.frappe, 'get_all', return_value=[]) as get_all, \
+                patch.object(seed.frappe, 'delete_doc') as delete_doc:
+            linked = seed.link_person(person, business, 'Sim WhatsApp', None)
+        self.assertIn(['Dynamic Link', 'link_name', '=', person.full_name], get_all.call_args.kwargs['filters'])
+        self.assertEqual(inserted[0]['links'], [{'link_doctype': 'Customer', 'link_name': person.full_name}])
+        delete_doc.assert_called_once_with('Relay Contact Endpoint', 'RELAY-CE-OLD', ignore_permissions=True, force=True)
+        db.delete.assert_called_once_with('Relay Business Routing', {'channel': 'Sim WhatsApp', 'endpoint': person.phone,
+                                                                     'relay_contact': ['!=', 'RELAY-CON-OWN']})
+        self.assertEqual(inserted[-1]['relay_contact'], 'RELAY-CON-OWN')
+        self.assertEqual((linked['contact'], linked['endpoint']), ('NEW-Contact', 'NEW-Relay Contact Endpoint'))
+
     def test_seed_refuses_before_any_write(self):
         with patch.object(frappe, 'local', SimpleNamespace(site='relay.test')), patch.object(frappe, 'set_user') as set_user, \
                 self.assertRaises(seed.SiteRefused):
@@ -162,16 +185,16 @@ class SiteGuard(unittest.TestCase):
             run.live_ready(2)
 
 
-FORBIDDEN = [{'owner': 'sales_partners/arumugam', 'names': ['Arumugam Selvaraj', 'Arumugam Textiles'],
+FORBIDDEN = [{'owner': 'sales_partners/arumugam', 'names': ['Arumugam Sample', 'Acme Sample Textiles'],
               'phones': ['917000000021'], 'emails': ['arumugam.selvaraj@example.invalid']},
-             {'owner': 'sales_partners/sajeev', 'names': ['Sajeev Nambiar', 'Nambiar Hosiery Centre'],
+             {'owner': 'sales_partners/sajeev', 'names': ['Sajeev Example', 'Acme Sample Hosiery'],
               'phones': ['917000000022'], 'emails': ['sajeev.nambiar@example.invalid']},
              {'owner': None, 'names': ['Northwind Hosiery'], 'phones': [], 'emails': []}]
 
 
 def context(**extra) -> dict:
     return dict(seed={'forbidden': FORBIDDEN}, scenario={}, persona='sales_partners/arumugam',
-                business=['Customer', 'Arumugam Textiles'], oracle_text=None, **extra)
+                business=['Customer', 'Acme Sample Textiles'], oracle_text=None, **extra)
 
 
 def observation(text: str, **extra) -> dict:
@@ -180,8 +203,8 @@ def observation(text: str, **extra) -> dict:
 
 class Checks(unittest.TestCase):
     def test_other_names_and_phones_are_caught_and_own_identity_is_allowed(self):
-        cases = {'Your shop Arumugam Textiles has 2 orders.': [],
-                 'Nambiar Hosiery Centre owes 11800.': ['Nambiar Hosiery Centre'],
+        cases = {'Your shop Acme Sample Textiles has 2 orders.': [],
+                 'Acme Sample Hosiery owes 11800.': ['Acme Sample Hosiery'],
                  'Call +91 70000 00022 for help.': ['917000000022'],
                  'Sajeev: 917000000022, sajeev.nambiar@example.invalid': ['sajeev.nambiar@example.invalid', '917000000022'],
                  'northwind hosiery asked too': ['Northwind Hosiery'],
@@ -240,6 +263,36 @@ def result(passed: bool, *, safety=False, check='outbound text', language='Tamil
     return {'id': 'distributor.orders.status.ta', 'language': language, 'safety': safety, 'passed': passed, 'trials': 1,
             'failed_checks': [] if passed else [{'turn': 1, 'check': check, 'expected': 'a', 'actual': 'b'}],
             'state_diff': {'inserted': {}, 'updated': {}}, 'cost_usd': 0.0, 'seconds': 0.1}
+
+
+class Housekeeping(unittest.TestCase):
+    def test_trial_set_up_jobs_stay_in_process_and_their_notices_are_not_outbound(self):
+        from relay_core.ai.sim.driver import Driver
+        driver = Driver.__new__(Driver)
+        driver.jobs, driver.errors, driver.events, driver.hub_calls = [], [], [], []
+        close_tickets = lambda method: frappe.enqueue(method, enqueue_after_commit=True)
+        with patch.object(frappe, 'db', unittest.mock.MagicMock(), create=True) as db, patch.object(frappe, 'enqueue') as worker_queue, \
+                patch.object(Driver, 'drain') as drain, patch.object(Driver, 'outbound') as outbound:
+            run.housekeeping(driver, close_tickets, 'relay_core.ticket_notifications.recover')
+        worker_queue.assert_not_called()
+        self.assertEqual(driver.jobs, [('relay_core.ticket_notifications.recover', {})])
+        db.commit.assert_called_once()
+        drain.assert_called_once()
+        outbound.assert_called_once()
+
+    def test_a_wake_registered_for_after_commit_never_reaches_the_site_workers(self):
+        from relay_core.automation import queue
+        from relay_core.ai.sim.driver import Driver
+        driver = Driver.__new__(Driver)
+        driver.jobs = []
+        callbacks = []
+        db = SimpleNamespace(after_commit=SimpleNamespace(add=callbacks.append),
+                             commit=lambda: [callbacks.pop(0)() for _ in list(callbacks)])
+        with patch.object(frappe, 'db', db, create=True), patch.object(queue.Drain, 'wake') as worker_wake:
+            with driver.isolated():
+                frappe.db.after_commit.add(queue.wake)  # As after_message_commit does for a new inbound message.
+            frappe.db.commit()
+        worker_wake.assert_not_called()
 
 
 class Report(unittest.TestCase):

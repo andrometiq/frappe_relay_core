@@ -55,3 +55,17 @@ test('a burst passes the union of the changed message names once', async () => {
     assert.deepEqual(batches[1],[['reconnect'],[]],'names do not leak into the next batch')
   } finally { q.dispose() }
 })
+
+test('a burst keeps which message changes also came from the open conversation and which had no change key', async () => {
+  const batches=[]
+  const q=realtimeRefreshQueue(async batch=>batches.push(batch),()=>true,5)
+  try {
+    q.schedule('messages',[],'c1');q.schedule('messages',['M1'],'c1');q.schedule('messages',[],'c2');q.schedule('receipts',['M1'],'c3')
+    await wait(25)
+    assert.deepEqual([[...batches[0].changes],[...batches[0].open],batches[0].unknown],[['c1','c2'],['c1'],false])
+    q.schedule('messages');await wait(25)
+    assert.deepEqual([[...batches[1].changes],batches[1].unknown],[[],true],'keys do not leak into the next batch')
+    q.schedule('reads');await wait(25)
+    assert.equal(batches[2].unknown,false)
+  } finally { q.dispose() }
+})

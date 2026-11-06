@@ -12,7 +12,7 @@ import frappe
 from relay_core.business_access import document_name
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 from redis.exceptions import LockError
-from relay_core import bulk_sheet, service_window, whatsapp
+from relay_core import bulk_sheet, service_window, whatsapp, locks
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
 from relay_core.hub_channels import hub_arguments
@@ -154,6 +154,14 @@ def is_bulk(doc):
     if doc.operation == 'templates.send':
         return bool(doc.template_name)
     return doc.operation in OPERATIONS and bool(doc.arguments) and 'message' in json.loads(doc.arguments)
+
+
+def lock_campaign(name):
+    """The campaign status, read under its row lock as the first read of a new transaction. Counters have one
+    writer (bulk_updates.recount); every save of the whole row takes this lock first, so the two wait for each
+    other instead of failing with MariaDB error 1020 or writing older counters or status back."""
+    frappe.db.commit()
+    return frappe.db.get_value('Relay Campaign', name, 'status', for_update=True)
 
 
 def bulk(name, statuses=None):
@@ -430,7 +438,7 @@ def append_rows(name, rows):
     doc = bulk(name, ('Draft',))
     if doc.source_file or doc.recipient_filters or not doc.column_map:
         frappe.throw('Add rows only to a campaign created with rows')
-    with frappe.cache.lock('relay-bulk-append:' + name, timeout=120):
+    with locks.lock('relay-bulk-append:' + name, timeout=120):
         last, total = frappe.db.sql(f'SELECT COALESCE(MAX(sheet_row), 0), COUNT(*) FROM `tab{RECIPIENT}` WHERE campaign=%s',
                                     name)[0]
         numbered = given_rows(rows, int(last))
@@ -565,7 +573,7 @@ def sheet_contact(channel, number):
     from relay_core.contact_lifecycle import endpoint_key, sibling_contact, whatsapp_contact
     if not bulk_sheet.sheet_phone('+' + number, ''):
         return 'invalid', 'Invalid phone number'
-    with frappe.cache.lock('relay-whatsapp-person:' + number, timeout=30):
+    with locks.lock('relay-whatsapp-person:' + number, timeout=30):
         frappe.db.commit()
         existing = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, number)},
                                        ['relay_contact', 'verified'], as_dict=True, for_update=True)
@@ -732,7 +740,8 @@ def control(name, action, scheduled_at=None):
         scheduled_at = start_time(scheduled_at)
     checked = target in ('Running', 'Scheduled')
     media = check_ready(bulk(name, allowed)) if checked else {}  # Hub calls stay outside the lock.
-    with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
+    with locks.lock('relay-bulk-control:' + name, timeout=30):
+        lock_campaign(name)
         doc = bulk(name, allowed)
         if checked:
             check_validation(doc)
@@ -761,8 +770,8 @@ def retry_failed(name):
     if not retry_needed(doc):
         return read(name)
     media = check_ready(doc)  # Hub calls stay outside the lock.
-    with frappe.cache.lock('relay-bulk-control:' + name, timeout=30):
-        frappe.db.commit()  # A fresh snapshot sees a retry that another request committed.
+    with locks.lock('relay-bulk-control:' + name, timeout=30):
+        lock_campaign(name)  # A fresh snapshot sees a retry that another request committed.
         doc = bulk(name)
         if not retry_needed(doc):
             return read(name)
@@ -835,7 +844,7 @@ def send_job(name, step=0):
     """One slice of at most SLICE_SECONDS; it enqueues the next slice instead of running on."""
     deadline, more = time.monotonic() + SLICE_SECONDS, False
     try:
-        with frappe.cache.lock('relay-bulk-send:' + name, timeout=SLICE_SECONDS + 300, blocking_timeout=LOCK_WAIT):
+        with locks.lock('relay-bulk-send:' + name, timeout=SLICE_SECONDS + 300, blocking_timeout=LOCK_WAIT):
             doc = frappe.get_doc('Relay Campaign', name)
             if doc.status == 'Running':
                 more = push(doc, deadline)
@@ -905,9 +914,11 @@ def push(doc, deadline):
             continue
         except (ValueError, OSError, ValidationError, PermissionError) as exc:
             frappe.log_error(title='Campaign preparation failed')
-            doc.status, doc.last_error = 'Paused', friendly_reason(str(exc), snapshot['fields'])
-            phase(doc, 'Paused')
-            internal_save(doc)
+            if lock_campaign(doc.name) == 'Running':  # A manager's pause or cancel since the slice began stays.
+                doc.reload()
+                doc.status, doc.last_error = 'Paused', friendly_reason(str(exc), snapshot['fields'])
+                phase(doc, 'Paused')
+                internal_save(doc)
             frappe.db.commit()
             return False
         if has_attachments:

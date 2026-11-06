@@ -244,8 +244,8 @@ def read_file(file, limit: int, describe=None) -> Source:
             raise SourceError('Only files stored on this site are read')
         if (file.file_size or 0) > limit:
             raise SourceError(too_large(limit))
-        raw = file.get_content()
-        raw = raw.encode() if isinstance(raw, str) else raw
+        # No encodings: Frappe would decode a binary file that happens to read as windows-1250 into text.
+        raw = file.get_content(encodings=())
         if len(raw) > limit:
             raise SourceError(too_large(limit))
         fingerprint(source, raw)

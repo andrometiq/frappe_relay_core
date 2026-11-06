@@ -188,6 +188,11 @@ def prepare_choices(source, channel, context, data):
 def _prepare(source, channel, context, kind, data):
     if kind=='choices':
         return prepare_choices(source, channel, context, data)
+    if kind=='poll':
+        from relay_core import polls
+        choices, content = polls.prepare(data)
+        tool, arguments, _ = prepare_choices(source, channel, context, choices)
+        return tool, arguments, content
     if kind=='flow':
         if channel.channel!='WhatsApp' or context.get('provider')!='WhatsApp' or context.get('group_id'):raise ValueError('Forms require a private WhatsApp conversation')
         if set(data)-{'id','body','cta','screen','token','initial_data'}:raise ValueError('Invalid form arguments')

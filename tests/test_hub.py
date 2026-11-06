@@ -162,6 +162,39 @@ class MediaHTTPTests(unittest.TestCase):
             server.shutdown(); server.server_close(); thread.join()
 
 
+class OlderHubTests(unittest.TestCase):
+    def test_a_tool_the_hub_does_not_have_is_an_older_hub(self):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from relay_core.hub import OlderHubError
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if body['method'] == 'notifications/initialized':
+                    self.send_response(202); self.end_headers(); return
+                if body['method'] == 'initialize':
+                    answer = {'result': {'protocolVersion': '2025-06-18'}}
+                elif body['params']['name'] == 'telegram.bot.health':
+                    answer = {'error': {'code': -32602, 'message': 'unknown tool "telegram.bot.health"'}}
+                else:
+                    answer = {'error': {'code': -32602, 'message': 'invalid params'}}
+                self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+                self.wfile.write(json.dumps({'jsonrpc': '2.0', 'id': body['id'], **answer}).encode())
+            def log_message(self, *_): pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            hub = HubClient(f'http://127.0.0.1:{server.server_port}/mcp', 'x'*64)
+            with self.assertRaises(OlderHubError):
+                hub.call_tool('telegram.bot.health', {'channel': 'tg-1'})
+            with self.assertRaises(HubError) as caught:
+                hub.call_tool('email.mailbox.health', {'channel': 'mail-1'})
+            self.assertNotIsInstance(caught.exception, OlderHubError)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+
 class ToolDetailTests(unittest.TestCase):
     def test_meta_text_is_shown_once(self):
         from relay_core.hub import tool_detail

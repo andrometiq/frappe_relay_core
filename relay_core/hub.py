@@ -13,6 +13,12 @@ from . import file_limits
 
 MAX_WHATSAPP_DOWNLOAD_BYTES = 16 * 1024 * 1024
 SIGNUP_TOOLS = ('whatsapp.signup.start', 'whatsapp.signup.get', 'whatsapp.signup.resume', 'whatsapp.signup.cancel')
+# Site tools that set up the site's own numbers and its Hub link; none takes or returns a credential.
+SETUP_TOOLS = ('channels.health', 'whatsapp.number.health', 'whatsapp.number.check', 'whatsapp.number.settings', 'whatsapp.number.pin_reset',
+               'whatsapp.number.remove', 'site.disconnect', 'telegram.bot.health', 'telegram.bot.check', 'telegram.bot.remove',
+               'email.mailbox.health', 'email.mailbox.check', 'email.mailbox.remove')
+# Site tools that carry a bot token or a mail password to the Hub. Core forwards it once and never keeps it.
+CREDENTIAL_TOOLS = ('telegram.bot.connect', 'telegram.bot.settings', 'email.mailbox.connect', 'email.mailbox.settings')
 
 MEDIA_CHECKS = {
     'account': 'an account-scoped credential is required',
@@ -59,6 +65,30 @@ def tool_detail(result):
     return ' · '.join(shown)
 
 
+class Secret:
+    """A bot token or mail password on its way to the Hub. Every repr shows it masked, so a developer-mode traceback
+    with local variables never prints it; only the Hub request body reveals it."""
+    __slots__ = ('_value',)
+
+    def __init__(self, value):
+        self._value = value
+
+    def __repr__(self):
+        return "'********'"
+
+    __str__ = __repr__
+
+    def reveal(self):
+        return self._value
+
+
+def revealed(value):
+    """The json.dumps default of a Hub request body: the value of a Secret."""
+    if isinstance(value, Secret):
+        return value.reveal()
+    raise TypeError(f'{type(value).__name__} is not JSON serializable')
+
+
 class HubError(RuntimeError):
     def __init__(self, message, metadata=None, detail=''):
         super().__init__(message)
@@ -102,6 +132,22 @@ def whatsapp_rejection(error):
     return one_line(f'WhatsApp rejected this request{code}' + (f': {detail}' if detail else ''))
 
 
+class OlderHubError(HubError):
+    """The Hub runs a version without the called tool."""
+
+
+def protected_transport(parsed):
+    """HTTPS, or plain HTTP that never leaves this machine."""
+    return parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"})
+
+
+class HubRequest(Request):
+    """A Hub request whose repr leaves out the bearer token and the body, which a traceback would otherwise show."""
+
+    def __repr__(self):
+        return f'<HubRequest {self.get_method()} {self.full_url}>'
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise HubError("Hub redirects are not allowed")
@@ -112,15 +158,13 @@ class HubClient:
         parsed = urlsplit(url)
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("Invalid Hub endpoint")
-        if parsed.scheme != "https" and not (
-            parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "::1"}
-        ):
+        if not protected_transport(parsed):
             raise ValueError("Hub requires HTTPS outside loopback")
         if not parsed.hostname or not parsed.path.endswith("/mcp") or any(part in {".", ".."} for part in parsed.path.split("/")) or "%" in parsed.path or "//" in parsed.path:
             raise ValueError("Hub endpoint must end in /mcp")
         if len(token) < 32 or "\n" in token or "\r" in token:
             raise ValueError("A Hub token of at least 32 characters is required")
-        self.url, self.token = url, token
+        self.url, self.token = url, Secret(token)
         self.protocol = None
         self.opener = build_opener(NoRedirect)
 
@@ -133,11 +177,11 @@ class HubClient:
         body = {"jsonrpc": "2.0", "method": method, "params": params}
         if request_id is not None:
             body["id"] = request_id
-        headers = {"Authorization": f"Bearer {self.token}",
+        headers = {"Authorization": f"Bearer {self.token.reveal()}",
                    "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.protocol:
             headers["MCP-Protocol-Version"] = self.protocol
-        req = Request(self.url, data=json.dumps(body).encode(), headers=headers)
+        req = HubRequest(self.url, data=json.dumps(body, default=revealed).encode(), headers=headers)
         test_mode.ensure_allowed(self.url)
         try:
             with self.opener.open(req, timeout=30) as response:
@@ -164,6 +208,9 @@ class HubClient:
         if not isinstance(result, dict) or result.get("id") != request_id or result.get("jsonrpc") != "2.0":
             raise HubError("Invalid MCP response envelope")
         if "error" in result:
+            message = result["error"].get("message") if isinstance(result["error"], dict) else None
+            if isinstance(message, str) and message.startswith("unknown tool"):
+                raise OlderHubError("This Relay Hub version does not have this tool")
             raise HubError("Hub rejected the MCP operation")
         if not isinstance(result.get("result"), dict):
             raise HubError("Missing MCP result")
@@ -181,7 +228,7 @@ class HubClient:
         return self.call_tool("whatsapp.execute", arguments)
 
     def call_tool(self, name, arguments):
-        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment", *SIGNUP_TOOLS}:
+        if name not in {"account.get", "channels.list", "whatsapp.execute", "whatsapp.enqueue", "whatsapp.send", "whatsapp.bulk", "whatsapp.deliveries", "whatsapp.resolve", "whatsapp.media", "telegram.send", "telegram.typing", "telegram.groups", "telegram.message", "telegram.media", "email.send", "channels.deliveries", "channels.resolve", "telegram.attachment", "email.attachment", "email.mailbox", "whatsapp.attachment", *SIGNUP_TOOLS, *SETUP_TOOLS, *CREDENTIAL_TOOLS}:
             raise HubError("Unsupported Hub tool")
         if name == "email.send":
             test_mode.ensure_email_allowed()

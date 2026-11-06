@@ -7,6 +7,7 @@ import frappe
 from relay_core.business_access import document_name
 
 from relay_core.permissions import readable_contact, require_access
+from relay_core import locks
 
 STATUSES = {'Open', 'Waiting', 'Resolved', 'Archived'}
 SOURCES = {'Manual', 'Flow', 'External AI', 'Import'}
@@ -92,7 +93,7 @@ def upsert(contact, values, *, name=None, source='Flow', source_key=None):
     intent = hashlib.sha256(json.dumps([title.strip(), summary.strip(), category.strip(), status, sorted(names), business], ensure_ascii=False).encode()).hexdigest()
     key = hashlib.sha256(json.dumps([contact, source, source_key or str(uuid.uuid4())]).encode()).hexdigest()
     # Serialize topic membership updates across both human and automation requests.
-    with frappe.cache.lock('relay-topics-' + hashlib.sha256(contact.encode()).hexdigest(), timeout=30, blocking_timeout=5):
+    with locks.lock('relay-topics-' + hashlib.sha256(contact.encode()).hexdigest(), timeout=30, blocking_timeout=5):
         existing = name or frappe.db.get_value('Relay Conversation Topic', {'topic_key': key}, 'name')
         doc = frappe.get_doc('Relay Conversation Topic', existing) if existing else frappe.new_doc('Relay Conversation Topic')
         if existing:

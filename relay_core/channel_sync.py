@@ -4,6 +4,7 @@ import frappe
 from relay_core.hub import HubError
 from relay_core.permissions import require_access
 from relay_core.settings import value as connection_value
+from relay_core import locks
 
 PROVIDERS = ('WhatsApp', 'Telegram', 'Email')
 KEY = re.compile(r'[A-Za-z0-9_.:-]{1,140}')
@@ -54,10 +55,12 @@ def sync():
         listed = listed_channels(client().call_tool('channels.list', {}))
     except (HubError, ValueError) as error:
         return {'synced': False, 'error': getattr(error, 'detail', '') or str(error)}
-    with frappe.cache.lock('relay-channel-sync', timeout=60, blocking_timeout=10):
+    with locks.lock('relay-channel-sync', timeout=60, blocking_timeout=10):
         frappe.db.commit()
         result = store(account, listed)
         frappe.db.commit()
+    # Health such as a failed check lives in the Hub, so open Account pages read again even when no row changed.
+    publish()
     return dict(result, synced=True)
 
 
@@ -121,6 +124,12 @@ def keep_one_default(account):
                               filters={'account': account, 'channel': provider, 'enabled': 1})
         if len(rows) > 1 and not any(row.is_default for row in rows):
             save(frappe.get_doc('Relay Channel', rows[0].name), {'is_default': 1})
+
+
+def publish():
+    """Tell open Account pages to read the channels again. No ids or status travel in the event."""
+    frappe.publish_realtime('relay_changed', {'kind': 'channels'}, room=frappe.realtime.get_doctype_room('Relay Channel'),
+                            after_commit=True)
 
 
 def queue_sync():

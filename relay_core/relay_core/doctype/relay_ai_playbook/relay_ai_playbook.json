@@ -1,0 +1,137 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Playbook",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:playbook_key",
+  "naming_rule": "By fieldname",
+  "track_changes": 1,
+  "title_field": "title",
+  "description": "Owner or app instructions a skill can load.",
+  "field_order": [
+    "playbook_key",
+    "title",
+    "enabled",
+    "is_global",
+    "audience",
+    "column_break_scope",
+    "company",
+    "business_doctype",
+    "app",
+    "is_system_generated",
+    "section_instructions",
+    "description",
+    "instructions"
+  ],
+  "fields": [
+    {
+      "fieldname": "playbook_key",
+      "label": "Playbook key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1,
+      "description": "<app>/<name> for an app playbook, desk/<name> for one made in Relay."
+    },
+    {
+      "fieldname": "title",
+      "label": "Title",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "is_global",
+      "label": "In every prompt",
+      "fieldtype": "Check",
+      "default": "0",
+      "in_list_view": 1,
+      "description": "Put the full text in every reply prompt of matching company and business type. Otherwise a bound skill sees only the description and loads the text when needed."
+    },
+    {
+      "fieldname": "audience",
+      "label": "Audience",
+      "fieldtype": "Select",
+      "options": "customer\nstaff",
+      "default": "customer",
+      "reqd": 1,
+      "description": "Customer replies use only customer playbooks."
+    },
+    {
+      "fieldname": "column_break_scope",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "company",
+      "label": "Company (blank for all)",
+      "fieldtype": "Link",
+      "options": "Company"
+    },
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type (blank for all)",
+      "fieldtype": "Link",
+      "options": "DocType"
+    },
+    {
+      "fieldname": "app",
+      "label": "App",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "The app that ships this playbook file."
+    },
+    {
+      "fieldname": "is_system_generated",
+      "label": "From an app file",
+      "fieldtype": "Check",
+      "default": "0",
+      "read_only": 1
+    },
+    {
+      "fieldname": "section_instructions",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Small Text",
+      "description": "When to load this playbook. Up to 1024 characters; the model sees it in the playbook index."
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Long Text",
+      "reqd": 1,
+      "description": "Trusted owner instructions. They never widen tools, scope or identity."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-04 18:00:00.000000"
+}

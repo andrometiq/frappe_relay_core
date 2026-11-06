@@ -112,5 +112,5 @@ def apply_email_evidence(action, row):
     frappe.db.set_value('Relay Message', message.name, 'status', status, update_modified=False)
     action.result = json.dumps(result)
     internal_save(action)
-    changed(message)
+    changed(message, receipt=True)
     return True

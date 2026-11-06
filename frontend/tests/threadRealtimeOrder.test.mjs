@@ -10,7 +10,7 @@ import { messageData, objectValue } from '../src/components/messageContent.js'
 import { coordinates } from '../src/components/formValidation.js'
 
 const source = (await readFile(new URL('../src/composables/useMessages.js', import.meta.url), 'utf8'))
-  .replace(/^import .*\n/gm, '').replace('export function', 'function')
+  .replace(/^import .*\n/gm, '').replace('export function', 'const announceOwnSend = () => {}, recordOwnMessages = () => {}\nfunction')
 const make = new Function('ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useRealtimeRefresh', 'coreApi',
   'resetRecipient', 'sha256Hex', 'randomUUID', 'messageData', 'objectValue', 'coordinates', 'inject', 'composerKinds', 'defaultSendSource', source + '\nreturn useMessages();')
 const name = index => 'RELAY-MSG-' + String(index).padStart(10, '0')
@@ -192,7 +192,7 @@ test('buffered arrivals keep their updated ticks and cannot leak into another co
   assert.equal(f.state.newArrivals.value,0)
 })
 
-test('busy defers all work and releasing busy refreshes new rows before pending recovery',async t=>{
+test('busy defers all work and releasing busy refreshes new rows, then only the deferred details',async t=>{
   const f=await fixture(t,30)
   f.state.busy.value=true;await nextTick()
   f.records.get('A').push(row(31))
@@ -200,20 +200,30 @@ test('busy defers all work and releasing busy refreshes new rows before pending 
   assert.equal(f.calls.length,0)
   f.state.busy.value=false;await nextTick();await tick()
   assert.equal(f.state.rows.value.at(-1).name,name(31))
-  assert.equal(f.calls[0].method,'api.messages')
+  assert.deepEqual(f.calls.map(call=>call.method),['api.messages'],'A new message needs no pending recovery')
+  f.state.busy.value=true;await nextTick()
+  await f.realtime('message_actions')
+  f.state.busy.value=false;await nextTick();await tick()
   assert.ok(f.calls.some(call=>call.method==='messaging.pending_messages'))
 })
 
-test('sending allows new rows but defers snapshots and pending recovery',async t=>{
+test('sending allows new rows and receipt snapshots but defers pending recovery',async t=>{
   const f=await fixture(t,30)
   f.state.sending.value=1;await nextTick()
   f.records.get('A').push(row(31))
   await f.realtime('visible')
   assert.equal(f.state.rows.value.at(-1).name,name(31))
-  assert.deepEqual(f.calls.map(call=>call.method),['api.messages'])
+  assert.equal(f.snapshots.length,1,'Delivery ticks keep updating during back-to-back sends')
+  assert.equal(f.calls.some(call=>call.method==='messaging.pending_messages'),false)
   f.state.sending.value=0;await nextTick();await tick()
-  assert.equal(f.snapshots.length,1)
   assert.ok(f.calls.some(call=>call.method==='messaging.pending_messages'))
+})
+
+test('a receipt re-reads only the messages it names and never the new-message cursor',async t=>{
+  const f=await fixture(t,30)
+  await f.realtime('receipts',[name(5)]);await tick()
+  assert.deepEqual(f.calls.map(call=>call.method),['api.message_snapshots'])
+  assert.deepEqual(f.snapshots.map(snapshot=>snapshot.names),[[name(5)]])
 })
 
 test('visible fetches new rows first and pending recovery cannot block the next message event',async t=>{

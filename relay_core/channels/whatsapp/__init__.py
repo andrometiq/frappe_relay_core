@@ -22,7 +22,7 @@ class WhatsApp(Channel):
         'location': True, 'contacts': True, 'reply_quote': True, 'reactions': True, 'edits': False,
         'read_receipts': True, 'group_receipts': True,
         'templates': True, 'reply_window_hours': 24, 'bulk_campaigns': True, 'forms': True, 'voice_calls': True,
-        'groups': True, 'topics': False, 'email_threading': False, 'ai_automation': True, 'saved_replies': True,
+        'groups': True, 'topics': False, 'email_threading': False, 'ai_automation': True, 'saved_replies': True, 'polls': True,
     }
     account_flags = {'templates': 'templates', 'forms': 'flows'}
 
