@@ -30,6 +30,12 @@ def changed(doc, method=None, messages=None, receipt=False):
     kind = RESOURCES.get(doc.doctype)
     if not kind:
         return
+    if doc.doctype == 'Relay Notification':
+        # Only its user reads a notification; agents cannot join the Relay Notification doctype room.
+        # Without a user, publish_realtime would send to the whole site.
+        if doc.get('user'):
+            frappe.publish_realtime('relay_changed', {'kind': kind}, user=doc.user, after_commit=True)
+        return
     if doc.doctype in TICKET_RECORDS:
         if has_ticket(doc):
             frappe.publish_realtime('relay_changed', {'kind': 'tickets'},

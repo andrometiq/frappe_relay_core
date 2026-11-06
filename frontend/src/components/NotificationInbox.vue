@@ -54,7 +54,7 @@ async function visit(row) {
 }
 onMounted(() => load());
 onBeforeUnmount(() => { disposed = true; });
-useRealtimeRefresh(['Relay Notification'],['notifications'],()=>load());
+useRealtimeRefresh([],['notifications'],()=>load());
 const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: () => load(next.value) })
 </script>
 <template>

@@ -54,6 +54,16 @@ class ConversationEventNames(unittest.TestCase):
         realtime.contact_changed('RELAY-CON-0000000001', 'reads')
         self.assertEqual([event for event, _ in self.events()], [{'kind': 'contacts'}, {'kind': 'reads'}])
 
+    def test_a_notification_change_reaches_only_its_user(self):
+        realtime.changed(_dict(doctype='Relay Notification', name='RELAY-NOT-1', user='agent@example.com',
+                               relay_contact='RELAY-CON-0000000001', kind='Mention'))
+        self.assertEqual(self.publish.call_count, 1)
+        self.assertEqual(self.publish.call_args.args, ('relay_changed', {'kind': 'notifications'}))
+        self.assertEqual(self.publish.call_args.kwargs, {'user': 'agent@example.com', 'after_commit': True})
+        self.publish.reset_mock()
+        realtime.changed(_dict(doctype='Relay Notification', name='RELAY-NOT-2', user=None))
+        self.publish.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
