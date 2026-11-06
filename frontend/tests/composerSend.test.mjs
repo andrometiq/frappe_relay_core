@@ -289,3 +289,33 @@ test('a later successful send keeps the notice of an earlier failed one', async 
   await Promise.all([first, state.send()])
   assert.equal(state.notice.value, 'Provider rejected')
 })
+
+test('an upload keeps the inbox usable and its file never joins the chat opened meanwhile', async t => {
+  const previousReader = globalThis.FileReader
+  globalThis.FileReader = class { readAsDataURL() { this.result = 'data:image/png;base64,QUNNRQ=='; setImmediate(() => this.onload()) } }
+  t.after(() => { globalThis.FileReader = previousReader })
+  const uploads = []
+  const { state } = fixture(t, method => {
+    if (method !== 'attachments.upload') return undefined
+    const step = deferred(); uploads.push(step); return step.promise
+  })
+  await state.open('A')
+  const first = state.uploadAttachment({ name: 'acme-catalogue.png' })
+  assert.equal(state.uploading.value, true)
+  assert.equal(state.busy.value, false, 'Chat switching and the list stay usable')
+  state.body.value = 'Caption typed during the upload'
+  assert.equal(state.body.value, 'Caption typed during the upload')
+  await tick()
+  uploads[0].resolve({ name: 'FILE-1', filename: 'acme-catalogue.png' })
+  assert.equal(await first, true)
+  assert.equal(state.attachment.value.name, 'FILE-1')
+
+  const second = state.uploadAttachment({ name: 'acme-price-list.png' })
+  await tick()
+  await state.open('B')
+  assert.equal(state.selected.value, 'B', 'Another chat opens during the upload')
+  uploads[1].resolve({ name: 'FILE-2', filename: 'acme-price-list.png' })
+  assert.equal(await second, false)
+  assert.equal(state.attachment.value, null, 'The file of chat A is not attached in chat B')
+  assert.equal(state.uploading.value, false)
+})
