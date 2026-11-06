@@ -684,7 +684,7 @@ export function useMessages() {
     data = null,
   ) {
     if (!message) return;
-    const submitted = {scope:windowKey(), body:body.value, kind:kind.value, attachment:attachment.value,
+    const submitted = {scope:windowKey(), conversation:conversationIdentity(), body:body.value, kind:kind.value, attachment:attachment.value,
       quoting:quoting.value, source:source.value};
     const typed = !data;
     if (!data) {
@@ -819,9 +819,12 @@ export function useMessages() {
       : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
     if (outcome) notice.value = outcome;
     if(result.status==='Submitted')sessionStorage.removeItem(storage);
-    restored.value = "";
-    // A send from an older page of history opens the newest page, where its bubble belongs.
-    if (newer.value) await history();
+    // A send from an older page of history opens the newest page, where its bubble belongs, unless the agent
+    // opened another chat meanwhile.
+    if (conversationIdentity() === submitted.conversation) {
+      restored.value = "";
+      if (newer.value) await history();
+    }
     // The sent bubble stays until the live update brings its stored message; no history read is needed.
     if(pending && result.status==='Submitted') {
       pending.persistedMessage=result.message;
@@ -846,7 +849,7 @@ export function useMessages() {
     message.status = 'Sending';
     notice.value = '';
     sendingKeys.add(message.request.request_key);
-    return queueSend(() => deliver(message.request, message.storage, message, { scope: null }))
+    return queueSend(() => deliver(message.request, message.storage, message, { scope: null, conversation: conversationIdentity() }))
       .finally(() => sendingKeys.delete(message.request.request_key));
   }
   async function deletePending(message) {

@@ -319,3 +319,24 @@ test('an upload keeps the inbox usable and its file never joins the chat opened 
   assert.equal(state.attachment.value, null, 'The file of chat A is not attached in chat B')
   assert.equal(state.uploading.value, false)
 })
+
+test('a send that finishes after another chat opened does not reload that chat', async t => {
+  const response = deferred()
+  const context = { items: thread.slice(0, 2), first: thread[0].name, last: thread[1].name, has_more: false, has_newer: true }
+  const { state, calls } = fixture(t, (method, values) => {
+    if (method === 'messaging.send') return response.promise
+    if (method === 'inbox.view_state') return values.contact === 'B' ? { first_unread: thread[0].name } : {}
+    if (method === 'api.message_context') return context
+  })
+  await state.open('A')
+  state.body.value = 'ok'
+  const send = state.send()
+  await state.open('B')
+  assert.equal(state.newer.value, true, 'B opens at its first unread with newer pages below')
+  const reads = calls.filter(call => call.method === 'api.messages').length
+  response.resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001' })
+  await send
+  assert.equal(calls.filter(call => call.method === 'api.messages').length - reads, 0, 'B is not reloaded at its newest page')
+  assert.equal(state.newer.value, true)
+  assert.equal(state.restored.value, thread[0].name, 'B keeps its first-unread position')
+})
