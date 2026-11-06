@@ -55,6 +55,24 @@ class TicketTests(unittest.TestCase):
         inserted.insert.assert_called_once()
         self.assertEqual(result['name'], 'TKT-00002')
 
+    def test_a_repeated_create_request_key_returns_the_first_ticket(self):
+        import contextlib
+        import relay_core
+        inserted = Record(name='TKT-00002', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        stored = {}
+        self.f.db.get_value = Mock(side_effect=lambda doctype, filters, *args, **kwargs: stored.get(filters['request_key']))
+        self.f.db.commit = Mock(side_effect=lambda: stored.setdefault(self.f.get_doc.call_args.args[0]['request_key'],
+                                                                      Record(name='TKT-00002', ticket_status='Open')))
+        locks = types.SimpleNamespace(lock=Mock(side_effect=lambda *args, **kwargs: contextlib.nullcontext()))
+        messaging = types.SimpleNamespace(request_hash=lambda key: 'user-' + key)
+        with patch('relay_core.ticket_tags.message_business', return_value=('Customer', 'LOCAL-1')), \
+                patch.object(relay_core, 'locks', locks, create=True), patch.dict(sys.modules, {'relay_core.messaging': messaging}):
+            results = [self.module.create('Delivery issue', [self.message.name], request_key='key-1') for _ in range(2)]
+        self.assertEqual(results, [{'name': 'TKT-00002', 'ticket_status': 'Open'}] * 2)
+        inserted.insert.assert_called_once()
+        self.assertEqual(self.f.get_doc.call_args.args[0]['request_key'], 'user-key-1')
+
     def test_ai_evidence_appends_idempotently_and_uses_existing_decision(self):
         message = Record(name='RELAY-MSG-0000000002', direction='Incoming', content='Please replace the damaged parcel')
         first = Record(name=self.message.name, content='Please help')

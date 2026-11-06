@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "Relay Chat Folder",
-  "modified": "2026-10-27 18:00:00.000000",
+  "modified": "2026-11-06 12:00:00.000000",
   "module": "Relay Core",
   "engine": "InnoDB",
   "autoname": "RELAY-CF-.##########",
@@ -32,12 +32,22 @@
       "label": "Sort order",
       "fieldtype": "Int",
       "in_list_view": 1
+    },
+    {
+      "fieldname": "request_key",
+      "label": "Request key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1,
+      "hidden": 1,
+      "no_copy": 1
     }
   ],
   "field_order": [
     "user",
     "folder_name",
-    "sort_order"
+    "sort_order",
+    "request_key"
   ],
   "permissions": [
     {

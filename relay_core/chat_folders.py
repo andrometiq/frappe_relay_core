@@ -58,12 +58,30 @@ def folders():
 
 
 @frappe.whitelist(methods=['POST'])
-def create(folder_name):
+def create(folder_name, request_key=None):
+    """A repeated request key returns the folder it created."""
     require_access()
     features.require('folders')
+    if request_key is None:
+        return insert_folder(folder_name)
+    from relay_core import locks
+    from relay_core.messaging import request_hash
+    key = request_hash(request_key)
+    with locks.lock('relay-folder-request:' + key, timeout=10, blocking_timeout=5):
+        existing = frappe.db.get_value(FOLDER, {'request_key': key}, ['name', 'folder_name', 'sort_order'],
+                                       as_dict=True, for_update=True)
+        if existing:
+            return dict(existing, count=frappe.db.count(STATE, {'user': frappe.session.user, 'folder': existing.name}))
+        result = insert_folder(folder_name, key)
+        frappe.db.commit()
+    return result
+
+
+def insert_folder(folder_name, request_key=None):
     table = frappe.qb.DocType(FOLDER)
     last = frappe.qb.from_(table).select(Max(table.sort_order)).where(table.user == frappe.session.user).run()[0][0] or 0
-    doc = frappe.get_doc({'doctype': FOLDER, 'user': frappe.session.user, 'folder_name': folder_name, 'sort_order': last + 1})
+    doc = frappe.get_doc({'doctype': FOLDER, 'user': frappe.session.user, 'folder_name': folder_name,
+                          'sort_order': last + 1, 'request_key': request_key})
     doc.insert()
     return {'name': doc.name, 'folder_name': doc.folder_name, 'sort_order': doc.sort_order, 'count': 0}
 

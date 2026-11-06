@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
 import RemoteLinkField from '../fields/RemoteLinkField.vue'
 import { coreApi } from '../../services/coreApi'
+import { stableSubmission } from '../../services/submission'
 import { useTicketSettings } from '../../composables/useTicketSettings'
 import { pickerOptions } from '../../services/ticketSettings'
 import { ticketPayload, ticketRoute, ticketSubject } from '../../services/ticketForm'
@@ -28,9 +29,11 @@ function reconcile() {
   if (!types.value.some(option => option.value === form.value.ticketType)) form.value.ticketType = ''
 }
 async function create() {
+  if (busy.value) return
   busy.value = true; error.value = ''
   try {
-    const result = await coreApi('tickets.create', { ...ticketPayload(form.value, selectedMessages.value.map(row => row.name)), ...(businessType.value ? { business_type: businessType.value, business_record: businessRecord.value } : {}) }, true)
+    const payload = { ...ticketPayload(form.value, selectedMessages.value.map(row => row.name)), ...(businessType.value ? { business_type: businessType.value, business_record: businessRecord.value } : {}) }
+    const result = await stableSubmission('relay-ticket', payload, key => coreApi('tickets.create', { ...payload, request_key: key }, true))
     open.value = false
     emit('created', { ...result, href: ticketRoute(result.name) })
   } catch { error.value = 'Could not create the ticket. Select up to 50 messages from one business record and check your permissions.' }

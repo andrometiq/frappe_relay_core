@@ -446,8 +446,10 @@ def validate_ticket(doc, check_assignment=True):
 
 @frappe.whitelist(methods=['POST'])
 def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket_status=None,
-           business_type=None, business_record=None):
-    from relay_core import ticket_tags
+           business_type=None, business_record=None, request_key=None):
+    """A repeated request key returns the ticket it created."""
+    from relay_core import locks, ticket_tags
+    from relay_core.messaging import request_hash
     require_access()
     if isinstance(messages, str):
         messages = frappe.parse_json(messages)
@@ -461,11 +463,26 @@ def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket
     if business_type is not None or business_record is not None:
         if (business_type or None, business_record or None) != (business_doctype or None, business_name or None):
             frappe.throw('Choose the business record that owns the selected messages')
-    doc = frappe.get_doc({'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
-                          'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
-                          'assigned_to': assigned_to or None,
-                          'business_doctype': business_doctype, 'business_name': business_name,
-                          'messages': [{'message': name} for name in messages]})
+    values = {'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
+              'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
+              'assigned_to': assigned_to or None,
+              'business_doctype': business_doctype, 'business_name': business_name,
+              'messages': [{'message': name} for name in messages]}
+    if request_key is None:
+        return insert_ticket(values)
+    key = request_hash(request_key)
+    with locks.lock('relay-ticket-request:' + key, timeout=30, blocking_timeout=10):
+        existing = frappe.db.get_value('Relay Ticket', {'request_key': key}, ['name', 'ticket_status'],
+                                       as_dict=True, for_update=True)
+        if existing:
+            return {'name': existing.name, 'ticket_status': existing.ticket_status}
+        result = insert_ticket(dict(values, request_key=key))
+        frappe.db.commit()
+    return result
+
+
+def insert_ticket(values):
+    doc = frappe.get_doc(values)
     # insert runs the controller validation and Frappe create permissions.
     doc.insert()
     return {'name': doc.name, 'ticket_status': doc.ticket_status}
