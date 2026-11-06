@@ -79,7 +79,7 @@ class SheetTests(unittest.TestCase):
     def test_sheet_numbers_use_the_shared_phone_helper(self):
         for value in ('98765 43210', '+91 98765-43210', '09876543210', '(+91) 98765 43210',
                       '91-9876543210', '9876543210', '919876543210.0', '919876543210.000',
-                      '9.19876543210E+11', '9.19876543210000e+11', 9876543210, 919876543210.0):
+                      9876543210, 919876543210.0):
             with self.subTest(value=value):
                 self.assertEqual(bulk_sheet.sheet_phone(value, 'IN'), '919876543210')
         self.assertEqual(bulk_sheet.sheet_phone('+91 98765-43210', ''), '919876543210')
@@ -90,13 +90,21 @@ class SheetTests(unittest.TestCase):
 
     def test_sheet_rejects_invalid_landline_and_inexact_excel_numbers(self):
         mapping = {'phone': 'Mobile', 'fields': {}, 'fixed': {}}
-        for value in ('9199999787611', '1234567890', '914423456789', '+44 20 7946 0958',
-                      '9.198765432101E+10', '9.198765432100000E+11', '9.19876543210E+999999',
-                      '9.19876543210E-999999', '-9.19876543210E+11', 'NaN', 'Infinity'):
+        for value in ('9199999787611', '1234567890', '914423456789', '+44 20 7946 0958', 'NaN', 'Infinity'):
             with self.subTest(value=value):
                 self.assertIsNone(bulk_sheet.sheet_phone(value, 'IN'))
                 self.assertEqual(bulk_sheet.prepare_row({'Mobile': value}, mapping, [], 'IN'),
                                  (None, None, 'Invalid phone number'))
+
+    def test_sheet_rejects_excel_scientific_numbers_with_a_row_error(self):
+        mapping = {'phone': 'Mobile', 'fields': {}, 'fixed': {}}
+        for value in ('9.19877E+11', '9.19876543210E+11', '9.19876543210000e+11', '9.198765432101E+10',
+                      '9.19876543210E+999999', '9.19876543210E-999999', '-9.19876543210E+11', ' 9.19877e11 '):
+            with self.subTest(value=value):
+                self.assertIsNone(bulk_sheet.sheet_phone(value, 'IN'))
+                self.assertEqual(bulk_sheet.prepare_row({'Mobile': value}, mapping, [], 'IN'),
+                                 (None, None, bulk_sheet.SCIENTIFIC_PHONE))
+        self.assertEqual(bulk_campaigns.friendly_reason(bulk_sheet.SCIENTIFIC_PHONE), bulk_sheet.SCIENTIFIC_PHONE)
 
     def write(self, suffix, rows):
         handle, path = tempfile.mkstemp(suffix=suffix)

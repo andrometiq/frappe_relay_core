@@ -63,7 +63,8 @@ def normalize_row(values, region):
         raise RowProblem('A cell is too long (maximum 200 characters).')
     mobile = bulk_sheet.sheet_phone(row['Mobile'], region) if row['Mobile'] else None
     if row['Mobile'] and not mobile:
-        raise RowProblem('Enter a valid mobile number, including its country code.')
+        raise RowProblem(bulk_sheet.SCIENTIFIC_PHONE if bulk_sheet.is_scientific(row['Mobile'])
+                         else 'Enter a valid mobile number, including its country code.')
     try:
         email = identity.normalize('Email', row['Email']) if row['Email'] else ''
     except ValueError:
