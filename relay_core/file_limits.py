@@ -1,4 +1,7 @@
 """The one attachment size limit of Relay, lowered per media kind where a channel provider accepts less."""
+import base64
+import binascii
+
 import frappe
 from frappe.utils import cint
 from relay_core.channels.contract import MEGABYTE
@@ -44,3 +47,16 @@ def size_error(size: int, limit: int, subject: str = 'The file') -> str:
     if size > limit:
         return f'{subject} must be at most {size_label(limit)}'
     return ''
+
+
+def get_decoded_bytes(content_base64, limit: int, subject: str = 'The file') -> bytes:
+    """The bytes of base64 text from a request, refused when invalid or outside 1 byte to limit."""
+    if not isinstance(content_base64, str) or len(content_base64) > encoded_length(limit):
+        frappe.throw(size_error(limit + 1, limit, subject))
+    try:
+        raw = base64.b64decode(content_base64, validate=True)
+    except (ValueError, binascii.Error):
+        frappe.throw('Invalid file data')
+    if error := size_error(len(raw), limit, subject):
+        frappe.throw(error)
+    return raw

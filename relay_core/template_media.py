@@ -1,6 +1,4 @@
 """Header media of a WhatsApp template send: an uploaded file's Hub media id, or a public HTTPS link."""
-import base64
-import binascii
 import mimetypes
 import re
 
@@ -9,7 +7,7 @@ from relay_core.business_access import document_name
 
 from relay_core.bulk_sheet import HEADER_KINDS, public_media_url
 from relay_core.channels import channel as channel_definition
-from relay_core.file_limits import encoded_length, get_media_max_bytes, size_error, size_label
+from relay_core.file_limits import get_decoded_bytes, get_media_max_bytes
 
 UPLOADS = 'relay-template-media:'  # Hub media id -> the uploader's File and the sending channel.
 
@@ -73,14 +71,7 @@ def upload(channel, media_type, filename, content_base64):
     if mime_type not in channel_definition('WhatsApp').features['media'][HEADER_KINDS[media_type]]:
         frappe.throw(f'This file type is not accepted for this {media_type} header')
     limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type])
-    if not isinstance(content_base64, str) or len(content_base64) > encoded_length(limit):
-        frappe.throw(f'The file must be at most {size_label(limit)}')
-    try:
-        raw = base64.b64decode(content_base64, validate=True)
-    except (ValueError, binascii.Error):
-        frappe.throw('Invalid file data')
-    if error := size_error(len(raw), limit):
-        frappe.throw(error)
+    raw = get_decoded_bytes(content_base64, limit)
     try:
         media_id = hub_upload(sender, filename, raw, media_type, mime_type)
     except (HubError, ValueError) as error:

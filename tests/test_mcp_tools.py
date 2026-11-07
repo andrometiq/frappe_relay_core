@@ -315,7 +315,7 @@ class AISetupTests(unittest.TestCase):
     def test_creating_needs_a_request_key_but_changing_does_not(self):
         save = Mock(return_value={'name': 'Orders-001'})
         with patch('relay_core.ai.configuration.save', save), \
-                patch('relay_core.mcp_tools.ai.readable', return_value=Mock(enabled=0, mode='Shadow')):
+                patch('relay_core.mcp_tools.ai.permitted_document', return_value=Mock(enabled=0, mode='Shadow')):
             with self.assertRaisesRegex(registry.ToolError, 'request_key is required'):
                 self.handler('skills_save', values=SKILL)
             self.handler('skills_save', values={'title': 'Orders'}, name='Orders-001')
@@ -325,7 +325,7 @@ class AISetupTests(unittest.TestCase):
         from relay_core.mcp_tools.ai import LIVE
         save = Mock(return_value={'name': 'Orders-001'})
         live = Mock(enabled=1, mode='Automatic')
-        with patch('relay_core.ai.configuration.save', save), patch('relay_core.mcp_tools.ai.readable', return_value=live):
+        with patch('relay_core.ai.configuration.save', save), patch('relay_core.mcp_tools.ai.permitted_document', return_value=live):
             with self.assertRaisesRegex(registry.ToolError, LIVE):
                 self.handler('skills_save', values=dict(SKILL, enabled=1, mode='Automatic'), request_key=KEY)
             with self.assertRaisesRegex(registry.ToolError, LIVE):  # An edit of a skill that is already live.

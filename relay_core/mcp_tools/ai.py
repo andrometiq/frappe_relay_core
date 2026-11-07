@@ -4,9 +4,8 @@ Every tool needs the Enable AI features switch, as the screens do. Writes need t
 import json
 from functools import wraps
 
-import frappe
-
 from relay_core.mcp_tools.registry import CONFIRM, CURSOR, FLAG, NAME_FIELD, READ, WRITE, ToolError, obj, tool
+from relay_core.permissions import permitted_document
 
 EVENT, SKILL = 'Relay AI Event', 'Relay AI Skill'
 AI_OFF = ('AI features are turned off. Ask a System Manager to turn on Enable AI features in Relay Settings (Features), '
@@ -58,19 +57,8 @@ def ai_tool(name, safety, schema, doc, **options):
     return register
 
 
-def readable(doctype, name):
-    """The document after the same access and read checks as the AI screens."""
-    from relay_core.business_access import document_name
-    from relay_core.permissions import require_access
-    document_name(name)
-    require_access(doctype)
-    doc = frappe.get_doc(doctype, name)
-    doc.check_permission('read')
-    return doc
-
-
 def record(doctype, name, fields):
-    doc = readable(doctype, name)
+    doc = permitted_document(doctype, name)
     return {'name': doc.name, **{field: doc.get(field) for field in fields}}
 
 
@@ -157,7 +145,7 @@ def events_attach(name, request_key, url=None, note=None, filename=None, content
 def events_status(name):
     status = record(EVENT, name, ('memory_status', 'memory_built_at', 'memory_error', 'memory', 'memory_revision',
                                   'memory_build'))
-    build = readable('Relay AI Event Build', status['memory_build']) if status['memory_build'] else None
+    build = permitted_document('Relay AI Event Build', status['memory_build']) if status['memory_build'] else None
     return {**status, 'sources': json.loads(build.sources or '[]') if build else []}
 
 
@@ -263,7 +251,7 @@ def skills_validate(values, name=None):
 def skills_save(values, name=None, confirm=False, request_key=None):
     from relay_core.ai import configuration
     require_key(name, request_key)
-    stored = readable(SKILL, name) if name else None
+    stored = permitted_document(SKILL, name) if name else None
     current = {'enabled': stored.enabled, 'mode': stored.mode} if stored else {'enabled': 0, 'mode': 'Shadow'}
     merged = {**current, **values}
     if merged['enabled'] and merged['mode'] == 'Automatic' and not confirm:

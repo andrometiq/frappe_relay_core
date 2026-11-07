@@ -46,6 +46,15 @@ class FileLimitTests(unittest.TestCase):
         self.assertEqual(file_limits.size_error(0, 10 * MB, 'Header attachment'), 'Header attachment is empty')
         self.assertEqual(file_limits.size_error(501 * 1024, 500 * 1024), 'The file must be at most 500 KB')
 
+    def test_decoded_bytes_keep_the_limit_and_refuse_bad_data(self):
+        with patch.object(file_limits.frappe, 'throw', side_effect=throw):
+            self.assertEqual(file_limits.get_decoded_bytes(base64.b64encode(b'x' * 12).decode(), 12), b'x' * 12)
+            for value, message in ((base64.b64encode(b'x' * 13).decode(), 'The attachment must be at most 12 bytes'),
+                                   ('x' * 20, 'The attachment must be at most 12 bytes'), (None, 'The attachment must be at most 12 bytes'),
+                                   ('not base64!', 'Invalid file data'), ('', 'The attachment is empty')):
+                with self.subTest(value=value), self.assertRaisesRegex(frappe.ValidationError, message):
+                    file_limits.get_decoded_bytes(value, 12, 'The attachment')
+
 
 class AttachmentUploadLimitTests(unittest.TestCase):
     def setUp(self):

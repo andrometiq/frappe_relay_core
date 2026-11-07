@@ -1,10 +1,7 @@
 """Plain-text event editor; richer sources remain available in the existing Desk form."""
-import base64
-import binascii
-
 import frappe
 from relay_core import ai_features
-from relay_core.permissions import require_access
+from relay_core.permissions import permitted_document, require_access
 from relay_core.business_access import document_name
 
 EVENT = 'Relay AI Event'
@@ -48,10 +45,7 @@ def save(values, name=None):
 def read(name):
     """One event with its audience, links and attached files, for API clients."""
     from relay_core.ai.event_memory import attached_files
-    document_name(name)
-    require_access(EVENT)
-    doc = frappe.get_doc(EVENT, name)
-    doc.check_permission('read')
+    doc = permitted_document(EVENT, name)
     return {'name': doc.name, **{field: doc.get(field) for field in (*FIELDS, 'memory_status')},
             'audience': [row.business_doctype for row in doc.audience],
             'links': [{'url': row.url, 'note': row.note} for row in doc.links],
@@ -61,10 +55,7 @@ def read(name):
 @ai_features.required
 def attach(name, url=None, note=None, filename=None, content_base64=None):
     """Add one link or one private file to an event, as the Desk form does. Either change queues a memory build."""
-    document_name(name)
-    require_access(EVENT, 'write')
-    doc = frappe.get_doc(EVENT, name)
-    doc.check_permission('write')
+    doc = permitted_document(EVENT, name, 'write')
     if bool(url) == bool(content_base64):
         frappe.throw('Give either a link or a file')
     if url:
@@ -80,20 +71,12 @@ def attach_file(name, filename, content_base64):
     from relay_core.ai.event_memory import MAX_FILES, attached_files, file_limit
     from relay_core.ai.event_sources import EXTENSIONS
     from relay_core.attachments import save_attachment
-    from relay_core.file_limits import encoded_length, size_error
+    from relay_core.file_limits import get_decoded_bytes
     from relay_core.template_media import plain_filename
     plain_filename(filename)
     if not filename.lower().endswith(tuple('.' + extension for extension in EXTENSIONS)):
         frappe.throw(f'Attach one of these file types: {", ".join(EXTENSIONS)}')
     if len(attached_files(name)) >= MAX_FILES:
         frappe.throw(f'Attach at most {MAX_FILES} files to an event')
-    limit = file_limit()
-    if not isinstance(content_base64, str) or len(content_base64) > encoded_length(limit):
-        frappe.throw(size_error(limit + 1, limit))
-    try:
-        raw = base64.b64decode(content_base64, validate=True)
-    except (ValueError, binascii.Error):
-        frappe.throw('Invalid file data')
-    if error := size_error(len(raw), limit):
-        frappe.throw(error)
+    raw = get_decoded_bytes(content_base64, file_limit())
     save_attachment(filename, raw, name, EVENT)

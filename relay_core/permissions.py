@@ -22,6 +22,17 @@ def readable_contact(name):
     return relay, frappe.get_doc('Contact', relay.contact)
 
 
+def permitted_document(doctype, name, ptype='read'):
+    """The document after the DocType access and document permission checks of the Relay screens."""
+    import frappe
+    from relay_core.business_access import document_name
+    document_name(name)
+    require_access(doctype, ptype)
+    doc = frappe.get_doc(doctype, name)
+    doc.check_permission(ptype)
+    return doc
+
+
 def require_administrator():
     import frappe
     if frappe.session.user != 'Administrator':
