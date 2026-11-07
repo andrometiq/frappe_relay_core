@@ -8,6 +8,8 @@ from relay_core.mcp_tools import coordination, registry
 from relay_core.mcp_tools.registry import READ, SEND, WRITE, check
 
 CON, MSG, KEY, CH = 'RELAY-CON-0000000001', 'RELAY-MSG-0000000002', 'agent-key-0001', 'acme-319480'
+EVENT = {'title': 'Spring fair', 'enabled': 1, 'event_starts_on': '2026-12-01', 'audience': ['Customer']}
+SKILL = {'title': 'Orders', 'business_doctype': 'Customer', 'instructions': 'Answer order questions.'}
 HUB_ONLY = ('enrollment', 'delivery', 'telegram_delivery', 'legacy', 'operations', 'save_connection', 'save_feature',
             'recovery', 'deliveries')
 
@@ -104,6 +106,29 @@ CASES = {
     'flows_validate': ({'values': {'title': 'x'}}, [('relay_core.flows.service', 'validate_draft', {})], (({'title': 'x'},), {'name': None})),
     'flows_save': ({'values': {'title': 'x'}}, [('relay_core.flows.service', 'save', {})], (({'title': 'x'},), {'name': None})),
     'flows_publish': ({'name': 'F1', 'action': 'disable', 'confirm': True}, [('relay_core.flows.service', 'set_enabled', {})], (('F1', 0), {})),
+    'events_list': ({}, [('relay_core.ai.events', 'directory', {'items': [], 'next': None})], ((None,), {})),
+    'events_read': ({'name': 'Fair-001'}, [('relay_core.ai.events', 'read', {})], (('Fair-001',), {})),
+    'events_save': ({'values': EVENT, 'request_key': KEY}, [('relay_core.ai.events', 'save', {'name': 'Fair-001'})], ((EVENT, None), {})),
+    'events_attach': ({'name': 'Fair-001', 'url': 'https://example.test/catalog', 'request_key': KEY},
+                      [('relay_core.ai.events', 'attach', {})],
+                      (('Fair-001',), {'url': 'https://example.test/catalog', 'note': None, 'filename': None, 'content_base64': None})),
+    'events_status': ({'name': 'Fair-001'}, [('relay_core.mcp_tools.ai', 'record', {'memory_status': 'Pending', 'memory_build': None})],
+                      None),
+    'knowledge_list': ({}, [('relay_core.ai.knowledge', 'directory', {'items': [], 'next': None})], ((None,), {})),
+    'knowledge_read': ({'name': 'RELAY-KB-0000000001'}, [('relay_core.mcp_tools.ai', 'record', {})], None),
+    'knowledge_save': ({'values': {'title': 'Returns', 'instructions': 'Accept returns within 7 days.'}, 'request_key': KEY},
+                       [('relay_core.ai.knowledge', 'save', {'name': 'RELAY-KB-0000000001'})],
+                       (({'title': 'Returns', 'instructions': 'Accept returns within 7 days.'}, None), {})),
+    'skills_list': ({}, [('relay_core.ai.configuration', 'directory', {'items': [{'allowed_tools': '[{"capability": "orders"}]'}],
+                                                                       'next': None})], ((None,), {})),
+    'skills_read': ({'name': 'Orders-001'}, [('relay_core.mcp_tools.ai', 'record', {'allowed_tools': '[]', 'allowed_actions': None})], None),
+    'skills_options': ({'kind': 'report', 'business_doctype': 'Customer'}, [('relay_core.ai.configuration', 'editor_options', {'items': []})],
+                       (('report',), {'query': '', 'doctype': None, 'business_doctype': 'Customer', 'action': None, 'skill': None})),
+    'skills_validate': ({'values': {'title': 'Orders', 'allowed_tools': [{'capability': 'orders'}]}},
+                        [('relay_core.ai.configuration', 'validate_draft', {'valid': True, 'problems': []})],
+                        (({'title': 'Orders', 'allowed_tools': '[{"capability": "orders"}]'}, None), {})),
+    'skills_save': ({'values': SKILL, 'request_key': KEY}, [('relay_core.ai.configuration', 'save', {'name': 'Orders-001'})],
+                    ((SKILL, None), {})),
 }
 COVERED_ELSEWHERE = {'campaigns_validate', 'campaigns_control', 'chat_claim', 'chat_release', 'changes_since', 'activity_log'}
 
@@ -111,7 +136,7 @@ COVERED_ELSEWHERE = {'campaigns_validate', 'campaigns_control', 'chat_claim', 'c
 def run_case(name, arguments, targets):
     mocks = []
     with patch.object(coordination, 'with_actors', side_effect=lambda rows: rows), \
-            patch.object(coordination, 'active_claim', return_value=None):
+            patch.object(coordination, 'active_claim', return_value=None), patch('relay_core.ai_features.is_enabled', return_value=True):
         patches = []
         for module, function, value in targets:
             mock = Mock(return_value=value)
@@ -158,7 +183,7 @@ class RegistryTests(unittest.TestCase):
 
         from relay_core.mcp_tools import legacy
         hub_only = re.compile(r'relay_core(\.| import )(' + '|'.join(HUB_ONLY) + r')\b|save_connection|save_feature')
-        for area in ('account', 'campaigns', 'chats', 'contacts', 'flows', 'inbox', 'send', 'templates', 'tickets'):
+        for area in ('account', 'ai', 'campaigns', 'chats', 'contacts', 'flows', 'inbox', 'send', 'templates', 'tickets'):
             self.assertIsNone(hub_only.search(Path(f'relay_core/mcp_tools/{area}.py').read_text()), area)
         self.assertFalse({module for module, _ in legacy.TARGETS.values()} & {'relay_core.' + word for word in HUB_ONLY})
 
@@ -269,6 +294,63 @@ class CampaignGuardTests(unittest.TestCase):
     def test_pause_needs_no_confirm(self):
         self.handler(action='pause')
         self.control.assert_called_once_with('Promo', 'pause', scheduled_at=None)
+
+
+class AISetupTests(unittest.TestCase):
+    def handler(self, tool, **arguments):
+        with patch('relay_core.ai_features.is_enabled', return_value=True):
+            return registry.TOOLS[tool].handler(**arguments)
+
+    def test_ai_switch_off_gives_the_system_manager_hint(self):
+        from relay_core.mcp_tools.ai import AI_OFF
+        save = Mock()
+        with patch('relay_core.ai_features.is_enabled', return_value=False), patch('relay_core.ai.knowledge.save', save), \
+                patch.object(coordination, 'run', side_effect=lambda entry, arguments: entry.handler(**arguments)):
+            for name, arguments in (('events_list', {}), ('knowledge_save', CASES['knowledge_save'][0])):
+                result = registry.call(name, arguments)
+                self.assertTrue(result['isError'])
+                self.assertEqual(result['content'][0]['text'], AI_OFF)
+        save.assert_not_called()
+
+    def test_creating_needs_a_request_key_but_changing_does_not(self):
+        save = Mock(return_value={'name': 'Orders-001'})
+        with patch('relay_core.ai.configuration.save', save), \
+                patch('relay_core.mcp_tools.ai.readable', return_value=Mock(enabled=0, mode='Shadow')):
+            with self.assertRaisesRegex(registry.ToolError, 'request_key is required'):
+                self.handler('skills_save', values=SKILL)
+            self.handler('skills_save', values={'title': 'Orders'}, name='Orders-001')
+        save.assert_called_once_with({'title': 'Orders'}, 'Orders-001')
+
+    def test_live_skill_needs_confirm(self):
+        from relay_core.mcp_tools.ai import LIVE
+        save = Mock(return_value={'name': 'Orders-001'})
+        live = Mock(enabled=1, mode='Automatic')
+        with patch('relay_core.ai.configuration.save', save), patch('relay_core.mcp_tools.ai.readable', return_value=live):
+            with self.assertRaisesRegex(registry.ToolError, LIVE):
+                self.handler('skills_save', values=dict(SKILL, enabled=1, mode='Automatic'), request_key=KEY)
+            with self.assertRaisesRegex(registry.ToolError, LIVE):  # An edit of a skill that is already live.
+                self.handler('skills_save', values={'title': 'Orders'}, name='Orders-001')
+            save.assert_not_called()
+            self.handler('skills_save', values={'enabled': 0}, name='Orders-001')
+            self.handler('skills_save', values={'title': 'Orders'}, name='Orders-001', confirm=True)
+        self.assertEqual(save.call_count, 2)
+
+    def test_missing_required_fields_are_named(self):
+        import frappe
+        error = frappe.MandatoryError('[Relay AI Event, Fair-001]: description, audience')
+        self.assertEqual(registry.failure(error)['content'][0]['text'], 'Fill in the required fields: description, audience')
+
+    def test_skill_lists_are_json_text_in_core_and_arrays_over_mcp(self):
+        result, _ = run_case('skills_list', *CASES['skills_list'][:2])
+        self.assertEqual(result['items'][0]['allowed_tools'], [{'capability': 'orders'}])
+        self.assertEqual(result['items'][0]['allowed_actions'], [])
+
+    def test_validation_problems_and_attach_shape_are_checked(self):
+        self.assertIn('must be one of', check(registry.TOOLS['skills_save'].schema, {'values': {'mode': 'Live'}}))
+        self.assertIn('audience is required', check(registry.TOOLS['events_save'].schema, {'values': {'title': 'x'}}))
+        self.assertIn('request_key is required', check(registry.TOOLS['events_attach'].schema, {'name': 'Fair-001', 'url': 'https://x.test'}))
+        self.assertTrue(registry.TOOLS['events_attach'].large)
+        self.assertTrue(registry.TOOLS['events_attach'].annotations['idempotentHint'])
 
 
 if __name__ == '__main__':

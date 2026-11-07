@@ -80,10 +80,10 @@ def private_file(filename,raw,doctype=None,name=None):
                            'is_private':1,'content':raw}).insert(ignore_permissions=True)
 
 
-def save_attachment(filename,raw,message):
-    """A private File on the message that keeps the chosen name. Frappe adds a hash suffix to a reused
+def save_attachment(filename,raw,name,doctype='Relay Message'):
+    """A private File on the document that keeps the chosen name. Frappe adds a hash suffix to a reused
     name on disk; only file_url carries it, so the name sent and downloaded stays the original."""
-    file=private_file(filename,raw,'Relay Message',message)
+    file=private_file(filename,raw,doctype,name)
     if file.file_name!=filename:
         file.db_set('file_name',filename,update_modified=False)
     return file

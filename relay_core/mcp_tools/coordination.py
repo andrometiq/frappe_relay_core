@@ -2,6 +2,7 @@
 
 Claims live in Redis because they are short leases; a claim holder's pause of the Relay automation uses the
 existing staff takeover (automation_paused) and is undone on release or, after expiry, by the next MCP call."""
+import hashlib
 import json
 import re
 import time
@@ -16,6 +17,7 @@ CLIENT = 'relay-mcp-client:'
 CLIENT_SECONDS = 30 * 86400
 SENT = 'relay-mcp-sent:'
 SENT_SECONDS = 86400
+SAVED = 'relay-mcp-saved:'
 LOCK_SECONDS = 120
 SUBJECT = 'MCP '
 MAX_CLAIM_MINUTES = 30
@@ -37,6 +39,8 @@ def run(entry, arguments):
     """A write or send under the chat's claim and reply guard, then one audit row."""
     arguments = dict(arguments)
     after = arguments.pop('after_message', None)
+    if entry.once and arguments.get('request_key'):
+        return run_once(entry, arguments)
     contact = chat_of(arguments, after) if entry.chat else None
     if not contact:
         value = entry.handler(**arguments)
@@ -55,6 +59,23 @@ def run(entry, arguments):
         frappe.cache.set_value(sent_key, 1, expires_in_sec=SENT_SECONDS)
     if isinstance(value, dict):
         value = dict(value, sent_by=frappe.session.user, via='mcp', client=client_name())
+    return value
+
+
+def run_once(entry, arguments):
+    """A write with the agent's request_key: a repeat of the key within a day returns the first result, never a second record."""
+    key = f'{SAVED}{frappe.session.user}:{entry.name}:{arguments["request_key"]}'
+    digest = hashlib.sha256(json.dumps(arguments, sort_keys=True, default=str).encode()).hexdigest()
+    with locks.lock(key, timeout=LOCK_SECONDS, blocking_timeout=LOCK_SECONDS):
+        saved = frappe.cache.get_value(key)
+        if saved:
+            if saved['arguments'] != digest:
+                raise ToolError('Request key already belongs to different content; use a new request_key')
+            return saved['value']
+        value = entry.handler(**arguments)
+        audit(entry, arguments, value, None)
+        frappe.db.commit()  # Before the key is kept, so a repeat never returns a record that was rolled back.
+        frappe.cache.set_value(key, {'arguments': digest, 'value': value}, expires_in_sec=SENT_SECONDS)
     return value
 
 
