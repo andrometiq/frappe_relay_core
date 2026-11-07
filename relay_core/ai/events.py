@@ -68,6 +68,7 @@ def attach(name, url=None, note=None, filename=None, content_base64=None):
 
 def attach_file(name, filename, content_base64):
     """A private File on the event; its File hook queues the build."""
+    from pypdf.errors import PyPdfError
     from relay_core.ai.event_memory import MAX_FILES, attached_files, file_limit
     from relay_core.ai.event_sources import EXTENSIONS
     from relay_core.attachments import save_attachment
@@ -79,4 +80,7 @@ def attach_file(name, filename, content_base64):
     if len(attached_files(name)) >= MAX_FILES:
         frappe.throw(f'Attach at most {MAX_FILES} files to an event')
     raw = get_decoded_bytes(content_base64, file_limit())
-    save_attachment(filename, raw, name, EVENT)
+    try:
+        save_attachment(filename, raw, name, EVENT)
+    except PyPdfError:
+        frappe.throw('The PDF could not be read; attach a valid PDF file')

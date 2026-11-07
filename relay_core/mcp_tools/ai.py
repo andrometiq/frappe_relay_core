@@ -128,8 +128,8 @@ def events_save(values, name=None, request_key=None):
     'avoid_when': 'the text fits the event description; use events_save.',
     'returns': 'the event as events_read returns it.',
     'errors': '"Give either a link or a file"; "Use an http or https address"; "Add at most 10 links"; "The file must be at '
-              'most N MB"; "Invalid file data"; "Attach one of these file types". Files and links need an event memory '
-              'model in Relay Settings, else events_status shows Failed.'}, large=True, once=True)
+              'most N MB"; "Invalid file data"; "Attach one of these file types"; "The PDF could not be read". Files and '
+              'links need an event memory model in Relay Settings, else events_status shows Failed.'}, large=True, once=True)
 def events_attach(name, request_key, url=None, note=None, filename=None, content_base64=None):
     from relay_core.ai import events
     return events.attach(name, url=url, note=note, filename=filename, content_base64=content_base64)

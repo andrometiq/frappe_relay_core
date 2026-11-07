@@ -357,7 +357,7 @@ Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp)
 - **Use when:** the user gives a catalog, price list, poster or web page for an event.
 - **Do not use when:** the text fits the event description; use events_save.
 - **Returns:** the event as events_read returns it.
-- **Common errors:** "Give either a link or a file"; "Use an http or https address"; "Add at most 10 links"; "The file must be at most N MB"; "Invalid file data"; "Attach one of these file types". Files and links need an event memory model in Relay Settings, else events_status shows Failed.
+- **Common errors:** "Give either a link or a file"; "Use an http or https address"; "Add at most 10 links"; "The file must be at most N MB"; "Invalid file data"; "Attach one of these file types"; "The PDF could not be read". Files and links need an event memory model in Relay Settings, else events_status shows Failed.
 - **Arguments:** `name`, `url`?, `note`?, `filename`?, `content_base64`?, `request_key`
 
 ### `events_list` (R)

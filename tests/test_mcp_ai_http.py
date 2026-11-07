@@ -118,6 +118,9 @@ class MCPAISetupTests(MCPSite):
         text = base64.b64encode(b'Price list').decode()
         self.assertIn('Attach one of these file types', attach(filename='tool.exe', content_base64=text)['content'][0]['text'])
         self.assertEqual(attach(filename='bad.txt', content_base64='not base64!')['content'][0]['text'], 'Invalid file data')
+        broken = base64.b64encode(b'%PDF-1.4 broken').decode()
+        self.assertEqual(attach(filename='broken.pdf', content_base64=broken)['content'][0]['text'],
+                         'The PDF could not be read; attach a valid PDF file')
         with patch('relay_core.ai.event_memory.file_limit', return_value=4):
             self.assertIn('must be at most', attach(filename='big.txt', content_base64=text)['content'][0]['text'])
         self.assertEqual(attach(filename='prices.txt', content_base64=text)['structuredContent']['files'][0]['file_name'], 'prices.txt')
