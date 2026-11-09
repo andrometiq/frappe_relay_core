@@ -1,6 +1,8 @@
-"""Plain-text event editor; richer sources remain available in the existing Desk form."""
+"""Plain-text event editor; richer sources remain available in the existing Desk form.
+
+Events are business facts for staff, external agents and the Relay AI, so they work while AI features are off.
+Only their memory build needs the switch."""
 import frappe
-from relay_core import ai_features
 from relay_core.permissions import permitted_document, require_access
 from relay_core.business_access import document_name
 
@@ -10,7 +12,6 @@ FIELDS = ('title', 'enabled', 'company', 'description', 'event_starts_on', 'even
 
 
 @frappe.whitelist(methods=['GET'])
-@ai_features.required
 def directory(after=None):
     require_access(EVENT)
     rows = frappe.get_list(EVENT, filters={'name': ['>', after]} if after else {},
@@ -23,7 +24,6 @@ def directory(after=None):
 
 
 @frappe.whitelist(methods=['POST'])
-@ai_features.required
 def save(values, name=None):
     require_access(EVENT, 'write')
     if name:
@@ -41,7 +41,6 @@ def save(values, name=None):
     return {'name': doc.name}
 
 
-@ai_features.required
 def read(name):
     """One event with its audience, links and attached files, for API clients."""
     from relay_core.ai.event_memory import attached_files
@@ -52,7 +51,6 @@ def read(name):
             'files': [{'name': row.name, 'file_name': row.file_name, 'file_size': row.file_size} for row in attached_files(name)]}
 
 
-@ai_features.required
 def attach(name, url=None, note=None, filename=None, content_base64=None):
     """Add one link or one private file to an event, as the Desk form does. Either change queues a memory build."""
     doc = permitted_document(EVENT, name, 'write')

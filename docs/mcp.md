@@ -19,13 +19,15 @@ The older `relay.*` tool names still work but are not listed.
 - **Ticket** (`TKT-#####`): a support case made from messages.
 - **Template**: a WhatsApp message approved by Meta. Only templates can start a chat or reach a person after 24 hours.
 - **Campaign**: one template or message sent to many numbers, with live counts.
+- **Persona**: the one name and voice every customer reply uses, yours and the Relay AI's. `persona_read` gives it.
+- **Event** and **knowledge**: dated business facts (offers, seasons) and standing business rules. Replies may state only facts from them, the business record or the chat.
 
 ## Rules
-- **24-hour window**: on WhatsApp you can send free text or media only within 24 hours of the customer's last message. After that the send fails with "Outside the 24-hour reply window"; send an approved template with `chat_send_template` instead. `messages_read_one` shows if the window is open.
+- **24-hour window**: on WhatsApp you can send free text or media only within 24 hours of the customer's last message. After that the send fails with "Outside the 24-hour reply window"; send an approved template with `chat_send_template` instead. `reply_context` and `messages_read_one` show if the window is open.
 - **Customer sends** (class S) reach a real person or change live state. Every one needs `request_key`. A repeated key returns the first result and sends nothing new. Use a new key only for a new message.
 - **Confirm**: campaign start, schedule, resume and retry, template delete and flow publish need `confirm: true`. Campaign start and schedule also need `expected_recipients` equal to the count from `campaigns_validate`.
-- **Permissions**: you act as the API key's user. A chat, record or campaign the user cannot see returns "Not found" or "Not permitted". Campaigns, contacts_create and flows need the Relay Communication Manager role.
-- **AI setup**: events, knowledge and skills need the Enable AI features switch, which only a System Manager can turn on. Saving them needs the Relay Communication Manager role. A new event, knowledge entry or skill needs a `request_key`. A skill answers customers only when it is enabled in Automatic (Live) mode; that save needs `confirm: true`.
+- **Permissions**: you act as the API key's user. A chat, record or campaign the user cannot see returns "Not found" or "Not permitted". Campaigns, contacts_create and flows need the Relay Communication Manager role. An external AI user has Relay Communication User (chats and tickets of its business types) and Relay AI Agent (templates, events, knowledge and reading the persona).
+- **AI setup**: events, knowledge and the persona work whether the Enable AI features switch is on or off; your replies use them too. Skills need the switch, which only a System Manager can turn on. Saving events and knowledge needs Relay Communication Manager or Relay AI Agent; saving the persona and skills needs Relay Communication Manager. A new event, knowledge entry or skill needs a `request_key`. A skill answers customers only when it is enabled in Automatic (Live) mode; that save needs `confirm: true`.
 - **Templates** go to Meta for review the moment you create or update them; there is no local draft. Status starts as PENDING; read it again with `templates_list`.
 
 - **Several actors**: staff in the portal, the Relay automation and AI, and other MCP agents can work on the same chats. Each MCP agent is its own Frappe user. Replies show `sent_by` and `via` (`mcp`, `automation`, `staff` or `system`).
@@ -37,16 +39,17 @@ The older `relay.*` tool names still work but are not listed.
 **Safe polling loop (several agents)**
 1. `changes_since` with your saved cursor. Save the new cursor at once. The first call, without a cursor, gives the current cursor.
 2. For each chat with an `inbound` event that you will answer: `chat_claim` (skip the chat if it is claimed by another agent).
-3. `messages_list` or `messages_read_one` to read the chat and the reply window.
+3. `reply_context` to read the chat, the persona, the facts and the reply window.
 4. `chat_send_text` (or `chat_send_template`) with a new request_key and `after_message` set to the newest message you read. On "Chat changed", go back to step 3.
 5. `chat_mark_read`, then `chat_release`.
 
 **Reply to unread messages**
 1. `messages_list_unread` to see unread incoming messages by chat.
-2. `messages_read_one` for one message with context and the reply window state.
-3. `chat_send_text` with that message id, your text, a new request_key and `after_message` (or `chat_send_template` when the window is closed).
-4. `send_status` with the returned message id to follow delivery.
-5. `chat_mark_read` to clear the chat's unread count for the user.
+2. `reply_context` for the chat: the persona to reply as, the contact, the business record, the active events, the knowledge rules, the recent messages and the reply window.
+3. Write as the persona and follow the knowledge rules. State only facts from the events, the knowledge, the record or the chat; when the answer is not there, ask a person (`chat_comment_add`) instead of guessing.
+4. `chat_send_text` with your text, a new request_key and `after_message` set to the newest message (or `chat_send_template` when the window is closed).
+5. `send_status` with the returned message id to follow delivery.
+6. `chat_mark_read` to clear the chat's unread count for the user.
 
 **Create a template**
 1. `templates_media_upload` when the header has an image, video or document; keep the returned handle.
@@ -62,10 +65,10 @@ The older `relay.*` tool names still work but are not listed.
 
 **Set up an event, knowledge and a skill from the owner's description**
 1. `events_list`, `knowledge_list` and `skills_list` to find what exists; change an existing record instead of adding a duplicate.
-2. `events_save` with the title, dates, description and audience business types (`skills_options` kind business_doctype). Then `events_attach` for each catalog file or web page.
-3. `events_status` until memory_status is Ready or Partial; read the memory text the AI will use. On Failed, fix memory_error.
+2. `events_save` with the title, dates, description and audience business types (`records_types`). Then `events_attach` for each catalog file or web page.
+3. With AI features on: `events_status` until memory_status is Ready or Partial; read the memory text the AI will use. On Failed, fix memory_error.
 4. `knowledge_save` for each lasting rule or policy.
-5. `skills_options` for the channel, model, users, read capabilities (kind report) and actions. Then `skills_validate` until it is valid, and `skills_save` in Shadow mode.
+5. With AI features on: `skills_options` for the channel, model, users, read capabilities (kind report) and actions. Then `skills_validate` until it is valid, and `skills_save` in Shadow mode.
 6. Ask the user to check the records on the AI Events, Knowledge and Skills screens and the Shadow drafts. Make the skill Live (enabled, mode Automatic) only when the user agrees: run `skills_validate`, then `skills_save` with `confirm: true`.
 
 ## Tools
@@ -352,7 +355,7 @@ Mark one linked business record of a Frappe Contact as primary; no record clears
 
 ### `events_attach` (W)
 
-Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. The AI reads it into the event memory. At most 10 links and 10 files; a file within the Relay Settings AI file size (4 MB by default) and a request of at most 7 MB.
+Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. With AI features on, the Relay AI reads it into the event memory. At most 10 links and 10 files; a file within the Relay Settings AI file size (4 MB by default) and a request of at most 7 MB.
 
 - **Use when:** the user gives a catalog, price list, poster or web page for an event.
 - **Do not use when:** the text fits the event description; use events_save.
@@ -362,12 +365,12 @@ Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp)
 
 ### `events_list` (R)
 
-List the business events the Relay AI knows, 30 per page.
+List the business events (offers, seasons, dated facts), 30 per page. They work while AI features are off.
 
 - **Use when:** the user talks about an event, offer or campaign; check whether it exists before events_save.
 - **Do not use when:** you know the event name; use events_read.
 - **Returns:** {items: [{name, title, enabled, company, description, event_starts_on, event_ends_on, available_from, available_to, memory_status, audience: [business type]}], next}.
-- **Common errors:** AI features off; "Not permitted" without the Relay Communication Manager role.
+- **Common errors:** "Not permitted" without read access to events.
 - **Arguments:** `after`?
 
 ### `events_read` (R)
@@ -382,11 +385,11 @@ Read one event with its audience, links and attached files.
 
 ### `events_save` (W)
 
-Create or change a business event. The AI uses it in replies to contacts of the audience business types while it is enabled and inside available_from to available_to. Saving rebuilds the event memory.
+Create or change a business event. reply_context and the Relay AI use it for contacts of the audience business types while it is enabled and inside available_from to available_to. With AI features on, saving rebuilds the event memory.
 
 - **Use when:** the user describes an event, offer or season the AI must know; without name it creates one with title, description and audience.
 - **Do not use when:** the text is a standing rule for every reply; use knowledge_save.
-- **Returns:** {name}. Follow the memory build with events_status.
+- **Returns:** {name}. With AI features on, follow the memory build with events_status.
 - **Common errors:** "Choose 1–20 audience business types" (audience replaces the saved list; copy it from events_read); "Enable these contact types first: X"; "The event ends before it starts"; "Invalid event fields".
 - **Arguments:** `values`, `name`?, `request_key`?
 
@@ -396,7 +399,7 @@ Read the memory build of an event: its state, the published memory text the AI u
 
 - **Use when:** after events_save or events_attach, to check what the AI will know.
 - **Do not use when:** you need the event fields; use events_read.
-- **Returns:** {memory_status (Pending, Building, Ready, Partial or Failed), memory_built_at, memory_error, memory, memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}.
+- **Returns:** {memory_status (Pending, Building, Ready, Partial or Failed), memory_built_at, memory_error, memory, memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}. While AI features are off: {name, memory_status: "AI off", note}.
 - **Common errors:** "Not found"; "Not permitted".
 - **Arguments:** `name`
 
@@ -482,12 +485,12 @@ List chats, newest activity first, 30 per page, with unread counts and the lates
 
 ### `knowledge_list` (R)
 
-List the knowledge base: global standing playbooks (Relay AI Playbook) the Relay AI follows in every reply of their scope. App and skill playbooks are managed in Desk and are not listed.
+List the knowledge base: standing business rules that every reply of their scope follows, by you and by the Relay AI. They work while AI features are off. App and skill playbooks are managed in Desk and are not listed.
 
 - **Use when:** before knowledge_save, to change an existing entry instead of adding a duplicate.
 - **Do not use when:** you look for events; use events_list.
 - **Returns:** {items: [{name, title, enabled, company, business_doctype, instructions}], next}.
-- **Common errors:** AI features off; "Not permitted".
+- **Common errors:** "Not permitted" without read access to knowledge.
 - **Arguments:** `after`?
 
 ### `knowledge_read` (R)
@@ -540,6 +543,26 @@ Read one message with its media details, five messages around it and the reply w
 - **Common errors:** "Not found" for an unknown id; "Not permitted" outside the user's scope.
 - **Arguments:** `message`
 
+### `persona_read` (R)
+
+Read the persona you reply as: its name and how it writes. A company without its own persona uses the one for every company. Works while AI features are off.
+
+- **Use when:** before you write to a customer, unless reply_context already gave you the persona.
+- **Do not use when:** you are about to reply in a chat; reply_context returns the persona with the rest of the context.
+- **Returns:** {persona: {name, persona_name, enabled, company, instructions} or null}.
+- **Common errors:** "Not permitted" without read access to the persona.
+- **Arguments:** `company`?
+
+### `persona_save` (W)
+
+Create or change the persona: the one name and voice every customer reply uses, yours and the Relay AI's. One per company; a blank company covers every company without its own.
+
+- **Use when:** the user names the bot or tells you how replies must sound.
+- **Do not use when:** it is a business rule rather than a voice; use knowledge_save.
+- **Returns:** {name}.
+- **Common errors:** "This company already has a persona; change that one" (read it with persona_read and pass its name); "Use at most 4000 instruction characters"; "Invalid persona fields"; "Not permitted" without manager access.
+- **Arguments:** `values`, `name`?, `request_key`?
+
 ### `records_list` (R)
 
 Search business records of one type that have Relay chats, 30 per page.
@@ -569,6 +592,16 @@ List the business record types (DocTypes such as Customer) the user can open in 
 - **Returns:** {items: [doctype name]}.
 - **Common errors:** "Not permitted" without a Relay role.
 - **Arguments:** none
+
+### `reply_context` (R)
+
+Everything you need before you reply in one chat: the persona to reply as, the contact, the business record you may read, the active events and knowledge rules that apply to it, the recent messages and the reply window. Works while AI features are off.
+
+- **Use when:** always, right before you write a reply or a template to this chat.
+- **Do not use when:** you only browse chats; use inbox_list or messages_list.
+- **Returns:** {contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: {persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. A section your user may not read is null; facts not in events or knowledge are unknown.
+- **Common errors:** "Not found" or "Not permitted" for a chat outside the user's scope; "Too many knowledge instructions".
+- **Arguments:** `contact`, `limit`?
 
 ### `send_retry` (S)
 

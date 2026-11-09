@@ -7,7 +7,7 @@ const REASONS = [
   ['teams', capabilities => capabilities?.manage && !capabilities?.teams_enabled ? SWITCHED_OFF('Teams') : MANAGER],
   ['ai', () => SWITCHED_OFF('AI features')],
   ['flows', capabilities => capabilities?.manage ? SWITCHED_OFF('Automations') : MANAGER],
-  ['skills', () => MANAGER], ['manage', () => MANAGER], ['business_events', () => MANAGER], ['billing', () => MANAGER],
+  ['skills', () => MANAGER], ['knowledge', () => MANAGER], ['persona', () => MANAGER], ['events', () => MANAGER], ['manage', () => MANAGER], ['business_events', () => MANAGER], ['billing', () => MANAGER],
 ]
 
 export function deniedReason(item, capabilities) {

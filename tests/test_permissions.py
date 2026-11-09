@@ -4,7 +4,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from relay_core.permissions import MANAGER, TEAM_USER, USER, HUB_SERVICE
+from relay_core.permissions import AI_AGENT, MANAGER, TEAM_USER, USER, HUB_SERVICE
 
 DOCTYPES = Path('relay_core/relay_core/doctype')
 LETTERS = {'read': 'r', 'write': 'w', 'create': 'c', 'delete': 'd'}
@@ -73,6 +73,14 @@ class RoleMatrixTests(unittest.TestCase):
                         'Relay Memory'):
             self.assertEqual(set(PERMS[doctype]), {'System Manager'}, doctype)
 
+    def test_ai_agent_manages_templates_events_and_knowledge_and_reads_the_persona(self):
+        granted = {doctype: rows[AI_AGENT] for doctype, rows in PERMS.items() if AI_AGENT in rows}
+        self.assertEqual(granted, {'Relay WhatsApp Template': 'rwc', 'Relay AI Event': 'rwc', 'Relay AI Event Build': 'r',
+                                   'Relay AI Playbook': 'rwc', 'Relay AI Persona': 'r'})
+        self.assertTrue(self.can(MANAGER, 'Relay AI Persona', 'rwc'))
+        for role in (USER, TEAM_USER):
+            self.assertFalse(self.can(role, 'Relay AI Persona', 'r'), role)
+
     def test_hub_service_only_creates_hub_events(self):
         self.assertEqual([doctype for doctype, rows in PERMS.items() if HUB_SERVICE in rows], ['Relay Hub Event'])
         self.assertTrue(self.can(HUB_SERVICE, 'Relay Hub Event', 'c'))
@@ -136,7 +144,7 @@ class AccessTests(unittest.TestCase):
         with patch.dict(sys.modules, frappe=fake):
             permissions.install_roles()
         self.assertEqual([(row['role_name'], row['desk_access']) for row in created],
-                         [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0)])
+                         [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0), (AI_AGENT, 1)])
 
 
 class RoleMigrationTests(unittest.TestCase):

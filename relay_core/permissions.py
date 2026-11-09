@@ -3,6 +3,8 @@ USER = 'Relay Communication User'
 TEAM_USER = 'Relay Communication Team User'
 MANAGER = 'Relay Communication Manager'
 HUB_SERVICE = 'Relay Hub Service'
+# An external AI's user: with Relay Communication User it manages templates, events and knowledge and reads the persona.
+AI_AGENT = 'Relay AI Agent'
 # Legacy team endpoints retain these roles; business access is owned by business_access.
 ALL_TEAMS_ROLES = frozenset({TEAM_USER, MANAGER, 'System Manager'})
 
@@ -66,7 +68,7 @@ def require_access(doctype='Relay Contact', ptype='read', *, configure=False, ma
 def install_roles():
     """Run through the app installer, never from a public endpoint."""
     import frappe
-    for name in (USER, TEAM_USER, MANAGER, HUB_SERVICE):
+    for name in (USER, TEAM_USER, MANAGER, HUB_SERVICE, AI_AGENT):
         if not frappe.db.exists('Role', name):
             frappe.get_doc({'doctype': 'Role', 'role_name': name, 'desk_access': 0 if name == HUB_SERVICE else 1}).insert()
 

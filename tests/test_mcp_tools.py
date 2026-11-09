@@ -34,6 +34,8 @@ CASES = {
                       ((CON,), {'before': None, 'channel': None, 'limit': 3, 'query': ''})),
     'messages_read_one': ({'message': MSG}, [('relay_core.api', 'message_context', {'contact': CON, 'items': [{'name': MSG}]}),
                                              ('relay_core.messaging', 'reply_window', {'open': True})], ((MSG,), {})),
+    'reply_context': ({'contact': CON}, [('relay_core.reply_context', 'read', {'persona': None, 'messages': {'items': [{'name': MSG}]}})],
+                      ((CON, 20), {})),
     'chat_mark_read': ({'contact': CON, 'read': 1}, [('relay_core.message_reads', 'mark_chat', {})], ((), {'contact': CON, 'read': 1})),
     'chat_update': ({'contact': CON, 'starred': 1}, [('relay_core.inbox', 'update', {})], ((CON,), {'starred': 1, 'folder': None})),
     'chat_comment_add': ({'contact': CON, 'body': 'note', 'request_key': 'k' * 16}, [('relay_core.collaboration', 'add', {})],
@@ -119,6 +121,11 @@ CASES = {
     'knowledge_save': ({'values': {'title': 'Returns', 'instructions': 'Accept returns within 7 days.'}, 'request_key': KEY},
                        [('relay_core.ai.knowledge', 'save', {'name': 'RELAY-KB-0000000001'})],
                        (({'title': 'Returns', 'instructions': 'Accept returns within 7 days.'}, None), {})),
+    'persona_read': ({'company': 'Example Co'}, [('relay_core.ai.persona', 'find', {'persona_name': 'Mira'}),
+                                                 ('relay_core.mcp_tools.ai', 'require_access', None)], None),
+    'persona_save': ({'values': {'persona_name': 'Mira', 'instructions': 'Warm and short.'}, 'request_key': KEY},
+                     [('relay_core.ai.persona', 'save', {'name': 'RELAY-PER-0000000001'})],
+                     (({'persona_name': 'Mira', 'instructions': 'Warm and short.'}, None), {})),
     'skills_list': ({}, [('relay_core.ai.configuration', 'directory', {'items': [{'allowed_tools': '[{"capability": "orders"}]'}],
                                                                        'next': None})], ((None,), {})),
     'skills_read': ({'name': 'Orders-001'}, [('relay_core.mcp_tools.ai', 'record', {'allowed_tools': '[]', 'allowed_actions': None})], None),
@@ -301,16 +308,48 @@ class AISetupTests(unittest.TestCase):
         with patch('relay_core.ai_features.is_enabled', return_value=True):
             return registry.TOOLS[tool].handler(**arguments)
 
-    def test_ai_switch_off_gives_the_system_manager_hint(self):
+    def test_ai_switch_off_refuses_skills_with_the_system_manager_hint(self):
         from relay_core.mcp_tools.ai import AI_OFF
         save = Mock()
-        with patch('relay_core.ai_features.is_enabled', return_value=False), patch('relay_core.ai.knowledge.save', save), \
+        with patch('relay_core.ai_features.is_enabled', return_value=False), patch('relay_core.ai.configuration.save', save), \
                 patch.object(coordination, 'run', side_effect=lambda entry, arguments: entry.handler(**arguments)):
-            for name, arguments in (('events_list', {}), ('knowledge_save', CASES['knowledge_save'][0])):
+            for name, arguments in (('skills_list', {}), ('skills_save', CASES['skills_save'][0])):
                 result = registry.call(name, arguments)
                 self.assertTrue(result['isError'])
                 self.assertEqual(result['content'][0]['text'], AI_OFF)
         save.assert_not_called()
+
+    def test_events_and_knowledge_work_while_ai_is_off(self):
+        with patch('relay_core.ai_features.is_enabled', return_value=False), \
+                patch.object(coordination, 'run', side_effect=lambda entry, arguments: entry.handler(**arguments)):
+            for name in ('events_list', 'events_save', 'knowledge_list', 'knowledge_save', 'persona_save'):
+                arguments, targets, _ = CASES[name]
+                with patch.object(importlib.import_module(targets[0][0]), targets[0][1], Mock(return_value=targets[0][2])) as core:
+                    result = registry.call(name, arguments)
+                self.assertFalse(result['isError'], (name, result))
+                core.assert_called_once()
+
+    def test_persona_reads_with_the_user_permissions_and_needs_a_key_to_create(self):
+        import frappe
+        with patch('relay_core.ai.persona.find', return_value=None) as find, \
+                patch('relay_core.mcp_tools.ai.require_access') as access:
+            self.assertEqual(registry.TOOLS['persona_read'].handler(company='Example Co'), {'persona': None})
+        access.assert_called_once_with('Relay AI Persona')
+        self.assertEqual(find.call_args.args, ('Example Co', frappe.get_list))
+        with patch('relay_core.ai.persona.save', return_value={'name': 'RELAY-PER-0000000001'}) as save:
+            with self.assertRaisesRegex(registry.ToolError, 'request_key is required'):
+                registry.TOOLS['persona_save'].handler(values={'persona_name': 'Mira'})
+            registry.TOOLS['persona_save'].handler(values={'enabled': 0}, name='RELAY-PER-0000000001')
+        save.assert_called_once_with({'enabled': 0}, 'RELAY-PER-0000000001')
+        self.assertTrue(registry.TOOLS['persona_save'].once)
+
+    def test_event_status_says_ai_off_instead_of_failing(self):
+        from relay_core.mcp_tools.ai import MEMORY_OFF
+        with patch('relay_core.ai_features.is_enabled', return_value=False), \
+                patch('relay_core.mcp_tools.ai.record', return_value={'name': 'Fair-001'}) as record:
+            status = registry.TOOLS['events_status'].handler(name='Fair-001')
+        self.assertEqual(status, {'name': 'Fair-001', 'memory_status': 'AI off', 'note': MEMORY_OFF})
+        record.assert_called_once_with('Relay AI Event', 'Fair-001', ())
 
     def test_creating_needs_a_request_key_but_changing_does_not(self):
         save = Mock(return_value={'name': 'Orders-001'})

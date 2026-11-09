@@ -11,6 +11,7 @@ from relay_core.ai import adapter, reply_guard, service
 class ReplyGuardTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
+        self.enterContext(patch('relay_core.ai.persona.prompt', return_value=''))
         self.f = fixtures.framework()
         self.f.db.exists.return_value = True
         self.f.get_doc.return_value = fixtures.Doc(email='public@example.test', phone_no='+91 444 555 6666')

@@ -52,6 +52,38 @@ class AiFeatureSwitchTests(unittest.TestCase):
                 with self.subTest(api=api.__qualname__), self.assertRaisesRegex(frappe.PermissionError, ai_features.OFF_MESSAGE):
                     api(*arguments)
 
+    def test_events_and_knowledge_stay_open_while_off(self):
+        from relay_core import hooks
+        from relay_core.ai import events, knowledge
+        for doctype in ('Relay AI Event', 'Relay AI Event Build', 'Relay AI Playbook'):
+            self.assertNotEqual(hooks.has_permission.get(doctype), 'relay_core.ai_features.document_permission', doctype)
+            self.assertNotIn('validate', hooks.doc_events.get(doctype, {}), doctype)
+        self.assertEqual(hooks.has_permission['Relay AI Skill'], 'relay_core.ai_features.document_permission')
+        with patch.object(frappe, 'db', settings_db(0)), patch.object(events, 'require_access'), \
+             patch.object(knowledge, 'require_access'), patch.object(frappe, 'get_list', return_value=[]):
+            self.assertEqual(events.directory(), {'items': [], 'next': None})
+            self.assertEqual(knowledge.directory(), {'items': [], 'next': None})
+
+    def test_content_pickers_work_while_off_and_skill_pickers_do_not(self):
+        with patch.object(frappe, 'db', settings_db(0)), patch.object(configuration, 'require_access') as access, \
+             patch.object(frappe, 'get_list', return_value=[frappe._dict(name='Example Co')]):
+            self.assertEqual(configuration.editor_options('company_record')['items'][0]['value'], 'Example Co')
+            access.assert_called_once_with()
+            with self.assertRaisesRegex(frappe.PermissionError, ai_features.OFF_MESSAGE):
+                configuration.editor_options('report', business_doctype='Customer')
+
+    def test_turning_ai_on_queues_every_event_and_off_builds_nothing(self):
+        from relay_core.ai import event_memory
+        with patch.object(frappe, 'get_all', return_value=['Fair-001', 'Sale-001']), \
+             patch.object(event_memory, 'queue_build') as build, \
+             patch('relay_core.ai.knowledge_base.ingest.queue_event') as source:
+            event_memory.queue_all()
+        self.assertEqual([call.args for call in build.call_args_list], [('Fair-001',), ('Sale-001',)])
+        self.assertEqual([call.args for call in source.call_args_list], [('Fair-001',), ('Sale-001',)])
+        with patch.object(frappe, 'db', settings_db(0)), patch.object(frappe, 'enqueue') as enqueue:
+            self.assertIsNone(event_memory.queue_build('Fair-001'))
+        enqueue.assert_not_called()
+
     def test_queued_ai_work_and_inbound_hooks_do_nothing_while_off(self):
         message = Mock(direction='Incoming', message_type='voice', legacy_source=None)
         message.get.return_value = None
@@ -105,7 +137,8 @@ class AiFeatureSwitchTests(unittest.TestCase):
                 settings.save_feature('ai', 1)
         database.set_single_value.assert_not_called()
         with patch.object(settings, 'require_access'), patch.object(frappe, 'db', database), \
-             patch.object(frappe, 'get_roles', return_value=['System Manager']):
+             patch.object(frappe, 'get_roles', return_value=['System Manager']), \
+             patch('relay_core.ai.event_memory.queue_all') as queue_all:
             settings.save_feature('ai', 1)
             settings.save_feature('folders', 0)
             settings.save_feature('teams', 1)
@@ -113,6 +146,7 @@ class AiFeatureSwitchTests(unittest.TestCase):
                 settings.save_feature('billing', 1)
         self.assertEqual([call.args for call in database.set_single_value.call_args_list],
                          [('Relay Settings', 'enable_ai_features', 1), ('Relay Settings', 'enable_chat_folders', 0), ('Relay Settings', 'enable_teams', 1)])
+        queue_all.assert_called_once_with()  # Events saved while AI was off get their memory once it is on.
 
 
 if __name__ == '__main__':

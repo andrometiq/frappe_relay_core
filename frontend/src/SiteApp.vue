@@ -25,6 +25,7 @@ const views = {
   Setup: defineAsyncComponent(() => import('./components/onboarding/OnboardingWorkspace.vue')),
   Tickets: defineAsyncComponent(() => import('./components/TicketsWorkspace.vue')),
   Knowledge: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
+  Persona: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
   Events: defineAsyncComponent(() => import('./components/AIContentWorkspace.vue')),
   Skills: defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
   'Business events': defineAsyncComponent(() => import('./components/AutomationWorkspace.vue')),
@@ -45,8 +46,9 @@ const navigation = [
   { name: 'Business events', label: 'Business events', icon: 'zap', business_events: true },
   { name: 'Channel automation', label: 'Channel automation', icon: 'list-ordered', manage: true },
   { name: 'Flows', label: 'Flows', icon: 'git-branch', flows: true },
-  { name: 'Knowledge', label: 'Knowledge base', icon: 'book-open', ai: true, skills: true },
-  { name: 'Events', label: 'AI events', icon: 'calendar', ai: true, skills: true },
+  { name: 'Knowledge', label: 'Knowledge base', icon: 'book-open', knowledge: true },
+  { name: 'Persona', label: 'Persona', icon: 'smile', persona: true },
+  { name: 'Events', label: 'AI events', icon: 'calendar', events: true },
   { name: 'Skills', label: 'AI skills', icon: 'bot', ai: true, skills: true },
   { name: 'Settings', label: 'Settings', icon: 'settings', manage: true },
   { name: 'Teams', label: 'Roles & access', icon: 'user-check' },
@@ -54,7 +56,7 @@ const navigation = [
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
 const rendered = pageCapabilities(document.getElementById('app'))
-const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, teams_enabled: false, folders: false, ai: false, skills: false, business_events: false, flows: false }), ready = ref(Boolean(rendered))
+const capabilities = ref(rendered || { manage: false, configure: false, teams: false, billing: false, multi_team: false, teams_enabled: false, folders: false, ai: false, skills: false, knowledge: false, persona: false, events: false, business_events: false, flows: false }), ready = ref(Boolean(rendered))
 const error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const visible = computed(() => navigation.filter(item => navListed(item, capabilities.value)))
@@ -141,7 +143,7 @@ onErrorCaptured(e => {
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
       <AccessDenied v-else-if="current && !navAllowed(current, capabilities)" :page="current" :capabilities="capabilities" />
-      <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events', 'Knowledge', 'Events'].includes(view) ? { kind: {Skills:'skills', 'Business events':'business_events', Knowledge:'knowledge', Events:'events'}[view] } : {}" />
+      <component :is="views[view]" v-else-if="ready" v-bind="['Skills', 'Business events', 'Knowledge', 'Persona', 'Events'].includes(view) ? { kind: {Skills:'skills', 'Business events':'business_events', Knowledge:'knowledge', Persona:'persona', Events:'events'}[view] } : {}" />
     </main>
     <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :sections="sections" :view="view" :section="section" :badge="inboxBadge" @navigate="view = $event" @section="openSection">
       <template #footer>

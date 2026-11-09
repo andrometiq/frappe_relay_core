@@ -50,9 +50,11 @@ class ApiTests(unittest.TestCase):
             'Relay Communication User':set(),
             'Relay Communication Team User':{'all_teams'},
             'Relay Communication Manager':{'all_teams',('Relay Team','write'),('Relay WhatsApp Billing Month','read'),
-                                           ('Relay AI Skill','write'),('Relay Business Event Rule','write')},
+                                           ('Relay AI Skill','write'),('Relay Business Event Rule','write'),
+                                           ('Relay AI Playbook','write'),('Relay AI Event','write'),('Relay AI Persona','write')},
             'System Manager':{'all_teams',('Relay Team','write'),('Relay WhatsApp Billing Month','read'),
-                              ('Relay AI Skill','write'),('Relay Business Event Rule','write'),('Relay Settings','write')},
+                              ('Relay AI Skill','write'),('Relay Business Event Rule','write'),('Relay Settings','write'),
+                              ('Relay AI Playbook','write'),('Relay AI Event','write'),('Relay AI Persona','write')},
         }[role]
         self.f.has_permission=lambda doctype,ptype='read',**kwargs:(doctype,ptype) in rights
         self.api.can_manage=lambda:('Relay Team','write') in rights
@@ -66,7 +68,7 @@ class ApiTests(unittest.TestCase):
         with patch('relay_core.channels.enabled',return_value=[whatsapp]),patch('relay_core.hub_channels.site_numbers',return_value=numbers) as listed:
             result=self.api.capabilities()
         self.assertEqual(result,{'onboarding':{'required':False,'step':'done'},'contact_transfer':True,'manage':True,'teams':False,'teams_enabled':False,'folders':True,'billing':True,'multi_team':True,'configure':False,
-                                 'ai':True,'skills':True,'business_events':True,'flows':True,
+                                 'ai':True,'skills':True,'knowledge':True,'persona':True,'events':True,'business_events':True,'flows':True,
                                  'enabled_channels':['WhatsApp'],'max_file_bytes':file_limits.MAX_BYTES,'channels':{'WhatsApp':{'templates':True}},'whatsapp_numbers':numbers,
                                  'inbox_channels':[dict(row,medium='WhatsApp') for row in numbers]})
         listed.assert_called_once_with('WhatsApp')
@@ -96,12 +98,12 @@ class ApiTests(unittest.TestCase):
         listed.assert_not_called()
 
     def test_capabilities_follow_each_role(self):
-        flags=('manage','teams','billing','multi_team','configure','skills','business_events')
+        flags=('manage','teams','billing','multi_team','configure','skills','business_events','knowledge','events','persona')
         expected={
-            'Relay Communication User':(False,False,False,False,False,False,False),
-            'Relay Communication Team User':(False,False,False,True,False,False,False),
-            'Relay Communication Manager':(True,False,True,True,False,True,True),
-            'System Manager':(True,False,True,True,True,True,True),
+            'Relay Communication User':(False,False,False,False,False,False,False,False,False,False),
+            'Relay Communication Team User':(False,False,False,True,False,False,False,False,False,False),
+            'Relay Communication Manager':(True,False,True,True,False,True,True,True,True,True),
+            'System Manager':(True,False,True,True,True,True,True,True,True,True),
         }
         for role,values in expected.items():
             self.use_role(role)
@@ -115,6 +117,12 @@ class ApiTests(unittest.TestCase):
         with patch('relay_core.channels.enabled',return_value=[]),patch('relay_core.features.is_enabled',return_value=False):
             result=self.api.capabilities()
         self.assertEqual((result['manage'],result['teams'],result['teams_enabled'],result['folders']),(True,False,False,False))
+
+    def test_knowledge_and_events_pages_stay_while_ai_is_off(self):
+        self.use_role('Relay Communication Manager')
+        with patch('relay_core.channels.enabled',return_value=[]),patch.object(self.api.ai_features,'is_enabled',return_value=False):
+            result=self.api.capabilities()
+        self.assertEqual((result['ai'],result['skills'],result['knowledge'],result['events'],result['persona']),(False,False,True,True,True))
 
     def test_invalid_input_does_not_write(self):
         for name,account,enabled in [('','valid',1),('RELAY-CH-0000000001','',1),('RELAY-CH-0000000001','valid','garbage')]:

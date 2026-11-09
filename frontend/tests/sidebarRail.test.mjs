@@ -18,10 +18,10 @@ test('the desktop rail is 72px wide and every item shows its label and a tooltip
 })
 
 test('rail groups keep the order Chats, Tickets, Contacts, WhatsApp, Automation and Settings at the bottom', () => {
-  const all = ['Messages', 'Tickets', 'Contacts', 'WhatsApp', 'Business events', 'Flows', 'Skills', 'Settings', 'Teams', 'Activity'].map(page)
+  const all = ['Messages', 'Tickets', 'Contacts', 'WhatsApp', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events', 'Settings', 'Teams', 'Activity'].map(page)
   const groups = railGroups(all)
   assert.deepEqual(names(groups), [['Chats', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['WhatsApp', ['WhatsApp']],
-    ['Automation', ['Business events', 'Flows', 'Skills']], ['Settings', ['Settings', 'Teams', 'Activity']]])
+    ['Automation', ['Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events']], ['Settings', ['Settings', 'Teams', 'Activity']]])
   assert.deepEqual(groups.filter(group => group.bottom).map(group => group.name), ['Settings'])
   assert.equal(groups.find(group => group.name === 'Tickets').icon, 'ticket')
 })

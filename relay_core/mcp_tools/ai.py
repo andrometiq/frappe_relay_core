@@ -1,15 +1,18 @@
-"""The site's own AI setup: events, knowledge and skills, saved through the same APIs and checks as the AI screens.
+"""The site's own AI setup: events, knowledge, the persona and skills, saved through the same APIs and checks as
+the screens.
 
-Every tool needs the Enable AI features switch, as the screens do. Writes need the Relay Communication Manager role."""
+Events, knowledge and the persona work while the Enable AI features switch is off: external agents use them too.
+Skills need the switch, as their screen does. Writes need write access to the record type, as on the screens."""
 import json
 from functools import wraps
 
 from relay_core.mcp_tools.registry import CONFIRM, CURSOR, FLAG, NAME_FIELD, READ, WRITE, ToolError, obj, tool
-from relay_core.permissions import permitted_document
+from relay_core.permissions import permitted_document, require_access
 
 EVENT, SKILL = 'Relay AI Event', 'Relay AI Skill'
 AI_OFF = ('AI features are turned off. Ask a System Manager to turn on Enable AI features in Relay Settings (Features), '
           'then retry.')
+MEMORY_OFF = 'AI features are off, so the Relay AI does not read events into memory. The event text is still in use.'
 LIVE = 'This makes a live skill that answers customers; pass confirm: true after the user agreed.'
 DATE = {'type': 'string', 'pattern': '^[0-9]{4}-[0-9]{2}-[0-9]{2}$', 'description': 'YYYY-MM-DD; empty to clear.'}
 TEXT = {'type': 'string', 'maxLength': 8000}
@@ -21,6 +24,8 @@ EVENT_VALUES = obj({'title': NAME_FIELD, 'enabled': FLAG, 'company': {'type': 's
                     'audience': {'type': 'array', 'items': NAME_FIELD, 'minItems': 1, 'maxItems': 20}}, ('audience',))
 KNOWLEDGE_VALUES = obj({'title': NAME_FIELD, 'enabled': FLAG, 'company': {'type': 'string', 'maxLength': 140},
                         'business_doctype': {'type': 'string', 'maxLength': 140}, 'instructions': TEXT | {'minLength': 1}})
+PERSONA_VALUES = obj({'persona_name': NAME_FIELD, 'enabled': FLAG, 'company': {'type': 'string', 'maxLength': 140},
+                      'instructions': {'type': 'string', 'maxLength': 4000}})
 SKILL_VALUES = obj({
     'title': NAME_FIELD, 'enabled': FLAG, 'channel': {'type': 'string', 'maxLength': 140}, 'business_doctype': NAME_FIELD,
     'ai_model': {'type': 'string', 'maxLength': 140}, 'run_as_user': {'type': 'string', 'maxLength': 140},
@@ -44,7 +49,7 @@ OPTION_KINDS = ('business_doctype', 'channel', 'model', 'user', 'report', 'actio
 
 
 def ai_tool(name, safety, schema, doc, **options):
-    """Register an AI setup tool that refuses with AI_OFF while the site's AI switch is off."""
+    """Register a skills tool that refuses with AI_OFF while the site's AI switch is off."""
     def register(handler):
         @wraps(handler)
         def guarded(**arguments):
@@ -77,19 +82,19 @@ def skill_values(values):
     return {**values, **{field: json.dumps(values[field]) for field in SKILL_LISTS if field in values}}
 
 
-@ai_tool('events_list', READ, PAGE, {
-    'summary': 'List the business events the Relay AI knows, 30 per page.',
+@tool('events_list', READ, PAGE, {
+    'summary': 'List the business events (offers, seasons, dated facts), 30 per page. They work while AI features are off.',
     'use_when': 'the user talks about an event, offer or campaign; check whether it exists before events_save.',
     'avoid_when': 'you know the event name; use events_read.',
     'returns': '{items: [{name, title, enabled, company, description, event_starts_on, event_ends_on, available_from, '
                'available_to, memory_status, audience: [business type]}], next}.',
-    'errors': 'AI features off; "Not permitted" without the Relay Communication Manager role.'})
+    'errors': '"Not permitted" without read access to events.'})
 def events_list(after=None):
     from relay_core.ai import events
     return events.directory(after)
 
 
-@ai_tool('events_read', READ, NAMED, {
+@tool('events_read', READ, NAMED, {
     'summary': 'Read one event with its audience, links and attached files.',
     'use_when': 'before you change an event or add sources to it.',
     'avoid_when': 'you need the built AI memory; use events_status.',
@@ -101,13 +106,14 @@ def events_read(name):
     return events.read(name)
 
 
-@ai_tool('events_save', WRITE, obj({'values': EVENT_VALUES, 'name': NAME_FIELD}, ('values',)), {
-    'summary': 'Create or change a business event. The AI uses it in replies to contacts of the audience business types '
-               'while it is enabled and inside available_from to available_to. Saving rebuilds the event memory.',
+@tool('events_save', WRITE, obj({'values': EVENT_VALUES, 'name': NAME_FIELD}, ('values',)), {
+    'summary': 'Create or change a business event. reply_context and the Relay AI use it for contacts of the audience '
+               'business types while it is enabled and inside available_from to available_to. With AI features on, saving '
+               'rebuilds the event memory.',
     'use_when': 'the user describes an event, offer or season the AI must know; without name it creates one with title, '
                 'description and audience.',
     'avoid_when': 'the text is a standing rule for every reply; use knowledge_save.',
-    'returns': '{name}. Follow the memory build with events_status.',
+    'returns': '{name}. With AI features on, follow the memory build with events_status.',
     'errors': '"Choose 1–20 audience business types" (audience replaces the saved list; copy it from events_read); '
               '"Enable these contact types first: X"; "The event ends before it starts"; "Invalid event fields".'},
     once=True)
@@ -117,13 +123,13 @@ def events_save(values, name=None, request_key=None):
     return events.save(values, name)
 
 
-@ai_tool('events_attach', WRITE, obj({'name': NAME_FIELD, 'url': {'type': 'string', 'maxLength': 1000},
+@tool('events_attach', WRITE, obj({'name': NAME_FIELD, 'url': {'type': 'string', 'maxLength': 1000},
                                       'note': {'type': 'string', 'maxLength': 140},
                                       'filename': {'type': 'string', 'minLength': 1, 'maxLength': 120},
                                       'content_base64': {'type': 'string', 'minLength': 1}}, ('name', 'request_key')), {
-    'summary': 'Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. The AI reads '
-               'it into the event memory. At most 10 links and 10 files; a file within the Relay Settings AI file size '
-               '(4 MB by default) and a request of at most 7 MB.',
+    'summary': 'Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. With AI '
+               'features on, the Relay AI reads it into the event memory. At most 10 links and 10 files; a file within the '
+               'Relay Settings AI file size (4 MB by default) and a request of at most 7 MB.',
     'use_when': 'the user gives a catalog, price list, poster or web page for an event.',
     'avoid_when': 'the text fits the event description; use events_save.',
     'returns': 'the event as events_read returns it.',
@@ -135,33 +141,37 @@ def events_attach(name, request_key, url=None, note=None, filename=None, content
     return events.attach(name, url=url, note=note, filename=filename, content_base64=content_base64)
 
 
-@ai_tool('events_status', READ, NAMED, {
+@tool('events_status', READ, NAMED, {
     'summary': 'Read the memory build of an event: its state, the published memory text the AI uses and the sources read.',
     'use_when': 'after events_save or events_attach, to check what the AI will know.',
     'avoid_when': 'you need the event fields; use events_read.',
     'returns': '{memory_status (Pending, Building, Ready, Partial or Failed), memory_built_at, memory_error, memory, '
-               'memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}.',
+               'memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}. While AI features are off: '
+               '{name, memory_status: "AI off", note}.',
     'errors': '"Not found"; "Not permitted".'})
 def events_status(name):
+    from relay_core import ai_features
+    if not ai_features.is_enabled():
+        return {**record(EVENT, name, ()), 'memory_status': 'AI off', 'note': MEMORY_OFF}
     status = record(EVENT, name, ('memory_status', 'memory_built_at', 'memory_error', 'memory', 'memory_revision',
                                   'memory_build'))
     build = permitted_document('Relay AI Event Build', status['memory_build']) if status['memory_build'] else None
     return {**status, 'sources': json.loads(build.sources or '[]') if build else []}
 
 
-@ai_tool('knowledge_list', READ, PAGE, {
-    'summary': 'List the knowledge base: global standing playbooks (Relay AI Playbook) the Relay AI follows in every reply '
-               'of their scope. App and skill playbooks are managed in Desk and are not listed.',
+@tool('knowledge_list', READ, PAGE, {
+    'summary': 'List the knowledge base: standing business rules that every reply of their scope follows, by you and by '
+               'the Relay AI. They work while AI features are off. App and skill playbooks are managed in Desk and are not listed.',
     'use_when': 'before knowledge_save, to change an existing entry instead of adding a duplicate.',
     'avoid_when': 'you look for events; use events_list.',
     'returns': '{items: [{name, title, enabled, company, business_doctype, instructions}], next}.',
-    'errors': 'AI features off; "Not permitted".'})
+    'errors': '"Not permitted" without read access to knowledge.'})
 def knowledge_list(after=None):
     from relay_core.ai import knowledge
     return knowledge.directory(after)
 
 
-@ai_tool('knowledge_read', READ, NAMED, {
+@tool('knowledge_read', READ, NAMED, {
     'summary': 'Read one knowledge entry.',
     'use_when': 'before you change it.',
     'avoid_when': 'you need all entries; use knowledge_list.',
@@ -172,7 +182,7 @@ def knowledge_read(name):
     return record(DOCTYPE, name, FIELDS)
 
 
-@ai_tool('knowledge_save', WRITE, obj({'values': KNOWLEDGE_VALUES, 'name': NAME_FIELD}, ('values',)), {
+@tool('knowledge_save', WRITE, obj({'values': KNOWLEDGE_VALUES, 'name': NAME_FIELD}, ('values',)), {
     'summary': 'Create or change a standing instruction. Blank company and business_doctype apply to every reply. '
                'Keep entries short: more than 100 enabled entries, or more than 8000 characters for one reply, stop the AI.',
     'use_when': 'the user states a lasting business rule, policy or fact the AI must always follow.',
@@ -184,6 +194,35 @@ def knowledge_save(values, name=None, request_key=None):
     from relay_core.ai import knowledge
     require_key(name, request_key)
     return knowledge.save(values, name)
+
+
+@tool('persona_read', READ, obj({'company': {'type': 'string', 'maxLength': 140}}), {
+    'summary': 'Read the persona you reply as: its name and how it writes. A company without its own persona uses the '
+               'one for every company. Works while AI features are off.',
+    'use_when': 'before you write to a customer, unless reply_context already gave you the persona.',
+    'avoid_when': 'you are about to reply in a chat; reply_context returns the persona with the rest of the context.',
+    'returns': '{persona: {name, persona_name, enabled, company, instructions} or null}.',
+    'errors': '"Not permitted" without read access to the persona.'})
+def persona_read(company=None):
+    import frappe
+    from relay_core.ai import persona
+    require_access(persona.DOCTYPE)
+    return {'persona': persona.find(company, frappe.get_list)}
+
+
+@tool('persona_save', WRITE, obj({'values': PERSONA_VALUES, 'name': NAME_FIELD}, ('values',)), {
+    'summary': 'Create or change the persona: the one name and voice every customer reply uses, yours and the Relay AI\'s. '
+               'One per company; a blank company covers every company without its own.',
+    'use_when': 'the user names the bot or tells you how replies must sound.',
+    'avoid_when': 'it is a business rule rather than a voice; use knowledge_save.',
+    'returns': '{name}.',
+    'errors': '"This company already has a persona; change that one" (read it with persona_read and pass its name); '
+              '"Use at most 4000 instruction characters"; "Invalid persona fields"; "Not permitted" without manager access.'},
+    once=True)
+def persona_save(values, name=None, request_key=None):
+    from relay_core.ai import persona
+    require_key(name, request_key)
+    return persona.save(values, name)
 
 
 @ai_tool('skills_list', READ, PAGE, {

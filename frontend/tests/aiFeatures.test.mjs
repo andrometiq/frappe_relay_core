@@ -33,18 +33,21 @@ test('only a System Manager sees the AI switch in Settings', async () => {
 })
 
 
-test('knowledge and events pages and direct content loads require AI', async () => {
+test('knowledge and events pages stay while AI is off; skills still require AI', async () => {
   const app = await read('SiteApp.vue')
-  for (const name of ['Knowledge', 'Events']) {
-    assert.match(app, new RegExp("name: '" + name + "'[^}]*ai: true"))
-    assert.equal(navAllowed({name, ai:true, skills:true}, {...manager, ai:false}), false)
-    assert.equal(navAllowed({name, ai:true, skills:true}, {...manager, ai:true}), true)
+  for (const [name, gate] of [['Knowledge', 'knowledge'], ['Persona', 'persona'], ['Events', 'events']]) {
+    assert.match(app, new RegExp("name: '" + name + "'[^}]*" + gate + ': true'))
+    assert.doesNotMatch(app, new RegExp("name: '" + name + "'[^}]*ai: true"))
+    assert.equal(navAllowed({ name, [gate]: true }, { ...manager, ai: false, [gate]: true }), true)
+    assert.equal(navAllowed({ name, [gate]: true }, { ...manager, ai: true, [gate]: false }), false)
   }
   const content = await read('components/AIContentWorkspace.vue')
-  assert.match(content, /capabilities.value.ai && capabilities.value.skills/)
+  assert.match(content, /Boolean\(capabilities.value\[props.kind\]\)/)
   assert.match(content, /if \(!allowed.value\)/)
   assert.match(content, /ai.knowledge/)
   assert.match(content, /ai.events/)
+  assert.match(content, /ai.persona/)
+  assert.match(content, /v-model="draft.persona_name" label="Persona name"/)
   const editor = await read('components/AutomationWorkspace.vue')
   assert.match(editor, /capabilities.value.ai && capabilities.value.skills/)
   assert.match(editor, /Configured reports/)

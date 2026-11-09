@@ -728,6 +728,7 @@ class SharedAdapterTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch('relay_core.ai.capabilities.active', side_effect=ValueError('Capability is not approved')))
         self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
+        self.enterContext(patch('relay_core.ai.persona.prompt', return_value=''))
         # Privacy lookup data is supplied by the dedicated reply guard tests.
         guard_db = framework()
         guard_db.db.exists.return_value = False

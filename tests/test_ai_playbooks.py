@@ -199,6 +199,7 @@ class CopyCheckTests(unittest.TestCase):
 
     def setUp(self):
         self.enterContext(patch('relay_core.ai.knowledge.prompt', return_value=''))
+        self.enterContext(patch('relay_core.ai.persona.prompt', return_value=''))
         self.enterContext(patch('relay_core.ai.playbooks.copy_texts', return_value=(SECRET,)))
         self.enterContext(patch('relay_core.ai.registry.builtin.copy_texts', return_value=(SECRET,)))
         self.f = fixtures.framework()

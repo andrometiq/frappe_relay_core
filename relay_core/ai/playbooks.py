@@ -28,14 +28,19 @@ def applies(row, business, company) -> bool:
             and (not row.business_doctype or row.business_doctype == business[0]))
 
 
-def global_text(business, company) -> str:
-    """The full text of every enabled global customer playbook for this business type and company. Too many rows
-    or too much text stops inference for staff review instead of dropping rules."""
-    rows = frappe.get_all(DOCTYPE, filters={'enabled': 1, 'is_global': 1, 'audience': 'customer'}, fields=FIELDS,
-                          order_by='name asc', limit_page_length=MAX_GLOBAL_ROWS + 1)
+def global_rows(business, company, reader=None) -> list:
+    """Every enabled global customer playbook for this business type and company. `reader` is frappe.get_list to
+    apply the user's permissions. Too many rows stop inference for staff review instead of dropping rules."""
+    rows = (reader or frappe.get_all)(DOCTYPE, filters={'enabled': 1, 'is_global': 1, 'audience': 'customer'}, fields=FIELDS,
+                                      order_by='name asc', limit_page_length=MAX_GLOBAL_ROWS + 1)
     if len(rows) > MAX_GLOBAL_ROWS:
         raise ValueError('Too many knowledge instructions; consolidate the knowledge base')
-    text = '\n\n'.join(f'{row.title}\n{row.instructions}' for row in rows if applies(row, business, company))
+    return [row for row in rows if applies(row, business, company)]
+
+
+def global_text(business, company) -> str:
+    """The full text of the global playbooks for this business type and company. Too much text stops inference."""
+    text = '\n\n'.join(f'{row.title}\n{row.instructions}' for row in global_rows(business, company))
     if len(text) > MAX_GLOBAL_CHARS:
         raise ValueError('Knowledge instructions exceed the 8000 character prompt budget')
     return text

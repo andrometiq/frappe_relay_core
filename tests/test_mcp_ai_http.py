@@ -17,7 +17,9 @@ class MCPAISetupTests(MCPSite):
         cls.operator = user('relay-mcp-ai-manager@example.invalid', manager=True)
         cls.staff = user('relay-mcp-ai-staff@example.invalid')
         cls.outsider = cls.plain_user(frappe, 'relay-mcp-ai-outsider@example.invalid')
-        for actor in (cls.operator, cls.staff, cls.outsider):
+        cls.agent = user('relay-mcp-ai-agent@example.invalid')
+        frappe.get_doc('User', cls.agent).add_roles('Relay AI Agent')
+        for actor in (cls.operator, cls.staff, cls.outsider, cls.agent):
             cls.add_token(frappe, actor)
         cls.ai_was = frappe.db.get_single_value('Relay Settings', 'enable_ai_features')
         cls.created = []
@@ -48,7 +50,8 @@ class MCPAISetupTests(MCPSite):
         """A create over MCP; the record is removed after the class."""
         result = self.tool(tool, {'values': values, 'request_key': 'key-' + secrets.token_hex(8), **arguments})
         self.assertFalse(result['isError'], result)
-        doctype = {'events_save': 'Relay AI Event', 'knowledge_save': 'Relay AI Playbook', 'skills_save': 'Relay AI Skill'}[tool]
+        doctype = {'events_save': 'Relay AI Event', 'knowledge_save': 'Relay AI Playbook', 'skills_save': 'Relay AI Skill',
+                   'persona_save': 'Relay AI Persona'}[tool]
         self.created.append((doctype, result['structuredContent']['name']))
         return result['structuredContent']['name']
 
@@ -67,12 +70,26 @@ class MCPAISetupTests(MCPSite):
         self.assertTrue(result['isError'], result)
         return result['content'][0]['text']
 
-    def test_switch_off_refuses_every_ai_tool_with_the_hint(self):
+    def test_switch_off_refuses_skills_with_the_hint(self):
         from relay_core.mcp_tools.ai import AI_OFF
         self.set_ai(0)
-        for tool, arguments in (('events_list', {}), ('skills_options', {'kind': 'business_doctype'}),
-                                ('knowledge_save', {'values': {'title': 'Off', 'instructions': 'x'}, 'request_key': 'off-key-001'})):
+        for tool, arguments in (('skills_list', {}), ('skills_options', {'kind': 'business_doctype'}),
+                                ('skills_save', {'values': {'title': 'Off'}, 'request_key': 'off-key-001'})):
             self.assertEqual(self.error(tool, arguments), AI_OFF)
+
+    def test_switch_off_keeps_events_and_knowledge(self):
+        import frappe
+        self.set_ai(0)
+        name = self.save('events_save', {'title': 'Off Fair ' + self.stamp, 'description': 'Fair while AI is off.',
+                                         'audience': AUDIENCE})
+        self.assertIn(name, [row['name'] for row in self.tool('events_list', {})['structuredContent']['items']])
+        self.assertEqual(self.tool('events_read', {'name': name})['structuredContent']['description'], 'Fair while AI is off.')
+        self.assertEqual(self.tool('events_status', {'name': name})['structuredContent']['memory_status'], 'AI off')
+        self.assertFalse([call for call in frappe.enqueue.call_args_list if call.args[:1] == ('relay_core.ai.event_memory.build',)])
+        rule = self.save('knowledge_save', {'title': 'Off rule ' + self.stamp, 'enabled': 1, 'instructions': 'Reply politely.'})
+        self.assertEqual(self.tool('knowledge_read', {'name': rule})['structuredContent']['instructions'], 'Reply politely.')
+        self.assertTrue(self.error('knowledge_save', {'values': {'title': 'Staff', 'instructions': 'x'}, 'request_key': 'staff-off-01'},
+                                   self.staff).startswith('Not permitted'))
 
     def test_roles_match_the_ai_screens(self):
         response = self.post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'events_list', 'arguments': {}}},
@@ -139,6 +156,82 @@ class MCPAISetupTests(MCPSite):
         self.assertEqual(self.tool('knowledge_read', {'name': name})['structuredContent']['instructions'], 'Accept returns within 7 days.')
         self.assertEqual(self.error('knowledge_save', {'values': {'instructions': '   '}, 'name': name}),
                          'Use 1–8000 instruction characters')
+
+    def test_persona_is_saved_by_managers_and_read_while_ai_is_off(self):
+        import frappe
+        from relay_core.ai import persona
+        self.set_ai(0)
+        frappe.db.delete('Relay AI Persona', {'company': ['is', 'not set']})
+        frappe.db.commit()
+        name = self.save('persona_save', {'persona_name': 'Mira', 'instructions': 'Warm and short. Sign off as Mira.'})
+        read = self.tool('persona_read', {})['structuredContent']['persona']
+        self.assertEqual((read['name'], read['persona_name'], read['instructions']), (name, 'Mira', 'Warm and short. Sign off as Mira.'))
+        self.assertEqual(self.tool('persona_read', {'company': 'No Such Company'})['structuredContent']['persona']['name'], name)
+        self.assertIn(name, [row.name for row in self.as_manager(persona.directory)['items']])
+        self.assertTrue(self.error('persona_save', {'values': {'persona_name': 'Second'}, 'request_key': 'persona-' + self.stamp})
+                        .startswith('Already exists'))
+        self.assertFalse(self.tool('persona_save', {'values': {'enabled': 0}, 'name': name})['isError'])
+        self.assertIsNone(self.tool('persona_read', {})['structuredContent']['persona'])
+        self.assertTrue(self.error('persona_save', {'values': {'persona_name': 'Staff'}, 'request_key': 'staff-persona-1'},
+                                   self.staff).startswith('Not permitted'))
+        self.assertTrue(self.error('persona_read', {}, self.staff).startswith('Not permitted'))
+
+    def test_ai_agent_role_gives_templates_events_knowledge_and_persona_read_only(self):
+        import frappe
+        events = self.tool('events_save', {'values': {'title': 'Agent Fair ' + self.stamp, 'description': 'Agent fair.',
+                                                      'audience': AUDIENCE}, 'request_key': 'agent-' + self.stamp}, self.agent)
+        self.assertFalse(events['isError'], events)
+        self.created.append(('Relay AI Event', events['structuredContent']['name']))
+        rule = self.tool('knowledge_save', {'values': {'title': 'Agent rule ' + self.stamp, 'instructions': 'Be brief.'},
+                                            'request_key': 'agent-rule-' + self.stamp}, self.agent)
+        self.assertFalse(rule['isError'], rule)
+        self.created.append(('Relay AI Playbook', rule['structuredContent']['name']))
+        self.assertFalse(self.tool('persona_read', {}, self.agent)['isError'])
+        self.assertTrue(frappe.has_permission('Relay WhatsApp Template', 'write', user=self.agent))
+        template = self.tool('templates_create', {'channel': 'RELAY-CH-0000000001', 'name': 'agent_check', 'language': 'en',
+                                                  'category': 'UTILITY', 'components': [{'type': 'BODY', 'text': 'Hi'}]},
+                             self.agent)
+        self.assertFalse(template['content'][0]['text'].startswith('Not permitted'), template)
+        for tool, arguments in (('persona_save', {'values': {'persona_name': 'No'}, 'request_key': 'agent-persona-1'}),
+                                ('skills_save', {'values': {'title': 'No'}, 'request_key': 'agent-skill-01'}),
+                                ('campaigns_create', {'title': 'Agent deny check', 'channel': 'none', 'rows': [{'phone': '91'}]})):
+            message = self.error(tool, arguments, self.agent)
+            self.assertTrue(message.startswith('Not permitted'), (tool, message))
+
+    def readable_chat(self):
+        """The chat with the most messages that the manager can read, found with the real permission rules."""
+        import frappe
+        rows = frappe.db.sql('select relay_contact from `tabRelay Message` where relay_contact is not null '
+                             'group by relay_contact order by count(*) desc limit 20', pluck=True)
+        return next((name for name in rows if frappe.has_permission('Relay Contact', 'read', doc=name, user=self.operator)), None)
+
+    def test_reply_context_gives_the_facts_while_ai_is_off_and_respects_access(self):
+        contact = self.readable_chat()
+        if not contact:
+            self.skipTest('the manager can read no chat on this site')
+        self.set_ai(0)
+        self.save('events_save', {'title': 'Context Fair ' + self.stamp, 'enabled': 1,
+                                          'description': 'Context fair on the first.', 'audience': AUDIENCE})
+        self.save('knowledge_save', {'title': 'Context rule ' + self.stamp, 'enabled': 1, 'instructions': 'Reply politely.'})
+        context = self.tool('reply_context', {'contact': contact, 'limit': 5})['structuredContent']
+        self.assertEqual(context['contact']['name'], contact)
+        self.assertTrue(1 <= len(context['messages']) <= 5)
+        self.assertIn('open', context['reply_window'])
+        self.assertIn({'title': 'Context rule ' + self.stamp, 'instructions': 'Reply politely.'}, context['knowledge'])
+        record = context['business_record']
+        if record and record['doctype'] == 'Customer':
+            self.assertIn('Context fair on the first.', [row['description'] for row in context['events']])
+        self.assertNotIn('memory', json.dumps(context['events']))
+        result = self.tool('reply_context', {'contact': contact}, self.staff)
+        if result['isError']:
+            self.assertRegex(result['content'][0]['text'], '^(Not permitted|Not found)')
+        else:
+            staff = result['structuredContent']
+            self.assertEqual((staff['events'], staff['knowledge'], staff['persona']), (None, None, None))
+        response = self.post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                              'params': {'name': 'reply_context', 'arguments': {'contact': contact}}},
+                             {'Authorization': self.tokens[self.outsider]})
+        self.assertEqual(response.status_code, 403)
 
     def test_skill_saved_over_mcp_equals_the_skills_screen_save(self):
         import frappe

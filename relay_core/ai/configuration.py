@@ -10,6 +10,7 @@ FIELDS = ('title', 'enabled', 'channel', 'business_doctype', 'ai_model', 'run_as
           'handoff_owner', 'mode', 'daily_limit', 'daily_spend_cap_usd', 'target', 'instructions', 'reply_style',
           'search_confirmation', 'exact_trigger', 'execution_policy', 'allowed_tools', 'allowed_actions',
           'max_tool_calls', 'memory_enabled')
+CONTENT_KINDS = ('business_doctype', 'company_record')
 
 
 def _list(value, label):
@@ -202,12 +203,14 @@ def test_skill(name, message):
 
 
 @frappe.whitelist(methods=['GET'])
-@ai_features.required
 def editor_options(kind, query='', doctype=None, business_doctype=None, action=None, selected=None, skill=None):
-    """Bounded, permission-checked captions; identifiers are values, never labels."""
+    """Bounded, permission-checked captions; identifiers are values, never labels. The knowledge, event and persona
+    pickers (CONTENT_KINDS) work while AI features are off."""
+    if kind not in CONTENT_KINDS:
+        ai_features.require()
     if skill is not None and skill != "":
         document_name(skill)
-    if kind == 'business_doctype':
+    if kind in CONTENT_KINDS:
         require_access()
     else:
         require_access('Relay AI Skill', 'write')

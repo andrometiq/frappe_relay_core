@@ -89,6 +89,24 @@ def messages_read_one(message):
             'claim': public_claim(context['contact'], claim) if (claim := active_claim(context['contact'])) else None}
 
 
+@tool('reply_context', READ, obj({'contact': CONTACT, 'limit': limit(50, 20)}, ('contact',)), {
+    'summary': 'Everything you need before you reply in one chat: the persona to reply as, the contact, the business '
+               'record you may read, the active events and knowledge rules that apply to it, the recent messages and the '
+               'reply window. Works while AI features are off.',
+    'use_when': 'always, right before you write a reply or a template to this chat.',
+    'avoid_when': 'you only browse chats; use inbox_list or messages_list.',
+    'returns': '{contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: '
+               '{persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, '
+               'available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. '
+               'A section your user may not read is null; facts not in events or knowledge are unknown.',
+    'errors': '"Not found" or "Not permitted" for a chat outside the user\'s scope; "Too many knowledge instructions".'})
+def reply_context(contact, limit=20):
+    from relay_core import reply_context as context
+    from relay_core.mcp_tools.coordination import with_actors
+    result = context.read(contact, limit)
+    return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']])}
+
+
 @tool('chat_mark_read', WRITE, obj({'contact': CONTACT, 'read': FLAG}, ('contact', 'read')), {
     'summary': "Mark a chat read (1) or its newest incoming message unread (0) for the current user only.",
     'use_when': 'you handled a chat, or want to leave it for a person to answer.',

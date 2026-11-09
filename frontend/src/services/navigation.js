@@ -1,7 +1,7 @@
 import { channelCan, channelEnabled } from './enabledChannels.js'
 
 // A nav item lists the api.capabilities flags it needs, such as configure or teams.
-const gates = ['manage', 'configure', 'teams', 'billing', 'ai', 'skills', 'business_events', 'flows']
+const gates = ['manage', 'configure', 'teams', 'billing', 'ai', 'skills', 'knowledge', 'persona', 'events', 'business_events', 'flows']
 
 export function navAllowed(item, capabilities) {
   return gates.every(gate => !item[gate] || Boolean(capabilities?.[gate])) && channelEnabled(capabilities, item.channel)
@@ -24,7 +24,7 @@ const RAIL = [
   { name: 'Tickets', icon: 'ticket', pages: ['Tickets'] },
   { name: 'Contacts', icon: 'users', pages: ['Contacts'] },
   { name: 'WhatsApp', icon: 'message-circle', pages: ['WhatsApp'] },
-  { name: 'Automation', icon: 'zap', pages: ['Channel automation', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Events'] },
+  { name: 'Automation', icon: 'zap', pages: ['Channel automation', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events'] },
   { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams', 'Activity'], bottom: true },
 ]
 

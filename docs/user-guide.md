@@ -66,6 +66,7 @@ Give staff a Relay role in Desk. Configure their business types in Settings > Bu
 | --- | --- |
 | Relay Communication User | Assigned enabled business types, plus shared unlinked contacts and chats. |
 | Relay Communication Manager | Every enabled business type, bulk campaigns and business type assignments. |
+| Relay AI Agent | For an external AI user, together with Relay Communication User: WhatsApp templates, AI events and the knowledge base, and reading the persona. See `integrations/agent-skill/relay/`. |
 | System Manager | Everything above, plus setup and channel configuration. |
 | Relay Hub Service | Hub callbacks only. |
 
@@ -75,7 +76,7 @@ See [Business type access](business-access.md) for the current rule.
 
 The Send on WhatsApp button shows for the roles set on each action. When the Roles table is empty, every Relay user who can read the document sees it.
 
-AI is off by default. While "Enable AI features" is off, Relay shows no AI skills page, no conversation summary, no translation and no AI controls on tickets. Business events, templates and campaigns still work.
+AI is off by default. While "Enable AI features" is off, Relay shows no AI skills page, no conversation summary, no translation and no AI controls on tickets. The knowledge base, AI events, business events, templates and campaigns still work.
 
 ## 4. Page by page catalog
 
@@ -368,7 +369,7 @@ Hub connection:
 
 | Item | What it does |
 | --- | --- |
-| Enable AI features | Shows or hides all AI pages and controls. Off by default. |
+| Enable AI features | Shows or hides the AI skills, summaries, translations and AI controls. Off by default. The knowledge base and AI events stay. |
 | WhatsApp billing: Service charge (%) | Added to Meta's price on the Billing page. |
 | Channel readiness | The numbers the Hub gave to this site and whether each is enabled. |
 | Disconnect from Relay Hub | Ends this site's link to the Hub after you confirm. See [5.12](#512-set-up-whatsapp-from-relay-core). |
@@ -644,7 +645,7 @@ Notes:
 | delete a folder | Its chats stay in your Inbox without a folder. Other people are not affected. |
 | remove a user from a business type | A Communication User loses access to that type. |
 | give someone Relay Communication Manager | They see every enabled type and can prepare bulk campaigns. |
-| turn off "Enable AI features" | AI pages and buttons hide and AI background work stops. Inbox, templates, campaigns and business events keep working. |
+| turn off "Enable AI features" | AI pages and buttons hide and AI background work stops. Inbox, templates, campaigns, business events, the knowledge base and AI events keep working. |
 | change the callback secret only in Core | The Hub's messages are rejected and no new messages arrive. Put the same secret in the Hub. |
 | save a wrong Hub URL, token or account | Save connection checks with the Hub first. It shows an error and keeps the old values. |
 | delete a template | Meta removes it. Rules and buttons that use it stop sending until you pick another template. |

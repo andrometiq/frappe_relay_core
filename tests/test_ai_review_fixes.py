@@ -178,7 +178,8 @@ class DecisionRegression(unittest.TestCase):
 
     def test_knowledge_copy_is_blocked_at_inference_and_delivery(self):
         instructions = 'always ask the internal team to verify every special discount before sharing details with customers'
-        with patch('relay_core.ai.knowledge.prompt', return_value=instructions) as knowledge:
+        with patch('relay_core.ai.knowledge.prompt', return_value=instructions) as knowledge, \
+                patch('relay_core.ai.persona.prompt', return_value=''):
             result = self.complete('What should I know?', instructions)
             self.assertTrue(result['handoff'])
             self.assertEqual(result['reason'], reply_guard.REASON)

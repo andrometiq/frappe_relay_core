@@ -1,0 +1,85 @@
+{
+  "doctype": "DocType",
+  "name": "Relay AI Persona",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "RELAY-PER-.##########",
+  "naming_rule": "Expression (old style)",
+  "track_changes": 1,
+  "title_field": "persona_name",
+  "description": "The one name and voice that replies to customers use, by people's agents and by the Relay AI. One per company; a blank company covers every company without its own.",
+  "field_order": [
+    "persona_name",
+    "enabled",
+    "column_break_scope",
+    "company",
+    "section_instructions",
+    "instructions"
+  ],
+  "fields": [
+    {
+      "fieldname": "persona_name",
+      "label": "Persona name",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1,
+      "description": "The name replies introduce themselves with, such as a bot name."
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": "1",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "column_break_scope",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "company",
+      "label": "Company",
+      "fieldtype": "Link",
+      "options": "Company",
+      "in_list_view": 1,
+      "description": "Blank for every company without its own persona."
+    },
+    {
+      "fieldname": "section_instructions",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "instructions",
+      "label": "Instructions",
+      "fieldtype": "Long Text",
+      "description": "How the persona writes: tone, greeting, sign-off and what it never says. Up to 4000 characters."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "report": 1,
+      "export": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay Communication Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1,
+      "print": 1
+    },
+    {
+      "role": "Relay AI Agent",
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "modified": "2026-11-09 13:00:00.000000"
+}
