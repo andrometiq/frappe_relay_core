@@ -66,6 +66,7 @@ Give staff a Relay role in Desk. Configure their business types in Settings > Bu
 | --- | --- |
 | Relay Communication User | Assigned enabled business types, plus shared unlinked contacts and chats. |
 | Relay Communication Manager | Every enabled business type, bulk campaigns and business type assignments. |
+| Relay AI Agent | For an external AI user, together with Relay Communication User: WhatsApp templates, AI events and the knowledge base, and reading the persona. See `integrations/agent-skill/relay/`. |
 | System Manager | Everything above, plus setup and channel configuration. |
 | Relay Hub Service | Hub callbacks only. |
 
