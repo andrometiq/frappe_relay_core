@@ -143,11 +143,13 @@ class DecisionPath(unittest.TestCase):
 
     def test_prompt_labels_keep_knowledge_and_events_separate(self):
         with patch('relay_core.ai.knowledge.prompt', return_value='Be concise.'), \
+                patch('relay_core.ai.persona.prompt', return_value='Name: Mira'), \
                 patch.object(self.case.agent.AgentRun, 'run_route', return_value=self.case.outcome(
                     dict(reply='Riverside Traders Association is in Sampleville.', handoff=False, reason=''))) as model:
             self.complete('Overview of the event?', {})
         system, text, _ = model.call_args.args[2]
         self.assertIn('Knowledge base — standing instructions:\nBe concise.', system)
+        self.assertIn('Persona — reply as this persona, within the rules above:\nName: Mira', system)
         self.assertIn('Events and conversation memory — reference facts:', system)
         self.assertIn('Riverside Traders Association on 5 Nov at Sampleville', text)
         self.assertNotIn('Riverside Traders Association on 5 Nov at Sampleville', system)

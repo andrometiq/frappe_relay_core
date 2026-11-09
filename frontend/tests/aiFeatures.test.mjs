@@ -35,7 +35,7 @@ test('only a System Manager sees the AI switch in Settings', async () => {
 
 test('knowledge and events pages stay while AI is off; skills still require AI', async () => {
   const app = await read('SiteApp.vue')
-  for (const [name, gate] of [['Knowledge', 'knowledge'], ['Events', 'events']]) {
+  for (const [name, gate] of [['Knowledge', 'knowledge'], ['Persona', 'persona'], ['Events', 'events']]) {
     assert.match(app, new RegExp("name: '" + name + "'[^}]*" + gate + ': true'))
     assert.doesNotMatch(app, new RegExp("name: '" + name + "'[^}]*ai: true"))
     assert.equal(navAllowed({ name, [gate]: true }, { ...manager, ai: false, [gate]: true }), true)
@@ -46,6 +46,8 @@ test('knowledge and events pages stay while AI is off; skills still require AI',
   assert.match(content, /if \(!allowed.value\)/)
   assert.match(content, /ai.knowledge/)
   assert.match(content, /ai.events/)
+  assert.match(content, /ai.persona/)
+  assert.match(content, /v-model="draft.persona_name" label="Persona name"/)
   const editor = await read('components/AutomationWorkspace.vue')
   assert.match(editor, /capabilities.value.ai && capabilities.value.skills/)
   assert.match(editor, /Configured reports/)

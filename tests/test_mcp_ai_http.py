@@ -48,7 +48,8 @@ class MCPAISetupTests(MCPSite):
         """A create over MCP; the record is removed after the class."""
         result = self.tool(tool, {'values': values, 'request_key': 'key-' + secrets.token_hex(8), **arguments})
         self.assertFalse(result['isError'], result)
-        doctype = {'events_save': 'Relay AI Event', 'knowledge_save': 'Relay AI Playbook', 'skills_save': 'Relay AI Skill'}[tool]
+        doctype = {'events_save': 'Relay AI Event', 'knowledge_save': 'Relay AI Playbook', 'skills_save': 'Relay AI Skill',
+                   'persona_save': 'Relay AI Persona'}[tool]
         self.created.append((doctype, result['structuredContent']['name']))
         return result['structuredContent']['name']
 
@@ -153,6 +154,25 @@ class MCPAISetupTests(MCPSite):
         self.assertEqual(self.tool('knowledge_read', {'name': name})['structuredContent']['instructions'], 'Accept returns within 7 days.')
         self.assertEqual(self.error('knowledge_save', {'values': {'instructions': '   '}, 'name': name}),
                          'Use 1–8000 instruction characters')
+
+    def test_persona_is_saved_by_managers_and_read_while_ai_is_off(self):
+        import frappe
+        from relay_core.ai import persona
+        self.set_ai(0)
+        frappe.db.delete('Relay AI Persona', {'company': ['is', 'not set']})
+        frappe.db.commit()
+        name = self.save('persona_save', {'persona_name': 'Mira', 'instructions': 'Warm and short. Sign off as Mira.'})
+        read = self.tool('persona_read', {})['structuredContent']['persona']
+        self.assertEqual((read['name'], read['persona_name'], read['instructions']), (name, 'Mira', 'Warm and short. Sign off as Mira.'))
+        self.assertEqual(self.tool('persona_read', {'company': 'No Such Company'})['structuredContent']['persona']['name'], name)
+        self.assertIn(name, [row.name for row in self.as_manager(persona.directory)['items']])
+        self.assertTrue(self.error('persona_save', {'values': {'persona_name': 'Second'}, 'request_key': 'persona-' + self.stamp})
+                        .startswith('Already exists'))
+        self.assertFalse(self.tool('persona_save', {'values': {'enabled': 0}, 'name': name})['isError'])
+        self.assertIsNone(self.tool('persona_read', {})['structuredContent']['persona'])
+        self.assertTrue(self.error('persona_save', {'values': {'persona_name': 'Staff'}, 'request_key': 'staff-persona-1'},
+                                   self.staff).startswith('Not permitted'))
+        self.assertTrue(self.error('persona_read', {}, self.staff).startswith('Not permitted'))
 
     def test_skill_saved_over_mcp_equals_the_skills_screen_save(self):
         import frappe

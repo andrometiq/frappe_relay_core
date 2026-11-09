@@ -540,6 +540,26 @@ Read one message with its media details, five messages around it and the reply w
 - **Common errors:** "Not found" for an unknown id; "Not permitted" outside the user's scope.
 - **Arguments:** `message`
 
+### `persona_read` (R)
+
+Read the persona you reply as: its name and how it writes. A company without its own persona uses the one for every company. Works while AI features are off.
+
+- **Use when:** before you write to a customer, unless reply_context already gave you the persona.
+- **Do not use when:** you are about to reply in a chat; reply_context returns the persona with the rest of the context.
+- **Returns:** {persona: {name, persona_name, enabled, company, instructions} or null}.
+- **Common errors:** "Not permitted" without read access to the persona.
+- **Arguments:** `company`?
+
+### `persona_save` (W)
+
+Create or change the persona: the one name and voice every customer reply uses, yours and the Relay AI's. One per company; a blank company covers every company without its own.
+
+- **Use when:** the user names the bot or tells you how replies must sound.
+- **Do not use when:** it is a business rule rather than a voice; use knowledge_save.
+- **Returns:** {name}.
+- **Common errors:** "This company already has a persona; change that one" (read it with persona_read and pass its name); "Use at most 4000 instruction characters"; "Invalid persona fields"; "Not permitted" without manager access.
+- **Arguments:** `values`, `name`?, `request_key`?
+
 ### `records_list` (R)
 
 Search business records of one type that have Relay chats, 30 per page.

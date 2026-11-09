@@ -8,15 +8,24 @@ import WorkspaceHeading from './WorkspaceHeading.vue'
 
 const props = defineProps({ kind: String })
 const capabilities = inject('relayCapabilities')
+// Knowledge, events and the persona are business content: they work while AI features are off.
+const KINDS = {
+  knowledge: { api: 'ai.knowledge', button: 'New instruction', saved: 'Instructions saved.',
+    description: 'Standing instructions: how the assistant should work.',
+    blank: { title: '', enabled: 0, company: '', business_doctype: '', instructions: '' } },
+  events: { api: 'ai.events', button: 'New event', saved: 'Event saved.',
+    description: 'Facts about something that happened or is planned. Events are reference information for replies, not instructions.',
+    blank: { title: '', enabled: 0, company: '', description: '', audience: [], event_starts_on: '', event_ends_on: '', available_from: '', available_to: '' } },
+  persona: { api: 'ai.persona', button: 'New persona', saved: 'Persona saved.',
+    description: 'The one name and voice every customer reply uses, by agents and by the AI. One per company; a blank company covers the rest.',
+    blank: { persona_name: '', enabled: 1, company: '', instructions: '' } },
+}
+const config = computed(() => KINDS[props.kind])
 const allowed = computed(() => Boolean(capabilities.value[props.kind]))
-const knowledge = computed(() => props.kind === 'knowledge')
-const api = computed(() => knowledge.value ? 'ai.knowledge' : 'ai.events')
 const rows = ref([]), next = ref(null), draft = ref(null), busy = ref(false), error = ref(''), notice = ref('')
 let generation = 0
 function edit(row = {}) {
-  draft.value = knowledge.value
-    ? { title: '', enabled: 0, company: '', business_doctype: '', instructions: '', ...row }
-    : { title: '', enabled: 0, company: '', description: '', audience: [], event_starts_on: '', event_ends_on: '', available_from: '', available_to: '', ...row }
+  draft.value = { ...config.value.blank, ...row }
   error.value = ''; notice.value = ''
 }
 async function load(append = false) {
@@ -24,7 +33,7 @@ async function load(append = false) {
   if (!allowed.value) { rows.value = []; draft.value = null; return }
   busy.value = true; error.value = ''
   try {
-    const page = await coreApi(api.value + '.directory', { after: append ? next.value : null })
+    const page = await coreApi(config.value.api + '.directory', { after: append ? next.value : null })
     if (current === generation) { rows.value = append ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (current === generation) error.value = e.message }
   finally { if (current === generation) busy.value = false }
@@ -35,10 +44,10 @@ async function save() {
   busy.value = true; error.value = ''; notice.value = ''
   const { name, memory_status, ...values } = draft.value
   try {
-    const result = await coreApi(api.value + '.save', { name, values }, true)
+    const result = await coreApi(config.value.api + '.save', { name, values }, true)
     draft.value.name = result.name
     await load()
-    notice.value = knowledge.value ? 'Instructions saved.' : capabilities.value.ai ? 'Event saved. Its memory build is queued.' : 'Event saved.'
+    notice.value = props.kind === 'events' && capabilities.value.ai ? 'Event saved. Its memory build is queued.' : config.value.saved
   } catch (e) { error.value = e.message }
   finally { busy.value = false }
 }
@@ -49,23 +58,25 @@ onMounted(load)
   <section class="v1-screen"><div class="v1-content space-y-4">
     <p v-if="!allowed">Use a communication manager account to access this page.</p>
     <template v-else>
-      <WorkspaceHeading :description="knowledge ? 'Standing instructions: how the assistant should work.' : 'Facts about something that happened or is planned. Events are reference information for replies, not instructions.'">
-        <Button :label="knowledge ? 'New instruction' : 'New event'" :disabled="busy" @click="edit()" />
+      <WorkspaceHeading :description="config.description">
+        <Button :label="config.button" :disabled="busy" @click="edit()" />
       </WorkspaceHeading>
       <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
       <div class="v1-detail-grid">
         <div class="space-y-3">
           <button v-for="row in rows" :key="row.name" class="v1-list-card" :disabled="busy" :aria-pressed="draft?.name === row.name" @click="edit(row)">
-            <strong>{{ row.title }}</strong><span>{{ row.enabled ? 'Enabled' : 'Disabled' }}{{ row.memory_status ? ' · ' + row.memory_status : '' }}</span>
+            <strong>{{ row.title || row.persona_name }}</strong><span>{{ row.enabled ? 'Enabled' : 'Disabled' }}{{ kind === 'persona' ? ' · ' + (row.company || 'Every company') : '' }}{{ row.memory_status && capabilities.ai ? ' · ' + row.memory_status : '' }}</span>
           </button>
           <p v-if="busy" role="status">Loading…</p><p v-else-if="!rows.length">No records yet.</p>
           <span v-if="next" ref="moreSentinel" aria-hidden="true" />
         </div>
         <form v-if="draft" class="workflow-card space-y-3" @submit.prevent="save">
-          <FormControl v-model="draft.title" label="Title" required :disabled="busy" />
+          <FormControl v-if="kind === 'persona'" v-model="draft.persona_name" label="Persona name" maxlength="140" required :disabled="busy" />
+          <FormControl v-else v-model="draft.title" label="Title" required :disabled="busy" />
           <FormControl v-model="draft.enabled" label="Enabled" type="checkbox" :disabled="busy" />
           <EventPicker v-model="draft.company" label="Company (blank for all)" kind="company_record" :disabled="busy" />
-          <template v-if="knowledge">
+          <FormControl v-if="kind === 'persona'" v-model="draft.instructions" label="How the persona writes (tone, greeting, sign-off)" type="textarea" rows="8" maxlength="4000" :disabled="busy" />
+          <template v-else-if="kind === 'knowledge'">
             <EventPicker v-model="draft.business_doctype" label="Business type (blank for all)" kind="business_doctype" :disabled="busy" />
             <FormControl v-model="draft.instructions" label="Standing instructions" type="textarea" rows="8" maxlength="8000" required :disabled="busy" />
           </template>

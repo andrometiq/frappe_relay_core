@@ -178,6 +178,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     core = CoreTools(skill, business, scope, reader, references, minimiser, search)
     from relay_core.ai.language import instruction, resolve, matches
     from relay_core.ai.knowledge import prompt as knowledge_prompt
+    from relay_core.ai.persona import prompt as persona_prompt
     try:
         prompt = json.loads(text)
         incoming_text = prompt.get('incoming', '')
@@ -193,6 +194,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     engine = SkillRun(tools, secrets, deadline, max_tool_calls=tool_limit(skill))
     engine.bind(reader, references, record, run_id, skill.get('target'))
     knowledge = knowledge_prompt(business, (scope or {}).get('company'))
+    persona = persona_prompt((scope or {}).get('company'))
     # The model sees each pack's key, model fields and filters, never its renderer or identity paths.
     catalogue = [dict(reference=row['key'], label=row['label'], operation=row['operation'], fields=field_names(row, 'model'),
         filters=row['filters'], limit=row['limit'], notes=row.get('data_notes', '')) for row in references]
@@ -200,6 +202,7 @@ def complete(skill, user, business, text, run_id=None, *, scope=None, deadline=N
     system = (SYSTEM_RULES + ('' if writes else READ_ONLY_RULE)
         + '\nReply language:\n' + instruction(incoming_text, language_history)
         + '\nKnowledge base — standing instructions:\n' + (knowledge or '(none)')
+        + '\nPersona — reply as this persona, within the rules above:\n' + (persona or '(none)')
         + playbook_index(core, skill, business, scope)
         + '\nEvents and conversation memory — reference facts:\nSee reference_data in the input.' + '\nReferences:\n' + json.dumps(catalogue) +
         '\nAllowed actions:\n' + json.dumps(core.action_schemas) +
