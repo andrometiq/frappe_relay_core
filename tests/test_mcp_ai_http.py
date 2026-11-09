@@ -67,12 +67,26 @@ class MCPAISetupTests(MCPSite):
         self.assertTrue(result['isError'], result)
         return result['content'][0]['text']
 
-    def test_switch_off_refuses_every_ai_tool_with_the_hint(self):
+    def test_switch_off_refuses_skills_with_the_hint(self):
         from relay_core.mcp_tools.ai import AI_OFF
         self.set_ai(0)
-        for tool, arguments in (('events_list', {}), ('skills_options', {'kind': 'business_doctype'}),
-                                ('knowledge_save', {'values': {'title': 'Off', 'instructions': 'x'}, 'request_key': 'off-key-001'})):
+        for tool, arguments in (('skills_list', {}), ('skills_options', {'kind': 'business_doctype'}),
+                                ('skills_save', {'values': {'title': 'Off'}, 'request_key': 'off-key-001'})):
             self.assertEqual(self.error(tool, arguments), AI_OFF)
+
+    def test_switch_off_keeps_events_and_knowledge(self):
+        import frappe
+        self.set_ai(0)
+        name = self.save('events_save', {'title': 'Off Fair ' + self.stamp, 'description': 'Fair while AI is off.',
+                                         'audience': AUDIENCE})
+        self.assertIn(name, [row['name'] for row in self.tool('events_list', {})['structuredContent']['items']])
+        self.assertEqual(self.tool('events_read', {'name': name})['structuredContent']['description'], 'Fair while AI is off.')
+        self.assertEqual(self.tool('events_status', {'name': name})['structuredContent']['memory_status'], 'AI off')
+        self.assertFalse([call for call in frappe.enqueue.call_args_list if call.args[:1] == ('relay_core.ai.event_memory.build',)])
+        rule = self.save('knowledge_save', {'title': 'Off rule ' + self.stamp, 'enabled': 1, 'instructions': 'Reply politely.'})
+        self.assertEqual(self.tool('knowledge_read', {'name': rule})['structuredContent']['instructions'], 'Reply politely.')
+        self.assertTrue(self.error('knowledge_save', {'values': {'title': 'Staff', 'instructions': 'x'}, 'request_key': 'staff-off-01'},
+                                   self.staff).startswith('Not permitted'))
 
     def test_roles_match_the_ai_screens(self):
         response = self.post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'events_list', 'arguments': {}}},

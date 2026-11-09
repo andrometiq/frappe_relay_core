@@ -301,16 +301,34 @@ class AISetupTests(unittest.TestCase):
         with patch('relay_core.ai_features.is_enabled', return_value=True):
             return registry.TOOLS[tool].handler(**arguments)
 
-    def test_ai_switch_off_gives_the_system_manager_hint(self):
+    def test_ai_switch_off_refuses_skills_with_the_system_manager_hint(self):
         from relay_core.mcp_tools.ai import AI_OFF
         save = Mock()
-        with patch('relay_core.ai_features.is_enabled', return_value=False), patch('relay_core.ai.knowledge.save', save), \
+        with patch('relay_core.ai_features.is_enabled', return_value=False), patch('relay_core.ai.configuration.save', save), \
                 patch.object(coordination, 'run', side_effect=lambda entry, arguments: entry.handler(**arguments)):
-            for name, arguments in (('events_list', {}), ('knowledge_save', CASES['knowledge_save'][0])):
+            for name, arguments in (('skills_list', {}), ('skills_save', CASES['skills_save'][0])):
                 result = registry.call(name, arguments)
                 self.assertTrue(result['isError'])
                 self.assertEqual(result['content'][0]['text'], AI_OFF)
         save.assert_not_called()
+
+    def test_events_and_knowledge_work_while_ai_is_off(self):
+        with patch('relay_core.ai_features.is_enabled', return_value=False), \
+                patch.object(coordination, 'run', side_effect=lambda entry, arguments: entry.handler(**arguments)):
+            for name in ('events_list', 'events_save', 'knowledge_list', 'knowledge_save'):
+                arguments, targets, _ = CASES[name]
+                with patch.object(importlib.import_module(targets[0][0]), targets[0][1], Mock(return_value=targets[0][2])) as core:
+                    result = registry.call(name, arguments)
+                self.assertFalse(result['isError'], (name, result))
+                core.assert_called_once()
+
+    def test_event_status_says_ai_off_instead_of_failing(self):
+        from relay_core.mcp_tools.ai import MEMORY_OFF
+        with patch('relay_core.ai_features.is_enabled', return_value=False), \
+                patch('relay_core.mcp_tools.ai.record', return_value={'name': 'Fair-001'}) as record:
+            status = registry.TOOLS['events_status'].handler(name='Fair-001')
+        self.assertEqual(status, {'name': 'Fair-001', 'memory_status': 'AI off', 'note': MEMORY_OFF})
+        record.assert_called_once_with('Relay AI Event', 'Fair-001', ())
 
     def test_creating_needs_a_request_key_but_changing_does_not(self):
         save = Mock(return_value={'name': 'Orders-001'})

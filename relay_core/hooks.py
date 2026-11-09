@@ -96,10 +96,11 @@ doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for eve
 doc_events.setdefault('Relay AI Event', {}).update(
     {event: 'relay_core.ai.knowledge_base.ingest.on_event_change' for event in ('on_update', 'on_trash')})
 
-# Cover generic Desk/REST access as well as the dedicated AI APIs.
-for _doctype in ('Relay AI Skill', 'Relay AI Knowledge', 'Relay AI Event', 'Relay AI Event Build',
+# Cover generic Desk/REST access as well as the dedicated AI APIs. Events, their builds and playbooks (the
+# knowledge base) stay open while AI is off: staff and external agents use them; only the model work is gated.
+for _doctype in ('Relay AI Skill', 'Relay AI Knowledge',
                  'Relay Memory', 'Relay AI Provider', 'Relay Learned Procedure', 'Relay Automation Policy',
-                 'Relay Conversation Summary', 'Relay Message Translation', 'Relay AI Playbook',
+                 'Relay Conversation Summary', 'Relay Message Translation',
                  'Relay AI Knowledge Base', 'Relay AI Knowledge Source', 'Relay AI Knowledge Chunk', 'Relay AI Memory'):
     has_permission[_doctype] = 'relay_core.ai_features.document_permission'
     permission_query_conditions[_doctype] = 'relay_core.ai_features.query_condition'

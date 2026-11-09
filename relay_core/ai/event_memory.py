@@ -87,6 +87,14 @@ def queue_build(event: str, force: bool = False) -> None:
                    relay_event=event, triggered_by=frappe.session.user, force=force)
 
 
+def queue_all() -> None:
+    """AI features turned on: build the memory and knowledge source of every event, also those saved while off."""
+    from relay_core.ai.knowledge_base.ingest import queue_event
+    for event in frappe.get_all(EVENT, pluck='name'):
+        queue_build(event)
+        queue_event(event)
+
+
 def on_file_change(doc, method=None) -> None:
     """File hook: an attachment of an event was added, changed or removed. Its knowledge source follows."""
     if doc.attached_to_doctype == EVENT and doc.attached_to_name:

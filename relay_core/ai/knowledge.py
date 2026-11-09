@@ -1,8 +1,9 @@
-"""Standing owner instructions: the global desk playbooks, behind the original knowledge API shape."""
+"""Standing owner instructions: the global desk playbooks, behind the original knowledge API shape.
+
+They work while AI features are off: external agents follow them too."""
 import frappe
 from frappe.model.naming import make_autoname
 
-from relay_core import ai_features
 from relay_core.ai import playbooks
 from relay_core.permissions import require_access
 from relay_core.business_access import document_name
@@ -17,7 +18,6 @@ def prompt(business, company):
 
 
 @frappe.whitelist(methods=['GET'])
-@ai_features.required
 def directory(after=None):
     require_access(DOCTYPE)
     filters = dict(STANDING, **({'name': ['>', after]} if after else {}))
@@ -26,7 +26,6 @@ def directory(after=None):
 
 
 @frappe.whitelist(methods=['POST'])
-@ai_features.required
 def save(values, name=None):
     require_access(DOCTYPE, 'write')
     values = frappe.parse_json(values) if isinstance(values, str) else values

@@ -8,7 +8,7 @@ import WorkspaceHeading from './WorkspaceHeading.vue'
 
 const props = defineProps({ kind: String })
 const capabilities = inject('relayCapabilities')
-const allowed = computed(() => capabilities.value.ai && capabilities.value.skills)
+const allowed = computed(() => Boolean(capabilities.value[props.kind]))
 const knowledge = computed(() => props.kind === 'knowledge')
 const api = computed(() => knowledge.value ? 'ai.knowledge' : 'ai.events')
 const rows = ref([]), next = ref(null), draft = ref(null), busy = ref(false), error = ref(''), notice = ref('')
@@ -38,7 +38,7 @@ async function save() {
     const result = await coreApi(api.value + '.save', { name, values }, true)
     draft.value.name = result.name
     await load()
-    notice.value = knowledge.value ? 'Instructions saved.' : 'Event saved. Its memory build is queued.'
+    notice.value = knowledge.value ? 'Instructions saved.' : capabilities.value.ai ? 'Event saved. Its memory build is queued.' : 'Event saved.'
   } catch (e) { error.value = e.message }
   finally { busy.value = false }
 }
@@ -47,9 +47,9 @@ onMounted(load)
 </script>
 <template>
   <section class="v1-screen"><div class="v1-content space-y-4">
-    <p v-if="!allowed">Enable AI features and use a communication manager account to access this page.</p>
+    <p v-if="!allowed">Use a communication manager account to access this page.</p>
     <template v-else>
-      <WorkspaceHeading :description="knowledge ? 'Standing instructions: how the assistant should work.' : 'Facts about something that happened or is planned. Events are reference information, not instructions.'">
+      <WorkspaceHeading :description="knowledge ? 'Standing instructions: how the assistant should work.' : 'Facts about something that happened or is planned. Events are reference information for replies, not instructions.'">
         <Button :label="knowledge ? 'New instruction' : 'New event'" :disabled="busy" @click="edit()" />
       </WorkspaceHeading>
       <ErrorMessage :message="error" /><p v-if="notice" role="status">{{ notice }}</p>
@@ -73,9 +73,9 @@ onMounted(load)
             <EventPicker v-model="draft.audience" label="Audience business types" kind="business_doctype" multiple :disabled="busy" />
             <FormControl v-model="draft.description" label="Event facts" type="textarea" rows="8" maxlength="10000" required :disabled="busy" />
             <div class="grid gap-3 sm:grid-cols-2">
-              <FormControl v-for="field in ['event_starts_on', 'event_ends_on', 'available_from', 'available_to']" :key="field" v-model="draft[field]" :label="{event_starts_on:'Event starts',event_ends_on:'Event ends',available_from:'AI may use from',available_to:'AI may use until'}[field]" type="date" :disabled="busy" />
+              <FormControl v-for="field in ['event_starts_on', 'event_ends_on', 'available_from', 'available_to']" :key="field" v-model="draft[field]" :label="{event_starts_on:'Event starts',event_ends_on:'Event ends',available_from:'Use in replies from',available_to:'Use in replies until'}[field]" type="date" :disabled="busy" />
             </div>
-            <a v-if="draft.name" class="underline" :href="'/desk/relay-ai-event/' + encodeURIComponent(draft.name)">Attachments and memory details</a>
+            <a v-if="draft.name" class="underline" :href="'/desk/relay-ai-event/' + encodeURIComponent(draft.name)">{{ capabilities.ai ? 'Attachments and memory details' : 'Attachments' }}</a>
           </template>
           <Button type="submit" label="Save" variant="solid" :loading="busy" />
         </form>

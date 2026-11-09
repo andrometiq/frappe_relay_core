@@ -222,6 +222,8 @@ def capabilities():
             'multi_team':sees_all_teams(), 'configure':can_configure(),
             'ai':ai_features.is_enabled(),
             'skills':ai_features.is_enabled() and frappe.has_permission('Relay AI Skill', 'write'),
+            'knowledge':frappe.has_permission('Relay AI Playbook', 'write'),
+            'events':frappe.has_permission('Relay AI Event', 'write'),
             'business_events':frappe.has_permission('Relay Business Event Rule', 'write'),
             'flows':manage and features.is_enabled('flows'),
             'enabled_channels':enabled_names, 'max_file_bytes':get_max_bytes(),

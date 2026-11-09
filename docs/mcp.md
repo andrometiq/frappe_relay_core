@@ -25,7 +25,7 @@ The older `relay.*` tool names still work but are not listed.
 - **Customer sends** (class S) reach a real person or change live state. Every one needs `request_key`. A repeated key returns the first result and sends nothing new. Use a new key only for a new message.
 - **Confirm**: campaign start, schedule, resume and retry, template delete and flow publish need `confirm: true`. Campaign start and schedule also need `expected_recipients` equal to the count from `campaigns_validate`.
 - **Permissions**: you act as the API key's user. A chat, record or campaign the user cannot see returns "Not found" or "Not permitted". Campaigns, contacts_create and flows need the Relay Communication Manager role.
-- **AI setup**: events, knowledge and skills need the Enable AI features switch, which only a System Manager can turn on. Saving them needs the Relay Communication Manager role. A new event, knowledge entry or skill needs a `request_key`. A skill answers customers only when it is enabled in Automatic (Live) mode; that save needs `confirm: true`.
+- **AI setup**: events and knowledge work whether the Enable AI features switch is on or off; your replies use them too. Skills need the switch, which only a System Manager can turn on. Saving events, knowledge and skills needs write access to them (the Relay Communication Manager role). A new event, knowledge entry or skill needs a `request_key`. A skill answers customers only when it is enabled in Automatic (Live) mode; that save needs `confirm: true`.
 - **Templates** go to Meta for review the moment you create or update them; there is no local draft. Status starts as PENDING; read it again with `templates_list`.
 
 - **Several actors**: staff in the portal, the Relay automation and AI, and other MCP agents can work on the same chats. Each MCP agent is its own Frappe user. Replies show `sent_by` and `via` (`mcp`, `automation`, `staff` or `system`).
@@ -352,7 +352,7 @@ Mark one linked business record of a Frappe Contact as primary; no record clears
 
 ### `events_attach` (W)
 
-Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. The AI reads it into the event memory. At most 10 links and 10 files; a file within the Relay Settings AI file size (4 MB by default) and a request of at most 7 MB.
+Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp) to an event. With AI features on, the Relay AI reads it into the event memory. At most 10 links and 10 files; a file within the Relay Settings AI file size (4 MB by default) and a request of at most 7 MB.
 
 - **Use when:** the user gives a catalog, price list, poster or web page for an event.
 - **Do not use when:** the text fits the event description; use events_save.
@@ -362,12 +362,12 @@ Add one link or one file (txt, md, csv, json, html, pdf, docx, jpg, png or webp)
 
 ### `events_list` (R)
 
-List the business events the Relay AI knows, 30 per page.
+List the business events (offers, seasons, dated facts), 30 per page. They work while AI features are off.
 
 - **Use when:** the user talks about an event, offer or campaign; check whether it exists before events_save.
 - **Do not use when:** you know the event name; use events_read.
 - **Returns:** {items: [{name, title, enabled, company, description, event_starts_on, event_ends_on, available_from, available_to, memory_status, audience: [business type]}], next}.
-- **Common errors:** AI features off; "Not permitted" without the Relay Communication Manager role.
+- **Common errors:** "Not permitted" without read access to events.
 - **Arguments:** `after`?
 
 ### `events_read` (R)
@@ -382,11 +382,11 @@ Read one event with its audience, links and attached files.
 
 ### `events_save` (W)
 
-Create or change a business event. The AI uses it in replies to contacts of the audience business types while it is enabled and inside available_from to available_to. Saving rebuilds the event memory.
+Create or change a business event. reply_context and the Relay AI use it for contacts of the audience business types while it is enabled and inside available_from to available_to. With AI features on, saving rebuilds the event memory.
 
 - **Use when:** the user describes an event, offer or season the AI must know; without name it creates one with title, description and audience.
 - **Do not use when:** the text is a standing rule for every reply; use knowledge_save.
-- **Returns:** {name}. Follow the memory build with events_status.
+- **Returns:** {name}. With AI features on, follow the memory build with events_status.
 - **Common errors:** "Choose 1–20 audience business types" (audience replaces the saved list; copy it from events_read); "Enable these contact types first: X"; "The event ends before it starts"; "Invalid event fields".
 - **Arguments:** `values`, `name`?, `request_key`?
 
@@ -396,7 +396,7 @@ Read the memory build of an event: its state, the published memory text the AI u
 
 - **Use when:** after events_save or events_attach, to check what the AI will know.
 - **Do not use when:** you need the event fields; use events_read.
-- **Returns:** {memory_status (Pending, Building, Ready, Partial or Failed), memory_built_at, memory_error, memory, memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}.
+- **Returns:** {memory_status (Pending, Building, Ready, Partial or Failed), memory_built_at, memory_error, memory, memory_revision, memory_build, sources: [{id, kind, label, status, reason}]}. While AI features are off: {name, memory_status: "AI off", note}.
 - **Common errors:** "Not found"; "Not permitted".
 - **Arguments:** `name`
 
@@ -482,12 +482,12 @@ List chats, newest activity first, 30 per page, with unread counts and the lates
 
 ### `knowledge_list` (R)
 
-List the knowledge base: global standing playbooks (Relay AI Playbook) the Relay AI follows in every reply of their scope. App and skill playbooks are managed in Desk and are not listed.
+List the knowledge base: standing business rules that every reply of their scope follows, by you and by the Relay AI. They work while AI features are off. App and skill playbooks are managed in Desk and are not listed.
 
 - **Use when:** before knowledge_save, to change an existing entry instead of adding a duplicate.
 - **Do not use when:** you look for events; use events_list.
 - **Returns:** {items: [{name, title, enabled, company, business_doctype, instructions}], next}.
-- **Common errors:** AI features off; "Not permitted".
+- **Common errors:** "Not permitted" without read access to knowledge.
 - **Arguments:** `after`?
 
 ### `knowledge_read` (R)

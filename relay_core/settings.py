@@ -49,6 +49,9 @@ def save_feature(feature, enabled):
     if feature not in features.FIELDS or str(enabled) not in ('0', '1'):
         frappe.throw('Choose a known feature and 0 or 1')
     frappe.db.set_single_value('Relay Settings', features.FIELDS[feature], int(enabled))
+    if feature == 'ai' and int(enabled):
+        from relay_core.ai.event_memory import queue_all
+        queue_all()
     from relay_core.queue_counts import invalidate
     invalidate()
     return {'enabled': features.is_enabled(feature)}
