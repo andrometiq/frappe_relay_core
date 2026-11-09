@@ -129,9 +129,15 @@
       "create": 1,
       "report": 1,
       "print": 1
+    },
+    {
+      "role": "Relay AI Agent",
+      "read": 1,
+      "write": 1,
+      "create": 1
     }
   ],
   "sort_field": "modified",
   "sort_order": "DESC",
-  "modified": "2026-11-04 18:00:00.000000"
+  "modified": "2026-11-09 13:00:00.000000"
 }

@@ -87,6 +87,12 @@
       "report": 1,
       "export": 1,
       "print": 1
+    },
+    {
+      "role": "Relay AI Agent",
+      "read": 1,
+      "write": 1,
+      "create": 1
     }
   ],
   "field_order": [
@@ -103,5 +109,5 @@
     "hub_event_id"
   ],
   "title_field": "template_name",
-  "modified": "2026-10-27 12:00:00.000000"
+  "modified": "2026-11-09 13:00:00.000000"
 }

@@ -12,7 +12,16 @@ Install/migrate idempotently creates one disabled **Default support** skill, ide
 
 The existing **Enable AI features** setting (`enable_ai_features`, frontend `capabilities.ai`) hides skills, channel AI steps and ticket AI explanations. Dedicated AI APIs, evals, memory backfill and generic AI document access are gated server-side. Knowledge (Relay AI Playbook) and events (Relay AI Event) stay open while the switch is off, because staff and external MCP agents use them too; only the event memory build and knowledge ingest need the switch. When the switch turns on, every event is queued for its memory build and knowledge source.
 
-The **persona** (Relay AI Persona) is the one name and voice of customer replies: a persona name and instructions for tone, greeting and sign-off. There is one per company; a persona without company covers every company without its own. Managers edit it on the Persona page next to the knowledge base, or with the MCP tools `persona_read` and `persona_save`. It works while AI features are off. The Relay AI reply prompt includes the enabled persona of the conversation company after the knowledge base, below the system rules. AI settings cannot be changed while disabled; the System Manager can still turn the switch on. This switch is separate from channel automation and the site automation gate.
+The **persona** (Relay AI Persona) is the one name and voice of customer replies: a persona name and instructions for tone, greeting and sign-off. There is one per company; a persona without company covers every company without its own. Managers edit it on the Persona page next to the knowledge base, or with the MCP tools `persona_read` and `persona_save`. It works while AI features are off. The Relay AI reply prompt includes the enabled persona of the conversation company after the knowledge base, below the system rules.
+
+An **external AI** (any MCP client) works as its own Frappe user. Give that user exactly these roles:
+
+| Role | Gives |
+|---|---|
+| Relay Communication User | Read, reply and send in the chats of the business types the user is assigned to (Relay Contact Type users), and tickets. |
+| Relay AI Agent | Manage WhatsApp templates, create and change events and knowledge, read the persona. |
+
+Do not give Relay Communication Manager unless the AI must also run campaigns, create contacts, change flows, skills or the persona. A chat claim pauses the Relay automation only for a manager. The agent instructions and connection template are in `integrations/agent-skill/relay/`. AI settings cannot be changed while disabled; the System Manager can still turn the switch on. This switch is separate from channel automation and the site automation gate.
 
 Relay uses the shared AI Model, AI Provider Account and bounded adapter from `frappe_tools`. Shadow records proposals and the episode ticket without automatic replies or business drafts. The saved-skill preview uses authenticated identity and the same decision path. It sends nothing and creates no operational run, ticket, approval or business document, but can call the configured model and consume budget. Unit tests mock this boundary.
 

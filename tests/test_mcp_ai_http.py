@@ -17,7 +17,9 @@ class MCPAISetupTests(MCPSite):
         cls.operator = user('relay-mcp-ai-manager@example.invalid', manager=True)
         cls.staff = user('relay-mcp-ai-staff@example.invalid')
         cls.outsider = cls.plain_user(frappe, 'relay-mcp-ai-outsider@example.invalid')
-        for actor in (cls.operator, cls.staff, cls.outsider):
+        cls.agent = user('relay-mcp-ai-agent@example.invalid')
+        frappe.get_doc('User', cls.agent).add_roles('Relay AI Agent')
+        for actor in (cls.operator, cls.staff, cls.outsider, cls.agent):
             cls.add_token(frappe, actor)
         cls.ai_was = frappe.db.get_single_value('Relay Settings', 'enable_ai_features')
         cls.created = []
@@ -173,6 +175,28 @@ class MCPAISetupTests(MCPSite):
         self.assertTrue(self.error('persona_save', {'values': {'persona_name': 'Staff'}, 'request_key': 'staff-persona-1'},
                                    self.staff).startswith('Not permitted'))
         self.assertTrue(self.error('persona_read', {}, self.staff).startswith('Not permitted'))
+
+    def test_ai_agent_role_gives_templates_events_knowledge_and_persona_read_only(self):
+        import frappe
+        events = self.tool('events_save', {'values': {'title': 'Agent Fair ' + self.stamp, 'description': 'Agent fair.',
+                                                      'audience': AUDIENCE}, 'request_key': 'agent-' + self.stamp}, self.agent)
+        self.assertFalse(events['isError'], events)
+        self.created.append(('Relay AI Event', events['structuredContent']['name']))
+        rule = self.tool('knowledge_save', {'values': {'title': 'Agent rule ' + self.stamp, 'instructions': 'Be brief.'},
+                                            'request_key': 'agent-rule-' + self.stamp}, self.agent)
+        self.assertFalse(rule['isError'], rule)
+        self.created.append(('Relay AI Playbook', rule['structuredContent']['name']))
+        self.assertFalse(self.tool('persona_read', {}, self.agent)['isError'])
+        self.assertTrue(frappe.has_permission('Relay WhatsApp Template', 'write', user=self.agent))
+        template = self.tool('templates_create', {'channel': 'RELAY-CH-0000000001', 'name': 'agent_check', 'language': 'en',
+                                                  'category': 'UTILITY', 'components': [{'type': 'BODY', 'text': 'Hi'}]},
+                             self.agent)
+        self.assertFalse(template['content'][0]['text'].startswith('Not permitted'), template)
+        for tool, arguments in (('persona_save', {'values': {'persona_name': 'No'}, 'request_key': 'agent-persona-1'}),
+                                ('skills_save', {'values': {'title': 'No'}, 'request_key': 'agent-skill-01'}),
+                                ('campaigns_create', {'title': 'Agent deny check', 'channel': 'none', 'rows': [{'phone': '91'}]})):
+            message = self.error(tool, arguments, self.agent)
+            self.assertTrue(message.startswith('Not permitted'), (tool, message))
 
     def readable_chat(self):
         """The chat with the most messages that the manager can read, found with the real permission rules."""
