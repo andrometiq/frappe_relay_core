@@ -64,6 +64,14 @@ class AiFeatureSwitchTests(unittest.TestCase):
             self.assertEqual(events.directory(), {'items': [], 'next': None})
             self.assertEqual(knowledge.directory(), {'items': [], 'next': None})
 
+    def test_content_pickers_work_while_off_and_skill_pickers_do_not(self):
+        with patch.object(frappe, 'db', settings_db(0)), patch.object(configuration, 'require_access') as access, \
+             patch.object(frappe, 'get_list', return_value=[frappe._dict(name='Example Co')]):
+            self.assertEqual(configuration.editor_options('company_record')['items'][0]['value'], 'Example Co')
+            access.assert_called_once_with()
+            with self.assertRaisesRegex(frappe.PermissionError, ai_features.OFF_MESSAGE):
+                configuration.editor_options('report', business_doctype='Customer')
+
     def test_turning_ai_on_queues_every_event_and_off_builds_nothing(self):
         from relay_core.ai import event_memory
         with patch.object(frappe, 'get_all', return_value=['Fair-001', 'Sale-001']), \
