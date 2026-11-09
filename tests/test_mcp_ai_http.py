@@ -174,6 +174,41 @@ class MCPAISetupTests(MCPSite):
                                    self.staff).startswith('Not permitted'))
         self.assertTrue(self.error('persona_read', {}, self.staff).startswith('Not permitted'))
 
+    def readable_chat(self):
+        """The chat with the most messages that the manager can read, found with the real permission rules."""
+        import frappe
+        rows = frappe.db.sql('select relay_contact from `tabRelay Message` where relay_contact is not null '
+                             'group by relay_contact order by count(*) desc limit 20', pluck=True)
+        return next((name for name in rows if frappe.has_permission('Relay Contact', 'read', doc=name, user=self.operator)), None)
+
+    def test_reply_context_gives_the_facts_while_ai_is_off_and_respects_access(self):
+        contact = self.readable_chat()
+        if not contact:
+            self.skipTest('the manager can read no chat on this site')
+        self.set_ai(0)
+        self.save('events_save', {'title': 'Context Fair ' + self.stamp, 'enabled': 1,
+                                          'description': 'Context fair on the first.', 'audience': AUDIENCE})
+        self.save('knowledge_save', {'title': 'Context rule ' + self.stamp, 'enabled': 1, 'instructions': 'Reply politely.'})
+        context = self.tool('reply_context', {'contact': contact, 'limit': 5})['structuredContent']
+        self.assertEqual(context['contact']['name'], contact)
+        self.assertTrue(1 <= len(context['messages']) <= 5)
+        self.assertIn('open', context['reply_window'])
+        self.assertIn({'title': 'Context rule ' + self.stamp, 'instructions': 'Reply politely.'}, context['knowledge'])
+        record = context['business_record']
+        if record and record['doctype'] == 'Customer':
+            self.assertIn('Context fair on the first.', [row['description'] for row in context['events']])
+        self.assertNotIn('memory', json.dumps(context['events']))
+        result = self.tool('reply_context', {'contact': contact}, self.staff)
+        if result['isError']:
+            self.assertRegex(result['content'][0]['text'], '^(Not permitted|Not found)')
+        else:
+            staff = result['structuredContent']
+            self.assertEqual((staff['events'], staff['knowledge'], staff['persona']), (None, None, None))
+        response = self.post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                              'params': {'name': 'reply_context', 'arguments': {'contact': contact}}},
+                             {'Authorization': self.tokens[self.outsider]})
+        self.assertEqual(response.status_code, 403)
+
     def test_skill_saved_over_mcp_equals_the_skills_screen_save(self):
         import frappe
         from relay_core.ai import configuration

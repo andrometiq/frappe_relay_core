@@ -34,6 +34,8 @@ CASES = {
                       ((CON,), {'before': None, 'channel': None, 'limit': 3, 'query': ''})),
     'messages_read_one': ({'message': MSG}, [('relay_core.api', 'message_context', {'contact': CON, 'items': [{'name': MSG}]}),
                                              ('relay_core.messaging', 'reply_window', {'open': True})], ((MSG,), {})),
+    'reply_context': ({'contact': CON}, [('relay_core.reply_context', 'read', {'persona': None, 'messages': {'items': [{'name': MSG}]}})],
+                      ((CON, 20), {})),
     'chat_mark_read': ({'contact': CON, 'read': 1}, [('relay_core.message_reads', 'mark_chat', {})], ((), {'contact': CON, 'read': 1})),
     'chat_update': ({'contact': CON, 'starred': 1}, [('relay_core.inbox', 'update', {})], ((CON,), {'starred': 1, 'folder': None})),
     'chat_comment_add': ({'contact': CON, 'body': 'note', 'request_key': 'k' * 16}, [('relay_core.collaboration', 'add', {})],

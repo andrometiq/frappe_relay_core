@@ -285,18 +285,24 @@ def is_available(row, company: str | None, day) -> bool:
             and (not row.available_to or day <= getdate(row.available_to)))
 
 
-def eligible_events(business_doctype: str, company: str | None, day=None, limit: int | None = MAX_EVENTS) -> list:
-    """Enabled events with published memory that this business type and company may use on `day`."""
+def available_events(business_doctype: str, company: str | None, day=None, *, filters=None, fields=(), reader=None) -> list:
+    """Enabled events, newest first, whose audience has this business type and that this company may use on `day`.
+    `reader` is frappe.get_list to apply the user's permissions."""
     names = frappe.get_all(AUDIENCE, filters={'parenttype': EVENT, 'parentfield': 'audience',
                                               'business_doctype': business_doctype}, pluck='parent')
     if not names:
         return []
-    rows = frappe.get_all(EVENT, filters={'name': ['in', names], 'enabled': 1, 'memory_status': ['in', PUBLISHED]},
-                          fields=['name', 'title', 'company', 'available_from', 'available_to', 'event_starts_on',
-                                  'event_ends_on', 'memory', 'memory_revision', 'memory_build'],
-                          order_by='modified desc')
+    rows = (reader or frappe.get_all)(EVENT, filters={'name': ['in', names], 'enabled': 1, **(filters or {})},
+                                      fields=['name', 'title', 'company', 'available_from', 'available_to', 'event_starts_on',
+                                              'event_ends_on', *fields], order_by='modified desc')
     day = getdate(day)
-    return [row for row in rows if is_available(row, company, day)][:limit]
+    return [row for row in rows if is_available(row, company, day)]
+
+
+def eligible_events(business_doctype: str, company: str | None, day=None, limit: int | None = MAX_EVENTS) -> list:
+    """Enabled events with published memory that this business type and company may use on `day`."""
+    return available_events(business_doctype, company, day, filters={'memory_status': ['in', PUBLISHED]},
+                            fields=('memory', 'memory_revision', 'memory_build'))[:limit]
 
 
 def check_context(used, business: tuple[str, str], company: str | None) -> None:
