@@ -148,7 +148,7 @@ class HeaderResolutionTests(unittest.TestCase):
     def test_dynamic_full_and_national_number_matches(self):
         for name in (NUMBER + '.png', '9876543210.jpg', '98765 43210.jpg', '+91 98765-43210.png',
                      '09876543210.jpg', '(+91) 98765 43210.png', '91-9876543210.png',
-                     '919876543210.0.png', '9.19876543210E+11.png'):
+                     '919876543210.0.png'):
             self.file(name, b'\xff\xd8\xff' if name.endswith('.jpg') else b'\x89PNG\r\n\x1a\n')
             result = campaign_media.resolve(attachment('dynamic', name), 'image', {NUMBER}, 'IN')
             self.assertEqual(result[NUMBER], (attachment('dynamic', name)['files'][0], None))
@@ -175,8 +175,8 @@ class HeaderResolutionTests(unittest.TestCase):
                 bulk.add_rows(doc, iter(rows), set())
             found = insert.call_args.args[1]
             self.assertEqual([row[3] for row in found],
-                             [None, 'Duplicate row', 'Invalid phone number', 'Invalid phone number'])
-            self.assertEqual([row[1] for row in found[:2]], [NUMBER, NUMBER])
+                             [None, bulk_sheet.SCIENTIFIC_PHONE, 'Invalid phone number', 'Invalid phone number'])
+            self.assertEqual(found[0][1], NUMBER)
             self.assertEqual(found[0][2]['values']['header_media'], mapping['header_attachment']['files'][0])
             self.assertEqual(enroll.call_count, 1 if source else 0)
 

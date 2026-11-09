@@ -7,13 +7,13 @@ import { coreApi } from '../src/services/coreApi.js'
 import { onRealtime } from '../src/services/realtime.js'
 import { defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
 import { mergeChangedRows, mergeFirstPage, newestActivity } from '../src/services/inboxRows.js'
-import { listRefresh } from '../src/services/realtimeRefreshQueue.js'
+import { heldRefresh, listRefresh } from '../src/services/realtimeRefreshQueue.js'
 import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
 
 test('read mutations refresh the unread queue without waiting for a socket, but failed reads do not', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
-  const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'useChatFolders',
+  const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'heldRefresh', 'useChatFolders',
     'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
     script + '\nreturn { mode, rows, loading };').bind(null, useLoadMore)
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window
@@ -33,7 +33,7 @@ test('read mutations refresh the unread queue without waiting for a socket, but 
   try {
     const state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, () => {}, computed, ref, watch, coreApi,
       (_doctypes, kinds, refresh) => { off = onRealtime(event => { if (kinds.includes(event.kind)) refreshed = refresh() }) }, mediumOptions,
-      () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh,
+      () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh, heldRefresh,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
       () => false, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters))
     await mount()

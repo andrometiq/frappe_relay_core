@@ -58,7 +58,7 @@ test('views of one channel share a single count read and live refresh', async ()
   all.release()
 })
 
-test('a failed count read shows empty counts instead of stale ones', async () => {
+test('a failed count read keeps the last known counts instead of showing none', async () => {
   let fail = false
   let refresh
   const acquire = sharedQueueCounts(async () => { if (fail) throw Error('offline'); return { unread: 5 } }, load => { refresh = load; return () => {} })
@@ -67,5 +67,12 @@ test('a failed count read shows empty counts instead of stale ones', async () =>
   assert.equal(lease.counts.value.unread, 5)
   fail = true
   await refresh()
-  assert.deepEqual(lease.counts.value, { ...EMPTY_COUNTS })
+  assert.deepEqual(lease.counts.value, { ...EMPTY_COUNTS, unread: 5 })
+  fail = false
+  await refresh()
+  assert.equal(lease.counts.value.unread, 5)
+  fail = true
+  const fresh = acquire('Email')
+  await Promise.resolve(); await Promise.resolve()
+  assert.deepEqual(fresh.counts.value, { ...EMPTY_COUNTS }, 'A first read that fails has no counts to keep')
 })

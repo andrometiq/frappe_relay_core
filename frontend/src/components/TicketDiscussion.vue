@@ -6,24 +6,15 @@ import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import { dateTime } from './relativeTime'
 import { distinctPeople, withMention } from '../services/ticketForm'
+import { ticketCommentsStore } from '../services/ticketComments'
 
 const props = defineProps({ ticket: Object })
-const comments = ref([]), body = ref(''), mentions = ref([]), error = ref(''), busy = ref(false)
+const { comments, error, sending, open, load, add } = ticketCommentsStore(coreApi)
+const body = ref(''), mentions = ref([])
 const labels = new Map()
 const contact = computed(() => props.ticket.messages?.[0]?.contact || '')
-const readOnly = computed(() => busy.value || !props.ticket.can_edit)
-let generation = 0
+const readOnly = computed(() => sending.value || !props.ticket.can_edit)
 
-async function run(task) {
-  const current = generation
-  busy.value = true; error.value = ''
-  try { await task(current) } catch (e) { if (current === generation) error.value = e.message }
-  finally { if (current === generation) busy.value = false }
-}
-async function load() {
-  const current = generation, result = await coreApi('ticket_tags.comments', { name: props.ticket.name })
-  if (current === generation) comments.value = result
-}
 function mention(values) {
   if (values.length > 10) { error.value = 'Mention at most 10 colleagues'; return }
   for (const user of values.filter(user => !mentions.value.includes(user))) body.value = withMention(body.value, labels.get(user) || user)
@@ -35,19 +26,16 @@ async function colleagues(query, signal) {
   return rows
 }
 const mentionField = computed(() => ({ label: 'Notify in this comment', placeholder: 'Search colleagues…', readOnly: readOnly.value, search: colleagues }))
-function send() {
-  return run(async current => {
-    const result = await coreApi('ticket_tags.add_comment', { name: props.ticket.name, body: body.value, mentions: mentions.value }, true)
-    if (current !== generation) return
-    comments.value = result; body.value = ''; mentions.value = []
-    toast('Comment added')
-  })
+async function send() {
+  if (!await add(body.value, mentions.value)) return
+  body.value = ''; mentions.value = []
+  toast('Comment added')
 }
-watch(() => props.ticket.name, () => {
-  ++generation; comments.value = []; body.value = ''; mentions.value = []; error.value = ''; busy.value = false
-  run(load)
+watch(() => props.ticket.name, name => {
+  body.value = ''; mentions.value = []
+  open(name)
 }, { immediate: true })
-useRealtimeRefresh([], ['tickets'], () => run(load))
+useRealtimeRefresh([], ['tickets'], load)
 </script>
 
 <template>
@@ -62,7 +50,7 @@ useRealtimeRefresh([], ['tickets'], () => run(load))
       <textarea v-model="body" aria-label="Ticket comment" placeholder="Write a comment…" rows="3" maxlength="4000" />
       <ChoiceField :field="mentionField" :model-value="mentions" multiple @update:model-value="mention" />
       <small class="ticket-muted">People you add here get a notification about this comment.</small>
-      <div><Button type="submit" variant="solid" label="Add comment" :disabled="busy || !body.trim()" /></div>
+      <div><Button type="submit" variant="solid" label="Add comment" :disabled="sending || !body.trim()" /></div>
     </form>
     <ErrorMessage :message="error" />
   </section>

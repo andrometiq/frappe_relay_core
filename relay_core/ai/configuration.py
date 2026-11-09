@@ -129,9 +129,8 @@ def directory(after=None):
     return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
 
 
-@frappe.whitelist(methods=['POST'])
-@ai_features.required
-def save(values, name=None):
+def skill_draft(values, name=None):
+    """The skill a save would write: the stored or new skill with the editor's values applied."""
     if name is not None and name != "":
         document_name(name)
     require_access('Relay AI Skill', 'write')
@@ -139,8 +138,28 @@ def save(values, name=None):
     if not isinstance(values, dict) or set(values) - set(FIELDS):
         raise ValueError('Invalid skill fields')
     doc = frappe.get_doc('Relay AI Skill', name) if name else frappe.new_doc('Relay AI Skill')
-    doc.update(values); doc.save()
+    doc.update(values)
+    return doc
+
+
+@frappe.whitelist(methods=['POST'])
+@ai_features.required
+def save(values, name=None):
+    doc = skill_draft(values, name)
+    doc.save()
     return {'name': doc.name}
+
+
+@ai_features.required
+def validate_draft(values, name=None):
+    """What a save of these values would refuse, without writing: missing fields, then the skill rules."""
+    doc = skill_draft(values, name)
+    problems = [message for _, message in doc._get_missing_mandatory_fields()]
+    try:
+        validate_skill(doc)
+    except (ValueError, frappe.ValidationError) as error:
+        problems.append(str(error))
+    return {'valid': not problems, 'problems': problems}
 
 
 @frappe.whitelist(methods=['POST'])

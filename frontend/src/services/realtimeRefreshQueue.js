@@ -51,6 +51,23 @@ export function listRefresh(kinds) {
   return 'reload'
 }
 
+// A list's live refresh while a page loads would replace the loaded pages. It is held, and runs once with every
+// held kind when release() is called after the load. A refresh that a page load cancelled is held the same way.
+export function heldRefresh(isLoading, refresh) {
+  let held = null
+  function hold(kinds) { if (isLoading()) held = new Set([...(held || []), ...(kinds || [])]) }
+  return {
+    hold,
+    refresh(batch = {}) { return isLoading() ? hold(batch.kinds) : refresh(batch) },
+    release() {
+      if (!held) return
+      const kinds = held
+      held = null
+      return refresh({ kinds })
+    },
+  }
+}
+
 // Where the message changes of a batch happened, for a chat list. When every change also came from the open
 // conversation's room, only that row changed: 'own' when this browser sent every named message (the list already
 // moved the row), else 'selected'. A change seen only in the shared room is elsewhere and reads the first page.

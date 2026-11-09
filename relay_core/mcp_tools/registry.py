@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from frappe.exceptions import DoesNotExistError, DuplicateEntryError, ValidationError
+from frappe.exceptions import DoesNotExistError, DuplicateEntryError, MandatoryError, ValidationError
 from frappe.exceptions import PermissionError as FrappePermissionError
 
 READ, WRITE, SEND = 'R', 'W', 'S'
@@ -26,6 +26,10 @@ REQUEST_KEY = {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{8,120}$',
                'description': 'Your own stable key for this one send (8-120 letters, digits, _ or -). Reuse it to retry; '
                               'the same key never sends twice.'}
 
+SAVE_KEY = {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{8,120}$',
+            'description': 'Your own stable key for this one change (8-120 letters, digits, _ or -). Needed to create; reuse it '
+                           'to retry, the same key never creates twice.'}
+
 
 def obj(properties, required=()):
     return {'type': 'object', 'properties': properties, 'required': list(required), 'additionalProperties': False}
@@ -45,6 +49,7 @@ class Tool:
     listed: bool = True
     large: bool = False
     chat: bool = False
+    once: bool = False
     title: str = ''
 
     @property
@@ -67,16 +72,19 @@ class Tool:
 TOOLS: dict[str, Tool] = {}
 
 
-def tool(name, safety, schema, doc, *, listed=True, large=False, chat=False):
+def tool(name, safety, schema, doc, *, listed=True, large=False, chat=False, once=False):
     """Register a handler. Listed tools need the four doc parts, a safety class and an area_verb name.
 
-    A chat tool sends to one chat: it takes after_message and runs under that chat's claim and reply guard."""
+    A chat tool sends to one chat: it takes after_message and runs under that chat's claim and reply guard.
+    A once tool creates records: it takes request_key, and a repeated key returns the first result."""
     def register(handler):
         if name in TOOLS:
             raise ValueError(f'Duplicate MCP tool {name}')
         if chat:
             schema['properties']['after_message'] = AFTER_MESSAGE
-        TOOLS[name] = Tool(name, safety, schema, doc, handler, listed, large, chat)
+        if once:
+            schema['properties']['request_key'] = SAVE_KEY
+        TOOLS[name] = Tool(name, safety, schema, doc, handler, listed, large, chat, once)
         return handler
     return register
 
@@ -199,6 +207,8 @@ def failure(error) -> dict:
         message = 'Not found: ' + (core_message(error) or 'check the name or id')
     elif isinstance(error, DuplicateEntryError):
         message = 'Already exists: ' + (core_message(error) or 'use the existing record')
+    elif isinstance(error, MandatoryError):
+        message = 'Fill in the required fields: ' + str(error).rpartition(']: ')[2]
     elif isinstance(error, (ValidationError, ValueError)) and core_message(error):
         message = core_message(error)
     elif isinstance(error, HubError):

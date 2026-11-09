@@ -5,6 +5,7 @@ from relay_core.permissions import require_access
 from relay_core.api import validate_reference
 
 MAX_MENTIONS = 10
+COMMENT_KEY_SECONDS = 86400
 
 
 def user_list(values, limit=MAX_MENTIONS):
@@ -88,11 +89,27 @@ def comments(name):
 
 
 @frappe.whitelist(methods=['POST'])
-def add_comment(name, body, mentions=None):
-    """Mentioned users must read the ticket; they get a notification."""
+def add_comment(name, body, mentions=None, request_key=None):
+    """Mentioned users must read the ticket; they get a notification. A repeated request key adds nothing."""
     if not isinstance(body, str) or not 1 <= len(body.strip()) <= 4000:
         frappe.throw('Comment must contain 1–4000 characters')
     users = user_list(mentions)
+    if request_key is None:
+        insert_comment(name, body, users)
+        return comments(name)
+    from relay_core import locks
+    from relay_core.messaging import request_hash
+    # Comment is a Frappe DocType, so the used key lives in the cache for the retry window.
+    seen = 'relay-ticket-comment:' + request_hash(request_key)
+    with locks.lock(seen, timeout=30, blocking_timeout=10):
+        if not frappe.cache.get_value(seen):
+            insert_comment(name, body, users)
+            frappe.db.commit()
+            frappe.cache.set_value(seen, 1, expires_in_sec=COMMENT_KEY_SECONDS)
+    return comments(name)
+
+
+def insert_comment(name, body, users):
     doc = locked_ticket(name)
     if any(not can_follow(doc, user) for user in users):
         frappe.throw('A mentioned colleague cannot access this conversation', frappe.PermissionError)
@@ -102,4 +119,3 @@ def add_comment(name, body, mentions=None):
     from relay_core.realtime import changed
     changed(doc)
     notify(doc, users, 'Mention', f'{frappe.utils.get_fullname(frappe.session.user)} mentioned you on a ticket')
-    return comments(name)

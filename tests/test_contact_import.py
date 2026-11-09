@@ -63,11 +63,13 @@ class ContactImportTests(TestCase):
         return dict(zip(service.COLUMNS, [mobile, email, 'Local import person', kind, record]))
 
     def test_excel_numbers_and_email_normalization(self):
-        for mobile in ('9876543210', '9876543210.0', '9.19876543210E+11', '+91 98765 43210'):
+        for mobile in ('9876543210', '9876543210.0', '+91 98765 43210'):
             row = service.normalize_row(self.row(mobile, ' Person@Example.Invalid '), 'IN')
             self.assertEqual((row['mobile'], row['email']), ('919876543210', 'person@example.invalid'))
         for mobile in ('123', '1.5e3', '9.1234567890123456e15'):
             with self.assertRaises(ValueError): service.normalize_row(self.row(mobile), 'IN')
+        for mobile in ('9.19877E+11', '9.19876543210E+11'):
+            with self.assertRaisesRegex(ValueError, 'scientific form'): service.normalize_row(self.row(mobile), 'IN')
 
     def test_preview_merges_duplicates_and_plans_one_person_with_two_links(self):
         rows = [(2, self.row()), (3, self.row('9876543210.0')), (4, self.row(record='LOCAL-2'))]

@@ -16,30 +16,17 @@ class Quiet(WSGIRequestHandler):
 
 
 @unittest.skipUnless(SITES, 'needs RELAY_AUTOMATION_TEST_SITES and a test site')
-class MCPHTTPTests(unittest.TestCase):
+class MCPSite(unittest.TestCase):
+    """The site behind a local WSGI server. Subclasses add their users in add_users and keep API tokens in cls.tokens."""
     @classmethod
     def setUpClass(cls):
         import frappe
         import frappe.app
-        from channel_site_fixtures import init, user
+        from channel_site_fixtures import init
         cls.site = init()
-        cls.operator = user('relay-mcp-operator@example.invalid')
-        cls.outsider = 'relay-mcp-outsider@example.invalid'
-        if not frappe.db.exists('User', cls.outsider):
-            with patch('frappe.core.doctype.user.user.throttle_user_creation'):
-                frappe.get_doc({'doctype': 'User', 'email': cls.outsider, 'first_name': 'MCP Outsider', 'send_welcome_email': 0}).insert()
-        cls.password = secrets.token_hex(16)
         cls.tokens = {}
-        for actor in (cls.operator, cls.outsider):
-            key, secret = secrets.token_hex(12), secrets.token_hex(24)
-            doc = frappe.get_doc('User', actor)
-            doc.api_key, doc.api_secret = key, secret
-            doc.save(ignore_permissions=True)
-            cls.tokens[actor] = 'token ' + key + ':' + secret
-        from frappe.utils.password import update_password
-        update_password(cls.operator, cls.password)
+        cls.add_users(frappe)
         frappe.db.commit()
-        cls.hidden = cls.hidden_contact(frappe)
 
         def application(environ, start_response):
             environ['HTTP_X_FRAPPE_SITE_NAME'] = cls.site
@@ -53,12 +40,24 @@ class MCPHTTPTests(unittest.TestCase):
         cls.server.shutdown()
 
     @classmethod
-    def hidden_contact(cls, frappe):
-        """A Relay Contact the operator cannot read, found with the real permission rules."""
-        for name in frappe.get_all('Relay Contact', pluck='name', order_by='name desc', limit_page_length=300):
-            if not frappe.has_permission('Relay Contact', 'read', doc=name, user=cls.operator):
-                return name
-        return None
+    def add_users(cls, frappe):
+        raise NotImplementedError
+
+    @classmethod
+    def plain_user(cls, frappe, email):
+        """A user without any Relay role."""
+        if not frappe.db.exists('User', email):
+            with patch('frappe.core.doctype.user.user.throttle_user_creation'):
+                frappe.get_doc({'doctype': 'User', 'email': email, 'first_name': 'MCP Outsider', 'send_welcome_email': 0}).insert()
+        return email
+
+    @classmethod
+    def add_token(cls, frappe, actor):
+        key, secret = secrets.token_hex(12), secrets.token_hex(24)
+        doc = frappe.get_doc('User', actor)
+        doc.api_key, doc.api_secret = key, secret
+        doc.save(ignore_permissions=True)
+        cls.tokens[actor] = 'token ' + key + ':' + secret
 
     def post(self, body, headers=None, session=None):
         import requests
@@ -69,6 +68,28 @@ class MCPHTTPTests(unittest.TestCase):
         response = self.post(body, {'Authorization': self.tokens[actor or self.operator]})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()['result']
+
+
+class MCPHTTPTests(MCPSite):
+    @classmethod
+    def add_users(cls, frappe):
+        from channel_site_fixtures import user
+        from frappe.utils.password import update_password
+        cls.operator = user('relay-mcp-operator@example.invalid')
+        cls.outsider = cls.plain_user(frappe, 'relay-mcp-outsider@example.invalid')
+        for actor in (cls.operator, cls.outsider):
+            cls.add_token(frappe, actor)
+        cls.password = secrets.token_hex(16)
+        update_password(cls.operator, cls.password)
+        cls.hidden = cls.hidden_contact(frappe)
+
+    @classmethod
+    def hidden_contact(cls, frappe):
+        """A Relay Contact the operator cannot read, found with the real permission rules."""
+        for name in frappe.get_all('Relay Contact', pluck='name', order_by='name desc', limit_page_length=300):
+            if not frappe.has_permission('Relay Contact', 'read', doc=name, user=cls.operator):
+                return name
+        return None
 
     def test_authentication_and_browser_rules(self):
         import requests

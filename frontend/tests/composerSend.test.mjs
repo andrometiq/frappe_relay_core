@@ -289,3 +289,54 @@ test('a later successful send keeps the notice of an earlier failed one', async 
   await Promise.all([first, state.send()])
   assert.equal(state.notice.value, 'Provider rejected')
 })
+
+test('an upload keeps the inbox usable and its file never joins the chat opened meanwhile', async t => {
+  const previousReader = globalThis.FileReader
+  globalThis.FileReader = class { readAsDataURL() { this.result = 'data:image/png;base64,QUNNRQ=='; setImmediate(() => this.onload()) } }
+  t.after(() => { globalThis.FileReader = previousReader })
+  const uploads = []
+  const { state } = fixture(t, method => {
+    if (method !== 'attachments.upload') return undefined
+    const step = deferred(); uploads.push(step); return step.promise
+  })
+  await state.open('A')
+  const first = state.uploadAttachment({ name: 'acme-catalogue.png' })
+  assert.equal(state.uploading.value, true)
+  assert.equal(state.busy.value, false, 'Chat switching and the list stay usable')
+  state.body.value = 'Caption typed during the upload'
+  assert.equal(state.body.value, 'Caption typed during the upload')
+  await tick()
+  uploads[0].resolve({ name: 'FILE-1', filename: 'acme-catalogue.png' })
+  assert.equal(await first, true)
+  assert.equal(state.attachment.value.name, 'FILE-1')
+
+  const second = state.uploadAttachment({ name: 'acme-price-list.png' })
+  await tick()
+  await state.open('B')
+  assert.equal(state.selected.value, 'B', 'Another chat opens during the upload')
+  uploads[1].resolve({ name: 'FILE-2', filename: 'acme-price-list.png' })
+  assert.equal(await second, false)
+  assert.equal(state.attachment.value, null, 'The file of chat A is not attached in chat B')
+  assert.equal(state.uploading.value, false)
+})
+
+test('a send that finishes after another chat opened does not reload that chat', async t => {
+  const response = deferred()
+  const context = { items: thread.slice(0, 2), first: thread[0].name, last: thread[1].name, has_more: false, has_newer: true }
+  const { state, calls } = fixture(t, (method, values) => {
+    if (method === 'messaging.send') return response.promise
+    if (method === 'inbox.view_state') return values.contact === 'B' ? { first_unread: thread[0].name } : {}
+    if (method === 'api.message_context') return context
+  })
+  await state.open('A')
+  state.body.value = 'ok'
+  const send = state.send()
+  await state.open('B')
+  assert.equal(state.newer.value, true, 'B opens at its first unread with newer pages below')
+  const reads = calls.filter(call => call.method === 'api.messages').length
+  response.resolve({ status: 'Submitted', action: 'RELAY-MA-0000000001' })
+  await send
+  assert.equal(calls.filter(call => call.method === 'api.messages').length - reads, 0, 'B is not reloaded at its newest page')
+  assert.equal(state.newer.value, true)
+  assert.equal(state.restored.value, thread[0].name, 'B keeps its first-unread position')
+})

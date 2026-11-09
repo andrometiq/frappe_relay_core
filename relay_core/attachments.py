@@ -65,10 +65,7 @@ def upload(message,filename,content_base64):
     if not isinstance(filename,str) or not 1<=len(filename)<=120 or any(ord(c)<32 for c in filename) or any(c in filename for c in ('/','\\','"')):
         frappe.throw('Use a plain attachment filename of at most 120 characters')
     limit=file_limits.get_max_bytes()
-    if not isinstance(content_base64,str) or len(content_base64)>file_limits.encoded_length(limit):frappe.throw(f'The attachment must be at most {file_limits.size_label(limit)}')
-    try:raw=base64.b64decode(content_base64,validate=True)
-    except (ValueError,binascii.Error):frappe.throw('Invalid attachment data')
-    if error:=file_limits.size_error(len(raw),limit,'The attachment'):frappe.throw(error)
+    raw=file_limits.get_decoded_bytes(content_base64,limit,'The attachment')
     file=save_attachment(filename,raw,source.name)
     return {'name':file.name,'filename':file.file_name,'size':len(raw)}
 
@@ -80,10 +77,10 @@ def private_file(filename,raw,doctype=None,name=None):
                            'is_private':1,'content':raw}).insert(ignore_permissions=True)
 
 
-def save_attachment(filename,raw,message):
-    """A private File on the message that keeps the chosen name. Frappe adds a hash suffix to a reused
+def save_attachment(filename,raw,name,doctype='Relay Message'):
+    """A private File on the document that keeps the chosen name. Frappe adds a hash suffix to a reused
     name on disk; only file_url carries it, so the name sent and downloaded stays the original."""
-    file=private_file(filename,raw,'Relay Message',message)
+    file=private_file(filename,raw,doctype,name)
     if file.file_name!=filename:
         file.db_set('file_name',filename,update_modified=False)
     return file

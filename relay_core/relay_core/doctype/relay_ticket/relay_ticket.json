@@ -11,6 +11,7 @@
     "assigned_to",
     "messages",
     "source_action_key",
+    "request_key",
     "business_doctype",
     "business_name",
     "conversation_key",
@@ -59,6 +60,15 @@
       "label": "Source Action Key",
       "fieldtype": "Data",
       "unique": 1
+    },
+    {
+      "fieldname": "request_key",
+      "label": "Request key",
+      "fieldtype": "Data",
+      "unique": 1,
+      "read_only": 1,
+      "hidden": 1,
+      "no_copy": 1
     },
     {
       "fieldname": "assigned_to",

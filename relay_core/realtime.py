@@ -15,10 +15,13 @@ RESOURCES = {
     'Relay Campaign': 'campaigns', 'Relay Campaign Recipient': 'campaigns',
     'Relay Conversation Summary': 'reports', 'Relay Notification': 'notifications',
     'Relay Case': 'cases', 'Relay Flow': 'flows', 'Relay Flow Run': 'flows',
-    'Relay Automation Run': 'tickets', 'Relay Flow Action': 'tickets',
-    'Relay Message Action': 'tickets',
+    'Relay Automation Run': 'automation_runs', 'Relay Flow Action': 'flow_actions',
+    'Relay Message Action': 'message_actions',
     'Relay Ticket Status': 'tickets', 'Relay Ticket Type': 'tickets',
 }
+# Sends and automation steps are frequent; only a ticket screen that shows the record re-reads.
+TICKET_RECORDS = frozenset({'Relay Automation Run', 'Relay Flow Action', 'Relay Message Action'})
+
 
 def changed(doc, method=None, messages=None, receipt=False):
     """`receipt` marks a delivery status change only, so lists and counts can skip it."""
@@ -26,6 +29,17 @@ def changed(doc, method=None, messages=None, receipt=False):
         return incoming_changed()
     kind = RESOURCES.get(doc.doctype)
     if not kind:
+        return
+    if doc.doctype == 'Relay Notification':
+        # Only its user reads a notification; agents cannot join the Relay Notification doctype room.
+        # Without a user, publish_realtime would send to the whole site.
+        if doc.get('user'):
+            frappe.publish_realtime('relay_changed', {'kind': kind}, user=doc.user, after_commit=True)
+        return
+    if doc.doctype in TICKET_RECORDS:
+        if has_ticket(doc):
+            frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
+                room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
         return
     if doc.doctype == 'Relay Message':
         messages = messages or [doc.name]
@@ -43,6 +57,19 @@ def changed(doc, method=None, messages=None, receipt=False):
     if doc.get('business_doctype') and doc.get('business_name'):
         from relay_core.business_inbox import changed as business_changed
         business_changed(doc.business_doctype,doc.business_name,kind,messages,receipt,change)
+
+
+def has_ticket(doc):
+    """A ticket shows its automation runs, flow actions and the sends of its messages or notices."""
+    if doc.doctype != 'Relay Message Action':
+        return bool(doc.get('ticket'))
+    try:
+        payload = frappe.parse_json(doc.get('payload') or '{}')
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and (payload.get('ticket') or payload.get('delivery_episodes')):
+        return True
+    return bool(doc.get('source_message') and frappe.db.get_value('Relay Message', doc.source_message, 'ticket'))
 
 
 COUNTED_KINDS = frozenset({'messages', 'reads', 'contacts', 'permissions'})

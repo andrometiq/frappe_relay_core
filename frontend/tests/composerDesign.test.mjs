@@ -22,8 +22,8 @@ function fixture(t, { provider = 'WhatsApp', window = {open:true,remaining_secon
   globalThis.document = { getElementById: () => ({dataset:{user:'local-composer-test'}}), visibilityState:'visible' }
   globalThis.sessionStorage = {getItem:key => storage.get(key),setItem:(key,value) => storage.set(key,value),removeItem:key=>storage.delete(key)}
   const source = ref({name:'local-message',channel:'local-channel',relay_contact:'local-contact',sender_endpoint:'local-recipient',provider_context:{provider}})
-  const state = Object.fromEntries(Object.entries({selected:'local-contact',businessType:'',businessName:'',rows:[],attachment:null,quoting:false,kind:'text',body:'',latitude:'',longitude:'',contactName:'',phone:'',pollQuestion:'',pollOptions:['',''],busy:false,sending:0,error:''}).map(([key,value]) => [key,ref(value)]))
-  Object.assign(state, {source,sourceContext:computed(()=>source.value.provider_context),kinds:computed(()=>composerKinds(whatsappCapabilities,source.value.provider_context)),cancelReply:()=>state.quoting.value=false,send:()=>sends.push(state.body.value),uploadAttachment:async()=>{state.attachment.value=null;state.error.value='Upload failed'}})
+  const state = Object.fromEntries(Object.entries({selected:'local-contact',businessType:'',businessName:'',rows:[],attachment:null,quoting:false,kind:'text',body:'',latitude:'',longitude:'',contactName:'',phone:'',pollQuestion:'',pollOptions:['',''],busy:false,uploading:false,sending:0,error:''}).map(([key,value]) => [key,ref(value)]))
+  Object.assign(state, {source,sourceContext:computed(()=>source.value.provider_context),kinds:computed(()=>composerKinds(whatsappCapabilities,source.value.provider_context)),cancelReply:()=>state.quoting.value=false,send:()=>sends.push(state.body.value),uploadAttachment:async()=>{state.attachment.value=null;state.error.value='Upload failed';return state.uploadApplies??true}})
   if (legacyDraft) storage.set('relay-draft-' + sha256Hex(compositionScope(source.value, 'local-composer-test')), JSON.stringify(legacyDraft))
   const sends = [], events = [], props = reactive({mode:'reply',offText:off})
   let response = window, focused = 0
@@ -93,6 +93,19 @@ test('Telegram counter counts Unicode points, appears near limit while editing a
   const {state,view}=fixture(t,{provider:'Telegram'});await settle();view.editing.value=true;state.body.value='😀'.repeat(100)
   assert.equal(view.showCount.value,false);state.body.value='😀'.repeat(4096);assert.equal(view.characterCount.value,4096);assert.equal(view.showCount.value,true);assert.equal(view.canSend.value,true)
   state.body.value+='😀';assert.equal(view.canSend.value,false);view.editing.value=false;assert.equal(view.showCount.value,true)
+})
+
+test('an upload holds Send but not the caption, and a chat switched during it changes nothing', async t => {
+  const {state,view}=fixture(t);await settle();view.requestedAttachmentKind.value='photo'
+  state.attachment.value={name:'local-attachment',filename:'catalogue.png'};state.kind.value='photo';state.body.value='Acme Textiles catalogue'
+  assert.equal(view.canSend.value,true)
+  state.uploading.value=true
+  assert.equal(view.canSend.value,false,'Send waits for the upload')
+  state.uploading.value=false
+  state.uploadApplies=false;state.kind.value='text'
+  await view.attachFile({target:{files:[{name:'photo.png'}],value:'photo.png'}})
+  assert.equal(state.kind.value,'text','The chat opened during the upload keeps its own composer')
+  assert.equal(state.attachment.value,null)
 })
 
 test('a failed first upload keeps an attachment composer; failed replacement keeps the previous file', async t => {

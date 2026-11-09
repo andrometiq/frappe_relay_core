@@ -13,11 +13,14 @@ export function useConversationPresence(props, onState) {
   let lastHeartbeat = 0;
   let timer,
     reading = false,
+    readAgain = false,
     generation = 0,
     confirmed = "";
   async function heartbeat() {
     const business=props.businessDoctype&&props.businessName;
-    if (reading || document.visibilityState !== "visible" || !document.hasFocus() || (!props.contact&&!business))
+    // Messages seen while a read is running are marked when it ends.
+    if (reading) { readAgain = true; return; }
+    if (document.visibilityState !== "visible" || !document.hasFocus() || (!props.contact&&!business))
       return;
     const contact = props.contact,
       businessDoctype=props.businessDoctype,
@@ -65,6 +68,7 @@ export function useConversationPresence(props, onState) {
       /* Foreground controls surface actionable API errors. */
     } finally {
       reading = false;
+      if (readAgain) { readAgain = false; clearTimeout(timer); timer = setTimeout(heartbeat, 0); }
     }
   }
   watch(
@@ -102,7 +106,7 @@ export function useConversationPresence(props, onState) {
   function focus(){ heartbeat(); }
   onMounted(() => { heartbeat(); window.addEventListener('focus',focus); });
   onBeforeUnmount(() => {
-    generation++; clearTimeout(timer); clearTimeout(typingExpiry); window.removeEventListener('focus',focus);
+    generation++; readAgain = false; clearTimeout(timer); clearTimeout(typingExpiry); window.removeEventListener('focus',focus);
   });
   let leaveRoom, leaveViewers;
   watchRoom(()=>[props.contact,props.businessDoctype,props.businessName],value=>{

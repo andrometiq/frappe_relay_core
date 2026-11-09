@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { stableSubmission } from './submission.js'
 
 // Personal chat folders: one shared list per app, refreshed after every folder or move change.
 export function chatFolderStore(api) {
@@ -16,7 +17,8 @@ export function chatFolderStore(api) {
   }
   return {
     folders, changes, moved, load,
-    create: name => api('chat_folders.create', { folder_name: name }, true).then(changed),
+    create: name => stableSubmission('relay-folder', { folder_name: name },
+      key => api('chat_folders.create', { folder_name: name, request_key: key }, true)).then(changed),
     rename: (folder, name) => api('chat_folders.rename', { folder, folder_name: name }, true).then(changed),
     remove: folder => api('chat_folders.delete', { folder }, true).then(changed),
     // An empty folder removes the conversation from its folder.

@@ -133,7 +133,7 @@ def error_report(name):
 def friendly_reason(reason, fields=()):
     """Only our validation vocabulary is exposed; provider details stay in stored outcomes."""
     text = str(reason or '')
-    exact = {OPTED_OUT, OUTSIDE_WINDOW, 'Invalid phone number', 'Duplicate number', 'Duplicate row',
+    exact = {OPTED_OUT, OUTSIDE_WINDOW, 'Invalid phone number', bulk_sheet.SCIENTIFIC_PHONE, 'Duplicate number', 'Duplicate row',
         'Missing header attachment', 'Duplicate header attachments', 'Header attachment unavailable',
         'Header attachments must stay private', 'Header attachment is empty',
         'Endpoint verification revoked', 'Contact binding needs review',

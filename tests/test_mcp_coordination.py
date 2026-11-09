@@ -203,6 +203,21 @@ class CoordinationTests(unittest.TestCase):
         self.assertEqual((details['client'], details['message']), ('agent-a', 'RELAY-MSG-0000000002'))
         self.assertGreater(details['response_seconds'], 0)
 
+    def test_a_repeated_request_key_creates_once_and_returns_the_first_result(self):
+        save = Mock(side_effect=lambda values, name: {'name': f'RELAY-KB-{save.call_count:010d}'})
+        values = {'title': 'Returns', 'instructions': 'Accept returns within 7 days.'}
+        with patch('relay_core.ai_features.is_enabled', return_value=True), patch('relay_core.ai.knowledge.save', save):
+            first = registry.call('knowledge_save', {'values': values, 'request_key': KEY})
+            again = registry.call('knowledge_save', {'values': values, 'request_key': KEY})
+            other = registry.call('knowledge_save', {'values': dict(values, title='Other'), 'request_key': KEY})
+            self.site.set_user('agent-b@x.test')
+            own = registry.call('knowledge_save', {'values': values, 'request_key': KEY})
+        self.assertEqual(again['structuredContent'], first['structuredContent'])
+        self.assertIn('different content', other['content'][0]['text'])
+        self.assertEqual(own['structuredContent']['name'], 'RELAY-KB-0000000002')
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual([log['subject'] for log in self.site.logs], ['MCP knowledge_save'] * 2)
+
 
 if __name__ == '__main__':
     unittest.main()

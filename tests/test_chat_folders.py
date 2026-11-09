@@ -86,6 +86,24 @@ class ChatFolderTests(unittest.TestCase):
         self.assertEqual([(row['name'], row['count']) for row in chat_folders.folders()], [('F-MINE', 4), ('F-EMPTY', 0)])
         self.assertEqual(self.fake.get_all.call_args.kwargs['filters'], {'user': 'agent@example.invalid'})
 
+    def test_a_repeated_create_request_key_returns_the_first_folder(self):
+        import contextlib
+        stored = {}
+        self.fake.db.get_value.side_effect = lambda doctype, filters, *args, **kwargs: stored.get(filters['request_key'])
+        self.fake.db.count.return_value = 2
+        self.fake.qb.from_.return_value.select.return_value.where.return_value.run.return_value = [(3,)]
+        doc = self.fake.get_doc.return_value
+        doc.name, doc.folder_name, doc.sort_order = 'F-NEW', 'Follow up', 4
+        self.fake.db.commit.side_effect = lambda: stored.setdefault('user-key-1', _dict(name='F-NEW', folder_name='Follow up', sort_order=4))
+        with patch('relay_core.locks.lock', side_effect=lambda *args, **kwargs: contextlib.nullcontext()), \
+                patch('relay_core.messaging.request_hash', side_effect=lambda key: 'user-' + key):
+            first = chat_folders.create('Follow up', request_key='key-1')
+            again = chat_folders.create('Follow up', request_key='key-1')
+        self.assertEqual(first, {'name': 'F-NEW', 'folder_name': 'Follow up', 'sort_order': 4, 'count': 0})
+        self.assertEqual(again, {'name': 'F-NEW', 'folder_name': 'Follow up', 'sort_order': 4, 'count': 2})
+        doc.insert.assert_called_once()
+        self.assertEqual(self.fake.get_doc.call_args.args[0]['request_key'], 'user-key-1')
+
     def test_every_api_requires_relay_access(self):
         self.access.side_effect = PermissionError
         for call in (chat_folders.folders, lambda: chat_folders.create('A'), lambda: chat_folders.rename('F-MINE', 'B'),

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, ref, watch, reactive } from 'vue'
-import { chatListRefresh, realtimeRefreshQueue, scheduleEvent } from '../src/services/realtimeRefreshQueue.js'
+import { chatListRefresh, heldRefresh, realtimeRefreshQueue, scheduleEvent } from '../src/services/realtimeRefreshQueue.js'
 import { announceOwnSend, lastOwnSend, ownSendOf, recordOwnMessages } from '../src/services/ownSends.js'
 import { appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, rootBrowse, readBrowse, browseRoute, enterBrowse, browseCrumbs, levelLabel, searchLabel, tileCount, tileKey, tileUnread } from '../src/services/businessBrowse.js'
 import { useDebouncedSearch } from '../src/composables/useDebouncedSearch.js'
@@ -15,7 +15,7 @@ async function component(t, props = {}, api) {
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const mounted = [], scope = effectScope(), emitted = []
   let realtime, liveKinds
-  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, chatListRefresh, lastOwnSend, ownSendOf, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
+  const globals = { computed, ref, watch, nextTick, useDebouncedSearch, useLoadMore, appendTiles, chatTile, mergeTiles, moveSentTile, sentTile, chatListRefresh, heldRefresh, lastOwnSend, ownSendOf, tileKey, browseCrumbs, browseRoute, enterBrowse, levelLabel, readBrowse, searchLabel, tileCount, tileUnread,
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     onMounted: callback => mounted.push(callback), onBeforeUnmount() {}, useRealtimeRefresh(_doctypes, kinds, refresh) { realtime = refresh; liveKinds = kinds }, coreApi: api }
   const state = scope.run(() => new Function(...Object.keys(globals), script + '\nreturn { state, query, items, fields, people, crumbs, next, loading, error, choose, navigate, load, search, moreSentinel };')(...Object.values(globals)))
@@ -136,6 +136,32 @@ test('a no-group type goes straight to records; paging and failed requests can r
   assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2'])
   assert.equal(view.next.value, null)
   assert.deepEqual(JSON.parse(calls.at(-1).path), [])
+})
+
+test('a live change while the next page loads keeps the loaded pages and runs after the load', async t => {
+  browser(t, '#/messages'); const calls = []; let releasePage2
+  const page2 = new Promise(resolve => { releasePage2 = resolve })
+  const view = await component(t, {}, async (method, values) => {
+    calls.push(values)
+    if (!values.doctype) return { items: [type], next: null }
+    if (values.start) { await page2; return { items: [{ ...record, name: 'local-2' }], next: null } }
+    return { items: [{ ...record, name: 'local-1' }], next: 30 }
+  })
+  view.choose(type); await settle()
+  const observers = [], originalObserver = globalThis.IntersectionObserver
+  globalThis.IntersectionObserver = class { constructor(callback) { this.callback = callback; observers.push(this) } observe() {} disconnect() {} }
+  t.after(() => { globalThis.IntersectionObserver = originalObserver })
+  view.moreSentinel.value = {}; await settle()
+  const more = observers.at(-1).callback([{ isIntersecting: true }]); await settle()
+  assert.equal(view.loading.value, true, 'Page 2 is loading')
+  calls.length = 0
+  await view.realtime(['messages'])
+  assert.deepEqual(view.items.value.map(row => row.name), ['local-1'], 'The list is not cleared')
+  assert.equal(calls.length, 0, 'The live change waits for the page load')
+  releasePage2(); await more; await settle()
+  assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2'])
+  assert.deepEqual(calls.map(values => values.start), [0], 'The held change re-reads the first page in place')
+  assert.deepEqual(view.items.value.map(row => row.name), ['local-1', 'local-2'])
 })
 
 test('reading the open record refreshes only its tile; other changes reload the level', async t => {

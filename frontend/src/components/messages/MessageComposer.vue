@@ -21,7 +21,7 @@ import SendNumber from "./SendNumber.vue";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
-const showReplies = ref(false), editing = ref(false), uploading = ref(false), preview = ref("");
+const showReplies = ref(false), editing = ref(false), preview = ref("");
 const isMobile = useMobileLayout();
 
 import { compositionScope, telegramLimit } from '../../services/channelComposition';
@@ -34,6 +34,7 @@ const {
   rows,
   attachment,
   uploadAttachment,
+  uploading,
   source,
   quoting,
   cancelReply,
@@ -131,20 +132,17 @@ async function attachFile(event) {
   const formatError = attachmentFormatError(capabilities.value, provider, requestedAttachmentKind.value, file.name)
     || sizeError(file.size, attachmentMaxBytes(capabilities.value, provider, requestedAttachmentKind.value), `A ${provider} ${requestedAttachmentKind.value}`);
   if (formatError) { error.value = formatError; if (!attachment.value) kind.value = requestedAttachmentKind.value; return; }
-  const previous = attachment.value;
-  uploading.value = true;
-  try {
-    await uploadAttachment(file);
-    if (attachment.value) {
-      kind.value = requestedAttachmentKind.value;
-      clearPreview();
-      if (['photo', 'video'].includes(kind.value)) preview.value = URL.createObjectURL(file);
-    } else {
-      attachment.value = previous;
-      // Keep the requested kind visible after a first upload failure; never send its caption as text.
-      if (!previous) kind.value = requestedAttachmentKind.value;
-    }
-  } finally { uploading.value = false; }
+  const previous = attachment.value, requested = requestedAttachmentKind.value;
+  if (!(await uploadAttachment(file))) return;
+  if (attachment.value) {
+    kind.value = requested;
+    clearPreview();
+    if (['photo', 'video'].includes(kind.value)) preview.value = URL.createObjectURL(file);
+  } else {
+    attachment.value = previous;
+    // Keep the requested kind visible after a first upload failure; never send its caption as text.
+    if (!previous) kind.value = requested;
+  }
   focusDraft();
 }
 const emit = defineEmits(["template", "mode", "closed"]);
@@ -221,7 +219,7 @@ const windowHint = computed(() => windowState.value.open && Number.isFinite(wind
 onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); clearInterval(clockTimer); });
 const canSend = computed(
   () =>
-    !busy.value && !offReason.value && !windowChecking.value && !windowError.value &&
+    !busy.value && !uploading.value && !offReason.value && !windowChecking.value && !windowError.value &&
     (!limit.value || [...body.value].length <= limit.value) &&
     windowState.value.open &&
     (kind.value === "text"
@@ -238,6 +236,7 @@ const canSend = computed(
 );
 const busyReason = "Wait for the current send to finish";
 const sendTitle = computed(() => windowError.value ? "Check the reply window before sending" : windowChecking.value ? "Checking reply window" : busy.value ? busyReason
+  : uploading.value ? "Wait for the upload to finish"
   : limit.value && [...body.value].length > limit.value ? "The message is too long for this channel"
   : canSend.value ? "Send · Enter"
   : kind.value === "text" ? "Type a message first" : pollError.value || "Add the file or details first");
@@ -302,15 +301,15 @@ function keydown(event) {
       </div>
       <p v-if="error" role="alert" class="composer-error">{{ error }}</p>
       <div v-if="windowError" class="composer-error" role="alert"><span>Could not check the reply window. Your draft is saved. {{ windowError }}</span><Button label="Check again" variant="ghost" :disabled="windowChecking" @click="checkWindow" /></div>
-      <p v-if="busy || windowChecking" role="status" class="composer-status">{{ uploading ? 'Uploading…' : busy ? 'Sending…' : 'Checking reply window…' }}</p>
+      <p v-if="busy || uploading || windowChecking" role="status" class="composer-status">{{ uploading ? 'Uploading…' : busy ? 'Sending…' : 'Checking reply window…' }}</p>
       <template v-if="!closed">
         <div v-if="mediaKind" class="composer-context composer-attachment">
           <img v-if="preview && kind === 'photo'" :src="preview" alt="Selected attachment" />
           <video v-else-if="preview && kind === 'video'" :src="preview" muted preload="metadata" />
           <FeatherIcon v-else :name="attachmentKinds[kind]?.[1] || 'file'" />
           <span><strong>{{ attachment?.filename || 'Choose ' + attachmentKinds[kind]?.[0].toLowerCase() }}</strong><small>{{ attachment ? formatBytes(attachment.size) : attachmentLimit ? 'Up to ' + sizeLabel(attachmentLimit) : '' }}</small></span>
-          <Button :label="attachment ? 'Replace' : 'Choose file'" variant="ghost" :disabled="busy" @click="chooseAttachment(kind)" />
-          <Button icon="x" aria-label="Remove attachment" title="Remove attachment" variant="ghost" :disabled="busy" @click="clearAttachment" />
+          <Button :label="attachment ? 'Replace' : 'Choose file'" variant="ghost" :disabled="busy || uploading" @click="chooseAttachment(kind)" />
+          <Button icon="x" aria-label="Remove attachment" title="Remove attachment" variant="ghost" :disabled="busy || uploading" @click="clearAttachment" />
         </div>
         <div v-if="['location', 'contact'].includes(kind)" class="composer-detail-fields">
           <div class="composer-context"><strong>{{ kind === 'location' ? 'Share a location' : 'Share a contact' }}</strong><Button label="Cancel" variant="ghost" :disabled="busy" @click="clearAttachment" /></div>
@@ -354,10 +353,10 @@ function keydown(event) {
             :aria-label="mediaKind ? 'Caption' : 'Message'" :placeholder="mediaKind ? 'Add a caption…' : 'Message…'" rows="1" :readonly="busy"
             @focus="editing = true" @blur="editing = false" @keydown="keydown" @input="resizeDraft(); typing()" />
           <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
-          <Button class="composer-send" :label="isMobile ? '' : busy && !uploading ? 'Sending…' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
+          <Button class="composer-send" :label="isMobile ? '' : busy ? 'Sending…' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
         </template>
       </div>
-      <input type="file" ref="attachmentInput" aria-label="Attachment" hidden :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy" @change="attachFile" />
+      <input type="file" ref="attachmentInput" aria-label="Attachment" hidden :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy || uploading" @change="attachFile" />
     </template>
     <CannedReplies v-if="showReplies" :source="source" @close="closeReplies" @select="applySavedReply" />
   </form>

@@ -75,5 +75,6 @@ test('invalid-number summary uses all validation issues and agrees with the issu
   assert.equal(invalidNumberLabel({contact_counts: {invalid: 0}, issues: [{reason:'Invalid phone number',count:5}], recipients:[{}]}), '5 invalid numbers');
   assert.equal(invalidNumberLabel({contact_counts: {invalid: 5}, issues: [{reason:'Invalid phone number',count:1}]}), '1 invalid number');
   assert.equal(invalidNumberLabel({issues: [{reason:'Duplicate number',count:5}]}), '0 invalid numbers');
+  assert.equal(invalidNumberLabel({issues: [{reason:'Invalid phone number',count:2}, {reason:'Invalid phone number: Excel saved it in scientific form and lost digits. Format the column as text',count:3}]}), '5 invalid numbers');
   assert.equal(invalidNumberLabel({contact_counts:{invalid:0}}), 'Invalid number count unavailable');
 });

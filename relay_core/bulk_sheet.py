@@ -3,7 +3,6 @@ import csv
 import ipaddress
 import mimetypes
 import re
-from decimal import Decimal, InvalidOperation
 from urllib.parse import unquote, urlsplit
 import phonenumbers
 from relay_core.channels import channel
@@ -19,22 +18,17 @@ MESSAGE_MEDIA = {'photo': 'image', 'video': 'video', 'document': 'document'}  # 
 PLACEHOLDER = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 PRIVATE_SUFFIXES = ('.localhost', '.local', '.internal', '.intranet', '.lan', '.home.arpa')
 HEADER_KINDS = {media: kind for kind, media in MESSAGE_MEDIA.items()}  # Meta header type -> registry kind.
+SCIENTIFIC_PHONE = 'Invalid phone number: Excel saved it in scientific form and lost digits. Format the column as text'
 
 
 def sheet_phone(value, region):
-    """Mobile E.164 digits, accepting Excel's exact integer text representations."""
+    """Mobile E.164 digits. Excel's exact integer text (919876543210.0) is accepted; scientific text
+    (9.19877E+11) has lost digits and is rejected."""
     text = str(value or '').strip()
     if re.fullmatch(r'[0-9]+\.0+', text):
         text = text.split('.')[0]
-    elif re.fullmatch(r'[+-]?[0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+', text):
-        try:
-            number = Decimal(text)
-        except InvalidOperation:
-            return None
-        if (len(number.as_tuple().digits) > 15 or not 0 < number < 10**15
-                or number != number.to_integral_value()):
-            return None
-        text = str(int(number))
+    elif is_scientific(text):
+        return None
     destination = phone_number(text, region)
     if destination:
         number = phonenumbers.parse('+' + destination, None)
@@ -42,6 +36,10 @@ def sheet_phone(value, region):
                 (phonenumbers.PhoneNumberType.MOBILE, phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE)):
             return destination
     return None
+
+
+def is_scientific(text):
+    return bool(re.fullmatch(r'[+-]?[0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+', text))
 
 
 def template_fields(template):
@@ -298,9 +296,10 @@ def is_site_file(value):
 def prepare_row(row, mapping, fields, region, header_file=None, zip_files=None):
     """Return (destination, values, problem). Problems are user-facing reasons. A number-matched header file
     comes as header_file; a header column names a link or one of zip_files (ZIP name -> (file, problem))."""
-    destination = sheet_phone(row.get(mapping['phone']), region)
+    phone = row.get(mapping['phone'])
+    destination = sheet_phone(phone, region)
     if not destination:
-        return None, None, 'Invalid phone number'
+        return None, None, SCIENTIFIC_PHONE if is_scientific(str(phone or '').strip()) else 'Invalid phone number'
     values = {}
     by_number = (mapping.get('header_attachment') or {}).get('mode') in ('static', 'dynamic')
     for field in fields:

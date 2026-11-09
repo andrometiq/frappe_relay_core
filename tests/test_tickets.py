@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import json
 import types
 import unittest
 from unittest.mock import Mock, call, patch
@@ -53,6 +54,24 @@ class TicketTests(unittest.TestCase):
         self.assertEqual((payload['business_doctype'], payload['business_name']), ('Customer', 'LOCAL-1'))
         inserted.insert.assert_called_once()
         self.assertEqual(result['name'], 'TKT-00002')
+
+    def test_a_repeated_create_request_key_returns_the_first_ticket(self):
+        import contextlib
+        import relay_core
+        inserted = Record(name='TKT-00002', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        stored = {}
+        self.f.db.get_value = Mock(side_effect=lambda doctype, filters, *args, **kwargs: stored.get(filters['request_key']))
+        self.f.db.commit = Mock(side_effect=lambda: stored.setdefault(self.f.get_doc.call_args.args[0]['request_key'],
+                                                                      Record(name='TKT-00002', ticket_status='Open')))
+        locks = types.SimpleNamespace(lock=Mock(side_effect=lambda *args, **kwargs: contextlib.nullcontext()))
+        messaging = types.SimpleNamespace(request_hash=lambda key: 'user-' + key)
+        with patch('relay_core.ticket_tags.message_business', return_value=('Customer', 'LOCAL-1')), \
+                patch.object(relay_core, 'locks', locks, create=True), patch.dict(sys.modules, {'relay_core.messaging': messaging}):
+            results = [self.module.create('Delivery issue', [self.message.name], request_key='key-1') for _ in range(2)]
+        self.assertEqual(results, [{'name': 'TKT-00002', 'ticket_status': 'Open'}] * 2)
+        inserted.insert.assert_called_once()
+        self.assertEqual(self.f.get_doc.call_args.args[0]['request_key'], 'user-key-1')
 
     def test_ai_evidence_appends_idempotently_and_uses_existing_decision(self):
         message = Record(name='RELAY-MSG-0000000002', direction='Incoming', content='Please replace the damaged parcel')
@@ -864,14 +883,32 @@ class TicketHistoryTests(unittest.TestCase):
 
     def test_realtime_journals_use_ticket_room_without_payload_and_after_commit(self):
         from relay_core import realtime
-        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt))
+        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt),
+                                     parse_json=lambda value: json.loads(value) if isinstance(value, str) else value, db=types.SimpleNamespace(get_value=Mock(return_value=None)))
+        ticketed = (Record(doctype='Relay Automation Run', ticket=self.ticket.name, input_snapshot='private'),
+                    Record(doctype='Relay Flow Action', ticket=self.ticket.name),
+                    Record(doctype='Relay Message Action', payload={'ticket': self.ticket.name}),
+                    Record(doctype='Relay Message Action', payload='{"delivery_episodes": [["T-1", 1]]}'),
+                    Record(doctype='Relay Message', ticket=self.ticket.name))
         with patch.object(realtime, 'frappe', fake):
-            for dt in ('Relay Automation Run','Relay Flow Action','Relay Message Action'):
-                realtime.changed(Record(doctype=dt, input_snapshot='private'))
-                fake.publish_realtime.assert_called_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
-            realtime.changed(Record(doctype='Relay Message', ticket=self.ticket.name))
-            fake.publish_realtime.assert_called_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
+            for doc in ticketed:
+                fake.publish_realtime.reset_mock()
+                realtime.changed(doc)
+                fake.publish_realtime.assert_any_call('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
 
+    def test_chat_sends_and_untracked_automation_do_not_reload_ticket_screens(self):
+        from relay_core import realtime
+        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt),
+                                     parse_json=lambda value: json.loads(value) if isinstance(value, str) else value, db=types.SimpleNamespace(get_value=Mock(return_value=None)))
+        with patch.object(realtime, 'frappe', fake):
+            for doc in (Record(doctype='Relay Automation Run'), Record(doctype='Relay Flow Action'),
+                        Record(doctype='Relay Message Action', payload={'text': 'ok'}, source_message='MSG-1'),
+                        Record(doctype='Relay Message Action', payload='broken')):
+                realtime.changed(doc)
+            fake.publish_realtime.assert_not_called()
+            fake.db.get_value.return_value = self.ticket.name
+            realtime.changed(Record(doctype='Relay Message Action', payload={'text': 'ok'}, source_message='MSG-1'))
+            fake.publish_realtime.assert_called_once_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
 
 def setUpModule():
     """These tests cover AI behavior, so the AI features switch is on."""

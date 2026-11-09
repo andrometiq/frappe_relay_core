@@ -92,6 +92,28 @@ class TicketTagTests(unittest.TestCase):
             self.module.add_comment('TKT-00001', 'Please check', ['blocked@example.invalid'])
         self.assertEqual(self.f.get_doc.call_count, 1)
 
+    def test_a_repeated_comment_request_key_adds_the_comment_once(self):
+        import contextlib
+        import relay_core
+        ticket = self.ticket(); ticket.check_permission = Mock()
+        comment = Mock()
+        self.f.get_doc = Mock(side_effect=lambda value, *args, **kwargs: comment if isinstance(value, dict) else ticket)
+        cache = {}
+        self.f.cache = types.SimpleNamespace(get_value=cache.get, set_value=lambda key, value, expires_in_sec: cache.__setitem__(key, value))
+        self.f.db.commit = Mock()
+        self.f.get_all = Mock(return_value=[])
+        self.tickets.read = Mock()
+        locks = types.SimpleNamespace(lock=Mock(side_effect=lambda *args, **kwargs: contextlib.nullcontext()))
+        messaging = types.SimpleNamespace(request_hash=lambda key: 'user-' + key)
+        with patch.object(relay_core, 'locks', locks, create=True), \
+                patch.dict(sys.modules, {'relay_core.messaging': messaging, 'relay_core.realtime': types.SimpleNamespace(changed=Mock())}):
+            for _ in range(2):
+                self.assertEqual(self.module.add_comment('TKT-00001', 'Please call Acme Textiles', request_key='key-1'), [])
+            self.module.add_comment('TKT-00001', 'Please call Acme Textiles', request_key='key-2')
+        self.assertEqual(comment.insert.call_count, 2)
+        self.assertEqual(self.f.db.commit.call_count, 2)
+        self.assertEqual(sorted(cache), ['relay-ticket-comment:user-key-1', 'relay-ticket-comment:user-key-2'])
+
 
 if __name__ == '__main__':
     unittest.main()

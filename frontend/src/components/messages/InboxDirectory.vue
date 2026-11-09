@@ -12,7 +12,7 @@ import BusinessDirectory from './BusinessDirectory.vue'
 import { defaultMedium, mediumChips } from '../../services/enabledChannels'
 import { countLabel } from '../../services/queueCounts'
 import { mergeChangedRows, mergeFirstPage, newestActivity } from '../../services/inboxRows'
-import { listRefresh } from '../../services/realtimeRefreshQueue'
+import { heldRefresh, listRefresh } from '../../services/realtimeRefreshQueue'
 import { INBOX_ROWS, useQueueCounts } from '../../composables/useQueueCounts'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 import InboxFilterPanel from './InboxFilterPanel.vue'
@@ -59,7 +59,7 @@ async function load(cursor = {}) {
     const page = await directoryPage(cursor)
     if (ticket === generation) { rows.value = cursor.after ? [...rows.value, ...page.items] : page.items; next.value = page.next }
   } catch (e) { if (ticket === generation) { error.value = e.message; rows.value = []; next.value = null } }
-  finally { if (ticket === generation) loading.value = false }
+  finally { if (ticket === generation) { loading.value = false; live.release() } }
 }
 watch(query, (_value, _previous, onCleanup) => {
   ++generation; clearTimeout(searchTimer); error.value = ''; rows.value = []; next.value = null; loading.value = true
@@ -100,24 +100,25 @@ function openRow(row) {
 }
 function rowChanged(row, values) { Object.assign(row, values) }
 // A new message updates only the conversations active since the newest loaded row; other changes reload the page.
-async function refreshChanged() {
+async function refreshChanged(kinds) {
   const since = newestActivity(rows.value)
-  if (loading.value || error.value || !since) return load()
+  if (error.value || !since) return load()
   const ticket = ++generation
   try {
     const page = await directoryPage({ since })
-    if (ticket !== generation) return
+    if (ticket !== generation) return live.hold(kinds)
     if (page.next) return load()
     rows.value = mergeChangedRows(rows.value, page.items)
   } catch { if (ticket === generation) return load() }
 }
 // A read state change re-reads the first page in place, so the list keeps its rows and scroll.
-async function refreshFirstPage() {
-  if (loading.value || error.value || !rows.value.length) return load()
+async function refreshFirstPage(kinds) {
+  if (error.value || !rows.value.length) return load()
   const ticket = ++generation
   try {
     const page = await directoryPage({})
     if (ticket === generation) rows.value = mergeFirstPage(rows.value, page)
+    else live.hold(kinds)
   } catch { if (ticket === generation) return load() }
 }
 // Receipts change no row; new messages alone fetch only the changed rows.
@@ -125,9 +126,10 @@ function refresh({ kinds } = {}) {
   const kind = listRefresh(kinds)
   if (groupingView.value || kind === 'none') return
   if (kind === 'reload') return load()
-  return kind === 'loaded' && !kinds.has('reads') && !kinds.has('chats') ? refreshChanged() : refreshFirstPage()
+  return kind === 'loaded' && !kinds.has('reads') && !kinds.has('chats') ? refreshChanged(kinds) : refreshFirstPage(kinds)
 }
-useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads', 'chats', 'permissions', 'contacts'], refresh)
+const live = heldRefresh(() => loading.value, refresh)
+useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads', 'chats', 'permissions', 'contacts'], live.refresh)
 </script>
 <template>
   <header class="inbox-list-head">

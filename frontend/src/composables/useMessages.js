@@ -162,6 +162,8 @@ export function useMessages() {
     notice = ref("");
   // Sends in flight and their request keys. New incoming rows can refresh during a send.
   const sending = ref(0), sendingKeys = new Set();
+  // An upload holds only the composer; the list, the thread and other chats stay usable.
+  const uploading = ref(false);
   const newer = ref(false),
     last = ref(null),
     restored = ref(""),
@@ -682,7 +684,7 @@ export function useMessages() {
     data = null,
   ) {
     if (!message) return;
-    const submitted = {scope:windowKey(), body:body.value, kind:kind.value, attachment:attachment.value,
+    const submitted = {scope:windowKey(), conversation:conversationIdentity(), body:body.value, kind:kind.value, attachment:attachment.value,
       quoting:quoting.value, source:source.value};
     const typed = !data;
     if (!data) {
@@ -817,9 +819,12 @@ export function useMessages() {
       : result.status === "Rejected" ? "Message was not sent. Use Retry or Delete on the message." : "Delivery not confirmed. Review the action before retrying.");
     if (outcome) notice.value = outcome;
     if(result.status==='Submitted')sessionStorage.removeItem(storage);
-    restored.value = "";
-    // A send from an older page of history opens the newest page, where its bubble belongs.
-    if (newer.value) await history();
+    // A send from an older page of history opens the newest page, where its bubble belongs, unless the agent
+    // opened another chat meanwhile.
+    if (conversationIdentity() === submitted.conversation) {
+      restored.value = "";
+      if (newer.value) await history();
+    }
     // The sent bubble stays until the live update brings its stored message; no history read is needed.
     if(pending && result.status==='Submitted') {
       pending.persistedMessage=result.message;
@@ -844,7 +849,7 @@ export function useMessages() {
     message.status = 'Sending';
     notice.value = '';
     sendingKeys.add(message.request.request_key);
-    return queueSend(() => deliver(message.request, message.storage, message, { scope: null }))
+    return queueSend(() => deliver(message.request, message.storage, message, { scope: null, conversation: conversationIdentity() }))
       .finally(() => sendingKeys.delete(message.request.request_key));
   }
   async function deletePending(message) {
@@ -854,26 +859,32 @@ export function useMessages() {
     } else if (message.storage) sessionStorage.removeItem(message.storage);
     pendingMessages.value = pendingMessages.value.filter(row => row !== message);
   }
+  // False when the agent opened another chat during the upload; the file then belongs to no composer.
   async function uploadAttachment(file) {
+    if (uploading.value) return true;
     attachment.value = null;
-    if (!file) return;
-    await run(async () => {
+    if (!file) return true;
+    const message = source.value, scope = windowKey();
+    uploading.value = true;
+    error.value = "";
+    try {
       const content = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result.split(",")[1]);
         reader.onerror = () => reject(Error("Could not read the attachment"));
         reader.readAsDataURL(file);
       });
-      attachment.value = await coreApi(
-        "attachments.upload",
-        {
-          message: source.value.name,
-          filename: file.name,
-          content_base64: content,
-        },
-        true,
-      );
-    });
+      const uploaded = await coreApi("attachments.upload",
+        { message: message.name, filename: file.name, content_base64: content }, true);
+      if (windowKey() !== scope) return false;
+      attachment.value = uploaded;
+    } catch (e) {
+      if (windowKey() !== scope) return false;
+      error.value = e.message;
+    } finally {
+      uploading.value = false;
+    }
+    return true;
   }
   async function openFromLink() {
     if(location.hash.split('?')[0]!=='#/messages')return;
@@ -962,6 +973,7 @@ export function useMessages() {
     openQuote,
     send,
     sending,
+    uploading,
     retryPending,
     deletePending,
     run,
