@@ -1,12 +1,13 @@
 """Received WhatsApp media bounds and permission-checked response contract."""
 import base64
+from functools import partial
 import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from relay_core import attachments
-from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
+from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubClient, HubError
 from site_file_limit import use_relay_file_limit
 
 
@@ -19,6 +20,7 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         self.source = SimpleNamespace(name='RELAY-MSG-0000000001', direction='Incoming', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
             message_data=json.dumps({'kind': 'document', 'media': {'id': '123', 'filename': 'Local fixture.docx'}}))
         self.hub = Mock()
+        self.hub.media = partial(HubClient.media, self.hub)
         def reject(message, *args): raise ValueError(message, *args)
         boundary = SimpleNamespace(db=SimpleNamespace(get_value=lambda *args: None), throw=reject)
         for fixture in (patch.object(attachments, 'frappe', boundary),

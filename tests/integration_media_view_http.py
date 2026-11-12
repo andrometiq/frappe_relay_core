@@ -16,7 +16,7 @@ import requests
 import frappe
 import frappe.app
 from relay_core import inbox, messaging, received_media, whatsapp
-from relay_core.hub import HubError
+from relay_core.hub import HubClient, HubError
 
 SITE = 'relay.test'
 assert Path(inbox.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1]), 'Run with this checkout first on PYTHONPATH'
@@ -53,6 +53,7 @@ def jpeg():
 class FakeHub:
     """Answers whatsapp.attachment and whatsapp.media by media ID: expired, busy, a small photo or a sticker."""
     calls = []
+    media = HubClient.media
 
     def call_tool(self, name, arguments):
         self.calls.append(arguments['media_id'])

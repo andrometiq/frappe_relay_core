@@ -1,5 +1,6 @@
 """WhatsApp stickers: the kept copy first, readable expiry states, and forwards that upload the kept copy."""
 import base64
+from functools import partial
 import json
 from datetime import datetime
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from relay_core import attachments, messaging
-from relay_core.hub import HubError
+from relay_core.hub import HubClient, HubError
 
 WEBP = b'RIFF\x10\x00\x00\x00WEBPVP8 fixture'
 NOW = datetime(2026, 11, 12, 10, 0, 0)
@@ -25,6 +26,7 @@ class StickerTests(unittest.TestCase):
         self.channel = SimpleNamespace(channel='WhatsApp', name='RELAY-CH-1', hub_channel=None)
         self.messages = {self.incoming.name: self.incoming}
         self.hub = Mock()
+        self.hub.media = partial(HubClient.media, self.hub)
         self.hub.call_tool.return_value = {'content_base64': base64.b64encode(WEBP).decode(), 'content_type': 'image/webp'}
         self.kept = SimpleNamespace(file_name='sticker.webp')
         def reject(text, *args): raise ValueError(text, *args)

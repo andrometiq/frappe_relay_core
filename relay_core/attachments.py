@@ -35,8 +35,7 @@ def whatsapp_media(source,channel,media_id,sticker=False):
     """Download received WhatsApp media and turn Hub rejections into readable reasons.
 
     ownership_verification stays a retry: it is the Hub's own lookup failing, not a fact about the media."""
-    tool='whatsapp.media' if sticker else 'whatsapp.attachment'
-    try:return whatsapp.client().call_tool(tool,hub_arguments(channel,{'media_id':media_id}))
+    try:return whatsapp.client().media('WhatsApp',media_id,sticker=sticker,channel=hub_arguments(channel,{}).get('channel'))
     except HubError as error:check=error.metadata.get('error',{}).get('check')
     if check=='provider_metadata' and is_media_expired(source) or check=='ownership':
         frappe.throw('Media no longer available from WhatsApp',MediaGone)

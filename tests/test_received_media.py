@@ -1,5 +1,6 @@
 """Received WhatsApp media is kept as a private File as soon as it arrives."""
 import base64
+from functools import partial
 import json
 from contextlib import nullcontext
 from datetime import datetime
@@ -9,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from relay_core import attachments, received_media
 from relay_core.automation.service import message_hash
-from relay_core.hub import HubError
+from relay_core.hub import HubClient, HubError
 from site_file_limit import use_relay_file_limit
 
 NOW = datetime(2026, 11, 12, 10, 0, 0)
@@ -60,6 +61,7 @@ class StoreTests(unittest.TestCase):
     def setUp(self):
         self.source = message()
         self.hub = Mock()
+        self.hub.media = partial(HubClient.media, self.hub)
         self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'jpeg bytes').decode(), 'content_type': 'image/jpeg'}
         self.saved = []
         def save_attachment(filename, raw, name):
