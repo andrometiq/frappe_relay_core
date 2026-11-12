@@ -180,6 +180,16 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(self.frappe.enqueue.call_args.kwargs['job_id'], 'relay-media-store:RELAY-MSG-0000000200')
 
 
+class EditTests(unittest.TestCase):
+    def test_an_edit_of_the_same_media_keeps_its_copy(self):
+        previous = message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101').message_data
+        edited = {'kind': 'image', 'media': {'id': '555'}, 'caption': 'Updated caption'}
+        self.assertEqual(received_media.with_kept_copy(previous, edited), dict(edited, attachment='FILE-1', attachment_source='RELAY-MSG-0000000101'))
+        other = {'kind': 'image', 'media': {'id': '999'}}
+        self.assertEqual(received_media.with_kept_copy(previous, other), other)
+        self.assertEqual(received_media.with_kept_copy(previous, {'kind': 'revoked'}), {'kind': 'revoked'})
+
+
 class MessageHashTests(unittest.TestCase):
     def test_a_kept_copy_does_not_make_queued_work_stale(self):
         source, kept = message(), message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101')

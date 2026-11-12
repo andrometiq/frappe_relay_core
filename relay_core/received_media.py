@@ -110,6 +110,15 @@ def set_data(message, data):
     frappe.db.set_value('Relay Message', message, 'message_data', json.dumps(data, ensure_ascii=False), update_modified=False)
 
 
+def with_kept_copy(previous, edited):
+    """Edited message_data that keeps the kept copy, or the skip reason, of the same media."""
+    previous = object_value(previous or {})
+    media_id = (previous.get('media') or {}).get('id')
+    if not media_id or media_id != (edited.get('media') or {}).get('id'):
+        return edited
+    return dict(edited, **{key: previous[key] for key in KEPT_COPY_KEYS if key in previous})
+
+
 def get_missing(days):
     """At most BATCH live received WhatsApp media of the last `days` days that Meta still keeps and Relay
     has not copied, oldest first. Kept and skipped media are left out in SQL, so each run moves on."""

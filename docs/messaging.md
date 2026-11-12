@@ -148,6 +148,7 @@ Meta keeps media that a webhook received for only 7 days. Core saves a copy of e
 
 - Core skips media larger than the Relay attachment limit and imported legacy messages.
 - A failed download does not stop the message. When the Hub is busy or fails, an hourly job tries again for one day. When the media can never be kept, for example because it is larger than the limit or WhatsApp refuses it, Core records the reason in `media_store_skipped` and does not download it again.
+- When the sender edits the caption, the saved copy stays on the message.
 - Media without a copy that is older than 7 days returns HTTP 410 "Media no longer available from WhatsApp". The UI shows no Retry button for it. A busy or failed Hub returns HTTP 503, and the UI shows Retry.
 
 To save the copies of recent media that has none, for example after an outage, list them first and then queue them:

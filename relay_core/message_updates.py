@@ -167,7 +167,9 @@ def apply_updates(payload, channel, event):
             elif times==previous.get('times',{}):
                 continue
         elif update['kind'] == 'edit':
-            values = {'message_data': json.dumps(update['data'], ensure_ascii=False), 'content': preview(update['data']),
+            from relay_core.received_media import with_kept_copy
+            data = with_kept_copy(doc.message_data, update['data'])
+            values = {'message_data': json.dumps(data, ensure_ascii=False), 'content': preview(update['data']),
                       'message_type': update['data']['kind'], 'edited_at': frappe.utils.now_datetime(),
                       'transcript': '', 'transcript_status': '', 'transcript_details': None}
         else:
