@@ -730,15 +730,24 @@ def sticker_bytes(result):
     return raw, mime
 
 
+def get_kept_sticker(source, data):
+    """The bytes and type of the sticker copy kept on the received source message, or None."""
+    if not data.get('attachment'): return None
+    import mimetypes
+    from relay_core.attachments import file_content
+    file, raw = file_content(data['attachment'], source)
+    mime = mimetypes.guess_type(file.file_name)[0]
+    if mime not in STICKER_TYPES: raise ValueError('Unsupported sticker media type')
+    return raw, mime
+
+
 def whatsapp_sticker(original):
     """Send arguments for a received WhatsApp sticker: its kept copy, or Meta's media ID while Meta keeps it."""
-    import mimetypes
-    from relay_core.attachments import file_content, is_media_expired
+    from relay_core.attachments import is_media_expired
     data = object_value(original.message_data or {})
-    if data.get('attachment'):
-        file, raw = file_content(data['attachment'], original)
-        if mimetypes.guess_type(file.file_name)[0] == 'image/webp':
-            return {'content_base64': base64.b64encode(raw).decode(), 'mime_type': 'image/webp'}
+    kept = get_kept_sticker(original, data)
+    if kept and kept[1] == 'image/webp':
+        return {'content_base64': base64.b64encode(kept[0]).decode(), 'mime_type': 'image/webp'}
     if is_media_expired(original):
         raise ValueError('WhatsApp no longer keeps this sticker, so it cannot be sent again')
     return {'media_id': data['media']['id']}
@@ -758,11 +767,8 @@ def sticker(message):
         if original.direction != 'Incoming' or original.message_type != 'sticker' or original_channel.name != channel.name or original.relay_contact != source.relay_contact:
             raise ValueError('Sticker source is not permitted')
         source, data = original, object_value(original.message_data or {})
-    if data.get('attachment'):
-        import mimetypes
-        from relay_core.attachments import file_content
-        file, raw = file_content(data['attachment'], source)
-        return sticker_response(raw, mimetypes.guess_type(file.file_name)[0])
+    if kept := get_kept_sticker(source, data):
+        return sticker_response(*kept)
     media = data.get('media') or {}; file_id = media.get('file_id') if channel.channel == 'Telegram' else media.get('id')
     if not isinstance(file_id, str) or not file_id: raise ValueError('Sticker file reference is missing')
     if channel.channel == 'WhatsApp':

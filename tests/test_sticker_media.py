@@ -50,6 +50,12 @@ class StickerTests(unittest.TestCase):
             self.assertEqual((response.status_code, response.data, response.content_type), (200, WEBP, 'image/webp'))
         self.hub.call_tool.assert_not_called()
 
+    def test_kept_copy_of_an_unknown_type_is_a_readable_error(self):
+        self.incoming.message_data = json.dumps({'kind': 'sticker', 'media': {'id': '777'}, 'attachment': 'FILE-1', 'attachment_source': self.incoming.name})
+        self.kept.file_name = 'sticker.bin'
+        with self.assertRaisesRegex(ValueError, 'Unsupported sticker media type'): messaging.sticker(self.incoming.name)
+        self.hub.call_tool.assert_not_called()
+
     def test_live_download_uses_the_sticker_tool_of_the_source(self):
         response = messaging.sticker(self.outgoing().name)
         self.assertEqual(response.data, WEBP)
