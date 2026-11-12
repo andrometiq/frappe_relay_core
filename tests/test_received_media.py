@@ -1,0 +1,160 @@
+"""Received WhatsApp media is kept as a private File as soon as it arrives."""
+import base64
+import json
+from contextlib import nullcontext
+from datetime import datetime
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from relay_core import attachments, received_media
+from relay_core.automation.service import message_hash
+from relay_core.hub import HubError
+from site_file_limit import use_relay_file_limit
+
+NOW = datetime(2026, 11, 12, 10, 0, 0)
+WEBP = b'RIFF\x10\x00\x00\x00WEBPVP8 fixture'
+
+
+def setUpModule():
+    use_relay_file_limit()
+
+
+class Doc(SimpleNamespace):
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+
+def message(kind='image', direction='Incoming', provider='WhatsApp', sent_at='2026-11-11 10:00:00', **data):
+    media = {'id': '555', 'mime_type': 'image/jpeg'} if kind != 'sticker' else {'id': '556', 'mime_type': 'image/webp'}
+    return Doc(name='RELAY-MSG-0000000101', direction=direction, message_type=kind, legacy_source=None,
+        channel='RELAY-CH-1', sent_at=sent_at, creation=sent_at, content='Photo',
+        provider_context=json.dumps({'provider': provider}),
+        message_data=json.dumps({'kind': kind, 'media': media, **data}))
+
+
+class OnMessageTests(unittest.TestCase):
+    def setUp(self):
+        self.callbacks = []
+        self.frappe = SimpleNamespace(db=SimpleNamespace(after_commit=SimpleNamespace(add=self.callbacks.append)), enqueue=Mock())
+        fixture = patch.object(received_media, 'frappe', self.frappe)
+        fixture.start(); self.addCleanup(fixture.stop)
+
+    def test_received_whatsapp_media_is_queued_once_after_commit(self):
+        received_media.on_message(message())
+        self.frappe.enqueue.assert_not_called()
+        self.callbacks[0]()
+        self.frappe.enqueue.assert_called_once_with('relay_core.received_media.store', message='RELAY-MSG-0000000101',
+            queue='long', timeout=300, job_id='relay-media-store:RELAY-MSG-0000000101', deduplicate=True)
+
+    def test_other_messages_are_not_queued(self):
+        legacy = message(); legacy.legacy_source = 'legacy-1'
+        oversized = message(); oversized.message_data = json.dumps({'kind': 'video', 'media': {'id': '9', 'file_size': 50 * 1024 * 1024}})
+        for doc in (message(provider='Telegram'), message(direction='Outgoing'), message(kind='text'), legacy, oversized,
+                    message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101')):
+            received_media.on_message(doc)
+        self.assertEqual(self.callbacks, [])
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.source = message()
+        self.hub = Mock()
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'jpeg bytes').decode(), 'content_type': 'image/jpeg'}
+        self.saved = []
+        def save_attachment(filename, raw, name):
+            self.saved.append((filename, raw, name)); return SimpleNamespace(name='FILE-NEW')
+        self.db = SimpleNamespace(commit=Mock(), get_value=Mock(side_effect=lambda doctype, name, field, **kw: self.source.message_data if field == 'message_data' else name),
+                                  set_value=Mock())
+        self.logger = Mock()
+        boundary = SimpleNamespace(db=self.db, get_doc=lambda doctype, name: self.source if doctype == 'Relay Message' else SimpleNamespace(channel='WhatsApp', hub_channel=None),
+                                   logger=lambda name: self.logger, ValidationError=ValueError)
+        def reject(text, *args): raise ValueError(text, *args)
+        for fixture in (patch.object(received_media, 'frappe', boundary), patch.object(received_media.locks, 'lock', return_value=nullcontext()),
+                        patch.object(received_media, 'save_attachment', side_effect=save_attachment),
+                        patch.object(attachments, 'frappe', SimpleNamespace(throw=reject)),
+                        patch.object(attachments, 'now_datetime', return_value=NOW), patch.object(received_media, 'now_datetime', return_value=NOW),
+                        patch.object(attachments.whatsapp, 'client', return_value=self.hub)):
+            fixture.start(); self.addCleanup(fixture.stop)
+
+    def test_media_is_downloaded_once_and_recorded_where_read_looks_first(self):
+        self.assertEqual(received_media.store(self.source.name).name, 'FILE-NEW')
+        self.hub.call_tool.assert_called_once_with('whatsapp.attachment', {'media_id': '555'})
+        self.assertEqual(self.saved, [('whatsapp-image.jpg', b'jpeg bytes', 'RELAY-MSG-0000000101')])
+        name, field, value = self.db.set_value.call_args.args[1:]
+        self.assertEqual(json.loads(value)['attachment'], 'FILE-NEW')
+        self.assertEqual(json.loads(value)['attachment_source'], 'RELAY-MSG-0000000101')
+
+    def test_sticker_uses_the_sticker_tool_and_is_checked(self):
+        self.source = message(kind='sticker')
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(WEBP).decode(), 'content_type': 'image/webp'}
+        received_media.store(self.source.name)
+        self.hub.call_tool.assert_called_once_with('whatsapp.media', {'media_id': '556'})
+        self.assertEqual(self.saved[0][:2], ('sticker.webp', WEBP))
+        self.saved.clear()
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'not webp').decode(), 'content_type': 'image/webp'}
+        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(self.saved, [])
+
+    def test_a_kept_copy_or_expired_media_is_not_downloaded_again(self):
+        self.source = message(attachment='FILE-OLD', attachment_source='RELAY-MSG-0000000101')
+        self.assertIsNone(received_media.store(self.source.name))
+        self.source = message(sent_at='2026-11-04 10:00:00')
+        self.assertIsNone(received_media.store(self.source.name))
+        self.hub.call_tool.assert_not_called()
+
+    def test_a_copy_kept_meanwhile_is_not_replaced(self):
+        kept = json.dumps({'kind': 'image', 'media': {'id': '555'}, 'attachment': 'FILE-OTHER'})
+        self.db.get_value.side_effect = lambda doctype, name, field, **kw: kept if field == 'message_data' else name
+        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(self.saved, [])
+
+    def test_hub_failure_or_oversized_media_is_logged_and_never_raised(self):
+        self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'capacity'}})
+        self.assertIsNone(received_media.store(self.source.name))
+        self.assertIn('Media downloads are busy', self.logger.warning.call_args.args[0])
+        self.hub.call_tool.side_effect = None
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'x' * (10 * 1024 * 1024 + 1)).decode(), 'content_type': 'video/mp4'}
+        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(self.saved, [])
+
+    def test_file_names_keep_the_sender_name_and_a_matching_extension(self):
+        self.assertEqual(received_media.file_name('Price list.pdf', 'application/pdf', 'document'), 'Price list.pdf')
+        self.assertEqual(received_media.file_name('../notes', 'application/pdf', 'document'), '.._notes.pdf')
+        self.assertEqual(received_media.file_name(None, 'audio/ogg', 'audio'), 'whatsapp-audio.ogg')
+        self.assertEqual(received_media.file_name(None, 'application/x-unknown', 'document'), 'whatsapp-document')
+
+
+class BackfillTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = [message(), message(sent_at='2026-11-01 10:00:00'), message(attachment='FILE-1')]
+        for number, row in enumerate(self.rows): row.name = f'RELAY-MSG-000000020{number}'
+        self.frappe = SimpleNamespace(get_all=Mock(side_effect=lambda doctype, **kw: ['RELAY-CH-1'] if doctype == 'Relay Channel' else self.rows),
+                                      enqueue=Mock(), logger=Mock())
+        for fixture in (patch.object(received_media, 'frappe', self.frappe), patch.object(received_media, 'now_datetime', return_value=NOW),
+                        patch.object(attachments, 'now_datetime', return_value=NOW)):
+            fixture.start(); self.addCleanup(fixture.stop)
+
+    def test_dry_run_lists_only_media_meta_still_keeps(self):
+        self.assertEqual(received_media.store_recent_whatsapp_media(days=7), {'count': 1, 'names': ['RELAY-MSG-0000000200'], 'queued': False})
+        self.frappe.enqueue.assert_not_called()
+        filters = self.frappe.get_all.call_args.kwargs['filters']
+        self.assertEqual(filters['legacy_source'], ['is', 'not set'])
+        self.assertEqual(filters['creation'][1], datetime(2026, 11, 5, 10, 0, 0))
+        self.assertEqual(self.frappe.get_all.call_args.kwargs['limit_page_length'], received_media.BATCH)
+
+    def test_a_real_run_queues_each_missing_copy(self):
+        self.assertTrue(received_media.store_recent_whatsapp_media(days=7, dry_run=0)['queued'])
+        self.frappe.enqueue.assert_called_once()
+        self.assertEqual(self.frappe.enqueue.call_args.kwargs['job_id'], 'relay-media-store:RELAY-MSG-0000000200')
+
+
+class MessageHashTests(unittest.TestCase):
+    def test_a_kept_copy_does_not_make_queued_work_stale(self):
+        source, kept = message(), message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101')
+        self.assertEqual(message_hash(source), message_hash(kept))
+        self.assertNotEqual(message_hash(source), message_hash(message(caption='changed')))
+
+
+if __name__ == '__main__':
+    unittest.main()

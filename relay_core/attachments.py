@@ -10,8 +10,8 @@ from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
 from relay_core.hub_channels import hub_arguments
 
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
-# Meta keeps received media for about 30 days; after that the media ID no longer resolves.
-WHATSAPP_MEDIA_DAYS=30
+# Meta keeps media received by webhook for 7 days; after that the media ID no longer resolves.
+WHATSAPP_MEDIA_DAYS=7
 
 
 class MediaGone(frappe.ValidationError):
@@ -22,16 +22,35 @@ class MediaRetry(frappe.ValidationError):
     http_status_code=503
 
 
-def whatsapp_media(source,channel,media_id):
-    """Download received WhatsApp media and turn Hub rejections into readable reasons."""
-    try:return whatsapp.client().call_tool('whatsapp.attachment',hub_arguments(channel,{'media_id':media_id}))
+def is_media_expired(source):
+    """Whether Meta has dropped the media of a received message. sent_at is Meta's own time for the
+    message, so it is the closest to when Meta stored the media; creation is later when projection waited."""
+    return (now_datetime()-get_datetime(source.sent_at or source.creation)).days>=WHATSAPP_MEDIA_DAYS
+
+
+def whatsapp_media(source,channel,media_id,sticker=False):
+    """Download received WhatsApp media and turn Hub rejections into readable reasons.
+
+    ownership_verification stays a retry: it is the Hub's own lookup failing, not a fact about the media."""
+    tool='whatsapp.media' if sticker else 'whatsapp.attachment'
+    try:return whatsapp.client().call_tool(tool,hub_arguments(channel,{'media_id':media_id}))
     except HubError as error:check=error.metadata.get('error',{}).get('check')
-    age=now_datetime()-get_datetime(source.sent_at or source.creation)
-    if check=='provider_metadata' and age.days>=WHATSAPP_MEDIA_DAYS or check=='ownership':
+    if check=='provider_metadata' and is_media_expired(source) or check=='ownership':
         frappe.throw('Media no longer available from WhatsApp',MediaGone)
     if check=='size':frappe.throw('Media is larger than the 16 MiB download limit',MediaGone)
     if check=='capacity':frappe.throw('Media downloads are busy. Try again shortly.',MediaRetry)
     frappe.throw('WhatsApp did not return this media. Try again.',MediaRetry)
+
+
+def whatsapp_attachment(source,channel,media):
+    """The bytes, type and name of received WhatsApp media `media` (its message_data media or template header)."""
+    media_id=media.get('id')
+    if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
+    result=whatsapp_media(source,channel,media_id)
+    try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
+    except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
+    if not 1<=len(raw)<=MAX_WHATSAPP_DOWNLOAD_BYTES:frappe.throw('Attachment exceeds the 16 MiB download limit')
+    return raw,result.get('content_type','application/octet-stream'),media.get('filename') or result.get('filename')
 
 
 def template_media(data):
@@ -159,13 +178,7 @@ def read(message,download=0,index=None):
             filename,raw=kept
             return response(raw,mimetypes.guess_type(filename)[0] or 'application/octet-stream',filename,download)
     if channel.channel=='WhatsApp':
-        media=data.get('media') or header or {};media_id=media.get('id')
-        if not isinstance(media_id,str) or not re.fullmatch(r'[0-9]{1,100}',media_id):frappe.throw('Attachment reference is missing')
-        result=whatsapp_media(source,channel,media_id)
-        try:raw=base64.b64decode(result.get('content_base64',''),validate=True)
-        except (ValueError,binascii.Error,TypeError):frappe.throw('Invalid attachment response')
-        if not 1<=len(raw)<=MAX_WHATSAPP_DOWNLOAD_BYTES:frappe.throw('Attachment exceeds the 16 MiB download limit')
-        return response(raw,result.get('content_type','application/octet-stream'),media.get('filename') or result.get('filename'),download)
+        return response(*whatsapp_attachment(source,channel,data.get('media') or header or {}),download)
     if channel.channel!='Telegram':frappe.throw('Remote attachment download is not available for this channel')
     media=data.get('media') or {};file_id=media.get('file_id')
     if not isinstance(file_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}',file_id):frappe.throw('Attachment reference is missing')

@@ -85,6 +85,7 @@ To quote one message while reusing another sticker, supply
 `{"sticker_message":"RELAY-MSG-0000000002"}`. That sticker must be readable and
 belong to the same contact and channel. An optional `file_id` must match the
 stored source. Outgoing copies retain the incoming sticker reference for reuse.
+On WhatsApp, Core uploads the saved copy of the sticker. When no copy is saved, Core reuses Meta's media ID only while Meta keeps the media (7 days); after that it refuses the send.
 
 Telegram sends one contact card per call. WhatsApp accepts a bounded array of
 cards. Portable contact details are preserved in Telegram's vCard field.
@@ -140,6 +141,23 @@ Choose one stable request key for one user intent. Reuse it after a timeout.
 Reusing a key with the same content returns its stored action; changing content
 under the same key is rejected. Creating a new key after an uncertain result can
 send a duplicate. Automatic reconciliation is not completed.
+
+## Received WhatsApp media
+
+Meta keeps media that a webhook received for only 7 days. Core saves a copy of each received WhatsApp image, video, audio, document and sticker as a private File on its Relay Message when the message arrives. A background job on the `long` queue downloads it through the Hub. `relay_core.attachments.read` and `relay_core.messaging.sticker` serve the saved copy first and call the Hub only when no copy exists.
+
+- Core skips media larger than the Relay attachment limit and imported legacy messages.
+- A failed download does not stop the message. An hourly job tries again for one day.
+- Media without a copy that is older than 7 days returns HTTP 410 "Media no longer available from WhatsApp". The UI shows no Retry button for it. A busy or failed Hub returns HTTP 503, and the UI shows Retry.
+
+To save the copies of recent media that has none, for example after an outage, list them first and then queue them:
+
+```sh
+bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 1}"
+bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 0}"
+```
+
+One run queues at most 500 messages, oldest first. When a run lists 500, run it again after its jobs finish.
 
 ## View stickers and updates
 

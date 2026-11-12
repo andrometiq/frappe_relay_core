@@ -47,14 +47,21 @@ def check_actor(policy):
         raise ValueError('Execution identity is not permitted')
 
 
+# A kept local copy of received media is the same input, so keeping it does not make queued work stale.
+KEPT_COPY_KEYS = ('attachment', 'attachment_source')
+
+
 def message_hash(message):
     def parsed(value):
         if isinstance(value, str):
             try: return json.loads(value)
             except ValueError: return value
         return value
+    data = parsed(message.get('message_data'))
+    if isinstance(data, dict):
+        data = {key: value for key, value in data.items() if key not in KEPT_COPY_KEYS}
     return hashlib.sha256(canonical({'content': message.content, 'type': message.message_type,
-        'context': parsed(message.get('provider_context')), 'data': parsed(message.get('message_data')),
+        'context': parsed(message.get('provider_context')), 'data': data,
         'business': [message.get('business_doctype'), message.get('business_name')],
         'destination': [message.get('relay_contact'), message.get('channel'), message.get('sender_endpoint'), message.get('conversation_key')]}).encode()).hexdigest()
 
