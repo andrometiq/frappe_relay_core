@@ -83,6 +83,11 @@ with ExitStack() as stack:
         'first_name': 'Local media view verifier', 'send_welcome_email': 0, 'roles': [{'role': 'System Manager'}]})
     api_key, api_secret = secrets.token_hex(12), secrets.token_hex(24)
     user.api_key = api_key; user.api_secret = api_secret; user.enabled = 1; user.save()
+    # A Relay user with no business type assigned: it may read the Relay Message DocType but not this conversation.
+    outsider = fixture('User', {'email': 'relay-media-outsider@example.invalid'}, {'email': 'relay-media-outsider@example.invalid',
+        'first_name': 'Local media outsider', 'send_welcome_email': 0, 'roles': [{'role': 'Relay Communication User'}]})
+    outsider_key, outsider_secret = secrets.token_hex(12), secrets.token_hex(24)
+    outsider.api_key = outsider_key; outsider.api_secret = outsider_secret; outsider.enabled = 1; outsider.save()
     business = fixture('Customer', {'customer_name': 'Local media view verification'}, {
         'customer_name': 'Local media view verification', 'customer_type': 'Company',
         'customer_group': frappe.db.get_value('Customer Group', {'is_group': 0}, 'name'),
@@ -140,8 +145,9 @@ with ExitStack() as stack:
     assert not {kept.name, kept_sticker.name, refused.name, week_old.name} & set(missing), missing
     print('PASS site store marks media WhatsApp refuses and the backfill lists only media without a copy or a mark')
     names = {'expired': expired.name, 'busy': busy.name, 'recent': recent.name, 'earliest': earliest.name, 'newest': max(row.name for row in (expired, busy, recent, earliest, kept, kept_sticker, week_old, old_sticker, refused)),
-             'kept': kept.name, 'kept_sticker': kept_sticker.name, 'week_old': week_old.name, 'old_sticker': old_sticker.name}
-    contact_name, user_name, channel_name = contact.name, user.name, channel.name
+             'kept': kept.name, 'kept_sticker': kept_sticker.name, 'week_old': week_old.name, 'old_sticker': old_sticker.name,
+             'kept_url': frappe.db.get_value('File', {'attached_to_doctype': 'Relay Message', 'attached_to_name': kept.name}, 'file_url')}
+    contact_name, user_name, channel_name, outsider_name = contact.name, user.name, channel.name, outsider.name
     frappe.destroy()
 
     original_init = frappe.app.init_request
@@ -192,10 +198,24 @@ with ExitStack() as stack:
         gone = get('messaging.sticker', {'message': names['old_sticker']})
         assert gone.status_code == 410 and 'no longer available' in gone.json()['_server_messages'], gone.status_code
         print('PASS HTTP kept photo and sticker are served without the Hub; 8-day-old photo and sticker are 410; guests are denied')
+
+        site = url.split('/api/')[0]
+        outsider_headers = {'Authorization': 'token ' + outsider_key + ':' + outsider_secret}
+        def listed(auth):
+            response = requests.get(site + '/api/resource/File', headers=auth, timeout=20, params={'fields': '["file_url"]',
+                'filters': json.dumps([['attached_to_doctype', '=', 'Relay Message'], ['attached_to_name', '=', names['kept']]])})
+            assert response.status_code == 200, response.text[:300]
+            return response.json()['data']
+        assert listed(headers) == [{'file_url': names['kept_url']}]
+        assert listed(outsider_headers) == [], 'a Relay user who cannot open the conversation does not see its files'
+        download = lambda auth: requests.get(site + names['kept_url'], headers=auth, timeout=20).status_code
+        assert download(headers) == 200 and download(outsider_headers) == 403 and download({}) in (401, 403)
+        print('PASS HTTP kept File is listed and downloaded only by a user who can read the conversation')
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=5)
         connect()
-        user = frappe.get_doc('User', user_name)
-        user.api_key = None; user.api_secret = None; user.enabled = 0; user.save()
+        for name in (user_name, outsider_name):
+            user = frappe.get_doc('User', name)
+            user.api_key = None; user.api_secret = None; user.enabled = 0; user.save()
         frappe.db.set_value('Relay Channel', channel_name, 'enabled', 0)
         frappe.db.commit(); frappe.destroy()

@@ -62,6 +62,7 @@ doc_events.setdefault('Prepared Report', {})['on_update'] = 'relay_core.prepared
 doc_events.setdefault('Prepared Report', {})['on_trash'] = 'relay_core.prepared_reports.cleanup'
 has_permission['Prepared Report'] = 'relay_core.prepared_reports.permission'
 has_permission['File'] = 'relay_core.prepared_reports.file_permission'
+permission_query_conditions['File'] = 'relay_core.permissions.message_file_query'
 
 from relay_core.saved_reply_actions import NOTE_ACTION as _saved_note_action
 relay_saved_reply_actions = {'relay.add_internal_note': _saved_note_action}
