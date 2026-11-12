@@ -48,8 +48,8 @@ function evict() {
   }
 }
 
-export function loadMedia(message) {
-  const source = mediaURL(message)
+// `source` is another endpoint of the same message, such as its sticker.
+export function loadMedia(message, source = mediaURL(message)) {
   const known = entries.get(source)
   if (known) {
     entries.delete(source)
