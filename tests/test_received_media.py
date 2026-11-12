@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+import frappe
 from relay_core import attachments, received_media
 from relay_core.automation.service import message_hash
 from relay_core.hub import HubClient, HubError
@@ -52,7 +53,7 @@ class OnMessageTests(unittest.TestCase):
         legacy = message(); legacy.legacy_source = 'legacy-1'
         oversized = message(); oversized.message_data = json.dumps({'kind': 'video', 'media': {'id': '9', 'file_size': 50 * 1024 * 1024}})
         for doc in (message(provider='Telegram'), message(direction='Outgoing'), message(kind='text'), legacy, oversized,
-                    message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101')):
+                    message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101'), message(media_store_skipped='too large')):
             received_media.on_message(doc)
         self.assertEqual(self.callbacks, [])
 
@@ -70,8 +71,8 @@ class StoreTests(unittest.TestCase):
                                   set_value=Mock())
         self.logger = Mock()
         boundary = SimpleNamespace(db=self.db, get_doc=lambda doctype, name: self.source if doctype == 'Relay Message' else SimpleNamespace(channel='WhatsApp', hub_channel=None),
-                                   logger=lambda name: self.logger, ValidationError=ValueError)
-        def reject(text, *args): raise ValueError(text, *args)
+                                   logger=lambda name: self.logger, ValidationError=frappe.ValidationError)
+        def reject(text, error=ValueError): raise error(text)
         for fixture in (patch.object(received_media, 'frappe', boundary), patch.object(received_media.locks, 'lock', return_value=nullcontext()),
                         patch.object(received_media, 'save_attachment', side_effect=save_attachment),
                         patch.object(attachments, 'frappe', SimpleNamespace(throw=reject)),
@@ -111,14 +112,32 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(received_media.store(self.source.name))
         self.assertEqual(self.saved, [])
 
-    def test_hub_failure_or_oversized_media_is_logged_and_never_raised(self):
-        self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'capacity'}})
-        self.assertIsNone(received_media.store(self.source.name))
-        self.assertIn('Media downloads are busy', self.logger.warning.call_args.args[0])
-        self.hub.call_tool.side_effect = None
+    def skipped(self):
+        return [json.loads(call.args[3]).get('media_store_skipped') for call in self.db.set_value.call_args_list]
+
+    def test_a_busy_or_failed_hub_is_logged_and_left_for_recover(self):
+        for check in ('capacity', 'provider_metadata'):
+            self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': check}})
+            self.assertIsNone(received_media.store(self.source.name))
+        self.assertIn('Try again', self.logger.warning.call_args.args[0])
+        self.assertEqual((self.saved, self.skipped()), ([], []))
+
+    def test_media_that_can_never_be_kept_is_marked_and_not_downloaded_again(self):
         self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'x' * (10 * 1024 * 1024 + 1)).decode(), 'content_type': 'video/mp4'}
         self.assertIsNone(received_media.store(self.source.name))
+        self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'ownership'}})
+        self.assertIsNone(received_media.store(self.source.name))
         self.assertEqual(self.saved, [])
+        self.assertEqual([reason.split()[0] for reason in self.skipped()], ['The', 'Media'])
+        self.source.message_data = self.db.set_value.call_args.args[3]
+        self.hub.call_tool.reset_mock()
+        self.assertIsNone(received_media.store(self.source.name))
+        self.hub.call_tool.assert_not_called()
+
+    def test_a_copy_kept_meanwhile_is_not_marked_skipped(self):
+        self.db.get_value.side_effect = lambda doctype, name, field, **kw: json.dumps({'media': {'id': '555'}, 'attachment': 'FILE-OTHER'}) if field == 'message_data' else name
+        received_media.skip(self.source.name, 'too large')
+        self.db.set_value.assert_not_called()
 
     def test_file_names_keep_the_sender_name_and_a_matching_extension(self):
         self.assertEqual(received_media.file_name('Price list.pdf', 'application/pdf', 'document'), 'Price list.pdf')
@@ -131,8 +150,9 @@ class BackfillTests(unittest.TestCase):
     def setUp(self):
         self.rows = [message(), message(sent_at='2026-11-01 10:00:00'), message(attachment='FILE-1')]
         for number, row in enumerate(self.rows): row.name = f'RELAY-MSG-000000020{number}'
-        self.frappe = SimpleNamespace(get_all=Mock(side_effect=lambda doctype, **kw: ['RELAY-CH-1'] if doctype == 'Relay Channel' else self.rows),
-                                      enqueue=Mock(), logger=Mock())
+        def get_all(doctype, limit_start=0, limit_page_length=None, **kw):
+            return ['RELAY-CH-1'] if doctype == 'Relay Channel' else self.rows[limit_start:limit_start + limit_page_length]
+        self.frappe = SimpleNamespace(get_all=Mock(side_effect=get_all), enqueue=Mock(), logger=Mock())
         for fixture in (patch.object(received_media, 'frappe', self.frappe), patch.object(received_media, 'now_datetime', return_value=NOW),
                         patch.object(attachments, 'now_datetime', return_value=NOW)):
             fixture.start(); self.addCleanup(fixture.stop)
@@ -141,9 +161,18 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(received_media.store_recent_whatsapp_media(days=7), {'count': 1, 'names': ['RELAY-MSG-0000000200'], 'queued': False})
         self.frappe.enqueue.assert_not_called()
         filters = self.frappe.get_all.call_args.kwargs['filters']
-        self.assertEqual(filters['legacy_source'], ['is', 'not set'])
-        self.assertEqual(filters['creation'][1], datetime(2026, 11, 5, 10, 0, 0))
+        self.assertIn(['legacy_source', 'is', 'not set'], filters)
+        self.assertIn(['creation', '>=', datetime(2026, 11, 5, 10, 0, 0)], filters)
+        self.assertIn(['message_data', 'not like', '%"attachment"%'], filters)
+        self.assertIn(['message_data', 'not like', '%"media_store_skipped"%'], filters)
         self.assertEqual(self.frappe.get_all.call_args.kwargs['limit_page_length'], received_media.BATCH)
+
+    def test_pages_past_rows_that_cannot_be_queued_until_a_batch_is_found(self):
+        self.rows = [message(sent_at='2026-11-01 10:00:00') for _ in range(4)] + [message() for _ in range(3)]
+        for number, row in enumerate(self.rows): row.name = f'RELAY-MSG-000000030{number}'
+        with patch.object(received_media, 'BATCH', 2):
+            self.assertEqual(received_media.get_missing(7), ['RELAY-MSG-0000000304', 'RELAY-MSG-0000000305'])
+        self.assertEqual([call.kwargs['limit_start'] for call in self.frappe.get_all.call_args_list[1:]], [0, 2, 4])
 
     def test_a_real_run_queues_each_missing_copy(self):
         self.assertTrue(received_media.store_recent_whatsapp_media(days=7, dry_run=0)['queued'])
@@ -155,6 +184,7 @@ class MessageHashTests(unittest.TestCase):
     def test_a_kept_copy_does_not_make_queued_work_stale(self):
         source, kept = message(), message(attachment='FILE-1', attachment_source='RELAY-MSG-0000000101')
         self.assertEqual(message_hash(source), message_hash(kept))
+        self.assertEqual(message_hash(source), message_hash(message(media_store_skipped='too large')))
         self.assertNotEqual(message_hash(source), message_hash(message(caption='changed')))
 
 

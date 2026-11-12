@@ -47,8 +47,9 @@ def check_actor(policy):
         raise ValueError('Execution identity is not permitted')
 
 
-# A kept local copy of received media is the same input, so keeping it does not make queued work stale.
-KEPT_COPY_KEYS = ('attachment', 'attachment_source')
+# A kept local copy of received media, or the reason it cannot be kept, is the same input,
+# so recording it does not make queued work stale.
+KEPT_COPY_KEYS = ('attachment', 'attachment_source', 'media_store_skipped')
 
 
 def message_hash(message):

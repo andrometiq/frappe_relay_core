@@ -147,7 +147,7 @@ send a duplicate. Automatic reconciliation is not completed.
 Meta keeps media that a webhook received for only 7 days. Core saves a copy of each received WhatsApp image, video, audio, document and sticker as a private File on its Relay Message when the message arrives. A background job on the `long` queue downloads it through the Hub. `relay_core.attachments.read` and `relay_core.messaging.sticker` serve the saved copy first and call the Hub only when no copy exists.
 
 - Core skips media larger than the Relay attachment limit and imported legacy messages.
-- A failed download does not stop the message. An hourly job tries again for one day.
+- A failed download does not stop the message. When the Hub is busy or fails, an hourly job tries again for one day. When the media can never be kept, for example because it is larger than the limit or WhatsApp refuses it, Core records the reason in `media_store_skipped` and does not download it again.
 - Media without a copy that is older than 7 days returns HTTP 410 "Media no longer available from WhatsApp". The UI shows no Retry button for it. A busy or failed Hub returns HTTP 503, and the UI shows Retry.
 
 To save the copies of recent media that has none, for example after an outage, list them first and then queue them:
@@ -157,7 +157,7 @@ bench --site <site> execute relay_core.received_media.store_recent_whatsapp_medi
 bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 0}"
 ```
 
-One run queues at most 500 messages, oldest first. When a run lists 500, run it again after its jobs finish.
+One run queues at most 500 messages, oldest first. A run skips media that has a copy or a recorded reason. When a run lists 500, run it again after its jobs finish.
 
 ## View stickers and updates
 

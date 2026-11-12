@@ -7,7 +7,8 @@ import re
 import frappe
 from frappe.utils import add_to_date, cint, now_datetime
 from relay_core import file_limits, locks
-from relay_core.attachments import is_media_expired, save_attachment, whatsapp_attachment, whatsapp_media
+from relay_core.attachments import MediaRetry, is_media_expired, save_attachment, whatsapp_attachment, whatsapp_media
+from relay_core.automation.service import KEPT_COPY_KEYS
 from relay_core.hub import HubError
 from relay_core.messaging import object_value, sticker_bytes, STICKER_TYPES
 
@@ -16,6 +17,8 @@ TIMEOUT = 300
 # A failed or lost job is retried by recover() for this long; store_recent_whatsapp_media covers the rest.
 RECOVER_DAYS = 1
 BATCH = 500
+# Why the media can never be kept, such as its size; recover() does not download it again.
+SKIPPED = 'media_store_skipped'
 
 
 def is_storable(doc) -> bool:
@@ -25,7 +28,8 @@ def is_storable(doc) -> bool:
     data = object_value(doc.message_data or {})
     media = data.get('media') or {}
     size = media.get('file_size') or 0
-    return not data.get('attachment') and bool(media.get('id')) and size <= file_limits.get_max_bytes()
+    return (not data.get('attachment') and not data.get(SKIPPED) and bool(media.get('id'))
+            and size <= file_limits.get_max_bytes())
 
 
 def on_message(doc, method=None):
@@ -52,8 +56,11 @@ def store(message):
             if error := file_limits.size_error(len(raw), file_limits.get_max_bytes(), 'The media'):
                 raise ValueError(error)
         except (HubError, ValueError, frappe.ValidationError) as error:
-            # recover() tries again while Meta keeps the media.
             frappe.logger('relay_core').warning(f'Received media {message} was not kept: {str(error)[:300]}')
+            # Only a busy or failed Hub is worth another try; recover() retries it while Meta keeps the media.
+            if not isinstance(error, (HubError, MediaRetry)):
+                skip(message, str(error)[:140])
+                frappe.db.commit()
             return None
         file = keep(source, filename, raw)
         frappe.db.commit()
@@ -79,27 +86,49 @@ def file_name(filename, mime, kind):
 
 def keep(source, filename, raw):
     """Attach raw to the message and record it where attachments.read looks first."""
-    frappe.db.get_value('Relay Message', source.name, 'name', for_update=True)
-    data = object_value(frappe.db.get_value('Relay Message', source.name, 'message_data') or {})
+    data = get_locked_data(source.name)
     if data.get('attachment'):
         return None
     file = save_attachment(filename, raw, source.name)
-    data.update(attachment=file.name, attachment_source=source.name)
-    frappe.db.set_value('Relay Message', source.name, 'message_data', json.dumps(data, ensure_ascii=False), update_modified=False)
+    set_data(source.name, dict(data, attachment=file.name, attachment_source=source.name))
     return file
 
 
+def skip(message, reason):
+    """Record why the media cannot be kept, unless a copy was kept meanwhile."""
+    data = get_locked_data(message)
+    if not data.get('attachment'):
+        set_data(message, dict(data, **{SKIPPED: reason}))
+
+
+def get_locked_data(message):
+    frappe.db.get_value('Relay Message', message, 'name', for_update=True)
+    return object_value(frappe.db.get_value('Relay Message', message, 'message_data') or {})
+
+
+def set_data(message, data):
+    frappe.db.set_value('Relay Message', message, 'message_data', json.dumps(data, ensure_ascii=False), update_modified=False)
+
+
 def get_missing(days):
-    """Live received WhatsApp media of the last `days` days that Meta still keeps and Relay has not copied."""
+    """At most BATCH live received WhatsApp media of the last `days` days that Meta still keeps and Relay
+    has not copied, oldest first. Kept and skipped media are left out in SQL, so each run moves on."""
     channels = frappe.get_all('Relay Channel', filters={'channel': 'WhatsApp'}, pluck='name')
     if not channels:
         return []
-    rows = frappe.get_all('Relay Message', filters={'direction': 'Incoming', 'channel': ['in', channels],
-        'message_type': ['in', KINDS], 'legacy_source': ['is', 'not set'],
-        'creation': ['>=', add_to_date(now_datetime(), days=-cint(days))]},
-        fields=['name', 'direction', 'message_type', 'message_data', 'legacy_source', 'sent_at', 'creation'],
-        order_by='creation asc', limit_page_length=BATCH)
-    return [row.name for row in rows if is_storable(row) and not is_media_expired(row)]
+    filters = [['direction', '=', 'Incoming'], ['channel', 'in', channels], ['message_type', 'in', KINDS],
+               ['legacy_source', 'is', 'not set'], ['creation', '>=', add_to_date(now_datetime(), days=-cint(days))],
+               ['message_data', 'not like', '%"attachment"%'], ['message_data', 'not like', f'%"{SKIPPED}"%']]
+    names, start = [], 0
+    while len(names) < BATCH:
+        rows = frappe.get_all('Relay Message', filters=filters, order_by='creation asc, name asc',
+            fields=['name', 'direction', 'message_type', 'message_data', 'legacy_source', 'sent_at', 'creation'],
+            limit_start=start, limit_page_length=BATCH)
+        names += [row.name for row in rows if is_storable(row) and not is_media_expired(row)]
+        if len(rows) < BATCH:
+            break
+        start += BATCH
+    return names[:BATCH]
 
 
 def store_recent_whatsapp_media(days=7, dry_run=1):

@@ -66,6 +66,8 @@ class FakeHub:
             raise HubError('rejected', {'provider': 'Hub', 'error': {'check': 'provider_metadata'}})
         if arguments['media_id'] == '7002':
             raise HubError('rejected', {'provider': 'Hub', 'error': {'check': 'capacity'}})
+        if arguments['media_id'] == '7005':
+            raise HubError('rejected', {'provider': 'Hub', 'error': {'check': 'ownership'}})
         raw = jpeg() if arguments['media_id'] == '7004' else b'local photo bytes'
         return {'content_base64': base64.b64encode(raw).decode(), 'content_type': 'image/jpeg'}
 
@@ -102,20 +104,23 @@ with ExitStack() as stack:
     expired, busy, recent = message('Local media expired photo', 'image', '7001'), message('Local media busy photo', 'image', '7002'), message('Local media recent photo', 'image', '7003')
     kept, kept_sticker = message('Local media kept photo', 'image', '7004'), message('Local media kept sticker', 'sticker', '7102')
     week_old, old_sticker = message('Local media week-old photo', 'image', '7001'), message('Local media expired sticker', 'sticker', '7101')
+    refused = message('Local media refused photo', 'image', '7005')
     # Created last but sent first: the conversation opens at it because thread order is by sent time.
     earliest = message('Local media earliest question', 'text')
     now = frappe.utils.now_datetime()
     for row, sent in ((expired, now - timedelta(days=40)), (busy, now - timedelta(hours=1)), (recent, now - timedelta(minutes=5)), (earliest, now - timedelta(days=41)),
                       (kept, now - timedelta(minutes=4)), (kept_sticker, now - timedelta(minutes=3)), (week_old, now - timedelta(days=8)), (old_sticker, now - timedelta(days=8))):
         frappe.db.set_value('Relay Message', row.name, 'sent_at', sent, update_modified=False)
+    for row in (busy, recent, refused):  # Rows from an earlier run must stay inside the backfill window.
+        frappe.db.set_value('Relay Message', row.name, 'creation', now, update_modified=False)
     state = frappe.db.get_value('Relay Conversation State', {'state_key': inbox.state_key(contact.name, user.name)}, 'name')
     if state: frappe.delete_doc('Relay Conversation State', state, ignore_permissions=True, force=True)
     frappe.db.delete('Relay Message Read', {'user': user.name, 'message': ['in', [expired.name, busy.name, recent.name, earliest.name]]})
-    for row in (kept, kept_sticker):
+    for row in (kept, kept_sticker, refused):
         stale = frappe.get_all('File', filters={'attached_to_doctype': 'Relay Message', 'attached_to_name': row.name}, pluck='name')
         for file in stale: frappe.delete_doc('File', file, ignore_permissions=True, force=True)
         data = json.loads(frappe.db.get_value('Relay Message', row.name, 'message_data'))
-        data.pop('attachment', None); data.pop('attachment_source', None)
+        for key in ('attachment', 'attachment_source', received_media.SKIPPED): data.pop(key, None)
         frappe.db.set_value('Relay Message', row.name, 'message_data', json.dumps(data), update_modified=False)
     frappe.db.set_value('Relay Channel', channel.name, 'enabled', 1)
     frappe.db.commit()
@@ -127,7 +132,14 @@ with ExitStack() as stack:
     assert frappe.db.get_value('File', json.loads(frappe.db.get_value('Relay Message', kept_sticker.name, 'message_data'))['attachment'], 'file_name') == 'sticker.webp'
     assert received_media.store(week_old.name) is None and FakeHub.calls == ['7004', '7102'], 'media Meta no longer keeps is not fetched'
     print('PASS site store keeps one private File per received photo and sticker, never twice, and skips media older than 7 days')
-    names = {'expired': expired.name, 'busy': busy.name, 'recent': recent.name, 'earliest': earliest.name, 'newest': max(expired.name, busy.name, recent.name, earliest.name),
+    assert received_media.store(refused.name) is None and FakeHub.calls[-1] == '7005'
+    assert received_media.SKIPPED in json.loads(frappe.db.get_value('Relay Message', refused.name, 'message_data'))
+    assert received_media.store(refused.name) is None and FakeHub.calls.count('7005') == 1, 'refused media is not downloaded again'
+    missing = received_media.get_missing(7)
+    assert recent.name in missing and busy.name in missing, missing
+    assert not {kept.name, kept_sticker.name, refused.name, week_old.name} & set(missing), missing
+    print('PASS site store marks media WhatsApp refuses and the backfill lists only media without a copy or a mark')
+    names = {'expired': expired.name, 'busy': busy.name, 'recent': recent.name, 'earliest': earliest.name, 'newest': max(row.name for row in (expired, busy, recent, earliest, kept, kept_sticker, week_old, old_sticker, refused)),
              'kept': kept.name, 'kept_sticker': kept_sticker.name, 'week_old': week_old.name, 'old_sticker': old_sticker.name}
     contact_name, user_name, channel_name = contact.name, user.name, channel.name
     frappe.destroy()
