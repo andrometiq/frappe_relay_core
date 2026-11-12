@@ -16,7 +16,7 @@ def setUpModule():
 
 class WhatsAppAttachmentTests(unittest.TestCase):
     def setUp(self):
-        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
+        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', direction='Incoming', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
             message_data=json.dumps({'kind': 'document', 'media': {'id': '123', 'filename': 'Local fixture.docx'}}))
         self.hub = Mock()
         def reject(message, *args): raise ValueError(message, *args)
@@ -86,6 +86,9 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
         self.assertEqual(self.rejected('provider_metadata', '2026-10-26 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
         self.assertEqual(self.rejected('ownership_verification', '2026-11-25 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.source.direction = 'Outgoing'
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-19 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
         self.assertEqual(attachments.MediaGone.http_status_code, 410)
         self.assertEqual(attachments.MediaRetry.http_status_code, 503)
 

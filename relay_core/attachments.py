@@ -10,8 +10,10 @@ from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
 from relay_core.hub_channels import hub_arguments
 
 MEDIA_KINDS=('photo','image','video','audio','voice','document','animation')
-# Meta keeps media received by webhook for 7 days; after that the media ID no longer resolves.
+# Meta keeps media received by webhook for 7 days and media the business uploaded for 30 days;
+# after that the media ID no longer resolves.
 WHATSAPP_MEDIA_DAYS=7
+WHATSAPP_UPLOAD_DAYS=30
 
 
 class MediaGone(frappe.ValidationError):
@@ -23,9 +25,10 @@ class MediaRetry(frappe.ValidationError):
 
 
 def is_media_expired(source):
-    """Whether Meta has dropped the media of a received message. sent_at is Meta's own time for the
+    """Whether Meta has dropped the media of the message. sent_at is Meta's own time for the
     message, so it is the closest to when Meta stored the media; creation is later when projection waited."""
-    return (now_datetime()-get_datetime(source.sent_at or source.creation)).days>=WHATSAPP_MEDIA_DAYS
+    days=WHATSAPP_MEDIA_DAYS if source.direction=='Incoming' else WHATSAPP_UPLOAD_DAYS
+    return (now_datetime()-get_datetime(source.sent_at or source.creation)).days>=days
 
 
 def whatsapp_media(source,channel,media_id,sticker=False):
