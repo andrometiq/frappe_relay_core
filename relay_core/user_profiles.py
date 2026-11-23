@@ -2,8 +2,11 @@
 
 A user reads and edits only their own profile; a System Manager may edit anyone's. Colleagues see the public card.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import frappe
-from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
+from frappe.utils import add_to_date, get_datetime, get_system_timezone, getdate, now_datetime
 from relay_core.permissions import require_access
 
 DOCTYPE = 'Relay User Profile'
@@ -15,6 +18,7 @@ CLEAR_AFTER = {'30m': {'minutes': 30}, '1h': {'hours': 1}, '4h': {'hours': 4}, '
 DEFAULTS = {'display_name': '', 'job_title': '', 'status': 'Available', 'status_text': '', 'status_clear_at': None,
             'theme': 'System', 'density': 'Comfortable', 'notify_messages': 1, 'notify_mentions': 1, 'notify_sound': 0}
 MAX_CARDS = 100
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 
 
 def target_user(user=None):
@@ -45,10 +49,17 @@ def stored(user):
 def profile_of(user):
     account = frappe.db.get_value('User', user, ['full_name', 'user_image'], as_dict=True)
     profile = stored(user)
-    profile['status_clear_at'] = str(profile['status_clear_at']) if profile['status_clear_at'] else None
+    profile['status_clear_at'] = zoned(profile['status_clear_at'])
     for flag in FLAGS:
         profile[flag] = int(profile[flag] or 0)
     return {'user': user, 'full_name': account.full_name or user, 'user_image': account.user_image or '', **profile}
+
+
+def zoned(value):
+    """An ISO time with the site's UTC offset, so every browser shows the same moment."""
+    if not value:
+        return None
+    return get_datetime(value).replace(tzinfo=ZoneInfo(get_system_timezone())).isoformat()
 
 
 @frappe.whitelist(methods=['GET'])
@@ -58,7 +69,7 @@ def get(user=None):
     return profile_of(target_user(user))
 
 
-def clean(values):
+def clean(values, user):
     """Validated field values from an update request; unknown fields are refused."""
     allowed = set(TEXTS) | set(CHOICES) | set(FLAGS) | {'clear_after', 'user_image'}
     unknown = set(values) - allowed
@@ -79,7 +90,7 @@ def clean(values):
         elif key == 'clear_after':
             value = clear_time(value)
         elif key == 'user_image':
-            value = image_url(value)
+            value = image_url(value, user)
         result[key] = value
     return result
 
@@ -95,12 +106,16 @@ def clear_time(value):
     return add_to_date(now_datetime().replace(microsecond=0), **CLEAR_AFTER[value])
 
 
-def image_url(value):
-    """A public file that exists, or empty to remove the photo."""
+def image_url(value, user):
+    """A public image the user uploaded or attached to their User record, or empty to remove the photo."""
     if value in (None, ''):
         return ''
-    if not isinstance(value, str) or not value.startswith('/files/') or not frappe.db.exists('File', {'file_url': value, 'is_private': 0}):
-        frappe.throw('Upload the photo as a public image first')
+    if not isinstance(value, str) or not value.startswith('/files/') or not value.lower().endswith(IMAGE_EXTENSIONS):
+        frappe.throw('Upload a PNG, JPEG, GIF or WebP photo')
+    files = frappe.get_all('File', filters={'file_url': value, 'is_private': 0},
+                           fields=['owner', 'attached_to_doctype', 'attached_to_name'])
+    if not any(row.owner == user or (row.attached_to_doctype == 'User' and row.attached_to_name == user) for row in files):
+        frappe.throw('Upload the photo to your own profile first')
     return value
 
 
@@ -110,19 +125,42 @@ def update(user=None, **values):
     require_access()
     user = target_user(user)
     values.pop('cmd', None)
-    changes = clean(values)
-    if 'user_image' in changes:
-        frappe.db.set_value('User', user, 'user_image', changes.pop('user_image'))
+    changes = clean(values, user)
+    changed = save_photo(user, changes.pop('user_image')) if 'user_image' in changes else False
     if 'clear_after' in changes:
         changes['status_clear_at'] = changes.pop('clear_after')
     if changes.get('status') == 'Available' and 'status_text' not in changes:
         changes.update(status_text='', status_clear_at=None)
-    if changes:
-        doc = frappe.get_doc(DOCTYPE, user) if frappe.db.exists(DOCTYPE, user) else frappe.new_doc(DOCTYPE).update({'user': user})
-        doc.update(changes)
-        doc.save(ignore_permissions=True)
-    frappe.publish_realtime('relay_changed', {'kind': 'user_profiles'}, after_commit=True)
+    changed = save_profile(user, changes) or changed
+    if changed:
+        frappe.publish_realtime('relay_changed', {'kind': 'user_profiles'}, after_commit=True)
     return profile_of(user)
+
+
+def save_photo(user, image):
+    """Write User.user_image only when it changes."""
+    if (frappe.db.get_value('User', user, 'user_image') or '') == image:
+        return False
+    frappe.db.set_value('User', user, 'user_image', image)
+    return True
+
+
+def save_profile(user, changes):
+    """Save only the fields that differ from the stored profile; True when something changed."""
+    exists = frappe.db.exists(DOCTYPE, user)
+    doc = frappe.get_doc(DOCTYPE, user) if exists else frappe.new_doc(DOCTYPE).update({'user': user, **DEFAULTS})
+    changes = {key: value for key, value in changes.items() if not same(doc.get(key), value)}
+    if not changes:
+        return False
+    doc.update(changes)
+    doc.save(ignore_permissions=True)
+    return True
+
+
+def same(current, value):
+    if isinstance(value, datetime):
+        return bool(current) and get_datetime(current) == value
+    return str(current if current is not None else '') == str(value if value is not None else '')
 
 
 @frappe.whitelist(methods=['GET'])

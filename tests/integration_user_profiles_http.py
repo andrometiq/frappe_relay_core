@@ -5,9 +5,11 @@ Fixtures are clearly named, reusable local users. API credentials are ephemeral.
 """
 import os
 import secrets
+import struct
 import sys
 import threading
 import unittest
+import zlib
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -40,6 +42,16 @@ def user_with_key(email, name, roles):
     user.api_key, user.api_secret, user.enabled = key, secret, 1
     user.save()
     return {'Authorization': f'token {key}:{secret}'}
+
+
+def png(seed):
+    """A small valid PNG whose colour depends on the seed, so each user uploads different content."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    colour = bytes(zlib.crc32(seed.encode()).to_bytes(4, 'big')[:3])
+    pixels = b''.join(b'\0' + colour * 8 for _ in range(8))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 8, 8, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
 
 
 class Quiet(WSGIRequestHandler):
@@ -112,6 +124,22 @@ class UserProfilesHttpTests(unittest.TestCase):
     def test_invalid_values_are_refused(self):
         self.assertEqual(self.call('update', self.agent, status='Sleeping').status_code, 417)
         self.assertEqual(self.call('update', self.agent, owner='x').status_code, 417)
+
+    def upload_photo(self, headers, user):
+        response = requests.post(f'{self.url.split("/api/")[0]}/api/method/upload_file', headers=headers, timeout=20,
+                                 files={'file': ('relay-profile-photo.png', png(user), 'image/png')},
+                                 data={'is_private': '0', 'doctype': 'User', 'docname': user, 'fieldname': 'user_image'})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()['message']['file_url']
+
+    def test_photo_attached_to_own_user_is_accepted_and_a_colleagues_photo_is_refused(self):
+        mine, theirs = self.upload_photo(self.agent, self.AGENT), self.upload_photo(self.other, self.OTHER)
+        response = self.call('update', self.agent, user_image=mine)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['message']['user_image'], mine)
+        self.assertNotEqual(theirs, mine)
+        self.assertEqual(self.call('update', self.agent, user_image=theirs).status_code, 417)
+        self.assertEqual(self.call('update', self.agent, user_image='').json()['message']['user_image'], '')
 
     def test_cards_show_public_fields(self):
         self.call('update', self.other, display_name='Profile colleague', status='Do not disturb')
