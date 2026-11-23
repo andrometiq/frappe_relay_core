@@ -65,10 +65,10 @@ const ROUTE_FILTERS = ['query', 'ticket_status', 'mine', 'state', 'assigned', 'r
 // An empty value of these is itself a filter: no owner, no type.
 const EMPTY_FILTERS = ['assigned_to', 'ticket_type']
 
-// The Tickets URL: the dashboard is #/tickets, the list carries its filters, and an open ticket is added on top.
-export function ticketRoute({ view = 'dashboard', filters = {}, ticket = '' } = {}) {
+// The Tickets URL: the list is #/tickets with its filters, the dashboard is ?view=dashboard, and an open ticket is added on top.
+export function ticketRoute({ view = 'tickets', filters = {}, ticket = '' } = {}) {
   const params = new URLSearchParams()
-  if (view !== 'dashboard' || ticket) params.set('view', view)
+  if (view !== 'tickets') params.set('view', view)
   if (view === 'tickets') {
     for (const key of ROUTE_FILTERS) {
       const value = filters[key]
@@ -84,11 +84,11 @@ export function ticketFilterRoute(filters) {
   return ticketRoute({ view: 'tickets', filters })
 }
 
-// View, list filters and open ticket of a Tickets URL; a bare ticket link opens over the list.
+// View, list filters and open ticket of a Tickets URL; an unknown view opens the list.
 export function readTicketRoute(hash) {
   const params = new URLSearchParams(hash.split('?')[1] || '')
   const ticket = params.get('ticket') || ''
-  const view = VIEWS.includes(params.get('view')) ? params.get('view') : ticket ? 'tickets' : 'dashboard'
+  const view = VIEWS.includes(params.get('view')) ? params.get('view') : 'tickets'
   return { view, ticket, filters: ticketFiltersFromRoute(hash) }
 }
 
@@ -100,4 +100,45 @@ export function ticketFiltersFromRoute(hash) {
   }
   filters.mine = Number(filters.mine) ? 1 : 0
   return filters
+}
+
+export const BUSINESS_TYPE_DOTS = ['#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594', '#d6409f', '#ffc53d', '#8b8d98']
+
+// Sidebar views of the ticket list, counted from the dashboard numbers. A count is null while it is unknown.
+export function ticketViews(dashboard, settings, user, businessTypes = []) {
+  const totals = dashboard?.totals
+  const statuses = dashboard?.statuses || []
+  const closed = new Set(settings.statuses.filter(row => row.state === 'Closed').map(row => row.name))
+  const sum = rows => rows.reduce((total, row) => total + row.tickets, 0)
+  const known = value => totals ? value : null
+  const openOf = type => sum((dashboard?.business_types || []).filter(row => row.business_doctype === type))
+  return [
+    { key: 'views', items: [
+      { key: 'all', label: 'All tickets', icon: 'ticket', filters: {}, count: known(sum(statuses)) },
+      { key: 'open', label: 'Open', icon: 'inbox', filters: { state: 'Open' }, count: known(totals?.open), strong: true },
+      { key: 'mine', label: 'Assigned to me', icon: 'user', filters: { state: 'Open', mine: 1 },
+        count: known(dashboard?.assignees.find(row => row.assigned_to === user)?.tickets || 0) },
+      { key: 'unassigned', label: 'Unassigned', icon: 'at-sign', filters: { state: 'Open', assigned_to: '' }, count: known(totals?.unassigned) },
+      { key: 'resolved', label: 'Resolved', icon: 'check', filters: { state: 'Closed' }, count: known(sum(statuses.filter(row => closed.has(row.ticket_status)))) },
+    ] },
+    { key: 'types', title: 'Business type', items: businessTypes.map((type, index) => ({
+      key: 'type:' + type.value, label: type.label, dot: BUSINESS_TYPE_DOTS[index % BUSINESS_TYPE_DOTS.length],
+      filters: { state: 'Open', business_type: type.value }, count: known(openOf(type.value)) })) },
+  ].filter(section => section.items.length)
+}
+
+// The list filters that pick a view: query and status stay as the person set them.
+function viewFilters(filters) {
+  return Object.fromEntries(Object.entries(filters).filter(([key, value]) => !['query', 'ticket_status'].includes(key)
+    && ((value && value !== '0') || (value === '' && EMPTY_FILTERS.includes(key)))).map(([key, value]) => [key, String(value)]))
+}
+
+export function ticketViewKey(sections, filters) {
+  const current = JSON.stringify(Object.entries(viewFilters(filters)).sort())
+  return sections.flatMap(section => section.items).find(item => JSON.stringify(Object.entries(viewFilters(item.filters)).sort()) === current)?.key || ''
+}
+
+// Picking a view keeps the search text and replaces every other filter.
+export function ticketViewFilters(view, filters) {
+  return { ...emptyTicketFilters(), query: filters.query || '', ...view.filters }
 }
