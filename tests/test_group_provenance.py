@@ -37,6 +37,16 @@ class ProvenanceTests(unittest.TestCase):
         message['from']['is_bot'] = True; message['sender_chat'] = {'id': -1001}
         self.assertEqual(telegram_message(event)['sender_chat_id'], -1001)
 
+    def test_a_private_chat_keeps_its_public_handle_and_a_group_does_not(self):
+        event = self.event(); message = event['payload']['message']
+        event['sender'] = '55012345'; message.pop('message_thread_id')
+        message['chat'] = {'id': 55012345, 'type': 'private', 'username': 'ravitex'}
+        self.assertEqual(telegram_message(event)['username'], 'ravitex')
+        message['chat']['username'] = 'no spaces allowed'
+        self.assertNotIn('username', telegram_message(event))
+        group = self.event(); group['payload']['message']['chat']['username'] = 'groupname'
+        self.assertNotIn('username', telegram_message(group))
+
     def test_normalized_route_and_body_must_match_authenticated_update(self):
         for field, value in [('provider_id', '124'), ('sender', '-1002'), ('body', 'changed')]:
             event = self.event(); event[field] = value

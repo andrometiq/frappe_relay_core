@@ -82,7 +82,17 @@ def thread_item(thread, last, channel, person, unread):
             'channel': channel_name, 'provider': channel.channel, 'channel_label': channel.label or channel.title or channel_name,
             'channel_address': channel.address or '', 'endpoint': endpoint, 'last_message': last.name,
             'last_at': last.sent_at or last.creation, 'last_direction': last.direction, 'preview': directory_preview(last),
-            'unread': unread[0], 'first_unread': unread[1]}
+            'unread': unread[0], 'first_unread': unread[1], 'handle': telegram_handle(thread) if channel.channel == 'Telegram' else ''}
+
+
+def telegram_handle(thread):
+    """The person's public Telegram handle from their newest message on the thread, when Telegram sent one."""
+    from relay_core.automation.provenance import context_of
+    contact, channel, endpoint = thread
+    context = frappe.db.get_value('Relay Message', {'relay_contact': contact, 'channel': channel, 'sender_endpoint': endpoint,
+                                                    'direction': 'Incoming'}, 'provider_context', order_by='name desc')
+    username = context_of({'provider_context': context}).get('username') if context else None
+    return '@' + username if isinstance(username, str) and username else ''
 
 
 def provider_rank(provider):

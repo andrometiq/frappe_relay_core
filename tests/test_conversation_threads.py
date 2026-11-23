@@ -36,6 +36,7 @@ class ConversationThreadTests(unittest.TestCase):
                          [('CH-WA1', '911'), ('CH-WA2', '911'), ('CH-MAIL', 'ravi@example.invalid')],
                          'WhatsApp, then Telegram, then Email; hidden channels and unreadable people are left out')
         support = items[1]
+        self.assertEqual(support['handle'], '')
         self.assertEqual({key: support[key] for key in ('key', 'provider', 'channel_label', 'channel_address', 'unread', 'first_unread',
                                                          'last_message', 'last_direction', 'preview', 'contact_label', 'frappe_contact')},
                          {'key': 'R1|CH-WA2|911', 'provider': 'WhatsApp', 'channel_label': 'Support', 'channel_address': '+91 70000 00002',
@@ -48,6 +49,19 @@ class ConversationThreadTests(unittest.TestCase):
             for values in ({}, {'contact': 'RELAY-CON-1', 'doctype': 'Customer', 'name': 'C1'}):
                 with self.subTest(values=values), self.assertRaises(ValueError):
                     conversation_threads.threads(**values)
+
+
+class TelegramHandleTests(unittest.TestCase):
+    def test_a_telegram_thread_shows_the_handle_of_its_newest_incoming_message(self):
+        fake = fake_frappe()
+        with patch.object(conversation_threads, 'frappe', fake):
+            fake.db.get_value.return_value = '{"provider": "Telegram", "chat_id": 55012345, "username": "ravitex"}'
+            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '@ravitex')
+            self.assertEqual(fake.db.get_value.call_args.kwargs['order_by'], 'name desc')
+            fake.db.get_value.return_value = '{"provider": "Telegram", "chat_id": 55012345}'
+            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '')
+            fake.db.get_value.return_value = None
+            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '')
 
 
 class ReadablePersonTests(unittest.TestCase):

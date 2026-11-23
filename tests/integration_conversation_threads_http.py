@@ -126,7 +126,7 @@ class ConversationThreadHttpTests(unittest.TestCase):
                 (self.channels[1], 'ravi@example.invalid', 1)])
             item = items[2]
             self.assertEqual(set(item), {'key', 'relay_contact', 'contact_label', 'frappe_contact', 'channel', 'provider', 'channel_label',
-                                         'channel_address', 'endpoint', 'last_message', 'last_at', 'last_direction', 'preview', 'unread',
+                                         'channel_address', 'endpoint', 'last_message', 'last_at', 'last_direction', 'preview', 'unread', 'handle',
                                          'first_unread'})
             self.assertEqual((item['key'], item['provider'], item['last_message'], item['first_unread'], item['last_direction']),
                              ('|'.join((self.contact, self.channels[1], 'ravi@example.invalid')), 'Email', self.names[3], self.names[3], 'Incoming'))
