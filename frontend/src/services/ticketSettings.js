@@ -133,9 +133,14 @@ function viewFilters(filters) {
     && ((value && value !== '0') || (value === '' && EMPTY_FILTERS.includes(key)))).map(([key, value]) => [key, String(value)]))
 }
 
+// A picked status replaces the view's state on the server, so the view stays active without it.
 export function ticketViewKey(sections, filters) {
-  const current = JSON.stringify(Object.entries(viewFilters(filters)).sort())
-  return sections.flatMap(section => section.items).find(item => JSON.stringify(Object.entries(viewFilters(item.filters)).sort()) === current)?.key || ''
+  const key = values => {
+    const { state, ...rest } = viewFilters(values)
+    return JSON.stringify(Object.entries(filters.ticket_status ? rest : { ...rest, ...(state ? { state } : {}) }).sort())
+  }
+  const current = key(filters)
+  return sections.flatMap(section => section.items).find(item => key(item.filters) === current)?.key || ''
 }
 
 // Picking a view keeps the search text and replaces every other filter.

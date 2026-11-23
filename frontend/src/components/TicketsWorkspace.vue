@@ -25,6 +25,7 @@ const view = ref('tickets')
 const businessTypes = ref([])
 const typeOptions = computed(() => businessTypes.value.filter(row => row.enabled).map(row => ({ value: row.business_doctype, label: row.label || row.business_doctype })))
 const filters = ref(emptyTicketFilters())
+const typeLabel = doctype => typeOptions.value.find(row => row.value === doctype)?.label || doctype
 const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref('')
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
@@ -51,8 +52,9 @@ const stats = computed(() => {
 // Dashboard filters that have no control of their own on the list.
 const filterLabel = computed(() => {
   if (activeView.value) return ''
-  const { state, assigned, resolved_today, assigned_to, ticket_type, exclude_assignees, unlinked } = filters.value
-  return [resolved_today && 'Resolved today', !resolved_today && state && state + ' tickets', assigned && 'With an owner',
+  const { state, assigned, resolved_today, assigned_to, ticket_type, exclude_assignees, unlinked, mine, business_type } = filters.value
+  return [resolved_today && 'Resolved today', !resolved_today && state && state + ' tickets', Number(mine) && 'Assigned to me',
+    business_type && 'Business type: ' + typeLabel(business_type), assigned && 'With an owner',
     exclude_assignees && 'Other assignees', assigned_to === '' ? 'Unassigned' : assigned_to && 'Assigned to: ' + linkedTitle('User', assigned_to),
     ticket_type !== undefined && 'Type: ' + (ticket_type || 'No type'), unlinked && 'Not linked to a business record'].filter(Boolean).join(' · ')
 })
@@ -136,7 +138,6 @@ async function update(method, values = {}) {
     else error.value = e.message
   } finally { saving.value = false }
 }
-const typeLabel = doctype => typeOptions.value.find(row => row.value === doctype)?.label || doctype
 useDebouncedSearch(() => JSON.stringify(filters.value), () => load(), () => { ++generation; page.value = { items: [] }; listBusy.value = true })
 onMounted(() => {
   loadSettings().catch(e => { error.value = e.message })
@@ -145,7 +146,14 @@ onMounted(() => {
 })
 onMounted(() => { load(); readRoute(); window.addEventListener('popstate', readRoute); window.addEventListener('hashchange', readRoute) })
 onBeforeUnmount(() => { window.removeEventListener('popstate', readRoute); window.removeEventListener('hashchange', readRoute) })
-useRealtimeRefresh(['Relay Ticket'], ['tickets'], () => Promise.all([load(), loadCounts()]))
+// One coalesced refresh per burst of ticket events: the counts always, the list only while it shows.
+let listStale = false
+function refreshView() {
+  listStale = view.value !== 'tickets'
+  return listStale ? loadCounts() : Promise.all([load(), loadCounts()])
+}
+watch(view, value => { if (value === 'tickets' && listStale) { listStale = false; load() } })
+useRealtimeRefresh(['Relay Ticket'], ['tickets'], refreshView)
 const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.next, error, load: () => load(page.value.next) })
 </script>
 <template>
@@ -160,7 +168,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <header class="page-head">
           <Button variant="ghost" icon="chevron-left" aria-label="Back to tickets" @click="view = 'tickets'" /><h2>Ticket dashboard</h2>
         </header>
-        <div class="ticket-dashboard-wrap"><ErrorMessage :message="error" /><TicketDashboard :settings="settings" @open="select" /></div>
+        <div class="ticket-dashboard-wrap"><ErrorMessage :message="error" /><TicketDashboard :settings="settings" :counts="counts" @open="select" /></div>
       </template>
       <template v-else>
         <header class="page-head">

@@ -40,7 +40,7 @@ function tickets(t, calls = [], failure = null) {
   }
   return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters, readTicketRoute, ticketRoute, linkedTitle: () => '', toast: () => {},
     ticketViewFilters, ticketViewKey, ticketViews, recordTitle: row => row.subject || row.name, relativeTime: () => '1h ago',
-    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'pickStatus', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load', 'pickView', 'sections', 'activeView', 'stats', 'openStat'])
+    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'pickStatus', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load', 'pickView', 'sections', 'activeView', 'stats', 'openStat', 'filterLabel', 'refreshView'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {
@@ -71,6 +71,37 @@ test('the Dashboard button, sidebar views and list filters replace the URL, so t
   await settle()
   assert.deepEqual(page.entries(), ['#/tickets?query=parcel&state=Open&assigned_to='])
   assert.equal(state.activeView.value, 'unassigned')
+})
+
+test('a status pick keeps Assigned to me active and other filters are named with Clear filter', async t => {
+  browser(t, '#/tickets')
+  const state = await tickets(t)
+  state.pickView({ filters: { state: 'Open', mine: 1 } })
+  state.pickStatus('Closed')
+  assert.equal(state.activeView.value, 'mine', 'The view stays active with its status')
+  state.setFilter({ assigned: 1 })
+  assert.equal(state.activeView.value, '')
+  assert.equal(state.filterLabel.value, 'Assigned to me · With an owner')
+  state.setFilter({ assigned: 0, mine: 0, business_type: 'Customer', ticket_status: '', state: '', unlinked: 1 })
+  assert.equal(state.filterLabel.value, 'Business type: Customer · Not linked to a business record')
+})
+
+test('a ticket event refreshes the list only while it shows, and the counts once', async t => {
+  browser(t, '#/tickets')
+  const calls = []
+  const state = await tickets(t, calls)
+  const count = method => calls.filter(([name]) => name === method).length
+  let before = [count('tickets.directory'), count('tickets.dashboard')]
+  await state.refreshView()
+  assert.deepEqual([count('tickets.directory') - before[0], count('tickets.dashboard') - before[1]], [1, 1])
+  state.view.value = 'dashboard'
+  await settle()
+  before = [count('tickets.directory'), count('tickets.dashboard')]
+  await state.refreshView()
+  assert.deepEqual([count('tickets.directory') - before[0], count('tickets.dashboard') - before[1]], [0, 1], 'The dashboard view reads only the counts')
+  state.view.value = 'tickets'
+  await settle()
+  assert.equal(count('tickets.directory') - before[0], 1, 'The list reloads once when it shows again')
 })
 
 test('stat cards open their tickets and the dashboard counts the sidebar views', async t => {
