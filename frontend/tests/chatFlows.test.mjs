@@ -15,7 +15,7 @@ test('closing or switching the chat closes and clears the ticket dialog', () => 
 
 test('"Link record" opens the link form, not the full contact details', async () => {
   assert.match(connected, /capabilities.manage" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link/)
-  assert.match(connected, /<ChatPanel v-if="contextShown && !isMobile" :title="linking \? 'Link record' : 'Contact info'"/)
+  assert.match(connected, /<ChatPanel v-if="contextShown && !isMobile" :title="linking \? 'Link record' : 'Details'"/)
   assert.match(connected, /<ContactDetails v-if="frappeContact" [^>]*compact [^>]*:link="linking"/)
   const details = await read('components/ContactDetails.vue')
   assert.match(details, /<ContactLinks [^>]*:start="link"/)
@@ -78,7 +78,7 @@ test('internal notes work in every chat: email chats and switched-off channels t
   const email = await read('components/messages/EmailComposer.vue')
   assert.match(email, /<slot name="note" \/>/)
   assert.match(email, /@submit\.prevent="!noting && send\(\)"/)
-  assert.match(connected, /<EmailComposer v-if="[^"]*" :key="source\.name" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">/)
+  assert.match(connected, /<EmailComposer v-if="[^"]*" :key="source\.name" :lock="lock" :mode="composeMode" :note-busy="noteBusy" @mode="setComposeMode">/)
   assert.equal(connected.match(/<template #note><NoteComposer /g)?.length, 2)
   assert.match(connected, /<MessageComposer v-else-if="source && \(replyOff \|\| channelEnabled\([^"]*" [^>]*:off-text="replyOff"/)
   assert.doesNotMatch(connected, /class="chat-channel-off"/)

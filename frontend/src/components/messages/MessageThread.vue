@@ -67,6 +67,8 @@ const props = defineProps({
   replyClosed: Boolean,
   // The provider of the channel picked to send on; actions that send act only on its messages.
   provider: String,
+  // Every row is on one channel (an open thread), so bubbles name no channel or number.
+  oneChannel: Boolean,
 });
 const emit = defineEmits([
   "reconcile",
@@ -86,10 +88,10 @@ const emit = defineEmits([
   "toast",
 ]);
 const capabilities = inject("relayCapabilities", ref({}));
-const showChannel = computed(() => multipleChannels(capabilities.value));
+const showChannel = computed(() => !props.oneChannel && multipleChannels(capabilities.value));
 const sentRows = computed(() => groupSends(props.rows || []));
 const threadRows = computed(() => notesInThread(sentRows.value, props.notes, { more: props.more, newer: props.newer }));
-const numberTags = computed(() => messageNumberTags(sentRows.value, capabilities.value));
+const numberTags = computed(() => props.oneChannel ? {} : messageNumberTags(sentRows.value, capabilities.value));
 // Built once per row change: every render, such as a page load or the paging flag, only looks rows up.
 const quoted = computed(() => quoteIndex(props.rows || []));
 const dividers = computed(() => dayDividers(threadRows.value));
@@ -100,6 +102,21 @@ const isUnsent = message => !message.emailRequest && (message.action ? message.s
 // A send the provider later reported as failed shows its reason on tap or hover and offers Retry in its menu.
 const isUndelivered = message => !message._pending && message.direction === 'Outgoing' && message.status === 'Failed';
 const reasonShown = ref(null);
+// New incoming messages and new sends slide in. The first page, older pages and the saved copy of a send do not.
+const fresh = ref(new Set());
+let known = null, freshTimer;
+watch(() => props.rows, rows => {
+  const list = rows || [];
+  if (!known) { if (list.length) known = new Set(list.map(row => row.name)); return; }
+  const newest = [...known].filter(name => !name.startsWith('pending:')).reduce((max, name) => name > max ? name : max, '');
+  const added = list.filter(row => !known.has(row.name) && (row._pending || (row.direction === 'Incoming' && row.name > newest)));
+  for (const row of list) known.add(row.name);
+  if (!added.length) return;
+  fresh.value = new Set([...fresh.value, ...added.map(row => row.name)]);
+  clearTimeout(freshTimer);
+  freshTimer = setTimeout(() => { fresh.value = new Set(); }, 700);
+}, { immediate: true });
+onBeforeUnmount(() => clearTimeout(freshTimer));
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
@@ -339,14 +356,18 @@ function actions(message) {
           'menu-target': menu?.message.name === message.name,
           'is-selecting': selecting && selectableMessage(message),
           'is-selected': selection.includes(message.name),
+          'is-fresh': fresh.has(message.name),
+          'is-pending': message._pending && deliveryKind(message) === 'sending',
+          'is-unsent': message._pending && isUnsent(message),
         }"
+        :aria-busy="message._pending && deliveryKind(message) === 'sending' ? 'true' : undefined"
         :data-message="message._pending ? null : message.name"
         :tabindex="selecting && selectableMessage(message) ? 0 : -1"
         :role="selecting && selectableMessage(message) ? 'checkbox' : undefined"
         :aria-checked="selecting && selectableMessage(message) ? selection.includes(message.name) : undefined"
         @click.capture="toggleSelection(message, $event)"
         @keydown.space="selecting && toggleSelection(message, $event)"
-        v-memo="[selecting, selection.includes(message.name), message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
+        v-memo="[selecting, selection.includes(message.name), fresh.has(message.name), message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
         @pointermove="pressMove" @pointerdown="pressStart(message, $event)" @pointerup="pressEnd" @pointercancel="pressEnd" @pointerleave="pressEnd"
         @contextmenu="isMobile && $event.preventDefault()"
       >
@@ -371,7 +392,7 @@ function actions(message) {
         </button>
         <span v-if="showChannel && !message.sends" class="message-channel">{{ objectValue(message.provider_context).provider }}</span>
         <MessageContent :message="message" :show-reply-reference="false" :show-reactions="false" />
-        <p v-if="message._pending && message.error" class="text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
+        <p v-if="message._pending && message.error" class="message-pending-error text-sm text-ink-gray-7 mt-2" role="status">{{ message.error }}</p>
         <footer class="message-footer">
           <time
             :title="timeOf(message)?.toLocaleString()"

@@ -20,14 +20,14 @@ test('the More menu is one dropdown that closes itself on choice', async () => {
   assert.doesNotMatch(tools, /useConversationPresence/)
 })
 
-test('only one side panel is open at a time and the info button toggles contact info', () => {
+test('only one side panel is open at a time and the details button toggles the details panel', () => {
   assert.match(connected, /const panel = ref\(''\);/)
   assert.match(connected, /notesOpen = computed\(\(\) => panel\.value === 'notes'/)
   assert.match(connected, /searchOpen = computed\(\(\) => panel\.value === 'search'\)/)
   assert.match(connected, /contextShown = computed\(\(\) => panel\.value === 'contact'\)/)
   assert.match(connected, /function toggleContext\(\) \{ linking\.value = false; togglePanel\('contact'\); \}/)
   assert.doesNotMatch(connected, /contextOpen|notesOpen\.value = |searchOpen\.value = /)
-  assert.match(connected, /<Button icon="info" aria-label="Contact info"[^>]*@click="toggleInfo"/)
+  assert.match(connected, /<Button :icon="isMobile \? 'info' : 'panel-right'" aria-label="Details"[^>]*@click="toggleInfo"/)
   assert.match(connected, /else if \(infoOpen\.value\) closeInfo\(\)/)
 })
 
@@ -36,11 +36,10 @@ test('the header second line names the person, then phone, email and channel', (
   assert.match(connected, /contactRecord\.value\?\.phone/, 'The saved mobile shows in an email chat too')
   assert.match(connected, /contactRecord\.value\?\.email/, 'The saved email shows in a WhatsApp chat too')
   assert.equal((connected.match(/<ContactEndpoints :phone="phone" :email="email" \/>/g) || []).length, 3, 'Phone and wide headers and the info panel mark each address')
-  assert.match(connected, /<ContactEndpoints :phone="contact\.phone" :email="contact\.email"/, 'Business contacts show mobile and email')
 })
 
 test('a switched-off channel shows a plain banner in place of replies', () => {
-  assert.match(connected, /const replyOff = computed\(\(\) => channelOff\.value && !numbers\.active\.value \? channelOffText\(provider\.value\) : ''\)/)
+  assert.match(connected, /const replyOff = computed\(\(\) => channelOff\.value \? channelOffText\(provider\.value\) : ''\)/)
   assert.match(connected, /<EmailComposer v-if="!replyOff && /)
   assert.match(connected, /plainChatError\(loadFailed \? '' : error\)/)
 })
@@ -50,11 +49,16 @@ test('the header shows at most three viewer avatars with names and a +n count', 
   assert.match(connected, /people\.length > 3[^]*\+\{\{ people\.length - 3 \}\}/)
 })
 
-test('the To bar shows only in a business chat with several contacts', async () => {
-  assert.match(connected, /chooseRecipient = computed\(\(\) => !!businessName\.value && linkedContacts\.value\.length > 1\)/)
-  assert.equal((connected.match(/<template v-if="chooseRecipient" #recipient>/g) || []).length, 2)
+test('both composers show the reply lock of the open thread and no channel menu', async () => {
+  assert.match(connected, /<MessageComposer [^>]*:lock="lock"/)
+  assert.match(connected, /<EmailComposer [^>]*:lock="lock"/)
+  assert.doesNotMatch(connected, /SendChannel|chooseRecipient|#recipient/)
   const composer = await read('components/messages/MessageComposer.vue')
-  assert.match(composer, /v-if="\$slots\.recipient"/)
+  assert.match(composer, /<ReplyLock v-if="lock" :lock="lock" \/>/)
+  assert.doesNotMatch(composer, /SendNumber|useSendChannel|name="channel"/)
+  const email = await read('components/messages/EmailComposer.vue')
+  assert.match(email, /<ReplyLock v-if="lock" :lock="lock" \/>/)
+  assert.doesNotMatch(email, /name="channel"/)
 })
 
 test('a reply shows a quote strip with the author and a cancel button', async () => {

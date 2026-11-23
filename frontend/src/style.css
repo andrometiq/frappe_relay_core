@@ -15,6 +15,7 @@
   --relay-bubble-in:#f0f0f3;--relay-bubble-out:#3e63dd;--relay-chat:#fff;
   --relay-green:#18794e;--relay-amber:var(--ink-gray-6);--relay-red:#ce2c31;--relay-purple:var(--relay-note-ink);
   --relay-status-available:#30a46c;--relay-status-busy:#f76b15;--relay-status-away:#8b8d98;--relay-status-dnd:#e5484d;
+  --relay-whatsapp:#18794e;--relay-telegram:#0b75aa;--relay-email:#ce2c31;
   --relay-shadow-1:0 1px 2px rgba(0,0,0,.05),0 0 0 1px rgba(0,0,51,.06);--relay-shadow-2:0 2px 6px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.07);
   --relay-shadow:0 0 0 1px rgba(0,0,51,.06),0 20px 50px rgba(0,0,0,.18);--relay-overlay:rgba(0,0,0,.35);
   --relay-radius:8px;--relay-radius-sm:6px;--relay-radius-lg:12px;--relay-ease:cubic-bezier(.2,0,0,1);--relay-fast:150ms;--relay-normal:220ms;
@@ -40,6 +41,7 @@
   --relay-bubble-in:#212225;--relay-bubble-out:#3e63dd;--relay-chat:#111113;
   --relay-green:#3dd68c;--relay-amber:var(--ink-gray-6);--relay-red:#ff9592;
   --relay-status-available:#30a46c;--relay-status-busy:#f76b15;--relay-status-away:#777b84;--relay-status-dnd:#e5484d;
+  --relay-whatsapp:#3dd68c;--relay-telegram:#70b8ff;--relay-email:#ff9592;
   --relay-shadow-1:0 1px 2px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.05);--relay-shadow-2:0 2px 6px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
   --relay-shadow:0 0 0 1px rgba(255,255,255,.07),0 20px 50px rgba(0,0,0,.5);--relay-overlay:rgba(0,0,0,.6);
   --surface-white:#111113;--surface-modal:#18191b;--surface-selected:#182449;
@@ -1062,7 +1064,13 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-bubble.ml-auto{border-radius:8px;background:var(--relay-bubble-out);color:#fff}
 .v1-shell.relay-shell .conversation-bubble.ml-auto>:is(.message-content,.message-footer,.message-sender,.message-quote,.message-channel){color:#fff;--ink-gray-4:#fff;--ink-gray-5:#fff;--ink-gray-6:#fff;--ink-gray-7:#fff;--ink-gray-8:#fff;--ink-gray-9:#fff;--relay-ink:#fff;--relay-ink-2:#fff;--relay-ink-3:#fff;--ink-blue-1:#fff;--ink-blue-2:#fff;--ink-blue-3:#fff;--ink-green-2:#fff;--outline-gray-2:rgba(255,255,255,.28);--outline-blue-1:rgba(255,255,255,.6);--surface-white:rgba(0,0,0,.08);--surface-gray-1:rgba(0,0,0,.08);--surface-gray-2:rgba(0,0,0,.08)}
 .v1-shell.relay-shell .conversation-bubble:hover{box-shadow:var(--relay-shadow-2)}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble:nth-last-child(-n+3){animation:relay-fade-up var(--relay-normal) var(--relay-ease) both}
+/* New incoming messages and new sends slide in (MessageThread marks them); loaded pages and acknowledged sends do not. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:relay-fade-up var(--relay-normal) var(--relay-ease) both}
+/* A send shows at once, greyed until the server takes it; one that failed gets a red edge, its reason, Retry and Delete. */
+.v1-shell.relay-shell .conversation-bubble.is-pending{opacity:.6}
+.v1-shell.relay-shell .conversation-bubble.is-unsent{box-shadow:0 0 0 2px var(--relay-red)}
+.v1-shell.relay-shell .conversation-bubble.ml-auto>.message-pending-error,.v1-shell.relay-shell .conversation-bubble.ml-auto .pending-status.is-unsent{color:#fff;font-weight:600}
+@media (prefers-reduced-motion:reduce){.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:none}}
 .v1-shell.relay-shell .conversation-bubble .message-content>p:last-child::after,.v1-shell.relay-shell .conversation-bubble .message-template>:last-child::after{content:none}
 .v1-shell.relay-shell .conversation-bubble>.message-footer{position:static;justify-content:flex-end;gap:4px;margin-top:2px;color:inherit;font-size:12px;line-height:inherit;opacity:1}
 .v1-shell.relay-shell .conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
@@ -1174,10 +1182,9 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .relay-slide-enter-active,.relay-slide-leave-active{transition:transform var(--relay-normal) var(--relay-ease)}
 .relay-slide-enter-from,.relay-slide-leave-to{transform:translateX(-100%)}
 
-/* Message density from the user profile, and a short entrance for the newest message. */
+/* Message density from the user profile. */
 [data-density=compact] .v1-shell.relay-shell .message-thread-content{gap:1px}
 [data-density=compact] .v1-shell.relay-shell .conversation-bubble{padding-block:3px 2px;line-height:1.35}
-.v1-shell.relay-shell .message-thread-content>article:last-child{animation:relay-fade-up var(--relay-normal) var(--relay-ease)}
 
 .message-composer>.composer-quote{display:flex;flex-wrap:nowrap;gap:4px;padding:4px 4px 4px 10px;border-left:3px solid var(--relay-accent,var(--outline-blue-1));white-space:normal}
 .composer-quote-body{display:flex;flex:1;flex-direction:column;min-width:0}

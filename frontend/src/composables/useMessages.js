@@ -9,7 +9,9 @@ import { messageData, objectValue } from "../components/messageContent";
 import { closeRoute, openRoute } from "../useViewRoute.js";
 import { announceOwnSend, recordOwnMessages } from "../services/ownSends.js";
 
-export function useMessages() {
+// `threads`: the caller opens one thread (channel and contact endpoint) at a time with openThread, so opening a chat
+// or a record loads no mixed timeline.
+export function useMessages({ threads = false } = {}) {
   const capabilities = inject('relayCapabilities', ref({}));
   const contacts = ref([]),
     query = ref(""),
@@ -25,7 +27,8 @@ export function useMessages() {
   // a send still in this tab's queue: the server stamps its message only after the provider answers.
   const displayRows=computed(()=>{
     const merged=[...rows.value];
-    for(const row of pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value))){
+    for(const row of pendingMessages.value.filter(row=>row.scope===(selected.value||businessType.value+':'+businessName.value) && (!channel.value||row.channel===channel.value)
+      && (!endpoint.value||row.sender_endpoint===endpoint.value))){
       const time=rowTime(row), index=Number.isNaN(time)||row.request&&row.status==='Sending'?-1:merged.findIndex(item=>rowTime(item)>time);
       if(index<0)merged.push(row);else merged.splice(index,0,row);
     }
@@ -36,7 +39,7 @@ export function useMessages() {
     let pending=pendingMessages.value.find(row=>row.name===name);
     if(!pending) {
       pendingMessages.value.push({name,scope:selected.value||businessType.value+':'+businessName.value,
-        channel:message.channel,provider_context:message.provider_context,direction:'Outgoing',
+        channel:message.channel,sender_endpoint:message.sender_endpoint,provider_context:message.provider_context,direction:'Outgoing',
         content:values.body,creation:new Date().toISOString(),_pending:true,
         emailRequest:key,emailSource:message.name});
       pending=pendingMessages.value.at(-1);
@@ -174,8 +177,10 @@ export function useMessages() {
   let bufferedArrivals = new Map();
   function clearArrivals() { bufferedArrivals.clear(); newArrivals.value=0; }
   const windowKey = () => businessName.value
-    ? JSON.stringify(['business', businessType.value, businessName.value, channel.value])
-    : selected.value ? JSON.stringify(['contact', selected.value, channel.value]) : '';
+    ? JSON.stringify(['business', businessType.value, businessName.value, channel.value, endpoint.value])
+    : selected.value ? JSON.stringify(['contact', selected.value, channel.value, endpoint.value]) : '';
+  // History filters of the open thread: our channel and, inside it, the contact endpoint.
+  const threadFilter = () => ({ ...(channel.value ? { channel: channel.value } : {}), ...(endpoint.value ? { sender_endpoint: endpoint.value } : {}) });
   const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,pollQuestion,pollOptions,attachment,quoting,source,alsoVia,viaNumber};
   function clearRecipient() {
     resetRecipient(draftFields);
@@ -198,7 +203,8 @@ export function useMessages() {
     ingestionCursor.value=saved.ingestionCursor||'RELAY-MSG-0000000000';rows.value=saved.rows;before.value=saved.before;last.value=saved.last;more.value=saved.more;newer.value=saved.newer;
     bufferedArrivals=new Map((saved.arrivals||[]).map(row=>[row.name,row]));newArrivals.value=bufferedArrivals.size;
     viewPosition.value=saved.position;restored.value=saved.position?.atBottom?'':saved.position?.name||'';
-    if(!businessName.value && !source.value)source.value=defaultSendSource(rows.value,capabilities.value);
+    if(!source.value && threads && channel.value)source.value=pinnedSource.value=threadSource(rows.value);
+    else if(!businessName.value && !source.value)source.value=defaultSendSource(rows.value,capabilities.value);
     restoredRefreshPending = true;
     return true;
   }
@@ -233,7 +239,7 @@ export function useMessages() {
     // A contact conversation opens at its first unread message, otherwise at the newest one.
     const target=businessName.value ? !saved.atBottom && saved.name : saved.first_unread;
     if(!target){await history();return;}
-    const [checkpoint,page]=await Promise.all([historyRequest({limit:1,...(channel.value?{channel:channel.value}:{})}),
+    const [checkpoint,page]=await Promise.all([historyRequest({limit:1,...threadFilter()}),
       businessName.value
         ? coreApi('business_inbox.message_context',{doctype:businessType.value,name:businessName.value,message:target})
         : coreApi('api.message_context',{message:target,...(channel.value?{channel:channel.value}:{})})]);
@@ -283,6 +289,7 @@ export function useMessages() {
   }
   async function refreshNew() {
     if (refreshing || busy.value || !(selected.value || businessName.value) || document.visibilityState !== 'visible') return;
+    if (threads && !channel.value) return;
     const generation = requestSequence, identity = conversationIdentity();
     refreshing = true;
     restoredRefreshPending = false;
@@ -290,7 +297,7 @@ export function useMessages() {
       if(!last.value){await history();return;}
       let hasMore = true;
       while (hasMore) {
-        const batch = await historyRequest({since:ingestionCursor.value,limit:50,...(channel.value?{channel:channel.value}:{})});
+        const batch = await historyRequest({since:ingestionCursor.value,limit:50,...threadFilter()});
         if (generation !== requestSequence || identity !== conversationIdentity()) return;
         if (batch.items.length) {
           const known = new Set(rows.value.map(row=>row.name));
@@ -430,6 +437,8 @@ export function useMessages() {
   const previousContacts = ref(null),
     nextContacts = ref(null),
     channel = ref(""),
+    // The contact endpoint of the open thread inside `channel`; empty shows every endpoint.
+    endpoint = ref(""),
     channels = ref([]),
     starred = ref(false),
     directoryMode = ref('all'),
@@ -458,6 +467,25 @@ export function useMessages() {
     return restoreWindow() ? refreshVisible() : run(restoreSavedView);
   }
 
+  // Opens one thread: its channel and contact endpoint. It opens at its first unread message, else at its newest one.
+  // The thread's newest message is the reply source, so a reply goes back on the same channel to the same endpoint.
+  function openThread(thread) {
+    if (busy.value || !thread) return;
+    if (channel.value === thread.channel && endpoint.value === (thread.endpoint || '') && (rows.value.length || last.value)) return;
+    clearRecipient();saveWindow();clearArrivals();++requestSequence;
+    channel.value=thread.channel;endpoint.value=thread.endpoint||'';
+    rows.value=[];source.value=null;pinnedSource.value=null;quoting.value=false;viewPosition.value=null;
+    restored.value='';firstUnread.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
+    if (restoreWindow()) return refreshVisible();
+    return run(async () => {
+      await history();
+      const unread = thread.first_unread;
+      if (!unread || !rows.value.some(row => row.name === unread)) return;
+      firstUnread.value = unread; restored.value = unread;
+      viewPosition.value = { name: unread, offset: UNREAD_OFFSET, atBottom: false };
+    });
+  }
+
   // Sending picks a channel without filtering the timeline; the newest loaded message of that person on it becomes the source.
   function sendVia(value) {
     if (busy.value) return;
@@ -483,7 +511,7 @@ export function useMessages() {
       identity = conversationIdentity();
     const page = await historyRequest({
       limit: 50,
-      ...(channel.value ? { channel: channel.value } : {}),
+      ...threadFilter(),
       ...(older && before.value ? { before: before.value } : {}),
     });
     if (generation !== requestSequence || identity !== conversationIdentity()) return;
@@ -495,8 +523,11 @@ export function useMessages() {
     if (!older) { last.value = page.last; newer.value = false; }
     more.value = page.has_more;
     updateChannels();
-    if (!older && !source.value && !businessName.value) source.value = defaultSendSource(rows.value, capabilities.value);
+    if (!older && !source.value && threads && channel.value) source.value = pinnedSource.value = threadSource(rows.value);
+    else if (!older && !source.value && !businessName.value) source.value = defaultSendSource(rows.value, capabilities.value);
   }
+  // The open thread's newest sent or received message; every message of a thread has its channel and endpoint.
+  const threadSource = items => items.findLast(row => !row._pending && row.channel === channel.value && (row.sender_endpoint || '') === endpoint.value) || null;
   function updateChannels() {
     if(channel.value)return;
     const choices=new Map(channels.value.map(row=>[row.value,row]));
@@ -524,15 +555,16 @@ export function useMessages() {
     before.value = null;
     more.value = false;
     body.value = "";
-    channel.value = preferredChannels.get(contact)||"";
+    channel.value = threads ? "" : preferredChannels.get(contact)||"";
+    endpoint.value = "";
     channels.value = [];
     clearRecipient();
     return run(loading(async () => {
-      const saved=coreApi('inbox.view_state',{contact});
-      saved.catch(()=>{});
+      const saved=threads ? null : coreApi('inbox.view_state',{contact});
+      saved?.catch(()=>{});
       const [metadata]=await Promise.all([coreApi('api.conversation_channels',{contact}),restorePending()]);
       channels.value=metadata.items;
-      await restoreSavedView(true,saved);
+      if(!threads)await restoreSavedView(true,saved);
     }));
   }
   // A conversation that failed to open stays open with a retry; only a missing or forbidden one leaves.
@@ -555,7 +587,7 @@ export function useMessages() {
   function clearSelection(updateRoute = true) {
     clearRecipient();saveWindow();clearArrivals();++requestSequence;loadFailed.value=null;
     selected.value="";businessName.value="";businessType.value="";businessContext.value=null;
-    rows.value=[];source.value=null;quoting.value=false;
+    rows.value=[];source.value=null;quoting.value=false;endpoint.value="";if(threads)channel.value="";
     if(updateRoute && location.hash.split('?')[0]==='#/messages')closeRoute("#/messages");
   }
   function openBusiness(doctype, record, updateRoute = true) {
@@ -582,12 +614,13 @@ export function useMessages() {
     restored.value = "";firstUnread.value = "";
     more.value = false;
     channel.value = "";
+    endpoint.value = "";
     channels.value = [];
     clearRecipient();
     if(updateRoute)businessRoute(doctype,name,switching);
     return run(loading(async()=>{
       businessContext.value=await coreApi('business_inbox.context',{doctype,name});
-      if(!restoreWindow())await restoreSavedView();
+      if(!threads && !restoreWindow())await restoreSavedView();
       await restorePending();
     }));
   }
@@ -607,7 +640,7 @@ export function useMessages() {
       const page = await historyRequest({
         after: last.value,
         limit: 50,
-        ...(channel.value ? { channel: channel.value } : {}),
+        ...threadFilter(),
       });
       // A page for a chat the user has left must not land in the open chat.
       if (generation !== requestSequence || identity !== conversationIdentity()) return;
@@ -638,13 +671,20 @@ export function useMessages() {
       const page = business.name
         ? await coreApi('business_inbox.message_context',{...business,message})
         : await coreApi('api.message_context', { message });
+      // With threads, the message's own thread opens around it and its newest message is the reply source.
+      const target = page.items.find(row => row.name === message);
+      const items = threads && target ? page.items.filter(row => row.channel === target.channel && row.sender_endpoint === target.sender_endpoint) : page.items;
+      if (threads && target && (channel.value !== target.channel || endpoint.value !== (target.sender_endpoint || ''))) {
+        clearRecipient(); clearArrivals(); channel.value = target.channel; endpoint.value = target.sender_endpoint || '';
+      }
+      const first = threads ? items[0]?.name : page.first, newest = threads ? items.at(-1)?.name : page.last;
       if(business.name){
         ++requestSequence;
-        rows.value=page.items;before.value=page.first;last.value=page.last;
+        rows.value=items;before.value=first;last.value=newest;
         more.value=page.has_more;newer.value=page.has_newer;restored.value=message;
-        const recipient=page.items.find(row=>row.name===message);
-        if(recipient && (source.value?.channel!==recipient.channel || source.value?.sender_endpoint!==recipient.sender_endpoint)) clearRecipient();
-        source.value=recipient||source.value;
+        if (threads) { source.value = pinnedSource.value = threadSource(items); updateChannels(); return; }
+        if(target && (source.value?.channel!==target.channel || source.value?.sender_endpoint!==target.sender_endpoint)) clearRecipient();
+        source.value=target||source.value;
         updateChannels();return;
       }
       const changed = selected.value !== page.contact || !!businessName.value;
@@ -652,14 +692,15 @@ export function useMessages() {
       ++requestSequence;
       businessName.value = '';
       selected.value = page.contact;
-      channel.value = '';
-      rows.value = page.items;
-      before.value = page.first;
-      last.value = page.last;
+      if (!threads || !target) { channel.value = ''; endpoint.value = ''; }
+      rows.value = items;
+      before.value = first;
+      last.value = newest;
       more.value = page.has_more;
       newer.value = page.has_newer;
       restored.value = message;
-      if (!quoting.value) source.value = page.items.find(row => row.name === message);
+      if (threads && target) source.value = pinnedSource.value = threadSource(items);
+      else if (!quoting.value) source.value = target;
       updateChannels();
       // A chat opened at a message starts its live updates from now, not from the first message ever.
       if (changed) {
@@ -684,8 +725,7 @@ export function useMessages() {
     data = null,
   ) {
     if (!message) return;
-    const submitted = {scope:windowKey(), conversation:conversationIdentity(), body:body.value, kind:kind.value, attachment:attachment.value,
-      quoting:quoting.value, source:source.value};
+    const submitted = {conversation:conversationIdentity()};
     const typed = !data;
     if (!data) {
       if (["photo", "video", "audio", "voice", "document"].includes(action)) {
@@ -741,10 +781,12 @@ export function useMessages() {
     // A picked number sends from its newest loaded message of this person, else the server finds that message.
     // Media stays on the message it was uploaded to; the server moves the attachment to the picked number.
     const media = ["photo", "video", "audio", "voice", "document"].includes(action);
-    const picked = !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
+    // An open thread is a locked reply: its own channel and endpoint, no picked number and no extra channels.
+    const locked = threads && !!channel.value && message.channel === channel.value;
+    const picked = !locked && !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
     if (picked) message = picked;
-    const via = quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
-    const extraChannels = ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
+    const via = locked || quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
+    const extraChannels = !locked && ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
     const intent = JSON.stringify({
       quote,
       ...(via && via !== "auto" ? { via } : {}),
@@ -772,7 +814,7 @@ export function useMessages() {
     let pending;
     if(action!=='reaction') {
       pending=pendingMessages.value.find(row=>row.name==='pending:'+key);
-      if(!pending) {pending={name:'pending:'+key,contact:selected.value,scope:selected.value||businessType.value+':'+businessName.value,channel:message.channel,provider_context:message.provider_context,
+      if(!pending) {pending={name:'pending:'+key,contact:selected.value,scope:selected.value||businessType.value+':'+businessName.value,channel:message.channel,sender_endpoint:message.sender_endpoint,provider_context:message.provider_context,
         direction:'Outgoing',status:'Sending',content:data.text||data.caption||(data.question&&'Poll: '+data.question)||attachment.value?.filename||action,
         creation:new Date().toISOString(),_pending:true,storage};pendingMessages.value.push(pending);pending=pendingMessages.value.at(-1);}
       else pending.status='Sending';
@@ -798,18 +840,11 @@ export function useMessages() {
     sendQueue = next;
     return next;
   }
-  // Puts the unsent draft back unless the user started a new one.
-  function restoreDraft(submitted) {
-    if (windowKey() !== submitted.scope || body.value || attachment.value) return;
-    body.value = submitted.body;
-    kind.value = submitted.kind;
-    attachment.value = submitted.attachment;
-    if (source.value === submitted.source) quoting.value = submitted.quoting;
-  }
+  // A send that never reached the server stays on its bubble with the reason, Retry and Delete; the composer stays free.
   async function deliver(request, storage, pending, submitted) {
     let result;
     try { result = await call("relay_core.messaging.send", request, true); }
-    catch(err) {if(pending){pending.status='Unconfirmed';restoreDraft(submitted);}throw err;}
+    catch(err) {if(!pending)throw err;pending.status='Unconfirmed';pending.error=err.message;return;}
     sessionStorage.setItem('relay-typed-result-'+result.action,storage);
     if(pending?.conversation)recordOwnMessages(pending.conversation,[result.message,...(result.sends||[]).map(copy=>copy.message)]);
     retireAction(result);
@@ -849,7 +884,7 @@ export function useMessages() {
     message.status = 'Sending';
     notice.value = '';
     sendingKeys.add(message.request.request_key);
-    return queueSend(() => deliver(message.request, message.storage, message, { scope: null, conversation: conversationIdentity() }))
+    return queueSend(() => deliver(message.request, message.storage, message, { conversation: conversationIdentity() }))
       .finally(() => sendingKeys.delete(message.request.request_key));
   }
   async function deletePending(message) {
@@ -956,9 +991,11 @@ export function useMessages() {
     previousContacts,
     nextContacts,
     channel,
+    endpoint,
     channels,
     findContacts,
     filterChannel,
+    openThread,
     sendVia,
     viaNumber,
     pinnedSource,
