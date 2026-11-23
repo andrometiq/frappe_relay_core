@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { FeatherIcon } from '@relay/ui'
-import { endpointLabel, hasManyPeople, ourChannel, providerIcon } from '../../services/conversationThreads'
+import { hasManyPeople, ourChannel, providerIcon, threadAddress } from '../../services/conversationThreads'
 // The details panel's channel list: every endpoint of the record or chat, each on its own thread.
 const props = defineProps({ threads: { type: Array, default: () => [] }, active: String, busy: Boolean, record: Object })
 const emit = defineEmits(['select'])
@@ -15,7 +15,7 @@ const manyPeople = computed(() => hasManyPeople(props.threads))
       :aria-current="thread.key === active ? 'true' : undefined" :disabled="busy" @click="emit('select', thread)">
       <FeatherIcon class="thread-detail-icon" :name="providerIcon(thread.provider)" :size="15" aria-hidden="true" />
       <span class="thread-detail-copy">
-        <strong><bdi>{{ endpointLabel(thread.endpoint, thread.provider) || thread.provider }}</bdi></strong>
+        <strong><bdi>{{ threadAddress(thread) || thread.provider }}</bdi></strong>
         <small>{{ thread.provider }}<template v-if="manyPeople"> · {{ thread.contact_label }}</template><template v-if="ourChannel(thread)"> · to {{ ourChannel(thread) }}</template></small>
       </span>
       <span v-if="thread.unread" class="thread-detail-unread" :aria-label="`${thread.unread} unread`">{{ thread.unread }}</span>

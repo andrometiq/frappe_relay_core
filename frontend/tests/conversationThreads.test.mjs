@@ -8,7 +8,7 @@ import { resetRecipient } from '../src/services/recipientContext.js'
 import { sha256Hex } from '../src/services/crypto.js'
 import { messageData, objectValue } from '../src/components/messageContent.js'
 import { coordinates } from '../src/components/formValidation.js'
-import { contactThread, endpointLabel, newestThread, openingThread, replyLock, replyLockText, rowChannels, sourceThread, threadMatches, threadTabs, waitingLabel } from '../src/services/conversationThreads.js'
+import { contactThread, endpointLabel, newestThread, openingThread, replyLock, replyLockText, rowChannels, sourceThread, threadAddress, threadMatches, threadTabs, waitingLabel } from '../src/services/conversationThreads.js'
 
 const read = path => readFile(new URL('../src/' + path, import.meta.url), 'utf8')
 const thread = (key, values = {}) => ({ key, relay_contact: 'RELAY-CON-1', contact_label: 'Ravi', frappe_contact: 'Ravi', channel: 'CH-SALES',
@@ -53,6 +53,28 @@ test('tabs name our channel only when the record talks on two of our channels of
     ['WhatsApp', '+91 90000 00001', 'Sales', 'Ravi'], ['WhatsApp', '+91 80000 05678', 'Support', 'Ravi'],
     ['Telegram', '55012345', '', 'Ravi'], ['Email', 'priya@example.invalid', '', 'Priya']])
   assert.equal(endpointLabel('55012345', 'Telegram'), '55012345', 'A Telegram chat id is not a phone number')
+})
+
+test('a Telegram thread reads by its handle and every tab keeps its full text in the tooltip', () => {
+  const bot = thread('bot', { provider: 'Telegram', channel: 'CH-BOT', channel_label: 'Bot', channel_address: '@essdee_bot', endpoint: '55012345', handle: '@ravitex' })
+  assert.equal(threadAddress(bot), '@ravitex')
+  assert.equal(threadAddress({ ...bot, handle: '' }), '55012345')
+  assert.equal(replyLockText(bot), 'Replying on Telegram to @ravitex from Bot · @essdee_bot')
+  const long = thread('mail', { provider: 'Email', channel: 'CH-MAIL', channel_label: 'Sales mail', channel_address: 'sales@example.invalid',
+    endpoint: 'accounts.receivable.department.tiruppur.division@ravitextiles-international-exports.invalid' })
+  assert.equal(threadTabs([long])[0].title,
+    'Email · accounts.receivable.department.tiruppur.division@ravitextiles-international-exports.invalid · to our Sales mail · sales@example.invalid')
+})
+
+test('a long address ends in an ellipsis inside its tab, and edge fades follow scrolling, not a timer', async () => {
+  const tabs = await read('components/messages/ThreadTabs.vue')
+  assert.match(tabs, /\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ min-width:0; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \}/)
+  assert.match(tabs, /@media \(max-width:768px\) \{[^}]*\}\s*\.thread-tab \{ min-height:44px; \}\s*\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ max-width:120px; \}/)
+  assert.match(tabs, /\.thread-tab-icon, \.thread-tab-provider, \.thread-tab-unread \{ flex:none; \}/)
+  assert.match(tabs, /new ResizeObserver\(measure\)/)
+  assert.match(tabs, /@scroll\.passive="measure"/)
+  assert.match(tabs, /scrollIntoView\?\.\(\{ block: 'nearest', inline: 'nearest' \}\)/)
+  assert.doesNotMatch(tabs, /setInterval|setTimeout/)
 })
 
 test('a list row marks each channel and the one holding the unread message', () => {

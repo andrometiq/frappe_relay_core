@@ -53,8 +53,15 @@ export function threadTabs(threads) {
   const list = threads || [], manyPeople = hasManyPeople(list)
   const ours = provider => new Set(list.filter(thread => thread.provider === provider).map(thread => thread.channel)).size
   return list.map(thread => ({ thread, icon: providerIcon(thread.provider), provider: thread.provider || 'Chat',
-    endpoint: endpointLabel(thread.endpoint, thread.provider), person: manyPeople ? thread.contact_label || '' : '',
-    via: ours(thread.provider) > 1 ? thread.channel_label || thread.channel : '', from: ourChannel(thread) }))
+    endpoint: threadAddress(thread), person: manyPeople ? thread.contact_label || '' : '',
+    via: ours(thread.provider) > 1 ? thread.channel_label || thread.channel : '', from: ourChannel(thread),
+    title: [thread.provider || 'Chat', threadAddress(thread), manyPeople && thread.contact_label, ourChannel(thread) && 'to our ' + ourChannel(thread)]
+      .filter(Boolean).join(' · ') }))
+}
+
+// The person's side of a thread: a Telegram handle when Telegram sent one, else the endpoint.
+export function threadAddress(thread) {
+  return thread?.handle || endpointLabel(thread?.endpoint, thread?.provider)
 }
 
 export function hasManyPeople(threads) {
@@ -73,7 +80,7 @@ export function replyLock(thread) {
   if (!thread) return null
   const email = thread.provider === 'Email'
   return { icon: providerIcon(thread.provider), verb: email ? 'Replying by' : 'Replying on', provider: thread.provider || 'Chat',
-    to: endpointLabel(thread.endpoint, thread.provider) || thread.contact_label || 'Contact', from: ourChannel(thread), note: email ? 'subject kept' : '' }
+    to: threadAddress(thread) || thread.contact_label || 'Contact', from: ourChannel(thread), note: email ? 'subject kept' : '' }
 }
 
 export function replyLockText(thread) {
