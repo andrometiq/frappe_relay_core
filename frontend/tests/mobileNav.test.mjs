@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { navAllowed } from '../src/services/navigation.js'
-import { contactInfoRoute, isContactInfoRoute, splitMobileNav } from '../src/services/mobileNav.js'
+import { activeMobileTab, contactInfoRoute, isContactInfoRoute, splitMobileNav } from '../src/services/mobileNav.js'
 import { mediumChips } from '../src/services/enabledChannels.js'
 
 const navigation = [
@@ -24,6 +24,14 @@ test('the tab bar uses the same gating as the rail', () => {
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, user)))
   assert.deepEqual(names(tabs), ['Messages', 'Tickets'])
   assert.deepEqual(names(more), ['Contacts'])
+})
+
+test('Templates lights only on its own section; other WhatsApp sections and More pages light More', () => {
+  const { tabs } = splitMobileNav(navigation)
+  assert.equal(activeMobileTab(tabs, 'WhatsApp', 'templates'), 'WhatsApp')
+  for (const section of ['campaigns', 'forms', 'billing', 'account']) assert.equal(activeMobileTab(tabs, 'WhatsApp', section), 'More')
+  assert.equal(activeMobileTab(tabs, 'Messages', ''), 'Messages')
+  assert.equal(activeMobileTab(tabs, 'Contacts', ''), 'More')
 })
 
 test('contact info is the chat route with info=1', () => {

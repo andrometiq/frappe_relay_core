@@ -11,6 +11,11 @@ export function splitMobileNav(items) {
   return { tabs, more: items.filter(item => !TABS.some(tab => tab.name === item.name)) }
 }
 
+// The highlighted tab: a section tab only on its own section, so Campaigns, Forms and Billing light More instead.
+export function activeMobileTab(tabs, view, section) {
+  return tabs.find(tab => tab.name === view && (!tab.section || tab.section === section))?.name || 'More'
+}
+
 // The contact info page is the open chat route plus info=1, so Back returns to the chat.
 export function contactInfoRoute(hash) {
   const [path, query = ''] = hash.split('?')
