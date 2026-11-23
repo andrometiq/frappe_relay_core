@@ -126,8 +126,6 @@ test('a reply on an open thread is locked to its channel and endpoint', async t 
   const { state, sends } = fixture(t)
   await state.open('RELAY-CON-1')
   await state.openThread(thread('sales'))
-  state.viaNumber.value = 'CH-SUPPORT'
-  state.alsoVia.value = ['CH-MAIL']
   state.body.value = 'Sharing the invoice now'
   await state.send()
   const [request] = sends()

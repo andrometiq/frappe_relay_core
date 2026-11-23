@@ -157,9 +157,6 @@ export function useMessages({ threads = false } = {}) {
     phone = ref(""),
     pollQuestion = ref(""),
     pollOptions = ref(["", ""]),
-    alsoVia = ref([]),
-    // The WhatsApp number staff picked in "Send via"; empty lets the server reply from the newest incoming number.
-    viaNumber = ref(""),
     busy = ref(false),
     error = ref(""),
     notice = ref("");
@@ -181,7 +178,7 @@ export function useMessages({ threads = false } = {}) {
     : selected.value ? JSON.stringify(['contact', selected.value, channel.value, endpoint.value]) : '';
   // History filters of the open thread: our channel and, inside it, the contact endpoint.
   const threadFilter = () => ({ ...(channel.value ? { channel: channel.value } : {}), ...(endpoint.value ? { sender_endpoint: endpoint.value } : {}) });
-  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,pollQuestion,pollOptions,attachment,quoting,source,alsoVia,viaNumber};
+  const draftFields = {body,kind,emoji,latitude,longitude,contactName,phone,pollQuestion,pollOptions,attachment,quoting,source};
   function clearRecipient() {
     resetRecipient(draftFields);
     error.value = ""; notice.value = "";
@@ -458,15 +455,6 @@ export function useMessages({ threads = false } = {}) {
     }catch(e){if(generation===directorySequence)error.value=e.message;}
   }
 
-  function filterChannel(value) {
-    if(busy.value || channel.value===value) return;
-    clearRecipient();saveWindow();clearArrivals();++requestSequence;
-    channel.value=value;rows.value=[];source.value=null;quoting.value=false;
-    restored.value='';firstUnread.value='';newArrivals.value=0;before.value=null;last.value=null;newer.value=false;more.value=false;
-    clearRecipient();
-    return restoreWindow() ? refreshVisible() : run(restoreSavedView);
-  }
-
   // Opens one thread: its channel and contact endpoint. It opens at its first unread message, else at its newest one.
   // The thread's newest message is the reply source, so a reply goes back on the same channel to the same endpoint.
   function openThread(thread) {
@@ -484,26 +472,6 @@ export function useMessages({ threads = false } = {}) {
       firstUnread.value = unread; restored.value = unread;
       viewPosition.value = { name: unread, offset: UNREAD_OFFSET, atBottom: false };
     });
-  }
-
-  // Sending picks a channel without filtering the timeline; the newest loaded message of that person on it becomes the source.
-  function sendVia(value) {
-    if (busy.value) return;
-    const contact = source.value?.relay_contact;
-    const row = rows.value.findLast(item => item.channel === value && (!contact || item.relay_contact === contact));
-    if (!row) return filterChannel(value);
-    selectRecipient(row);
-    quoting.value = false;
-  }
-  // A WhatsApp number from "Send via" on a site with several numbers; the draft stays as typed.
-  function pickNumber(value) {
-    if (busy.value) return;
-    quoting.value = false;
-    viaNumber.value = value;
-  }
-  // More channels for one composed message; the picker offers them only when several channels are enabled.
-  function toggleAlsoVia(value) {
-    alsoVia.value = alsoVia.value.includes(value) ? alsoVia.value.filter(item => item !== value) : [...alsoVia.value, value];
   }
 
   async function history(older = false) {
@@ -778,22 +746,16 @@ export function useMessages({ threads = false } = {}) {
     error.value = "";
     notice.value = "";
     const quote = action === "reaction" || quoting.value;
-    // A picked number sends from its newest loaded message of this person, else the server finds that message.
-    // Media stays on the message it was uploaded to; the server moves the attachment to the picked number.
-    const media = ["photo", "video", "audio", "voice", "document"].includes(action);
-    // An open thread is a locked reply: its own channel and endpoint, no picked number and no extra channels.
+    // An open thread is a locked reply on its own channel and endpoint. Without one, the server picks the reply channel
+    // unless staff chose the source message.
     const locked = threads && !!channel.value && message.channel === channel.value;
-    const picked = !locked && !quote && !media && viaNumber.value ? rows.value.findLast(row => row.channel === viaNumber.value && row.relay_contact === message.relay_contact && !row._pending) : null;
-    if (picked) message = picked;
-    const via = locked || quote || picked ? "" : viaNumber.value || (message === pinnedSource.value ? "" : "auto");
-    const extraChannels = !locked && ["text", "location", "contact"].includes(action) ? alsoVia.value : [];
+    const via = locked || quote || message === pinnedSource.value ? "" : "auto";
     const intent = JSON.stringify({
       quote,
       ...(via && via !== "auto" ? { via } : {}),
       message: message.name,
       kind: action,
       data,
-      ...(extraChannels.length ? { channels: extraChannels } : {}),
     });
     let storage = "relay-typed-action-" + sha256Hex(intent);
     let key = sessionStorage.getItem(storage);
@@ -810,7 +772,7 @@ export function useMessages({ threads = false } = {}) {
     if (sendingKeys.has(key)) return;
     sendingKeys.add(key);
     const request = { message: message.name, kind: action, data, request_key: key, quote: quote ? 1 : 0,
-      ...(extraChannels.length ? { channels: extraChannels } : {}), ...(via ? { via } : {}) };
+      ...(via ? { via } : {}) };
     let pending;
     if(action!=='reaction') {
       pending=pendingMessages.value.find(row=>row.name==='pending:'+key);
@@ -864,11 +826,6 @@ export function useMessages({ threads = false } = {}) {
     if(pending && result.status==='Submitted') {
       pending.persistedMessage=result.message;
       if(!result.message || rows.value.some(row=>row.name===result.message))pendingMessages.value=pendingMessages.value.filter(row=>row!==pending);
-    }
-    // Unfinished copies on other channels join the same bubble as failed or pending marks.
-    if((result.sends||[]).slice(1).some(copy=>!['Submitted','Queued'].includes(copy.status))) {
-      notice.value=notice.value||"Some channels did not get this message. Review Message activity for retry options.";
-      await restorePending();
     }
   }
   // A message that was not sent: Retry resends it with its own request key, Delete hides it for good.
@@ -994,14 +951,8 @@ export function useMessages({ threads = false } = {}) {
     endpoint,
     channels,
     findContacts,
-    filterChannel,
     openThread,
-    sendVia,
-    viaNumber,
     pinnedSource,
-    pickNumber,
-    alsoVia,
-    toggleAlsoVia,
     history,
     open,
     reply,

@@ -27,35 +27,3 @@ export function messageNumberTags(rows, capabilities) {
   return tags
 }
 
-const hours = seconds => Math.max(1, Math.ceil(seconds / 3600))
-
-// One "Send via" row from messaging.send_numbers: open window, closed window or no chat yet on that number.
-// Closed and new numbers stay selectable; they can take an approved template only.
-export function sendNumberChoice(item, defaultChannel) {
-  const open = !!item.window?.open
-  const left = hoursLeft(item)
-  const wrote = item.channel === defaultChannel && item.has_chat
-  const status = !item.has_chat ? 'No chat yet · template only'
-    : !open ? 'Window closed · template only'
-      : [wrote ? 'Customer wrote here' : 'Window open', left].filter(Boolean).join(' · ')
-  return { value: item.channel, label: item.label, address: item.address, status, templateOnly: !open, hasChat: !!item.has_chat }
-}
-
-// The number a reply goes out from: the staff's pick while it is still a number of the site, else the backend default.
-export function effectiveNumber(items, picked, defaultChannel) {
-  const names = (items || []).map(item => item.channel)
-  if (picked && names.includes(picked)) return picked
-  return names.includes(defaultChannel) ? defaultChannel : names[0] || ''
-}
-
-// "13 h left" while the chosen number's reply window is open.
-export function hoursLeft(item) {
-  const seconds = item?.window?.remaining_seconds
-  return item?.window?.open && Number.isFinite(seconds) ? `${hours(seconds)} h left` : ''
-}
-
-// The window hint of the chosen number, as the one-number composer shows it.
-export function windowHint(item) {
-  const left = hoursLeft(item)
-  return left && `24 h window open · ${left}`
-}

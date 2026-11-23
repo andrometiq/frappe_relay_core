@@ -324,19 +324,7 @@
 .relay-shell .conversation-heading-actions{display:flex;align-items:center;gap:6px}
 .relay-shell .conversation-heading-actions button{width:32px;min-width:32px;height:32px;padding:0}
 
-.relay-shell .business-contact-strip{display:flex;align-items:stretch;gap:6px;min-width:0;padding:8px 14px;border-bottom:1px solid var(--outline-gray-2);background:var(--surface-white);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-.relay-shell .business-contact-strip::-webkit-scrollbar{display:none}
-.relay-shell .business-contact-strip>button{display:flex;align-items:center;gap:8px;flex:0 0 auto;min-height:38px;max-width:230px;padding:5px 10px;border:1px solid transparent;border-radius:8px;color:var(--ink-gray-6);text-align:left;transition:background-color 120ms ease,border-color 120ms ease}
-.relay-shell .business-contact-strip>button:hover{background:var(--surface-gray-2)}
-.relay-shell .business-contact-strip>button.active{border-color:var(--outline-gray-3);background:var(--surface-gray-2);color:var(--ink-gray-9)}
-.relay-shell .business-contact-strip>button:first-child{justify-content:center;min-width:62px}
-.relay-shell .business-contact-strip>button:first-child small{color:var(--ink-gray-5)}
 .contact-chip-avatar{flex:none}
-.relay-shell .contact-chip-copy{display:block;min-width:0;max-width:165px}
-.relay-shell .contact-chip-copy strong,.relay-shell .contact-chip-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.relay-shell .contact-chip-copy strong{font-size:12px;font-weight:600;color:inherit}
-.relay-shell .contact-chip-copy small{margin-top:2px;color:var(--ink-gray-5);font-size:12px}
-.relay-shell .contact-strip-loading{align-self:center;padding:0 8px;color:var(--ink-gray-5);font-size:12px;white-space:nowrap}
 
 .start-contact-picker{display:grid;gap:7px}
 .start-contact-picker>label{color:var(--ink-gray-5);font-size:12px}
@@ -351,9 +339,6 @@
 .start-contact-copy small{margin-top:3px;color:var(--ink-gray-5);font-size:12px}
 .start-contact-results>p{padding:10px;color:var(--ink-gray-5);font-size:12px}
 
-.relay-shell .business-recipient-bar{display:flex;align-items:center;gap:8px;padding:7px 20px;border-top:1px solid var(--outline-gray-2);background:var(--surface-white);color:var(--ink-gray-5);font-size:12px}
-.relay-shell .business-recipient-bar strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-gray-8)}
-.relay-shell .business-recipient-bar button{margin-left:auto;color:var(--ink-blue-2);font-weight:500}
 .relay-shell .business-compose-start{display:flex;justify-content:flex-end;flex:0 0 auto;padding:11px 18px;border-top:1px solid var(--outline-gray-2);background:var(--surface-white)}
 .relay-shell .business-compose-start button{min-width:0;max-width:100%;overflow:hidden}
 .relay-shell .business-compose-start button>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -371,9 +356,6 @@
   .relay-shell .business-directory-controls{padding-inline:16px}
   .relay-shell .conversation-heading{grid-template-columns:auto auto minmax(0,1fr) auto;padding:9px 12px;min-height:58px}
   .relay-shell .conversation-meta span:not(:first-child){display:none}
-  .relay-shell .business-contact-strip{padding:7px 10px}
-  .relay-shell .business-contact-strip>button{max-width:190px}
-  .relay-shell .business-recipient-bar{padding-inline:12px}
   .relay-shell .business-compose-start{padding:9px 12px}
 }
 
@@ -533,7 +515,6 @@
 :is(.v1-shell,.relay-dialog,.relay-menu) button,
 .relay-dialog__close { min-width:40px; }
 .v1-shell .frappe-list-filters { grid-template-columns:minmax(180px,1fr) repeat(3,minmax(120px,1fr)); }
-.v1-shell .business-recipient-bar { flex-wrap:wrap; }
 .v1-shell .team-workspace { flex:1; height:auto; }
 .v1-shell .notification-toggle { min-width:40px; }
 @media (min-width:769px) and (max-width:1000px) {
@@ -555,7 +536,7 @@
   .v1-shell .conversation-heading { display:flex; flex-wrap:wrap; padding-inline:16px; }
   .v1-shell .conversation-title { flex:1; min-width:100px; }
   .v1-shell .conversation-heading-actions { width:100%; justify-content:flex-end; gap:4px; }
-  .v1-shell .message-composer,.v1-shell .message-thread,.v1-shell .business-recipient-bar { padding-inline:16px; }
+  .v1-shell .message-composer,.v1-shell .message-thread { padding-inline:16px; }
   .v1-shell .message-composer,.v1-shell .business-compose-start { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
   .v1-shell .chat-draft { font-size:16px; }
   .v1-shell .frappe-list-filters { grid-template-columns:1fr; padding-inline:16px; }
@@ -1228,7 +1209,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .composer-note-head { display:flex; align-items:center; gap:8px; font-size:12px; }
 .composer-note-head > span { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 .composer-note-head .relay-button { color:var(--relay-note-ink); font-size:12px; }
-.composer-recipient:empty { display:none; }
 @media (max-width:768px) {
   .v1-shell.relay-shell .composer-dock { margin:6px 8px max(12px,env(safe-area-inset-bottom)); max-height:60%; }
   .composer-dock .composer-writing { border-radius:18px; padding:5px; }
@@ -1244,7 +1224,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 }
 
 .composer-dock .composer-more-trigger svg, .composer-dock .composer-send svg { width:20px; height:20px; }
-.composer-dock .business-recipient-bar button { min-height:44px; min-width:44px; }
 
 .v1-shell.relay-shell .composer-dock :is(input,select,summary) { min-height:44px; }
 .relay-menu--touch .relay-menu__item { min-height:44px; }

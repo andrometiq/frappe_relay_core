@@ -499,11 +499,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 .contact-panel-empty { padding:0 16px 16px; color:var(--ink-gray-5); font-size:13px; text-align:center; }
 .contact-panel-summary + .contact-details { padding:0 16px 16px; }
 .conversation-load-failed { flex:1; }
-.conversation-compose-context { display:flex; align-items:center; gap:8px; padding:6px 16px; border-top:1px solid var(--outline-gray-2); }
-.conversation-compose-context > :first-child { flex-shrink:0; }
-.conversation-compose-context .business-recipient-bar { flex:1; flex-wrap:nowrap; min-width:0; padding:0; border:0; }
-.business-recipient-bar strong { flex:1; }
-.business-recipient-bar button { flex-shrink:0; min-height:36px; }
 .conversation-who { display:flex; align-items:center; gap:8px; min-width:0; }
 .conversation-who > :deep(*) { flex:none; margin:0; }
 .conversation-who > :deep(*:last-child) { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }

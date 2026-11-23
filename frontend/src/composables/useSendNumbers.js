@@ -1,16 +1,16 @@
 import { computed, ref, watch } from 'vue'
 import { coreApi } from '../services/coreApi'
 import { objectValue } from '../components/messageContent'
-import { effectiveNumber, hasManyNumbers, sendNumberChoice } from '../services/whatsappNumbers'
+import { hasManyNumbers } from '../services/whatsappNumbers'
 import { useRealtimeRefresh } from './useRealtimeRefresh'
 import { isReceiptsOnly } from '../services/realtimeRefreshQueue'
 
 export const sendNumbersKey = Symbol('Send numbers')
 
-/** "Send via" numbers of the open WhatsApp chat on a site with several numbers.
- * The default is the number of the person's newest incoming message, read again on each new message event. */
+/** The site's WhatsApp numbers for the open chat on a site with several numbers: where the person wrote, and the
+ * number a new conversation starts from. Read again on each new message event. */
 export function useSendNumbers(state, capabilities) {
-  const { source, selected, quoting, pinnedSource, viaNumber, pickNumber } = state
+  const { source, selected, quoting, pinnedSource } = state
   const items = ref([]), defaultChannel = ref('')
   const contact = computed(() => source.value?.relay_contact || selected.value || '')
   const context = computed(() => objectValue(source.value?.provider_context))
@@ -30,14 +30,12 @@ export function useSendNumbers(state, capabilities) {
   watch(contact, load, { immediate: true })
   useRealtimeRefresh([], ['messages', 'receipts'], ({ kinds } = {}) => isReceiptsOnly(kinds) ? undefined : load())
 
-  // A quote or a chosen business contact sends from its own message; otherwise the pick, else the default.
+  // A quote or a chosen message sends from its own number; otherwise the backend default.
   const current = computed(() => {
-    if (quoting.value || (!viaNumber.value && source.value && source.value === pinnedSource.value)) return source.value?.channel || ''
-    return effectiveNumber(items.value, viaNumber.value, defaultChannel.value)
+    if (quoting.value || (source.value && source.value === pinnedSource.value)) return source.value?.channel || ''
+    return items.value.some(item => item.channel === defaultChannel.value) ? defaultChannel.value : items.value[0]?.channel || ''
   })
-  const chosen = computed(() => items.value.find(item => item.channel === current.value) || null)
   const wroteTo = computed(() => items.value.find(item => item.channel === defaultChannel.value && item.has_chat) || null)
-  const choices = computed(() => items.value.map(item => ({ ...sendNumberChoice(item, defaultChannel.value), inline: true })))
 
-  return { active, contact, items, current, chosen, wroteTo, choices, pick: pickNumber, load }
+  return { active, contact, items, current, wroteTo, load }
 }
