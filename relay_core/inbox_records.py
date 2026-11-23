@@ -8,8 +8,9 @@ from relay_core.relay_chats import CHAT, CONTACT
 
 PAGE = 30
 MAX_WORDS = 5
-FIELDS = ['name', 'business_doctype', 'business_name', 'title', 'last_contact', 'last_message_preview', 'last_message_at',
-          'last_channel', 'unread_count']
+FIELDS = ['name', 'business_doctype', 'business_name', 'title', 'last_contact', 'last_message', 'last_message_preview',
+          'last_message_at', 'last_channel', 'unread_count']
+MAX_ROW_CHANNELS = 6
 
 
 def like(text):
@@ -147,13 +148,16 @@ def items(rows):
     from relay_core.relay_chats import title
     providers = dict(frappe.get_list('Relay Channel', fields=['name', 'channel'], as_list=True, limit_page_length=0))
     chats = contact_rows([row.business_name for row in rows if row.business_doctype == CONTACT])
+    channels, directions, tickets = row_channels(rows, providers), last_directions(rows), open_tickets(rows)
     result = []
     for row in rows:
         caption = row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
         item = {'id': row.name, 'title': caption, 'display_name': caption, 'channel': row.last_channel,
                 'provider': providers.get(row.last_channel), 'latest_preview': row.last_message_preview or '',
                 'latest_at': row.last_message_at, 'last_message_at': str(row.last_message_at), 'unread': row.unread_count or 0,
-                'unread_more': False, 'starred': 0, 'folder': '', 'unlinked': False, 'assignment': {}}
+                'unread_more': False, 'starred': 0, 'folder': '', 'unlinked': False, 'assignment': {},
+                'threads': channels.get(row.name, []), 'last_direction': directions.get(row.last_message),
+                'open_tickets': tickets.get((row.business_doctype, row.business_name), 0)}
         if row.business_doctype == CONTACT:
             item.update(chats.get(row.business_name, {}), kind='contact', name=row.business_name)
         else:
@@ -176,3 +180,75 @@ def contact_rows(names):
     people = dict(frappe.get_all(CONTACT, filters={'name': ['in', names]}, fields=['name', 'contact'], as_list=True))
     return {name: {'contact': people.get(name), 'unlinked': name not in linked, 'starred': (states.get(name) or {}).get('starred', 0),
                    'folder': (states.get(name) or {}).get('folder') or ''} for name in names}
+
+
+def row_channels(rows, providers):
+    """Each row's contact endpoints as channel marks {channel, provider, endpoint, unread}, unread first.
+
+    A record row shows the endpoints of its linked Contacts and a chat row its own; a thread with unread messages is
+    marked even when it has no stored endpoint. Only readable channels count."""
+    from relay_core.relay_chats import thread_of, unread_by_chat
+    endpoints = record_endpoints([row for row in rows if row.business_doctype != CONTACT])
+    endpoints.update(chat_endpoints([row.business_name for row in rows if row.business_doctype == CONTACT]))
+    unread_rows = unread_by_chat({(row.business_doctype, row.business_name): row.unread_count or 0 for row in rows})
+    result = {}
+    for row in rows:
+        key = (row.business_doctype, row.business_name)
+        unread = {thread_of(message)[1:] for message in unread_rows.get(key, [])}
+        marks = {(channel, endpoint): False for channel, endpoint in endpoints.get(key, ())}
+        marks.update({thread: True for thread in unread})
+        result[row.name] = sorted(({'channel': channel, 'provider': providers[channel], 'endpoint': endpoint, 'unread': flag}
+                                   for (channel, endpoint), flag in marks.items() if channel in providers),
+                                  key=lambda mark: (not mark['unread'], mark['provider'], mark['endpoint']))[:MAX_ROW_CHANNELS]
+    return result
+
+
+def record_endpoints(rows):
+    """{(doctype, record): {(channel, endpoint)}} of the Contacts linked to each record, in one query."""
+    if not rows:
+        return {}
+    endpoint, relay, link = (frappe.qb.DocType(name) for name in ('Relay Contact Endpoint', CONTACT, 'Dynamic Link'))
+    found = (frappe.qb.from_(endpoint).join(relay).on(endpoint.relay_contact == relay.name).join(link).on(link.parent == relay.contact)
+             .select(link.link_doctype, link.link_name, endpoint.channel, endpoint.endpoint)
+             .where((link.parenttype == 'Contact') & (link.parentfield == 'links'))
+             .where(link.link_doctype.isin(list({row.business_doctype for row in rows})))
+             .where(link.link_name.isin(list({row.business_name for row in rows}))).limit(1000).run())
+    wanted, result = {(row.business_doctype, row.business_name) for row in rows}, {}
+    for doctype, name, channel, address in found:
+        if (doctype, name) in wanted:
+            result.setdefault((doctype, name), set()).add((channel, address or ''))
+    return result
+
+
+def chat_endpoints(contacts):
+    if not contacts:
+        return {}
+    result = {}
+    for row in frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': ['in', contacts]},
+                              fields=['relay_contact', 'channel', 'endpoint'], limit_page_length=1000):
+        result.setdefault((CONTACT, row.relay_contact), set()).add((row.channel, row.endpoint or ''))
+    return result
+
+
+def last_directions(rows):
+    names = [row.last_message for row in rows if row.last_message]
+    if not names:
+        return {}
+    return dict(frappe.get_all('Relay Message', filters={'name': ['in', names]}, fields=['name', 'direction'], as_list=True))
+
+
+def open_tickets(rows):
+    """{(doctype, record): open ticket count} of the record rows the user can read tickets of."""
+    records = [row for row in rows if row.business_doctype != CONTACT]
+    if not records:
+        return {}
+    statuses = frappe.get_all('Relay Ticket Status', filters={'state': 'Open'}, pluck='name')
+    if not statuses:
+        return {}
+    result = {}
+    for ticket in frappe.get_list('Relay Ticket', fields=['business_doctype', 'business_name'], limit_page_length=1000, filters={
+            'business_doctype': ['in', list({row.business_doctype for row in records})],
+            'business_name': ['in', list({row.business_name for row in records})], 'ticket_status': ['in', statuses]}):
+        key = (ticket.business_doctype, ticket.business_name)
+        result[key] = result.get(key, 0) + 1
+    return result

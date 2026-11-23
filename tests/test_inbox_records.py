@@ -15,7 +15,7 @@ AT = datetime.datetime(2026, 10, 28, 10, 0)
 
 def chat(name, doctype='Customer', record='C1', at=AT, **values):
     return _dict(name=name, business_doctype=doctype, business_name=record, title=values.pop('title', record), last_contact='R1',
-                 last_message_preview='Hi', last_message_at=at, last_channel='CH-1', unread_count=0, **values)
+                 last_message_preview='Hi', last_message_at=at, last_channel='CH-1', **{'unread_count': 0, **values})
 
 
 class InboxRecordTests(unittest.TestCase):
@@ -31,6 +31,7 @@ class InboxRecordTests(unittest.TestCase):
         self.chats = []
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
         self.enterContext(patch('relay_core.inbox.frappe', self.fake))
+        self.endpoints = self.enterContext(patch.object(inbox_records, 'record_endpoints', return_value={}))
         self.enterContext(patch('relay_core.relay_chats.title', side_effect=lambda key:
             next((row.title for row in self.chats if (row.business_doctype, row.business_name) == key), key[1])))
 
@@ -122,6 +123,25 @@ class InboxRecordTests(unittest.TestCase):
             row = inbox_records.page()['items'][0]
         self.assertEqual((row['kind'], row['name'], row['contact'], row['display_name']), ('contact', 'R9', 'CONTACT-9', '+91 98765'))
         self.assertEqual((row['unlinked'], row['starred'], row['folder'], row['provider']), (True, 1, 'F1', 'WhatsApp'))
+
+    def test_a_row_marks_its_channels_and_the_ones_holding_unread_messages(self):
+        self.chats = [chat('RC-1', unread_count=2, last_message='MSG-9'), chat('RC-2', record='C2')]
+        self.endpoints.return_value = {('Customer', 'C1'): {('CH-1', '911'), ('CH-1', '922'), ('CH-X', 'hidden')}}
+        unread = [_dict(name='MSG-9', relay_contact='R1', channel='CH-1', sender_endpoint='922')]
+        tickets = [_dict(business_doctype='Customer', business_name='C1')] * 2
+
+        def get_all(doctype, **kwargs):
+            return {'Relay Message': [('MSG-9', 'Incoming')], 'Relay Ticket Status': ['Open']}.get(doctype, [])
+        self.fake.get_all.side_effect = get_all
+        self.fake.get_list.side_effect = lambda doctype, **kwargs: tickets if doctype == 'Relay Ticket' else self.get_list(doctype, **kwargs)
+        with patch('relay_core.relay_chats.unread_by_chat', return_value={('Customer', 'C1'): unread}) as scan:
+            first, second = inbox_records.page()['items']
+        self.assertEqual(first['threads'], [{'channel': 'CH-1', 'provider': 'WhatsApp', 'endpoint': '922', 'unread': True},
+                                            {'channel': 'CH-1', 'provider': 'WhatsApp', 'endpoint': '911', 'unread': False}],
+                         'Unread threads come first and unreadable channels are left out')
+        self.assertEqual((first['last_direction'], first['open_tickets']), ('Incoming', 2))
+        self.assertEqual((second['threads'], second['last_direction'], second['open_tickets']), ([], None, 0))
+        scan.assert_called_once_with({('Customer', 'C1'): 2, ('Customer', 'C2'): 0})
 
     def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),

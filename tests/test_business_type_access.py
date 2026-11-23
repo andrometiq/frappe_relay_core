@@ -440,6 +440,9 @@ class BusinessTypeAccessTests(unittest.TestCase):
         with patch.object(display, 'frappe', self.fake), patch.object(display, 'require_access'), \
                 patch.object(conversation_start, 'frappe', self.fake), patch.object(conversation_start, 'start_contact'), \
                 patch.object(relay_chats, 'frappe', self.fake), patch.object(inbox_records, 'frappe', self.fake), \
+                patch.object(inbox_records, 'row_channels', return_value={}), \
+                patch.object(inbox_records, 'last_directions', return_value={}), \
+                patch.object(inbox_records, 'open_tickets', return_value={}), \
                 patch.object(access, 'primary', return_value=('Customer', 'LOCAL-C1')) as primary, \
                 patch.object(access, 'candidates', return_value=[('Customer', 'LOCAL-C1')]), \
                 patch.object(business_inbox, '_linked_contacts', return_value=[]), \
