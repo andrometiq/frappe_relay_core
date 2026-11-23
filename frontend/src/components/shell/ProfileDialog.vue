@@ -11,6 +11,8 @@ const photoInput = ref(null)
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024
 const NOTIFICATIONS = [['notify_messages', 'New message in my chats'], ['notify_mentions', 'Mentions and assignments'], ['notify_sound', 'Sound']]
 const name = computed(() => form.value?.display_name || form.value?.full_name || '')
+// While a clear time is set, the first choice keeps it.
+const clearOptions = computed(() => myProfile.value?.status_clear_at ? [{ value: 'keep', label: 'Keep current time' }, ...CLEAR_AFTER] : CLEAR_AFTER)
 const clearHint = computed(() => clearAfter.value === null && myProfile.value?.status_clear_at
   ? 'Clears ' + new Date(myProfile.value.status_clear_at.replace(' ', 'T')).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '')
 
@@ -87,7 +89,7 @@ async function save() {
         </div>
         <div class="profile-grid profile-grid--status">
           <FormControl v-model="form.status_text" label="Custom status" placeholder="At dispatch till 4 PM" maxlength="100" />
-          <FormControl :model-value="clearAfter ?? ''" type="select" label="Clear after" :options="CLEAR_AFTER" @update:model-value="clearAfter = $event" />
+          <FormControl :model-value="clearAfter ?? clearOptions[0].value" type="select" label="Clear after" :options="clearOptions" @update:model-value="clearAfter = $event === 'keep' ? null : $event" />
         </div>
         <p v-if="clearHint" class="profile-hint">{{ clearHint }}</p>
       </fieldset>
