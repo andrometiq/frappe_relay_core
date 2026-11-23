@@ -12,6 +12,10 @@ function go(name) {
   open.value = false
   emit('navigate', name)
 }
+function openTab(tab) {
+  if (tab.section) goSection(tab.section)
+  else go(tab.name)
+}
 function goSection(name) {
   open.value = false
   emit('section', name)
@@ -26,7 +30,7 @@ watch(open, async value => {
 <template>
   <nav class="mobile-tabbar" aria-label="Relay sections">
     <button v-for="item in split.tabs" :key="item.name" type="button" class="mobile-tab" :class="{ active: view === item.name }"
-      :aria-current="view === item.name ? 'page' : undefined" @click="go(item.name)">
+      :aria-current="view === item.name ? 'page' : undefined" @click="openTab(item)">
       <span class="mobile-tab-icon"><FeatherIcon :name="item.icon" :size="20" />
         <span v-if="item.name === 'Messages' && badge" class="mobile-tab-badge" :aria-label="`${badge} unread chats`">{{ badge }}</span></span>
       <span>{{ item.label }}</span>

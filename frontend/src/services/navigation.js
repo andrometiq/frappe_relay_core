@@ -17,20 +17,29 @@ export function opensSetup(capabilities, initialPath) {
   return Boolean(capabilities?.configure && capabilities?.onboarding?.required) && ['', '/', '/messages'].includes(initialPath)
 }
 
-// Desktop rail groups. Each group opens its first allowed page; a group with more pages shows them as tabs.
+// Desktop rail groups. Each group opens its first allowed page; a group with more pages lists them in its section sidebar.
+// Templates and Campaigns open WhatsApp section tabs; Campaigns shows only when its section is allowed.
 const RAIL = [
   { name: 'Get started', icon: 'play', pages: ['Setup'] },
-  { name: 'Chats', icon: 'message-square', pages: ['Messages'] },
+  { name: 'Inbox', icon: 'inbox', pages: ['Messages'] },
   { name: 'Tickets', icon: 'ticket', pages: ['Tickets'] },
   { name: 'Contacts', icon: 'users', pages: ['Contacts'] },
-  { name: 'WhatsApp', icon: 'message-circle', pages: ['WhatsApp'] },
+  { name: 'Templates', icon: 'layout', pages: ['WhatsApp'], section: 'templates' },
+  { name: 'Campaigns', icon: 'megaphone', pages: ['WhatsApp'], section: 'campaigns', needsSection: true },
   { name: 'Automation', icon: 'zap', pages: ['Channel automation', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events'] },
-  { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams', 'Activity'], bottom: true },
+  { name: 'Reports', icon: 'chart-column', pages: ['Activity'] },
+  { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams'], bottom: true },
 ]
 
-export function railGroups(pages) {
+export function railGroups(pages, sections = []) {
   return RAIL.map(group => ({ ...group, pages: group.pages.map(name => pages.find(page => page.name === name)).filter(Boolean) }))
-    .filter(group => group.pages.length)
+    .filter(group => group.pages.length && (!group.needsSection || sections.some(section => section.name === group.section)))
+}
+
+// The rail group that owns the open page; WhatsApp tabs other than Campaigns belong to Templates.
+export function activeRailGroup(groups, view, section) {
+  const owners = groups.filter(group => group.pages.some(page => page.name === view))
+  return owners.find(group => group.section === section) || owners.find(group => !group.needsSection) || owners[0]
 }
 
 // WhatsApp section tabs, shared by the sidebar, the phone More sheet and the section's own tab bar.

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, onErrorCaptured, onMounted, provide, ref } from 'vue'
-import { Avatar, Button, Dropdown, ErrorMessage, FeatherIcon } from '@relay/ui'
+import { Button, Dropdown, ErrorMessage, FeatherIcon } from '@relay/ui'
 import { linkedTitle } from './services/linkedTitle'
 import { coreApi, frappeRequest } from './services/coreApi'
 import { realtimeStatus, startRealtime } from './services/realtime'
@@ -10,8 +10,12 @@ import AccessDenied from './components/AccessDenied.vue'
 import NotificationInbox from './components/NotificationInbox.vue'
 import TicketNotices from './components/TicketNotices.vue'
 import { routeTab, useViewRoute } from './useViewRoute'
-import { navAllowed, navListed, opensSetup, railGroups, whatsappRoute, whatsappSections } from './services/navigation'
+import { activeRailGroup, navAllowed, navListed, opensSetup, railGroups, whatsappRoute, whatsappSections } from './services/navigation'
 import MobileTabBar from './components/shell/MobileTabBar.vue'
+import SectionSidebar from './components/shell/SectionSidebar.vue'
+import ProfileDialog from './components/shell/ProfileDialog.vue'
+import UserAvatar from './components/UserAvatar.vue'
+import { loadMyProfile, saveMyProfile } from './services/userProfiles'
 import { useMobileLayout } from './composables/useMobileLayout'
 import { useUnreadChats } from './composables/useQueueCounts'
 import { defaultMedium, pageCapabilities } from './services/enabledChannels'
@@ -39,7 +43,7 @@ const views = {
 }
 const navigation = [
   { name: 'Setup', label: 'Get started', icon: 'play', configure: true, setup: true },
-  { name: 'Messages', label: 'Chats', icon: 'message-square' },
+  { name: 'Messages', label: 'Inbox', icon: 'inbox' },
   { name: 'Tickets', label: 'Tickets', icon: 'ticket' },
   { name: 'Contacts', label: 'Contacts', icon: 'users' },
   { name: 'WhatsApp', label: 'WhatsApp', icon: 'message-circle', channel: 'WhatsApp' },
@@ -61,18 +65,29 @@ const error = ref(''), loadError = ref('')
 const current = computed(() => navigation.find(item => item.name === view.value))
 const visible = computed(() => navigation.filter(item => navListed(item, capabilities.value)))
 const setupPending = computed(() => capabilities.value.onboarding?.required && !capabilities.value.configure && !capabilities.value.whatsapp_numbers?.length)
-const rail = computed(() => railGroups(visible.value))
-const currentGroup = computed(() => rail.value.find(group => group.pages.some(page => page.name === view.value)))
-const isMobile = useMobileLayout(), moreOpen = ref(false)
+const isMobile = useMobileLayout(), moreOpen = ref(false), pagesOpen = ref(false), profileOpen = ref(false)
 const inboxBadge = useUnreadChats(computed(() => defaultMedium(capabilities.value)))
 const sections = computed(() => whatsappSections(capabilities.value))
+const rail = computed(() => railGroups(visible.value, sections.value))
 const hash = ref(location.hash)
-const section = computed(() => view.value === 'WhatsApp' ? routeTab(hash.value, 'templates') : '')
+// The WhatsApp tab on screen: a tab the user may not open falls back to the first allowed one, as WhatsAppSection does.
+const section = computed(() => {
+  if (view.value !== 'WhatsApp') return ''
+  const tab = routeTab(hash.value, 'templates')
+  return tab === 'account' || sections.value.some(item => item.name === tab) ? tab : sections.value[0]?.name || tab
+})
+const currentGroup = computed(() => activeRailGroup(rail.value, view.value, section.value))
+const sidebarGroup = computed(() => currentGroup.value?.pages.length > 1 ? currentGroup.value : null)
 function openSection(name) { location.hash = whatsappRoute(name) }
+function openGroup(group) {
+  if (group.section) openSection(group.section)
+  else view.value = group.pages[0].name
+}
 const user = window.frappe?.session?.user || document.getElementById('app')?.dataset.user || 'Account'
 const userTitle = computed(() => linkedTitle('User', user, 'Account'))
 const accountActions = computed(() => [
-  { label: `Theme: ${THEME_LABELS[theme.value][1]}`, icon: THEME_LABELS[theme.value][0], onClick: cycleTheme },
+  { label: 'Your profile', icon: 'user', onClick: () => { profileOpen.value = true } },
+  { label: `Theme: ${THEME_LABELS[theme.value][1]}`, icon: THEME_LABELS[theme.value][0], onClick: nextTheme },
   { label: 'Open Frappe Desk', icon: 'grid', onClick: () => location.assign('/desk/relay-core') },
   { label: 'Sign out', icon: 'log-out', onClick: logout },
 ])
@@ -82,6 +97,11 @@ async function initialize() {
   error.value = ''
   try { capabilities.value = await coreApi('api.capabilities'); ready.value = true }
   catch (e) { error.value = e.message }
+}
+// The account menu cycles the theme and keeps the profile in step.
+function nextTheme() {
+  cycleTheme()
+  saveMyProfile({ theme: { system: 'System', light: 'Light', dark: 'Dark' }[theme.value] }).catch(() => {})
 }
 function openSetupFirst() { if (opensSetup(capabilities.value, initialPath)) view.value = 'Setup' }
 async function logout() {
@@ -96,7 +116,7 @@ function focusSearch(event) {
   event.preventDefault()
   input.focus()
 }
-onMounted(() => { startRealtime(); initialize().then(openSetupFirst); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
+onMounted(() => { startRealtime(); initialize().then(openSetupFirst); loadMyProfile(true).catch(() => {}); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
@@ -105,40 +125,36 @@ onErrorCaptured(e => {
 })
 </script>
 <template>
-  <div class="app-shell relay-shell v1-shell">
-    <header class="page-header v1-header" :inert="moreOpen || undefined">
-      <span class="relay-brand"><span class="relay-logo" aria-hidden="true"><FeatherIcon name="message-circle" /></span>Relay</span>
-      <h1>{{ current?.label }}</h1>
-      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /><TicketNotices /></div>
-    </header>
+  <div class="app-shell relay-shell v1-shell" :class="{ 'has-section-sidebar': sidebarGroup && !isMobile }">
     <aside class="app-nav relay-rail" aria-label="Relay navigation">
+      <span class="relay-rail-logo" aria-hidden="true">R</span>
       <nav class="relay-rail-items" aria-label="Relay sections">
         <template v-for="group in rail" :key="group.name">
           <button v-if="!group.bottom" type="button" class="rail-item" :class="{ active: currentGroup === group }" :title="group.name"
-            :aria-current="currentGroup === group ? 'page' : undefined" @click="view = group.pages[0].name">
-            <span class="rail-icon"><FeatherIcon :name="group.icon" :size="20" /><span v-if="group.name === 'Chats' && inboxBadge" class="rail-badge" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span></span>
-            <span class="rail-label">{{ group.name }}</span>
+            :aria-label="group.name" :aria-current="currentGroup === group ? 'page' : undefined" @click="openGroup(group)">
+            <FeatherIcon :name="group.icon" :size="18" /><span v-if="group.name === 'Inbox' && inboxBadge" class="rail-badge" :aria-label="`${inboxBadge} unread chats`">{{ inboxBadge }}</span>
           </button>
         </template>
       </nav>
       <div class="relay-rail-footer">
         <template v-for="group in rail" :key="group.name">
           <button v-if="group.bottom" type="button" class="rail-item" :class="{ active: currentGroup === group }" :title="group.name"
-            :aria-current="currentGroup === group ? 'page' : undefined" @click="view = group.pages[0].name">
-            <span class="rail-icon"><FeatherIcon :name="group.icon" :size="20" /></span><span class="rail-label">{{ group.name }}</span>
+            :aria-label="group.name" :aria-current="currentGroup === group ? 'page' : undefined" @click="openGroup(group)">
+            <FeatherIcon :name="group.icon" :size="18" />
           </button>
         </template>
         <Dropdown :options="accountActions" placement="right">
-          <button type="button" class="rail-account" :title="userTitle" :aria-label="`Account: ${userTitle}`"><Avatar :label="userTitle" size="sm" /></button>
+          <button type="button" class="rail-account" :title="userTitle" :aria-label="`Account: ${userTitle}`"><UserAvatar :user="user" :label="userTitle" size="sm" /></button>
         </Dropdown>
       </div>
     </aside>
-    <main class="workspace" :inert="moreOpen || undefined">
-      <h1 v-if="view !== 'Messages'" class="workspace-title">{{ current?.label }}</h1>
-      <nav v-if="currentGroup?.pages.length > 1" class="v1-tabs workspace-subtabs" :aria-label="currentGroup.name + ' pages'">
-        <Button v-for="page in currentGroup.pages" :key="page.name" :label="page.label" :variant="view === page.name ? 'solid' : 'ghost'"
-          :aria-current="view === page.name ? 'page' : undefined" @click="view = page.name" />
-      </nav>
+    <SectionSidebar v-if="sidebarGroup" v-model:open="pagesOpen" :group="sidebarGroup" :view="view" :overlay="isMobile" @navigate="view = $event" />
+    <header class="page-header v1-header" :inert="moreOpen || pagesOpen || undefined">
+      <button v-if="sidebarGroup" type="button" class="section-toggle" :aria-label="`${sidebarGroup.name} pages`" :aria-expanded="pagesOpen" @click="pagesOpen = true"><FeatherIcon name="list" :size="18" /></button>
+      <h1 :class="{ 'inbox-title': view === 'Messages' }">{{ current?.label }}</h1>
+      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /><TicketNotices /></div>
+    </header>
+    <main class="workspace" :inert="moreOpen || pagesOpen || undefined">
       <p v-if="setupPending && ready" class="setup-pending" role="status">Relay is being set up. Ask your administrator to finish setup.</p>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
       <LoadingRows v-if="!ready && !error" label="Loading workspace…" :count="6" />
@@ -148,8 +164,12 @@ onErrorCaptured(e => {
     <MobileTabBar v-if="isMobile && ready" v-model:open="moreOpen" :items="visible" :sections="sections" :view="view" :section="section" :badge="inboxBadge" @navigate="view = $event" @section="openSection">
       <template #footer>
         <a href="/desk/relay-core" class="mobile-sheet-item"><span class="mobile-sheet-icon"><FeatherIcon name="grid" :size="18" /></span><span>Frappe Desk</span></a>
-        <div class="relay-account mobile-sheet-account"><Avatar :label="userTitle" size="sm" aria-hidden="true" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span><Button :icon="THEME_LABELS[theme][0]" :aria-label="`Theme: ${THEME_LABELS[theme][1]}`" :title="`Theme: ${THEME_LABELS[theme][1]}`" @click="cycleTheme" /><Button icon="log-out" aria-label="Sign out" @click="logout" /></div>
+        <div class="relay-account mobile-sheet-account">
+          <button type="button" class="mobile-sheet-profile" data-profile-open @click="moreOpen = false; profileOpen = true"><UserAvatar :user="user" :label="userTitle" size="sm" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span></button>
+          <Button :icon="THEME_LABELS[theme][0]" :aria-label="`Theme: ${THEME_LABELS[theme][1]}`" :title="`Theme: ${THEME_LABELS[theme][1]}`" @click="nextTheme" /><Button icon="log-out" aria-label="Sign out" @click="logout" />
+        </div>
       </template>
     </MobileTabBar>
+    <ProfileDialog v-model="profileOpen" />
   </div>
 </template>

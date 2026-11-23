@@ -12,11 +12,11 @@ test('a mobile number and an email each carry their own icon and spoken label', 
   assert.match(start, /<ContactEndpoints :phone="row\.phone" :email="row\.email"/)
 })
 
-test('phone dialogs open as bottom sheets as tall as their content', async () => {
+test('phone dialogs open as full-screen sheets', async () => {
   const mobile = await read('mobile.css')
   const sheet = mobile.match(/\.relay-dialog,\.relay-dialog--sm,\.relay-dialog--lg,\.relay-dialog--xl\{([^}]*)\}/)[1]
-  assert.match(sheet, /height:auto;max-height:calc\(var\(--relay-viewport-height,100dvh\) - 24px\)/)
-  assert.match(sheet, /border-radius:16px 16px 0 0/)
-  assert.match(mobile, /\.relay-dialog-mask\{align-items:flex-end;padding:0\}/)
-  assert.match(mobile, /\.relay-dialog::before\{content:''/, 'A grab handle marks the sheet')
+  assert.match(sheet, /height:var\(--relay-viewport-height,100dvh\);max-height:var\(--relay-viewport-height,100dvh\)/)
+  assert.match(sheet, /border-radius:0/)
+  assert.match(sheet, /animation:relay-sheet-up/)
+  assert.match(mobile, /\.relay-dialog-mask\{align-items:stretch;padding:0\}/)
 })
