@@ -125,7 +125,7 @@ onErrorCaptured(e => {
 })
 </script>
 <template>
-  <div class="app-shell relay-shell v1-shell" :class="{ 'has-section-sidebar': sidebarGroup && !isMobile }">
+  <div class="app-shell relay-shell v1-shell">
     <aside class="app-nav relay-rail" aria-label="Relay navigation">
       <span class="relay-rail-logo" aria-hidden="true">R</span>
       <nav class="relay-rail-items" aria-label="Relay sections">
