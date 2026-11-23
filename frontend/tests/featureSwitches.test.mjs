@@ -7,8 +7,8 @@ import { assignmentLabel } from '../src/services/assignment.js'
 const read = path => readFile(new URL('../src/' + path, import.meta.url), 'utf8')
 const title = (_doctype, name) => name.toUpperCase()
 
-test('Roles and access replaces team controls and Settings is available to managers', async () => {
-  assert.match(await read('SiteApp.vue'), /name: 'Teams'[^}]*label: 'Roles & access'/)
+test('Access replaces team controls and Settings is available to managers', async () => {
+  assert.match(await read('SiteApp.vue'), /name: 'Teams'[^}]*label: 'Access'/)
   assert.match(await read('SiteApp.vue'), /name: 'Settings'[^}]*manage: true/)
   assert.doesNotMatch(await read('components/AccessWorkspace.vue'), /Communication teams|teams.save|TeamsWorkspace/)
   assert.doesNotMatch(await read('components/TeamsWorkspace.vue'), /Take group|business_groups.claim/)

@@ -19,6 +19,7 @@ export function opensSetup(capabilities, initialPath) {
 
 // Desktop rail groups. Each group opens its first allowed page; a group with more pages lists them in its section sidebar.
 // Templates and Campaigns open WhatsApp section tabs; Campaigns shows only when its section is allowed.
+// Settings draws its own sidebar (ownSidebar), so the shell adds none.
 const RAIL = [
   { name: 'Get started', icon: 'play', pages: ['Setup'] },
   { name: 'Inbox', icon: 'inbox', pages: ['Messages'] },
@@ -28,7 +29,7 @@ const RAIL = [
   { name: 'Campaigns', icon: 'megaphone', pages: ['WhatsApp'], section: 'campaigns', needsSection: true },
   { name: 'Automation', icon: 'zap', pages: ['Channel automation', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events'] },
   { name: 'Reports', icon: 'chart-column', pages: ['Activity'] },
-  { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams'], bottom: true },
+  { name: 'Settings', icon: 'settings', pages: ['Settings', 'Teams'], bottom: true, ownSidebar: true },
 ]
 
 export function railGroups(pages, sections = []) {

@@ -55,7 +55,7 @@ const navigation = [
   { name: 'Events', label: 'AI events', icon: 'calendar', events: true },
   { name: 'Skills', label: 'AI skills', icon: 'bot', ai: true, skills: true },
   { name: 'Settings', label: 'Settings', icon: 'settings', manage: true },
-  { name: 'Teams', label: 'Roles & access', icon: 'user-check' },
+  { name: 'Teams', label: 'Access', icon: 'user-check' },
   { name: 'Activity', label: 'Activity & health', icon: 'activity', configure: true },
 ]
 const view = useViewRoute(Object.keys(views), 'Messages')
@@ -77,7 +77,9 @@ const section = computed(() => {
   return tab === 'account' || sections.value.some(item => item.name === tab) ? tab : sections.value[0]?.name || tab
 })
 const currentGroup = computed(() => activeRailGroup(rail.value, view.value, section.value))
-const sidebarGroup = computed(() => currentGroup.value?.pages.length > 1 ? currentGroup.value : null)
+const sidebarGroup = computed(() => currentGroup.value?.pages.length > 1 && !currentGroup.value.ownSidebar ? currentGroup.value : null)
+// Pages that draw their own heading and section sidebar; the shell title stays for phones and screen readers.
+const ownTitle = computed(() => ['Tickets', 'Settings', 'Teams'].includes(view.value) || (view.value === 'WhatsApp' && section.value === 'templates'))
 function openSection(name) { location.hash = whatsappRoute(name) }
 function openGroup(group) {
   if (group.section) openSection(group.section)
@@ -151,7 +153,7 @@ onErrorCaptured(e => {
     <SectionSidebar v-if="sidebarGroup" v-model:open="pagesOpen" :group="sidebarGroup" :view="view" :overlay="isMobile" @navigate="view = $event" />
     <header class="page-header v1-header" :inert="moreOpen || pagesOpen || undefined">
       <button v-if="sidebarGroup" type="button" class="section-toggle" :aria-label="`${sidebarGroup.name} pages`" :aria-expanded="pagesOpen" @click="pagesOpen = true"><FeatherIcon name="list" :size="18" /></button>
-      <h1 :class="{ 'inbox-title': view === 'Messages' }">{{ current?.label }}</h1>
+      <h1 :class="{ 'inbox-title': view === 'Messages', 'page-titled': ownTitle }">{{ view === 'WhatsApp' && section === 'templates' ? 'Templates' : current?.label }}</h1>
       <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /><TicketNotices /></div>
     </header>
     <main class="workspace" :inert="moreOpen || pagesOpen || undefined">

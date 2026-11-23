@@ -39,7 +39,8 @@ test('a group without allowed pages is hidden and a group opens its first allowe
   assert.deepEqual(names(railGroups(['Messages', 'Tickets', 'Contacts', 'Teams'].map(page))),
     [['Inbox', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['Settings', ['Teams']]])
   assert.match(app, /else view\.value = group\.pages\[0\]\.name/)
-  assert.match(app, /currentGroup\.value\?\.pages\.length > 1 \? currentGroup\.value : null/)
+  assert.match(app, /currentGroup\.value\?\.pages\.length > 1 && !currentGroup\.value\.ownSidebar \? currentGroup\.value : null/)
+  assert.equal(railGroups(['Settings', 'Teams'].map(page))[0].ownSidebar, true, 'Settings draws its own sidebar')
   assert.match(app, /<SectionSidebar v-if="sidebarGroup"/)
 })
 
