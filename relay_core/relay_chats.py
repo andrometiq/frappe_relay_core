@@ -7,6 +7,8 @@ import frappe
 CHAT = 'Relay Chat'
 CONTACT = 'Relay Contact'
 FIELDS = ['name', 'last_message', 'last_message_at', 'unread_count']
+THREAD_FIELDS = ['name', 'relay_contact', 'channel', 'sender_endpoint']
+UNREAD_SCAN = 200
 PREVIEW_FIELDS = ['name', 'relay_contact', 'channel', 'direction', 'sent_at', 'creation', 'content', 'message_data',
                   'transcript', 'business_doctype', 'business_name']
 
@@ -34,11 +36,15 @@ def on_message(doc, method=None):
 
 
 def record(key, message):
-    """Move the chat to a newer message and count an incoming live message as unread."""
+    """Move the chat to a newer message and count an incoming live message as unread; a reply answers its thread."""
     chat = locked(key)
     values = newer_values(chat, key, message)
     if message.get('direction') == 'Incoming' and not message.get('legacy_source'):
         values.update(unread_count=(chat.unread_count or 0) + 1, is_unread=1)
+    elif message.get('direction') == 'Outgoing' and chat.unread_count:
+        unread = remaining_unread(key, chat.unread_count)
+        if unread < chat.unread_count:
+            values.update(unread_count=unread, is_unread=int(unread > 0))
     if values:
         frappe.db.set_value(CHAT, chat.name, values, update_modified=False)
 
@@ -101,11 +107,13 @@ def title(key):
 
 
 def mark_read(key, upto=None):
-    """Lower the shared unread count after a reader saw the chat up to message `upto`, or all of it when None."""
+    """Lower the shared unread count after a reader saw some messages of the chat, or all of it when `upto` is None.
+
+    The reads are stored first, so each thread keeps only its messages after its newest read or reply."""
     chat = frappe.db.get_value(CHAT, {'business_doctype': key[0], 'business_name': key[1]}, FIELDS, as_dict=True, for_update=True)
     if not chat or not chat.unread_count:
         return
-    unread = 0 if not upto or upto >= (chat.last_message or '') else unread_after(key, upto)
+    unread = remaining_unread(key, chat.unread_count) if upto else 0
     if unread < chat.unread_count:
         frappe.db.set_value(CHAT, chat.name, {'unread_count': unread, 'is_unread': int(unread > 0)}, update_modified=False)
         changed()
@@ -119,13 +127,60 @@ def mark_unread(key):
         changed()
 
 
-def unread_after(key, upto):
-    filters = {'direction': 'Incoming', 'legacy_source': ['is', 'not set'], 'name': ['>', upto]}
+def remaining_unread(key, total):
+    """The chat's unread count after its reads and replies; only the newest UNREAD_SCAN messages are checked."""
+    return len(unread_messages(key, total)) + max(0, total - UNREAD_SCAN)
+
+
+def unread_messages(key, total):
+    """The chat's unread messages, newest first: of the newest `total` incoming live messages, the ones after
+    the newest operator read or reply on their thread. A thread is one contact endpoint on one channel."""
+    return unread_by_chat({key: total}).get(key, [])
+
+
+def unread_by_chat(totals):
+    """unread_messages of several chats {key: unread count}: one query per unread chat and two for all their threads."""
+    candidates = {key: frappe.get_all('Relay Message', filters=incoming_filters(key), fields=THREAD_FIELDS, order_by='name desc',
+                                      limit_page_length=min(total, UNREAD_SCAN)) for key, total in totals.items() if total}
+    seen = thread_cursors([row for rows in candidates.values() for row in rows])
+    return {key: [row for row in rows if row.name > seen.get(thread_of(row), '')] for key, rows in candidates.items()}
+
+
+def incoming_filters(key):
+    filters = {'direction': 'Incoming', 'legacy_source': ['is', 'not set']}
     if key[0] == CONTACT:
         filters.update(relay_contact=key[1], business_name=['is', 'not set'], legacy_triage=0)
     else:
         filters.update(business_doctype=key[0], business_name=key[1])
-    return frappe.db.count('Relay Message', filters)
+    return filters
+
+
+def thread_of(row):
+    return row.relay_contact, row.channel, row.sender_endpoint or ''
+
+
+def thread_cursors(rows):
+    """The newest read or reply of each thread of `rows`, in two indexed queries."""
+    if not rows:
+        return {}
+    from pypika.functions import Max
+    cursors = {}
+    read = set(frappe.get_all('Relay Message Read', filters={'message': ['in', [row.name for row in rows]]}, pluck='message'))
+    for row in rows:
+        if row.name in read:
+            cursors[thread_of(row)] = max(cursors.get(thread_of(row), ''), row.name)
+    message = frappe.qb.DocType('Relay Message')
+    replies = (frappe.qb.from_(message).select(message.relay_contact, message.channel, message.sender_endpoint, Max(message.name))
+               .where(message.direction == 'Outgoing')
+               .where(message.relay_contact.isin(list({row.relay_contact for row in rows})))
+               .where(message.channel.isin(list({row.channel for row in rows})))
+               .groupby(message.relay_contact, message.channel, message.sender_endpoint).run())
+    threads = {thread_of(row) for row in rows}
+    for contact, channel, endpoint, newest in replies:
+        thread = (contact, channel, endpoint or '')
+        if thread in threads:
+            cursors[thread] = max(cursors.get(thread, ''), newest or '')
+    return cursors
 
 
 def changed():

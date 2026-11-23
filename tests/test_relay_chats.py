@@ -59,28 +59,45 @@ class RelayChatTests(unittest.TestCase):
                                           'last_channel': 'CH-1', 'last_message_preview': 'Hello', 'title': 'Kestrel Traders',
                                           'unread_count': 1, 'is_unread': 1})
 
-    def test_an_older_message_only_counts_as_unread_and_a_reply_counts_nothing(self):
+    def test_an_older_message_only_counts_as_unread_and_a_reply_recounts_its_chat(self):
         self.row = _dict(name='RC-1', last_message='RELAY-MSG-0000000009', last_message_at=AT, unread_count=2)
         relay_chats.on_message(message(at=AT - datetime.timedelta(minutes=5)))
         self.assertEqual(self.written(), {'unread_count': 3, 'is_unread': 1})
         self.fake.db.set_value.reset_mock()
-        relay_chats.on_message(message(direction='Outgoing', at=AT - datetime.timedelta(minutes=5)))
-        self.fake.db.set_value.assert_not_called()
+        with patch.object(relay_chats, 'unread_messages', return_value=[message()]) as unread:
+            relay_chats.on_message(message(direction='Outgoing', at=AT - datetime.timedelta(minutes=5)))
+        unread.assert_called_once_with(('Customer', 'C1'), 2)
+        self.assertEqual(self.written(), {'unread_count': 1, 'is_unread': 1}, 'A reply answers only its own thread')
+        self.fake.db.set_value.reset_mock()
         relay_chats.on_message(message(legacy_source='old', at=AT - datetime.timedelta(minutes=5)))
         self.fake.db.set_value.assert_not_called()
 
-    def test_reading_to_the_end_clears_the_row_and_an_earlier_read_recounts(self):
+    def test_a_read_keeps_the_unread_messages_of_other_threads_and_a_full_read_clears_the_row(self):
         self.row = _dict(name='RC-1', last_message='RELAY-MSG-0000000009', last_message_at=AT, unread_count=3)
-        with patch('relay_core.queue_counts.invalidate'):
+        with patch('relay_core.queue_counts.invalidate'), patch.object(relay_chats, 'unread_messages', return_value=[message()]) as unread:
             relay_chats.mark_read(('Customer', 'C1'), 'RELAY-MSG-0000000009')
+            unread.assert_called_once_with(('Customer', 'C1'), 3)
+            self.assertEqual(self.written(), {'unread_count': 1, 'is_unread': 1})
+            self.fake.publish_realtime.assert_called_with('relay_changed', {'kind': 'chats'}, room=self.fake.realtime.get_doctype_room.return_value,
+                                                          after_commit=True)
+            relay_chats.mark_read(('Customer', 'C1'))
             self.assertEqual(self.written(), {'unread_count': 0, 'is_unread': 0})
-            self.fake.db.count.return_value = 1
-            relay_chats.mark_read(('Customer', 'C1'), 'RELAY-MSG-0000000007')
-        filters = self.fake.db.count.call_args.args[1]
-        self.assertEqual((filters['business_doctype'], filters['business_name'], filters['name']), ('Customer', 'C1', ['>', 'RELAY-MSG-0000000007']))
-        self.assertEqual(self.written(), {'unread_count': 1, 'is_unread': 1})
-        self.fake.publish_realtime.assert_called_with('relay_changed', {'kind': 'chats'}, room=self.fake.realtime.get_doctype_room.return_value,
-                                                      after_commit=True)
+
+    def test_unread_messages_are_the_newest_incoming_after_their_thread_read_or_reply(self):
+        rows = [_dict(name=f'RELAY-MSG-000000000{index}', relay_contact='R1', channel=channel, sender_endpoint=endpoint)
+                for index, channel, endpoint in ((9, 'WA', '911'), (8, 'WA', '922'), (7, 'WA', '911'), (6, 'MAIL', 'a@x.invalid'))]
+        self.fake.get_all.side_effect = lambda doctype, **kwargs: rows if doctype == 'Relay Message' else ['RELAY-MSG-0000000007']
+        self.fake.qb.from_.return_value.select.return_value.where.return_value.where.return_value.where.return_value \
+            .groupby.return_value.run.return_value = [('R1', 'MAIL', 'a@x.invalid', 'RELAY-MSG-0000000006'), ('R1', 'TG', '55', 'RELAY-MSG-0000000099')]
+        found = relay_chats.unread_messages(('Customer', 'C1'), 4)
+        self.assertEqual([row.name for row in found], ['RELAY-MSG-0000000009', 'RELAY-MSG-0000000008'],
+                         'A read message hides only the older ones of its thread, and a reply only its own thread')
+        listed = self.fake.get_all.call_args_list[0]
+        self.assertEqual(listed.kwargs['filters'], {'direction': 'Incoming', 'legacy_source': ['is', 'not set'],
+                                                    'business_doctype': 'Customer', 'business_name': 'C1'})
+        self.assertEqual((listed.kwargs['order_by'], listed.kwargs['limit_page_length']), ('name desc', 4))
+        self.assertEqual(relay_chats.remaining_unread(('Customer', 'C1'), relay_chats.UNREAD_SCAN + 5), 7, 'Messages past the scan stay unread')
+        self.assertEqual(relay_chats.unread_messages(('Customer', 'C1'), 0), [])
 
     def test_a_read_that_lowers_nothing_writes_nothing(self):
         self.row = _dict(name='RC-1', last_message='RELAY-MSG-0000000009', last_message_at=AT, unread_count=0)
