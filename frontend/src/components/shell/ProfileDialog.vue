@@ -1,23 +1,27 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Avatar, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
-import { CLEAR_AFTER, STATUSES, applyPreferences, loadMyProfile, myProfile, saveMyProfile } from '../../services/userProfiles'
+import { CLEAR_AFTER, STATUSES, changedFields, loadMyProfile, myProfile, saveMyProfile, setDensity } from '../../services/userProfiles'
+import { setTheme, theme } from '../../services/theme'
 import { uploadFile } from '../../services/uploadFile'
 
 // Raven-style profile: photo, name, status and personal preferences. Theme and density preview until Cancel.
 const open = defineModel({ type: Boolean, default: false })
 const form = ref(null), clearAfter = ref(null), busy = ref(false), uploading = ref(false), error = ref('')
 const photoInput = ref(null)
+let shown = null
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024
 const NOTIFICATIONS = [['notify_messages', 'New message in my chats'], ['notify_mentions', 'Mentions and assignments'], ['notify_sound', 'Sound']]
 const name = computed(() => form.value?.display_name || form.value?.full_name || '')
 // While a clear time is set, the first choice keeps it.
 const clearOptions = computed(() => myProfile.value?.status_clear_at ? [{ value: 'keep', label: 'Keep current time' }, ...CLEAR_AFTER] : CLEAR_AFTER)
 const clearHint = computed(() => clearAfter.value === null && myProfile.value?.status_clear_at
-  ? 'Clears ' + new Date(myProfile.value.status_clear_at.replace(' ', 'T')).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '')
+  ? 'Clears ' + new Date(myProfile.value.status_clear_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '')
 
+// Opening only reads the profile; the theme and density on screen are kept so Cancel can restore them.
 watch(open, async value => {
   if (!value) return
+  shown = { theme: theme.value, density: document.documentElement.dataset.density }
   error.value = ''
   clearAfter.value = null
   form.value = myProfile.value ? { ...myProfile.value } : null
@@ -26,10 +30,16 @@ watch(open, async value => {
 
 function preview(field, value) {
   form.value[field] = value
-  applyPreferences(form.value)
+  if (field === 'theme') setTheme(value.toLowerCase())
+  else setDensity(value)
+}
+function restore(keep = {}) {
+  if (shown && !('theme' in keep)) setTheme(shown.theme)
+  if (shown && !('density' in keep)) setDensity(shown.density)
+  shown = null
 }
 function cancel() {
-  if (myProfile.value) applyPreferences(myProfile.value)
+  restore()
   open.value = false
 }
 async function choosePhoto(event) {
@@ -42,18 +52,21 @@ async function choosePhoto(event) {
   }
   error.value = ''
   uploading.value = true
-  try { form.value.user_image = await uploadFile(file, 'The photo could not be uploaded. Try again.', { isPrivate: false }) }
+  try {
+    form.value.user_image = await uploadFile(file, 'The photo could not be uploaded. Try again.',
+      { isPrivate: false, doctype: 'User', docname: form.value.user, fieldname: 'user_image' })
+  }
   catch (e) { error.value = e.message }
   finally { uploading.value = false }
 }
 async function save() {
-  const { display_name, job_title, status, status_text, theme, density, user_image, notify_messages, notify_mentions, notify_sound } = form.value
-  const values = { display_name, job_title, status, status_text, theme, density, user_image, notify_messages, notify_mentions, notify_sound }
+  const values = changedFields(form.value, myProfile.value)
   if (clearAfter.value !== null) values.clear_after = clearAfter.value
   busy.value = true
   error.value = ''
   try {
-    await saveMyProfile(values)
+    if (Object.keys(values).length) await saveMyProfile(values)
+    restore(values)
     open.value = false
     toast('Profile saved')
   } catch (e) { error.value = e.message }
@@ -62,7 +75,7 @@ async function save() {
 </script>
 
 <template>
-  <Dialog :model-value="open" :options="{ title: 'Your profile', size: 'lg' }" class="profile-dialog" @update:model-value="value => value || cancel()">
+  <Dialog :model-value="open" :options="{ title: 'Your profile' }" class="profile-dialog" @update:model-value="value => value || cancel()">
     <form v-if="form" id="relay-profile-form" class="profile-form" @submit.prevent="save">
       <ErrorMessage :message="error" />
       <section class="profile-photo">

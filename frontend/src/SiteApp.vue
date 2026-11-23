@@ -15,7 +15,7 @@ import MobileTabBar from './components/shell/MobileTabBar.vue'
 import SectionSidebar from './components/shell/SectionSidebar.vue'
 import ProfileDialog from './components/shell/ProfileDialog.vue'
 import UserAvatar from './components/UserAvatar.vue'
-import { loadMyProfile, saveMyProfile } from './services/userProfiles'
+import { loadStartPreferences, saveMyProfile } from './services/userProfiles'
 import { useMobileLayout } from './composables/useMobileLayout'
 import { useUnreadChats } from './composables/useQueueCounts'
 import { defaultMedium, pageCapabilities } from './services/enabledChannels'
@@ -116,7 +116,7 @@ function focusSearch(event) {
   event.preventDefault()
   input.focus()
 }
-onMounted(() => { startRealtime(); initialize().then(openSetupFirst); loadMyProfile(true).catch(() => {}); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
+onMounted(() => { startRealtime(); initialize().then(openSetupFirst); loadStartPreferences().catch(() => {}); openLegacyConversation(location, coreApi); window.addEventListener('hashchange', () => { hash.value = location.hash }); window.addEventListener('keydown', focusSearch) })
 onErrorCaptured(e => {
   if (/dynamically imported module|Loading chunk|Importing a module script/.test(String(e))) {
     loadError.value = 'This screen could not load. Refresh Relay to try again.'
