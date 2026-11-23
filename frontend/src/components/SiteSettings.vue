@@ -80,6 +80,7 @@ const checklist = computed(() => [
   { label: 'WhatsApp channel', icon: 'message-circle', ready: channel.value?.configured, state: !loaded.value ? 'Not checked' : channel.value?.configured ? 'Enabled for this account' : 'Needs setup', href: '#/settings?tab=whatsapp' },
   { label: 'Business types and grouping', icon: 'users', ready: types.value.length > 0, state: !loaded.value ? 'Not checked' : types.value.length ? `${types.value.length} enabled types` : 'Needs setup', href: '#/settings?tab=business-types' },
   { label: 'Contacts and links', icon: 'users', state: 'Review identities, consent and permitted links', href: '#/contacts' },
+  { label: 'Contact numbers and addresses', icon: 'phone', state: 'Verified numbers and email addresses of each contact, in Desk', href: '/desk/relay-contact-endpoint' },
   ...(capabilities.value.configure ? [{ label: 'Incoming messages and recovery', icon: 'activity', state: 'See what arrived and retry failures', href: '#/activity' }] : []),
 ])
 onMounted(() => { run(load); window.addEventListener('hashchange', readRoute) })

@@ -107,6 +107,18 @@ test('settings sections follow the person and the enabled channels', () => {
   assert.deepEqual(['access', 'overview', 'hub'].map(settingsRoute), ['#/teams', '#/settings', '#/settings?tab=hub'])
 })
 
+test('long names shrink with an ellipsis, Desk links are touch targets and contact endpoints stay linked', () => {
+  const css = source('pages.css')
+  assert.match(css, /\.page-person>span\{min-width:0;overflow:hidden\}/)
+  assert.match(css, /\.page-person>span>:is\(b,small,span\)\{overflow:hidden;text-overflow:ellipsis\}/)
+  assert.match(source('components/AccessWorkspace.vue'), /:title="row\.full_name"[\s\S]*:title="row\.user"/)
+  assert.match(css, /\.desk-link\{display:inline-flex;align-items:center;min-height:40px\}/)
+  assert.equal((source('components/SavedRepliesWorkspace.vue').match(/class="desk-link /g) || []).length, 2)
+  assert.match(source('components/SiteSettings.vue'), /label: 'Contact numbers and addresses'[^}]*href: '\/desk\/relay-contact-endpoint'/)
+  const dashboard = source('components/tickets/TicketDashboard.vue')
+  assert.doesNotMatch(dashboard, /coreApi|useRealtimeRefresh/, 'The dashboard reads counts from the page')
+})
+
 test('list pages use the shared sidebar and side panel, and tables stack into cards on phones', () => {
   for (const file of ['components/whatsapp/WhatsAppTemplates.vue', 'components/TicketsWorkspace.vue', 'components/settings/SettingsLayout.vue']) {
     assert.match(source(file), /<PageSidebar /, file)

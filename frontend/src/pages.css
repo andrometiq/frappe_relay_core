@@ -58,7 +58,11 @@ button.page-side-item:hover{background:var(--relay-hover);color:var(--relay-ink)
 .page-table .cell-wrap{display:flex;flex-wrap:wrap;gap:4px}
 .relay-page.has-panel .page-table .col-optional,.relay-page.has-panel:has(.side-panel.is-wide) .page-table .col-wide-optional{display:none}
 .page-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
-.page-person{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.page-person{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-width:0;white-space:nowrap}
+/* A long name or email shrinks and ends with an ellipsis; its title holds the full value. */
+.page-table td.cell-main .page-person{display:flex}
+.page-person>span{min-width:0;overflow:hidden}
+.page-person>span>:is(b,small,span){overflow:hidden;text-overflow:ellipsis}
 
 /* Stat cards */
 .page-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:16px 20px;border-bottom:1px solid var(--relay-stroke)}
@@ -122,6 +126,9 @@ a.settings-row:hover{background:var(--relay-hover)}
 .toggle-switch:disabled{cursor:not-allowed;opacity:.5}
 .toggle-switch:focus-visible{outline:2px solid var(--relay-accent);outline-offset:2px}
 
+/* Desk links inside settings pages are full touch targets */
+.desk-link{display:inline-flex;align-items:center;min-height:40px}
+
 /* WhatsApp preview in the dark theme, with WhatsApp's own dark colours */
 html[data-theme=dark] .wa-preview .wa-preview-wall{background:#0b141a}
 html[data-theme=dark] .wa-preview .wa-preview-bubble,html[data-theme=dark] .wa-preview .wa-preview-button{background:#202c33;color:#e9edef}
@@ -173,7 +180,8 @@ html[data-theme=dark] .wa-preview .wa-preview-media{background:#2a3942;color:#ae
   .page-table tbody tr:first-child{margin-top:12px}
   .page-table td{display:flex;align-items:center;gap:10px;min-width:0;padding:2px 0;border:0}
   .page-table td[data-label]::before{content:attr(data-label);flex:none;width:96px;color:var(--relay-ink-soft);font-size:12px}
-  .page-table td.cell-main{display:block;width:auto;max-width:none}
+  .page-table td.cell-main{display:block;width:auto;max-width:none;min-width:0;overflow:hidden}
+  .page-table tbody tr>td{max-width:100%}
   .page-table td.cell-main::before{display:none}
   .page-table td small,.page-table .cell-title{max-width:100%}
   .side-panel.is-sheet{position:fixed;inset:0;z-index:72;border:0;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);background:var(--relay-layer)}

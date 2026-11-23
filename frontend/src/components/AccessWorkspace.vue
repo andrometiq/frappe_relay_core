@@ -83,7 +83,7 @@ onMounted(load)
         <tbody>
           <tr v-for="row in rows" :key="row.user" :class="{ selected: draft?.user === row.user, readonly: !data.can_edit }" :tabindex="data.can_edit ? 0 : undefined"
             @click="edit(row)" @keydown.enter.prevent="edit(row)">
-            <td class="cell-main"><span class="page-person"><UserAvatar :user="row.user" :label="row.full_name" size="sm" /><span><b class="cell-title">{{ row.full_name }}</b><small>{{ row.user }}</small></span></span></td>
+            <td class="cell-main"><span class="page-person"><UserAvatar :user="row.user" :label="row.full_name" size="sm" /><span><b class="cell-title" :title="row.full_name">{{ row.full_name }}</b><small :title="row.user">{{ row.user }}</small></span></span></td>
             <td data-label="Role"><span class="cell-wrap"><Badge v-for="badge in roleBadges(row)" :key="badge.label" :label="badge.label" :theme="badge.theme" /></span></td>
             <td data-label="Teams" :class="{ muted: !row.teams.length }">{{ labelList(row.teams, data.teams) || '—' }}</td>
             <td data-label="Business types" :class="{ muted: !row.business_types.length && !seesAllTypes(row) }">{{ seesAllTypes(row) ? 'All' : labelList(row.business_types, data.business_types) || '—' }}</td>
@@ -155,7 +155,6 @@ onMounted(load)
 
 <style scoped>
 .access-table tbody tr.readonly { cursor:default; }
-.access-table .page-person > span { min-width:0; }
 .access-matrix { padding-top:20px; max-width:none; }
 .access-matrix-scroll { overflow-x:auto; }
 .access-panel-title { display:flex; align-items:center; gap:8px; }
