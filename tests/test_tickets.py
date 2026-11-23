@@ -26,6 +26,7 @@ class TicketTests(unittest.TestCase):
             spec.loader.exec_module(self.module)
         self.module.require_access = Mock()
         self.module.readable_contact = Mock()
+        self.contact_titles, self.module.contact_titles = self.module.contact_titles, Mock()
         self.module.ticket_settings = Mock()
         self.module.ticket_settings.is_closed.side_effect = lambda doc: doc.get('ticket_status') == 'Closed'
         self.module.ticket_settings.status_of.side_effect = lambda status_type: status_type
@@ -143,6 +144,18 @@ class TicketTests(unittest.TestCase):
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'business_doctype': 'Supplier'})
         values.assert_called_once_with(result['items'], 'Supplier')
         self.assertEqual(result['group_fields'], [{'fieldname': 'region', 'label': 'Region'}])
+
+    def test_list_names_the_first_contact_only_through_permission_checked_reads(self):
+        rows = [Record(name='TKT-00001'), Record(name='TKT-00002'), Record(name='TKT-00003')]
+        self.f.get_all = Mock(return_value=[Record(parent='TKT-00001', message='M1'), Record(parent='TKT-00001', message='M9'),
+                                            Record(parent='TKT-00002', message='M2')])
+        self.f.get_list = Mock(side_effect=lambda doctype, **kwargs: {
+            'Relay Message': [Record(name='M1', relay_contact='C1')],
+            'Relay Contact': [Record(name='C1', display_name='Ravi Textiles')]}[doctype])
+        self.contact_titles(rows)
+        self.assertEqual([row['contact_title'] for row in rows], ['Ravi Textiles', '', ''])
+        self.assertEqual(self.f.get_list.call_args_list[0].kwargs['filters'], {'name': ['in', ['M1', 'M2']]})
+        self.assertEqual(self.f.get_list.call_args_list[1].kwargs['filters'], {'name': ['in', ['C1']]})
 
     def test_read_rechecks_access_instead_of_exposing_stale_links(self):
         self.doc.name='TKT-00001';self.doc.check_permission=Mock()

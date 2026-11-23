@@ -10,7 +10,7 @@ from relay_core.permissions import require_access, readable_contact
 from relay_core.api import validate_reference
 
 _episode_transition = ContextVar('relay_episode_transition', default=None)
-LIST_FIELDS = ['name', 'subject', 'ticket_status', 'ticket_type', 'assigned_to', 'owner', 'creation',
+LIST_FIELDS = ['name', 'subject', 'ticket_status', 'ticket_type', 'assigned_to', 'owner', 'creation', 'modified',
                'business_doctype', 'business_name']
 
 
@@ -880,7 +880,22 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
                            order_by='creation desc', page_length=31)
     from relay_core.business_groups import ticket_values
     columns = ticket_values(rows[:30], business_type)
+    contact_titles(rows[:30])
     return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None, 'group_fields': columns}
+
+
+def contact_titles(rows):
+    """Name the contact of each ticket's first linked message, only where the user may read that message and contact."""
+    first = {}
+    for link in frappe.get_all('Relay Ticket Message', filters={'parenttype': 'Relay Ticket', 'parent': ['in', [row.name for row in rows] or ['']]},
+                               fields=['parent', 'message'], order_by='idx asc', limit=0):
+        first.setdefault(link.parent, link.message)
+    senders = {row.name: row.relay_contact for row in frappe.get_list(
+        'Relay Message', filters={'name': ['in', list(first.values()) or ['']]}, fields=['name', 'relay_contact'], limit=0)}
+    titles = {row.name: row.display_name for row in frappe.get_list(
+        'Relay Contact', filters={'name': ['in', list(senders.values()) or ['']]}, fields=['name', 'display_name'], limit=0)}
+    for row in rows:
+        row['contact_title'] = titles.get(senders.get(first.get(row.name))) or ''
 
 
 def _status_names(state):
