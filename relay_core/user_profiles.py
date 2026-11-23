@@ -92,7 +92,7 @@ def clear_time(value):
         return get_datetime(f'{getdate()} 23:59:59')
     if value not in CLEAR_AFTER:
         frappe.throw('Choose a valid time to clear the status')
-    return add_to_date(now_datetime(), **CLEAR_AFTER[value])
+    return add_to_date(now_datetime().replace(microsecond=0), **CLEAR_AFTER[value])
 
 
 def image_url(value):
