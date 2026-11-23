@@ -204,13 +204,31 @@ def records(doctype, query='', after=None):
     return {'items':rows[:30], 'next':rows[29].name if len(rows)>30 else None}
 
 
+def timeline_scope(doctype, name):
+    """(linked Relay Contacts query, Relay Message condition) of the record's timeline.
+
+    Only this business's messages belong in its timeline. Messages without a business
+    belong here only for contacts whose only or primary link is this record."""
+    relay=frappe.qb.DocType('Relay Contact');link=frappe.qb.DocType('Dynamic Link')
+    linked=(frappe.qb.from_(relay).join(link).on(relay.contact==link.parent).select(relay.name)
+            .where((link.parenttype=='Contact') & (link.parentfield=='links') &
+                   (link.link_doctype==doctype) & (link.link_name==name)))
+    message=frappe.qb.DocType('Relay Message')
+    unstamped=message.business_name.isnull() | (message.business_name=='')
+    scope=((message.business_doctype==doctype)&(message.business_name==name)) | (unstamped & message.relay_contact.isin(
+        resolved_contacts(doctype,name,linked) or ['']))
+    return linked,scope
+
+
 def resolved_contacts(doctype, name, linked):
     from relay_core.business_access import primary
     return [row[0] for row in linked.limit(500).run() if primary(row[0]) == (doctype, name)]
 
 
 @frappe.whitelist(methods=['GET'])
-def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium=None, names=None, query=None, since=None):
+def messages(doctype, name, before=None, after=None, channel=None, limit=50, from_date=None, to_date=None, medium=None, names=None, query=None, since=None,
+             sender_endpoint=None):
+    """One page of the record's timeline; `channel` and `sender_endpoint` keep one thread."""
     check_type(doctype)
     if not isinstance(name,str) or not name or len(name)>140:
         frappe.throw('Choose a business record')
@@ -221,13 +239,14 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
     if isinstance(limit,bool) or not str(limit).isdigit() or not 1<=int(limit)<=100:
         frappe.throw('Message limit must be between 1 and 100')
     limit=int(limit)
-    relay=frappe.qb.DocType('Relay Contact');link=frappe.qb.DocType('Dynamic Link')
-    linked=(frappe.qb.from_(relay).join(link).on(relay.contact==link.parent).select(relay.name)
-            .where((link.parenttype=='Contact') & (link.parentfield=='links') &
-                   (link.link_doctype==doctype) & (link.link_name==name)))
+    linked,scope=timeline_scope(doctype,name)
     message=frappe.qb.DocType('Relay Message')
     filters={}
     if channel:filters['channel']=channel
+    if sender_endpoint is not None:
+        if not isinstance(sender_endpoint,str) or not 1<=len(sender_endpoint)<=200 or any(ord(c)<32 for c in sender_endpoint):
+            frappe.throw('Invalid conversation endpoint')
+        filters['sender_endpoint']=sender_endpoint
     if query is not None:
         if not isinstance(query,str) or len(query)>100 or any(ord(c)<32 for c in query):frappe.throw('Invalid message search')
     if names is not None:
@@ -246,11 +265,6 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
         start, end = date_range(from_date, to_date)
         timestamp = Coalesce(message.sent_at, message.creation)
         query = query.where((timestamp >= start) & (timestamp < end))
-    # Only this business's messages belong in its timeline. Messages without a business
-    # belong here only for contacts whose only or primary link is this record.
-    unstamped=message.business_name.isnull() | (message.business_name=='')
-    scope=((message.business_doctype==doctype)&(message.business_name==name)) | (unstamped & message.relay_contact.isin(
-        resolved_contacts(doctype,name,linked) or ['']))
     if medium not in (None, '', 'WhatsApp', 'Telegram', 'Email'):frappe.throw('Unsupported business inbox channel')
     channels=frappe.qb.DocType('Relay Channel')
     available=frappe.qb.from_(channels).select(channels.name)
