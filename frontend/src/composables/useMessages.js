@@ -205,11 +205,15 @@ export function useMessages({ threads = false } = {}) {
     restoredRefreshPending = true;
     return true;
   }
-  let positionTimer, pendingPosition;
+  let positionTimer, pendingPosition, savedPosition = '';
   function flushPosition() {
     clearTimeout(positionTimer);
     if(!pendingPosition)return;
     const values=pendingPosition;pendingPosition=null;
+    // A re-layout reports the same position again; only a real move is saved.
+    const position=JSON.stringify(values);
+    if(position===savedPosition)return;
+    savedPosition=position;
     const method=values.business?'business_inbox.save_view':'inbox.save_view';
     if(values.business)delete values.business;
     coreApi(method,values,true,{keepalive:true}).catch(()=>{});

@@ -171,3 +171,20 @@ test('threads update from socket events only; nothing polls', async () => {
   for (const file of files) assert.doesNotMatch(file, /setInterval|polling/i)
   assert.match(files[0], /useRealtimeRefresh\(\[\], \['messages', 'reads', 'chats', 'contacts'\]/)
 })
+
+test('a re-layout that reports the same position saves nothing', async t => {
+  const { state, calls } = fixture(t, method => method === 'inbox.save_view' ? { saved: true } : undefined)
+  await state.open('RELAY-CON-1')
+  const position = { name: 'RELAY-MSG-0000000004', offset: 12, atBottom: true }
+  for (const value of [position, { ...position }, { ...position, offset: 40, atBottom: false }]) {
+    state.rememberPosition(value)
+    await new Promise(resolve => setTimeout(resolve, 850))
+  }
+  assert.deepEqual(calls.filter(call => call.method === 'inbox.save_view').map(call => call.values.offset), [12, 40])
+})
+
+test('the set of known rows of a thread is bounded and starts over in another chat', async () => {
+  const thread = await read('components/messages/MessageThread.vue')
+  assert.match(thread, /if \(known\.size > 2 \* list\.length \+ 200\) known = new Set\(list\.map\(row => row\.name\)\);/)
+  assert.match(thread, /watch\(\(\) => props\.selected, \(\) => \{ known = null; fresh\.value = new Set\(\); clearTimeout\(freshTimer\); \}\);/)
+})

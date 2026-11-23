@@ -111,12 +111,16 @@ watch(() => props.rows, rows => {
   const newest = [...known].filter(name => !name.startsWith('pending:')).reduce((max, name) => name > max ? name : max, '');
   const added = list.filter(row => !known.has(row.name) && (row._pending || (row.direction === 'Incoming' && row.name > newest)));
   for (const row of list) known.add(row.name);
+  // Long-open chats keep only the names they show, so the set stays the size of the loaded rows.
+  if (known.size > 2 * list.length + 200) known = new Set(list.map(row => row.name));
   if (!added.length) return;
   fresh.value = new Set([...fresh.value, ...added.map(row => row.name)]);
   clearTimeout(freshTimer);
   freshTimer = setTimeout(() => { fresh.value = new Set(); }, 700);
 }, { immediate: true });
 onBeforeUnmount(() => clearTimeout(freshTimer));
+// Another chat starts its own set: its first rows are loaded, not new.
+watch(() => props.selected, () => { known = null; fresh.value = new Set(); clearTimeout(freshTimer); });
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
