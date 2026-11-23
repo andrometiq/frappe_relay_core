@@ -57,3 +57,10 @@ test('the phone layout keeps the bottom tab bar and hides the rail', () => {
   assert.match(mobile, /\.v1-shell\.relay-shell>\.app-nav,\.v1-shell\.relay-shell>\.relay-nav-backdrop\{display:none!important\}/)
   assert.match(app, /<MobileTabBar v-if="isMobile && ready"/)
 })
+
+test('the shell keeps no dead brand styles, the inbox pane is called Inbox and the profile dialog is 560px on desktop', () => {
+  assert.doesNotMatch(css, /relay-brand|relay-logo/)
+  const inbox = readFileSync(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
+  assert.match(inbox, /<h2>Inbox<\/h2>/)
+  assert.match(block(rail, '  .relay-dialog.profile-dialog'), /width:min\(560px,100%\)/)
+})

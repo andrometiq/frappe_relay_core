@@ -133,7 +133,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
 </script>
 <template>
   <header class="inbox-list-head">
-    <h2>Chats</h2>
+    <h2>Inbox</h2>
     <span ref="filterButton" class="inbox-filter-trigger"><Button icon="filter" variant="ghost" :aria-pressed="activeFilters.length > 0 || mode === 'business'" :aria-expanded="filtersOpen" aria-label="Filter chats" title="Filter chats" @click="filtersOpen = !filtersOpen" /><span v-if="activeFilters.length" class="inbox-filter-count" aria-hidden="true">{{ activeFilters.length }}</span></span>
     <Button variant="solid" icon="plus" aria-label="New chat" title="New chat" @click="emit('start')" />
   </header>

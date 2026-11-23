@@ -7,6 +7,6 @@ const reason = computed(() => deniedReason(props.page, props.capabilities))
 </script>
 <template>
   <WorkspaceState icon="lock" title="You cannot open this page" :description="reason || 'Ask your system administrator for access.'">
-    <a class="relay-button relay-button--outline" href="#/messages">Go to Chats</a>
+    <a class="relay-button relay-button--outline" href="#/messages">Go to Inbox</a>
   </WorkspaceState>
 </template>
