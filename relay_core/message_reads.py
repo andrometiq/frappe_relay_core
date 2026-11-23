@@ -64,7 +64,7 @@ def record_contact_reads(contact, names, chats):
         from relay_core.realtime import contact_changed
         contact_changed(contact, 'reads')
     for key, newest in chats.items():
-        mark_read(key, newest)
+        mark_read(key)
     frappe.db.commit()
 
 
@@ -106,7 +106,7 @@ def mark_chat(contact=None, read=1, business_doctype=None, business_name=None):
     def write():
         for name in chats:
             set_chat_read(name, str(read) == '1')
-        relay_chats.mark_read(key) if str(read) == '1' else relay_chats.mark_unread(key)
+        relay_chats.mark_read(key, everything=True) if str(read) == '1' else relay_chats.mark_unread(key)
         frappe.db.commit()
     fresh_write(write)
     unread = frappe.db.get_value(relay_chats.CHAT, {'business_doctype': key[0], 'business_name': key[1]}, 'unread_count') or 0

@@ -15,7 +15,7 @@ LAST_FIELDS = ['name', 'direction', 'sent_at', 'creation', 'content', 'message_d
 @frappe.whitelist(methods=['GET'])
 def threads(contact=None, doctype=None, name=None):
     """The threads of one chat (`contact`) or one business record (`doctype`, `name`), each with its last message,
-    its shared unread count and its first unread message. Threads on channels the user cannot read are left out."""
+    its unread count and its first unread message. Threads on channels the user cannot read are left out."""
     require_access()
     if bool(contact) == bool(doctype or name):
         frappe.throw('Choose one chat or one business record')
@@ -23,15 +23,17 @@ def threads(contact=None, doctype=None, name=None):
     if contact:
         validate_reference(contact, 'CON')
         readable_contact(contact)
-        scope, key = message.relay_contact == contact, relay_chats.key_of({'relay_contact': contact})
+        scope = message.relay_contact == contact
+        unread = relay_chats.unread_by_thread('m.relay_contact=%(contact)s AND COALESCE(m.legacy_triage, 0)=0', {'contact': contact})
     else:
         from relay_core.business_access import business_document
         from relay_core.business_inbox import check_type, timeline_scope
         check_type(doctype)
         business_document(doctype, name)
         linked, scope = timeline_scope(doctype, name)
-        scope, key = scope & message.relay_contact.isin(linked), (doctype, name)
-    return {'items': thread_items(newest_by_thread(scope), key)}
+        scope = scope & message.relay_contact.isin(linked)
+        unread = relay_chats.thread_unread((doctype, name))
+    return {'items': thread_items(newest_by_thread(scope), unread)}
 
 
 def newest_by_thread(scope):
@@ -44,16 +46,14 @@ def newest_by_thread(scope):
     return {(contact, channel, endpoint or ''): newest for contact, channel, endpoint, newest in rows}
 
 
-def thread_items(newest, key):
-    """Thread rows sorted WhatsApp, Telegram, Email, then by our channel and the contact endpoint."""
+def thread_items(newest, unread):
+    """Thread rows sorted WhatsApp, Telegram, Email, then by our channel and the contact endpoint.
+
+    `unread` maps a thread to (unread count, first unread, newest unread), as relay_chats.unread_threads counts them."""
     channels = {row.name: row for row in frappe.get_list('Relay Channel', fields=['name', 'channel', 'label', 'title', 'address'],
                                                           limit_page_length=0)}
     last = {row.name: row for row in frappe.get_all('Relay Message', filters={'name': ['in', list(newest.values())]},
                                                      fields=LAST_FIELDS)} if newest else {}
-    unread = {}
-    total = frappe.db.get_value(relay_chats.CHAT, {'business_doctype': key[0], 'business_name': key[1]}, 'unread_count') or 0
-    for row in relay_chats.unread_messages(key, total):
-        unread.setdefault(relay_chats.thread_of(row), []).append(row.name)
     people, items = {}, []
     for thread, name in newest.items():
         person, channel, endpoint = thread
@@ -63,7 +63,7 @@ def thread_items(newest, key):
             people[person] = readable_person(person)
         if people[person] is None:
             continue
-        items.append(thread_item(thread, last[name], channels[channel], people[person], unread.get(thread, [])))
+        items.append(thread_item(thread, last[name], channels[channel], people[person], unread.get(thread, (0, None, None))))
     return sorted(items, key=lambda item: (provider_rank(item['provider']), item['channel_label'], item['endpoint'], item['contact_label']))
 
 
@@ -82,7 +82,7 @@ def thread_item(thread, last, channel, person, unread):
             'channel': channel_name, 'provider': channel.channel, 'channel_label': channel.label or channel.title or channel_name,
             'channel_address': channel.address or '', 'endpoint': endpoint, 'last_message': last.name,
             'last_at': last.sent_at or last.creation, 'last_direction': last.direction, 'preview': directory_preview(last),
-            'unread': len(unread), 'first_unread': min(unread) if unread else None}
+            'unread': unread[0], 'first_unread': unread[1]}
 
 
 def provider_rank(provider):

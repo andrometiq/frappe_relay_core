@@ -23,19 +23,15 @@ class ConversationThreadTests(unittest.TestCase):
             _dict(name='CH-WA2', channel='WhatsApp', label='Support', title='', address='+91 70000 00002'),
             _dict(name='CH-WA1', channel='WhatsApp', label='Sales', title='', address='+91 70000 00001')]
         self.fake.get_all.return_value = [last('M3', 'CH-MAIL'), last('M5', 'CH-WA1', 'Outgoing'), last('M7', 'CH-WA2'), last('M8', 'CH-HIDDEN')]
-        self.fake.db.get_value.return_value = 3
         self.enterContext(patch.object(conversation_threads, 'frappe', self.fake))
         self.enterContext(patch('relay_core.inbox.directory_preview', side_effect=lambda row: row.content))
         self.people = self.enterContext(patch.object(conversation_threads, 'readable_person', side_effect=lambda contact:
             None if contact == 'R-HIDDEN' else {'label': 'Ravi', 'frappe_contact': 'CONTACT-1'}))
-        self.unread = self.enterContext(patch('relay_core.relay_chats.unread_messages', return_value=[
-            _dict(name='M7', relay_contact='R1', channel='CH-WA2', sender_endpoint='911'),
-            _dict(name='M6', relay_contact='R1', channel='CH-WA2', sender_endpoint='911')]))
 
     def test_each_endpoint_on_each_channel_is_its_own_thread_with_its_unread(self):
         newest = {('R1', 'CH-WA2', '911'): 'M7', ('R1', 'CH-MAIL', 'ravi@example.invalid'): 'M3', ('R1', 'CH-WA1', '911'): 'M5',
                   ('R1', 'CH-HIDDEN', '911'): 'M8', ('R-HIDDEN', 'CH-WA1', '922'): 'M5'}
-        items = conversation_threads.thread_items(newest, ('Customer', 'C1'))
+        items = conversation_threads.thread_items(newest, {('R1', 'CH-WA2', '911'): (2, 'M6', 'M7')})
         self.assertEqual([(item['channel'], item['endpoint']) for item in items],
                          [('CH-WA1', '911'), ('CH-WA2', '911'), ('CH-MAIL', 'ravi@example.invalid')],
                          'WhatsApp, then Telegram, then Email; hidden channels and unreadable people are left out')
@@ -46,7 +42,6 @@ class ConversationThreadTests(unittest.TestCase):
                           'unread': 2, 'first_unread': 'M6', 'last_message': 'M7', 'last_direction': 'Incoming', 'preview': 'Hello M7',
                           'contact_label': 'Ravi', 'frappe_contact': 'CONTACT-1'})
         self.assertEqual((items[0]['unread'], items[0]['first_unread']), (0, None), 'The same endpoint on another number is another thread')
-        self.unread.assert_called_once_with(('Customer', 'C1'), 3)
 
     def test_a_request_names_one_chat_or_one_record(self):
         with patch.object(conversation_threads, 'require_access'):

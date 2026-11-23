@@ -423,7 +423,7 @@ class BusinessTypeAccessTests(unittest.TestCase):
             primary.return_value = ('Customer', 'LOCAL-C1')
             for read in (0, 1):
                 self.assertEqual(message_reads.mark_chat('shared', read), {'contact': 'shared', 'unread': 7})
-            read_chat.assert_called_once_with(('Customer', 'LOCAL-C1'))
+            read_chat.assert_called_once_with(('Customer', 'LOCAL-C1'), everything=True)
             unread_chat.assert_called_once_with(('Customer', 'LOCAL-C1'))
             self.fake.session.user = 'manager'
             primary.return_value = ('Supplier', 'LOCAL-S1')

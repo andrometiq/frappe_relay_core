@@ -84,7 +84,7 @@ class MarkChatTests(unittest.TestCase):
 
     def test_read_clears_the_chat_row(self):
         self.call('1')
-        self.chats[0].assert_called_once_with(('Relay Contact', 'C1'))
+        self.chats[0].assert_called_once_with(('Relay Contact', 'C1'), everything=True)
         self.chats[1].assert_not_called()
 
     def test_a_bad_flag_is_rejected_before_any_write(self):

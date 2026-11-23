@@ -108,7 +108,7 @@ def mark_visible(doctype,name,messages,last_read=None):
         state.last_seen=frappe.utils.now_datetime();state.save(ignore_permissions=True)
         if insert_reads([(rows[message]['relay_contact'],message) for message in names]):changed(doctype,name)
         from relay_core.relay_chats import mark_read
-        mark_read((doctype,name),max(names))
+        mark_read((doctype,name))
         frappe.db.commit()
         return state.last_read
     with locks.lock('relay-business-inbox-'+key,timeout=15,blocking_timeout=3):

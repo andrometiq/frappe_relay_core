@@ -127,21 +127,20 @@ class InboxRecordTests(unittest.TestCase):
     def test_a_row_marks_its_channels_and_the_ones_holding_unread_messages(self):
         self.chats = [chat('RC-1', unread_count=2, last_message='MSG-9'), chat('RC-2', record='C2')]
         self.endpoints.return_value = {('Customer', 'C1'): {('CH-1', '911'), ('CH-1', '922'), ('CH-X', 'hidden')}}
-        unread = [_dict(name='MSG-9', relay_contact='R1', channel='CH-1', sender_endpoint='922')]
         tickets = [_dict(business_doctype='Customer', business_name='C1')] * 2
 
         def get_all(doctype, **kwargs):
             return {'Relay Message': [('MSG-9', 'Incoming')], 'Relay Ticket Status': ['Open']}.get(doctype, [])
         self.fake.get_all.side_effect = get_all
         self.fake.get_list.side_effect = lambda doctype, **kwargs: tickets if doctype == 'Relay Ticket' else self.get_list(doctype, **kwargs)
-        with patch('relay_core.relay_chats.unread_by_chat', return_value={('Customer', 'C1'): unread}) as scan:
+        with patch('relay_core.relay_chats.thread_unread', return_value={('R1', 'CH-1', '922'): (1, 'MSG-9', 'MSG-9')}) as scan:
             first, second = inbox_records.page()['items']
         self.assertEqual(first['threads'], [{'channel': 'CH-1', 'provider': 'WhatsApp', 'endpoint': '922', 'unread': True},
                                             {'channel': 'CH-1', 'provider': 'WhatsApp', 'endpoint': '911', 'unread': False}],
                          'Unread threads come first and unreadable channels are left out')
         self.assertEqual((first['last_direction'], first['open_tickets']), ('Incoming', 2))
         self.assertEqual((second['threads'], second['last_direction'], second['open_tickets']), ([], None, 0))
-        scan.assert_called_once_with({('Customer', 'C1'): 2, ('Customer', 'C2'): 0})
+        scan.assert_called_once_with(('Customer', 'C1'))
 
     def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),

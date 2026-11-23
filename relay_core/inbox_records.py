@@ -187,14 +187,13 @@ def row_channels(rows, providers):
 
     A record row shows the endpoints of its linked Contacts and a chat row its own; a thread with unread messages is
     marked even when it has no stored endpoint. Only readable channels count."""
-    from relay_core.relay_chats import thread_of, unread_by_chat
+    from relay_core.relay_chats import thread_unread
     endpoints = record_endpoints([row for row in rows if row.business_doctype != CONTACT])
     endpoints.update(chat_endpoints([row.business_name for row in rows if row.business_doctype == CONTACT]))
-    unread_rows = unread_by_chat({(row.business_doctype, row.business_name): row.unread_count or 0 for row in rows})
     result = {}
     for row in rows:
         key = (row.business_doctype, row.business_name)
-        unread = {thread_of(message)[1:] for message in unread_rows.get(key, [])}
+        unread = {thread[1:] for thread in thread_unread(key)} if row.unread_count else set()
         marks = {(channel, endpoint): False for channel, endpoint in endpoints.get(key, ())}
         marks.update({thread: True for thread in unread})
         result[row.name] = sorted(({'channel': channel, 'provider': providers[channel], 'endpoint': endpoint, 'unread': flag}

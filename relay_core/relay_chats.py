@@ -7,8 +7,6 @@ import frappe
 CHAT = 'Relay Chat'
 CONTACT = 'Relay Contact'
 FIELDS = ['name', 'last_message', 'last_message_at', 'unread_count']
-THREAD_FIELDS = ['name', 'relay_contact', 'channel', 'sender_endpoint']
-UNREAD_SCAN = 200
 PREVIEW_FIELDS = ['name', 'relay_contact', 'channel', 'direction', 'sent_at', 'creation', 'content', 'message_data',
                   'transcript', 'business_doctype', 'business_name']
 
@@ -42,7 +40,7 @@ def record(key, message):
     if message.get('direction') == 'Incoming' and not message.get('legacy_source'):
         values.update(unread_count=(chat.unread_count or 0) + 1, is_unread=1)
     elif message.get('direction') == 'Outgoing' and chat.unread_count:
-        unread = remaining_unread(key, chat.unread_count)
+        unread = unread_total(key)
         if unread < chat.unread_count:
             values.update(unread_count=unread, is_unread=int(unread > 0))
     if values:
@@ -106,14 +104,17 @@ def title(key):
     return (frappe.db.get_value(doctype, name, field) if field != 'name' else None) or name
 
 
-def mark_read(key, upto=None):
-    """Lower the shared unread count after a reader saw some messages of the chat, or all of it when `upto` is None.
+def mark_read(key, *, everything=False):
+    """Count the chat's unread messages again after a reader stored the reads of the messages they saw.
 
-    The reads are stored first, so each thread keeps only its messages after its newest read or reply."""
+    `everything` marks the whole chat read: the reader reads the newest message of each unread thread."""
     chat = frappe.db.get_value(CHAT, {'business_doctype': key[0], 'business_name': key[1]}, FIELDS, as_dict=True, for_update=True)
     if not chat or not chat.unread_count:
         return
-    unread = remaining_unread(key, chat.unread_count) if upto else 0
+    if everything:
+        from relay_core.message_reads import insert_reads
+        insert_reads([(thread[0], newest) for thread, (_, _, newest) in thread_unread(key).items()])
+    unread = unread_total(key)
     if unread < chat.unread_count:
         frappe.db.set_value(CHAT, chat.name, {'unread_count': unread, 'is_unread': int(unread > 0)}, update_modified=False)
         changed()
@@ -127,60 +128,47 @@ def mark_unread(key):
         changed()
 
 
-def remaining_unread(key, total):
-    """The chat's unread count after its reads and replies; only the newest UNREAD_SCAN messages are checked."""
-    return len(unread_messages(key, total)) + max(0, total - UNREAD_SCAN)
+def unread_total(key):
+    return sum(count for count, _, _ in thread_unread(key).values())
 
 
-def unread_messages(key, total):
-    """The chat's unread messages, newest first: of the newest `total` incoming live messages, the ones after
-    the newest operator read or reply on their thread. A thread is one contact endpoint on one channel."""
-    return unread_by_chat({key: total}).get(key, [])
+def thread_unread(key):
+    """{(relay_contact, channel, endpoint): (unread count, first unread, newest unread)} of the chat's unread threads."""
+    return unread_by_thread(*chat_condition(key))
 
 
-def unread_by_chat(totals):
-    """unread_messages of several chats {key: unread count}: one query per unread chat and two for all their threads."""
-    candidates = {key: frappe.get_all('Relay Message', filters=incoming_filters(key), fields=THREAD_FIELDS, order_by='name desc',
-                                      limit_page_length=min(total, UNREAD_SCAN)) for key, total in totals.items() if total}
-    seen = thread_cursors([row for rows in candidates.values() for row in rows])
-    return {key: [row for row in rows if row.name > seen.get(thread_of(row), '')] for key, rows in candidates.items()}
+def unread_by_thread(where, values=None):
+    """thread_unread of the messages matching `where`."""
+    return {tuple(row[:3]): tuple(row[3:]) for row in unread_threads(where, values)}
 
 
-def incoming_filters(key):
-    filters = {'direction': 'Incoming', 'legacy_source': ['is', 'not set']}
+def chat_condition(key):
+    """The SQL condition, on alias m, of the messages whose incoming ones the chat's unread count covers."""
     if key[0] == CONTACT:
-        filters.update(relay_contact=key[1], business_name=['is', 'not set'], legacy_triage=0)
-    else:
-        filters.update(business_doctype=key[0], business_name=key[1])
-    return filters
+        return ("m.relay_contact=%(contact)s AND COALESCE(m.business_name, '')='' AND COALESCE(m.legacy_triage, 0)=0",
+                {'contact': key[1]})
+    return 'm.business_doctype=%(doctype)s AND m.business_name=%(name)s', {'doctype': key[0], 'name': key[1]}
 
 
-def thread_of(row):
-    return row.relay_contact, row.channel, row.sender_endpoint or ''
+def unread_threads(where, values=None, key=()):
+    """Rows of (*key, relay_contact, channel, endpoint, unread count, first unread, newest unread) for the threads of the
+    messages matching `where` (SQL on alias m) that have unread messages. `key` adds SQL columns of m to group by.
 
-
-def thread_cursors(rows):
-    """The newest read or reply of each thread of `rows`, in two indexed queries."""
-    if not rows:
-        return {}
-    from pypika.functions import Max
-    cursors = {}
-    read = set(frappe.get_all('Relay Message Read', filters={'message': ['in', [row.name for row in rows]]}, pluck='message'))
-    for row in rows:
-        if row.name in read:
-            cursors[thread_of(row)] = max(cursors.get(thread_of(row), ''), row.name)
-    message = frappe.qb.DocType('Relay Message')
-    replies = (frappe.qb.from_(message).select(message.relay_contact, message.channel, message.sender_endpoint, Max(message.name))
-               .where(message.direction == 'Outgoing')
-               .where(message.relay_contact.isin(list({row.relay_contact for row in rows})))
-               .where(message.channel.isin(list({row.channel for row in rows})))
-               .groupby(message.relay_contact, message.channel, message.sender_endpoint).run())
-    threads = {thread_of(row) for row in rows}
-    for contact, channel, endpoint, newest in replies:
-        thread = (contact, channel, endpoint or '')
-        if thread in threads:
-            cursors[thread] = max(cursors.get(thread, ''), newest or '')
-    return cursors
+    This is the one unread rule: a thread is one contact endpoint on one channel, and its unread messages are its live
+    incoming messages after the newest reply or operator read on that thread. Each thread keeps its own position, so
+    reading or answering one thread never hides the unread messages of another."""
+    columns = [*key, 'm.relay_contact', 'm.channel', "COALESCE(m.sender_endpoint, '')"]
+    groups = ', '.join(str(index) for index in range(1, len(columns) + 1))
+    return frappe.db.sql(f"""SELECT {', '.join(columns)}, COUNT(*), MIN(m.name), MAX(m.name) FROM `tabRelay Message` m
+        LEFT JOIN (SELECT x.relay_contact AS thread_contact, x.channel AS thread_channel,
+                COALESCE(x.sender_endpoint, '') AS thread_endpoint, MAX(x.name) AS seen
+            FROM `tabRelay Message` x
+            WHERE x.relay_contact IN (SELECT m.relay_contact FROM `tabRelay Message` m WHERE {where})
+                AND (x.direction='Outgoing' OR x.name IN (SELECT message FROM `tabRelay Message Read`))
+            GROUP BY 1, 2, 3) c
+            ON c.thread_contact=m.relay_contact AND c.thread_channel=m.channel AND c.thread_endpoint=COALESCE(m.sender_endpoint, '')
+        WHERE ({where}) AND m.direction='Incoming' AND COALESCE(m.legacy_source, '')='' AND m.name>COALESCE(c.seen, '')
+        GROUP BY {groups}""", values or {})
 
 
 def changed():
@@ -217,7 +205,7 @@ def permission(doc, user=None, permission_type=None):
 def rebuild():
     """Build every chat row from the stored messages; run again, it rewrites the same derived values.
 
-    A chat's unread count is its incoming live messages after the newest reply or operator read."""
+    A chat's unread count is the sum of its threads' unread messages, by the one rule in unread_threads."""
     install_index()
     owners = unstamped_owners()
     latest = {}
@@ -225,7 +213,7 @@ def rebuild():
         key = key_of(message, owners)
         if key not in latest or message_order(message) > message_order(latest[key]):
             latest[key] = message
-    unread = unread_counts(read_thresholds(owners), owners)
+    unread = unread_counts(owners)
     existing = {(row.business_doctype, row.business_name): row.name
                 for row in frappe.get_all(CHAT, fields=['name', 'business_doctype', 'business_name'], limit_page_length=0)}
     columns = ['last_message', 'last_message_at', 'last_contact', 'last_channel', 'last_message_preview', 'unread_count', 'is_unread']
@@ -254,6 +242,8 @@ STAMPED = "COALESCE(business_doctype, '')<>'' AND COALESCE(business_name, '')<>'
 KEY_SQL = (f"CASE WHEN {STAMPED} THEN business_doctype ELSE '{CONTACT}' END, "
            f"CASE WHEN {STAMPED} THEN business_name ELSE relay_contact END")
 LIVE = 'COALESCE(legacy_triage, 0)=0'
+STAMPED_M = "COALESCE(m.business_doctype, '')<>'' AND COALESCE(m.business_name, '')<>''"
+LIVE_M = 'COALESCE(m.legacy_triage, 0)=0'
 
 
 def unstamped_owners():
@@ -275,25 +265,12 @@ def latest_messages():
     return frappe.get_all('Relay Message', filters={'name': ['in', newest]}, fields=PREVIEW_FIELDS, limit_page_length=0) if newest else []
 
 
-def read_thresholds(owners):
-    """The newest outgoing or operator-read message name of each chat."""
-    thresholds = {}
-    statements = (f"SELECT {KEY_SQL}, MAX(name) FROM `tabRelay Message` WHERE direction='Outgoing' AND {LIVE} GROUP BY 1, 2",
-                  f"""SELECT {KEY_SQL}, MAX(name) FROM `tabRelay Message` WHERE {LIVE}
-                      AND name IN (SELECT message FROM `tabRelay Message Read`) GROUP BY 1, 2""")
-    for statement in statements:
-        for doctype, name, newest in frappe.db.sql(statement):
-            key = resolve((doctype, name), owners)
-            thresholds[key] = max(thresholds.get(key, ''), newest or '')
-    return thresholds
-
-
-def unread_counts(thresholds, owners):
+def unread_counts(owners):
+    """The unread count of every chat, by the one rule in unread_threads."""
     counts = {}
-    rows = frappe.db.sql(f"""SELECT {KEY_SQL}, name FROM `tabRelay Message` WHERE direction='Incoming'
-        AND COALESCE(legacy_source, '')='' AND {LIVE}""")
-    for doctype, name, message in rows:
+    for doctype, name, *_, count, _, _ in unread_threads(LIVE_M, key=[
+            f"CASE WHEN {STAMPED_M} THEN m.business_doctype ELSE '{CONTACT}' END",
+            f"CASE WHEN {STAMPED_M} THEN m.business_name ELSE m.relay_contact END"]):
         key = resolve((doctype, name), owners)
-        if message > thresholds.get(key, ''):
-            counts[key] = counts.get(key, 0) + 1
+        counts[key] = counts.get(key, 0) + count
     return counts
