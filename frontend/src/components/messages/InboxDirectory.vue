@@ -21,6 +21,7 @@ import InboxRowActions from './InboxRowActions.vue'
 import { useChatFolders } from '../../composables/useChatFolders'
 import { folderLabel } from '../../services/chatFolders'
 import { hasManyNumbers, numberName } from '../../services/whatsappNumbers'
+import { rowChannels, waitingLabel } from '../../services/conversationThreads'
 import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../../services/inboxFilters'
 const props = defineProps({ selected: String, businessName: String, businessType: String, busy: Boolean })
 const emit = defineEmits(['select', 'business', 'start', 'navigate'])
@@ -41,7 +42,8 @@ const activeFilters = computed(() => filterChips(filters.value, options.value))
 // Each readable business record is one row; chats that no readable record covers stay contact rows.
 const { counts } = useQueueCounts(medium, computed(() => ({ ...params.value, ...INBOX_ROWS })))
 const mode = ref(filters.value.tab), folder = ref(''), query = ref(''), rows = ref([]), next = ref(null), loading = ref(false), error = ref('')
-const groupingView = computed(() => ['all', 'business'].includes(mode.value) && params.value.business_type !== 'none')
+// Browsing by business type is its own view; every tab lists the chat rows, newest activity first.
+const groupingView = computed(() => mode.value === 'business' && params.value.business_type !== 'none')
 const filtersOpen = ref(false), filterButton = ref(null), mobileFilterButton = ref(null)
 watch(mode, value => { if (value !== 'business') filters.value = { ...filters.value, tab: value } })
 watch(filters, value => saveFilters(storage, user, value))
@@ -159,13 +161,19 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
     <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry" @click="load()" /></div>
     <div class="directory-rows" :aria-busy="loading">
       <LoadingRows v-if="loading && !rows.length" label="Loading chats…" />
+      <TransitionGroup name="inbox-row">
       <div v-for="row in rows" :key="row.name" class="directory-row" @contextmenu="openRowMenu($event, row)" @pointerdown="pressStart($event, row)" @pointerup="pressEnd" @pointercancel="pressEnd">
         <button type="button" :aria-label="'Open chat: ' + rowTitle(row)" class="directory-contact" :class="{ 'is-unread': row.unread }"
           :aria-pressed="row.kind === 'business' ? businessType === row.doctype && businessName === row.record : selected === row.name" :disabled="busy" @click="openRow(row)">
           <span class="directory-avatar"><Avatar :label="rowTitle(row)" /><span v-if="manyMediums" class="directory-channel" :title="row.provider || 'Chat'" :aria-label="row.provider || 'Chat'"><FeatherIcon :name="row.provider === 'Email' ? 'mail' : row.provider === 'Telegram' ? 'send' : 'message-circle'" :size="11" /></span></span>
           <span class="directory-contact-copy">
             <span class="directory-contact-top"><strong>{{ rowTitle(row) }}</strong><FeatherIcon v-if="row.starred" name="star" :size="12" class="directory-star" aria-label="Starred" /><time :title="row.latest_at" :datetime="row.latest_at">{{ listTime(row.latest_at) }}</time></span>
-            <span class="directory-contact-bottom"><span v-if="manyNumbers && numberName(capabilities, row.channel)" class="number-tag">{{ numberName(capabilities, row.channel) }}</span><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
+            <span class="directory-contact-bottom"><span v-if="manyNumbers && !row.threads?.length && numberName(capabilities, row.channel)" class="number-tag">{{ numberName(capabilities, row.channel) }}</span><small>{{ row.latest_preview || 'No messages yet' }}</small><span v-if="row.unread" class="directory-unread" :aria-label="`${row.unread} unread messages`">{{ row.unread > 99 ? '99+' : row.unread }}</span></span>
+            <span v-if="rowChannels(row).length || row.open_tickets || waitingLabel(row)" class="directory-row-channels">
+              <span v-for="mark in rowChannels(row)" :key="mark.channel + mark.endpoint" class="row-channel" :class="{ 'is-unread': mark.unread }" :data-provider="mark.provider" :title="mark.label" role="img" :aria-label="mark.label"><FeatherIcon :name="mark.icon" :size="12" /></span>
+              <span v-if="row.open_tickets" class="row-badge is-ticket">{{ row.open_tickets > 1 ? row.open_tickets + ' tickets' : 'Ticket' }}</span>
+              <span v-if="waitingLabel(row)" class="row-badge is-waiting">{{ waitingLabel(row) }}</span>
+            </span>
             <span v-if="(row.unlinked && !rowActions?.canLink(row)) || (capabilities.folders && row.folder && folderLabel(folders, row.folder))" class="directory-contact-context">
               <span v-if="row.unlinked && !rowActions?.canLink(row)" class="directory-unlinked">Not linked</span>
               <span v-if="capabilities.folders && row.folder && folderLabel(folders, row.folder)" class="directory-folder"><FeatherIcon name="folder" :size="12" />{{ folderLabel(folders, row.folder) }}</span>
@@ -175,6 +183,7 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
         <button v-if="rowActions?.canLink(row)" type="button" class="directory-link" :aria-label="'Link ' + rowTitle(row) + ' to a business record'" @click="rowActions.link(row)">Link</button>
         <button type="button" class="directory-row-menu" aria-label="Chat actions" title="Chat actions" @click="rowActions.open($event, $event.currentTarget, row)"><FeatherIcon name="more-horizontal" :size="16" /></button>
       </div>
+      </TransitionGroup>
       <WorkspaceState v-if="!loading && !rows.length && !error" compact :icon="mode === 'unread' ? 'check' : 'message-square'" :title="query || activeFilters.length ? 'No chats found' : folder ? 'No chats in this folder' : mode === 'unread' ? 'You’re all caught up' : mode === 'unlinked' ? 'Every chat is linked' : 'No chats yet'" :description="query ? 'Try a different name or number.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Chats you move to this folder show here.' : mode === 'all' ? 'Press + to message a contact.' : ''"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else-if="mode === 'all' && !folder" label="New chat" variant="solid" @click="emit('start')" /></WorkspaceState>
       <div v-if="next" ref="more" class="directory-load-more" role="status">{{ loading ? 'Loading more chats…' : '' }}</div>
     </div>
@@ -211,6 +220,24 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
 /* The Link button sits on the context line and the row menu takes the time's place, so neither covers text. */
 .directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context) { padding-right:56px; }
 @media (hover:hover) { .directory-row:hover .directory-contact-top time { visibility:hidden; } }
+.directory-row-channels { order:3; display:flex; align-items:center; gap:4px; min-width:0; margin-top:6px; }
+.row-channel { position:relative; display:grid; flex:none; place-items:center; width:22px; height:22px; border-radius:6px; background:var(--relay-hover); color:var(--relay-ink-3); }
+.row-channel[data-provider="WhatsApp"] { color:var(--relay-whatsapp); }
+.row-channel[data-provider="Telegram"] { color:var(--relay-telegram); }
+.row-channel[data-provider="Email"] { color:var(--relay-email); }
+/* The channel holding the unread message carries a blue dot. */
+.row-channel.is-unread { background:var(--relay-accent-soft); box-shadow:inset 0 0 0 1px var(--relay-accent); }
+.row-channel.is-unread::after { content:""; position:absolute; top:-3px; right:-3px; width:8px; height:8px; border:2px solid var(--relay-layer); border-radius:50%; background:var(--relay-accent); }
+.row-badge { flex:none; padding:1px 7px; border-radius:4px; background:var(--relay-hover); color:var(--relay-ink-3); font-size:11px; font-weight:500; line-height:18px; white-space:nowrap; }
+.row-channel + .row-badge, .directory-row-channels > .row-badge:first-child { margin-left:auto; }
+.row-badge.is-ticket { background:var(--relay-warning-bg); color:var(--relay-warning-ink); }
+.row-badge.is-waiting { background:var(--relay-note-bg); color:var(--relay-note-ink); }
+/* A row with a new message moves to the top; the others slide to make room. */
+.inbox-row-move { transition:transform var(--relay-normal) var(--relay-ease); }
+.inbox-row-enter-active { transition:opacity var(--relay-normal) var(--relay-ease), transform var(--relay-normal) var(--relay-ease); }
+.inbox-row-enter-from { opacity:0; transform:translateY(-8px); }
+.inbox-row-leave-active { display:none; }
+@media (prefers-reduced-motion:reduce) { .inbox-row-move, .inbox-row-enter-active { transition:none; } }
 .inbox-filter-chips { display:flex; flex-wrap:wrap; gap:6px; padding:8px 16px 0; }
 .inbox-filter-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; min-height:24px; padding:0 4px 0 10px; border-radius:12px; background:var(--relay-accent-soft); color:var(--relay-accent-text); font-size:12px; overflow-wrap:anywhere; }
 .inbox-filter-chip button { display:grid; place-items:center; width:20px; height:20px; border-radius:10px; }
