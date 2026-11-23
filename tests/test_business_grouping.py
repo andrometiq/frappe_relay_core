@@ -517,6 +517,7 @@ class BusinessTimeIndexTests(unittest.TestCase):
     def test_business_activity_index_and_time_expression_on_both_engines(self):
         fake, time = self.run_install('mariadb')
         fake.db.add_index.assert_any_call('Relay Message', ['business_doctype', 'business_name', 'relay_timeline_time', 'name'], 'relay_business_time')
+        fake.db.add_index.assert_any_call('Relay Message', ['business_doctype', 'business_name', 'name'], 'relay_business_name')
         self.assertEqual(time, 'm.relay_timeline_time')
         from relay_core import timeline
         with patch.object(timeline, 'frappe', fake):
