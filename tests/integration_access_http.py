@@ -146,6 +146,9 @@ class AccessHttpTests(unittest.TestCase):
         self.assertIn(MANAGER, self.roles(self.MANAGER_USER))
         self.assertEqual(self.call('save', self.manager, user=self.TARGET, teams=['Ghost team']).status_code, 417)
         self.assertEqual(self.call('save', self.manager, user=self.TARGET, role='Owner').status_code, 417)
+        for role in (['User'], {'role': 'Manager'}):
+            response = self.call('save', self.manager, user=self.TARGET, role=role)
+            self.assertEqual(response.status_code, 417, response.text[:300])
         self.assertEqual(self.call('save', self.manager, user='Administrator', role='User').status_code, 417)
 
     def test_user_reads_only_own_access_and_cannot_change_it(self):
@@ -154,6 +157,10 @@ class AccessHttpTests(unittest.TestCase):
         result = response.json()['message']
         self.assertFalse(result['can_edit'])
         self.assertEqual([row['user'] for row in result['items']], [self.AGENT])
+        own = result['items'][0]
+        self.assertEqual({row['value'] for row in result['teams']}, set(own['teams']), 'Only own teams')
+        self.assertEqual({row['value'] for row in result['business_types']}, set(own['business_types']), 'Only own business types')
+        self.assertNotIn(self.team, [row['value'] for row in result['teams']])
         response = self.call('save', self.agent, user=self.TARGET, role='Manager')
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(self.call('save', self.agent, user=self.AGENT, role='Manager').status_code, 403)

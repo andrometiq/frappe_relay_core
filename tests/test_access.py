@@ -118,9 +118,12 @@ class AccessTests(unittest.TestCase):
         self.assertEqual([row['value'] for row in result['business_types']], ['Customer', 'Supplier'])
 
         self.access.can_manage.return_value = False
+        self.f.session.user = 'agent@example.com'
         result = self.access.directory()
         self.assertFalse(result['can_edit'])
-        self.assertEqual([row['user'] for row in result['items']], ['me@example.com'])
+        self.assertEqual([row['user'] for row in result['items']], ['agent@example.com'])
+        self.assertEqual([row['value'] for row in result['teams']], ['Dispatch'], 'Only own teams')
+        self.assertEqual([row['value'] for row in result['business_types']], ['Customer'], 'Only own types')
 
     def test_save_needs_the_manager_check(self):
         self.access.require_access.side_effect = PermissionError('Only communication managers can perform this action')
@@ -156,7 +159,7 @@ class AccessTests(unittest.TestCase):
         self.assertEqual(self.docs[('Relay Team', 'Sales')].saved, 1)
 
     def test_invalid_values_are_refused(self):
-        for values in ({'role': 'Owner'}, {'team_user': 'yes'}, {'teams': '["Ghost"]'}, {'business_types': 'Customer'}):
+        for values in ({'role': 'Owner'}, {'role': ['User']}, {'role': {'a': 1}}, {'team_user': 'yes'}, {'teams': '["Ghost"]'}, {'business_types': 'Customer'}):
             with self.assertRaises(PermissionError, msg=values):
                 self.access.save('agent@example.com', **values)
         for user in ('shop@example.com', 'Administrator', 'nobody@example.com', None):

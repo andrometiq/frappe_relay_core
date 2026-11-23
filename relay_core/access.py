@@ -59,13 +59,16 @@ def access_rows(users):
 
 @frappe.whitelist(methods=['GET'])
 def directory():
-    """Managers read everyone with Relay access; other users read only their own row."""
+    """Managers read everyone with Relay access and every team and type; other users read only their own."""
     require_access()
     manager = can_manage()
-    users = listed_users() if manager else [frappe.session.user]
-    teams = frappe.get_all('Relay Team', fields=['name', 'title'], order_by='title asc', limit=500)
-    types = frappe.get_all('Relay Contact Type', fields=['business_doctype', 'label', 'enabled'], order_by='business_doctype asc', limit=200)
-    return {'can_edit': manager, 'items': access_rows(users),
+    items = access_rows(listed_users() if manager else [frappe.session.user])
+    own = {} if manager else {'name': ['in', [name for row in items for name in row['teams']] or ['']]}
+    teams = frappe.get_all('Relay Team', filters=own, fields=['name', 'title'], order_by='title asc', limit=500)
+    own = {} if manager else {'name': ['in', [name for row in items for name in row['business_types']] or ['']]}
+    types = frappe.get_all('Relay Contact Type', filters=own, fields=['business_doctype', 'label', 'enabled'],
+                           order_by='business_doctype asc', limit=200)
+    return {'can_edit': manager, 'items': items,
             'teams': [{'value': row.name, 'label': row.title or row.name} for row in teams],
             'business_types': [{'value': row.business_doctype, 'label': row.label or row.business_doctype, 'enabled': bool(row.enabled)}
                                for row in types]}
@@ -155,7 +158,7 @@ def save(user, role=None, team_user=None, teams=None, business_types=None):
     """Change one user's Relay role, Team User role, teams and business types. Values left out stay unchanged."""
     require_access(manage=True)
     staff_user(user)
-    if role is not None and role not in ROLES:
+    if role is not None and (not isinstance(role, str) or role not in ROLES):
         frappe.throw('Role must be User, Manager or empty')
     team_user = flag(team_user)
     wanted_teams = known_names(teams, 'Relay Team', 'Teams') if teams is not None else None
