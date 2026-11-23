@@ -5,6 +5,7 @@ import { recordTitle } from '../services/recordTitle'
 import { linkedTitle } from '../services/linkedTitle'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, ErrorMessage, FeatherIcon, TextInput, toast } from '@relay/ui'
+import UserAvatar from './UserAvatar.vue'
 import TicketSettings from './TicketSettings.vue'
 import RelaySelect from './RelaySelect.vue'
 import TicketDashboard from './tickets/TicketDashboard.vue'
@@ -152,7 +153,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
               <td data-label="Business type">{{ row.business_doctype || 'Not linked' }}</td>
               <td data-label="Business record">{{ row.business_title || '—' }}</td>
               <td v-for="field in page.group_fields" :key="field.fieldname" :data-label="field.label">{{ row.group_values?.[field.fieldname] || 'Not set' }}</td>
-              <td data-label="Assigned to">{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</td>
+              <td data-label="Assigned to"><span class="ticket-assignee"><UserAvatar v-if="row.assigned_to" :user="row.assigned_to" :label="linkedTitle('User', row.assigned_to)" size="sm" />{{ linkedTitle('User', row.assigned_to, 'Unassigned') }}</span></td>
               <td data-label="Status"><Badge :label="look(row).label" :theme="look(row).theme" /></td>
             </tr></tbody>
           </table>

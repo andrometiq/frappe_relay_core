@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { Users } from '@lucide/vue'
-import { Avatar, Badge, ErrorMessage } from '@relay/ui'
+import { Badge, ErrorMessage } from '@relay/ui'
+import UserAvatar from '../UserAvatar.vue'
 import LoadingRows from '../LoadingRows.vue'
 import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
@@ -73,7 +74,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
             <a class="ticket-bar" :href="ticketFilterRoute(row.filters)" :title="(row.title || row.label) + ': ' + row.tickets" :aria-label="`Show ${row.tickets} tickets: ${row.label}`">
               <span class="ticket-bar__label">
                 <span v-if="panel.avatars && row.key === 'others'" class="ticket-bar__group" aria-hidden="true"><Users :stroke-width="1.7" /></span>
-                <Avatar v-else-if="panel.avatars" :label="row.key ? row.label : ''" size="sm" />
+                <UserAvatar v-else-if="panel.avatars" :user="row.key" :label="row.key ? row.label : ''" size="sm" />
                 <Badge v-else-if="row.theme" :label="row.label" :theme="row.theme" />
                 <span v-if="!row.theme">{{ row.label }}</span>
               </span>

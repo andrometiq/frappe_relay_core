@@ -6,6 +6,7 @@ import { recordTitle } from '../services/recordTitle';
 import { linkedTitle } from '../services/linkedTitle';
 import { phoneCaption } from '../services/phoneNumber';
 import WorkspaceState from "./WorkspaceState.vue";
+import UserAvatar from "./UserAvatar.vue";
 import InboxDirectory from "./messages/InboxDirectory.vue";
 import ConversationTools from "./messages/ConversationTools.vue";
 import ContactDetails from "./ContactDetails.vue";
@@ -406,7 +407,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
           </div>
         </div>
         <div class="conversation-heading-actions">
-          <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><Avatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
+          <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><UserAvatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :user="person.name" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
             <Button icon="info" aria-label="Contact info" title="Contact info" :aria-pressed="isMobile ? infoOpen : contextShown" @click="toggleInfo" />
           </ConversationTools>

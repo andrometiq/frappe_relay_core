@@ -1,7 +1,8 @@
-export async function uploadFile(file, failure) {
+// Uploads are private unless the caller needs a public file, such as a profile photo.
+export async function uploadFile(file, failure, { isPrivate = true } = {}) {
   const form = new FormData();
   form.append("file", file, file.name);
-  form.append("is_private", "1");
+  form.append("is_private", isPrivate ? "1" : "0");
   const response = await fetch("/api/method/upload_file", { method: "POST", credentials: "same-origin", body: form,
     headers: { "X-Frappe-CSRF-Token": window.frappe?.csrf_token || window.csrf_token || "" } });
   const body = await response.json().catch(() => null);
