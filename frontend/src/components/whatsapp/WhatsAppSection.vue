@@ -34,12 +34,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
 </script>
 <template>
   <section class="v1-screen channel-section">
-    <header class="channel-section-header">
+    <header v-if="tab !== 'templates'" class="channel-section-header">
       <FeatherIcon name="message-circle" class="h-4 w-4" />
       <h2>WhatsApp<template v-if="account"> · {{ account }}</template></h2>
       <Badge v-if="configured !== null" :label="configured ? 'Connected' : 'Needs setup'" :theme="configured ? 'green' : 'orange'" />
     </header>
-    <nav class="v1-tabs" aria-label="WhatsApp sections">
+    <nav v-if="tab !== 'templates'" class="v1-tabs" aria-label="WhatsApp sections">
       <Button v-for="item in tabs" :key="item.name" :label="item.label" :variant="tab === item.name ? 'solid' : 'ghost'" :aria-current="tab === item.name ? 'page' : undefined" @click="open(item.name)" />
     </nav>
     <div v-if="tab === 'account'" class="v1-content channel-section-content space-y-5">

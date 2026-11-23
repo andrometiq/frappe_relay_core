@@ -38,13 +38,48 @@ export function templateStatusTheme(status) {
   return "gray";
 }
 
+// Sidebar status groups: Meta's statuses folded into what a person acts on.
+export const TEMPLATE_STATUS_GROUPS = [
+  { key: "ALL", label: "All templates", icon: "layout" },
+  { key: "APPROVED", label: "Approved", icon: "check", tone: "green", statuses: ["APPROVED", "ACTIVE"] },
+  { key: "REVIEW", label: "In review", icon: "clock", tone: "orange", statuses: ["PENDING", "IN_APPEAL"] },
+  { key: "REJECTED", label: "Rejected", icon: "x", tone: "red", statuses: ["REJECTED"] },
+  { key: "PAUSED", label: "Paused or turned off", icon: "alert-circle", tone: "red", statuses: ["PAUSED", "DISABLED"] },
+];
+
+export const TEMPLATE_CATEGORIES = [
+  { key: "UTILITY", label: "Utility", tone: "blue" },
+  { key: "MARKETING", label: "Marketing", tone: "orange" },
+  { key: "AUTHENTICATION", label: "Authentication", tone: "gray" },
+];
+
+export function templateStatusGroup(status) {
+  const value = text(status).toUpperCase();
+  return TEMPLATE_STATUS_GROUPS.find((group) => group.statuses?.includes(value))?.key || "OTHER";
+}
+
+// Sidebar counts per status group and per category.
+export function templateCounts(templates) {
+  const counts = { ALL: 0, OTHER: 0, categories: {} };
+  for (const group of TEMPLATE_STATUS_GROUPS) counts[group.key] = 0;
+  for (const template of Array.isArray(templates) ? templates : []) {
+    counts.ALL += 1;
+    counts[templateStatusGroup(template.status)] += 1;
+    const category = text(template.category).toUpperCase();
+    if (category) counts.categories[category] = (counts.categories[category] || 0) + 1;
+  }
+  return counts;
+}
+
 export function filterTemplates(
   templates,
-  { query = "", status = "ALL", category = "ALL", language = "ALL" } = {},
+  { query = "", status = "ALL", group = "ALL", category = "ALL", language = "ALL" } = {},
 ) {
   const needle = text(query).toLocaleLowerCase();
   return (Array.isArray(templates) ? templates : []).filter((template) => {
     if (status !== "ALL" && text(template.status).toUpperCase() !== status)
+      return false;
+    if (group !== "ALL" && templateStatusGroup(template.status) !== group)
       return false;
     if (
       category !== "ALL" &&
