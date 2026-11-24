@@ -164,12 +164,38 @@ class UserProfileTests(unittest.TestCase):
         site = self.site()
         site.profiles[OTHER] = {'user': OTHER, 'display_name': 'Prakash', 'job_title': 'Dispatch',
                                 'status': 'Do not disturb', 'status_text': 'Driving', 'status_clear_at': None, 'theme': 'Dark'}
-        items = user_profiles.cards(f'["{AGENT}", "{OTHER}"]')['items']
+        with patch.object(user_profiles, 'relay_staff', side_effect=lambda users: users) as staff:
+            items = user_profiles.cards(f'["{AGENT}", "{OTHER}"]')['items']
+        staff.assert_called_once_with([AGENT, OTHER])
         self.assertEqual(items[1], {'user': OTHER, 'name': 'Prakash', 'image': '/files/prakash.png',
                                     'job_title': 'Dispatch', 'status': 'Do not disturb', 'status_text': 'Driving'})
         self.assertEqual((items[0]['name'], items[0]['status']), ('Anitha K', 'Available'))
         with self.assertRaises(frappe.ValidationError):
             user_profiles.cards([f'user{index}@example.invalid' for index in range(101)])
+
+
+class RelayStaffTests(unittest.TestCase):
+    def test_only_colleagues_have_cards(self):
+        def get_all(doctype, filters, pluck):
+            if doctype == 'User':
+                active = {'agent@x', 'member@x', 'desk@x', 'admin@x', 'Administrator'}
+                return [name for name in filters['name'][1] if name in active]
+            if doctype == 'Has Role':
+                return [name for name in filters['parent'][1] if name in ('agent@x', 'admin@x')]
+            return [name for name in filters['user'][1] if name == 'member@x']
+        fake = SimpleNamespace(get_all=Mock(side_effect=get_all))
+        with patch.object(user_profiles, 'frappe', fake):
+            self.assertEqual(user_profiles.relay_staff(['agent@x', 'customer@x', 'member@x', 'desk@x', 'admin@x', 'Administrator', '']),
+                             ['agent@x', 'member@x', 'admin@x', 'Administrator'])
+        user_filters = fake.get_all.call_args_list[0].kwargs['filters']
+        self.assertEqual((user_filters['user_type'], user_filters['enabled']), ('System User', 1), 'Website users are never colleagues')
+        role_filters = fake.get_all.call_args_list[1].kwargs['filters']
+        self.assertEqual(set(role_filters['role'][1]), {'Relay Communication User', 'Relay Communication Team User',
+                                                        'Relay Communication Manager', 'System Manager'})
+        with patch.object(user_profiles, 'frappe', fake):
+            fake.get_all.reset_mock()
+            self.assertEqual(user_profiles.relay_staff(['customer@x']), [])
+            self.assertEqual(fake.get_all.call_count, 1, 'No role read when none of them is a system user')
 
 
 if __name__ == '__main__':
