@@ -54,8 +54,10 @@ function place() {
   const width = Math.min(340, innerWidth - 16)
   position.value = { left: `${Math.max(8, Math.min(box.left, innerWidth - width - 8))}px`, top: `${box.bottom + 6}px`, width: `${width}px` }
 }
+// The record picker's results float in the page body, outside the panel.
 function outside(event) {
-  if (!panel.value?.contains(event.target) && !props.anchor?.contains(event.target)) open.value = false
+  if (panel.value?.contains(event.target) || props.anchor?.contains(event.target) || event.target.closest?.('.choice-results')) return
+  open.value = false
 }
 watch(open, async value => {
   document.removeEventListener('pointerdown', outside)
