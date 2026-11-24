@@ -3,6 +3,9 @@ import frappe
 from relay_core.business_access import document_name
 from relay_core import features
 from relay_core.permissions import require_access, readable_contact, sees_all_teams, ALL_TEAMS_ROLES
+from relay_core.team_access import ACCESS, ALL, GROUP, RECORD, group_field
+
+MAX_BUSINESS_ROWS = 5000
 
 
 def validate_agent(user):
@@ -28,6 +31,52 @@ def validate_team(doc):
     for medium, field in TEAM_DEFAULTS.items():
         if doc.get(field) and frappe.db.get_value('Relay Channel', doc.get(field), 'channel') != medium:
             frappe.throw(f'The default {medium} channel must be a {medium} channel')
+    validate_business(doc.get('business_access') or [])
+
+
+def validate_business(rows):
+    """Each row gives all records of an enabled type, one group of its first grouping field or one record."""
+    if not rows:
+        return
+    if len(rows) > MAX_BUSINESS_ROWS:
+        frappe.throw(f'A team can have at most {MAX_BUSINESS_ROWS} business rows')
+    enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
+    seen, picked = set(), {}
+    for row in rows:
+        if row.business_doctype not in enabled:
+            frappe.throw('Choose an enabled business type')
+        if row.access not in ACCESS:
+            frappe.throw('Business access must be All records, Group or Record')
+        validate_row(row)
+        if (row.business_doctype, row.access, row.value) in seen:
+            frappe.throw('A group or record can only appear once in a team')
+        seen.add((row.business_doctype, row.access, row.value))
+        if row.access == RECORD:
+            picked.setdefault(row.business_doctype, set()).add(row.value)
+    whole = {doctype for doctype, access, value in seen if access == ALL}
+    if any(doctype in whole and access != ALL for doctype, access, value in seen):
+        frappe.throw('A business type with all records cannot also pick groups or records')
+    for doctype, names in picked.items():
+        missing = names - set(frappe.get_all(doctype, filters={'name': ['in', list(names)]}, pluck='name'))
+        if missing:
+            frappe.throw(f'Unknown {doctype}: {", ".join(sorted(missing)[:5])}')
+
+
+def validate_row(row):
+    if row.access == ALL:
+        row.value, row.grouping_field = '', ''
+        return
+    if not isinstance(row.value, str) or not row.value.strip() or len(row.value) > 140:
+        frappe.throw('Choose a group or record of at most 140 characters')
+    if row.access == RECORD:
+        row.grouping_field = ''
+        return
+    field = group_field(row.business_doctype)
+    if not field:
+        frappe.throw(f'{row.business_doctype} has no grouping field. Pick records instead.')
+    if row.get('grouping_field') and row.grouping_field != field:
+        frappe.throw(f'The grouping field of {row.business_doctype} changed. Pick its groups again.')
+    row.grouping_field = field
 
 
 def validate_assignment(doc):
@@ -49,7 +98,28 @@ def directory(query='', after=None):
     filters = {'title': ['like', '%' + query.replace('%','\\%').replace('_','\\_') + '%']}
     if after: filters['name'] = ['>', after]
     rows = frappe.get_list('Relay Team', filters=filters, fields=['name','title'], order_by='name asc', page_length=31)
-    return {'items': rows[:30], 'next': rows[29].name if len(rows)>30 else None}
+    summarize(rows[:30])
+    return {'items': rows[:30], 'next': rows[29].name if len(rows)>30 else None,
+            'teams_enabled': features.is_enabled('teams')}
+
+
+def summarize(rows):
+    """Add each team's members and, per business type, whether it has all records and how many groups or records."""
+    names = [row.name for row in rows] or ['']
+    members, business = {}, {}
+    for row in frappe.get_all('Relay Team Member', filters={'parenttype': 'Relay Team', 'parent': ['in', names]},
+                              fields=['parent', 'user'], order_by='idx asc', limit=0):
+        members.setdefault(row.parent, []).append(row.user)
+    for row in frappe.get_all('Relay Team Business', filters={'parenttype': 'Relay Team', 'parent': ['in', names]},
+                              fields=['parent', 'business_doctype', 'access', {'COUNT': 'name', 'as': 'total'}],
+                              group_by='parent, business_doctype, access', order_by='parent asc', limit=0):
+        summary = business.setdefault(row.parent, {}).setdefault(row.business_doctype, {
+            'business_doctype': row.business_doctype, 'all': False, 'groups': 0, 'records': 0})
+        if row.access == ALL: summary['all'] = True
+        else: summary['groups' if row.access == GROUP else 'records'] = row.total
+    for row in rows:
+        row['members'] = members.get(row.name, [])
+        row['business'] = list(business.get(row.name, {}).values())
 
 
 @frappe.whitelist(methods=['GET'])
@@ -90,15 +160,26 @@ def _agent_options(query, contact=None):
 
 
 @frappe.whitelist(methods=['POST'])
-def save(title, members, name=None):
+def save(title, members, name=None, business=None):
+    """Business rows left out stay unchanged."""
     if name is not None and name != "":
         document_name(name)
     require_access(manage=True)
     members=user_list(members,'Invalid team members')
     doc=frappe.get_doc('Relay Team',name) if name else frappe.new_doc('Relay Team')
     doc.title=title;doc.set('members',[{'user':user} for user in members])
+    if business is not None:
+        doc.set('business_access', business_rows(business))
     doc.save()
     return team_payload(doc)
+
+
+def business_rows(value):
+    rows = frappe.parse_json(value) if isinstance(value, str) else value
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        frappe.throw('Business access must be a list of rows')
+    return [{'business_doctype': row.get('business_doctype'), 'access': row.get('access'), 'value': row.get('value') or ''}
+            for row in rows]
 
 
 def user_list(value, message):
@@ -108,7 +189,9 @@ def user_list(value, message):
 
 
 def team_payload(doc):
-    return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members]}
+    return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members],
+            'business':[{'business_doctype':row.business_doctype,'access':row.access,'value':row.value or ''}
+                        for row in doc.get('business_access') or []]}
 
 
 @frappe.whitelist(methods=['GET'])

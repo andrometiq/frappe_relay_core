@@ -10,6 +10,7 @@ from relay_core.automation.provenance import conversation_key
 
 class ActionPermissionTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
         self.source = _dict(has_permission=Mock(return_value=True))
         self.fake = SimpleNamespace(session=SimpleNamespace(user='sender'), get_doc=Mock(return_value=self.source),
                                     DoesNotExistError=LookupError, permissions=SimpleNamespace(has_permission=Mock(

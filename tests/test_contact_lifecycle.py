@@ -148,6 +148,9 @@ class ContactRemovalTests(unittest.TestCase):
 
 
 class LinkedBusinessAccessTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
+
     def test_removed_contact_link_ends_message_access(self):
         record = Mock(); record.has_permission.return_value = True
         fake = SimpleNamespace(session=SimpleNamespace(user='reader'), get_doc=Mock(return_value=record),

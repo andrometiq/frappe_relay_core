@@ -706,6 +706,7 @@ class ManagerLinkTests(BoundaryTests):
     def setUp(self):
         super().setUp()
         self.contacts.require_access = Mock()
+        self.contacts.record_covered = lambda doctype, name: bool(self.frappe.db.exists(doctype, name))  # Teams off
         self.contacts.can_manage = Mock(return_value=True)
         self.contacts.require_person = Mock()
         self.contacts.business_document = Mock()

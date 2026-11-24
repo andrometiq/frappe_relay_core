@@ -148,8 +148,11 @@ def business_records(doctype, query=''):
     check_type(doctype)
     field = title_field(doctype)
     pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-    rows = frappe.get_all(doctype, fields=list(dict.fromkeys(['name', field])),
-        or_filters=[['name', 'like', pattern], [field, 'like', pattern]], order_by='name asc', page_length=30)
+    from pypika.terms import LiteralValue
+    from relay_core.business_access import record_query
+    rows = frappe.qb.get_query(doctype, fields=list(dict.fromkeys(['name', field])),
+        or_filters=[['name', 'like', pattern], [field, 'like', pattern]], order_by='name asc', limit=30).where(
+        LiteralValue(f'`tab{doctype}`.name IN ({record_query(doctype)})')).run(as_dict=True)
     return [frappe._dict(name=row.name, value=row.name, label=row.get(field) or row.name, description='') for row in rows]
 
 

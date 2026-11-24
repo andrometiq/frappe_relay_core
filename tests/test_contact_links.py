@@ -11,6 +11,7 @@ from test_contact_primary import fake_frappe
 
 class ContactApiTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
         self.fake = fake_frappe(flags=SimpleNamespace(), parse_json=Mock(side_effect=json.loads))
         self.enterContext(patch.object(contacts, 'frappe', self.fake))
         self.enterContext(patch.object(access, 'frappe', self.fake))

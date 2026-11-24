@@ -14,6 +14,7 @@ from relay_core import business_access as access, business_inbox, business_group
 
 class BusinessTypeAccessTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
         self.db = sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
         self.db.executescript('''

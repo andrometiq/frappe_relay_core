@@ -5,7 +5,8 @@ import frappe.permissions
 
 
 def allowed_types(user=None):
-    """The Relay business access rule. Desk permissions and teams do not grant access."""
+    """The Relay business access rule. Desk permissions do not grant access. While Teams are on, a user's types are
+    the types their teams cover; record_covered then limits the records."""
     from relay_core.permissions import USER, MANAGER
     user = user or frappe.session.user
     roles = set(frappe.get_roles(user))
@@ -14,6 +15,9 @@ def allowed_types(user=None):
     enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     if user == 'Administrator' or roles.intersection({MANAGER, 'System Manager'}):
         return enabled
+    from relay_core.team_access import restricted, coverage
+    if restricted(user):
+        return enabled.intersection(coverage(user))
     assigned = frappe.get_all('Relay Contact Type User', filters={
         'user': user, 'parenttype': 'Relay Contact Type', 'parentfield': 'users'}, pluck='parent')
     return enabled.intersection(assigned)
@@ -23,6 +27,22 @@ def relay_user(user=None):
     from relay_core.permissions import USER, MANAGER
     user = user or frappe.session.user
     return user == 'Administrator' or bool(set(frappe.get_roles(user)).intersection({USER, MANAGER, 'System Manager'}))
+
+
+def record_query(doctype, user=None):
+    """SQL for the names of `doctype` records the user reaches. The caller checks the type."""
+    from relay_core.team_access import covered_query
+    return covered_query(doctype, user or frappe.session.user) or frappe.qb.get_query(
+        doctype, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+
+
+def record_covered(doctype, name, user=None):
+    """The record exists and the user's teams cover it. The caller checks the type."""
+    from relay_core.team_access import covered_query
+    covered = covered_query(doctype, user or frappe.session.user)
+    if covered is None:
+        return bool(frappe.db.exists(doctype, name))
+    return bool(frappe.db.sql(f'SELECT 1 FROM ({covered}) covered WHERE covered.name=%s LIMIT 1', name))
 
 
 def require_type(doctype, user=None):
@@ -46,10 +66,19 @@ def person_condition(expression, user=None):
     """Contact membership, applied before pagination and counts; unlinked people are shared."""
     if not relay_user(user):
         return '1=0'
-    types = ', '.join(frappe.db.escape(dt) for dt in sorted(allowed_types(user))) or "''"
+    from relay_core.team_access import covered_query
+    whole, clauses = [], []
+    for doctype in sorted(allowed_types(user)):
+        covered = covered_query(doctype, user or frappe.session.user)
+        if covered is None:
+            whole.append(frappe.db.escape(doctype))
+        else:
+            clauses.append(f'(l.link_doctype={frappe.db.escape(doctype)} AND l.link_name IN ({covered}))')
+    types = ', '.join(whole) or "''"
+    scope = ' OR '.join([f'l.link_doctype IN ({types})', *clauses])
     links = (f"SELECT 1 FROM `tabDynamic Link` l WHERE l.parent={expression} "
              "AND l.parenttype='Contact' AND l.parentfield='links'")
-    return f"(NOT EXISTS ({links}) OR EXISTS ({links} AND l.link_doctype IN ({types})))"
+    return f"(NOT EXISTS ({links}) OR EXISTS ({links} AND ({scope})))"
 
 
 def unlinked_contact(contact):
@@ -192,7 +221,7 @@ def allowed(doc, user=None):
     if not target or target[0] not in allowed_types(user): return False
     if (doc.get('doctype') != 'Relay Ticket' and not doc.get('ticket_notification')
             and target not in candidates(doc.relay_contact)): return False
-    return bool(frappe.db.exists(*target))
+    return record_covered(*target, user)
 
 
 def associate(doc,method=None):
@@ -362,7 +391,7 @@ def action_permission(doc, user=None, permission_type=None):
         except frappe.DoesNotExistError:
             return False
     try:
-        return business[0] in allowed_types(user) and bool(frappe.db.exists(*business))
+        return business[0] in allowed_types(user) and record_covered(*business, user)
     except frappe.DoesNotExistError:
         return False
 
@@ -377,7 +406,7 @@ def action_query(user=None):
               for index, key in enumerate(('business_doctype', 'business_name'))]
     clauses = []
     for dt in sorted(allowed_types(user)):
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+        query = record_query(dt, user)
         clauses.append(f'({fields[0]}={frappe.db.escape(dt)} AND {fields[1]} IN ({query}))')
     scope = ' OR '.join(clauses) or '1=0'
     sources = frappe.qb.get_query('Relay Message', fields=['name'], ignore_permissions=False,
@@ -406,7 +435,7 @@ def explicit_condition(doctype, user=None, *, allow_empty=False):
     table = '`tab' + doctype + '`'
     clauses = []
     for dt in sorted(allowed_types(user)):
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+        query = record_query(dt, user)
         clauses.append(f'({table}.business_doctype={frappe.db.escape(dt)} AND {table}.business_name IN ({query}))')
     if allow_empty and relay_user(user):
         clauses.append(f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='')")
