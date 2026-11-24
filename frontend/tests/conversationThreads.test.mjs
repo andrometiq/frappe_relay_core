@@ -62,6 +62,9 @@ test('a Telegram thread reads by its handle and every tab keeps its full text in
   assert.equal(threadAddress({ ...bot, handle: '' }), '')
   assert.equal(threadAddress({ ...bot, endpoint_label: '+919000001234' }), '+91 90000 01234', 'The linked mobile comes before the username')
   assert.equal(threadAddress({ ...bot, handle: '', endpoint_label: 'Ravi Kumar' }), 'Ravi Kumar')
+  assert.equal(threadAddress({ ...bot, handle: '', endpoint_label: 'Telegram' }), '', 'The tab says Telegram once, not "Telegram Telegram"')
+  assert.equal(threadTabs([{ ...bot, handle: '', endpoint_label: '' }])[0].endpoint, '')
+  assert.equal(threadAddress({ ...bot, endpoint_label: '+91 90000 01234' }), '+91 90000 01234', 'The server format and the tab format are the same')
   assert.equal(rowChannels({ threads: [{ provider: 'Telegram', channel: 'CH-BOT', endpoint: '55012345', endpoint_label: '+919000001234' }] })[0].label,
     'Telegram +91 90000 01234', 'A list mark names the linked mobile, not the chat id')
   assert.equal(replyLockText(bot), 'Replying on Telegram to @ravitex from Bot · @essdee_bot')

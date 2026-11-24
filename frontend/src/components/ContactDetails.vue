@@ -63,7 +63,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
         <ul v-if="detail.endpoints.length" class="info-card">
           <li v-for="endpoint in detail.endpoints" :key="endpoint.name" class="info-item">
             <span class="info-icon" :class="endpoint.verified ? 'is-green' : 'is-blue'" aria-hidden="true"><FeatherIcon :name="providerIcon(endpoint.provider)" :size="18" /></span>
-            <span class="info-item-copy"><b>{{ addressLabel(endpoint) || endpoint.provider }}</b><small>{{ endpoint.provider }} · {{ endpoint.verified ? 'Checked' : 'Not checked' }} · <time :datetime="endpoint.modified">Updated {{ relativeTime(endpoint.modified) }}</time></small></span>
+            <span class="info-item-copy"><b>{{ addressLabel(endpoint) || endpoint.provider }}</b><small><template v-if="addressLabel(endpoint)">{{ endpoint.provider }} · </template>{{ endpoint.verified ? 'Checked' : 'Not checked' }} · <time :datetime="endpoint.modified">Updated {{ relativeTime(endpoint.modified) }}</time></small></span>
             <Button v-if="endpoint.verified" label="Stop using" :aria-label="'Stop using ' + (addressLabel(endpoint) || endpoint.provider)" variant="ghost" size="xs" :disabled="busy" @click="revoke(endpoint.name)" />
           </li>
         </ul>

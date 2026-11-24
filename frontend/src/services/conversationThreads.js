@@ -19,8 +19,10 @@ export function endpointLabel(endpoint, provider = 'WhatsApp') {
 
 // What a person sees for a thread or channel mark: a Telegram chat's linked mobile, username or name, else the address.
 export function addressLabel(item) {
-  if (item?.provider === 'Telegram') return phoneCaption(item.endpoint_label) || item.endpoint_label || item.handle || endpointLabel(item.endpoint, 'Telegram')
-  return endpointLabel(item?.endpoint, item?.provider)
+  if (item?.provider !== 'Telegram') return endpointLabel(item?.endpoint, item?.provider)
+  // The provider word is shown beside the address, so a label that is only "Telegram" adds nothing.
+  const label = item.endpoint_label === 'Telegram' ? '' : item.endpoint_label
+  return phoneCaption(label) || label || item.handle || endpointLabel(item.endpoint, 'Telegram')
 }
 
 export function threadMatches(thread, channel, endpoint) {
