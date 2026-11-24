@@ -978,7 +978,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 
 /* Conversation */
 .v1-shell.relay-shell .connected-thread{border:0;background:var(--relay-chat)}
-@media(min-width:769px){.v1-shell.relay-shell .connected-thread{border-top:1px solid var(--relay-stroke);border-left:1px solid var(--relay-stroke)}}
 .v1-shell.relay-shell .conversation-heading{display:flex;flex-wrap:nowrap;align-items:center;gap:10px;height:52px;min-height:52px;padding:0 12px 0 16px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
 .v1-shell.relay-shell .conversation-heading>.relay-avatar{width:30px;height:30px;border:0;font-size:12px}
 .v1-shell.relay-shell .conversation-title{flex:1;min-width:0}
