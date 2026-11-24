@@ -28,8 +28,8 @@ test('conversation summary and ticket AI controls follow the AI flag', async () 
 
 test('only a System Manager sees the AI switch in Settings', async () => {
   const settings = await read('components/SiteSettings.vue')
-  assert.match(settings, /v-if="config\.can_switch_ai" class="workflow-card settings-features"/)
-  assert.match(settings, /\{ key: 'ai', label: 'Enable AI features'/)
+  assert.match(settings, /<ToggleSwitch v-if="config\.can_switch_ai"/)
+  assert.match(settings, /\{ key: 'ai', label: 'AI features'/)
 })
 
 

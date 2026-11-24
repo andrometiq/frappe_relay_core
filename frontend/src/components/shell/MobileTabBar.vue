@@ -1,16 +1,21 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { FeatherIcon } from '@relay/ui'
-import { splitMobileNav } from '../../services/mobileNav'
+import { activeMobileTab, splitMobileNav } from '../../services/mobileNav'
 
 const props = defineProps({ items: { type: Array, required: true }, sections: { type: Array, default: () => [] }, view: String, section: String, badge: String })
 const emit = defineEmits(['navigate', 'section'])
 const open = defineModel('open', { type: Boolean, default: false })
 const split = computed(() => splitMobileNav(props.items))
+const activeTab = computed(() => activeMobileTab(split.value.tabs, props.view, props.section))
 const sheet = ref(null)
 function go(name) {
   open.value = false
   emit('navigate', name)
+}
+function openTab(tab) {
+  if (tab.section) goSection(tab.section)
+  else go(tab.name)
 }
 function goSection(name) {
   open.value = false
@@ -25,13 +30,13 @@ watch(open, async value => {
 
 <template>
   <nav class="mobile-tabbar" aria-label="Relay sections">
-    <button v-for="item in split.tabs" :key="item.name" type="button" class="mobile-tab" :class="{ active: view === item.name }"
-      :aria-current="view === item.name ? 'page' : undefined" @click="go(item.name)">
+    <button v-for="item in split.tabs" :key="item.name" type="button" class="mobile-tab" :class="{ active: activeTab === item.name }"
+      :aria-current="activeTab === item.name ? 'page' : undefined" @click="openTab(item)">
       <span class="mobile-tab-icon"><FeatherIcon :name="item.icon" :size="20" />
         <span v-if="item.name === 'Messages' && badge" class="mobile-tab-badge" :aria-label="`${badge} unread chats`">{{ badge }}</span></span>
       <span>{{ item.label }}</span>
     </button>
-    <button type="button" class="mobile-tab" :class="{ active: open || split.more.some(item => item.name === view) }"
+    <button type="button" class="mobile-tab" :class="{ active: open || activeTab === 'More' }"
       aria-haspopup="dialog" :aria-expanded="open" @click="open = !open">
       <span class="mobile-tab-icon"><FeatherIcon name="menu" :size="20" /></span><span>More</span>
     </button>

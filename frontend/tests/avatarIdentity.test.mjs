@@ -37,10 +37,9 @@ test('every avatar tone is a colour, not grey', async () => {
   for (const [red, green, blue] of tones) assert.ok(Math.max(red, green, blue) - Math.min(red, green, blue) >= 80, `#${[red, green, blue].map(value => value.toString(16).padStart(2, '0')).join('')} is too grey`)
 })
 
-test('contact chips and the new conversation contact list use the coloured avatar', async () => {
+test('the new conversation contact list uses the coloured avatar', async () => {
   const { readFile } = await import('node:fs/promises')
   const read = path => readFile(new URL('../src/components/' + path, import.meta.url), 'utf8')
-  assert.match(await read('ConnectedMessages.vue'), /<Avatar class="contact-chip-avatar" size="sm" :label="contact\.label"/)
   assert.match(await read('messages/StartConversation.vue'), /<Avatar class="contact-chip-avatar" size="sm" :label="row\.label"/)
   assert.doesNotMatch(await read('messages/StartConversation.vue'), /slice\(0, 1\)\.toUpperCase\(\)/)
 })

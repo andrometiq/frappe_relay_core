@@ -15,9 +15,7 @@ import { attachmentKinds, composerActions, pollProblem } from "../../services/co
 import { sha256Hex } from "../../services/crypto";
 import { messageData } from "../messageContent";
 import { formatBytes } from "../../services/mediaCache";
-import { useSendChannel } from "../../composables/useSendChannel";
-import { sendNumbersKey } from "../../composables/useSendNumbers";
-import SendNumber from "./SendNumber.vue";
+import ReplyLock from "./ReplyLock.vue";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
@@ -58,7 +56,8 @@ const capabilities = inject("relayCapabilities", ref({}));
 const can = feature => channelCan(capabilities.value, sourceContext.value.provider, feature);
 // `mode` is "reply" or "note"; the note slot holds the internal note form, so a note never goes to the customer.
 // `offText` marks a switched-off channel: replies show that banner and only notes stay open.
-const props = defineProps({ recipient: String, contactName: String, mode: { type: String, default: "reply" }, offText: String, noteBusy: Boolean });
+// `lock` names the open thread's reply target (see replyLock): the reply goes on its channel to its endpoint.
+const props = defineProps({ contactName: String, mode: { type: String, default: "reply" }, offText: String, noteBusy: Boolean, lock: Object });
 const attachmentInput = ref(null);
 // Chat drafts belong to the conversation/route, even when a different message is quoted.
 const draftScope = computed(() => compositionScope(source.value ? {
@@ -147,12 +146,6 @@ async function attachFile(event) {
 }
 const emit = defineEmits(["template", "mode", "closed"]);
 const noting = computed(() => props.mode === "note");
-const { choices: sendChoices } = useSendChannel();
-// On a site with several WhatsApp numbers the "Send via" number picker replaces the channel menu.
-const numbers = inject(sendNumbersKey, null);
-const manyNumbers = computed(() => !!numbers?.active.value);
-// The channel menu shows only when there is a real choice.
-const channelChoice = computed(() => !manyNumbers.value && sendChoices.value.size > 1);
 const windowChecking = ref(false), windowReceivedAt = ref(Date.now()), now = ref(Date.now());
 const clockTimer = setInterval(() => { now.value = Date.now(); }, 30000);
 const windowState = ref({ open: true }),
@@ -170,13 +163,6 @@ async function checkWindow(live = false) {
     return;
   }
   if (!source.value) return;
-  if (manyNumbers.value) {
-    const chosenWindow = numbers.chosen.value?.window || { open: false };
-    windowState.value = chosenWindow;
-    windowError.value = "";
-    if (chosenWindow.open && Number.isFinite(chosenWindow.remaining_seconds)) expiryTimer = setTimeout(() => { windowState.value = { ...windowState.value, open: false }; }, Math.min(chosenWindow.remaining_seconds * 1000, 2147483647));
-    return;
-  }
   windowChecking.value = live !== true;
   try {
     const result = await coreApi("messaging.reply_window", {
@@ -206,7 +192,6 @@ watch(
   { immediate: true },
 );
 useRealtimeRefresh([], ['messages', 'receipts'], ({ kinds }) => isReceiptsOnly(kinds) ? undefined : checkWindow(true));
-watch(() => manyNumbers.value && numbers.chosen.value, checkWindow);
 
 const offReason = computed(() => props.offText || (windowState.value.channel_disabled ? channelOffText(sourceContext.value.provider) : ""));
 const closed = computed(() => !!offReason.value || (!windowState.value.open && !windowError.value && !windowChecking.value));
@@ -234,7 +219,7 @@ const canSend = computed(
               ? !pollError.value
               : false),
 );
-const busyReason = "Wait for the current send to finish";
+const busyReason = "Wait for the chat to finish loading";
 const sendTitle = computed(() => windowError.value ? "Check the reply window before sending" : windowChecking.value ? "Checking reply window" : busy.value ? busyReason
   : uploading.value ? "Wait for the upload to finish"
   : limit.value && [...body.value].length > limit.value ? "The message is too long for this channel"
@@ -289,10 +274,9 @@ function keydown(event) {
       <slot name="note" />
     </template>
     <template v-else>
-      <div v-if="$slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
-      <div v-if="manyNumbers || channelChoice || windowHint" class="composer-context-bar">
-        <SendNumber v-if="manyNumbers" /><slot v-else-if="channelChoice" name="channel" />
-        <span v-if="windowHint" class="composer-window-hint" role="status">{{ windowHint }}</span>
+      <ReplyLock v-if="lock" :lock="lock" />
+      <div v-if="windowHint" class="composer-context-bar">
+        <span class="composer-window-hint" role="status">{{ windowHint }}</span>
       </div>
       <p v-if="sourceContext.message_thread_id" class="composer-status">Topic {{ sourceContext.message_thread_id }}</p>
       <div v-if="quoting" class="composer-context composer-quote">
@@ -301,7 +285,7 @@ function keydown(event) {
       </div>
       <p v-if="error" role="alert" class="composer-error">{{ error }}</p>
       <div v-if="windowError" class="composer-error" role="alert"><span>Could not check the reply window. Your draft is saved. {{ windowError }}</span><Button label="Check again" variant="ghost" :disabled="windowChecking" @click="checkWindow" /></div>
-      <p v-if="busy || uploading || windowChecking" role="status" class="composer-status">{{ uploading ? 'Uploading…' : busy ? 'Sending…' : 'Checking reply window…' }}</p>
+      <p v-if="busy || uploading || windowChecking" role="status" class="composer-status">{{ uploading ? 'Uploading…' : busy ? 'Working…' : 'Checking reply window…' }}</p>
       <template v-if="!closed">
         <div v-if="mediaKind" class="composer-context composer-attachment">
           <img v-if="preview && kind === 'photo'" :src="preview" alt="Selected attachment" />
@@ -336,9 +320,8 @@ function keydown(event) {
         <ComposerMore :actions="actions" :disabled="busy" :has-sticker="hasSticker" @action="moreAction" @emoji="insertEmoji">
           <template #details>
             <p>{{ sourceContext.provider || 'No channel' }} · {{ source.channel_title || source.channel }}</p>
-            <p v-if="recipient">To {{ recipient }}</p>
-            <WhatsAppIdentity v-if="sourceContext.provider === 'WhatsApp' && !manyNumbers" />
-            <p v-if="manyNumbers">From {{ numbers.chosen.value?.label }} · {{ numbers.chosen.value?.address }}</p>
+            <p v-if="lock">To {{ lock.to }}<template v-if="lock.from"> · from {{ lock.from }}</template></p>
+            <WhatsAppIdentity v-if="sourceContext.provider === 'WhatsApp'" />
             <p v-if="offReason">{{ offReason }}</p>
             <p v-else-if="windowError">Could not check the reply window.</p>
             <p v-else-if="can('reply_window_hours') && !sourceContext.group_id">{{ windowState.open ? 'Reply window open' : 'Reply window closed' }}<template v-if="windowState.expires_at_iso"> · {{ windowState.open ? 'Expires' : 'Expired' }} {{ deadlineTime(windowState.expires_at_iso, now) }}</template><template v-else-if="windowState.open && Number.isFinite(windowState.remaining_seconds)"> · {{ Math.ceil(remainingSeconds / 60) }} minutes remaining</template></p>
@@ -353,7 +336,7 @@ function keydown(event) {
             :aria-label="mediaKind ? 'Caption' : 'Message'" :placeholder="mediaKind ? 'Add a caption…' : 'Message…'" rows="1" :readonly="busy"
             @focus="editing = true" @blur="editing = false" @keydown="keydown" @input="resizeDraft(); typing()" />
           <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
-          <Button class="composer-send" :label="isMobile ? '' : busy ? 'Sending…' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
+          <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
         </template>
       </div>
       <input type="file" ref="attachmentInput" aria-label="Attachment" hidden :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy || uploading" @change="attachFile" />

@@ -24,7 +24,7 @@
   .v1-shell.relay-shell .workspace{position:relative;flex:1;min-height:0;border:0;border-radius:0;box-shadow:none;overflow:hidden}
 
   body{font-size:14px}
-  .v1-shell.relay-shell .workspace-title,.v1-shell.relay-shell .v1-header>.relay-brand,.relay-titlebar-search,.inbox-list-head{display:none}
+  .relay-titlebar-search,.inbox-list-head{display:none}
 
   /* App bar */
   .v1-shell.relay-shell .v1-header{gap:8px;height:auto;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 12px 10px;border:0;background:transparent}
@@ -34,6 +34,8 @@
   .v1-shell.relay-shell .v1-connection.is-connected{display:none}
   .v1-shell.relay-shell .v1-header .notification-toggle{width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
   .relay-header-actions{display:flex;align-items:center}
+  .section-toggle{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .mobile-sheet-profile{display:flex;flex:1;align-items:center;gap:10px;min-width:0;border-radius:8px;text-align:left}
   .relay-header-new.relay-button{width:44px;min-width:44px;height:44px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
 
   /* Detail pages own the whole screen: no app bar, no tab bar */
@@ -161,11 +163,10 @@
   .v1-shell.relay-shell .frappe-page-head{flex-wrap:wrap;gap:8px;padding-top:calc(8px + env(safe-area-inset-top))}
   .v1-shell.relay-shell .frappe-page-actions{flex-wrap:wrap}
 
-  /* Dialogs become bottom sheets: as tall as their content, up to the screen less a strip of the page */
-  .relay-dialog-mask{align-items:flex-end;padding:0}
-  .relay-dialog,.relay-dialog--sm,.relay-dialog--lg,.relay-dialog--xl{width:100%;max-width:100%;height:auto;max-height:calc(var(--relay-viewport-height,100dvh) - 24px);border-width:0;border-radius:16px 16px 0 0;animation:relay-sheet-up 260ms var(--relay-ease)}
-  .relay-dialog::before{content:'';flex:none;align-self:center;width:36px;height:4px;margin-top:8px;border-radius:2px;background:var(--outline-gray-3,#ccc)}
-  .relay-dialog__header{min-height:44px;padding-top:4px;border-bottom:0}
+  /* Dialogs become full-screen sheets that slide up from the bottom */
+  .relay-dialog-mask{align-items:stretch;padding:0}
+  .relay-dialog,.relay-dialog--sm,.relay-dialog--lg,.relay-dialog--xl{width:100%;max-width:100%;height:var(--relay-viewport-height,100dvh);max-height:var(--relay-viewport-height,100dvh);border-width:0;border-radius:0;animation:relay-sheet-up 260ms var(--relay-ease)}
+  .relay-dialog__header{min-height:52px;padding-top:calc(4px + env(safe-area-inset-top));border-bottom:1px solid var(--relay-stroke)}
   .relay-dialog__content{flex:1 1 auto;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
   .relay-dialog:has(.relay-dialog__footer) .relay-dialog__content{padding-bottom:16px}
   .relay-dialog__footer{flex-wrap:wrap;padding-bottom:calc(12px + env(safe-area-inset-bottom))}

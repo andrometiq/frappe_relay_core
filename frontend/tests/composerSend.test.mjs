@@ -109,7 +109,7 @@ test('a new message sent during a send goes out after it, in order', async t => 
   assert.deepEqual(sends().map(values => values.data.text), ['First', 'Second'])
 })
 
-test('a send that fails before the server accepts it puts the text back and keeps a retryable message', async t => {
+test('a send that fails before the server accepts it keeps a retryable message with its reason', async t => {
   let fail = true
   const { state, sends } = fixture(t, method => {
     if (method !== 'messaging.send') return undefined
@@ -118,10 +118,10 @@ test('a send that fails before the server accepts it puts the text back and keep
   await state.open('A')
   state.body.value = 'Hello'
   await state.send()
-  assert.equal(state.body.value, 'Hello')
-  assert.equal(state.error.value, 'Connection lost')
+  assert.equal(state.body.value, '', 'The composer is free for the next message')
+  assert.equal(state.error.value, '', 'The reason shows on the bubble, not in a banner')
   const failed = state.displayRows.value.find(row => row._pending)
-  assert.equal(failed.status, 'Unconfirmed')
+  assert.deepEqual([failed.status, failed.error], ['Unconfirmed', 'Connection lost'])
   fail = false
   await state.retryPending(failed)
   assert.deepEqual(sends().map(values => values.request_key), ['key-1', 'key-1'])
@@ -140,7 +140,7 @@ test('a failed send does not overwrite a new draft', async t => {
   assert.equal(state.body.value, 'New draft')
 })
 
-test('a sent photo closes the attachment panel, and a failed one puts it back', async t => {
+test('a sent photo closes the attachment panel, and a failed one stays on its bubble for Retry', async t => {
   let fail = false
   const { state } = fixture(t, method => method === 'messaging.send' && fail ? Promise.reject(Error('Connection lost')) : undefined)
   await state.open('A')
@@ -152,8 +152,9 @@ test('a sent photo closes the attachment panel, and a failed one puts it back', 
   fail = true
   state.kind.value = 'photo'; state.attachment.value = photo
   await state.send()
-  assert.equal(state.kind.value, 'photo')
-  assert.deepEqual(state.attachment.value, photo)
+  assert.equal(state.attachment.value, null)
+  const failed = state.displayRows.value.find(row => row._pending)
+  assert.deepEqual([failed.status, failed.request.data.attachment], ['Unconfirmed', 'FILE-1'])
 })
 
 test('a reply sent from an older message jumps to the newest one', async t => {

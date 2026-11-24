@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { Badge, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
+import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { whatsappHealth } from '../../services/whatsappHealth'
 import { accountMetadata, ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, connectionBadge, deliveryRows, needsReconnect, PIN_TEXT, removalText, SWITCHES, switchValue, webhookText } from '../../services/channelSetup'
@@ -63,26 +63,29 @@ onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels', '
 onBeforeUnmount(() => stop?.())
 </script>
 <template>
-  <section class="space-y-4" aria-label="WhatsApp accounts">
-    <ErrorMessage :message="error" />
-    <p v-if="notice" role="status" class="text-sm text-ink-gray-7">{{ notice }}</p>
-    <p v-if="!loaded" role="status">Reading WhatsApp numbers…</p>
-    <p v-else-if="!accounts.length && !error">No WhatsApp number is connected yet.</p>
+  <section class="whatsapp-accounts" aria-label="WhatsApp accounts">
+    <ErrorMessage v-if="error" :message="error" class="whatsapp-accounts-error" />
+    <p v-if="notice" role="status" class="whatsapp-accounts-note">{{ notice }}</p>
+    <p v-if="!loaded" role="status" class="settings-row">Reading WhatsApp numbers…</p>
+    <p v-else-if="!accounts.length && !error" class="settings-row">No WhatsApp number is connected yet.</p>
     <article v-for="row in accounts" :key="row.name" class="whatsapp-account">
-      <div class="whatsapp-account__title">
-        <h3>{{ metadata[row.name]?.profile?.display_phone_number || row.address || row.label }}</h3>
-        <Badge v-bind="connectionBadge(row)" />
-        <Badge v-if="row.is_default" label="Default" theme="blue" />
+      <div class="settings-row">
+        <span class="settings-row-icon whatsapp"><FeatherIcon name="phone" :size="16" /></span>
+        <span class="settings-row-text"><b>{{ metadata[row.name]?.profile?.display_phone_number || row.address || row.label }}</b>
+          <small>{{ [row.label, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</small></span>
+        <span class="settings-row-end"><Badge v-bind="connectionBadge(row)" /><Badge v-if="row.is_default" label="Default" theme="blue" /></span>
       </div>
-      <p class="whatsapp-account__name">{{ [row.label, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</p>
-      <ErrorMessage v-if="row.health.check_error" :message="row.health.check_error" />
-      <dl class="whatsapp-account__health">
-        <div><dt>Messages from Meta</dt><dd>{{ webhookText(row.health) }}</dd></div>
-        <div v-for="item in deliveryRows(row.health, dateTime)" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.text }}</dd></div>
-        <div v-for="item in whatsappHealth(metadata[row.name]?.profile)" :key="item.name"><dt>{{ item.name }}</dt><dd><Badge v-if="item.theme" :label="item.label" :theme="item.theme" /><template v-else>{{ item.text }}</template></dd></div>
-      </dl>
-      <p class="text-sm text-ink-gray-5">{{ checkedText(row.health) }} {{ syncText(metadata[row.name]) }}</p>
-      <template v-if="canConfigure">
+      <details class="whatsapp-account__more">
+        <summary>Account health</summary>
+        <ErrorMessage v-if="row.health.check_error" :message="row.health.check_error" />
+        <dl class="whatsapp-account__health">
+          <div><dt>Messages from Meta</dt><dd>{{ webhookText(row.health) }}</dd></div>
+          <div v-for="item in deliveryRows(row.health, dateTime)" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.text }}</dd></div>
+          <div v-for="item in whatsappHealth(metadata[row.name]?.profile)" :key="item.name"><dt>{{ item.name }}</dt><dd><Badge v-if="item.theme" :label="item.label" :theme="item.theme" /><template v-else>{{ item.text }}</template></dd></div>
+        </dl>
+        <p>{{ checkedText(row.health) }} {{ syncText(metadata[row.name]) }}</p>
+      </details>
+      <div v-if="canConfigure" class="whatsapp-account__manage">
         <div class="whatsapp-account__switches">
           <div v-for="item in SWITCHES" :key="item.name">
             <FormControl type="checkbox" :label="item.label" :model-value="switchValue(row, item.name)" :disabled="!!busy || (item.name !== 'enabled' && !row.enabled) || (item.name === 'enabled' && adminLocked(row))" @update:model-value="value => toggle(row, item.name, value)" />
@@ -97,9 +100,9 @@ onBeforeUnmount(() => stop?.())
           <Button v-if="!row.coexistence" variant="outline" icon-left="key" label="Reset PIN" :loading="busy === row.name + ':pin'" :disabled="!!busy" @click="confirm(row, 'pin')" />
           <Button variant="outline" theme="red" icon-left="trash-2" label="Remove number" :loading="busy === row.name + ':remove'" :disabled="!!busy" @click="confirm(row, 'remove')" />
         </div>
-      </template>
+      </div>
     </article>
-    <Button variant="outline" icon-left="refresh-cw" label="Refresh" :disabled="!!busy" @click="load" />
+    <div class="whatsapp-accounts-foot"><Button variant="outline" icon-left="refresh-cw" label="Refresh" :disabled="!!busy" @click="load" /></div>
     <Dialog :model-value="!!confirming" :options="{ title: confirming?.action === 'pin' ? 'Reset the two-step PIN?' : 'Remove this number?', size: 'md' }" @update:model-value="value => { if (!value) confirming = null }">
       <div v-if="confirming" class="space-y-4 text-sm text-ink-gray-8">
         <p v-if="confirming.action === 'pin'">{{ PIN_TEXT }}</p>
@@ -114,14 +117,19 @@ onBeforeUnmount(() => stop?.())
   </section>
 </template>
 <style scoped>
-.whatsapp-account { display:flex; flex-direction:column; gap:8px; padding-bottom:16px; border-bottom:1px solid var(--outline-gray-2); }
-.whatsapp-account__title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.whatsapp-account h3 { font-size:15px; font-weight:600; overflow-wrap:anywhere; }
-.whatsapp-account__name { color:var(--ink-gray-6); }
-.whatsapp-account__health { display:grid; gap:8px; margin:4px 0; }
-.whatsapp-account__health > div { display:grid; grid-template-columns:minmax(120px,170px) minmax(0,1fr); align-items:center; gap:12px; }
-.whatsapp-account__health dt { color:var(--ink-gray-5); }
-.whatsapp-account__health dd { margin:0; color:var(--ink-gray-8); overflow-wrap:anywhere; }
+.whatsapp-account { border-bottom:1px solid var(--relay-stroke); }
+.whatsapp-account .settings-row { border-bottom:0; }
+.whatsapp-accounts-error { margin:12px 16px 0; }
+.whatsapp-accounts-note { margin:12px 16px 0; font-size:13px; color:var(--relay-ink-2); }
+.whatsapp-account__more, .whatsapp-account__manage { padding:0 16px 12px 62px; font-size:13px; color:var(--relay-ink-3); }
+.whatsapp-account__more summary { cursor:pointer; font-size:12.5px; }
+.whatsapp-account__manage { display:flex; flex-direction:column; gap:10px; }
+.whatsapp-account__health { display:grid; gap:8px; margin:8px 0; }
+.whatsapp-account__health > div { display:grid; grid-template-columns:170px minmax(0,1fr); align-items:center; gap:12px; }
+.whatsapp-account__health dt { color:var(--relay-ink-3); }
+.whatsapp-account__health dd { margin:0; color:var(--relay-ink); overflow-wrap:anywhere; }
 .whatsapp-account__switches { display:grid; gap:10px; }
-.whatsapp-account__switches small { display:block; color:var(--ink-gray-5); padding-left:24px; }
+.whatsapp-account__switches small { display:block; color:var(--relay-ink-3); padding-left:24px; }
+.whatsapp-accounts-foot { padding:12px 16px; }
+@media (max-width:768px) { .whatsapp-account__more, .whatsapp-account__manage { padding-left:16px; } .whatsapp-account__health > div { grid-template-columns:1fr; gap:2px; } }
 </style>

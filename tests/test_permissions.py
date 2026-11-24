@@ -182,7 +182,7 @@ class MetadataTests(unittest.TestCase):
         from pathlib import Path
         field_names = {
             'Relay Automation Policy':'channel', 'Relay Email Rule':'channel',
-            'Relay Email Preference':'user', 'Relay Contact Type':'business_doctype',
+            'Relay Email Preference':'user', 'Relay User Profile':'user', 'Relay Contact Type':'business_doctype',
             'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
             'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title', 'Relay Document Action':'title',
             'Relay WhatsApp Billing Month':'record_key',

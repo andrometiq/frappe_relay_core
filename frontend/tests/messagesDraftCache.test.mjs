@@ -77,20 +77,14 @@ test('a reaction keeps the composer', async t => {
   assert.equal(state.body.value, 'Draft'); assert.equal(state.quoting.value, true)
 })
 
-test('reopened contacts and channels read current messages and statuses without polling', async t => {
-  const {state, records, row, calls} = fixture(t)
+test('reopened contacts read current messages and statuses without polling', async t => {
+  const {state, records, row} = fixture(t)
   records.set('A', [row('A-1'), row('A-2', 'whatsapp')])
   await state.open('A'); await state.open('B')
   records.set('A', [{...row('A-1'), status:'Read'}, row('A-2', 'whatsapp'), row('A-3')])
   await state.open('A')
   assert.equal(state.rows.value.find(item => item.name === 'A-1').status, 'Read')
   assert.equal(state.rows.value.at(-1).name, 'A-3')
-  await state.filterChannel('telegram'); await state.filterChannel('whatsapp')
-  records.get('A').push(row('A-4'))
-  await state.filterChannel('telegram')
-  assert.equal(state.rows.value.at(-1).name, 'A-4')
-  // Contact threads reopen at the first unread or newest message, so they read the server, not a cached window.
-  assert.ok(calls.some(call => call.method === 'inbox.view_state' && call.values.channel === 'telegram'))
 })
 
 test('business cache keys separate Customer and Supplier and denied restores expose no cached data', async t => {

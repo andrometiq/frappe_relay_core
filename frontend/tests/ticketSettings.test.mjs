@@ -121,14 +121,15 @@ test('the Tickets URL holds the view, every list filter and the open ticket', ()
   const filters = { query: 'late parcel', ticket_status: 'Open', mine: 1, state: 'Open', assigned: 1, business_type: 'Customer' }
   const route = ticketRoute({ view: 'tickets', filters, ticket: 'TKT-2' })
   assert.deepEqual(readTicketRoute(route), { view: 'tickets', ticket: 'TKT-2', filters: { ...filters, assigned: '1' } })
-  assert.equal(ticketRoute({ view: 'tickets', filters: { query: '', ticket_status: '', mine: 0 } }), '#/tickets?view=tickets')
-  assert.equal(ticketRoute({ view: 'dashboard', filters }), '#/tickets')
+  assert.equal(ticketRoute({ view: 'tickets', filters: { query: '', ticket_status: '', mine: 0 } }), '#/tickets')
+  assert.equal(ticketRoute({ view: 'dashboard', filters }), '#/tickets?view=dashboard')
 })
 
-test('a bare ticket link opens over the list and unknown views fall back to the dashboard', () => {
+test('the list is the default view: bare, ticket and unknown links open it', () => {
   assert.equal(readTicketRoute('#/tickets?ticket=TKT-3').view, 'tickets')
-  assert.equal(readTicketRoute('#/tickets?view=other').view, 'dashboard')
-  assert.equal(readTicketRoute('#/tickets').view, 'dashboard')
+  assert.equal(readTicketRoute('#/tickets?view=other').view, 'tickets')
+  assert.equal(readTicketRoute('#/tickets').view, 'tickets')
+  assert.equal(readTicketRoute('#/tickets?view=dashboard').view, 'dashboard')
 })
 
 test('empty assignee and type filters survive navigation and differ from all tickets', () => {

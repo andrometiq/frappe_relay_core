@@ -8,7 +8,7 @@ import { closeRoute, openRoute } from '../src/useViewRoute.js'
 import { browser } from './browserHistory.js'
 import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
 import { inputTime, siteTime } from '../src/services/campaignAudience.js'
-import { emptySettings, emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketFilterRoute, ticketRoute } from '../src/services/ticketSettings.js'
+import { emptySettings, emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketFilterRoute, ticketRoute, ticketViewFilters, ticketViewKey, ticketViews } from '../src/services/ticketSettings.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -32,12 +32,15 @@ function tickets(t, calls = [], failure = null) {
     calls.push([method, values])
     if (method === 'tickets.close_and_release' && failure) throw Error(failure)
     if (method === 'tickets.directory') return { items: [{ name: 'T-1' }, { name: 'T-2' }] }
-    if (values.name === 'T-MISSING') throw Error('Ticket not found')
+    if (method === 'business_types.list_types') return [{ business_doctype: 'Customer', enabled: 1 }]
+    if (values?.name === 'T-MISSING') throw Error('Ticket not found')
     if (method === 'tickets.read') return { name: values.name, status: 'Open' }
+    if (method === 'tickets.dashboard') return { totals: { open: 2, assigned: 1, unassigned: 1, resolved_today: 0 }, statuses: [], assignees: [], business_types: [], oldest_open: null, recent: [] }
     return { items: [], next: null }
   }
   return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters, readTicketRoute, ticketRoute, linkedTitle: () => '', toast: () => {},
-    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'pickStatus', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load'])
+    ticketViewFilters, ticketViewKey, ticketViews, recordTitle: row => row.subject || row.name, relativeTime: () => '1h ago',
+    useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'pickStatus', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load', 'pickView', 'sections', 'activeView', 'stats', 'openStat', 'filterLabel', 'refreshView'])
 }
 
 test('a ticket opened from the list adds one entry, switching replaces it and Back shows the list', async t => {
@@ -45,28 +48,74 @@ test('a ticket opened from the list adds one entry, switching replaces it and Ba
   const state = await tickets(t)
   state.select(state.page.value.items[0])
   state.select(state.page.value.items[1])
-  assert.deepEqual(page.entries(), ['#/tickets?view=tickets', '#/tickets?view=tickets&ticket=T-2'])
+  assert.deepEqual(page.entries(), ['#/tickets?view=tickets', '#/tickets?ticket=T-2'])
   page.history.back()
   assert.equal(state.selected.value, null)
   assert.equal(state.view.value, 'tickets')
 })
 
-test('the Dashboard and Tickets tabs and list filters replace the URL, so the tab and URL agree', async t => {
+test('the Dashboard button, sidebar views and list filters replace the URL, so the view and URL agree', async t => {
   const page = browser(t, '#/tickets')
   const state = await tickets(t)
-  state.view.value = 'tickets'
-  await settle()
-  assert.deepEqual(page.entries(), ['#/tickets?view=tickets'])
-  state.setFilter({ mine: 1, query: 'parcel' })
-  await settle()
-  assert.deepEqual(page.entries(), ['#/tickets?view=tickets&query=parcel&mine=1'])
+  assert.equal(state.view.value, 'tickets')
   state.view.value = 'dashboard'
   await settle()
-  assert.deepEqual(page.entries(), ['#/tickets'])
+  assert.deepEqual(page.entries(), ['#/tickets?view=dashboard'])
+  state.pickView({ filters: { state: 'Open', mine: 1 } })
+  await settle()
+  assert.equal(state.view.value, 'tickets')
+  assert.deepEqual(page.entries(), ['#/tickets?mine=1&state=Open'])
+  assert.equal(state.activeView.value, 'mine')
+  state.setFilter({ query: 'parcel' })
+  state.pickView({ filters: { state: 'Open', assigned_to: '' } })
+  await settle()
+  assert.deepEqual(page.entries(), ['#/tickets?query=parcel&state=Open&assigned_to='])
+  assert.equal(state.activeView.value, 'unassigned')
+})
+
+test('a status pick keeps Assigned to me active and other filters are named with Clear filter', async t => {
+  browser(t, '#/tickets')
+  const state = await tickets(t)
+  state.pickView({ filters: { state: 'Open', mine: 1 } })
+  state.pickStatus('Closed')
+  assert.equal(state.activeView.value, 'mine', 'The view stays active with its status')
+  state.setFilter({ assigned: 1 })
+  assert.equal(state.activeView.value, '')
+  assert.equal(state.filterLabel.value, 'Assigned to me · With an owner')
+  state.setFilter({ assigned: 0, mine: 0, business_type: 'Customer', ticket_status: '', state: '', unlinked: 1 })
+  assert.equal(state.filterLabel.value, 'Business type: Customer · Not linked to a business record')
+})
+
+test('a ticket event refreshes the list only while it shows, and the counts once', async t => {
+  browser(t, '#/tickets')
+  const calls = []
+  const state = await tickets(t, calls)
+  const count = method => calls.filter(([name]) => name === method).length
+  let before = [count('tickets.directory'), count('tickets.dashboard')]
+  await state.refreshView()
+  assert.deepEqual([count('tickets.directory') - before[0], count('tickets.dashboard') - before[1]], [1, 1])
+  state.view.value = 'dashboard'
+  await settle()
+  before = [count('tickets.directory'), count('tickets.dashboard')]
+  await state.refreshView()
+  assert.deepEqual([count('tickets.directory') - before[0], count('tickets.dashboard') - before[1]], [0, 1], 'The dashboard view reads only the counts')
+  state.view.value = 'tickets'
+  await settle()
+  assert.equal(count('tickets.directory') - before[0], 1, 'The list reloads once when it shows again')
+})
+
+test('stat cards open their tickets and the dashboard counts the sidebar views', async t => {
+  browser(t, '#/tickets')
+  const state = await tickets(t)
+  assert.deepEqual(state.stats.value.map(stat => [stat.label, stat.value]), [['Open', 2], ['Unassigned', 1], ['Resolved today', 0], ['Oldest open', '—']])
+  assert.equal(state.sections.value[0].items.find(item => item.key === 'open').count, 2)
+  state.openStat(state.stats.value[1])
+  assert.equal(state.filters.value.assigned_to, '')
+  assert.equal(state.activeView.value, 'unassigned')
 })
 
 test('closing a ticket returns to the exact filtered list, also after a status pick clears dashboard filters', async t => {
-  const list = '#/tickets?view=tickets&state=Open&assigned_to=a%40example.invalid'
+  const list = '#/tickets?state=Open&assigned_to=a%40example.invalid'
   const page = browser(t, list)
   const state = await tickets(t)
   assert.equal(state.filters.value.assigned_to, 'a@example.invalid')
@@ -76,16 +125,16 @@ test('closing a ticket returns to the exact filtered list, also after a status p
   assert.equal(state.view.value, 'tickets')
   state.pickStatus('Closed')
   await settle()
-  assert.deepEqual(page.entries(), ['#/tickets?view=tickets&ticket_status=Closed&assigned_to=a%40example.invalid'])
+  assert.deepEqual(page.entries(), ['#/tickets?ticket_status=Closed&assigned_to=a%40example.invalid'])
 })
 
 test('a ticket opened from the dashboard closes back to the dashboard', async t => {
-  const page = browser(t, '#/tickets')
+  const page = browser(t, '#/tickets?view=dashboard')
   const state = await tickets(t)
   state.select({ name: 'T-9' })
-  assert.deepEqual(page.entries(), ['#/tickets', '#/tickets?view=dashboard&ticket=T-9'])
+  assert.deepEqual(page.entries(), ['#/tickets?view=dashboard', '#/tickets?view=dashboard&ticket=T-9'])
   state.close()
-  assert.deepEqual(page.entries(), ['#/tickets'])
+  assert.deepEqual(page.entries(), ['#/tickets?view=dashboard'])
   assert.equal(state.view.value, 'dashboard')
 })
 
@@ -103,7 +152,7 @@ test('a ticket opened from a chat link closes to the ticket list', async t => {
   const state = await tickets(t)
   assert.equal(state.view.value, 'tickets')
   state.close()
-  assert.deepEqual(page.entries(), ['#/tickets?view=tickets'])
+  assert.deepEqual(page.entries(), ['#/tickets'])
   assert.equal(state.selected.value, null)
 })
 
@@ -114,13 +163,13 @@ test('a ticket link opens its detail and a missing ticket falls back to the list
   const state = await tickets(t)
   assert.equal(state.selected.value, null)
   assert.equal(state.error.value, 'Ticket not found')
-  assert.equal(page.location.hash, '#/tickets?view=tickets')
+  assert.equal(page.location.hash, '#/tickets')
 })
 
 test('dashboard links select the Tickets tab with assignee, Others or type filters', async t => {
   for (const filters of [{ assigned_to: 'a@example.invalid' }, { assigned_to: '' },
     { exclude_assignees: JSON.stringify(['a@example.invalid', 'b@example.invalid']) }, { ticket_type: 'Delivery' }]) {
-    const page = browser(t, '#/tickets')
+    const page = browser(t, '#/tickets?view=dashboard')
     const calls = [], state = await tickets(t, calls)
     openRoute(ticketFilterRoute(filters))
     state.readRoute()

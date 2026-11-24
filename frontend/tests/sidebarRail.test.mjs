@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { railGroups } from '../src/services/navigation.js'
+import { activeRailGroup, railGroups } from '../src/services/navigation.js'
 
 const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/SiteApp.vue', import.meta.url), 'utf8')
@@ -10,27 +10,38 @@ const block = (source, selector) => source.match(new RegExp(selector.replace(/[.
 const page = name => ({ name, label: name })
 const names = groups => groups.map(group => [group.name, group.pages.map(item => item.name)])
 
-test('the desktop rail is 72px wide and every item shows its label and a tooltip', () => {
-  assert.match(block(rail, '.v1-shell.relay-shell'), /grid-template-columns:72px minmax\(0,1fr\)/)
-  assert.match(app, /class="rail-label">\{\{ group\.name \}\}/)
+test('the desktop rail is 56px of icons and every item has a tooltip and a spoken name', () => {
+  assert.match(css, /\.v1-shell\.relay-shell\{grid-template-columns:56px auto minmax\(0,1fr\)/)
+  assert.match(block(rail, '  .v1-shell.relay-shell>.relay-rail'), /width:56px/)
   assert.equal((app.match(/:title="group\.name"/g) || []).length, 2)
-  assert.ok(!/rail-label[^{]*\{[^}]*(opacity:0|display:none)/.test(rail), 'labels are never hidden')
+  assert.equal((app.match(/:aria-label="group\.name"/g) || []).length, 2)
 })
 
-test('rail groups keep the order Chats, Tickets, Contacts, WhatsApp, Automation and Settings at the bottom', () => {
+test('rail groups keep the order Inbox, Tickets, Contacts, Templates, Campaigns, Automation, Reports and Settings at the bottom', () => {
   const all = ['Messages', 'Tickets', 'Contacts', 'WhatsApp', 'Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events', 'Settings', 'Teams', 'Activity'].map(page)
-  const groups = railGroups(all)
-  assert.deepEqual(names(groups), [['Chats', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['WhatsApp', ['WhatsApp']],
-    ['Automation', ['Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events']], ['Settings', ['Settings', 'Teams', 'Activity']]])
+  const groups = railGroups(all, [{ name: 'templates' }, { name: 'campaigns' }])
+  assert.deepEqual(names(groups), [['Inbox', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['Templates', ['WhatsApp']],
+    ['Campaigns', ['WhatsApp']], ['Automation', ['Business events', 'Flows', 'Skills', 'Knowledge', 'Persona', 'Events']], ['Reports', ['Activity']], ['Settings', ['Settings', 'Teams']]])
   assert.deepEqual(groups.filter(group => group.bottom).map(group => group.name), ['Settings'])
   assert.equal(groups.find(group => group.name === 'Tickets').icon, 'ticket')
 })
 
+test('Campaigns needs its WhatsApp section and WhatsApp tabs light the matching rail group', () => {
+  const groups = railGroups(['Messages', 'WhatsApp'].map(page), [{ name: 'templates' }])
+  assert.deepEqual(names(groups), [['Inbox', ['Messages']], ['Templates', ['WhatsApp']]])
+  const both = railGroups(['WhatsApp'].map(page), [{ name: 'templates' }, { name: 'campaigns' }])
+  assert.equal(activeRailGroup(both, 'WhatsApp', 'campaigns').name, 'Campaigns')
+  assert.equal(activeRailGroup(both, 'WhatsApp', 'forms').name, 'Templates')
+  assert.equal(activeRailGroup(both, 'Messages', ''), undefined)
+})
+
 test('a group without allowed pages is hidden and a group opens its first allowed page', () => {
   assert.deepEqual(names(railGroups(['Messages', 'Tickets', 'Contacts', 'Teams'].map(page))),
-    [['Chats', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['Settings', ['Teams']]])
-  assert.match(app, /@click="view = group\.pages\[0\]\.name"/)
-  assert.match(app, /v-if="currentGroup\?\.pages\.length > 1" class="v1-tabs workspace-subtabs"/)
+    [['Inbox', ['Messages']], ['Tickets', ['Tickets']], ['Contacts', ['Contacts']], ['Settings', ['Teams']]])
+  assert.match(app, /else view\.value = group\.pages\[0\]\.name/)
+  assert.match(app, /currentGroup\.value\?\.pages\.length > 1 && !currentGroup\.value\.ownSidebar \? currentGroup\.value : null/)
+  assert.equal(railGroups(['Settings', 'Teams'].map(page))[0].ownSidebar, true, 'Settings draws its own sidebar')
+  assert.match(app, /<SectionSidebar v-if="sidebarGroup"/)
 })
 
 test('the Chats badge and the inbox Unread tab read one count', () => {
@@ -46,4 +57,11 @@ test('the phone layout keeps the bottom tab bar and hides the rail', () => {
   const mobile = readFileSync(new URL('../src/mobile.css', import.meta.url), 'utf8')
   assert.match(mobile, /\.v1-shell\.relay-shell>\.app-nav,\.v1-shell\.relay-shell>\.relay-nav-backdrop\{display:none!important\}/)
   assert.match(app, /<MobileTabBar v-if="isMobile && ready"/)
+})
+
+test('the shell keeps no dead brand styles, the inbox pane is called Inbox and the profile dialog is 560px on desktop', () => {
+  assert.doesNotMatch(css, /relay-brand|relay-logo/)
+  const inbox = readFileSync(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
+  assert.match(inbox, /<h2>Inbox<\/h2>/)
+  assert.match(block(rail, '  .relay-dialog.profile-dialog'), /width:min\(560px,100%\)/)
 })

@@ -95,6 +95,8 @@ def install_indexes():
             ('relay_business_time',['business_doctype','business_name']),
         ):
             frappe.db.add_index('Relay Message',scope+['relay_timeline_time','name'],name)
+        # The unread count of a record reads its messages in name order (relay_chats.unread_threads).
+        frappe.db.add_index('Relay Message',['business_doctype','business_name','name'],'relay_business_name')
         frappe.clear_cache(doctype='Relay Message')
         return
     for name, scope in (
@@ -104,3 +106,4 @@ def install_indexes():
         ('relay_business_time', 'business_doctype, business_name'),
     ):
         frappe.db.sql(f'CREATE INDEX IF NOT EXISTS "{name}" ON "tabRelay Message" ({scope}, (COALESCE(sent_at, creation)), name)')
+    frappe.db.sql('CREATE INDEX IF NOT EXISTS "relay_business_name" ON "tabRelay Message" (business_doctype, business_name, name)')

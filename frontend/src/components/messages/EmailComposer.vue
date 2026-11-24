@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Button, Dropdown, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
 import ComposerMore from './ComposerMore.vue'
+import ReplyLock from './ReplyLock.vue'
 import { sizeLabel } from './attachmentFormats'
 import { composerActions } from '../../services/composerActions'
 import { messagesKey } from '../../composables/messagesContext'
@@ -13,7 +14,8 @@ import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 const { source, busy, beginEmail, finishEmail } = inject(messagesKey)
 const capabilities = inject('relayCapabilities', ref({}))
 // `mode` is "reply" or "note"; note mode shows only the note slot, so a note never goes out as email.
-const props = defineProps({ mode: { type: String, default: 'reply' }, noteBusy: Boolean })
+// `lock` names the open thread's reply target (see replyLock).
+const props = defineProps({ mode: { type: String, default: 'reply' }, noteBusy: Boolean, lock: Object })
 const emit = defineEmits(['mode'])
 const noting = computed(() => props.mode === 'note')
 let active = true
@@ -22,6 +24,9 @@ const anchor = source.value
 const draft = reactive(emailComposition(anchor))
 const error = ref(''), notice = ref(''), activity = ref(''), sending = ref(false), fileInput = ref(null)
 const recipientsOpen = ref(false)
+// A reply on a locked thread keeps its recipient and subject, so those fields fold away until staff open them.
+const fieldsOpen = ref(false)
+const fieldsShown = computed(() => !props.lock || draft.mode !== 'reply' || fieldsOpen.value || !!error.value)
 const actions = computed(() => composerActions({ email: true, busy: busy.value || sending.value }).map(action => action.id === 'files' ? { ...action, disabled: disabled.value } : action))
 const emailModes = [['reply', 'Reply'], ['reply-all', 'Reply all'], ['forward', 'Forward']]
 const modeOptions = computed(() => emailModes.map(([value, label]) => ({ label, disabled: disabled.value, onClick: () => modeChanged(value) })))
@@ -130,12 +135,15 @@ useRealtimeRefresh([],['message_actions'],check)
       <slot name="note" />
     </template>
     <template v-else>
-      <div v-if="$slots.recipient" class="composer-recipient"><slot name="recipient" /></div>
-      <div class="email-actions"><Dropdown :options="modeOptions" placement="top" touch-targets><Button :label="emailModes.find(([value]) => value === draft.mode)?.[1]" icon-right="chevron-down" variant="ghost" :disabled="disabled" aria-label="Email action" /></Dropdown><slot name="channel" /></div>
+      <ReplyLock v-if="lock" :lock="lock" />
+      <div class="email-actions"><Dropdown :options="modeOptions" placement="top" touch-targets><Button :label="emailModes.find(([value]) => value === draft.mode)?.[1]" icon-right="chevron-down" variant="ghost" :disabled="disabled" aria-label="Email action" /></Dropdown>
+        <Button v-if="lock && draft.mode === 'reply'" :label="fieldsOpen ? 'Hide recipients' : 'To and subject'" variant="ghost" :aria-expanded="fieldsOpen" @click="fieldsOpen = !fieldsOpen" /></div>
+      <template v-if="fieldsShown">
       <div class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" aria-label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
       <div v-if="recipientsOpen" class="grid gap-2 sm:grid-cols-2"><FormControl v-model="draft.cc" label="CC" :disabled="disabled" /><FormControl v-model="draft.bcc" label="BCC (private delivery audit only)" :disabled="disabled" /></div>
       <FormControl v-model="draft.subject" class="email-inline-field" label="Subject" aria-label="Subject" maxlength="998" :disabled="disabled" required />
       <details class="email-signature"><summary>Signature &amp; sender</summary><p>From {{ anchor.channel_title || 'the configured email account' }}. Review recipients before sending.</p><FormControl v-model="draft.signature" label="Signature" type="textarea" maxlength="2000" :disabled="disabled" /><Button label="Save my signature" :disabled="disabled" @click="saveSignature" /></details>
+      </template>
       <div v-if="draft.attachments.length" class="email-attachments"><span v-for="(file,index) in draft.attachments" :key="file.name">{{ file.filename }} <Button label="Remove" :disabled="disabled" @click="draft.attachments.splice(index,1)" /></span></div>
       <div class="composer-writing">
         <ComposerMore :actions="actions" :disabled="sending || busy" @action="moreAction"><template #details>From {{ anchor.channel_title || 'the configured email account' }}<p>To {{ draft.to }}</p></template></ComposerMore>

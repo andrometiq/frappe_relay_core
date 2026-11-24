@@ -1,9 +1,19 @@
-// Phone tab bar: these pages get a tab when the user may see them; every other allowed page goes to More.
-const TAB_PAGES = ['Messages', 'Tickets', 'Contacts']
+// Phone tab bar: Inbox, Tickets and Templates get a tab when the user may see them; every other allowed page goes to More.
+// A tab may rename its page and open one section of it, as Templates does for WhatsApp.
+const TABS = [
+  { name: 'Messages', label: 'Inbox', icon: 'inbox' },
+  { name: 'Tickets', label: 'Tickets', icon: 'ticket' },
+  { name: 'WhatsApp', label: 'Templates', icon: 'layout', section: 'templates' },
+]
 
 export function splitMobileNav(items) {
-  const tabs = TAB_PAGES.map(name => items.find(item => item.name === name)).filter(Boolean)
-  return { tabs, more: items.filter(item => !TAB_PAGES.includes(item.name)) }
+  const tabs = TABS.filter(tab => items.some(item => item.name === tab.name))
+  return { tabs, more: items.filter(item => !TABS.some(tab => tab.name === item.name)) }
+}
+
+// The highlighted tab: a section tab only on its own section, so Campaigns, Forms and Billing light More instead.
+export function activeMobileTab(tabs, view, section) {
+  return tabs.find(tab => tab.name === view && (!tab.section || tab.section === section))?.name || 'More'
 }
 
 // The contact info page is the open chat route plus info=1, so Back returns to the chat.

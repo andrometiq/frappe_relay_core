@@ -4,3 +4,24 @@
 .relay-button--outline.relay-button--red { color: var(--relay-red, #c42b1c); }
 @keyframes relay-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .relay-toast { animation: none; } }
+
+/* Presence dot on avatars that carry a status. */
+.relay-avatar[data-status] { position: relative; overflow: visible; }
+.relay-avatar[data-status] img { border-radius: inherit; }
+.relay-avatar[data-status]::after { content: ''; position: absolute; right: -2px; bottom: -2px; width: 34%; height: 34%; min-width: 9px; min-height: 9px; max-width: 16px; max-height: 16px; box-sizing: border-box; border: 2px solid var(--relay-layer, #fff); border-radius: 50%; background: var(--relay-status-available, #30a46c); transition: background-color 150ms ease; }
+.relay-avatar[data-status=busy]::after { background: var(--relay-status-busy, #f76b15); }
+.relay-avatar[data-status=away]::after { background: var(--relay-status-away, #8b8d98); }
+.relay-avatar[data-status=dnd]::after { background: var(--relay-status-dnd, #e5484d); }
+
+/* Segmented choice and switch, as in the profile dialog. */
+.relay-segmented { display: inline-flex; align-self: flex-start; max-width: 100%; overflow: hidden; border: 1px solid var(--relay-stroke-strong, #d9d9e0); border-radius: 6px; }
+.relay-segmented button { height: 30px; padding: 0 12px; border-right: 1px solid var(--relay-stroke-strong, #d9d9e0); color: var(--relay-ink-3, #60646c); font-size: 12.5px; transition: background-color 150ms ease, color 150ms ease; }
+.relay-segmented button:last-child { border-right: 0; }
+.relay-segmented button:hover { background: var(--relay-hover, #f0f0f3); }
+.relay-segmented button[aria-checked=true] { background: var(--relay-accent-soft, #edf2fe); color: var(--relay-accent-text, #3a5bc7); font-weight: 500; }
+.relay-switch { position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: var(--relay-stroke-strong, #d9d9e0); transition: background-color 180ms ease; }
+.relay-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 20%); transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
+.relay-switch[aria-checked=true] { background: var(--relay-accent, #3e63dd); }
+.relay-switch[aria-checked=true]::after { transform: translateX(14px); }
+.relay-switch:focus-visible, .relay-segmented button:focus-visible { outline: 2px solid var(--relay-accent, #3e63dd); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .relay-switch, .relay-switch::after { transition: none; } }

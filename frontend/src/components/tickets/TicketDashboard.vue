@@ -1,27 +1,18 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { Users } from '@lucide/vue'
-import { Avatar, Badge, ErrorMessage } from '@relay/ui'
+import { Badge } from '@relay/ui'
+import UserAvatar from '../UserAvatar.vue'
 import LoadingRows from '../LoadingRows.vue'
-import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
 import { recordTitle } from '../../services/recordTitle'
 import { assigneeChartRows, chartRows, statusLook, ticketFilterRoute } from '../../services/ticketSettings'
-import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { relativeTime } from '../relativeTime'
 
-const props = defineProps({ settings: Object })
+// The page reads tickets.dashboard once for its sidebar, stat cards and these charts.
+const props = defineProps({ settings: Object, counts: Object })
 const emit = defineEmits(['open'])
-const counts = ref(null), error = ref('')
-let generation = 0
-
-async function load() {
-  const current = ++generation
-  try {
-    const result = await coreApi('tickets.dashboard')
-    if (current === generation) { counts.value = result; error.value = '' }
-  } catch (e) { if (current === generation) error.value = e.message }
-}
+const counts = computed(() => props.counts)
 const person = user => user ? linkedTitle('User', user, user) : 'Unassigned'
 const kpis = computed(() => {
   const totals = counts.value.totals
@@ -47,14 +38,11 @@ const panels = computed(() => [
   { key: 'statuses', title: 'Tickets by status', rows: statuses.value },
   { key: 'business', title: 'Open tickets by business type', rows: businessTypes.value },
 ])
-onMounted(load)
-useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
 </script>
 
 <template>
   <div class="ticket-dashboard">
-    <ErrorMessage :message="error" />
-    <LoadingRows v-if="!counts && !error" label="Loading dashboard…" />
+    <LoadingRows v-if="!counts" label="Loading dashboard…" />
     <template v-if="counts">
       <div class="ticket-kpis">
         <a v-for="kpi in kpis" :key="kpi.label" class="ticket-kpi" :href="ticketFilterRoute(kpi.filters)" :title="kpi.hint" :aria-label="`${kpi.label}: ${kpi.value}. Show these tickets`">
@@ -73,7 +61,7 @@ useRealtimeRefresh(['Relay Ticket'], ['tickets'], load)
             <a class="ticket-bar" :href="ticketFilterRoute(row.filters)" :title="(row.title || row.label) + ': ' + row.tickets" :aria-label="`Show ${row.tickets} tickets: ${row.label}`">
               <span class="ticket-bar__label">
                 <span v-if="panel.avatars && row.key === 'others'" class="ticket-bar__group" aria-hidden="true"><Users :stroke-width="1.7" /></span>
-                <Avatar v-else-if="panel.avatars" :label="row.key ? row.label : ''" size="sm" />
+                <UserAvatar v-else-if="panel.avatars" :user="row.key" :label="row.key ? row.label : ''" size="sm" />
                 <Badge v-else-if="row.theme" :label="row.label" :theme="row.theme" />
                 <span v-if="!row.theme">{{ row.label }}</span>
               </span>

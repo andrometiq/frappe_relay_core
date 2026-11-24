@@ -4,6 +4,7 @@ import { ref, watch, onBeforeUnmount } from "vue";
 import { Button, ErrorMessage } from "@relay/ui";
 import { useRealtimeRefresh } from "../../composables/useRealtimeRefresh";
 import ChatPanel from "./ChatPanel.vue";
+import UserAvatar from "../UserAvatar.vue";
 import { coreApi } from "../../services/coreApi";
 import { dateTime } from "../relativeTime";
 // The list of notes for one chat. New notes and replies are written in the composer's Internal note mode.
@@ -90,6 +91,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesView
       <div v-if="more" ref="moreSentinel" class="h-px" aria-hidden="true" />
       <article v-for="row in rows" :key="row.name">
         <div class="note-author">
+          <UserAvatar :user="row.author" :label="row.author_name" size="sm" />
           <strong>{{ row.author_name }}</strong
           ><time>{{ dateTime(row.creation) }}</time>
         </div>
@@ -182,6 +184,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: more, root: notesView
 }
 .note-author {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   font-size: 12px;

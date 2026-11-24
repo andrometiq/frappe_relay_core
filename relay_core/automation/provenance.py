@@ -70,6 +70,9 @@ def telegram_message(payload):
             context['caption'] = body[:2000]
     if sender.get('id') is not None:
         context['participant_id'] = integer(sender['id'], positive=True)
+    # A private chat's public handle names the thread in the inbox; the chat id stays the address.
+    if chat['type'] == 'private' and isinstance(chat.get('username'), str) and re.fullmatch(r'[A-Za-z0-9_]{4,32}', chat['username']):
+        context['username'] = chat['username']
     sender_chat = message.get('sender_chat')
     if sender_chat:
         context['sender_chat_id'] = integer(sender_chat.get('id'))

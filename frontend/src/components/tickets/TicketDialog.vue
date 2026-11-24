@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge, Button, Dialog, ErrorMessage, FormControl } from '@relay/ui'
+import UserAvatar from '../UserAvatar.vue'
 import ChoiceField from '../fields/ChoiceField.vue'
 import TicketDiscussion from '../TicketDiscussion.vue'
 import { coreApi } from '../../services/coreApi'
@@ -52,7 +53,7 @@ watch(() => props.ticket.contact_person, async person => {
         <dt>Assigned to</dt>
         <dd>
           <ChoiceField v-if="ticket.can_assign && ticket.contact" :model-value="''" :field="ownerField" @update:model-value="user => user && emit('update', 'assign', { user })" />
-          <span v-else :class="{ 'ticket-unassigned': !ticket.assigned_to }">{{ linkedTitle('User', ticket.assigned_to, 'Unassigned') }}</span>
+          <span v-else class="ticket-assignee" :class="{ 'ticket-unassigned': !ticket.assigned_to }"><UserAvatar v-if="ticket.assigned_to" :user="ticket.assigned_to" :label="linkedTitle('User', ticket.assigned_to)" size="sm" />{{ linkedTitle('User', ticket.assigned_to, 'Unassigned') }}</span>
         </dd>
       </dl>
       <dl class="ticket-dialog__fields" aria-label="Ticket details">

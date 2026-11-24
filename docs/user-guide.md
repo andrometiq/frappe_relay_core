@@ -159,10 +159,11 @@ Who: every Relay role.
 
 | Item | What it does |
 | --- | --- |
+| Sidebar views | All tickets, Open, Assigned to me, Unassigned, Resolved and one Open view per business type. Each view shows its count. On a phone, the button above the list opens the views. |
+| Stat cards | Open, Unassigned, Resolved today and Oldest open. Click a card to show those tickets. |
+| Filter tickets, status | Search the subject, or show only one status. |
+| Ticket list | Newest first. Each row shows the contact, the linked record, the assignee, the status and when the ticket last changed. |
 | Dashboard | Open and closed ticket counts, tickets per person and tickets per type. |
-| Tickets | One list of tickets, newest first. |
-| All, status tabs | Show all tickets, or only the tickets in one status. |
-| Assigned to me | Show only your tickets. |
 | Ticket settings | Managers add, rename, colour, sort and delete statuses and types. Each status is of type Open or Closed. A status or type that tickets use cannot be deleted. |
 | Ticket row | Opens the ticket in a dialog. |
 
@@ -208,7 +209,7 @@ What breaks if you change it: if you remove or change a number on the Contact in
 
 ### 4.4 WhatsApp
 
-Who: every Relay role sees the WhatsApp page. Some tabs are for managers only. The header shows the Hub account and "Connected" or "Needs setup".
+Who: every Relay role sees the WhatsApp page. Some tabs are for managers only. The Templates page has its own sidebar; the other tabs show the Hub account and "Connected" or "Needs setup".
 
 #### Templates
 
@@ -218,10 +219,11 @@ Who: all can view. Managers and System Managers can create, edit and delete.
 
 | Item | What it does |
 | --- | --- |
-| Refresh | Reads the template list again from the Hub. |
-| New template | Opens the template editor. |
-| Search, Status, Category, Language | Filters the list. |
-| Template row | Opens the template: status, "Reason from Meta" for a rejected template, category, language, header, body, footer and buttons. "Edit" and the bin button change or delete it. |
+| Sidebar | Status views (All, Approved, In review, Rejected, Paused or turned off) and categories, each with a count. It also lists the WhatsApp numbers and links to Forms, Billing and Account. |
+| Sync with Meta | Reads the template list again from the Hub. |
+| Create template | Opens the template editor in a side panel. |
+| Filter by name or text, Language | Filters the list. |
+| Template row | Opens the template in a side panel: status, "Reason from Meta" for a rejected template, quality, category, language, header, body with its variables marked, footer, buttons and a WhatsApp preview. "Edit" and "Delete template" change or delete it. |
 
 Template editor:
 
@@ -238,7 +240,8 @@ Template editor:
 | Footer | Optional short text without variables. |
 | Review examples | A sample value for each variable. Meta reads them during review. |
 | Buttons | Optional: website link, phone call, quick reply, copy code and others. |
-| Submit for review | Sends the template to Meta. |
+| Preview | Shows the message as WhatsApp shows it, with your unsaved values and examples. |
+| Send to Meta for approval | Sends the template to Meta. |
 
 What happens after you submit: the status is PENDING. Meta decides, usually within minutes, sometimes later. The list then shows APPROVED or REJECTED. Only APPROVED templates appear in pickers, campaigns, business events and document actions.
 
@@ -340,11 +343,21 @@ Who sets it up: Manager or System Manager, in Desk at Relay Document Action. Who
 
 What happens: after you save the action and reload Desk, the button shows on saved documents of that type. The button opens a dialog with the filled template, the PDF name and the contacts with their numbers. Tick the contacts and click "Send". A green note says how many numbers got it. A list shows any number that failed and why.
 
-### 4.7 Roles & access
+### 4.7 Access
 
-This page explains assigned business types, manager access and system setup.
-Team creation, membership, group claiming and team filters are hidden.
-Existing team data and endpoints remain for compatibility.
+Who: every Relay role. Managers and System Managers change access; other users see only their own.
+
+Open it from Settings > People > Access.
+
+| Item | What it does |
+| --- | --- |
+| Access table | One row per person with a Relay role or System Manager: role, teams and business types. Managers and System Managers see every business type, so the table says All. |
+| Search, Role, Team, Business type | Filters the table. |
+| Add user | Pick a staff user and give them a Relay role. |
+| Row | Opens the side panel. Role is No access, User or Manager. Team User lets a person filter chats by every team. Teams are Relay Team members. Business types are Relay Contact Type users. Save sends only what you changed. |
+| What each role can do | The rights of User, Team User and Manager in Relay. |
+
+You cannot change your own role. A person whose roles come from a role profile keeps them; change the profile in Desk. Website users cannot get Relay access.
 
 ### 4.8 Settings & Setup
 
@@ -352,7 +365,9 @@ Who: Manager and System Manager. Connection changes require System Manager.
 
 ![Settings and setup](images/guide/settings.png)
 
-The setup cards show what is ready: Hub binding, Callback signing secret, WhatsApp channel, Business types and grouping, Contacts and links, and Callback processing and recovery. Click a card to go to that step.
+The Settings sidebar has these pages: Setup checklist; Channels (WhatsApp numbers, Telegram, Email); People (Access, Business types); Messages (Quick replies, Ticket statuses and types, Features); Account (Billing, Hub connection). On a phone, the button above the page opens the list.
+
+The setup checklist shows what is ready: Hub binding, Callback signing secret, WhatsApp channel, Business types and grouping, Contacts and links, and Callback processing and recovery. Click a row to go to that step.
 
 Hub connection:
 
@@ -436,8 +451,8 @@ What happens: Core reads the list of numbers from the Hub and makes one channel 
 
 ### 5.2 Give a staff member access (Manager or System Manager)
 
-1. In Desk, give the person Relay Communication User.
-2. In Relay Settings > Business types and users, add the person to each business type they should handle and save.
+1. Open Settings > People > Access and click "Add user", or click the person's row.
+2. Choose the User role, add each business type they should handle and click "Save".
 
 They see those enabled types across all channels, plus unlinked senders. Managers
 and System Managers see every enabled type without being listed. No Contact or

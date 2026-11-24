@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { navAllowed } from '../src/services/navigation.js'
-import { contactInfoRoute, isContactInfoRoute, splitMobileNav } from '../src/services/mobileNav.js'
+import { activeMobileTab, contactInfoRoute, isContactInfoRoute, splitMobileNav } from '../src/services/mobileNav.js'
 import { mediumChips } from '../src/services/enabledChannels.js'
 
 const navigation = [
@@ -10,18 +10,28 @@ const navigation = [
 ]
 const names = items => items.map(item => item.name)
 
-test('the tab bar shows Chats, Tickets and Contacts and More keeps the other allowed pages', () => {
+test('the tab bar shows Inbox, Tickets and Templates and More keeps the other allowed pages', () => {
   const admin = { configure: true, teams: true, enabled_channels: ['WhatsApp'] }
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, admin)))
-  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'Contacts'])
-  assert.deepEqual(names(more), ['Skills', 'WhatsApp', 'Teams', 'Settings'])
+  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'WhatsApp'])
+  assert.deepEqual(tabs.map(tab => tab.label), ['Inbox', 'Tickets', 'Templates'])
+  assert.equal(tabs[2].section, 'templates')
+  assert.deepEqual(names(more), ['Contacts', 'Skills', 'Teams', 'Settings'])
 })
 
 test('the tab bar uses the same gating as the rail', () => {
   const user = { configure: false, teams: false, enabled_channels: [] }
   const { tabs, more } = splitMobileNav(navigation.filter(item => navAllowed(item, user)))
-  assert.deepEqual(names(tabs), ['Messages', 'Tickets', 'Contacts'])
-  assert.deepEqual(names(more), [])
+  assert.deepEqual(names(tabs), ['Messages', 'Tickets'])
+  assert.deepEqual(names(more), ['Contacts'])
+})
+
+test('Templates lights only on its own section; other WhatsApp sections and More pages light More', () => {
+  const { tabs } = splitMobileNav(navigation)
+  assert.equal(activeMobileTab(tabs, 'WhatsApp', 'templates'), 'WhatsApp')
+  for (const section of ['campaigns', 'forms', 'billing', 'account']) assert.equal(activeMobileTab(tabs, 'WhatsApp', section), 'More')
+  assert.equal(activeMobileTab(tabs, 'Messages', ''), 'Messages')
+  assert.equal(activeMobileTab(tabs, 'Contacts', ''), 'More')
 })
 
 test('contact info is the chat route with info=1', () => {

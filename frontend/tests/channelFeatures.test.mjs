@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { alsoSendChoices, channelCan, channelFeature, composerKinds, defaultSendSource } from '../src/services/enabledChannels.js'
+import { channelCan, channelFeature, composerKinds, defaultSendSource } from '../src/services/enabledChannels.js'
 import { attachmentAccept, attachmentFormatError } from '../src/components/messages/attachmentFormats.js'
 import { whatsappCapabilities as capabilities } from './channelCapabilities.js'
 
@@ -50,8 +50,3 @@ test('the composer sends via the newest message of the first enabled channel', (
   assert.equal(defaultSendSource([], both), null)
 })
 
-test('Also send via is offered only when more than one channel is enabled', () => {
-  const choices = new Map([['live-number', 'WhatsApp'], ['bot', 'Telegram']])
-  assert.deepEqual(alsoSendChoices(capabilities, choices, 'live-number'), [])
-  assert.deepEqual(alsoSendChoices({ enabled_channels: ['WhatsApp', 'Telegram'] }, choices, 'live-number'), [['bot', 'Telegram']])
-})

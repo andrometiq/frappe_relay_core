@@ -88,7 +88,7 @@ Selecting a record animates the business browser into a fixed list pane and open
 │ rail │ Search businesses…  │ KESTREL TRADERS                      ⋯     │
 │      │ My group ▾          │ Customer · Sampleville Rep                 │
 │      ├─────────────────────┼────────────────────────────────────────────┤
-│      │ KESTREL TRADERS  3  │ [All 3] [Alex · …0101 2] [Sam · …0102 1]  │
+│      │ KESTREL TRADERS  3  │ [WhatsApp …0101 2] [WhatsApp …0102] [Email]│
 │      │ latest preview      ├────────────────────────────────────────────┤
 │      ├─────────────────────┤                    Today                   │
 │      │ NORTHWIND HOSIERY   │ Alex                                      │
@@ -99,7 +99,7 @@ Selecting a record animates the business browser into a fixed list pane and open
 │      │                     │                              │ Certainly.││
 │      │                     │                              └────────────┘│
 │      │                     ├────────────────────────────────────────────┤
-│      │                     │ To: Alex · …0101            Canned replies│
+│      │                     │ Replying on WhatsApp to …0101 from Sales   │
 │      │                     │ [Add]  Write a message…              [Send]│
 └──────┴─────────────────────┴────────────────────────────────────────────┘
 ```
@@ -108,14 +108,14 @@ The list pane may be resized on desktop within a safe range and remembers its wi
 
 ## Business and contact model
 
-- A business row aggregates all WhatsApp activity for that business document.
-- Opening a business initially shows an **All contacts** timeline.
-- If the business has one linked WhatsApp contact, the contact strip is omitted and that contact is the composer recipient.
-- With multiple contacts, the contact strip shows each person, masked number, unread count, and availability state.
-- Selecting a contact filters the timeline and fixes the composer recipient.
-- In **All contacts**, inbound bubbles display the sender. Replying to a bubble sets that sender as the recipient.
-- The composer remembers the last explicitly used recipient per business. It must never silently choose a different recipient.
-- A compact contact picker is part of the composer when a recipient still needs to be chosen. It is not a blocking dialog.
+- A business row aggregates all activity for that business document. The record types come from Relay Contact Type.
+- A thread is one contact endpoint on one of our channels, for example one WhatsApp number of a person on our Sales number. Each thread has its own tab, with the channel icon, the endpoint and its unread count. There is no mixed timeline.
+- `conversation_threads.threads` returns the threads of a record or a chat. `business_inbox.messages` and `api.messages` take `channel` and `sender_endpoint` to read one thread.
+- A record opens on the tab with the newest unread message, else on its newest thread. The URL keeps the open tab (`thread=`).
+- A reply always goes on the open thread: same channel, same endpoint, from the same business channel. The composer shows this in one line, for example "Replying on WhatsApp to +91 90000 01234 from Sales". There is no channel picker for a reply. Only a new conversation chooses a channel.
+- The unread count of a record is the sum of its threads. A thread keeps its messages after its newest operator read or reply, so reading one tab leaves the other tabs unread.
+- An inbox row shows a mark per channel endpoint. A blue dot marks the endpoints that hold unread messages.
+- A send shows at once as a grey bubble. It turns normal when the server accepts it. A send that fails stays on its bubble with the reason, Retry and Delete.
 - Contact search is server-backed and debounced. It searches name, phone, email, and fields configured as “show in link fields.” It never loads the entire contact table into the browser.
 
 ## Business directory behavior

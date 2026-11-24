@@ -153,6 +153,15 @@ test('a live reply window recheck keeps Send open; a new source waits for its wi
   assert.equal(view.canSend.value,true)
 })
 
+test('an in-flight send does not block the next message; loading the chat does', async t => {
+  const {state,view,sends}=fixture(t);await settle();state.body.value='Quantity 25';state.sending.value=1
+  assert.equal(view.canSend.value,true,'Sends queue in order and show at once as pending bubbles')
+  view.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(sends,['Quantity 25'])
+  state.busy.value=true
+  assert.equal(view.canSend.value,false);assert.ok(view.actions.value.filter(a=>a.id!=='details').every(a=>a.disabled))
+  state.busy.value=false;assert.equal(view.canSend.value,true)
+})
+
 
 test('the conversation composer restores a draft stored by the previous per-message composer', async t => {
   const {state}=fixture(t,{legacyDraft:{body:'Existing quantity 25 draft',kind:'text'}});await settle()

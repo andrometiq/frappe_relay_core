@@ -257,12 +257,30 @@ The WhatsApp Account tab and the Telegram and Email tabs in Settings use these m
 
 Send `bot_token`, `password` and `imap_password` in `secrets`, for example `{"channel": "Telegram", "values": {"label": "Acme Textiles"}, "secrets": {"bot_token": "..."}}`. Frappe masks a field of that name in a developer-mode traceback, and Core keeps each one masked until it writes the Hub request. Core still reads them from `values` or `settings` for older pages. Core sends a token or a password to the Hub only over HTTPS, or over plain HTTP to a Hub on the same machine (127.0.0.1 or ::1). Otherwise it refuses with the error code `insecure_hub`. The Hub refuses mail servers on private addresses and limits connects and checks per site. Telegram messages reach Relay only through the Hub's HTTPS webhook.
 
+## Access
+
+| Method | Route | Access |
+| --- | --- | --- |
+| GET | `/api/method/relay_core.access.directory` | Any Relay user; managers read everyone, others read only themselves |
+| GET | `/api/method/relay_core.access.user_options` | Communication Manager or System Manager |
+| POST | `/api/method/relay_core.access.save` | Communication Manager or System Manager; session CSRF required |
+
+`directory` returns `can_edit`, `items`, `teams` and `business_types`. Each item has `user`, `full_name`, `image`,
+`role` (`User`, `Manager`, `System Manager` or empty), `team_user`, `teams`, `business_types` and `role_locked` (why
+the role cannot change here, or empty). `user_options` takes `query` and returns up to 20 enabled staff users as
+`value` and `label`. `save` takes `user` and any of `role` (`User`, `Manager` or empty), `team_user` (0 or 1),
+`teams` and `business_types` (lists of names); parts left out stay unchanged. It changes only the three Relay roles,
+refuses the caller's own role and users with a role profile, and returns the saved item. A user who is not a manager
+gets 403.
+
 ## Workspace directories
 
 - `GET relay_core.telegram.group_chats`: manager-only verified Telegram group
   directory for the configured account. `limit` is 1–50 (default 30), and `after`
   is the prior `next` endpoint cursor. Returns `items`, `next`, `configured`.
 - `GET relay_core.api.business_types`: configured business DocTypes the caller can read.
+- `GET relay_core.tickets.directory`: newest tickets first, 30 per page. Each row has `modified` and `contact_title`,
+  the name of the first linked message's contact, empty when the caller cannot read that message or contact.
 - `GET relay_core.api.business_records`: `doctype` and optional `query`; returns
   up to 30 permission-filtered record names. Unconfigured DocTypes are rejected.
 - `relay_core.api.messages` additionally accepts `sender_endpoint` to narrow

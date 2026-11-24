@@ -31,6 +31,7 @@ const menu = computed(() => [
           <button v-if="canOrganize" type="button" class="contact-info-action" @click="emit('cases')"><FeatherIcon name="bookmark" :size="18" />Cases</button>
         </div>
       </div>
+      <slot />
       <ContactDetails v-if="contact" compact :contact="contact" :channel="channel" :link="link" @loaded="phone = $event.phone" @changed="emit('changed')" />
       <template v-else>
         <h4 class="info-group-title">Details</h4>

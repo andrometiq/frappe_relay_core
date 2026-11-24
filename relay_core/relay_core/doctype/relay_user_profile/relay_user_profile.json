@@ -1,0 +1,121 @@
+{
+  "doctype": "DocType",
+  "name": "Relay User Profile",
+  "modified": "2026-11-23 23:59:00.000000",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "field:user",
+  "naming_rule": "By fieldname",
+  "title_field": "display_name",
+  "fields": [
+    {
+      "fieldname": "user",
+      "label": "User",
+      "fieldtype": "Link",
+      "options": "User",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "display_name",
+      "label": "Display name",
+      "fieldtype": "Data",
+      "length": 80,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "job_title",
+      "label": "Job title",
+      "fieldtype": "Data",
+      "length": 80
+    },
+    {
+      "fieldname": "status_section",
+      "label": "Status",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Available\nBusy\nAway\nDo not disturb",
+      "default": "Available",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "status_text",
+      "label": "Status text",
+      "fieldtype": "Data",
+      "length": 100
+    },
+    {
+      "fieldname": "status_clear_at",
+      "label": "Clear status at",
+      "fieldtype": "Datetime"
+    },
+    {
+      "fieldname": "preferences_section",
+      "label": "Preferences",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "theme",
+      "label": "Theme",
+      "fieldtype": "Select",
+      "options": "System\nLight\nDark",
+      "default": "System"
+    },
+    {
+      "fieldname": "density",
+      "label": "Message density",
+      "fieldtype": "Select",
+      "options": "Comfortable\nCompact",
+      "default": "Comfortable"
+    },
+    {
+      "fieldname": "notify_messages",
+      "label": "New message in my chats",
+      "fieldtype": "Check",
+      "default": "1"
+    },
+    {
+      "fieldname": "notify_mentions",
+      "label": "Mentions and assignments",
+      "fieldtype": "Check",
+      "default": "1"
+    },
+    {
+      "fieldname": "notify_sound",
+      "label": "Sound",
+      "fieldtype": "Check",
+      "default": "0"
+    }
+  ],
+  "field_order": [
+    "user",
+    "display_name",
+    "job_title",
+    "status_section",
+    "status",
+    "status_text",
+    "status_clear_at",
+    "preferences_section",
+    "theme",
+    "density",
+    "notify_messages",
+    "notify_mentions",
+    "notify_sound"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1
+    }
+  ],
+  "track_changes": 1
+}
