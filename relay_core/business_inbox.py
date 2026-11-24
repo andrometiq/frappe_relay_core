@@ -255,7 +255,7 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
         for item in names:validate_reference(item,'MSG')
         filters['name']=['in',names]
     fields=['name','relay_contact','channel','content','direction','status','creation','sent_at','provider_context',
-            'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group']
+            'message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group','legacy_author']
     # Frappe applies role/user permissions and the assignment query hook before LIMIT.
     from relay_core.timeline import page_query
     query=page_query(fields,filters,limit+1,before,since or after,ingestion=bool(since),search=query or '')
@@ -294,8 +294,12 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
             channel_docs[row.channel].check_permission('read')
         identity=readable[row.relay_contact]
         items.append(dict(row,contact_label=identity['label'],frappe_contact=identity['frappe_contact']))
-    from relay_core.message_display import decorate_messages
-    decorate_messages(items, channel_docs)
+    from relay_core.endpoint_labels import contact_titles
+    renamed=contact_titles({name:identity['label'] for name,identity in readable.items() if identity})
+    for item in items:
+        item['contact_label']=renamed.get(item['relay_contact']) or item['contact_label']
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(items, channel_docs))
     cursor = page[-1].name if since and page else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
     return {'items':items,'has_more':more,'ingestion_cursor':cursor,'first':page[0].name if page else None,'last':page[-1].name if page else None}
 

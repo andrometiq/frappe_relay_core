@@ -77,8 +77,8 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     for channel_name in {row.channel for row in rows}:
         channels[channel_name] = frappe.get_doc('Relay Channel', channel_name)
         channels[channel_name].check_permission('read')
-    from relay_core.message_display import decorate_messages
-    decorate_messages(rows, channels)
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(rows, channels))
     if not after and not since:
         rows.reverse()
     cursor = rows[-1].name if since and rows else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
@@ -121,7 +121,9 @@ def contacts(query='', before=None, after=None, limit=50):
     rows = rows[:limit]
     if before:
         rows.reverse()
-    items = [dict(row, id=row['name']) for row in rows]
+    from relay_core.endpoint_labels import contact_titles
+    renamed = contact_titles({row['name']: row.get('display_name') for row in rows})
+    items = [dict(row, id=row['name'], **({'display_name': renamed[row['name']]} if row['name'] in renamed else {})) for row in rows]
     return {'items': items,
             'previous': {'before': items[0]['id']} if items and (more if before else bool(after)) else None,
             'next': {'after': items[-1]['id']} if items and (bool(before) if before else more) else None}
@@ -162,8 +164,8 @@ def message_context(message, channel=None):
     later=messages(doc.relay_contact,after=message,limit=25,channel=channel)
     fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group','legacy_author']
     row={key:doc.get(key) for key in fields}
-    from relay_core.message_display import decorate_messages
-    decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)})
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)}))
     return {'contact':doc.relay_contact,'items':earlier['items']+[row]+later['items'],'first':earlier['first'] or message,'has_more':earlier['has_more'],'has_newer':later['has_more'],'last':later['last'] or message,'anchor':message}
 
 
@@ -199,8 +201,8 @@ def message_snapshots(contact, names):
     channels = {row.channel: frappe.get_doc('Relay Channel', row.channel) for row in rows}
     for channel in channels.values():
         channel.check_permission('read')
-    from relay_core.message_display import decorate_messages
-    decorate_messages(rows, channels)
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(rows, channels))
     return {'items':rows}
 
 
@@ -278,6 +280,11 @@ def contact_details(contact):
             if channel.has_permission('read'):
                 row.provider = channel.channel
                 endpoints.append(row)
+        from relay_core.endpoint_labels import telegram_labels
+        labels = telegram_labels([(row.channel, row.endpoint) for row in endpoints if row.provider == 'Telegram'])
+        for row in endpoints:
+            if row.provider == 'Telegram':
+                row.endpoint_label = labels.get((row.channel, row.endpoint), '')
     from relay_core.contacts import can_manage_links
     can_edit_links = bool(person.has_permission('write') or can_manage_links(person.name))
     return {'name': person.name, 'label': person.full_name or person.name,
@@ -342,7 +349,9 @@ def contact_profile(contact):
     visible = allowed_types()
     readable = [link for link in links if link[0] in visible]
     email = person.email_id or contact_emails([person.name]).get(person.name, '')
-    return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
+    from relay_core.endpoint_labels import contact_titles
+    display_name = contact_titles({doc.name: doc.display_name}).get(doc.name) or doc.display_name
+    return {'name': doc.name, 'display_name': display_name, 'contact': doc.contact,
             'primary': primary_record(doc.name, links), 'link_count': len(readable),
             'phone': (person.mobile_no or person.phone or '').strip(), 'email': email}
 

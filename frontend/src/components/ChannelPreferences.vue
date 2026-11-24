@@ -4,6 +4,7 @@ import { linkedTitle } from '../services/linkedTitle'
 import { computed, ref, watch } from 'vue'
 import { Button, ErrorMessage, FormControl } from '@relay/ui'
 import { coreApi } from '../services/coreApi'
+import { addressLabel } from '../services/conversationThreads'
 const props = defineProps({ contact: String, links: Array, endpoints: Array, editable: Boolean })
 const business = ref(''), rows = ref([]), busy = ref(false), error = ref(''), notice = ref('')
 const selected = computed(() => props.links[Number(business.value)])
@@ -34,7 +35,7 @@ async function save(row) {
     <p class="text-sm">Record the person’s consent for each business separately. Lower priorities are tried first; equal priorities require review.</p>
     <ChoiceField v-model="business" :field="{ label: 'Business', options: [{value:'',label:'Choose a business'}, ...links.map((link, index) => ({value:String(index),label:linkedTitle(link.doctype, link.name)}))], readOnly: busy }" />
     <div v-for="row in rows" :key="row.endpoint" class="border-t pt-3 space-y-2">
-      <p class="break-words">{{ endpoints.find(item => item.name === row.endpoint)?.provider }} · {{ endpoints.find(item => item.name === row.endpoint)?.endpoint }}</p>
+      <p class="break-words">{{ endpoints.find(item => item.name === row.endpoint)?.provider }} · {{ addressLabel(endpoints.find(item => item.name === row.endpoint)) }}</p>
       <div class="grid gap-3 sm:grid-cols-2"><FormControl v-model="row.consent" label="Consent" type="select" :options="['Denied','Granted']" :disabled="busy || !editable" /><FormControl v-model="row.priority" label="Priority (1–100)" type="number" min="1" max="100" :disabled="busy || !editable" /></div>
       <Button v-if="editable" label="Save consent" :disabled="busy" @click="save(row)" />
     </div>

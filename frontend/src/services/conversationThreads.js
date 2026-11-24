@@ -12,7 +12,17 @@ export function providerIcon(provider) {
 
 // A WhatsApp number reads as a phone number; a Telegram chat id or an email address stays as it is.
 export function endpointLabel(endpoint, provider = 'WhatsApp') {
+  // A Telegram chat id means nothing to people; the server's endpoint_label names the linked mobile instead.
+  if (provider === 'Telegram') return /^-?\d+$/.test(String(endpoint || '').trim()) ? '' : endpoint || ''
   return (provider === 'WhatsApp' && phoneCaption(endpoint)) || endpoint || ''
+}
+
+// What a person sees for a thread or channel mark: a Telegram chat's linked mobile, username or name, else the address.
+export function addressLabel(item) {
+  if (item?.provider !== 'Telegram') return endpointLabel(item?.endpoint, item?.provider)
+  // The provider word is shown beside the address, so a label that is only "Telegram" adds nothing.
+  const label = item.endpoint_label === 'Telegram' ? '' : item.endpoint_label
+  return phoneCaption(label) || label || item.handle || endpointLabel(item.endpoint, 'Telegram')
 }
 
 export function threadMatches(thread, channel, endpoint) {
@@ -61,7 +71,7 @@ export function threadTabs(threads) {
 
 // The person's side of a thread: a Telegram handle when Telegram sent one, else the endpoint.
 export function threadAddress(thread) {
-  return thread?.handle || endpointLabel(thread?.endpoint, thread?.provider)
+  return addressLabel(thread)
 }
 
 export function hasManyPeople(threads) {
@@ -92,7 +102,7 @@ export function replyLockText(thread) {
 export function rowChannels(row, limit = 5) {
   const marks = Array.isArray(row?.threads) ? row.threads : []
   return marks.slice(0, limit).map(mark => ({ ...mark, icon: providerIcon(mark.provider),
-    label: `${mark.provider || 'Chat'} ${endpointLabel(mark.endpoint, mark.provider)}`.trim() + (mark.unread ? ', unread' : '') }))
+    label: `${mark.provider || 'Chat'} ${addressLabel(mark)}`.trim() + (mark.unread ? ', unread' : '') }))
 }
 
 // "Waiting 2d": the customer wrote last, everyone has read it and no one has replied for an hour or more.

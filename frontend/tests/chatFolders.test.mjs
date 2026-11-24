@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chatFolderStore, folderLabel } from '../src/services/chatFolders.js'
+import { FOLDER_COLORS, chatFolderStore, folderColor, folderLabel } from '../src/services/chatFolders.js'
 
 function fakeApi(rows) {
   const calls = []
@@ -70,4 +70,10 @@ test('a folder create that failed is retried with the same request key', async (
   await store.create('Acme Textiles')
   assert.equal(keys[0], keys[1], 'The retry reuses the key, so the server returns the first folder')
   assert.notEqual(keys[1], keys[2], 'A new create after success gets a new key')
+})
+
+test('each folder keeps one colour from its id', () => {
+  assert.equal(folderColor('F-1'), folderColor('F-1'))
+  assert.ok(FOLDER_COLORS.includes(folderColor('F-1')) && FOLDER_COLORS.includes(folderColor('')))
+  assert.ok(new Set(['F-1', 'F-2', 'F-3', 'F-4', 'F-5', 'F-6'].map(folderColor)).size > 1, 'Folders do not all share one colour')
 })

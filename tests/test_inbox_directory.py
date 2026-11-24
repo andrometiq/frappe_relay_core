@@ -148,6 +148,21 @@ class DirectoryQueryTests(unittest.TestCase):
         self.assertIn("`tabRelay Message Read`.`user`='agent@example.invalid'", read, 'Read means read by the session user')
         self.assertNotIn('Relay Conversation Assignment', read + unread)
 
+    def test_assigned_to_me_keeps_the_chats_assigned_to_the_session_user(self):
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]):
+            inbox.directory(assigned='me')
+            for assigned in ('other@example.invalid', 'all'):
+                with self.subTest(assigned=assigned), self.assertRaises(ValueError):
+                    inbox.directory(assigned=assigned)
+        self.assertIn("IN (SELECT `relay_contact` FROM `tabRelay Conversation Assignment` WHERE `assigned_to`='agent@example.invalid')", self.statements[0])
+
+    def test_assigned_to_me_narrows_business_rows_to_the_chats_last_written_by_them(self):
+        with patch.object(inbox, 'require_access'), patch.object(inbox, 'chosen_contacts', return_value=['C-1']) as chosen, \
+                patch('relay_core.inbox_records.page', return_value={'items': []}) as page:
+            inbox.directory(rows='business', assigned='me')
+        chosen.assert_called_once_with(0, '', None, 'me')
+        self.assertEqual(page.call_args.kwargs['contacts'], ['C-1'])
+
     def test_business_filter_keeps_chats_of_one_type_record_or_none(self):
         self.fake.get_all.return_value = ['Customer', 'Supplier']
         with patch.object(inbox, 'require_access'), patch.object(inbox, 'directory_items', return_value=[]), \

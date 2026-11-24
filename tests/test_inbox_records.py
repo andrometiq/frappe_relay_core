@@ -32,6 +32,7 @@ class InboxRecordTests(unittest.TestCase):
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
         self.enterContext(patch('relay_core.inbox.frappe', self.fake))
         self.endpoints = self.enterContext(patch.object(inbox_records, 'record_endpoints', return_value={}))
+        self.titles = self.enterContext(patch('relay_core.endpoint_labels.contact_titles', return_value={}))
         self.enterContext(patch('relay_core.relay_chats.title', side_effect=lambda key:
             next((row.title for row in self.chats if (row.business_doctype, row.business_name) == key), key[1])))
 
@@ -124,6 +125,16 @@ class InboxRecordTests(unittest.TestCase):
         self.assertEqual((row['kind'], row['name'], row['contact'], row['display_name']), ('contact', 'R9', 'CONTACT-9', '+91 98765'))
         self.assertEqual((row['unlinked'], row['starred'], row['folder'], row['provider']), (True, 1, 'F1', 'WhatsApp'))
 
+    def test_a_chat_saved_under_its_telegram_chat_id_shows_its_linked_mobile(self):
+        self.chats = [chat('RC-1', doctype='Relay Contact', record='R9', title='55012345'), chat('RC-2', record='C2', title='Acme')]
+        self.titles.return_value = {'R9': '+919000001234'}
+        self.fake.get_all.side_effect = lambda doctype, **kwargs: [('R9', 'CONTACT-9')] if doctype == 'Relay Contact' else []
+        with patch('relay_core.contacts.linked_contacts', return_value=set()), patch('relay_core.inbox.state_key', side_effect=str):
+            first, second = inbox_records.page()['items']
+        self.titles.assert_called_once_with({'R9': '55012345'})
+        self.assertEqual((first['title'], first['display_name']), ('+919000001234', '+919000001234'), 'The numeric chat id is never the row title')
+        self.assertEqual(second['title'], 'Acme', 'Record rows keep their record title')
+
     def test_a_row_marks_its_channels_and_the_ones_holding_unread_messages(self):
         self.chats = [chat('RC-1', unread_count=2, last_message='MSG-9'), chat('RC-2', record='C2')]
         self.endpoints.return_value = {('Customer', 'C1'): {('CH-1', '911'), ('CH-1', '922'), ('CH-X', 'hidden')}}
@@ -145,12 +156,24 @@ class InboxRecordTests(unittest.TestCase):
     def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),
                       _dict(business_doctype='Relay Contact', total=3, unread=1, messages=1)]
-        self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 1, 'unread_messages': 8})
+        with patch.object(inbox_records, 'assigned_count', return_value=0):
+            self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 1, 'mine': 0, 'unread_messages': 8})
         calls = [call for call in self.fake.get_list.call_args_list if call.args[0] == CHAT]
         self.assertEqual(calls[1].kwargs['filters'][-1].get_sql(), inbox_records.scope_filters('unlinked')[-1].get_sql())
         call = calls[0]
         self.assertEqual(call.kwargs['group_by'], 'business_doctype')
         self.assertEqual(call.kwargs['filters'], [[CHAT, 'last_channel', 'in', ['CH-1']]])
+
+    def test_assigned_to_me_counts_the_rows_of_my_assigned_chats_under_the_same_filters(self):
+        with patch('relay_core.inbox.chosen_contacts', return_value=['R1', 'R2']) as chosen:
+            self.assertEqual(inbox_records.assigned_count(['CH-1'], 'Customer'), 1)
+        chosen.assert_called_once_with(assigned='me')
+        self.assertEqual(self.chat_call().kwargs['filters'], [[CHAT, 'business_doctype', '=', 'Customer'], [CHAT, 'last_channel', 'in', ['CH-1']],
+                                                              [CHAT, 'last_contact', 'in', ['R1', 'R2']]])
+        self.fake.get_list.reset_mock()
+        with patch('relay_core.inbox.chosen_contacts', return_value=[]):
+            self.assertEqual(inbox_records.assigned_count(), 0)
+        self.assertEqual(self.fake.get_list.call_count, 0, 'No assigned chat needs no count query')
 
 
 if __name__ == '__main__':

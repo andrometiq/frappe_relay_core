@@ -1,11 +1,18 @@
-// Inbox tab (All, Unread or Not linked) and filters: some channels and one customer type or record. Each user keeps them in this browser.
+// Inbox view (sidebar), tab (All, Unread or Read) and filters: some channels and one customer type or record. Each user keeps them in this browser.
 export const NO_RECORD = 'none'
 export const TABS = Object.freeze([
   ['all', 'All', 'All chats you can see'],
   ['unread', 'Unread', 'Chats with messages no one has read yet'],
-  ['unlinked', 'Not linked', 'Chats not linked to a customer or supplier'],
+  ['read', 'Read', 'Chats with no unread message'],
 ])
-export const EMPTY_FILTERS = Object.freeze({ tab: 'all', channels: [], businessType: '', businessName: '', businessLabel: '' })
+// Sidebar views: [value, label, icon]. Each narrows the tab's list with a server filter.
+export const VIEWS = Object.freeze([
+  ['all', 'All chats', 'inbox'],
+  ['mine', 'Assigned to me', 'user'],
+  ['starred', 'Starred', 'star'],
+  ['unlinked', 'Not linked', 'link-2'],
+])
+export const EMPTY_FILTERS = Object.freeze({ tab: 'all', view: 'all', channels: [], businessType: '', businessName: '', businessLabel: '' })
 
 const text = value => typeof value === 'string' ? value.slice(0, 140) : ''
 
@@ -19,8 +26,10 @@ export function loadFilters(storage, user) {
     const saved = JSON.parse(storage.getItem(storageKey(user)) || '{}') || {}
     const businessType = text(saved.businessType)
     const businessName = businessType && businessType !== NO_RECORD ? text(saved.businessName) : ''
+    // Not linked was a tab before it became a sidebar view.
+    const view = saved.tab === 'unlinked' ? 'unlinked' : VIEWS.some(([value]) => value === saved.view) ? saved.view : 'all'
     return {
-      tab: TABS.some(([value]) => value === saved.tab) ? saved.tab : 'all',
+      tab: TABS.some(([value]) => value === saved.tab) ? saved.tab : 'all', view,
       channels: Array.isArray(saved.channels) ? saved.channels.filter(name => typeof name === 'string').slice(0, 50) : [],
       businessType, businessName, businessLabel: businessName ? text(saved.businessLabel) || businessName : '',
     }
@@ -50,6 +59,15 @@ export function filterParams(filters, options) {
   }
 }
 
+// inbox.directory parameters for the filters and a sidebar view. Not linked is the no-record business filter, so it replaces a chosen record.
+const VIEW_PARAMS = Object.freeze({ mine: { assigned: 'me' }, starred: { starred: 1 } })
+export function listParams(filters, options, view) {
+  const params = filterParams(filters, options)
+  if (view !== 'unlinked') return { ...params, ...VIEW_PARAMS[view] }
+  const { business_name: _record, ...rest } = params
+  return { ...rest, business_type: NO_RECORD }
+}
+
 // Chips that name each active filter, for the line under the tabs and the filter button count.
 export function filterChips(filters, options) {
   const names = options.filter(row => filters.channels.includes(row.name)).map(row => row.label)
@@ -67,7 +85,7 @@ export function withoutFilter(filters, key) {
   return key === 'channels' ? { ...filters, channels: [] } : { ...filters, businessType: '', businessName: '', businessLabel: '' }
 }
 
-// Remove every filter and keep the tab.
+// Remove every filter and keep the tab and view.
 export function withoutFilters(filters) {
-  return { ...EMPTY_FILTERS, tab: filters.tab, channels: [] }
+  return { ...EMPTY_FILTERS, tab: filters.tab, view: filters.view || 'all', channels: [] }
 }

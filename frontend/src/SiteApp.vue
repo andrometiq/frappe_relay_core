@@ -80,6 +80,10 @@ const currentGroup = computed(() => activeRailGroup(rail.value, view.value, sect
 const sidebarGroup = computed(() => currentGroup.value?.pages.length > 1 && !currentGroup.value.ownSidebar ? currentGroup.value : null)
 // Pages that draw their own heading and section sidebar; the shell title stays for phones and screen readers.
 const ownTitle = computed(() => ['Tickets', 'Settings', 'Teams'].includes(view.value) || (view.value === 'WhatsApp' && section.value === 'templates'))
+// Desktop pages that head themselves (the inbox, Tickets, Templates, Settings) get no shell header; phones always keep it.
+const shellHeader = computed(() => isMobile.value || !(view.value === 'Messages' || ownTitle.value))
+const live = computed(() => realtimeStatus.value === 'Live')
+const pageTitle = computed(() => view.value === 'WhatsApp' && section.value === 'templates' ? 'Templates' : current.value?.label)
 function openSection(name) { location.hash = whatsappRoute(name) }
 function openGroup(group) {
   if (group.section) openSection(group.section)
@@ -129,7 +133,7 @@ onErrorCaptured(e => {
 <template>
   <div class="app-shell relay-shell v1-shell">
     <aside class="app-nav relay-rail" aria-label="Relay navigation">
-      <span class="relay-rail-logo" aria-hidden="true">R</span>
+      <span class="relay-rail-logo"><span aria-hidden="true">R</span><span class="relay-connection-dot" :class="{ 'is-live': live }" role="status" :title="`Live updates: ${realtimeStatus}`"><span class="sr-only">Live updates: {{ realtimeStatus }}</span></span></span>
       <nav class="relay-rail-items" aria-label="Relay sections">
         <template v-for="group in rail" :key="group.name">
           <button v-if="!group.bottom" type="button" class="rail-item" :class="{ active: currentGroup === group }" :title="group.name"
@@ -145,17 +149,19 @@ onErrorCaptured(e => {
             <FeatherIcon :name="group.icon" :size="18" />
           </button>
         </template>
+        <NotificationInbox v-if="!isMobile" class="rail-notifications" />
         <Dropdown :options="accountActions" placement="right">
           <button type="button" class="rail-account" :title="userTitle" :aria-label="`Account: ${userTitle}`"><UserAvatar :user="user" :label="userTitle" size="sm" /></button>
         </Dropdown>
       </div>
     </aside>
     <SectionSidebar v-if="sidebarGroup" v-model:open="pagesOpen" :group="sidebarGroup" :view="view" :overlay="isMobile" @navigate="view = $event" />
-    <header class="page-header v1-header" :inert="moreOpen || pagesOpen || undefined">
+    <header v-if="shellHeader" class="page-header v1-header" :inert="moreOpen || pagesOpen || undefined">
       <button v-if="sidebarGroup" type="button" class="section-toggle" :aria-label="`${sidebarGroup.name} pages`" :aria-expanded="pagesOpen" @click="pagesOpen = true"><FeatherIcon name="list" :size="18" /></button>
-      <h1 :class="{ 'inbox-title': view === 'Messages', 'page-titled': ownTitle }">{{ view === 'WhatsApp' && section === 'templates' ? 'Templates' : current?.label }}</h1>
-      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span class="v1-connection" :class="{ 'is-connected': realtimeStatus === 'Live' }" role="status"><span aria-hidden="true" />{{ realtimeStatus }}</span><NotificationInbox /><TicketNotices /></div>
+      <h1 :class="{ 'inbox-title': view === 'Messages', 'page-titled': ownTitle }">{{ pageTitle }}</h1>
+      <div class="ml-auto flex items-center gap-2"><div id="relay-header-actions" class="relay-header-actions" /><span v-if="isMobile && !live" class="v1-connection" role="status" :title="`Live updates: ${realtimeStatus}`"><span aria-hidden="true" /><span class="sr-only">Live updates: {{ realtimeStatus }}</span></span><NotificationInbox v-if="isMobile" /></div>
     </header>
+    <h1 v-if="!shellHeader" class="sr-only">{{ pageTitle }}</h1>
     <main class="workspace" :inert="moreOpen || pagesOpen || undefined">
       <p v-if="setupPending && ready" class="setup-pending" role="status">Relay is being set up. Ask your administrator to finish setup.</p>
       <div v-if="error || loadError" class="px-4 py-2"><ErrorMessage :message="error || loadError" /><Button v-if="!ready" label="Retry access check" @click="initialize" /><Button v-if="loadError" label="Refresh Relay" @click="location.reload()" /></div>
@@ -172,6 +178,7 @@ onErrorCaptured(e => {
         </div>
       </template>
     </MobileTabBar>
+    <TicketNotices />
     <ProfileDialog v-model="profileOpen" />
   </div>
 </template>

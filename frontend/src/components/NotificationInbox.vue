@@ -60,7 +60,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
 <template>
   <div class="notification-inbox" @keydown.esc="open = false">
     <button
-      class="notification-toggle"
+      class="notification-toggle hit-zone"
       aria-label="Notifications"
       :aria-expanded="open"
       @click="

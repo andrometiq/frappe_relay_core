@@ -1,18 +1,25 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { FeatherIcon } from '@relay/ui'
+import { Dropdown, FeatherIcon } from '@relay/ui'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 
-// A page's own section sidebar: views, filters and links. Phones show the open view as a button that opens the list as a sheet.
-const props = defineProps({ title: String, subtitle: String, sections: { type: Array, default: () => [] }, active: String, label: String })
+// A page's own section sidebar: views, filters and links. Phones show the open view as a button that opens the list as a sheet;
+// a page that draws its own button turns `picker` off and drives `open`.
+// A section may carry an `action` (a small + in its heading) and an item may carry `menu` options or `selected` for a second highlight.
+const props = defineProps({ title: String, subtitle: String, sections: { type: Array, default: () => [] }, active: String, label: String, picker: { type: Boolean, default: true } })
 const emit = defineEmits(['select'])
 const isMobile = useMobileLayout()
-const open = ref(false), sheet = ref(null)
+const open = defineModel('open', { type: Boolean, default: false })
+const sheet = ref(null)
 const current = computed(() => props.sections.flatMap(section => section.items).find(item => item.key === props.active))
 function choose(item) {
   if (item.static) return
   open.value = false
   emit('select', item)
+}
+function act(action) {
+  open.value = false
+  action.onClick()
 }
 watch(open, async value => {
   if (!value) return
@@ -22,7 +29,7 @@ watch(open, async value => {
 </script>
 
 <template>
-  <button v-if="isMobile" type="button" class="page-side-picker" aria-haspopup="dialog" :aria-expanded="open" @click="open = true">
+  <button v-if="isMobile && picker" type="button" class="page-side-picker" aria-haspopup="dialog" :aria-expanded="open" @click="open = true">
     <FeatherIcon v-if="current?.icon" :name="current.icon" :size="16" /><span v-else-if="current?.dot" class="page-side-dot" :style="{ background: current.dot }" />
     <span class="page-side-picker-label">{{ current?.label || label || title }}</span>
     <span v-if="current?.count != null" class="page-side-count">{{ current.count }}</span>
@@ -42,17 +49,22 @@ watch(open, async value => {
       <slot name="top" />
       <nav class="page-side-sections">
         <div v-for="section in sections" :key="section.key" class="page-side-section">
-          <h3 v-if="section.title">{{ section.title }}</h3>
-          <component :is="item.static ? 'div' : 'button'" v-for="item in section.items" :key="item.key" :type="item.static ? undefined : 'button'"
-            class="page-side-item" :class="{ active: item.key === active, static: item.static }" :aria-current="item.key === active ? 'page' : undefined"
-            :title="item.title || item.label" @click="choose(item)">
-            <FeatherIcon v-if="item.icon" :name="item.icon" :size="16" :class="item.tone ? 'tone-' + item.tone : ''" />
-            <span v-else-if="item.dot" class="page-side-dot" :style="{ background: item.dot }" />
-            <span class="page-side-label">{{ item.label }}</span>
-            <span v-if="item.count != null" class="page-side-count" :class="{ strong: item.strong && item.count }">{{ item.count }}</span>
-          </component>
+          <h3 v-if="section.title">{{ section.title }}<button v-if="section.action" type="button" class="page-side-add" :aria-label="section.action.label" :title="section.action.label" @click="act(section.action)"><FeatherIcon :name="section.action.icon || 'plus'" :size="14" /></button></h3>
+          <div v-for="item in section.items" :key="item.key" class="page-side-row">
+            <component :is="item.static ? 'div' : 'button'" :type="item.static ? undefined : 'button'"
+              class="page-side-item" :class="{ active: item.key === active || item.selected, static: item.static, 'has-menu': item.menu?.length }"
+              :aria-current="item.key === active ? 'page' : undefined" :aria-pressed="item.selected === undefined ? undefined : item.selected"
+              :title="item.title || item.label" @click="choose(item)">
+              <FeatherIcon v-if="item.icon" :name="item.icon" :size="16" :class="item.tone ? 'tone-' + item.tone : ''" />
+              <span v-else-if="item.dot" class="page-side-dot" :style="{ background: item.dot }" />
+              <span class="page-side-label">{{ item.label }}</span>
+              <span v-if="item.count != null" class="page-side-count" :class="{ strong: item.strong && item.count }" :aria-label="item.countLabel">{{ item.count }}</span>
+            </component>
+            <Dropdown v-if="item.menu?.length" :options="item.menu"><button type="button" class="page-side-menu" :aria-label="`${item.label} actions`" :title="`${item.label} actions`"><FeatherIcon name="more-horizontal" :size="14" /></button></Dropdown>
+          </div>
         </div>
       </nav>
+      <slot name="bottom" />
     </aside>
   </Transition>
 </template>

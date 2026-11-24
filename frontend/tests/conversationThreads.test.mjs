@@ -42,7 +42,7 @@ test('the reply lock names the channel, the contact endpoint and our channel', (
     from: 'Sales mail · sales@example.invalid', note: 'subject kept' })
   assert.equal(replyLock(null), null)
   const fromMessage = sourceThread({ relay_contact: 'RELAY-CON-1', channel: 'CH-TG', sender_endpoint: '5501', channel_title: 'Bot', provider_context: '{"provider":"Telegram"}' })
-  assert.equal(replyLockText(fromMessage), 'Replying on Telegram to 5501 from Bot')
+  assert.doesNotMatch(replyLockText(fromMessage), /5501/, 'A Telegram chat id is never shown')
 })
 
 test('tabs name our channel only when the record talks on two of our channels of that kind', () => {
@@ -51,14 +51,22 @@ test('tabs name our channel only when the record talks on two of our channels of
     thread('priya', { relay_contact: 'RELAY-CON-2', contact_label: 'Priya', provider: 'Email', channel: 'CH-MAIL', endpoint: 'priya@example.invalid' })])
   assert.deepEqual(tabs.map(tab => [tab.provider, tab.endpoint, tab.via, tab.person]), [
     ['WhatsApp', '+91 90000 00001', 'Sales', 'Ravi'], ['WhatsApp', '+91 80000 05678', 'Support', 'Ravi'],
-    ['Telegram', '55012345', '', 'Ravi'], ['Email', 'priya@example.invalid', '', 'Priya']])
-  assert.equal(endpointLabel('55012345', 'Telegram'), '55012345', 'A Telegram chat id is not a phone number')
+    ['Telegram', '', '', 'Ravi'], ['Email', 'priya@example.invalid', '', 'Priya']], 'A Telegram tab without a linked number names no chat id')
+  assert.equal(endpointLabel('55012345', 'Telegram'), '', 'A Telegram chat id is not shown and is not a phone number')
+  assert.equal(endpointLabel('-1001234', 'Telegram'), '')
 })
 
 test('a Telegram thread reads by its handle and every tab keeps its full text in the tooltip', () => {
   const bot = thread('bot', { provider: 'Telegram', channel: 'CH-BOT', channel_label: 'Bot', channel_address: '@essdee_bot', endpoint: '55012345', handle: '@ravitex' })
   assert.equal(threadAddress(bot), '@ravitex')
-  assert.equal(threadAddress({ ...bot, handle: '' }), '55012345')
+  assert.equal(threadAddress({ ...bot, handle: '' }), '')
+  assert.equal(threadAddress({ ...bot, endpoint_label: '+919000001234' }), '+91 90000 01234', 'The linked mobile comes before the username')
+  assert.equal(threadAddress({ ...bot, handle: '', endpoint_label: 'Ravi Kumar' }), 'Ravi Kumar')
+  assert.equal(threadAddress({ ...bot, handle: '', endpoint_label: 'Telegram' }), '', 'The tab says Telegram once, not "Telegram Telegram"')
+  assert.equal(threadTabs([{ ...bot, handle: '', endpoint_label: '' }])[0].endpoint, '')
+  assert.equal(threadAddress({ ...bot, endpoint_label: '+91 90000 01234' }), '+91 90000 01234', 'The server format and the tab format are the same')
+  assert.equal(rowChannels({ threads: [{ provider: 'Telegram', channel: 'CH-BOT', endpoint: '55012345', endpoint_label: '+919000001234' }] })[0].label,
+    'Telegram +91 90000 01234', 'A list mark names the linked mobile, not the chat id')
   assert.equal(replyLockText(bot), 'Replying on Telegram to @ravitex from Bot · @essdee_bot')
   const long = thread('mail', { provider: 'Email', channel: 'CH-MAIL', channel_label: 'Sales mail', channel_address: 'sales@example.invalid',
     endpoint: 'accounts.receivable.department.tiruppur.division@ravitextiles-international-exports.invalid' })
@@ -68,7 +76,8 @@ test('a Telegram thread reads by its handle and every tab keeps its full text in
 
 test('a long address ends in an ellipsis inside its tab, and edge fades follow scrolling, not a timer', async () => {
   const tabs = await read('components/messages/ThreadTabs.vue')
-  assert.match(tabs, /\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ min-width:0; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \}/)
+  assert.match(tabs, /\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ min-width:0; max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \}/)
+  assert.match(tabs, /\.thread-tab-via \{ display:none; \}/, 'Our number name moves to the tooltip so four tabs fit beside the details panel')
   assert.match(tabs, /@media \(max-width:768px\) \{[^}]*\}\s*\.thread-tab \{ min-height:44px; \}\s*\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ max-width:120px; \}/)
   assert.match(tabs, /\.thread-tab-icon, \.thread-tab-provider, \.thread-tab-unread \{ flex:none; \}/)
   assert.match(tabs, /new ResizeObserver\(measure\)/)

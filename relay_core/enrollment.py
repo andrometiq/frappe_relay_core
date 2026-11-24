@@ -67,6 +67,10 @@ def pending(after=None):
                           'endpoint':row['from'],'preview':'Incoming conversation needs triage', 'ticket':ticket.name if ticket else None,
                           'received_at':doc.creation,'contact':None,'ambiguous':bool(contact),
                           'routing_rule':json.loads(doc.get('routing_decisions') or '{}').get(row['id'])})
+    from relay_core.endpoint_labels import telegram_labels
+    labels=telegram_labels([(item['channel'],item['endpoint']) for item in items if item['medium']=='Telegram'])
+    for item in items:
+        if item['medium']=='Telegram':item['endpoint_label']=labels.get((item['channel'],item['endpoint'])) or 'Telegram user'
     return {'items':items,'next':events[19].name if len(events)>20 else None}
 
 

@@ -132,7 +132,7 @@ def page(*, query='', mode='all', after=None, since=None, channels=None, busines
 
 
 def counts(channels=None, business_type=None, business_name=None):
-    """Row counts for the All, Unread, Read and Unlinked tabs and the unread message total, with the same business-link predicate as the queue."""
+    """Row counts for the All, Unread, Read, Unlinked and Assigned to me views and the unread message total, with the same business-link predicate as the queue."""
     rows = frappe.get_list(CHAT, filters=scope_filters('all', channels, business_type, business_name), group_by='business_doctype',
                            fields=['business_doctype', {'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'},
                                    {'SUM': 'unread_count', 'as': 'messages'}], order_by='business_doctype')
@@ -140,8 +140,18 @@ def counts(channels=None, business_type=None, business_name=None):
     unlinked = frappe.get_list(CHAT, filters=[*scope_filters('all', channels, business_type, business_name),
         [CHAT, 'business_doctype', '=', CONTACT], unlinked_condition()], fields=[{'COUNT': '*', 'as': 'total'}])
     return {'all': total, 'unread': unread, 'read': total - unread,
-            'unlinked': int(unlinked[0].total or 0) if unlinked else 0,
+            'unlinked': int(unlinked[0].total or 0) if unlinked else 0, 'mine': assigned_count(channels, business_type, business_name),
             'unread_messages': sum(int(row.messages or 0) for row in rows)}
+
+
+def assigned_count(channels=None, business_type=None, business_name=None):
+    """Rows whose last writer is a chat assigned to the session user, as the Assigned to me view lists them."""
+    from relay_core.inbox import chosen_contacts
+    contacts = chosen_contacts(assigned='me')
+    if not contacts:
+        return 0
+    found = frappe.get_list(CHAT, filters=scope_filters('all', channels, business_type, business_name, contacts), fields=[{'COUNT': '*', 'as': 'total'}])
+    return int(found[0].total or 0) if found else 0
 
 
 def items(rows):
@@ -149,9 +159,11 @@ def items(rows):
     providers = dict(frappe.get_list('Relay Channel', fields=['name', 'channel'], as_list=True, limit_page_length=0))
     chats = contact_rows([row.business_name for row in rows if row.business_doctype == CONTACT])
     channels, directions, tickets = row_channels(rows, providers), last_directions(rows), open_tickets(rows)
+    from relay_core.endpoint_labels import contact_titles
+    renamed = contact_titles({row.business_name: row.title for row in rows if row.business_doctype == CONTACT})
     result = []
     for row in rows:
-        caption = row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
+        caption = renamed.get(row.business_name) or row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
         item = {'id': row.name, 'title': caption, 'display_name': caption, 'channel': row.last_channel,
                 'provider': providers.get(row.last_channel), 'latest_preview': row.last_message_preview or '',
                 'latest_at': row.last_message_at, 'last_message_at': str(row.last_message_at), 'unread': row.unread_count or 0,
@@ -199,6 +211,11 @@ def row_channels(rows, providers):
         result[row.name] = sorted(({'channel': channel, 'provider': providers[channel], 'endpoint': endpoint, 'unread': flag}
                                    for (channel, endpoint), flag in marks.items() if channel in providers),
                                   key=lambda mark: (not mark['unread'], mark['provider'], mark['endpoint']))[:MAX_ROW_CHANNELS]
+    from relay_core.endpoint_labels import telegram_labels
+    telegram = [mark for marks in result.values() for mark in marks if mark['provider'] == 'Telegram']
+    labels = telegram_labels([(mark['channel'], mark['endpoint']) for mark in telegram])
+    for mark in telegram:
+        mark['endpoint_label'] = labels.get((mark['channel'], mark['endpoint']), '')
     return result
 
 

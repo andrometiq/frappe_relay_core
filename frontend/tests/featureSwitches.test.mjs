@@ -24,11 +24,14 @@ test('the inbox shows folder controls only while folders are on', async () => {
   assert.match(actions, /rowActionKeys\(item, \{ folders: capabilities\.value\.folders/)
 })
 
-test('the inbox tabs come from TABS, with no chat assignment anywhere in the list', async () => {
+test('the inbox tabs come from TABS, rows carry no assignment control and Assigned to me is a server-filtered sidebar view', async () => {
   const inbox = await read('components/messages/InboxDirectory.vue')
   assert.match(inbox, /v-for="\[value, label, hint\] in TABS"/)
   assert.match(inbox, /:title="hint"/)
-  assert.doesNotMatch(inbox, /assignment|assigned|Mine|Unassigned/i)
+  const rows = inbox.split('<TransitionGroup name="inbox-row">')[1].split('</TransitionGroup>')[0]
+  assert.doesNotMatch(rows, /assignment|assigned|Mine|Unassigned/i)
+  const sidebar = await read('components/messages/InboxSidebar.vue')
+  assert.match(sidebar, /mine: props\.counts\.mine/, 'The view count is the server count')
 })
 
 test('the assignment line says who has the chat and who chose them', () => {

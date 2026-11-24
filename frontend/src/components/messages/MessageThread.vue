@@ -12,14 +12,14 @@ import ReactionPicker from "./ReactionPicker.vue";
 import MessageInfoDialog from "./MessageInfoDialog.vue";
 import { useMobileLayout } from "../../composables/useMobileLayout";
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, inject } from "vue";
-import { Button, FeatherIcon } from "@relay/ui";
+import { Avatar, Button, FeatherIcon } from "@relay/ui";
 import { coreApi } from "../../services/coreApi";
 import MessageContent from "../MessageContent.vue";
 import { messageData, objectValue, attachmentDownloadURL, reactionLabels, ownReaction } from "../messageContent";
 import { channelCan, multipleChannels, onPickedChannel } from "../../services/enabledChannels";
 import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
-import { dayDividers, quoteIndex, timeOf } from "./threadIndex";
+import { dayDividers, groupStarts, isMine, quoteIndex, timeOf } from "./threadIndex";
 import { groupSends } from "../../services/sendGroups";
 import { notesInThread } from "../../services/threadNotes";
 import { selectMessages, selectableMessage } from '../../services/messageSelection'
@@ -95,6 +95,15 @@ const numberTags = computed(() => props.oneChannel ? {} : messageNumberTags(sent
 // Built once per row change: every render, such as a page load or the paging flag, only looks rows up.
 const quoted = computed(() => quoteIndex(props.rows || []));
 const dividers = computed(() => dayDividers(threadRows.value));
+// Messages read as sender groups: the first of a group shows the avatar, name and time.
+// The session user's own messages sit on the left; the contact, colleagues and automation sit on the right.
+const me = globalThis.frappe?.session?.user || "";
+const starts = computed(() => groupStarts(threadRows.value, props.unread, me));
+function senderName(message) {
+  if (message.direction !== "Outgoing") return readableName(message.contact_label || props.contactName, "Contact");
+  if (message.sender?.name) return message.sender.name;
+  return message._pending ? "You" : message.channel_title || "Our team";
+}
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
 // A chat send the server rejected, or one that never reached the server, offers Retry and Delete.
@@ -356,6 +365,10 @@ function actions(message) {
         class="conversation-bubble"
         :class="{
           'ml-auto': message.direction === 'Outgoing',
+          'is-group-start': starts.has(message.name),
+          'is-mine': isMine(message, me),
+          'is-other': !isMine(message, me),
+          'is-automated': message.sender?.automated,
           'anchored-message': message.name === anchor,
           'menu-target': menu?.message.name === message.name,
           'is-selecting': selecting && selectableMessage(message),
@@ -371,11 +384,15 @@ function actions(message) {
         :aria-checked="selecting && selectableMessage(message) ? selection.includes(message.name) : undefined"
         @click.capture="toggleSelection(message, $event)"
         @keydown.space="selecting && toggleSelection(message, $event)"
-        v-memo="[selecting, selection.includes(message.name), fresh.has(message.name), message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
+        v-memo="[starts.has(message.name), selecting, selection.includes(message.name), fresh.has(message.name), message, message.status, message.error, message.action, busy, message.name === anchor, reactionTarget === message.name, menu?.message.name === message.name, readersByMessage[message.name], quoted(message), showChannel, contactName, capabilities]"
         @pointermove="pressMove" @pointerdown="pressStart(message, $event)" @pointerup="pressEnd" @pointercancel="pressEnd" @pointerleave="pressEnd"
         @contextmenu="isMobile && $event.preventDefault()"
       >
         <span v-if="selecting && selectableMessage(message)" class="message-selection-check" aria-hidden="true"><FeatherIcon :name="selection.includes(message.name) ? 'check-square' : 'square'" :size="20" /></span>
+        <header v-if="starts.has(message.name)" class="message-group-head">
+          <Avatar class="message-group-avatar" :label="senderName(message)" :image="message.sender?.image || undefined" aria-hidden="true" />
+          <strong>{{ senderName(message) }}</strong><time :datetime="timeOf(message)?.toISOString()">{{ timeLabel(message) }}</time>
+        </header>
         <div v-if="message.contact_label" class="message-sender">
           {{ message.direction === "Outgoing" ? "To " + readableName(message.contact_label, "Contact") : readableName(message.contact_label, "Contact") }}
         </div>

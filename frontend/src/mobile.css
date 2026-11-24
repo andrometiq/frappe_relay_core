@@ -4,7 +4,11 @@
 @media (max-width:768px){
   /* One phone target floor, including controls teleported outside the app shell.
      Minimum sizes preserve targets while prefixed inputs can shrink to fit. */
-  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link){min-height:44px!important;min-width:44px!important}
+  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link,.hit-zone,.page-side-picker,.page-head-actions>.relay-button){min-height:44px!important;min-width:44px!important}
+  /* A compact control keeps its small look and gets an invisible 44px tap area around it. */
+  .hit-zone{position:relative}
+  :is(.v1-shell,.relay-dialog,.relay-menu) :is(.hit-zone,.page-side-picker,.page-head-actions>.relay-button){min-height:0;min-width:0}
+  .hit-zone::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
   /* Keep compact indicators inside the full-size label/input hit area. */
   label:has(>input:is([type=checkbox],[type=radio])){display:inline-flex;align-items:center;gap:8px}
   label>input:is([type=checkbox],[type=radio]):not(.relay-checkbox__input){width:16px;height:16px;flex:none}
@@ -28,15 +32,15 @@
 
   /* App bar */
   .v1-shell.relay-shell .v1-header{gap:8px;height:auto;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 12px 10px;border:0;background:transparent}
-  .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:24px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
+  .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:20px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
-  .v1-shell.relay-shell .v1-connection.is-connected{display:none}
-  .v1-shell.relay-shell .v1-header .notification-toggle{width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .v1-header .notification-toggle{width:36px;height:36px;padding:0;border-radius:8px;color:var(--relay-ink-2)}
   .relay-header-actions{display:flex;align-items:center}
   .section-toggle{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .mobile-sheet-profile{display:flex;flex:1;align-items:center;gap:10px;min-width:0;border-radius:8px;text-align:left}
-  .relay-header-new.relay-button{width:44px;min-width:44px;height:44px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
+  .v1-shell.relay-shell .relay-header-icon.relay-button{width:36px;height:36px;padding:0;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .relay-header-icon.relay-button[aria-pressed=true]{background:var(--relay-accent-soft);color:var(--relay-accent-text)}
 
   /* Detail pages own the whole screen: no app bar, no tab bar */
   .v1-shell.relay-shell:has(.connected-inbox.has-conversation,.ticket-detail,.frappe-form-view,.team-workspace.has-selection,.workflow-viewer.has-selection) :is(.v1-header,.mobile-tabbar){display:none}
@@ -65,37 +69,17 @@
   .mobile-sheet-account .relay-user-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   /* Conversation list */
+  .v1-shell.relay-shell .v1-tabs{overflow:visible}
   .v1-shell.relay-shell .connected-inbox{position:relative;display:flex;overflow:hidden}
   .v1-shell.relay-shell .contact-directory{display:flex;flex:1;flex-direction:column;min-width:0;border:0;border-radius:0;background:transparent}
   .v1-shell.relay-shell .connected-inbox.has-conversation .contact-directory{display:none}
-  .v1-shell.relay-shell .contact-directory>.directory-search{order:0;padding:0 16px}
-  .v1-shell.relay-shell .contact-directory>.directory-search .relay-input-shell{height:40px;min-height:40px;border-radius:8px;background:var(--relay-layer)}
-  .v1-shell.relay-shell .contact-directory>.directory-search .relay-input{min-height:36px;font-size:14px}
-  .v1-shell.relay-shell .contact-directory>.inbox-channel-chips{order:1;display:flex;gap:6px;padding:10px 16px 6px;overflow-x:auto;scrollbar-width:none}
-  .v1-shell.relay-shell .inbox-channel-chip{height:30px;min-height:30px;padding:0 12px;border-radius:15px;font-size:13px}
 
-  .v1-shell.relay-shell .contact-directory>.v1-queues,.v1-shell.relay-shell .v1-tabs{overflow:visible}
   .v1-shell.relay-shell .automation-chip{height:44px;padding:0 12px;border-radius:22px;font-size:13px}
   .v1-shell.relay-shell .automation-chips{gap:8px}
-  .v1-shell.relay-shell .contact-directory>.v1-queues{order:2;margin:4px 16px 6px;border-radius:8px}
   .number-sheet h3{padding:0 8px 2px;color:var(--relay-ink);font-size:16px;font-weight:600;letter-spacing:0;text-transform:none}
   .number-sheet-hint{padding:0 8px 8px;color:var(--relay-ink-3);font-size:12.5px}
   .number-sheet .number-option{min-height:48px;padding:10px 8px;font-size:14px}
   .number-sheet .number-option svg{width:18px;height:18px}
-  .v1-shell.relay-shell .contact-directory>:not(.directory-search,.inbox-channel-chips,.v1-queues){order:3}
-  .v1-shell.relay-shell .contact-directory>.v1-queues>button{height:44px;min-height:44px;min-width:44px;padding:0 4px;border-radius:6px;font-size:13px}
-  .v1-shell.relay-shell .contact-directory>.v1-queues>:last-child{flex:0 0 auto}
-  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{width:44px;height:44px;min-height:44px;min-width:44px;padding:0}
-  .v1-shell.relay-shell .contact-directory>.v1-queues .relay-button__label{display:none}
-  .v1-shell.relay-shell .directory-rows{padding:2px 8px}
-  .v1-shell.relay-shell .directory-contact{gap:12px;margin:0;padding:11px 10px;border-radius:8px;transition:background-color var(--relay-fast) ease,transform 120ms ease}
-  .v1-shell.relay-shell .directory-contact:active:not(:disabled){transform:scale(.985);background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
-  .v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true])::before{display:none}
-  .v1-shell.relay-shell .directory-avatar .relay-avatar{width:44px;height:44px;font-size:14px}
-  .v1-shell.relay-shell .directory-channel{right:0;bottom:0;width:12px;height:12px}
-  .v1-shell.relay-shell .directory-contact-top strong{font-size:14px}
-  .v1-shell.relay-shell .directory-contact-top time,.v1-shell.relay-shell .directory-contact-context{font-size:12px}
-  .v1-shell.relay-shell .directory-contact-bottom small{font-size:14px}
 
   /* Chat page */
   .v1-shell.relay-shell .connected-thread{position:relative;flex:1;min-width:0;border:0;background:var(--relay-mica)}
@@ -113,10 +97,16 @@
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
   .mobile-record-chip small{font-weight:500;opacity:.8}
   .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--relay-ink-2);font-size:12.5px;font-weight:600}
-  .v1-shell.relay-shell .message-thread{padding:12px 12px 6px;background:var(--relay-chat)}
-  .v1-shell.relay-shell .conversation-bubble{max-width:80%;font-size:14px;line-height:1.42}
-  .v1-shell.relay-shell .message-thread-content>.conversation-bubble{border-radius:8px}
-  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:8px}
+  .v1-shell.relay-shell .message-thread{padding:4px 0 8px;background:var(--relay-chat)}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble{padding:2px 36px 2px 56px}
+  .v1-shell.relay-shell .message-group-head .message-group-avatar{left:14px;width:32px;height:32px;font-size:12px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer>time{left:4px;width:48px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-menu-trigger{top:0;right:0;width:36px;height:36px;background:transparent;box-shadow:none}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other{padding:2px 56px 2px 36px}
+  .v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head .message-group-avatar{left:auto;right:14px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer>time{left:auto;right:4px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-menu-trigger{right:auto;left:0}
+  .v1-shell.relay-shell .message-date-divider{padding:8px 16px}
 
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
 

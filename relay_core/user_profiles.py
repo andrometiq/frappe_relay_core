@@ -170,6 +170,11 @@ def cards(users):
     users = frappe.parse_json(users) if isinstance(users, str) else users
     if not isinstance(users, list) or len(users) > MAX_CARDS or not all(isinstance(user, str) and 0 < len(user) <= 140 for user in users):
         frappe.throw(f'Request at most {MAX_CARDS} users')
+    return {'items': user_cards(users)}
+
+
+def user_cards(users):
+    """Name, photo, job title and status of each user, without an access check; callers check access."""
     accounts = frappe.get_all('User', filters={'name': ['in', users or ['']]}, fields=['name', 'full_name', 'user_image'])
     profiles = {row.user: row for row in frappe.get_all(DOCTYPE, filters={'user': ['in', users or ['']]},
                 fields=['user', 'display_name', 'job_title', 'status', 'status_text', 'status_clear_at'])}
@@ -181,4 +186,4 @@ def cards(users):
                       'image': account.user_image or '', 'job_title': profile.get('job_title') or '',
                       'status': 'Available' if expired else profile.get('status') or 'Available',
                       'status_text': '' if expired else profile.get('status_text') or ''})
-    return {'items': items}
+    return items

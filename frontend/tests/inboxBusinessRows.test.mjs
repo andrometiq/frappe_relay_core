@@ -16,9 +16,9 @@ test('the inbox lists business records and opens a record row as its business ch
 })
 
 test('a chat without a customer says Not linked, and only a manager gets a Link button', () => {
-  assert.match(inbox, /<span v-if="row\.unlinked && !rowActions\?\.canLink\(row\)" class="directory-unlinked">Not linked<\/span>/)
+  assert.match(inbox, /<span v-if="row\.unlinked && !rowActions\?\.canLink\(row\)" class="row-badge directory-unlinked">Not linked<\/span>/)
   assert.match(inbox, /<button v-if="rowActions\?\.canLink\(row\)"[^>]*>Link<\/button>/)
-  assert.deepEqual(TABS.at(-1).slice(0, 2), ['unlinked', 'Not linked'])
+  assert.ok(!TABS.some(([value]) => value === 'unlinked'), 'Not linked is a sidebar view, not a tab')
   assert.equal(canLinkRow({ unlinked: true }, true), true)
   assert.equal(canLinkRow({ unlinked: true }, false), false, 'A user who cannot link never sees a dead-end button')
   assert.equal(canLinkRow({ kind: 'business', unlinked: true }, true), false)
@@ -37,10 +37,10 @@ test('a business row marks every chat of its record, a chat row only itself', ()
   assert.deepEqual(readStateRequest({ name: 'RELAY-CON-1' }, false), { contact: 'RELAY-CON-1', read: 0 })
 })
 
-test('a chat with no saved name shows its number, and avatars carry no channel dot with one channel', () => {
+test('a chat with no saved name shows its number; the channel marks name each channel and the channel type is a filter choice', () => {
   assert.match(inbox, /recordTitle\(row\.kind === 'business' \? row : \{ display_name: row\.display_name \|\| row\.contact \}, 'Unknown number'\)/)
-  assert.match(inbox, /<span v-if="manyMediums" class="directory-channel"/)
-  assert.match(inbox, /v-if="manyMediums" class="inbox-channel-chips"/)
+  assert.doesNotMatch(inbox, /directory-channel|inbox-channel-chips/, 'The avatar has no channel dot; the marks line shows each channel')
+  assert.match(inbox, /v-model:medium="medium" :mediums="manyMediums \? chips : \[\]"/)
 })
 
 test('the channel row shows only switched-on channels, with no "soon" placeholders', () => {

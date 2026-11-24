@@ -45,3 +45,50 @@ def decorate_messages(rows, channels):
         context['mailbox_addresses'] = mailbox_addresses(channel)
         row['provider_context'] = context
     return rows
+
+
+def add_senders(rows):
+    """Name who sent each outgoing row as `sender`: {'user', 'name', 'image'} for a person, or {'automated': 1, 'name': 'Automation'}.
+
+    The send action's owner is the person who pressed Send, unless the action is an automatic delivery (automation, flow,
+    business event, routing, ticket notice, automatic email) or an AI handoff notice. A message without an action is an
+    old-app import by its author, or else the system's own (Hub campaign imports, business prompts): Automation.
+    Rows must already be permission-checked; this adds only the sender's display card."""
+    import frappe
+    from relay_core.messaging import automatic_delivery
+    outgoing = [row['name'] for row in rows if row.get('direction') == 'Outgoing' and row.get('name')]
+    if not outgoing:
+        return rows
+    # A sent message keeps its send action's request key as source_key; that key is the action's unique index.
+    stored = {row.name: row for row in frappe.get_all('Relay Message', filters={'name': ['in', outgoing]}, fields=['name', 'source_key', 'legacy_author'])}
+    keys = [row.source_key for row in stored.values() if row.source_key]
+    actions = {row.request_key: row for row in frappe.get_all('Relay Message Action', filters={'request_key': ['in', keys]},
+                                                              fields=['request_key', 'owner', 'payload'])} if keys else {}
+    senders = {}
+    for name in outgoing:
+        message = stored.get(name) or {}
+        action = actions.get(message.get('source_key'))
+        payload = action_payload(action.payload) if action else {}
+        user = action.owner if action else message.get('legacy_author')
+        automatic = automatic_delivery(payload) or payload.get('handoff_notice')
+        senders[name] = None if automatic or user in (None, '', 'Guest') else user
+    from relay_core.user_profiles import user_cards
+    cards = {card['user']: card for card in user_cards(sorted({user for user in senders.values() if user}))}
+    for row in rows:
+        if row.get('name') not in senders:
+            continue
+        user = senders[row['name']]
+        card = cards.get(user) or {}
+        row['sender'] = {'user': user, 'name': card.get('name') or user, 'image': card.get('image') or ''} if user \
+            else {'automated': 1, 'name': 'Automation'}
+    return rows
+
+
+def action_payload(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        payload = json.loads(value or '{}')
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}

@@ -113,10 +113,11 @@ watch(() => capabilities.value?.configure, configure => { if (configure) loadMar
         <template v-else-if="tab === 'whatsapp'">
           <section class="settings-card" aria-label="Connected numbers">
             <header><div><h3>Connected numbers</h3><p>Numbers linked through Meta signup. Messages to these numbers arrive in the inbox.</p></div>
-              <Badge v-if="channel" :label="channel.configured ? 'Connected' : 'Needs setup'" :theme="channel.configured ? 'green' : 'orange'" /></header>
-            <WhatsAppAccounts v-if="channel?.configured" />
+              <Badge v-if="channel && !channel.configured" label="Needs setup" theme="orange" /></header>
+            <WhatsAppAccounts v-if="channel?.configured" settings-target="#whatsapp-number-settings" />
             <p v-else-if="loaded" class="settings-row">{{ capabilities.configure ? 'Connect WhatsApp to add your first number.' : 'Relay is being set up. Ask your administrator to finish setup.' }}</p>
           </section>
+          <div id="whatsapp-number-settings" class="contents" />
           <section class="settings-card" aria-label="WhatsApp pages">
             <a class="settings-row" :href="whatsappRoute('templates')"><span class="settings-row-text"><b>Message templates</b><small>Approved messages you can send outside the 24-hour window</small></span><FeatherIcon name="chevron-right" :size="16" /></a>
           </section>

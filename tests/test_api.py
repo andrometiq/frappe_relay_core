@@ -19,6 +19,8 @@ class ApiTests(unittest.TestCase):
         self.f=types.SimpleNamespace(whitelist=whitelist,throw=throw,get_doc=Mock(),get_list=Mock(return_value=[]))
         self.enterContext(patch('relay_core.business_access.frappe', self.f))
         self.enterContext(patch.object(locks, 'frappe', self.f))
+        # Telegram-id titles are tested in test_endpoint_labels; contacts here have saved names.
+        self.enterContext(patch('relay_core.endpoint_labels.contact_titles', return_value={}))
         spec=importlib.util.spec_from_file_location('tested_relay_api',Path('relay_core/api.py'))
         self.api=importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules,frappe=self.f):spec.loader.exec_module(self.api)

@@ -1,6 +1,6 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Badge, Button, Dialog, Dropdown, ErrorMessage, FeatherIcon, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { whatsappHealth } from '../../services/whatsappHealth'
 import { accountMetadata, ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, connectionBadge, deliveryRows, needsReconnect, PIN_TEXT, removalText, SWITCHES, switchValue, webhookText } from '../../services/channelSetup'
@@ -8,10 +8,16 @@ import { setupRoute } from '../../services/onboarding'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 import WhatsAppProfile from './WhatsAppProfile.vue'
+import ToggleSwitch from '../fields/ToggleSwitch.vue'
 
 const accounts = ref([]), metadata = ref({}), canConfigure = ref(false)
 const loaded = ref(false), busy = ref(''), error = ref(''), notice = ref('')
 const confirming = ref(null), profileOf = ref(null)
+// Settings show for one number at a time, in their own card: the picked number, else the default one. `settingsTarget` names
+// where that card goes; with none it follows the list.
+defineProps({ settingsTarget: { type: String, default: '' } })
+const picked = ref('')
+const chosen = computed(() => accounts.value.find(row => row.name === picked.value) || accounts.value.find(row => row.is_default) || accounts.value[0])
 let stop
 
 async function load() {
@@ -57,6 +63,23 @@ function syncText(account) {
   const synced = account.last_success ? 'Synced from Meta ' + dateTime(account.last_success) + '.' : 'Waiting for the first sync from Meta.'
   return account.status === 'failed' ? synced + ' The last refresh failed: ' + account.last_error : synced
 }
+// The number row's own actions, in the mockup's More menu; Connect again stays a visible link when Meta dropped access.
+function actionsFor(row) {
+  const disabled = !!busy.value
+  return [
+    ...(needsReconnect(row) ? [] : [{ label: 'Check connection', icon: 'activity', disabled, onClick: () => check(row) }]),
+    ...(!row.is_default && row.enabled ? [{ label: 'Make default', icon: 'star', disabled, onClick: () => makeDefault(row) }] : []),
+    ...(row.enabled ? [{ label: 'Edit profile', icon: 'edit-2', disabled, onClick: () => { profileOf.value = row } }] : []),
+    ...(!row.coexistence ? [{ label: 'Reset PIN', icon: 'key', disabled, onClick: () => confirm(row, 'pin') }] : []),
+    { label: 'Remove number', icon: 'trash-2', disabled, onClick: () => confirm(row, 'remove') },
+  ]
+}
+// Quality and messaging limit from Meta, as short badges beside the connection state.
+function metaBadges(row) {
+  const health = whatsappHealth(metadata.value[row.name]?.profile)
+  const quality = health.find(item => item.name === 'Quality rating'), limit = health.find(item => item.name === 'Messaging limit')
+  return [quality?.theme && { label: 'Quality: ' + quality.label, theme: 'gray' }, limit?.text && limit.text !== 'Unknown' && { label: 'Limit: ' + limit.text.replace(/,000 customers a day$/, 'K/day').replace(' customers a day', '/day'), theme: 'gray' }].filter(Boolean)
+}
 const checkedText = health => health.checked_at ? 'Checked ' + dateTime(health.checked_at) + '.' : 'Not checked yet.'
 
 onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels', 'channel_automation'], load, ACCOUNTS_RELOAD_DELAY) })
@@ -68,12 +91,16 @@ onBeforeUnmount(() => stop?.())
     <p v-if="notice" role="status" class="whatsapp-accounts-note">{{ notice }}</p>
     <p v-if="!loaded" role="status" class="settings-row">Reading WhatsApp numbers…</p>
     <p v-else-if="!accounts.length && !error" class="settings-row">No WhatsApp number is connected yet.</p>
-    <article v-for="row in accounts" :key="row.name" class="whatsapp-account">
+    <article v-for="row in accounts" :key="row.name" class="whatsapp-account" :class="{ 'is-chosen': canConfigure && accounts.length > 1 && chosen?.name === row.name }">
       <div class="settings-row">
         <span class="settings-row-icon whatsapp"><FeatherIcon name="phone" :size="16" /></span>
-        <span class="settings-row-text"><b>{{ metadata[row.name]?.profile?.display_phone_number || row.address || row.label }}</b>
-          <small>{{ [row.label, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</small></span>
-        <span class="settings-row-end"><Badge v-bind="connectionBadge(row)" /><Badge v-if="row.is_default" label="Default" theme="blue" /></span>
+        <component :is="canConfigure && accounts.length > 1 ? 'button' : 'span'" :type="canConfigure && accounts.length > 1 ? 'button' : undefined" class="settings-row-text"
+          :aria-pressed="canConfigure && accounts.length > 1 ? chosen?.name === row.name : undefined" :title="canConfigure && accounts.length > 1 ? 'Show this number’s settings' : undefined" @click="picked = row.name">
+          <b>{{ row.label || metadata[row.name]?.profile?.display_phone_number || row.address }}</b>
+          <small>{{ [metadata[row.name]?.profile?.display_phone_number || row.address, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</small></component>
+        <span class="settings-row-end"><Badge v-bind="connectionBadge(row)" /><Badge v-if="row.is_default" label="Default" theme="blue" /><Badge v-for="badge in metaBadges(row)" :key="badge.label" class="whatsapp-meta-badge" v-bind="badge" />
+          <a v-if="canConfigure && needsReconnect(row)" class="relay-button relay-button--solid relay-button--sm" :href="setupRoute('number')">Connect again</a>
+          <Dropdown v-if="canConfigure" :options="actionsFor(row)"><Button icon="more-horizontal" variant="ghost" :aria-label="`${row.label} actions`" :title="`${row.label} actions`" :loading="busy.startsWith(row.name + ':')" /></Dropdown></span>
       </div>
       <details class="whatsapp-account__more">
         <summary>Account health</summary>
@@ -85,23 +112,16 @@ onBeforeUnmount(() => stop?.())
         </dl>
         <p>{{ checkedText(row.health) }} {{ syncText(metadata[row.name]) }}</p>
       </details>
-      <div v-if="canConfigure" class="whatsapp-account__manage">
-        <div class="whatsapp-account__switches">
-          <div v-for="item in SWITCHES" :key="item.name">
-            <FormControl type="checkbox" :label="item.label" :model-value="switchValue(row, item.name)" :disabled="!!busy || (item.name !== 'enabled' && !row.enabled) || (item.name === 'enabled' && adminLocked(row))" @update:model-value="value => toggle(row, item.name, value)" />
-            <small>{{ item.name === 'enabled' && adminLocked(row) ? ADMIN_OFF_TEXT : item.help }}</small>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <a v-if="needsReconnect(row)" class="relay-button relay-button--solid relay-button--sm" :href="setupRoute('number')">Connect again</a>
-          <Button v-else variant="outline" icon-left="activity" label="Check connection" :loading="busy === row.name + ':check'" :disabled="!!busy" @click="check(row)" />
-          <Button v-if="!row.is_default && row.enabled" variant="outline" label="Make default" :loading="busy === row.name + ':default'" :disabled="!!busy" @click="makeDefault(row)" />
-          <Button v-if="row.enabled" variant="outline" icon-left="edit-2" label="Edit profile" :disabled="!!busy" @click="profileOf = row" />
-          <Button v-if="!row.coexistence" variant="outline" icon-left="key" label="Reset PIN" :loading="busy === row.name + ':pin'" :disabled="!!busy" @click="confirm(row, 'pin')" />
-          <Button variant="outline" theme="red" icon-left="trash-2" label="Remove number" :loading="busy === row.name + ':remove'" :disabled="!!busy" @click="confirm(row, 'remove')" />
-        </div>
-      </div>
     </article>
+    <Teleport :to="settingsTarget || 'body'" :disabled="!settingsTarget" defer>
+      <section v-if="canConfigure && chosen" class="settings-card whatsapp-number-settings" :aria-label="`${chosen.label} number settings`">
+        <header><div><h3>{{ chosen.label || chosen.address }} number</h3><p>How this number behaves in the inbox.<template v-if="accounts.length > 1"> Pick a number above to see its settings.</template></p></div></header>
+        <div v-for="item in SWITCHES" :key="item.name" class="settings-row">
+          <span class="settings-row-text"><b>{{ item.label }}</b><small>{{ item.name === 'enabled' && adminLocked(chosen) ? ADMIN_OFF_TEXT : item.help }}</small></span>
+          <ToggleSwitch :label="item.label" :model-value="switchValue(chosen, item.name)" :disabled="!!busy || (item.name !== 'enabled' && !chosen.enabled) || (item.name === 'enabled' && adminLocked(chosen))" @update:model-value="value => toggle(chosen, item.name, value)" />
+        </div>
+      </section>
+    </Teleport>
     <div class="whatsapp-accounts-foot"><Button variant="outline" icon-left="refresh-cw" label="Refresh" :disabled="!!busy" @click="load" /></div>
     <Dialog :model-value="!!confirming" :options="{ title: confirming?.action === 'pin' ? 'Reset the two-step PIN?' : 'Remove this number?', size: 'md' }" @update:model-value="value => { if (!value) confirming = null }">
       <div v-if="confirming" class="space-y-4 text-sm text-ink-gray-8">
@@ -121,15 +141,19 @@ onBeforeUnmount(() => stop?.())
 .whatsapp-account .settings-row { border-bottom:0; }
 .whatsapp-accounts-error { margin:12px 16px 0; }
 .whatsapp-accounts-note { margin:12px 16px 0; font-size:13px; color:var(--relay-ink-2); }
-.whatsapp-account__more, .whatsapp-account__manage { padding:0 16px 12px 62px; font-size:13px; color:var(--relay-ink-3); }
+.whatsapp-account__more { padding:0 16px 10px 62px; font-size:13px; color:var(--relay-ink-3); }
 .whatsapp-account__more summary { cursor:pointer; font-size:12.5px; }
-.whatsapp-account__manage { display:flex; flex-direction:column; gap:10px; }
+.whatsapp-account .settings-row-end :deep(.relay-button--ghost) { width:30px; min-width:30px; height:30px; min-height:30px; padding:0; color:var(--relay-ink-3); }
 .whatsapp-account__health { display:grid; gap:8px; margin:8px 0; }
 .whatsapp-account__health > div { display:grid; grid-template-columns:170px minmax(0,1fr); align-items:center; gap:12px; }
 .whatsapp-account__health dt { color:var(--relay-ink-3); }
 .whatsapp-account__health dd { margin:0; color:var(--relay-ink); overflow-wrap:anywhere; }
-.whatsapp-account__switches { display:grid; gap:10px; }
-.whatsapp-account__switches small { display:block; color:var(--relay-ink-3); padding-left:24px; }
+.whatsapp-account button.settings-row-text { padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.whatsapp-account.is-chosen { background:var(--relay-accent-soft); }
+.whatsapp-account button.settings-row-text:focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; border-radius:4px; }
 .whatsapp-accounts-foot { padding:12px 16px; }
-@media (max-width:768px) { .whatsapp-account__more, .whatsapp-account__manage { padding-left:16px; } .whatsapp-account__health > div { grid-template-columns:1fr; gap:2px; } }
+/* Phones keep the state and default badges and the menu on one line; quality and limit are in Account health. */
+@media (max-width:768px) { .whatsapp-account__more { padding-left:16px; } .whatsapp-account__health > div { grid-template-columns:1fr; gap:2px; }
+  .whatsapp-meta-badge { display:none; } .whatsapp-account .settings-row { flex-wrap:nowrap; } .whatsapp-account .settings-row-text { flex:1; min-width:0; }
+  .whatsapp-account .settings-row-text > :is(b,small) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .whatsapp-account .settings-row-end { flex:none; flex-wrap:nowrap; } }
 </style>

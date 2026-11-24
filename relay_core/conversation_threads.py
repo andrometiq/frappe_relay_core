@@ -64,6 +64,19 @@ def thread_items(newest, unread):
         if people[person] is None:
             continue
         items.append(thread_item(thread, last[name], channels[channel], people[person], unread.get(thread, (0, None, None))))
+    from relay_core.endpoint_labels import contact_titles, telegram_labels, telegram_usernames
+    renamed = contact_titles({item['relay_contact']: item['contact_label'] for item in items})
+    for item in items:
+        item['contact_label'] = renamed.get(item['relay_contact']) or item['contact_label']
+    telegram = [item for item in items if item['provider'] == 'Telegram']
+    # Each Telegram thread's public @username, from its newest incoming message, read for all threads at once.
+    newest = telegram_usernames({item['relay_contact'] for item in telegram}, {item['channel'] for item in telegram})
+    for item in telegram:
+        item['handle'] = newest.get((item['relay_contact'], item['channel'], item['endpoint']), (None, ''))[1]
+    labels = telegram_labels([(item['channel'], item['endpoint']) for item in telegram],
+                             {(item['channel'], item['endpoint']): item['handle'] for item in telegram if item['handle']})
+    for item in telegram:
+        item['endpoint_label'] = labels.get((item['channel'], item['endpoint']), '')
     return sorted(items, key=lambda item: (provider_rank(item['provider']), item['channel_label'], item['endpoint'], item['contact_label']))
 
 
@@ -82,17 +95,7 @@ def thread_item(thread, last, channel, person, unread):
             'channel': channel_name, 'provider': channel.channel, 'channel_label': channel.label or channel.title or channel_name,
             'channel_address': channel.address or '', 'endpoint': endpoint, 'last_message': last.name,
             'last_at': last.sent_at or last.creation, 'last_direction': last.direction, 'preview': directory_preview(last),
-            'unread': unread[0], 'first_unread': unread[1], 'handle': telegram_handle(thread) if channel.channel == 'Telegram' else ''}
-
-
-def telegram_handle(thread):
-    """The person's public Telegram handle from their newest message on the thread, when Telegram sent one."""
-    from relay_core.automation.provenance import context_of
-    contact, channel, endpoint = thread
-    context = frappe.db.get_value('Relay Message', {'relay_contact': contact, 'channel': channel, 'sender_endpoint': endpoint,
-                                                    'direction': 'Incoming'}, 'provider_context', order_by='name desc')
-    username = context_of({'provider_context': context}).get('username') if context else None
-    return '@' + username if isinstance(username, str) and username else ''
+            'unread': unread[0], 'first_unread': unread[1], 'handle': ''}
 
 
 def provider_rank(provider):

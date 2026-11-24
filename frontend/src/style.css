@@ -485,15 +485,11 @@
 .v1-shell .relay-user-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .v1-connection { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-gray-6); white-space:nowrap; }
 .v1-connection>span { width:7px; height:7px; border-radius:50%; background:var(--ink-gray-5); }
-.v1-connection.is-connected>span { background:var(--ink-green-2); }
 .v1-screen { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; background:var(--surface-white); }
 .v1-content { position:relative; flex:1; min-height:0; overflow:auto; padding:24px; overflow-wrap:anywhere; background:var(--surface-gray-1); }
-.v1-tabs,.v1-queues { display:flex; flex-wrap:nowrap; min-width:0; overflow-x:auto; gap:4px; padding:8px 16px; border-bottom:1px solid var(--outline-gray-2); flex-shrink:0; scrollbar-width:thin; }
-.v1-tabs>*,.v1-queues>* { flex-shrink:0; white-space:nowrap; }
+.v1-tabs { display:flex; flex-wrap:nowrap; min-width:0; overflow-x:auto; gap:4px; padding:8px 16px; border-bottom:1px solid var(--outline-gray-2); flex-shrink:0; scrollbar-width:thin; }
+.v1-tabs>* { flex-shrink:0; white-space:nowrap; }
 .v1-tabs .relay-button--solid { background:var(--surface-blue-1); color:var(--ink-blue-3); border-color:var(--outline-blue-1); }
-.v1-queues button,.v1-queues a { display:flex; align-items:center; min-height:40px; padding:6px 10px; border-radius:6px; font-size:13px; }
-.v1-queues [aria-pressed=true] { background:var(--surface-blue-1); color:var(--ink-blue-3); font-weight:600; }
-.v1-queues button:hover,.v1-queues a:hover { background:var(--surface-gray-2); }
 .v1-detail-grid { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1.6fr); gap:20px; margin-top:20px; align-items:start; }
 .v1-card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:12px; }
 .v1-list-card { display:flex; flex-direction:column; gap:6px; width:100%; text-align:left; padding:16px; border:1px solid var(--outline-gray-2); border-radius:10px; background:var(--surface-white); overflow-wrap:anywhere; }
@@ -618,8 +614,6 @@
 .v1-shell .directory-search { padding:12px 16px; }
 .directory-search>.relay-input-shell { width:100%; min-width:0; }
 .directory-avatar { position:relative; flex:none; align-self:flex-start; margin-top:2px; }
-.directory-channel { position:absolute; bottom:-3px; right:-3px; display:grid; place-items:center; width:18px; height:18px; border:2px solid var(--surface-white); border-radius:50%; background:var(--surface-green-1); color:var(--ink-green-2); }
-.directory-contact-context { display:flex; align-items:center; gap:8px; margin-top:8px; min-width:0; font-size:12px; color:var(--ink-gray-6); }
 .directory-business { max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 6px; border-radius:4px; background:var(--surface-gray-2); }
 .directory-load-more { min-height:1px; margin:12px 16px; color:var(--ink-gray-5); font-size:12px; text-align:center; }
 .composer-quote { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:12px; }
@@ -696,8 +690,6 @@
 .v1-detail-grid > * { min-height:0; overflow-y:auto; }
 .v1-shell .directory-search { padding:6px 12px; }
 .v1-shell .directory-contact { padding:8px 12px; gap:8px; }
-.v1-shell .directory-contact-context { margin-top:2px; }
-.v1-shell .v1-queues { padding:4px 12px; }
 .v1-shell .conversation-heading { display:flex; flex-wrap:nowrap; min-height:52px; padding:4px 12px; gap:8px; }
 .v1-shell .conversation-title { flex:1; min-width:0; }
 .v1-shell .conversation-heading-actions { width:auto; flex:none; gap:2px; }
@@ -735,8 +727,6 @@
 
 /* Keep every card’s metadata inside its natural-height row. */
 .v1-list-card > * { flex-shrink:0; }
-.v1-queues { flex-wrap:wrap; gap:2px; }
-.v1-queues button,.v1-queues a { padding-inline:8px; }
 @media (max-width:768px) {
   .v1-tabs { flex-wrap:wrap; gap:2px; padding:4px 12px; }
   .workspace-heading-actions { margin-left:auto; }
@@ -871,8 +861,8 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .nav-chevron[aria-expanded=false] svg{transform:rotate(-90deg)}
 .v1-shell.relay-shell .nav-item[data-channel=WhatsApp] svg{color:#25a35a}
 .v1-shell.relay-shell .v1-connection{gap:6px;font-size:12px;color:var(--relay-ink-3)}
-.v1-shell.relay-shell .v1-connection>span{width:7px;height:7px;background:var(--relay-green);box-shadow:0 0 0 3px color-mix(in srgb,var(--relay-green) 22%,transparent)}
-.v1-shell.relay-shell .v1-connection:not(.is-connected)>span{background:var(--relay-ink-4);box-shadow:none}
+/* Shown only while live updates are down, so the dot is grey. */
+.v1-shell.relay-shell .v1-connection>span{width:7px;height:7px;background:var(--relay-ink-4)}
 .v1-shell.relay-shell .app-nav{gap:1px;padding:6px 8px 10px;border:0;background:transparent}
 .v1-shell.relay-shell .relay-nav-section{gap:1px}
 .v1-shell.relay-shell .relay-nav-group{padding:14px 12px 5px;color:var(--relay-ink-3);font-size:11px;font-weight:600;letter-spacing:normal}
@@ -889,14 +879,15 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .relay-user-name{color:var(--relay-ink);font-size:13.5px}
 .v1-shell.relay-shell .workspace{background:transparent}
 @media(min-width:769px){
-  .v1-shell.relay-shell{grid-template-columns:56px auto minmax(0,1fr);grid-template-rows:48px minmax(0,1fr);padding:0}
-  .v1-shell.relay-shell>.v1-header{grid-column:3;grid-row:1;gap:10px;height:48px;min-height:48px;padding:0 12px 0 20px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px}
+  .v1-shell.relay-shell{grid-template-columns:56px auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding:0}
+  .v1-shell.relay-shell>.v1-header{grid-column:3;grid-row:1;gap:10px;height:52px;min-height:52px;padding:0 12px 0 20px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px}
   .v1-shell.relay-shell>.v1-header>h1{color:var(--relay-ink);font-size:15px;font-weight:600}
   .v1-shell.relay-shell>.v1-header>h1.inbox-title{visibility:hidden}
   .relay-titlebar-search{width:420px;max-width:40vw;margin:0 auto}
   .relay-titlebar-search .relay-input-shell{min-height:30px;height:30px;gap:0;border-radius:6px;background:var(--relay-layer);color:var(--relay-ink-3)}
   .relay-titlebar-search .relay-input{min-height:28px;font-size:12px}
   .v1-shell.relay-shell>.v1-header .relay-button{min-height:30px}
+  .v1-shell.relay-shell:not(:has(>.v1-header)) .workspace{grid-row:1 / -1}
   .v1-shell.relay-shell .workspace{grid-column:3;grid-row:2;border:0;border-radius:0;background:var(--relay-layer);overflow:hidden}
   .v1-shell.relay-shell .workspace:has(>.connected-inbox){border:0;border-radius:0;background:transparent}
   :is(.v1-shell,.relay-dialog,.relay-menu) button,.relay-dialog__close{min-width:0}
@@ -916,7 +907,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .workspace-heading h2,.frappe-list-toolbar h2,.frappe-page-title h2,.workflow-card h3{color:var(--relay-ink);font-weight:600}
 .workspace-heading p,.workspace-help,.frappe-list-toolbar p,.workspace-state p{color:var(--relay-ink-3)}
 .workspace-state-icon{border:0;border-radius:8px;background:var(--relay-accent-soft);color:var(--relay-accent-text)}
-.v1-shell.relay-shell :is(.v1-tabs,.v1-queues,.frappe-page-head,.frappe-list-toolbar,.frappe-list-filters,.frappe-list-footer,.frappe-form-tabs,.frappe-form-section,.frappe-section-head){border-color:var(--relay-stroke);background:transparent}
+.v1-shell.relay-shell :is(.v1-tabs,.frappe-page-head,.frappe-list-toolbar,.frappe-list-filters,.frappe-list-footer,.frappe-form-tabs,.frappe-form-section,.frappe-section-head){border-color:var(--relay-stroke);background:transparent}
 .v1-shell.relay-shell .v1-tabs{gap:6px;padding:10px 16px 6px;border:0}
 .v1-shell.relay-shell .v1-tabs :is(button,a,.relay-button){height:28px;min-height:28px;padding:0 11px;border:1px solid transparent;border-radius:14px;background:transparent;box-shadow:none;color:var(--relay-ink-2);font-size:12.5px}
 .v1-shell.relay-shell .v1-tabs :is([aria-pressed=true],[aria-selected=true],.active,.relay-button--solid){border-color:transparent;background:var(--relay-ink);color:var(--relay-layer);font-weight:500}
@@ -938,18 +929,16 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .feedback-panel{border:0;border-radius:8px;background:var(--relay-accent-soft);color:var(--relay-ink)}
 
 /* Inbox list */
-.v1-shell.relay-shell .connected-inbox{grid-template-columns:340px minmax(0,1fr);background:transparent}
+/* Desktop: the inbox sidebar (260px) and the chat list (330px) share one column beside the conversation. */
+.v1-shell.relay-shell .connected-inbox{grid-template-columns:auto minmax(0,1fr) auto;background:transparent}
+.v1-shell.relay-shell .connected-inbox>.chat-panel{grid-column:3;grid-row:1;max-width:none}
+.v1-shell.relay-shell .connected-thread{min-width:0}
+/* Where a docked panel would leave the chat under 480px, the panel opens over the chat's right edge instead. */
+@media(min-width:769px){.v1-shell.relay-shell .connected-inbox.panel-overlay{position:relative}.v1-shell.relay-shell .connected-inbox.panel-overlay>.chat-panel{grid-column:1 / -1;grid-row:1;position:absolute;top:0;right:0;bottom:0;z-index:7;max-width:calc(100% - 24px);box-shadow:var(--relay-shadow-2)}}
 .v1-shell.relay-shell .contact-directory{border:0;background:var(--relay-layer)}
-.inbox-list-head{display:flex;align-items:center;gap:8px;padding:16px 16px 0}
-.inbox-list-head h2{margin-right:auto;color:var(--relay-ink);font-size:20px;font-weight:600;letter-spacing:-.01em}
-.inbox-list-head .relay-button--ghost{color:var(--relay-ink-2)}
-.inbox-list-head .relay-button--solid{box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .contact-directory>.inbox-channel-chips{display:flex;gap:6px;padding:12px 16px 0}
-.inbox-channel-chip{display:inline-flex;align-items:center;gap:6px;flex:none;height:28px;min-height:28px;padding:0 11px;border:1px solid var(--relay-stroke-strong);border-radius:14px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12.5px}
-.inbox-channel-chip[aria-pressed=true]{border-color:transparent;background:var(--relay-accent);color:var(--relay-accent-ink);font-weight:600}
-.inbox-channel-chip:disabled{opacity:.45;cursor:not-allowed}
-.inbox-channel-chip:disabled{padding:0 10px}
-.inbox-chip-soon{margin-left:-2px;font-size:10px;color:var(--relay-ink-3)}
+@media(min-width:769px){.v1-shell.relay-shell .contact-directory{flex-direction:row;border-right:1px solid var(--relay-stroke)}.v1-shell.relay-shell .contact-directory>.page-side{width:260px;flex:none}.v1-shell.relay-shell .contact-directory>.inbox-list{width:330px;flex:none}}
+@media(max-width:1440px) and (min-width:1181px){.v1-shell.relay-shell .contact-directory>.page-side{width:220px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:300px}}
+@media(max-width:1180px) and (min-width:769px){.v1-shell.relay-shell .contact-directory>.page-side{width:200px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:280px}}
 
 /* WhatsApp numbers: filter, number tags and pickers show only on a site with two or more numbers */
 .number-caret{flex:none;margin-left:auto;color:var(--relay-ink-3)}
@@ -978,52 +967,24 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .send-number-pill{display:inline-flex;align-items:center;gap:6px;min-width:0}
 .send-number-pill strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .send-number-address{white-space:nowrap}
-.v1-shell.relay-shell .contact-directory>.v1-queues{display:flex;flex-wrap:nowrap;gap:0;margin:10px 16px 10px;padding:3px;border:1px solid var(--relay-stroke);border-radius:7px;background:var(--relay-hover)}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button{flex:1 1 auto;justify-content:center;height:26px;min-height:26px;padding:0 6px;border-radius:5px;color:var(--relay-ink-2);font-size:12.5px;white-space:nowrap}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button:hover{background:transparent;color:var(--relay-ink)}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button[aria-pressed=true]{background:var(--relay-layer-strong);color:var(--relay-ink);font-weight:600;box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{height:26px;min-height:26px;padding:0 6px;border:0;background:transparent;box-shadow:none;font-size:12.5px}
-.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders{overflow-x:auto;margin-top:0;scrollbar-width:none}
-.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders>*{flex:0 0 auto;padding:0 8px}
-.v1-shell.relay-shell .directory-rows{padding:4px 8px 12px}
-.v1-shell.relay-shell .directory-contact{position:relative;align-items:flex-start;gap:11px;width:100%;min-height:0;margin:0 0 2px;padding:10px;border:0;border-radius:7px;transition:background-color var(--relay-fast) ease,box-shadow var(--relay-fast) ease}
-.v1-shell.relay-shell .directory-contact:hover{background:var(--relay-hover)}
-.v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true]){background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true])::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;background:var(--relay-accent)}
-.v1-shell.relay-shell .directory-avatar{margin:0}
-.v1-shell.relay-shell .directory-avatar .relay-avatar{width:36px;height:36px;font-size:12.5px}
-.v1-shell.relay-shell .directory-channel{right:-1px;bottom:-1px;width:11px;height:11px;border:2px solid var(--relay-layer-strong);background:var(--relay-green)}
-.v1-shell.relay-shell .directory-channel svg{display:none}
-.v1-shell.relay-shell .directory-contact-copy{display:flex;flex:1;flex-direction:column;min-width:0}
-.v1-shell.relay-shell .directory-contact-top{display:flex;align-items:baseline;gap:8px}
-.v1-shell.relay-shell .directory-contact-top strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-size:13.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact-top time{flex:none;margin-left:auto;color:var(--relay-ink-3);font-size:11.5px}
-.v1-shell.relay-shell .directory-contact.is-unread time{color:var(--relay-accent-text);font-weight:600}
-.v1-shell.relay-shell .directory-contact-context{order:1;display:flex;gap:0;min-width:0;margin-top:1px;overflow:hidden;color:var(--relay-ink-3);font-size:11.5px;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact-context .directory-business{max-width:none;padding:0;background:none;overflow:hidden;text-overflow:ellipsis}
-.v1-shell.relay-shell .directory-contact-bottom{order:2;display:flex;align-items:center;gap:6px;margin-top:3px}
-.v1-shell.relay-shell .directory-contact-bottom small{flex:1;min-width:0;margin:0;overflow:hidden;color:var(--relay-ink-2);font-size:13.5px;text-overflow:ellipsis;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact.is-unread .directory-contact-bottom small{color:var(--relay-ink);font-weight:500}
 .v1-shell.relay-shell .directory-unread{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--relay-accent);color:var(--relay-accent-ink);font-size:11px;font-weight:700}
-@media(min-width:769px){.v1-shell.relay-shell .contact-directory>.directory-search{padding:8px 16px 0}.v1-shell.relay-shell .contact-directory{border-top:1px solid var(--relay-stroke);border-left:1px solid var(--relay-stroke);border-radius:8px 0 0 0}}
-@media(max-width:1100px) and (min-width:769px){.v1-shell.relay-shell{grid-template-columns:200px minmax(0,1fr)}.v1-shell.relay-shell .connected-inbox{grid-template-columns:300px minmax(0,1fr)}}
 
 /* Conversation */
 .v1-shell.relay-shell .connected-thread{border:0;background:var(--relay-chat)}
-@media(min-width:769px){.v1-shell.relay-shell .connected-thread{border-top:1px solid var(--relay-stroke);border-left:1px solid var(--relay-stroke)}}
-.v1-shell.relay-shell .conversation-heading{display:flex;flex-wrap:nowrap;align-items:center;gap:12px;min-height:0;padding:12px 16px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
-.v1-shell.relay-shell .conversation-heading>.relay-avatar{width:36px;height:36px;font-size:12.5px}
+.v1-shell.relay-shell .conversation-heading{display:flex;flex-wrap:nowrap;align-items:center;gap:10px;height:52px;min-height:52px;padding:0 12px 0 16px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
+.v1-shell.relay-shell .conversation-heading>.relay-avatar{width:30px;height:30px;border:0;font-size:12px}
 .v1-shell.relay-shell .conversation-title{flex:1;min-width:0}
 .v1-shell.relay-shell .conversation-heading h2{color:var(--relay-ink);font-size:15px;font-weight:600}
-.v1-shell.relay-shell .conversation-meta{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;margin-top:3px;overflow:hidden;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
+.v1-shell.relay-shell .conversation-meta{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin-top:0;overflow:hidden;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
 .v1-shell.relay-shell .conversation-meta:empty{display:none}
-.v1-shell.relay-shell .conversation-meta>span{display:inline-flex;align-items:center;gap:6px;min-height:0;padding:0;border:0;background:none;color:var(--relay-ink-3);font-size:12px;font-weight:400}
-.v1-shell.relay-shell .conversation-meta span+span::before{content:none}
-.v1-shell.relay-shell .conversation-meta>.conversation-record,.v1-shell.relay-shell .conversation-meta>span:first-child:not(.conversation-channel,.conversation-number){height:24px;padding:0 9px;border-radius:6px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-weight:600}
+.v1-shell.relay-shell .conversation-meta>span{display:inline-flex;align-items:center;gap:6px;min-height:0;padding:0;border:0;background:none;color:var(--relay-ink-soft);font-size:12px;font-weight:500}
+/* The second line is plain text in the mockup: items joined by a middle dot. */
+.v1-shell.relay-shell .conversation-meta>*+*::before{content:"·";margin-right:4px;color:var(--relay-ink-soft)}
+.v1-shell.relay-shell .conversation-meta>.conversation-record{color:var(--relay-ink-3)}
 .conversation-record small{font-weight:500;opacity:.8}
 .v1-shell.relay-shell .conversation-meta>:is(.conversation-record,.conversation-linked){flex:none}
 .v1-shell.relay-shell .conversation-meta>.conversation-channel{display:inline-flex;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.conversation-linked{display:inline-flex;align-items:center;flex:none;height:24px;padding:0 9px;border:1px solid var(--relay-stroke-strong);border-radius:12px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:600}
+.conversation-linked{display:inline-flex;align-items:center;flex:none;height:18px;padding:0 7px;border:0;border-radius:4px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:11px;font-weight:600}
 .conversation-title-button{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .conversation-title-button:hover{text-decoration:underline}
 .v1-shell.relay-shell .conversation-heading-actions{display:flex;flex:none;align-items:center;gap:6px;width:auto;margin-left:auto}
@@ -1033,48 +994,81 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .viewer-more{display:grid;place-items:center;height:24px;min-width:24px;margin-left:-6px;padding:0 4px;border:2px solid var(--relay-layer-strong);border-radius:12px;background:var(--relay-hover)}
 .v1-shell.relay-shell .conversation-tools{max-height:none;padding:0;border:0;overflow:visible;background:transparent}
 .conversation-tool-buttons{display:flex;align-items:center;gap:6px}
-.v1-shell.relay-shell .conversation-heading-actions .relay-button{width:auto;min-width:0;height:32px;min-height:32px}
-.v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:32px;padding:0;border-color:transparent;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
+.v1-shell.relay-shell .conversation-heading-actions .relay-button{width:auto;min-width:0;height:30px;min-height:30px}
+.v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:30px;padding:0;border-color:transparent;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
 .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only:hover:not(:disabled){background:var(--relay-hover)}
-.v1-shell.relay-shell .message-thread{gap:4px;padding:18px 28px 10px;background:transparent;scrollbar-width:thin;scrollbar-color:var(--relay-stroke-strong) transparent}
-.v1-shell.relay-shell .message-thread-content{gap:4px}
-.v1-shell.relay-shell .conversation-bubble{min-width:0;max-width:62%;padding:8px 12px 6px;border:0;border-radius:8px;background:var(--relay-bubble-in);box-shadow:var(--relay-shadow-1);color:var(--relay-ink);font-size:13.5px;line-height:1.45;transition:box-shadow var(--relay-fast) ease}
-.v1-shell.relay-shell .conversation-bubble.ml-auto{border-radius:8px;background:var(--relay-bubble-out);color:#fff}
-.v1-shell.relay-shell .conversation-bubble.ml-auto>:is(.message-content,.message-footer,.message-sender,.message-quote,.message-channel){color:#fff;--ink-gray-4:#fff;--ink-gray-5:#fff;--ink-gray-6:#fff;--ink-gray-7:#fff;--ink-gray-8:#fff;--ink-gray-9:#fff;--relay-ink:#fff;--relay-ink-2:#fff;--relay-ink-3:#fff;--ink-blue-1:#fff;--ink-blue-2:#fff;--ink-blue-3:#fff;--ink-green-2:#fff;--outline-gray-2:rgba(255,255,255,.28);--outline-blue-1:rgba(255,255,255,.6);--surface-white:rgba(0,0,0,.08);--surface-gray-1:rgba(0,0,0,.08);--surface-gray-2:rgba(0,0,0,.08)}
-.v1-shell.relay-shell .conversation-bubble:hover{box-shadow:var(--relay-shadow-2)}
-/* New incoming messages and new sends slide in (MessageThread marks them); loaded pages and acknowledged sends do not. */
+/* Messages read as Raven-style sender groups, as in the approved mockup: no bubbles, a 34px avatar and the name once per group,
+   both sides on the left, a hover tint per row. */
+.v1-shell.relay-shell .message-thread{gap:0;padding:8px 0 12px;background:var(--relay-chat);scrollbar-width:thin;scrollbar-color:var(--relay-stroke-strong) transparent}
+.v1-shell.relay-shell .message-thread-content{gap:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble{position:relative;display:block;align-self:stretch;width:auto;min-width:0;max-width:none;margin:0;padding:2px 64px 2px 66px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--relay-ink);font-size:14px;line-height:1.55;transition:background-color var(--relay-fast) ease}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-group-start{margin-top:6px;padding-top:6px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble:is(:hover,.menu-target){background:var(--relay-hover)}
+.message-group-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.message-group-head strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-size:14px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.message-group-head time{flex:none;color:var(--relay-ink-soft);font-size:11.5px}
+.v1-shell.relay-shell .message-group-head .message-group-avatar{position:absolute;left:20px;top:8px;width:34px;height:34px;border:0;border-radius:8px;font-size:13px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-sender{display:none}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content>*+*{margin-top:6px}
+/* A plain text message ends with its ticks on the same line; other kinds keep the footer under them. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content)){display:inline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))>p{display:inline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))+.message-footer{display:inline-flex;margin-left:6px;vertical-align:baseline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer{position:static;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:4px;margin-top:1px;color:var(--relay-ink-soft);font-size:11px;line-height:inherit;opacity:1}
+/* The group head shows the time; a following row shows its time in the gutter on hover. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer>time{position:absolute;left:12px;top:5px;width:50px;color:var(--relay-ink-soft);font-size:10.5px;text-align:center;opacity:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.is-group-start):hover>.message-footer>time{opacity:1}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-group-start>.message-footer>time{display:none}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:relay-fade-up var(--relay-normal) var(--relay-ease) both}
 /* A send shows at once, greyed until the server takes it; one that failed gets a red edge, its reason, Retry and Delete. */
-.v1-shell.relay-shell .conversation-bubble.is-pending{opacity:.6}
-.v1-shell.relay-shell .conversation-bubble.is-unsent{box-shadow:0 0 0 2px var(--relay-red)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto>.message-pending-error,.v1-shell.relay-shell .conversation-bubble.ml-auto .pending-status.is-unsent{color:#fff;font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-pending{opacity:.6}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-unsent{box-shadow:inset 3px 0 var(--relay-red)}
+.v1-shell.relay-shell .conversation-bubble>.message-pending-error,.v1-shell.relay-shell .conversation-bubble .pending-status.is-unsent{color:var(--relay-red);font-weight:600}
 @media (prefers-reduced-motion:reduce){.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:none}}
 .v1-shell.relay-shell .conversation-bubble .message-content>p:last-child::after,.v1-shell.relay-shell .conversation-bubble .message-template>:last-child::after{content:none}
-.v1-shell.relay-shell .conversation-bubble>.message-footer{position:static;justify-content:flex-end;gap:4px;margin-top:2px;color:inherit;font-size:12px;line-height:inherit;opacity:1}
-.v1-shell.relay-shell .conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
 .v1-shell.relay-shell .conversation-bubble .delivery-checks{width:auto}
-.v1-shell.relay-shell .conversation-bubble .delivery-checks svg{width:14px;height:14px}
-.v1-shell.relay-shell .conversation-bubble .delivery-checks svg+svg{margin-left:-9px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:10px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto):is(:first-child,:not(.conversation-bubble:not(.ml-auto))+*){border-top-left-radius:3px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto:is(:first-child,:not(.conversation-bubble.ml-auto)+*){border-top-right-radius:3px}
-.v1-shell.relay-shell .message-footer :is(time,.message-channel,.message-delivery){color:inherit;font-size:12px}
-.v1-shell.relay-shell .message-footer .message-delivery.delivery-read{color:#53bdeb}.v1-shell.relay-shell .message-footer .message-delivery.delivery-failed{color:var(--ink-red-2)}
-.v1-shell.relay-shell .message-sender{margin:0 0 3px;color:var(--relay-ink-3);font-size:11.5px;font-weight:600}
-.v1-shell.relay-shell .conversation-bubble.ml-auto :is(.message-quote,.message-template,.media-document,.media-unavailable,.email-content){border-color:transparent;border-radius:6px;background:rgba(0,0,0,.08)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto .message-template{padding:8px 10px}
-.v1-shell.relay-shell .conversation-bubble:not(.ml-auto) :is(.message-quote,.media-document,.media-unavailable){border-radius:6px;background:var(--relay-hover)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto .message-template-buttons>li{border-color:rgba(255,255,255,.4);background:transparent;color:#fff}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg{width:13px;height:13px}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg+svg{margin-left:-8px}
+.v1-shell.relay-shell .message-footer :is(.message-channel,.message-delivery){color:inherit;font-size:11px}
+.v1-shell.relay-shell .message-footer .message-delivery.delivery-read{color:var(--relay-accent)}.v1-shell.relay-shell .message-footer .message-delivery.delivery-failed{color:var(--ink-red-2)}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble :is(.message-quote,.media-document,.media-unavailable){width:fit-content;max-width:min(100%,520px);border:1px solid var(--relay-stroke);border-radius:8px;background:var(--relay-panel)}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble .message-template{width:fit-content;max-width:min(100%,520px);padding:8px 12px;border:1px solid var(--relay-stroke);border-left:3px solid var(--relay-green);border-radius:6px;background:var(--relay-panel);font-size:13px}
 .message-template-footer,.message-template-caption{font-size:12px}
 .message-reactions{display:flex;flex-wrap:wrap;gap:4px}
-.message-reaction{display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:11px;background:var(--relay-bubble-in);box-shadow:var(--relay-shadow-1);color:var(--relay-ink-3);font-size:12.5px;font-weight:600;white-space:nowrap}
-.v1-shell.relay-shell .conversation-bubble>.message-reactions{position:absolute;left:10px;top:calc(100% - 6px);z-index:2;margin:0}
-.v1-shell.relay-shell .conversation-bubble:has(>.message-reactions):not(:has(.message-readers)){margin-bottom:16px}
-.v1-shell.relay-shell .message-date-divider{margin:6px 0 10px}
-.v1-shell.relay-shell .message-date-divider span{padding:3px 10px;border:1px solid var(--relay-stroke);border-radius:10px;background:var(--relay-layer);color:var(--relay-ink-3);font-size:12px;font-weight:600}
-.v1-shell.relay-shell .message-unread-divider{display:flex;align-items:center;gap:12px;margin:14px 0 8px}
-.v1-shell.relay-shell .message-unread-divider::before,.v1-shell.relay-shell .message-unread-divider::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--relay-accent) 45%,transparent)}
-.v1-shell.relay-shell .message-unread-divider span{padding:0;border:0;background:transparent;color:var(--relay-accent-text);font-size:11.5px;font-weight:600}
+.message-reaction{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid var(--relay-stroke);border-radius:999px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:500;white-space:nowrap}
+.v1-shell.relay-shell .conversation-bubble>.message-reactions{position:static;margin-top:5px}
+/* Day lines: the label between two hairlines. */
+.v1-shell.relay-shell .message-date-divider{display:flex;align-items:center;gap:12px;margin:0;padding:10px 20px}
+/* Everyone else's groups mirror the layout: avatar, name and text block on the right, the text itself still reads left to right. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other{padding:2px 66px 2px 64px;text-align:right}
+.v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head{justify-content:flex-end}
+.v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head .message-group-avatar{left:auto;right:20px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>:is(.message-content,.message-quote,.message-pending-error,.delivery-reason-text){display:block;width:fit-content;max-width:100%;margin-left:auto;text-align:left}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content)){display:block}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content :is(.message-template,.message-quote,.media-document,.media-unavailable){margin-left:auto}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer{display:flex;justify-content:flex-end;margin-left:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))+.message-footer{display:flex;margin-left:0}
+/* A footer holding only the hover time takes no line. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer:not(:has(>:not(time))){height:0;margin:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer>time{left:auto;right:12px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-reactions{justify-content:flex-end}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-menu-trigger{right:auto;left:16px}
+
+.v1-shell.relay-shell .conversation-bubble.is-automated .message-group-avatar{background:var(--relay-hover);color:var(--relay-ink-3)}
+.v1-shell.relay-shell .message-date-divider::before,.v1-shell.relay-shell .message-date-divider::after{content:"";flex:1;height:1px;background:var(--relay-stroke)}
+.v1-shell.relay-shell .message-date-divider span{padding:0;border:0;background:transparent;color:var(--relay-ink-soft);font-size:12px;font-weight:500}
+.v1-shell.relay-shell .message-unread-divider{margin:0}
+.v1-shell.relay-shell .message-unread-divider::before,.v1-shell.relay-shell .message-unread-divider::after{background:color-mix(in srgb,var(--relay-accent) 45%,transparent)}
+.v1-shell.relay-shell .message-unread-divider span{color:var(--relay-accent-text);font-size:11.5px;font-weight:600}
+.v1-shell.relay-shell .message-number-line{margin:6px 20px 0 66px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-menu-trigger{position:absolute;top:4px;right:16px;margin:0}
+/* An internal note sits in the message column on an amber card. */
+.v1-shell.relay-shell .message-thread-content>.note-bubble{align-self:stretch;width:auto;margin:6px 20px 6px 66px;padding:8px 12px;border:0;border-radius:6px;background:var(--relay-note-bg);color:var(--relay-ink);font-size:13px}
+.v1-shell.relay-shell .message-thread-content>.note-bubble header{color:var(--relay-note-ink);font-size:12px;font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.note-bubble header strong{font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.note-bubble small{display:none}
+@media(max-width:768px){.v1-shell.relay-shell .message-thread-content>.note-bubble{margin:6px 16px 6px 56px}}
 
 .composer-window-hint{padding:0 2px;margin-left:4px;color:var(--relay-ink-3);font-size:11px;white-space:nowrap}
 .send-via-chip.relay-button{min-height:28px;height:28px;max-width:100%;padding:0 6px;gap:6px;color:var(--relay-ink-3);font-size:12px}
@@ -1123,12 +1117,20 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 @keyframes relay-scale-in{from{opacity:0;transform:scale(.96)}}
 @keyframes relay-pop{from{opacity:0;transform:translateY(-4px)}}
 @keyframes relay-pill{from{transform:scaleY(.3)}}
+@keyframes relay-blink{50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}
 
 /* Desktop rail: 56px of icons with tooltips, as in the Raven-style mockups. */
 @media(min-width:769px){
   .v1-shell.relay-shell>.relay-rail{grid-column:1;grid-row:1 / -1;display:flex;flex-direction:column;align-items:center;gap:6px;width:56px;padding:12px 0;overflow:hidden auto;border-right:1px solid var(--relay-stroke);background:var(--relay-wall)}
-  .relay-rail-logo{display:grid;flex:none;place-items:center;width:32px;height:32px;margin-bottom:10px;border-radius:8px;background:var(--relay-accent);color:#fff;font-size:15px;font-weight:700}
+  .relay-rail-logo{position:relative;display:grid;flex:none;place-items:center;width:32px;height:32px;margin-bottom:10px;border-radius:8px;background:var(--relay-accent);color:#fff;font-size:15px;font-weight:700}
+  /* Live updates: a quiet dot on the logo, green when the socket is connected. */
+  .relay-connection-dot{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border:2px solid var(--relay-wall);border-radius:50%;background:var(--relay-ink-soft);box-sizing:content-box}
+  .relay-connection-dot.is-live{background:var(--relay-status-available)}
+  .relay-connection-dot:not(.is-live){animation:relay-blink 1.6s ease-in-out infinite}
+  .relay-rail .rail-notifications{margin:0}
+  .relay-rail .rail-notifications .notification-toggle{width:36px;height:36px;padding:0;border-radius:8px;color:var(--relay-ink-3)}
+  .relay-rail .rail-notifications .notification-panel{position:fixed;left:64px;right:auto;top:auto;bottom:12px}
   .relay-rail-items,.relay-rail-footer{display:flex;flex-direction:column;align-items:center;gap:6px}
   .relay-rail-footer{margin-top:auto;padding-top:12px}
   .v1-shell .rail-item{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:8px;color:var(--relay-ink-3);transition:background-color var(--relay-fast) ease,color var(--relay-fast) ease,transform var(--relay-fast) var(--relay-ease)}
@@ -1173,54 +1175,64 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 
 .message-page-error{display:flex;gap:8px;justify-content:center;align-items:center;padding:8px;font-size:13px;color:var(--ink-gray-6)}.message-page-error button{color:var(--ink-blue-3);font-weight:500}
 
-/* Composer: one stable writing row, with context only when it is relevant. */
-.v1-shell.relay-shell .composer-dock { position:static; display:flex; flex-direction:column; flex:none; gap:8px; min-width:0; max-height:50%; overflow:auto; margin:8px 16px 16px; padding:0; border:0; background:transparent; box-shadow:none; }
-.composer-dock .composer-writing { display:flex; align-items:flex-end; gap:8px; padding:6px; min-width:0; border:1px solid var(--relay-control-border); border-radius:10px; background:var(--relay-layer); }
-.composer-dock .composer-writing:focus-within { border-color:var(--relay-accent); }
-.v1-shell.relay-shell .composer-dock .chat-draft { flex:1; align-self:center; width:100%; min-width:0; min-height:44px; max-height:130px; padding:10px 4px; border:0; border-radius:6px; background:transparent; color:var(--relay-ink); font:inherit; font-size:14px; line-height:24px; resize:none; overflow-y:auto; }
-.composer-dock .chat-draft::placeholder { color:var(--relay-ink-3); opacity:1; }
-.v1-shell.relay-shell .composer-dock .relay-button { min-height:44px; min-width:44px; height:auto; }
-.v1-shell.relay-shell .composer-dock .composer-more-trigger { flex:none; width:44px; height:44px; padding:0; background:transparent; color:var(--relay-ink-2); }
-.v1-shell.relay-shell .composer-dock .composer-send { flex:none; min-width:96px; height:44px; padding:0 12px; border-radius:8px; background:var(--relay-accent); color:var(--relay-accent-ink); }
-.v1-shell.relay-shell .composer-dock .composer-send:disabled { background:var(--relay-layer-strong); color:var(--relay-ink-3); opacity:1; }
+/* Composer: one card, as in the approved mockup. Where the reply goes, Reply / Internal note / Template, the draft,
+   then a toolbar with the tools, the reply window and Send. Context (a quote, a file, an error) shows only when relevant. */
+.v1-shell.relay-shell .composer-dock { position:static; display:flex; flex-direction:column; flex:none; gap:0; min-width:0; max-height:50%; overflow:auto; margin:0 16px 14px; padding:0; border:1px solid var(--relay-stroke); border-radius:10px; background:var(--relay-layer); box-shadow:none; }
+.v1-shell.relay-shell .composer-dock:focus-within { border-color:var(--relay-stroke-strong); }
+.composer-dock .composer-writing { display:flex; align-items:flex-end; gap:8px; min-width:0; padding:0 14px; border:0; border-radius:0; background:transparent; }
+.v1-shell.relay-shell .composer-dock .chat-draft { flex:1; align-self:center; width:100%; min-width:0; min-height:44px; max-height:130px; padding:12px 0 8px; border:0; border-radius:0; background:transparent; color:var(--relay-ink); font:inherit; font-size:14px; line-height:22px; resize:none; overflow-y:auto; }
+.composer-dock .chat-draft::placeholder { color:var(--relay-ink-soft); opacity:1; }
+.composer-toolbar { display:flex; flex:none; align-items:center; gap:2px; min-width:0; padding:6px 8px; }
+.v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool) { flex:none; width:30px; min-width:30px; height:30px; min-height:30px; padding:0; border:0; background:transparent; box-shadow:none; color:var(--relay-ink-3); }
+.v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool):hover:not(:disabled) { background:var(--relay-hover); color:var(--relay-ink); }
+.composer-toolbar :is(.composer-more-trigger,.composer-tool) svg { width:17px; height:17px; }
+.composer-window-hint { display:inline-flex; align-items:center; gap:5px; margin:0 10px 0 auto; color:var(--relay-green); font-size:12px; white-space:nowrap; }
+.composer-window-hint.is-short { color:var(--relay-warning-ink); font-weight:600; }
+.v1-shell.relay-shell .composer-toolbar .composer-send { flex:none; min-width:0; height:30px; min-height:30px; margin-left:auto; padding:0 12px; border:0; border-radius:6px; background:var(--relay-accent); color:var(--relay-accent-ink); }
+.v1-shell.relay-shell .composer-toolbar .composer-window-hint + .composer-send { margin-left:0; }
+.v1-shell.relay-shell .composer-toolbar .composer-send:disabled { background:var(--relay-accent); color:var(--relay-accent-ink); opacity:.5; }
+.composer-toolbar .composer-send svg { width:15px; height:15px; }
 .composer-dock :is(button,textarea,input,summary):focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
-.composer-dock .composer-context { display:flex; align-items:center; gap:12px; padding:8px 8px 8px 12px; border:1px solid var(--relay-stroke-strong); border-radius:8px; background:var(--relay-layer); font-size:13px; }
+.composer-dock > :is(.composer-context,.composer-error,.composer-status,.composer-detail-fields) { margin:8px 12px 0; }
+.composer-dock .composer-context { display:flex; align-items:center; gap:12px; padding:6px 6px 6px 12px; border:1px solid var(--relay-stroke); border-radius:8px; background:var(--relay-panel); font-size:13px; }
 .composer-dock .composer-quote { border-left:3px solid var(--relay-accent); }
 .composer-context > strong, .composer-attachment > span { flex:1; min-width:0; }
 .composer-attachment > span { display:flex; flex-direction:column; }
 .composer-attachment strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .composer-attachment small { color:var(--relay-ink-3); font-size:12px; }
 .composer-attachment > img, .composer-attachment > video { width:48px; height:48px; object-fit:cover; border-radius:6px; }
-.composer-context-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:44px; color:var(--relay-ink-3); font-size:12px; }
-.composer-context-bar .composer-window-hint { margin-left:auto; font-size:12px; }
+.composer-context-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; color:var(--relay-ink-3); font-size:12px; }
 .composer-status { color:var(--relay-ink-3); font-size:12px; }
-.composer-kind-hint { flex:1; align-self:center; }
+.composer-kind-hint { flex:1; align-self:center; padding:12px 0; }
 .composer-error { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 12px; border-radius:8px; background:var(--surface-red-1); color:var(--relay-red); font-size:13px; }
 .composer-error > span { flex:1; }
-.composer-dock .composer-closed { align-items:center; flex-wrap:wrap; padding:12px; border-color:var(--relay-stroke-strong); }
+.composer-dock .composer-closed { align-items:center; flex-wrap:wrap; gap:12px; padding:12px 14px; }
 .composer-closed-copy { flex:1; min-width:180px; }
 .composer-closed-copy strong { display:flex; align-items:center; gap:8px; font-size:14px; }
 .composer-closed-copy p { font-size:13px; margin-top:4px; color:var(--relay-ink-3); }
 .composer-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
-.v1-shell.relay-shell .composer-dock.is-note { padding:8px; background:var(--relay-note-bg); color:var(--relay-note-ink); border:1px solid var(--relay-note-ink); border-radius:10px; }
+.v1-shell.relay-shell .composer-dock.is-note { border-color:color-mix(in srgb,var(--relay-note-ink) 45%,transparent); background:var(--relay-note-bg); color:var(--relay-ink); }
+.composer-note-hint { display:flex; align-items:center; gap:6px; margin:8px 14px 0; color:var(--relay-note-ink); font-size:12px; }
+.composer-dock.is-note > :not(.composer-tabs,.composer-note-hint) { margin:8px 12px 10px; }
 .composer-note-head { display:flex; align-items:center; gap:8px; font-size:12px; }
 .composer-note-head > span { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 .composer-note-head .relay-button { color:var(--relay-note-ink); font-size:12px; }
+/* The no-reply state of a business chat without a thread keeps the same card. */
+.composer-dock .composer-start { padding:12px 14px; }
 @media (max-width:768px) {
-  .v1-shell.relay-shell .composer-dock { margin:6px 8px max(12px,env(safe-area-inset-bottom)); max-height:60%; }
-  .composer-dock .composer-writing { border-radius:18px; padding:5px; }
-  .v1-shell.relay-shell .composer-dock .chat-draft { min-height:48px; font-size:16px; padding:11px 0; }
-  .v1-shell.relay-shell .composer-dock .composer-send { width:48px; min-width:48px; height:48px; padding:0; border-radius:50%; }
+  .v1-shell.relay-shell .composer-dock { margin:4px 8px max(8px,env(safe-area-inset-bottom)); max-height:60%; border-radius:12px; }
+  .v1-shell.relay-shell .composer-dock .chat-draft { min-height:40px; padding:10px 0 6px; font-size:16px; }
+  .v1-shell.relay-shell .composer-toolbar .composer-send { width:36px; height:36px; min-height:36px; padding:0; border-radius:50%; }
+  .v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool) { width:36px; height:36px; min-height:36px; }
+  .composer-window-hint { margin-right:8px; font-size:11.5px; }
   .composer-note-head > span { display:block; }
   .composer-note-head > span > span { display:block; }
   .composer-closed-copy { min-width:0; flex-basis:calc(100% - 60px); }
   .composer-dock .composer-closed > .relay-button { width:100%; }
-  .composer-dock .composer-start { padding:12px; border-radius:12px; gap:12px; }
+  .composer-dock .composer-start { padding:12px; gap:12px; }
   .composer-field-grid { grid-template-columns:1fr; }
   .composer-attachment { flex-wrap:wrap; }
 }
-
-.composer-dock .composer-more-trigger svg, .composer-dock .composer-send svg { width:20px; height:20px; }
 
 .v1-shell.relay-shell .composer-dock :is(input,select,summary) { min-height:44px; }
 .relay-menu--touch .relay-menu__item { min-height:44px; }

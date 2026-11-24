@@ -89,7 +89,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
             <a href="/desk/relay-channel">Open channel settings</a></template
           ><template v-else
             ><div class="incoming-title">
-              <strong>{{ row.endpoint }}</strong
+              <strong>{{ row.endpoint_label || row.endpoint }}</strong
               ><span>{{ row.medium }}</span>
             </div>
             <p class="incoming-preview">{{ row.preview }}</p>
@@ -104,7 +104,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: next, error, load: ()
       </div>
       <form v-if="selected" @submit.prevent="bind">
         <ErrorMessage :message="error" />
-        <h3>Link {{ selected.endpoint }}</h3>
+        <h3>Link {{ selected.endpoint_label || selected.endpoint }}</h3>
         <p>
           Choose the contact who sent this {{ selected.medium }} message.
         </p>
