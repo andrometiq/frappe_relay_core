@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Avatar, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
-import { CLEAR_AFTER, STATUSES, changedFields, loadMyProfile, myProfile, saveMyProfile, setDensity } from '../../services/userProfiles'
+import { CLEAR_AFTER, STATUSES, applyPreferences, changedFields, loadMyProfile, myProfile, saveMyProfile, setDensity } from '../../services/userProfiles'
 import { setTheme, theme } from '../../services/theme'
 import { uploadFile } from '../../services/uploadFile'
 
@@ -33,14 +33,20 @@ function preview(field, value) {
   if (field === 'theme') setTheme(value.toLowerCase())
   else setDensity(value)
 }
-function restore(keep = {}) {
-  if (shown && !('theme' in keep)) setTheme(shown.theme)
-  if (shown && !('density' in keep)) setDensity(shown.density)
+function restore() {
+  if (shown) { setTheme(shown.theme); setDensity(shown.density) }
   shown = null
 }
+// Unsaved edits: changed fields or a new clear time.
+const dirty = computed(() => !!form.value && !!myProfile.value && (Object.keys(changedFields(form.value, myProfile.value)).length > 0 || clearAfter.value !== null))
 function cancel() {
   restore()
   open.value = false
+}
+// A click outside or Escape keeps unsaved edits unless the person chooses to discard them.
+function dismiss() {
+  if (dirty.value && !window.confirm('Discard your profile changes?')) return
+  cancel()
 }
 async function choosePhoto(event) {
   const file = event.target.files?.[0]
@@ -66,7 +72,9 @@ async function save() {
   error.value = ''
   try {
     if (Object.keys(values).length) await saveMyProfile(values)
-    restore(values)
+    // Save keeps what the person sees, even when it equals the saved profile; only Cancel restores the page.
+    shown = null
+    applyPreferences(form.value)
     open.value = false
     toast('Profile saved')
   } catch (e) { error.value = e.message }
@@ -75,7 +83,7 @@ async function save() {
 </script>
 
 <template>
-  <Dialog :model-value="open" :options="{ title: 'Your profile' }" class="profile-dialog" @update:model-value="value => value || cancel()">
+  <Dialog :model-value="open" :options="{ title: 'Your profile' }" class="profile-dialog" @update:model-value="value => value || dismiss()">
     <form v-if="form" id="relay-profile-form" class="profile-form" @submit.prevent="save">
       <ErrorMessage :message="error" />
       <section class="profile-photo">

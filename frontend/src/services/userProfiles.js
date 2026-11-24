@@ -47,6 +47,12 @@ export function setDensity(density) {
   document.documentElement.dataset.density = String(density || 'Comfortable').toLowerCase()
 }
 
+// The one place a profile's theme and density reach the page.
+export function applyPreferences({ theme, density } = {}) {
+  if (theme) setTheme(theme.toLowerCase())
+  if (density) setDensity(density)
+}
+
 export async function loadMyProfile() {
   myProfile.value = await coreApi('user_profiles.get')
   return myProfile.value
@@ -67,8 +73,7 @@ export function changedFields(form, saved) {
 // Saves the given fields; only an explicit theme or density change applies to this page.
 export async function saveMyProfile(values) {
   myProfile.value = await coreApi('user_profiles.update', values, true)
-  if ('theme' in values) setTheme(myProfile.value.theme.toLowerCase())
-  if ('density' in values) setDensity(myProfile.value.density)
+  applyPreferences({ theme: 'theme' in values && myProfile.value.theme, density: 'density' in values && myProfile.value.density })
   cards.delete(myProfile.value.user)
   return myProfile.value
 }
