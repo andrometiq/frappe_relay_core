@@ -24,8 +24,9 @@ test('only one side panel is open at a time and the details button toggles the d
   assert.match(connected, /const panel = ref\(''\);/)
   assert.match(connected, /notesOpen = computed\(\(\) => panel\.value === 'notes'/)
   assert.match(connected, /searchOpen = computed\(\(\) => panel\.value === 'search'\)/)
-  assert.match(connected, /contextShown = computed\(\(\) => panel\.value === 'contact'\)/)
-  assert.match(connected, /function toggleContext\(\) \{ linking\.value = false; togglePanel\('contact'\); \}/)
+  assert.match(connected, /contextShown = computed\(\(\) => panel\.value === 'contact' \|\| \(!panel\.value && detailsPreferred\.value && !isMobile\.value\)\)/,
+    'Wide screens keep the details panel open until another panel takes its place')
+  assert.match(connected, /panel\.value = detailsPreferred\.value \? 'contact' : ''/)
   assert.doesNotMatch(connected, /contextOpen|notesOpen\.value = |searchOpen\.value = /)
   assert.match(connected, /<Button :icon="isMobile \? 'info' : 'panel-right'" aria-label="Details"[^>]*@click="toggleInfo"/)
   assert.match(connected, /else if \(infoOpen\.value\) closeInfo\(\)/)

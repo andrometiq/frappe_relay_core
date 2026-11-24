@@ -979,19 +979,20 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 /* Conversation */
 .v1-shell.relay-shell .connected-thread{border:0;background:var(--relay-chat)}
 @media(min-width:769px){.v1-shell.relay-shell .connected-thread{border-top:1px solid var(--relay-stroke);border-left:1px solid var(--relay-stroke)}}
-.v1-shell.relay-shell .conversation-heading{display:flex;flex-wrap:nowrap;align-items:center;gap:12px;min-height:0;padding:12px 16px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
-.v1-shell.relay-shell .conversation-heading>.relay-avatar{width:36px;height:36px;font-size:12.5px}
+.v1-shell.relay-shell .conversation-heading{display:flex;flex-wrap:nowrap;align-items:center;gap:10px;height:52px;min-height:52px;padding:0 12px 0 16px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer)}
+.v1-shell.relay-shell .conversation-heading>.relay-avatar{width:30px;height:30px;border:0;font-size:12px}
 .v1-shell.relay-shell .conversation-title{flex:1;min-width:0}
 .v1-shell.relay-shell .conversation-heading h2{color:var(--relay-ink);font-size:15px;font-weight:600}
-.v1-shell.relay-shell .conversation-meta{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;margin-top:3px;overflow:hidden;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
+.v1-shell.relay-shell .conversation-meta{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin-top:0;overflow:hidden;color:var(--relay-ink-3);font-size:12px;white-space:nowrap}
 .v1-shell.relay-shell .conversation-meta:empty{display:none}
-.v1-shell.relay-shell .conversation-meta>span{display:inline-flex;align-items:center;gap:6px;min-height:0;padding:0;border:0;background:none;color:var(--relay-ink-3);font-size:12px;font-weight:400}
-.v1-shell.relay-shell .conversation-meta span+span::before{content:none}
-.v1-shell.relay-shell .conversation-meta>.conversation-record,.v1-shell.relay-shell .conversation-meta>span:first-child:not(.conversation-channel,.conversation-number){height:24px;padding:0 9px;border-radius:6px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-weight:600}
+.v1-shell.relay-shell .conversation-meta>span{display:inline-flex;align-items:center;gap:6px;min-height:0;padding:0;border:0;background:none;color:var(--relay-ink-soft);font-size:12px;font-weight:500}
+/* The second line is plain text in the mockup: items joined by a middle dot. */
+.v1-shell.relay-shell .conversation-meta>*+*::before{content:"·";margin-right:4px;color:var(--relay-ink-soft)}
+.v1-shell.relay-shell .conversation-meta>.conversation-record{color:var(--relay-ink-3)}
 .conversation-record small{font-weight:500;opacity:.8}
 .v1-shell.relay-shell .conversation-meta>:is(.conversation-record,.conversation-linked){flex:none}
 .v1-shell.relay-shell .conversation-meta>.conversation-channel{display:inline-flex;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.conversation-linked{display:inline-flex;align-items:center;flex:none;height:24px;padding:0 9px;border:1px solid var(--relay-stroke-strong);border-radius:12px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:600}
+.conversation-linked{display:inline-flex;align-items:center;flex:none;height:18px;padding:0 7px;border:0;border-radius:4px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:11px;font-weight:600}
 .conversation-title-button{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .conversation-title-button:hover{text-decoration:underline}
 .v1-shell.relay-shell .conversation-heading-actions{display:flex;flex:none;align-items:center;gap:6px;width:auto;margin-left:auto}
@@ -1001,48 +1002,66 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .viewer-more{display:grid;place-items:center;height:24px;min-width:24px;margin-left:-6px;padding:0 4px;border:2px solid var(--relay-layer-strong);border-radius:12px;background:var(--relay-hover)}
 .v1-shell.relay-shell .conversation-tools{max-height:none;padding:0;border:0;overflow:visible;background:transparent}
 .conversation-tool-buttons{display:flex;align-items:center;gap:6px}
-.v1-shell.relay-shell .conversation-heading-actions .relay-button{width:auto;min-width:0;height:32px;min-height:32px}
-.v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:32px;padding:0;border-color:transparent;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
+.v1-shell.relay-shell .conversation-heading-actions .relay-button{width:auto;min-width:0;height:30px;min-height:30px}
+.v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only{width:30px;padding:0;border-color:transparent;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
 .v1-shell.relay-shell .conversation-heading-actions .relay-button--icon-only:hover:not(:disabled){background:var(--relay-hover)}
-.v1-shell.relay-shell .message-thread{gap:4px;padding:18px 28px 10px;background:transparent;scrollbar-width:thin;scrollbar-color:var(--relay-stroke-strong) transparent}
-.v1-shell.relay-shell .message-thread-content{gap:4px}
-.v1-shell.relay-shell .conversation-bubble{min-width:0;max-width:62%;padding:8px 12px 6px;border:0;border-radius:8px;background:var(--relay-bubble-in);box-shadow:var(--relay-shadow-1);color:var(--relay-ink);font-size:13.5px;line-height:1.45;transition:box-shadow var(--relay-fast) ease}
-.v1-shell.relay-shell .conversation-bubble.ml-auto{border-radius:8px;background:var(--relay-bubble-out);color:#fff}
-.v1-shell.relay-shell .conversation-bubble.ml-auto>:is(.message-content,.message-footer,.message-sender,.message-quote,.message-channel){color:#fff;--ink-gray-4:#fff;--ink-gray-5:#fff;--ink-gray-6:#fff;--ink-gray-7:#fff;--ink-gray-8:#fff;--ink-gray-9:#fff;--relay-ink:#fff;--relay-ink-2:#fff;--relay-ink-3:#fff;--ink-blue-1:#fff;--ink-blue-2:#fff;--ink-blue-3:#fff;--ink-green-2:#fff;--outline-gray-2:rgba(255,255,255,.28);--outline-blue-1:rgba(255,255,255,.6);--surface-white:rgba(0,0,0,.08);--surface-gray-1:rgba(0,0,0,.08);--surface-gray-2:rgba(0,0,0,.08)}
-.v1-shell.relay-shell .conversation-bubble:hover{box-shadow:var(--relay-shadow-2)}
-/* New incoming messages and new sends slide in (MessageThread marks them); loaded pages and acknowledged sends do not. */
+/* Messages read as Raven-style sender groups, as in the approved mockup: no bubbles, a 34px avatar and the name once per group,
+   both sides on the left, a hover tint per row. */
+.v1-shell.relay-shell .message-thread{gap:0;padding:8px 0 12px;background:var(--relay-chat);scrollbar-width:thin;scrollbar-color:var(--relay-stroke-strong) transparent}
+.v1-shell.relay-shell .message-thread-content{gap:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble{position:relative;display:block;align-self:stretch;width:auto;min-width:0;max-width:none;margin:0;padding:2px 64px 2px 66px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--relay-ink);font-size:14px;line-height:1.55;transition:background-color var(--relay-fast) ease}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-group-start{margin-top:6px;padding-top:6px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble:is(:hover,.menu-target){background:var(--relay-hover)}
+.message-group-head{display:flex;align-items:baseline;gap:8px;min-width:0}
+.message-group-head strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-size:14px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.message-group-head time{flex:none;color:var(--relay-ink-soft);font-size:11.5px}
+.v1-shell.relay-shell .message-group-head .message-group-avatar{position:absolute;left:20px;top:8px;width:34px;height:34px;border:0;border-radius:8px;font-size:13px}
+.v1-shell.relay-shell .conversation-bubble.ml-auto .message-group-avatar{background:var(--relay-accent-soft);color:var(--relay-accent-text)}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-sender{display:none}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content>*+*{margin-top:6px}
+/* A plain text message ends with its ticks on the same line; other kinds keep the footer under them. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content)){display:inline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))>p{display:inline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))+.message-footer{display:inline-flex;margin-left:6px;vertical-align:baseline}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer{position:static;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:4px;margin-top:1px;color:var(--relay-ink-soft);font-size:11px;line-height:inherit;opacity:1}
+/* The group head shows the time; a following row shows its time in the gutter on hover. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer>time{position:absolute;left:12px;top:5px;width:50px;color:var(--relay-ink-soft);font-size:10.5px;text-align:center;opacity:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.is-group-start):hover>.message-footer>time{opacity:1}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-group-start>.message-footer>time{display:none}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:relay-fade-up var(--relay-normal) var(--relay-ease) both}
 /* A send shows at once, greyed until the server takes it; one that failed gets a red edge, its reason, Retry and Delete. */
-.v1-shell.relay-shell .conversation-bubble.is-pending{opacity:.6}
-.v1-shell.relay-shell .conversation-bubble.is-unsent{box-shadow:0 0 0 2px var(--relay-red)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto>.message-pending-error,.v1-shell.relay-shell .conversation-bubble.ml-auto .pending-status.is-unsent{color:#fff;font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-pending{opacity:.6}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-unsent{box-shadow:inset 3px 0 var(--relay-red)}
+.v1-shell.relay-shell .conversation-bubble>.message-pending-error,.v1-shell.relay-shell .conversation-bubble .pending-status.is-unsent{color:var(--relay-red);font-weight:600}
 @media (prefers-reduced-motion:reduce){.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-fresh{animation:none}}
 .v1-shell.relay-shell .conversation-bubble .message-content>p:last-child::after,.v1-shell.relay-shell .conversation-bubble .message-template>:last-child::after{content:none}
-.v1-shell.relay-shell .conversation-bubble>.message-footer{position:static;justify-content:flex-end;gap:4px;margin-top:2px;color:inherit;font-size:12px;line-height:inherit;opacity:1}
-.v1-shell.relay-shell .conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
 .v1-shell.relay-shell .conversation-bubble .delivery-checks{width:auto}
-.v1-shell.relay-shell .conversation-bubble .delivery-checks svg{width:14px;height:14px}
-.v1-shell.relay-shell .conversation-bubble .delivery-checks svg+svg{margin-left:-9px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:10px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto):is(:first-child,:not(.conversation-bubble:not(.ml-auto))+*){border-top-left-radius:3px}
-.v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto:is(:first-child,:not(.conversation-bubble.ml-auto)+*){border-top-right-radius:3px}
-.v1-shell.relay-shell .message-footer :is(time,.message-channel,.message-delivery){color:inherit;font-size:12px}
-.v1-shell.relay-shell .message-footer .message-delivery.delivery-read{color:#53bdeb}.v1-shell.relay-shell .message-footer .message-delivery.delivery-failed{color:var(--ink-red-2)}
-.v1-shell.relay-shell .message-sender{margin:0 0 3px;color:var(--relay-ink-3);font-size:11.5px;font-weight:600}
-.v1-shell.relay-shell .conversation-bubble.ml-auto :is(.message-quote,.message-template,.media-document,.media-unavailable,.email-content){border-color:transparent;border-radius:6px;background:rgba(0,0,0,.08)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto .message-template{padding:8px 10px}
-.v1-shell.relay-shell .conversation-bubble:not(.ml-auto) :is(.message-quote,.media-document,.media-unavailable){border-radius:6px;background:var(--relay-hover)}
-.v1-shell.relay-shell .conversation-bubble.ml-auto .message-template-buttons>li{border-color:rgba(255,255,255,.4);background:transparent;color:#fff}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg{width:13px;height:13px}
+.v1-shell.relay-shell .conversation-bubble .delivery-checks svg+svg{margin-left:-8px}
+.v1-shell.relay-shell .message-footer :is(.message-channel,.message-delivery){color:inherit;font-size:11px}
+.v1-shell.relay-shell .message-footer .message-delivery.delivery-read{color:var(--relay-accent)}.v1-shell.relay-shell .message-footer .message-delivery.delivery-failed{color:var(--ink-red-2)}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble :is(.message-quote,.media-document,.media-unavailable){width:fit-content;max-width:min(100%,520px);border:1px solid var(--relay-stroke);border-radius:8px;background:var(--relay-panel)}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble .message-template{width:fit-content;max-width:min(100%,520px);padding:8px 12px;border:1px solid var(--relay-stroke);border-left:3px solid var(--relay-green);border-radius:6px;background:var(--relay-panel);font-size:13px}
 .message-template-footer,.message-template-caption{font-size:12px}
 .message-reactions{display:flex;flex-wrap:wrap;gap:4px}
-.message-reaction{display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:11px;background:var(--relay-bubble-in);box-shadow:var(--relay-shadow-1);color:var(--relay-ink-3);font-size:12.5px;font-weight:600;white-space:nowrap}
-.v1-shell.relay-shell .conversation-bubble>.message-reactions{position:absolute;left:10px;top:calc(100% - 6px);z-index:2;margin:0}
-.v1-shell.relay-shell .conversation-bubble:has(>.message-reactions):not(:has(.message-readers)){margin-bottom:16px}
-.v1-shell.relay-shell .message-date-divider{margin:6px 0 10px}
-.v1-shell.relay-shell .message-date-divider span{padding:3px 10px;border:1px solid var(--relay-stroke);border-radius:10px;background:var(--relay-layer);color:var(--relay-ink-3);font-size:12px;font-weight:600}
-.v1-shell.relay-shell .message-unread-divider{display:flex;align-items:center;gap:12px;margin:14px 0 8px}
-.v1-shell.relay-shell .message-unread-divider::before,.v1-shell.relay-shell .message-unread-divider::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--relay-accent) 45%,transparent)}
-.v1-shell.relay-shell .message-unread-divider span{padding:0;border:0;background:transparent;color:var(--relay-accent-text);font-size:11.5px;font-weight:600}
+.message-reaction{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid var(--relay-stroke);border-radius:999px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px;font-weight:500;white-space:nowrap}
+.v1-shell.relay-shell .conversation-bubble>.message-reactions{position:static;margin-top:5px}
+/* Day lines: the label between two hairlines. */
+.v1-shell.relay-shell .message-date-divider{display:flex;align-items:center;gap:12px;margin:0;padding:10px 20px}
+.v1-shell.relay-shell .message-date-divider::before,.v1-shell.relay-shell .message-date-divider::after{content:"";flex:1;height:1px;background:var(--relay-stroke)}
+.v1-shell.relay-shell .message-date-divider span{padding:0;border:0;background:transparent;color:var(--relay-ink-soft);font-size:12px;font-weight:500}
+.v1-shell.relay-shell .message-unread-divider{margin:0}
+.v1-shell.relay-shell .message-unread-divider::before,.v1-shell.relay-shell .message-unread-divider::after{background:color-mix(in srgb,var(--relay-accent) 45%,transparent)}
+.v1-shell.relay-shell .message-unread-divider span{color:var(--relay-accent-text);font-size:11.5px;font-weight:600}
+.v1-shell.relay-shell .message-number-line{margin:6px 20px 0 66px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-menu-trigger{position:absolute;top:4px;right:16px;margin:0}
+/* An internal note sits in the message column on an amber card. */
+.v1-shell.relay-shell .message-thread-content>.note-bubble{align-self:stretch;width:auto;margin:6px 20px 6px 66px;padding:8px 12px;border:0;border-radius:6px;background:var(--relay-note-bg);color:var(--relay-ink);font-size:13px}
+.v1-shell.relay-shell .message-thread-content>.note-bubble header{color:var(--relay-note-ink);font-size:12px;font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.note-bubble header strong{font-weight:600}
+.v1-shell.relay-shell .message-thread-content>.note-bubble small{display:none}
+@media(max-width:768px){.v1-shell.relay-shell .message-thread-content>.note-bubble{margin:6px 16px 6px 56px}}
 
 .composer-window-hint{padding:0 2px;margin-left:4px;color:var(--relay-ink-3);font-size:11px;white-space:nowrap}
 .send-via-chip.relay-button{min-height:28px;height:28px;max-width:100%;padding:0 6px;gap:6px;color:var(--relay-ink-3);font-size:12px}
@@ -1077,7 +1096,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .info-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid var(--relay-stroke);font-size:13px}
 .info-kv:first-child{border-top:0}
 .info-kv dt{flex:none;color:var(--relay-ink-3)}
-@keyframes relay-blink{50%{opacity:.35}}
 .info-kv dd{min-width:0;color:var(--relay-ink);text-align:right;overflow-wrap:anywhere}
 .info-kv a{min-height:0!important;color:var(--relay-accent-text)}
 .info-hint{margin:6px 4px 0;color:var(--relay-ink-3);font-size:11.5px;line-height:1.4}
@@ -1092,6 +1110,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 @keyframes relay-scale-in{from{opacity:0;transform:scale(.96)}}
 @keyframes relay-pop{from{opacity:0;transform:translateY(-4px)}}
 @keyframes relay-pill{from{transform:scaleY(.3)}}
+@keyframes relay-blink{50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}
 
 /* Desktop rail: 56px of icons with tooltips, as in the Raven-style mockups. */
@@ -1149,54 +1168,64 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 
 .message-page-error{display:flex;gap:8px;justify-content:center;align-items:center;padding:8px;font-size:13px;color:var(--ink-gray-6)}.message-page-error button{color:var(--ink-blue-3);font-weight:500}
 
-/* Composer: one stable writing row, with context only when it is relevant. */
-.v1-shell.relay-shell .composer-dock { position:static; display:flex; flex-direction:column; flex:none; gap:8px; min-width:0; max-height:50%; overflow:auto; margin:8px 16px 16px; padding:0; border:0; background:transparent; box-shadow:none; }
-.composer-dock .composer-writing { display:flex; align-items:flex-end; gap:8px; padding:6px; min-width:0; border:1px solid var(--relay-control-border); border-radius:10px; background:var(--relay-layer); }
-.composer-dock .composer-writing:focus-within { border-color:var(--relay-accent); }
-.v1-shell.relay-shell .composer-dock .chat-draft { flex:1; align-self:center; width:100%; min-width:0; min-height:44px; max-height:130px; padding:10px 4px; border:0; border-radius:6px; background:transparent; color:var(--relay-ink); font:inherit; font-size:14px; line-height:24px; resize:none; overflow-y:auto; }
-.composer-dock .chat-draft::placeholder { color:var(--relay-ink-3); opacity:1; }
-.v1-shell.relay-shell .composer-dock .relay-button { min-height:44px; min-width:44px; height:auto; }
-.v1-shell.relay-shell .composer-dock .composer-more-trigger { flex:none; width:44px; height:44px; padding:0; background:transparent; color:var(--relay-ink-2); }
-.v1-shell.relay-shell .composer-dock .composer-send { flex:none; min-width:96px; height:44px; padding:0 12px; border-radius:8px; background:var(--relay-accent); color:var(--relay-accent-ink); }
-.v1-shell.relay-shell .composer-dock .composer-send:disabled { background:var(--relay-layer-strong); color:var(--relay-ink-3); opacity:1; }
+/* Composer: one card, as in the approved mockup. Where the reply goes, Reply / Internal note / Template, the draft,
+   then a toolbar with the tools, the reply window and Send. Context (a quote, a file, an error) shows only when relevant. */
+.v1-shell.relay-shell .composer-dock { position:static; display:flex; flex-direction:column; flex:none; gap:0; min-width:0; max-height:50%; overflow:auto; margin:0 16px 14px; padding:0; border:1px solid var(--relay-stroke); border-radius:10px; background:var(--relay-layer); box-shadow:none; }
+.v1-shell.relay-shell .composer-dock:focus-within { border-color:var(--relay-stroke-strong); }
+.composer-dock .composer-writing { display:flex; align-items:flex-end; gap:8px; min-width:0; padding:0 14px; border:0; border-radius:0; background:transparent; }
+.v1-shell.relay-shell .composer-dock .chat-draft { flex:1; align-self:center; width:100%; min-width:0; min-height:44px; max-height:130px; padding:12px 0 8px; border:0; border-radius:0; background:transparent; color:var(--relay-ink); font:inherit; font-size:14px; line-height:22px; resize:none; overflow-y:auto; }
+.composer-dock .chat-draft::placeholder { color:var(--relay-ink-soft); opacity:1; }
+.composer-toolbar { display:flex; flex:none; align-items:center; gap:2px; min-width:0; padding:6px 8px; }
+.v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool) { flex:none; width:30px; min-width:30px; height:30px; min-height:30px; padding:0; border:0; background:transparent; box-shadow:none; color:var(--relay-ink-3); }
+.v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool):hover:not(:disabled) { background:var(--relay-hover); color:var(--relay-ink); }
+.composer-toolbar :is(.composer-more-trigger,.composer-tool) svg { width:17px; height:17px; }
+.composer-window-hint { display:inline-flex; align-items:center; gap:5px; margin:0 10px 0 auto; color:var(--relay-green); font-size:12px; white-space:nowrap; }
+.composer-window-hint.is-short { color:var(--relay-warning-ink); font-weight:600; }
+.v1-shell.relay-shell .composer-toolbar .composer-send { flex:none; min-width:0; height:30px; min-height:30px; margin-left:auto; padding:0 12px; border:0; border-radius:6px; background:var(--relay-accent); color:var(--relay-accent-ink); }
+.v1-shell.relay-shell .composer-toolbar .composer-window-hint + .composer-send { margin-left:0; }
+.v1-shell.relay-shell .composer-toolbar .composer-send:disabled { background:var(--relay-accent); color:var(--relay-accent-ink); opacity:.5; }
+.composer-toolbar .composer-send svg { width:15px; height:15px; }
 .composer-dock :is(button,textarea,input,summary):focus-visible { outline:2px solid var(--relay-accent); outline-offset:2px; }
-.composer-dock .composer-context { display:flex; align-items:center; gap:12px; padding:8px 8px 8px 12px; border:1px solid var(--relay-stroke-strong); border-radius:8px; background:var(--relay-layer); font-size:13px; }
+.composer-dock > :is(.composer-context,.composer-error,.composer-status,.composer-detail-fields) { margin:8px 12px 0; }
+.composer-dock .composer-context { display:flex; align-items:center; gap:12px; padding:6px 6px 6px 12px; border:1px solid var(--relay-stroke); border-radius:8px; background:var(--relay-panel); font-size:13px; }
 .composer-dock .composer-quote { border-left:3px solid var(--relay-accent); }
 .composer-context > strong, .composer-attachment > span { flex:1; min-width:0; }
 .composer-attachment > span { display:flex; flex-direction:column; }
 .composer-attachment strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .composer-attachment small { color:var(--relay-ink-3); font-size:12px; }
 .composer-attachment > img, .composer-attachment > video { width:48px; height:48px; object-fit:cover; border-radius:6px; }
-.composer-context-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:44px; color:var(--relay-ink-3); font-size:12px; }
-.composer-context-bar .composer-window-hint { margin-left:auto; font-size:12px; }
+.composer-context-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; color:var(--relay-ink-3); font-size:12px; }
 .composer-status { color:var(--relay-ink-3); font-size:12px; }
-.composer-kind-hint { flex:1; align-self:center; }
+.composer-kind-hint { flex:1; align-self:center; padding:12px 0; }
 .composer-error { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 12px; border-radius:8px; background:var(--surface-red-1); color:var(--relay-red); font-size:13px; }
 .composer-error > span { flex:1; }
-.composer-dock .composer-closed { align-items:center; flex-wrap:wrap; padding:12px; border-color:var(--relay-stroke-strong); }
+.composer-dock .composer-closed { align-items:center; flex-wrap:wrap; gap:12px; padding:12px 14px; }
 .composer-closed-copy { flex:1; min-width:180px; }
 .composer-closed-copy strong { display:flex; align-items:center; gap:8px; font-size:14px; }
 .composer-closed-copy p { font-size:13px; margin-top:4px; color:var(--relay-ink-3); }
 .composer-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
-.v1-shell.relay-shell .composer-dock.is-note { padding:8px; background:var(--relay-note-bg); color:var(--relay-note-ink); border:1px solid var(--relay-note-ink); border-radius:10px; }
+.v1-shell.relay-shell .composer-dock.is-note { border-color:color-mix(in srgb,var(--relay-note-ink) 45%,transparent); background:var(--relay-note-bg); color:var(--relay-ink); }
+.composer-note-hint { display:flex; align-items:center; gap:6px; margin:8px 14px 0; color:var(--relay-note-ink); font-size:12px; }
+.composer-dock.is-note > :not(.composer-tabs,.composer-note-hint) { margin:8px 12px 10px; }
 .composer-note-head { display:flex; align-items:center; gap:8px; font-size:12px; }
 .composer-note-head > span { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 .composer-note-head .relay-button { color:var(--relay-note-ink); font-size:12px; }
+/* The no-reply state of a business chat without a thread keeps the same card. */
+.composer-dock .composer-start { padding:12px 14px; }
 @media (max-width:768px) {
-  .v1-shell.relay-shell .composer-dock { margin:6px 8px max(12px,env(safe-area-inset-bottom)); max-height:60%; }
-  .composer-dock .composer-writing { border-radius:18px; padding:5px; }
-  .v1-shell.relay-shell .composer-dock .chat-draft { min-height:48px; font-size:16px; padding:11px 0; }
-  .v1-shell.relay-shell .composer-dock .composer-send { width:48px; min-width:48px; height:48px; padding:0; border-radius:50%; }
+  .v1-shell.relay-shell .composer-dock { margin:4px 8px max(8px,env(safe-area-inset-bottom)); max-height:60%; border-radius:12px; }
+  .v1-shell.relay-shell .composer-dock .chat-draft { min-height:40px; padding:10px 0 6px; font-size:16px; }
+  .v1-shell.relay-shell .composer-toolbar .composer-send { width:36px; height:36px; min-height:36px; padding:0; border-radius:50%; }
+  .v1-shell.relay-shell .composer-toolbar :is(.composer-more-trigger,.composer-tool) { width:36px; height:36px; min-height:36px; }
+  .composer-window-hint { margin-right:8px; font-size:11.5px; }
   .composer-note-head > span { display:block; }
   .composer-note-head > span > span { display:block; }
   .composer-closed-copy { min-width:0; flex-basis:calc(100% - 60px); }
   .composer-dock .composer-closed > .relay-button { width:100%; }
-  .composer-dock .composer-start { padding:12px; border-radius:12px; gap:12px; }
+  .composer-dock .composer-start { padding:12px; gap:12px; }
   .composer-field-grid { grid-template-columns:1fr; }
   .composer-attachment { flex-wrap:wrap; }
 }
-
-.composer-dock .composer-more-trigger svg, .composer-dock .composer-send svg { width:20px; height:20px; }
 
 .v1-shell.relay-shell .composer-dock :is(input,select,summary) { min-height:44px; }
 .relay-menu--touch .relay-menu__item { min-height:44px; }

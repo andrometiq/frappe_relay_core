@@ -98,10 +98,12 @@
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
   .mobile-record-chip small{font-weight:500;opacity:.8}
   .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--relay-ink-2);font-size:12.5px;font-weight:600}
-  .v1-shell.relay-shell .message-thread{padding:12px 12px 6px;background:var(--relay-chat)}
-  .v1-shell.relay-shell .conversation-bubble{max-width:80%;font-size:14px;line-height:1.42}
-  .v1-shell.relay-shell .message-thread-content>.conversation-bubble{border-radius:8px}
-  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.ml-auto+.conversation-bubble:not(.ml-auto),.v1-shell.relay-shell .message-thread-content>.conversation-bubble:not(.ml-auto)+.conversation-bubble.ml-auto{margin-top:8px}
+  .v1-shell.relay-shell .message-thread{padding:4px 0 8px;background:var(--relay-chat)}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble{padding:2px 36px 2px 56px}
+  .v1-shell.relay-shell .message-group-head .message-group-avatar{left:14px;width:32px;height:32px;font-size:12px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer>time{left:4px;width:48px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-menu-trigger{top:0;right:0;width:36px;height:36px;background:transparent;box-shadow:none}
+  .v1-shell.relay-shell .message-date-divider{padding:8px 16px}
 
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
 

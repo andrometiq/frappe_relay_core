@@ -25,9 +25,10 @@ onBeforeUnmount(() => { if (origin?.isConnected) origin.focus({ preventScroll: t
 </template>
 
 <style scoped>
-.chat-panel { display:flex; flex-direction:column; flex:none; width:360px; max-width:45%; min-height:0; border-left:1px solid var(--relay-stroke, var(--outline-gray-2)); background:var(--relay-layer, var(--surface-white)); color:var(--relay-ink, var(--ink-gray-8)); }
+.chat-panel { display:flex; flex-direction:column; flex:none; width:300px; max-width:45%; min-height:0; border-left:1px solid var(--relay-stroke, var(--outline-gray-2)); background:var(--relay-panel, var(--surface-white)); color:var(--relay-ink, var(--ink-gray-8)); }
 .chat-panel-head { display:flex; align-items:center; gap:8px; min-height:52px; padding:8px 8px 8px 16px; border-bottom:1px solid var(--relay-stroke, var(--outline-gray-2)); }
-.chat-panel-head :deep(.relay-button) { width:44px; height:44px; min-height:44px; }
+.chat-panel-head :deep(.relay-button) { width:32px; height:32px; min-height:32px; }
+@media (max-width:768px) { .chat-panel-head :deep(.relay-button) { width:44px; height:44px; min-height:44px; } }
 .chat-panel-title { flex:1; min-width:0; }
 .chat-panel-title h2 { font-size:15px; font-weight:600; }
 .chat-panel-title p { margin-top:2px; font-size:11px; color:var(--ink-gray-5); }

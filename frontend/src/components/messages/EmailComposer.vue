@@ -3,6 +3,7 @@ import { computed, inject, onMounted, onBeforeUnmount, reactive, ref, watch } fr
 import { Button, Dropdown, ErrorMessage, FeatherIcon, FormControl } from '@relay/ui'
 import ComposerMore from './ComposerMore.vue'
 import ReplyLock from './ReplyLock.vue'
+import ComposerTabs from './ComposerTabs.vue'
 import { sizeLabel } from './attachmentFormats'
 import { composerActions } from '../../services/composerActions'
 import { messagesKey } from '../../composables/messagesContext'
@@ -131,11 +132,13 @@ useRealtimeRefresh([],['message_actions'],check)
 <template>
   <form class="message-composer email-composer composer-dock" :class="{ 'is-note': noting }" aria-label="Email composer" @submit.prevent="!noting && send()">
     <template v-if="noting">
-      <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span><Button label="Back to reply" variant="ghost" :disabled="noteBusy" @click="emit('mode', 'reply')" /></div>
+      <ComposerTabs mode="note" :disabled="noteBusy" @mode="emit('mode', $event)" />
+      <p class="composer-note-hint"><FeatherIcon name="lock" :size="13" />Only your team sees this note</p>
       <slot name="note" />
     </template>
     <template v-else>
       <ReplyLock v-if="lock" :lock="lock" />
+      <ComposerTabs mode="reply" :disabled="sending || busy" @mode="value => value === 'note' && moreAction('note')" />
       <div class="email-actions"><Dropdown :options="modeOptions" placement="top" touch-targets><Button :label="emailModes.find(([value]) => value === draft.mode)?.[1]" icon-right="chevron-down" variant="ghost" :disabled="disabled" aria-label="Email action" /></Dropdown>
         <Button v-if="lock && draft.mode === 'reply'" :label="fieldsOpen ? 'Hide recipients' : 'To and subject'" variant="ghost" :aria-expanded="fieldsOpen" @click="fieldsOpen = !fieldsOpen" /></div>
       <template v-if="fieldsShown">
@@ -146,9 +149,11 @@ useRealtimeRefresh([],['message_actions'],check)
       </template>
       <div v-if="draft.attachments.length" class="email-attachments"><span v-for="(file,index) in draft.attachments" :key="file.name">{{ file.filename }} <Button label="Remove" :disabled="disabled" @click="draft.attachments.splice(index,1)" /></span></div>
       <div class="composer-writing">
-        <ComposerMore :actions="actions" :disabled="sending || busy" @action="moreAction"><template #details>From {{ anchor.channel_title || 'the configured email account' }}<p>To {{ draft.to }}</p></template></ComposerMore>
         <FormControl v-model="draft.body" class="email-body" label="Message" aria-label="Message" type="textarea" rows="2" placeholder="Write an email…" :disabled="disabled" required />
-        <Button v-if="!locked" class="email-send" type="submit" label="Send email" icon-left="send" variant="solid" :disabled="disabled || !draft.body.trim()" :loading="sending" :title="draft.body.trim() ? 'Send email' : 'Type a message first'" />
+      </div>
+      <div class="composer-toolbar">
+        <ComposerMore :actions="actions" :disabled="sending || busy" @action="moreAction"><template #details>From {{ anchor.channel_title || 'the configured email account' }}<p>To {{ draft.to }}</p></template></ComposerMore>
+        <Button v-if="!locked" class="email-send composer-send hit-zone" type="submit" label="Send email" icon-left="send" variant="solid" :disabled="disabled || !draft.body.trim()" :loading="sending" :title="draft.body.trim() ? 'Send email' : 'Type a message first'" />
       </div>
       <input ref="fileInput" type="file" multiple hidden :disabled="disabled" @change="attach" />
       <p v-if="sending" role="status" class="composer-status">{{ activity }}</p>
@@ -163,7 +168,9 @@ useRealtimeRefresh([],['message_actions'],check)
   </form>
 </template>
 <style scoped>
-.email-actions, .email-address-row { display:flex; align-items:center; gap:8px; min-width:0; }
+.email-actions, .email-address-row { display:flex; align-items:center; gap:8px; min-width:0; padding:0 8px; }
+.email-actions :deep(.relay-button) { min-height:28px; height:28px; font-size:12.5px; color:var(--relay-ink-3); }
+.email-address-row, .email-inline-field, .email-signature, .email-attachments { margin:0 12px; }
 .email-address-row > .relay-field { flex:1; min-width:0; }
 .email-inline-field { border-top:1px solid var(--relay-stroke); min-height:48px; display:grid; grid-template-columns:58px minmax(0,1fr); align-items:center; gap:8px; }
 .email-inline-field :deep(input) { border:0; border-radius:0; background:transparent; }
@@ -179,8 +186,6 @@ useRealtimeRefresh([],['message_actions'],check)
 .email-recovery p { flex-basis:100%; }
 .email-composer :deep(.relay-button__label) { position:static; width:auto; height:auto; clip-path:none; overflow:visible; }
 @media (max-width:768px) {
-  .email-composer .composer-writing { flex-wrap:wrap; }
-  .email-send { margin-left:auto; }
   .email-body :deep(textarea) { font-size:16px; }
 }
 </style>

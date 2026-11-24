@@ -36,6 +36,21 @@ export function dayDividers(rows, today = new Date()) {
   return dividers
 }
 
+// Rows that open a sender group, which shows the sender's avatar, name and time once: the first row, a row after a note
+// or the unread line, a new day, the other direction or another contact, or a gap of `minutes` or more.
+export function groupStarts(rows, unread = '', minutes = 10) {
+  const starts = new Set()
+  let previous = null
+  for (const row of rows) {
+    if (row.note) { previous = null; continue }
+    const at = timeOf(row), before = previous && timeOf(previous)
+    if (!previous || row.name === unread || previous.direction !== row.direction || previous.relay_contact !== row.relay_contact
+        || !at || !before || at.toDateString() !== before.toDateString() || at - before >= minutes * 60000) starts.add(row.name)
+    previous = row
+  }
+  return starts
+}
+
 // The message a reply quotes: the first loaded row of the same chat endpoint with the quoted provider message ID.
 export function quoteIndex(rows) {
   const key = (row, id) => row.channel + '\u0000' + row.sender_endpoint + '\u0000' + id

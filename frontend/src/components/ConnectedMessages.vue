@@ -156,8 +156,19 @@ const channelCaption = computed(() => wroteTo.value ? `Wrote to ${wroteTo.value.
 const whoLine = computed(() => [whoName.value, phone.value, email.value, channelCaption.value].filter(Boolean).join(' · '));
 function readInfoRoute() { infoOpen.value = location.hash.split("?")[0] === "#/messages" && isContactInfoRoute(location.hash); }
 function openInfo(link = false) { linking.value = link; openRoute(contactInfoRoute(location.hash)); infoOpen.value = true; }
-const contextShown = computed(() => panel.value === 'contact');
-function toggleContext() { linking.value = false; togglePanel('contact'); }
+// Wide screens keep the details panel open beside the chat, as in the approved layout; closing it is remembered in this browser.
+const detailsKey = 'relay-details-open';
+const detailsPreferred = ref(readDetailsPreference());
+function readDetailsPreference() {
+  try { const saved = localStorage.getItem(detailsKey); return saved === null ? innerWidth >= 1360 : saved === '1'; } catch { return innerWidth >= 1360; }
+}
+const contextShown = computed(() => panel.value === 'contact' || (!panel.value && detailsPreferred.value && !isMobile.value));
+function toggleContext() {
+  linking.value = false;
+  detailsPreferred.value = !contextShown.value;
+  try { localStorage.setItem(detailsKey, detailsPreferred.value ? '1' : '0'); } catch { /* Private windows can block storage. */ }
+  panel.value = detailsPreferred.value ? 'contact' : '';
+}
 // "Link record" opens the link form itself, not the full contact details.
 function openLinking() {
   if (isMobile.value) { openInfo(true); return; }
@@ -375,10 +386,13 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
           <h2><button v-if="frappeContact || conversationContact" type="button" class="conversation-title-button" aria-label="Open contact info" @click="toggleInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
           <p v-if="isMobile && whoLine" class="conversation-channel-line conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></p>
           <div class="conversation-meta">
-            <span v-if="!isMobile && whoLine" class="conversation-channel conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></span>
-            <span v-if="businessContext?.doctype_label || businessType"><FeatherIcon name="file-text" :size="13" />{{ businessContext?.doctype_label || businessType }}</span>
-            <span v-if="groupLabel">{{ groupLabel }}</span>
-            <span v-if="contactCount">{{ contactCount }}</span>
+            <template v-if="businessName">
+              <span>{{ businessContext?.doctype_label || businessType }}</span>
+              <span v-if="businessName !== title">{{ businessName }}</span>
+              <span v-if="groupLabel">{{ groupLabel }}</span>
+              <span v-if="contactCount">{{ contactCount }}</span>
+            </template>
+            <span v-else-if="!isMobile && whoLine" class="conversation-channel conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></span>
             <template v-if="!isMobile">
               <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
               <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextShown" @click="toggleContext">{{ otherLinks }}</button>
@@ -389,6 +403,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <div class="conversation-heading-actions">
           <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><UserAvatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :user="person.name" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
+            <Button v-if="!isMobile" icon="search" aria-label="Search conversation" title="Search conversation" :aria-pressed="searchOpen" @click="togglePanel('search')" />
             <Button :icon="isMobile ? 'info' : 'panel-right'" aria-label="Details" title="Details" :aria-pressed="isMobile ? infoOpen : contextShown" @click="toggleInfo" />
           </ConversationTools>
           <Dropdown v-else :options="menuActions"><Button :icon="isMobile ? 'more-vertical' : 'more-horizontal'" aria-label="Conversation actions" title="Conversation actions" /></Dropdown>
@@ -423,21 +438,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         @position="state.rememberPosition" @newer="loadNewer" @visible="lastVisible = $event"
         @visible-messages="visibleMessages = $event" @older="loadOlder" @retry-page="pagingError = ''" @reply="replyTo"
         @quote="openQuote" @reconcile="state.checkPending" @retry="retryMessage" @discard="state.deletePending" @send="send" @toast="showToast" />
-      <InternalNotes v-if="notesOpen" :key="conversationContact" :contact="conversationContact" @close="panel = ''" @open="focusMessage" @reply="startNote(null, $event)" @add="startNote()" />
-      <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
-      <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
-        @close="panel = ''" @open="panel = ''; focusMessage($event)" />
-      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="panel = ''">
-        <div v-if="!linking" class="contact-panel-summary">
-          <Avatar :label="title" size="lg" aria-hidden="true" />
-          <strong>{{ personName || title }}</strong>
-          <span v-if="phone || email"><ContactEndpoints :phone="phone" :email="email" /></span>
-          <span v-if="channelCaption">{{ channelCaption }}</span>
-        </div>
-        <ThreadDetails v-if="!linking" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :record="panelRecord" @select="chooseThread" />
-        <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="panel = ''" />
-        <p v-else class="contact-panel-empty">This chat has no linked Contact yet.</p>
-      </ChatPanel>
       <p v-if="toast" class="chat-toast" role="status">{{ toast.text }}<template v-if="toast.href"> · <a :href="toast.href">Open</a></template></p>
       </div>
 
@@ -475,6 +475,29 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
     </div>
     </Transition>
 
+    <template v-if="active">
+      <InternalNotes v-if="notesOpen" :key="conversationContact" :contact="conversationContact" @close="panel = ''" @open="focusMessage" @reply="startNote(null, $event)" @add="startNote()" />
+      <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
+      <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
+        @close="panel = ''" @open="panel = ''; focusMessage($event)" />
+      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="panel = ''">
+        <div v-if="!linking" class="contact-panel-summary">
+          <Avatar :label="title" size="lg" aria-hidden="true" />
+          <strong>{{ businessName ? title : personName || title }}</strong>
+          <span v-if="businessName">{{ [businessContext?.doctype_label || businessType, groupLabel].filter(Boolean).join(' · ') }}</span>
+          <span v-if="phone || email"><ContactEndpoints :phone="phone" :email="email" /></span>
+          <span v-if="channelCaption && !businessName">{{ channelCaption }}</span>
+          <div v-if="conversationContact" class="contact-panel-actions">
+            <Button label="Notes" icon-left="message-square" @click="openNotes" /><Button label="Topics" icon-left="list" @click="topicsOpen = true" />
+            <Dropdown :options="menuActions"><Button icon="more-horizontal" aria-label="More conversation actions" title="More conversation actions" /></Dropdown>
+          </div>
+        </div>
+        <ThreadDetails v-if="!linking" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :record="panelRecord" @select="chooseThread" />
+        <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="panel = ''" />
+        <p v-else class="contact-panel-empty">This chat has no linked Contact yet.</p>
+      </ChatPanel>
+    </template>
+
     <Transition name="relay-page">
       <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine" :link="linking"
         :can-organize="!!conversationContact" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(openNotes)" @changed="loadProfile(selected)">
@@ -489,11 +512,14 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 .conversation-body > :deep(.message-thread), .conversation-body > .conversation-load-failed { flex:1; min-width:0; }
 .chat-toast { position:absolute; left:50%; bottom:16px; z-index:8; transform:translateX(-50%); padding:8px 14px; border-radius:999px; background:var(--ink-gray-9, #1f2328); color:var(--surface-white, #fff); font-size:13px; white-space:nowrap; box-shadow:0 4px 16px #0003; animation:relay-fade-up 160ms ease-out; }
 .chat-toast a { color:inherit; font-weight:600; text-decoration:underline; }
-.contact-panel-summary { display:flex; flex-direction:column; align-items:center; gap:2px; padding:16px; text-align:center; overflow-wrap:anywhere; }
-.contact-panel-summary strong { margin-top:6px; font-size:15px; }
-.contact-panel-summary span { color:var(--ink-gray-5); font-size:12px; }
+.contact-panel-summary { display:flex; flex-direction:column; align-items:center; gap:2px; padding:18px 16px; border-bottom:1px solid var(--relay-stroke); text-align:center; overflow-wrap:anywhere; }
+.contact-panel-summary :deep(.relay-avatar) { width:56px; height:56px; margin-bottom:6px; border:0; border-radius:14px; font-size:20px; }
+.contact-panel-summary strong { color:var(--relay-ink); font-size:15px; font-weight:600; }
+.contact-panel-summary span { color:var(--relay-ink-3); font-size:13px; }
+.contact-panel-actions { display:flex; justify-content:center; gap:8px; margin-top:12px; }
+.contact-panel-actions :deep(.relay-button) { min-height:30px; height:30px; border:1px solid var(--relay-stroke); background:var(--relay-layer); }
 .contact-panel-empty { padding:0 16px 16px; color:var(--ink-gray-5); font-size:13px; text-align:center; }
-.contact-panel-summary + .contact-details { padding:0 16px 16px; }
+.contact-details { padding:0 16px 16px; }
 .conversation-load-failed { flex:1; }
 .conversation-who { display:flex; align-items:center; gap:8px; min-width:0; }
 .conversation-who > :deep(*) { flex:none; margin:0; }

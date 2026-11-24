@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { dayDividers, dayLabel, quoteIndex } from '../src/components/messages/threadIndex.js'
+import { dayDividers, dayLabel, groupStarts, quoteIndex } from '../src/components/messages/threadIndex.js'
 
 const row = (index, values = {}) => ({ name: 'M' + index, channel: 'CH', sender_endpoint: '91', sent_at: values.at || '2026-10-01 10:00:00',
   provider_context: JSON.stringify({ message_id: 'w' + index, ...(values.reply ? { reply_to_message_id: values.reply } : {}) }) })
@@ -45,4 +45,22 @@ test('the thread looks quotes and dividers up instead of scanning all rows in ev
   assert.match(thread, /const dividers = computed\(\(\) => dayDividers\(threadRows\.value\)\)/)
   assert.match(thread, /<div v-if="dividers\.has\(message\.name\)" class="message-date-divider">/)
   assert.doesNotMatch(thread, /props\.rows\.find\(|function dayLabel|toLocaleDateString/)
+})
+
+test('messages group by sender: a new group starts on the other side, another contact, a note, the unread line, a new day or a 10 minute gap', () => {
+  const at = time => '2026-10-01 ' + time
+  const message = (name, direction, time, contact = 'C1') => ({ name, direction, relay_contact: contact, sent_at: at(time) })
+  const rows = [message('M1', 'Incoming', '10:00:00'), message('M2', 'Incoming', '10:04:00'), message('M3', 'Outgoing', '10:05:00'),
+    message('M4', 'Outgoing', '10:06:00'), { name: 'N1', note: { body: 'note' }, sent_at: at('10:07:00') }, message('M5', 'Outgoing', '10:08:00'),
+    message('M6', 'Outgoing', '10:30:00'), message('M7', 'Incoming', '10:31:00', 'C2'), message('M8', 'Incoming', '10:32:00', 'C2'),
+    message('M9', 'Incoming', '10:33:00', 'C2'), { ...message('M10', 'Incoming', '10:34:00', 'C2'), sent_at: '2026-10-02 00:01:00' }]
+  assert.deepEqual([...groupStarts(rows, 'M9')], ['M1', 'M3', 'M5', 'M6', 'M7', 'M9', 'M10'])
+  assert.deepEqual([...groupStarts([])], [])
+})
+
+test('the thread shows the sender head once per group', async () => {
+  const thread = await readFile(new URL('../src/components/messages/MessageThread.vue', import.meta.url), 'utf8')
+  assert.match(thread, /const starts = computed\(\(\) => groupStarts\(threadRows\.value, props\.unread\)\)/)
+  assert.match(thread, /<header v-if="starts\.has\(message\.name\)" class="message-group-head">/)
+  assert.match(thread, /v-memo="\[starts\.has\(message\.name\),/, 'A row repaints when it starts or stops a group')
 })

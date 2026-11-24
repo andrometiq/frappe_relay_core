@@ -16,6 +16,7 @@ import { sha256Hex } from "../../services/crypto";
 import { messageData } from "../messageContent";
 import { formatBytes } from "../../services/mediaCache";
 import ReplyLock from "./ReplyLock.vue";
+import ComposerTabs from "./ComposerTabs.vue";
 const { identity, load: loadIdentity } = useWhatsAppIdentity({ immediate: false });
 import WhatsAppIdentity from "../WhatsAppIdentity.vue";
 import CannedReplies from './CannedReplies.vue';
@@ -201,6 +202,9 @@ onBeforeUnmount(() => emit("closed", false));
 const remainingSeconds = computed(() => Math.max(0, (windowState.value.remaining_seconds || 0) - Math.max(0, now.value - windowReceivedAt.value) / 1000));
 const windowHint = computed(() => windowState.value.open && Number.isFinite(windowState.value.remaining_seconds) && remainingSeconds.value <= 3600
   ? `${Math.max(1, Math.ceil(remainingSeconds.value / 60))} min left to reply` : '');
+// The toolbar names the time left in the reply window; under an hour it counts minutes as a warning.
+const windowLabel = computed(() => windowHint.value || (windowState.value.open && can('reply_window_hours') && Number.isFinite(windowState.value.remaining_seconds) && !sourceContext.value.group_id
+  ? `Reply window: ${Math.floor(remainingSeconds.value / 3600)}h left` : ''));
 onBeforeUnmount(() => { ++windowGeneration; clearTimeout(expiryTimer); clearInterval(clockTimer); });
 const canSend = computed(
   () =>
@@ -269,15 +273,13 @@ function keydown(event) {
 <template>
   <form class="message-composer composer-dock" :class="{ 'is-note': noting }" aria-label="Message composer" @submit.prevent="!noting && canSend && send()">
     <template v-if="noting">
-      <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span>
-        <Button label="Back to reply" variant="ghost" :disabled="busy || noteBusy" @click="emit('mode', 'reply')" /></div>
+      <ComposerTabs mode="note" :template="can('templates')" :disabled="busy || noteBusy" @mode="emit('mode', $event)" @template="emit('template')" />
+      <p class="composer-note-hint"><FeatherIcon name="lock" :size="13" />Only your team sees this note</p>
       <slot name="note" />
     </template>
     <template v-else>
       <ReplyLock v-if="lock" :lock="lock" />
-      <div v-if="windowHint" class="composer-context-bar">
-        <span class="composer-window-hint" role="status">{{ windowHint }}</span>
-      </div>
+      <ComposerTabs mode="reply" :template="can('templates') && !offReason" :disabled="busy" @mode="value => value === 'note' && moreAction('note')" @template="emit('template')" />
       <p v-if="sourceContext.message_thread_id" class="composer-status">Topic {{ sourceContext.message_thread_id }}</p>
       <div v-if="quoting" class="composer-context composer-quote">
         <span class="composer-quote-body"><strong>{{ source.direction === 'Outgoing' ? 'You' : props.contactName || 'Contact' }}</strong><span>{{ (source.content || 'Message').split('\n')[0].slice(0, 120) }}</span></span>
@@ -317,6 +319,18 @@ function keydown(event) {
         <p v-if="showCount" class="composer-status" :class="{ 'composer-error': characterCount > limit }" :role="characterCount > limit ? 'alert' : 'status'">{{ characterCount.toLocaleString() }} / {{ limit.toLocaleString() }}<template v-if="characterCount > limit"> · {{ characterCount - limit }} over limit</template></p>
       </template>
       <div class="composer-writing" :class="{ 'composer-closed': closed }">
+        <template v-if="closed">
+          <div class="composer-closed-copy" role="status"><strong><FeatherIcon :name="offReason ? 'alert-circle' : 'clock'" :size="16" />{{ offReason || '24-hour reply window closed' }}</strong><p v-if="!offReason">Send an approved template to continue.</p></div>
+          <Button v-if="can('templates') && !offReason" label="Choose template" icon-left="file-text" variant="solid" :disabled="busy" @click="emit('template')" />
+        </template>
+        <template v-else>
+          <textarea v-if="kind === 'text' || (mediaKind && captionAllowed)" ref="draftInput" v-model="body" class="chat-draft"
+            :aria-label="mediaKind ? 'Caption' : 'Message'" :placeholder="mediaKind ? 'Add a caption…' : 'Type a message…'" rows="1" :readonly="busy"
+            @focus="editing = true" @blur="editing = false" @keydown="keydown" @input="resizeDraft(); typing()" />
+          <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
+        </template>
+      </div>
+      <div class="composer-toolbar">
         <ComposerMore :actions="actions" :disabled="busy" :has-sticker="hasSticker" @action="moreAction" @emoji="insertEmoji">
           <template #details>
             <p>{{ sourceContext.provider || 'No channel' }} · {{ source.channel_title || source.channel }}</p>
@@ -327,17 +341,9 @@ function keydown(event) {
             <p v-else-if="can('reply_window_hours') && !sourceContext.group_id">{{ windowState.open ? 'Reply window open' : 'Reply window closed' }}<template v-if="windowState.expires_at_iso"> · {{ windowState.open ? 'Expires' : 'Expired' }} {{ deadlineTime(windowState.expires_at_iso, now) }}</template><template v-else-if="windowState.open && Number.isFinite(windowState.remaining_seconds)"> · {{ Math.ceil(remainingSeconds / 60) }} minutes remaining</template></p>
           </template>
         </ComposerMore>
-        <template v-if="closed">
-          <div class="composer-closed-copy" role="status"><strong><FeatherIcon :name="offReason ? 'alert-circle' : 'clock'" :size="16" />{{ offReason || '24-hour reply window closed' }}</strong><p v-if="!offReason">Send an approved template to continue.</p></div>
-          <Button v-if="can('templates') && !offReason" label="Choose template" icon-left="file-text" variant="solid" :disabled="busy" @click="emit('template')" />
-        </template>
-        <template v-else>
-          <textarea v-if="kind === 'text' || (mediaKind && captionAllowed)" ref="draftInput" v-model="body" class="chat-draft"
-            :aria-label="mediaKind ? 'Caption' : 'Message'" :placeholder="mediaKind ? 'Add a caption…' : 'Message…'" rows="1" :readonly="busy"
-            @focus="editing = true" @blur="editing = false" @keydown="keydown" @input="resizeDraft(); typing()" />
-          <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
-          <Button class="composer-send" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
-        </template>
+        <Button v-if="!closed && can('saved_replies')" class="composer-tool hit-zone" icon="zap" variant="ghost" aria-label="Saved replies" title="Saved replies" :disabled="busy" @click="moreAction('saved')" />
+        <span v-if="windowLabel" class="composer-window-hint" :class="{ 'is-short': windowHint }" role="status"><FeatherIcon name="clock" :size="13" />{{ windowLabel }}</span>
+        <Button v-if="!closed" class="composer-send hit-zone" :label="isMobile ? '' : 'Send'" icon="send" aria-label="Send" :aria-description="sendTitle" :title="sendTitle" type="submit" variant="solid" :disabled="!canSend" />
       </div>
       <input type="file" ref="attachmentInput" aria-label="Attachment" hidden :accept="attachmentAccept(capabilities, sourceContext.provider, requestedAttachmentKind)" :disabled="busy || uploading" @change="attachFile" />
     </template>

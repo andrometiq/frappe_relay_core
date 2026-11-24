@@ -24,11 +24,15 @@ test('"Link record" opens the link form, not the full contact details', async ()
   assert.match(links, /onMounted\(\(\) => \{ if \(props\.start && props\.detail\.can_edit_links\) startAdding\(\) \}\)/)
 })
 
-test('composer uses one stable row with mode and template actions in More', () => {
-  assert.doesNotMatch(composer, /composer-tabs|composer-toolbar|expanded|focusin=/)
-  assert.match(composer, /<ComposerMore :actions="actions"/)
+test('composer is one card: Reply, Internal note and Template tabs over the draft, then a toolbar with More, the reply window and Send', async () => {
+  const tabs = await read('components/messages/ComposerTabs.vue')
+  assert.match(tabs, />Reply<\/button>[\s\S]*>Internal note<\/button>[\s\S]*>Template<\/button>/)
+  assert.match(composer, /<ComposerTabs mode="reply" :template="can\('templates'\) && !offReason"/)
+  assert.match(composer, /<ComposerTabs mode="note"[^>]*@mode="emit\('mode', \$event\)"/, 'The Reply tab leaves note mode')
+  assert.match(composer, /<div class="composer-toolbar">\s*<ComposerMore :actions="actions"/)
+  assert.match(composer, /class="composer-window-hint"[^>]*>[^\n]*\{\{ windowLabel \}\}/)
+  assert.doesNotMatch(composer, /expanded|focusin=/)
   assert.match(composer, /Only your team sees this/)
-  assert.match(composer, /label="Back to reply"/)
   assert.match(connected, /@template="startInChat\(true\)"/)
 })
 

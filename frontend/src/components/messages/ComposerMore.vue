@@ -34,7 +34,7 @@ watch(() => props.disabled, value => { if (value && open.value) close() })
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', close) })
 </script>
 <template>
-  <Button ref="trigger" class="composer-more-trigger" icon="plus" variant="ghost" aria-label="Attachments and more" title="Attachments and more"
+  <Button ref="trigger" class="composer-more-trigger hit-zone" icon="plus" variant="ghost" aria-label="Attachments and more" title="Attachments and more"
     aria-haspopup="dialog" :aria-expanded="open" :disabled="disabled" @click="toggle" />
   <Teleport to=".v1-shell" defer>
     <div v-if="open && mobile" class="composer-more-backdrop" @click="close" />
