@@ -401,6 +401,15 @@ class StandaloneTicketTests(unittest.TestCase):
         self.agents.side_effect = PermissionError('The user needs a Relay communication role')
         with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
 
+    def test_the_assignee_must_reach_the_business_record(self):
+        self.f.set_user = Mock()
+        self.doc.assigned_to = 'owner@example.invalid'
+        self.module.validate_ticket(self.doc)
+        self.covered.side_effect = [True, False]
+        with self.assertRaisesRegex(PermissionError, 'agent cannot reach'):
+            self.module.validate_ticket(self.doc)
+        self.f.set_user.assert_called_with('creator@example.invalid')
+
     def test_assignee_and_mentioned_people_read_it_outside_their_teams(self):
         self.doc.update(name='TKT-00003', assigned_to='owner@example.invalid', watchers=[Record(user='mentioned@example.invalid')])
         self.assertTrue(self.module.permission(self.doc, 'owner@example.invalid'))

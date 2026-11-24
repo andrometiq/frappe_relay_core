@@ -432,6 +432,10 @@ def validate_ticket(doc, check_assignment=True):
                     from relay_core.permissions import company_allowed
                     if not company_allowed(doc.company):
                         frappe.throw('Ticket company is not accessible', frappe.PermissionError)
+                if doc.get('business_name'):
+                    from relay_core.business_access import allowed_types, record_covered
+                    if doc.business_doctype not in allowed_types() or not record_covered(doc.business_doctype, doc.business_name):
+                        frappe.throw('The agent cannot reach the business record of this ticket', frappe.PermissionError)
                 for row in doc.messages:
                     message = frappe.get_doc('Relay Message', row.message)
                     message.check_permission('read')
