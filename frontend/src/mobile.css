@@ -4,7 +4,11 @@
 @media (max-width:768px){
   /* One phone target floor, including controls teleported outside the app shell.
      Minimum sizes preserve targets while prefixed inputs can shrink to fit. */
-  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link){min-height:44px!important;min-width:44px!important}
+  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link,.hit-zone){min-height:44px!important;min-width:44px!important}
+  /* A compact control keeps its small look and gets an invisible 44px tap area around it. */
+  .hit-zone{position:relative}
+  :is(.v1-shell,.relay-dialog,.relay-menu) .hit-zone{min-height:0;min-width:0}
+  .hit-zone::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
   /* Keep compact indicators inside the full-size label/input hit area. */
   label:has(>input:is([type=checkbox],[type=radio])){display:inline-flex;align-items:center;gap:8px}
   label>input:is([type=checkbox],[type=radio]):not(.relay-checkbox__input){width:16px;height:16px;flex:none}
@@ -28,15 +32,16 @@
 
   /* App bar */
   .v1-shell.relay-shell .v1-header{gap:8px;height:auto;min-height:0;padding:calc(6px + env(safe-area-inset-top)) 12px 10px;border:0;background:transparent}
-  .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:24px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
+  .v1-shell.relay-shell .v1-header h1{min-width:0;padding-left:6px;overflow:hidden;color:var(--relay-ink);font-size:20px;font-weight:600;letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap}
   .v1-shell.relay-shell .v1-header>.ml-auto{gap:4px}
   .v1-shell.relay-shell .v1-connection{gap:0;font-size:0}
   .v1-shell.relay-shell .v1-connection.is-connected{display:none}
-  .v1-shell.relay-shell .v1-header .notification-toggle{width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .v1-header .notification-toggle{width:36px;height:36px;padding:0;border-radius:8px;color:var(--relay-ink-2)}
   .relay-header-actions{display:flex;align-items:center}
   .section-toggle{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:8px;color:var(--relay-ink-2)}
   .v1-shell.relay-shell .mobile-sheet-profile{display:flex;flex:1;align-items:center;gap:10px;min-width:0;border-radius:8px;text-align:left}
-  .relay-header-new.relay-button{width:44px;min-width:44px;height:44px;border-radius:8px;box-shadow:var(--relay-shadow-1)}
+  .v1-shell.relay-shell .relay-header-icon.relay-button{width:36px;height:36px;padding:0;border:0;border-radius:8px;background:transparent;box-shadow:none;color:var(--relay-ink-2)}
+  .v1-shell.relay-shell .relay-header-icon.relay-button[aria-pressed=true]{background:var(--relay-accent-soft);color:var(--relay-accent-text)}
 
   /* Detail pages own the whole screen: no app bar, no tab bar */
   .v1-shell.relay-shell:has(.connected-inbox.has-conversation,.ticket-detail,.frappe-form-view,.team-workspace.has-selection,.workflow-viewer.has-selection) :is(.v1-header,.mobile-tabbar){display:none}

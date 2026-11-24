@@ -889,14 +889,15 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .relay-user-name{color:var(--relay-ink);font-size:13.5px}
 .v1-shell.relay-shell .workspace{background:transparent}
 @media(min-width:769px){
-  .v1-shell.relay-shell{grid-template-columns:56px auto minmax(0,1fr);grid-template-rows:48px minmax(0,1fr);padding:0}
-  .v1-shell.relay-shell>.v1-header{grid-column:3;grid-row:1;gap:10px;height:48px;min-height:48px;padding:0 12px 0 20px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px}
+  .v1-shell.relay-shell{grid-template-columns:56px auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding:0}
+  .v1-shell.relay-shell>.v1-header{grid-column:3;grid-row:1;gap:10px;height:52px;min-height:52px;padding:0 12px 0 20px;border-bottom:1px solid var(--relay-stroke);background:var(--relay-layer);color:var(--relay-ink-2);font-size:12px}
   .v1-shell.relay-shell>.v1-header>h1{color:var(--relay-ink);font-size:15px;font-weight:600}
   .v1-shell.relay-shell>.v1-header>h1.inbox-title{visibility:hidden}
   .relay-titlebar-search{width:420px;max-width:40vw;margin:0 auto}
   .relay-titlebar-search .relay-input-shell{min-height:30px;height:30px;gap:0;border-radius:6px;background:var(--relay-layer);color:var(--relay-ink-3)}
   .relay-titlebar-search .relay-input{min-height:28px;font-size:12px}
   .v1-shell.relay-shell>.v1-header .relay-button{min-height:30px}
+  .v1-shell.relay-shell:not(:has(>.v1-header)) .workspace{grid-row:1 / -1}
   .v1-shell.relay-shell .workspace{grid-column:3;grid-row:2;border:0;border-radius:0;background:var(--relay-layer);overflow:hidden}
   .v1-shell.relay-shell .workspace:has(>.connected-inbox){border:0;border-radius:0;background:transparent}
   :is(.v1-shell,.relay-dialog,.relay-menu) button,.relay-dialog__close{min-width:0}
@@ -1109,6 +1110,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .info-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid var(--relay-stroke);font-size:13px}
 .info-kv:first-child{border-top:0}
 .info-kv dt{flex:none;color:var(--relay-ink-3)}
+@keyframes relay-blink{50%{opacity:.35}}
 .info-kv dd{min-width:0;color:var(--relay-ink);text-align:right;overflow-wrap:anywhere}
 .info-kv a{min-height:0!important;color:var(--relay-accent-text)}
 .info-hint{margin:6px 4px 0;color:var(--relay-ink-3);font-size:11.5px;line-height:1.4}
@@ -1128,7 +1130,14 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 /* Desktop rail: 56px of icons with tooltips, as in the Raven-style mockups. */
 @media(min-width:769px){
   .v1-shell.relay-shell>.relay-rail{grid-column:1;grid-row:1 / -1;display:flex;flex-direction:column;align-items:center;gap:6px;width:56px;padding:12px 0;overflow:hidden auto;border-right:1px solid var(--relay-stroke);background:var(--relay-wall)}
-  .relay-rail-logo{display:grid;flex:none;place-items:center;width:32px;height:32px;margin-bottom:10px;border-radius:8px;background:var(--relay-accent);color:#fff;font-size:15px;font-weight:700}
+  .relay-rail-logo{position:relative;display:grid;flex:none;place-items:center;width:32px;height:32px;margin-bottom:10px;border-radius:8px;background:var(--relay-accent);color:#fff;font-size:15px;font-weight:700}
+  /* Live updates: a quiet dot on the logo, green when the socket is connected. */
+  .relay-connection-dot{position:absolute;right:-3px;bottom:-3px;width:10px;height:10px;border:2px solid var(--relay-wall);border-radius:50%;background:var(--relay-ink-soft);box-sizing:content-box}
+  .relay-connection-dot.is-live{background:var(--relay-status-available)}
+  .relay-connection-dot:not(.is-live){animation:relay-blink 1.6s ease-in-out infinite}
+  .relay-rail .rail-notifications{margin:0}
+  .relay-rail .rail-notifications .notification-toggle{width:36px;height:36px;padding:0;border-radius:8px;color:var(--relay-ink-3)}
+  .relay-rail .rail-notifications .notification-panel{position:fixed;left:64px;right:auto;top:auto;bottom:12px}
   .relay-rail-items,.relay-rail-footer{display:flex;flex-direction:column;align-items:center;gap:6px}
   .relay-rail-footer{margin-top:auto;padding-top:12px}
   .v1-shell .rail-item{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:8px;color:var(--relay-ink-3);transition:background-color var(--relay-fast) ease,color var(--relay-fast) ease,transform var(--relay-fast) var(--relay-ease)}
