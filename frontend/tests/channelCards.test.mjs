@@ -35,8 +35,8 @@ test('every Account card disables the on switch of a channel a Hub admin turned 
     assert.match(card, /<p v-if="adminLocked\(row\)" class="text-sm text-ink-gray-5">\{\{ ADMIN_OFF_TEXT \}\}<\/p>/, path)
   }
   const whatsapp = await read('components/whatsapp/WhatsAppAccounts.vue')
-  assert.match(whatsapp, /\(item\.name === 'enabled' && adminLocked\(row\)\)/)
-  assert.match(whatsapp, /item\.name === 'enabled' && adminLocked\(row\) \? ADMIN_OFF_TEXT : item\.help/)
+  assert.match(whatsapp, /\(item\.name === 'enabled' && adminLocked\(chosen\)\)/)
+  assert.match(whatsapp, /item\.name === 'enabled' && adminLocked\(chosen\) \? ADMIN_OFF_TEXT : item\.help/)
 })
 
 test('a burst of channels events reloads an Account card once', async t => {
