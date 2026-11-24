@@ -21,7 +21,7 @@ import { composerActions } from "../services/composerActions";
 import ContactEndpoints from "./messages/ContactEndpoints.vue";
 import { useMessages } from "../composables/useMessages";
 import { useThreadNotes } from "../composables/useThreadNotes";
-import { sendNumbersKey, useSendNumbers } from "../composables/useSendNumbers";
+import { useSendNumbers } from "../composables/useSendNumbers";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { coreApi } from "../services/coreApi";
@@ -79,7 +79,6 @@ const frappeContact = computed(() => source.value?.frappe_contact || contactReco
 
 provide(messagesKey, state);
 const numbers = useSendNumbers(state, capabilities);
-provide(sendNumbersKey, numbers);
 // On a site with several WhatsApp numbers the header names the number the customer wrote to.
 const wroteTo = computed(() => numbers.active.value ? numbers.wroteTo.value : null);
 const {
@@ -116,6 +115,8 @@ const activeThread = computed(() => threads.items.value.find(thread => threadMat
 const activeContact = computed(() => linkedContacts.value.find(item => item.value === activeThread.value?.frappe_contact) || null);
 const lock = computed(() => replyLock(activeThread.value));
 const noThreads = computed(() => threads.ready.value && !threads.items.value.length && !threadOpen.value);
+// The threads read failed: the chat shows only the error and Retry.
+const threadsFailed = computed(() => !threadOpen.value && !threads.ready.value && !!threads.error.value && !threads.loading.value);
 const panelRecord = computed(() => businessName.value ? { doctype: businessContext.value?.doctype_label || businessType.value, name: businessName.value, title: title.value } : null);
 const isMobile = useMobileLayout(), infoOpen = ref(false), linking = ref(false);
 const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
@@ -438,6 +439,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <WorkspaceState v-if="loadFailed && !visibleRows.length" class="conversation-load-failed" title="Could not load messages" :description="loadFailedReason" icon="alert-circle">
         <Button label="Retry" variant="solid" icon-left="refresh-cw" :loading="busy" @click="retryChat" />
       </WorkspaceState>
+      <WorkspaceState v-else-if="threadsFailed" class="conversation-load-failed"
+        title="Could not load this chat" :description="plainChatError(threads.error.value) || 'Check your connection and try again.'" icon="alert-circle">
+        <Button label="Retry" variant="solid" icon-left="refresh-cw" @click="threads.load()" />
+      </WorkspaceState>
       <LoadingRows v-else-if="!threadOpen && !noThreads" class="conversation-thread-loading" label="Loading conversation…" :count="3" />
       <MessageThread v-else :key="active + ':' + channel + ':' + state.endpoint.value" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :paging="paging" :paging-error="pagingError" :error="state.error.value" :emoji="emoji"
@@ -461,7 +466,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <template #note><NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
           @busy="noteBusy = $event" @added="showToast('Note added'); threadNotes.load()" @clear-messages="noteMessages = []" @clear-reply="noteReply = null" /></template>
       </MessageComposer>
-      <div v-else-if="active && !loadFailed" class="composer-dock" :class="{ 'is-note': composeMode === 'note' }">
+      <div v-else-if="active && !loadFailed && !threadsFailed" class="composer-dock" :class="{ 'is-note': composeMode === 'note' }">
         <template v-if="composeMode === 'note' && noteContact">
           <div class="composer-note-head"><FeatherIcon name="lock" :size="16" /><span><strong>Internal note</strong><span>Only your team sees this</span></span><Button label="Back to reply" variant="ghost" :disabled="noteBusy" @click="setComposeMode('reply')" /></div>
           <NoteComposer :key="noteContact" :contact="noteContact" v-bind="noteBusiness" :messages="noteMessages" :reply-to="noteReply"
@@ -487,7 +492,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
         @close="panel = ''" @open="panel = ''; focusMessage($event)" />
-      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="closeDetails">
+      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" :take-focus="panel === 'contact' || !docked" @close="closeDetails">
         <div v-if="!linking" class="contact-panel-summary">
           <Avatar :label="title" size="lg" aria-hidden="true" />
           <strong>{{ businessName ? title : personName || title }}</strong>

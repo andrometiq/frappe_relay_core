@@ -226,35 +226,66 @@ def apply(file_url, channel=None):
     return run(file_url, channel, apply=True)
 
 
-def export_rows():
+EXPORT_PAGE = 1000
+
+
+def export_rows(query='', business_type=None, business_name=None, unlinked=0):
+    """Keyset pages of the Contacts list scope; each page reads its links and their records in batches."""
+    from relay_core.api import contact_filters
+    from relay_core.business_access import allowed_types, people_query
+    filters, or_filters = contact_filters(query, business_type, business_name, unlinked)
+    types = allowed_types()
     yield list(COLUMNS)
-    start = 0
+    after = None
     while True:
-        from relay_core.business_access import people_query
-        names = people_query(fields=['name'], order_by='name', offset=start, limit=200).run(pluck=True)
-        if not names:
+        page = people_query(filters=[*filters, *([['Contact', 'name', '>', after]] if after else [])],
+            or_filters=or_filters, fields=['name', 'mobile_no', 'phone', 'email_id', 'full_name', 'first_name'],
+            order_by='name asc', limit=EXPORT_PAGE, distinct=True).run(as_dict=True)
+        if not page:
             break
-        for name in names:
-            person = existing_person(name)
-            base = [person.get('mobile_no') or person.get('phone') or '', person.get('email_id') or '',
-                    person.get('full_name') or person.get('first_name') or name]
-            links = person.get('links') or []
-            for link in links:
-                if contacts.readable(link):
+        links, readable = page_links([person.name for person in page], types)
+        for person in page:
+            base = [person.mobile_no or person.phone or '', person.email_id or '',
+                    person.full_name or person.first_name or person.name]
+            for link in links.get(person.name, ()):
+                if ((link.link_doctype, link.link_name) in readable and business_type in (None, '', link.link_doctype)
+                        and business_name in (None, '', link.link_name)):
                     yield [*base, link.link_doctype, link.link_name]
-            if not links:
+            if person.name not in links:
                 yield [*base, '', '']
-        start += len(names)
+        after = page[-1].name
+
+
+def page_links(people, types):
+    """Business links of `people` by Contact, and the (doctype, name) pairs whose records exist in `types`."""
+    links = {}
+    for row in frappe.get_all('Dynamic Link', filters={'parenttype': 'Contact', 'parentfield': 'links', 'parent': ['in', people]},
+                              fields=['parent', 'link_doctype', 'link_name'], order_by='parent asc, idx asc'):
+        links.setdefault(row.parent, []).append(row)
+    wanted = {}
+    for rows in links.values():
+        for row in rows:
+            if row.link_doctype in types:
+                wanted.setdefault(row.link_doctype, set()).add(row.link_name)
+    readable = set()
+    for doctype, names in wanted.items():
+        try:
+            readable.update((doctype, name) for name in frappe.get_all(doctype, filters={'name': ['in', list(names)]}, pluck='name'))
+        except frappe.DoesNotExistError:
+            pass
+    return links, readable
 
 
 @frappe.whitelist(methods=['GET'])
-def export():
+def export(query='', business_type=None, business_name=None, unlinked=0):
     require_manager()
     from frappe.utils.xlsxutils import make_xlsx
     from xlsxwriter import Workbook
     output = BytesIO()
     # Preserve literal strings (including phone '+' and names beginning '=') in Excel.
     book = Workbook(output, {'constant_memory': True, 'strings_to_formulas': False, 'strings_to_urls': False})
-    make_xlsx(export_rows(), 'Contacts', wb=book)
+    make_xlsx(export_rows(query, business_type, business_name, unlinked), 'Contacts', wb=book)
     book.close()
-    frappe.response.update(filename='Relay contacts.xlsx', filecontent=output.getvalue(), type='binary')
+    scope = business_type or ('Not linked' if str(unlinked) == '1' else '')
+    frappe.response.update(filename=f'Relay contacts - {scope}.xlsx' if scope else 'Relay contacts.xlsx',
+                           filecontent=output.getvalue(), type='binary')

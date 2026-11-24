@@ -129,6 +129,9 @@ def update(user=None, **values):
     changed = save_photo(user, changes.pop('user_image')) if 'user_image' in changes else False
     if 'clear_after' in changes:
         changes['status_clear_at'] = changes.pop('clear_after')
+    elif 'status' in changes:
+        # A status set without a clear time stays until changed; an old timer must not clear it.
+        changes['status_clear_at'] = None
     if changes.get('status') == 'Available' and 'status_text' not in changes:
         changes.update(status_text='', status_clear_at=None)
     changed = save_profile(user, changes) or changed
@@ -149,12 +152,21 @@ def save_profile(user, changes):
     """Save only the fields that differ from the stored profile; True when something changed."""
     exists = frappe.db.exists(DOCTYPE, user)
     doc = frappe.get_doc(DOCTYPE, user) if exists else frappe.new_doc(DOCTYPE).update({'user': user, **DEFAULTS})
+    if is_expired(doc.get('status_clear_at')):
+        # An expired status reads as Available, so picking the old status again is a change.
+        doc.update({'status': 'Available', 'status_text': '', 'status_clear_at': None})
     changes = {key: value for key, value in changes.items() if not same(doc.get(key), value)}
     if not changes:
         return False
     doc.update(changes)
     doc.save(ignore_permissions=True)
     return True
+
+
+def on_user_trash(doc, method=None):
+    """Delete the profile of a User being deleted; its link would otherwise stop the delete with LinkExistsError."""
+    if frappe.db.exists(DOCTYPE, doc.name):
+        frappe.delete_doc(DOCTYPE, doc.name, ignore_permissions=True, force=True)
 
 
 def same(current, value):
@@ -170,7 +182,25 @@ def cards(users):
     users = frappe.parse_json(users) if isinstance(users, str) else users
     if not isinstance(users, list) or len(users) > MAX_CARDS or not all(isinstance(user, str) and 0 < len(user) <= 140 for user in users):
         frappe.throw(f'Request at most {MAX_CARDS} users')
-    return {'items': user_cards(users)}
+    return {'items': user_cards(relay_staff(users))}
+
+
+def relay_staff(users):
+    """The given users who are colleagues: enabled System Users holding a Relay role or System Manager, or members of a
+    Relay Team. Website users and other users' names return nothing."""
+    from relay_core.permissions import MANAGER, TEAM_USER, USER
+    users = [user for user in users if user]
+    if not users:
+        return []
+    staff = set(frappe.get_all('User', filters={'name': ['in', users], 'user_type': 'System User', 'enabled': 1}, pluck='name'))
+    if not staff:
+        return []
+    roles = set(frappe.get_all('Has Role', filters={'parenttype': 'User', 'parent': ['in', list(staff)],
+                                                    'role': ['in', [USER, TEAM_USER, MANAGER, 'System Manager']]}, pluck='parent'))
+    members = set(frappe.get_all('Relay Team Member', filters={'parenttype': 'Relay Team', 'user': ['in', list(staff - roles)]}, pluck='user')) \
+        if staff - roles else set()
+    # Administrator holds every role without Has Role rows.
+    return [user for user in users if user in (roles | members) or (user == 'Administrator' and user in staff)]
 
 
 def user_cards(users):

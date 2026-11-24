@@ -8,17 +8,19 @@ import ContactImportDialog from './ContactImportDialog.vue'
 import NewContactDialog from './NewContactDialog.vue'
 import BusinessDirectory from './messages/BusinessDirectory.vue'
 import { closeRoute, openRoute, routeTab } from '../useViewRoute'
+import { readBrowse } from '../services/businessBrowse'
+import { downloadName, exportSearch } from '../services/contactImport'
 const capabilities = inject('relayCapabilities')
 const tab = ref(routeTab(location.hash, 'contacts'))
 const exporting = ref(false), exportError = ref('')
 async function exportContacts() {
   exporting.value = true; exportError.value = ''
   try {
-    const response = await fetch('/api/method/relay_core.contact_import.export', { credentials: 'same-origin' })
+    const response = await fetch('/api/method/relay_core.contact_import.export' + exportSearch(readBrowse(location.hash)), { credentials: 'same-origin' })
     if (!response.ok) throw Error('Export failed')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob), link = document.createElement('a')
-    link.href = url; link.download = 'Relay contacts.xlsx'; link.click()
+    link.href = url; link.download = downloadName(response.headers.get('Content-Disposition')); link.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch { exportError.value = 'Could not export contacts. Check your connection and permissions, then try again.' }
   finally { exporting.value = false }

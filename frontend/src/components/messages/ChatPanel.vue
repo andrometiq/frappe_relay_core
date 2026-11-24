@@ -4,12 +4,13 @@ import { Button } from '@relay/ui'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 
 // One side panel of the chat: right of the messages on wide screens, a full page on phones.
-defineProps({ title: String, subtitle: String })
+// A panel the person opened takes focus and gives it back on close; one that docks by itself leaves focus where it is.
+const props = defineProps({ title: String, subtitle: String, takeFocus: { type: Boolean, default: true } })
 const emit = defineEmits(['close'])
 const isMobile = useMobileLayout()
 const panel = ref(null)
-const origin = document.activeElement
-onMounted(() => panel.value?.querySelector('button')?.focus({ preventScroll: true }))
+const origin = props.takeFocus ? document.activeElement : null
+onMounted(() => { if (props.takeFocus) panel.value?.querySelector('button')?.focus({ preventScroll: true }) })
 onBeforeUnmount(() => { if (origin?.isConnected) origin.focus({ preventScroll: true }) })
 </script>
 
