@@ -144,7 +144,8 @@ const channelLine = computed(() => {
 const personName = computed(() => { const name = recordTitle(contactRecord.value, ''); return phoneCaption(name) ? '' : name; });
 // The chat's own address comes first; the Contact's saved mobile and email fill in the other.
 const phone = computed(() => {
-  const value = (provider.value === 'Email' ? '' : phoneCaption(source.value?.sender_endpoint)) || phoneCaption(contactRecord.value?.display_name) || contactRecord.value?.phone || '';
+  const own = provider.value === 'Telegram' ? phoneCaption(activeThread.value?.endpoint_label) : provider.value === 'Email' ? '' : phoneCaption(source.value?.sender_endpoint);
+  const value = own || phoneCaption(contactRecord.value?.display_name) || contactRecord.value?.phone || '';
   return value === title.value ? '' : value;
 });
 const email = computed(() => {

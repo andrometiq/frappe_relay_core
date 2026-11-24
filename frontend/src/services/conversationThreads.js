@@ -12,7 +12,15 @@ export function providerIcon(provider) {
 
 // A WhatsApp number reads as a phone number; a Telegram chat id or an email address stays as it is.
 export function endpointLabel(endpoint, provider = 'WhatsApp') {
+  // A Telegram chat id means nothing to people; the server's endpoint_label names the linked mobile instead.
+  if (provider === 'Telegram') return /^-?\d+$/.test(String(endpoint || '').trim()) ? '' : endpoint || ''
   return (provider === 'WhatsApp' && phoneCaption(endpoint)) || endpoint || ''
+}
+
+// What a person sees for a thread or channel mark: a Telegram chat's linked mobile, username or name, else the address.
+export function addressLabel(item) {
+  if (item?.provider === 'Telegram') return phoneCaption(item.endpoint_label) || item.endpoint_label || item.handle || endpointLabel(item.endpoint, 'Telegram')
+  return endpointLabel(item?.endpoint, item?.provider)
 }
 
 export function threadMatches(thread, channel, endpoint) {
@@ -61,7 +69,7 @@ export function threadTabs(threads) {
 
 // The person's side of a thread: a Telegram handle when Telegram sent one, else the endpoint.
 export function threadAddress(thread) {
-  return thread?.handle || endpointLabel(thread?.endpoint, thread?.provider)
+  return addressLabel(thread)
 }
 
 export function hasManyPeople(threads) {
@@ -92,7 +100,7 @@ export function replyLockText(thread) {
 export function rowChannels(row, limit = 5) {
   const marks = Array.isArray(row?.threads) ? row.threads : []
   return marks.slice(0, limit).map(mark => ({ ...mark, icon: providerIcon(mark.provider),
-    label: `${mark.provider || 'Chat'} ${endpointLabel(mark.endpoint, mark.provider)}`.trim() + (mark.unread ? ', unread' : '') }))
+    label: `${mark.provider || 'Chat'} ${addressLabel(mark)}`.trim() + (mark.unread ? ', unread' : '') }))
 }
 
 // "Waiting 2d": the customer wrote last, everyone has read it and no one has replied for an hour or more.
