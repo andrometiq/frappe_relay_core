@@ -32,6 +32,7 @@ class InboxRecordTests(unittest.TestCase):
         self.enterContext(patch.object(inbox_records, 'frappe', self.fake))
         self.enterContext(patch('relay_core.inbox.frappe', self.fake))
         self.endpoints = self.enterContext(patch.object(inbox_records, 'record_endpoints', return_value={}))
+        self.titles = self.enterContext(patch('relay_core.endpoint_labels.contact_titles', return_value={}))
         self.enterContext(patch('relay_core.relay_chats.title', side_effect=lambda key:
             next((row.title for row in self.chats if (row.business_doctype, row.business_name) == key), key[1])))
 
@@ -123,6 +124,16 @@ class InboxRecordTests(unittest.TestCase):
             row = inbox_records.page()['items'][0]
         self.assertEqual((row['kind'], row['name'], row['contact'], row['display_name']), ('contact', 'R9', 'CONTACT-9', '+91 98765'))
         self.assertEqual((row['unlinked'], row['starred'], row['folder'], row['provider']), (True, 1, 'F1', 'WhatsApp'))
+
+    def test_a_chat_saved_under_its_telegram_chat_id_shows_its_linked_mobile(self):
+        self.chats = [chat('RC-1', doctype='Relay Contact', record='R9', title='55012345'), chat('RC-2', record='C2', title='Acme')]
+        self.titles.return_value = {'R9': '+919000001234'}
+        self.fake.get_all.side_effect = lambda doctype, **kwargs: [('R9', 'CONTACT-9')] if doctype == 'Relay Contact' else []
+        with patch('relay_core.contacts.linked_contacts', return_value=set()), patch('relay_core.inbox.state_key', side_effect=str):
+            first, second = inbox_records.page()['items']
+        self.titles.assert_called_once_with({'R9': '55012345'})
+        self.assertEqual((first['title'], first['display_name']), ('+919000001234', '+919000001234'), 'The numeric chat id is never the row title')
+        self.assertEqual(second['title'], 'Acme', 'Record rows keep their record title')
 
     def test_a_row_marks_its_channels_and_the_ones_holding_unread_messages(self):
         self.chats = [chat('RC-1', unread_count=2, last_message='MSG-9'), chat('RC-2', record='C2')]

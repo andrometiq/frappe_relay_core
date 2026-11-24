@@ -202,6 +202,8 @@ def directory_items(rows, channels=None):
     states={row.relay_contact:row for row in frappe.get_all('Relay Conversation State',
         filters={'state_key':['in',[state_key(name) for name in names]]},fields=['relay_contact','starred','folder',*READ_FIELDS])}
     unread=unread_counts({name:read_position(states.get(name)) for name in names},channels)
+    from relay_core.endpoint_labels import contact_titles
+    renamed=contact_titles({row.name:row.get('display_name') for row in rows})
     assignments={row.relay_contact:{'team':row.team,'assigned_to':row.assigned_to,'assigned_by':row.assigned_by} for row in frappe.get_all(
         'Relay Conversation Assignment',filters={'relay_contact':['in',names]},fields=['relay_contact','team','assigned_to','assigned_by'])}
     items=[]
@@ -211,7 +213,7 @@ def directory_items(rows, channels=None):
         state=states.get(row.name) or {}
         business=({'doctype':last['business_doctype'],'name':last['business_name']}
                   if last.get('business_doctype') in configured and last.get('business_name') else None)
-        items.append(dict(row,unlinked=row.name not in linked,provider=providers.get(last.get('channel')),channel=last.get('channel'),business=business,assignment=assignments.get(row.name,{}),id=row.name,
+        items.append(dict(row,**({'display_name':renamed[row.name]} if row.name in renamed else {}),unlinked=row.name not in linked,provider=providers.get(last.get('channel')),channel=last.get('channel'),business=business,assignment=assignments.get(row.name,{}),id=row.name,
                           starred=state.get('starred',0),folder=state.get('folder',''),
                           latest_preview=directory_preview(last),latest_at=last.get('sent_at') or last.get('creation'),
                           unread=unread.get(row.name,0),unread_more=False))

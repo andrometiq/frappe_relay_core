@@ -121,7 +121,9 @@ def contacts(query='', before=None, after=None, limit=50):
     rows = rows[:limit]
     if before:
         rows.reverse()
-    items = [dict(row, id=row['name']) for row in rows]
+    from relay_core.endpoint_labels import contact_titles
+    renamed = contact_titles({row['name']: row.get('display_name') for row in rows})
+    items = [dict(row, id=row['name'], **({'display_name': renamed[row['name']]} if row['name'] in renamed else {})) for row in rows]
     return {'items': items,
             'previous': {'before': items[0]['id']} if items and (more if before else bool(after)) else None,
             'next': {'after': items[-1]['id']} if items and (bool(before) if before else more) else None}
@@ -347,7 +349,9 @@ def contact_profile(contact):
     visible = allowed_types()
     readable = [link for link in links if link[0] in visible]
     email = person.email_id or contact_emails([person.name]).get(person.name, '')
-    return {'name': doc.name, 'display_name': doc.display_name, 'contact': doc.contact,
+    from relay_core.endpoint_labels import contact_titles
+    display_name = contact_titles({doc.name: doc.display_name}).get(doc.name) or doc.display_name
+    return {'name': doc.name, 'display_name': display_name, 'contact': doc.contact,
             'primary': primary_record(doc.name, links), 'link_count': len(readable),
             'phone': (person.mobile_no or person.phone or '').strip(), 'email': email}
 

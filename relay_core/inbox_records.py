@@ -159,9 +159,11 @@ def items(rows):
     providers = dict(frappe.get_list('Relay Channel', fields=['name', 'channel'], as_list=True, limit_page_length=0))
     chats = contact_rows([row.business_name for row in rows if row.business_doctype == CONTACT])
     channels, directions, tickets = row_channels(rows, providers), last_directions(rows), open_tickets(rows)
+    from relay_core.endpoint_labels import contact_titles
+    renamed = contact_titles({row.business_name: row.title for row in rows if row.business_doctype == CONTACT})
     result = []
     for row in rows:
-        caption = row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
+        caption = renamed.get(row.business_name) or row.title if row.business_doctype == CONTACT else title((row.business_doctype, row.business_name))
         item = {'id': row.name, 'title': caption, 'display_name': caption, 'channel': row.last_channel,
                 'provider': providers.get(row.last_channel), 'latest_preview': row.last_message_preview or '',
                 'latest_at': row.last_message_at, 'last_message_at': str(row.last_message_at), 'unread': row.unread_count or 0,

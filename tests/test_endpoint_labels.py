@@ -1,9 +1,9 @@
 """A Telegram chat shows the person's linked mobile number, never the numeric Telegram chat id."""
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from frappe import _dict
-from relay_core.endpoint_labels import telegram_labels
+from relay_core.endpoint_labels import contact_titles, telegram_labels
 
 
 class TelegramLabelTests(unittest.TestCase):
@@ -44,6 +44,31 @@ class TelegramLabelTests(unittest.TestCase):
     def test_a_saved_name_shows_when_there_is_no_number_or_username(self):
         with patch('frappe.get_all', side_effect=self.get_all):
             self.assertEqual(telegram_labels([('TG', '5503')]), {('TG', '5503'): 'Meena'})
+
+    def test_a_contact_saved_under_its_chat_id_is_titled_by_mobile_then_username_then_telegram_user(self):
+        def get_all(doctype, filters=None, **kwargs):
+            if doctype == 'Relay Channel':
+                return ['TG'] if filters == {'channel': 'Telegram'} else ['WA-1']
+            if doctype == 'Relay Contact':
+                return [_dict(name=name, contact='', display_name='') for name in filters['name'][1]]
+            if filters.get('channel') == ['in', ['WA-1']]:
+                return [_dict(relay_contact='R1', endpoint='919000001234')]
+            return [_dict(relay_contact='R1', channel='TG', endpoint='5501'), _dict(relay_contact='R2', channel='TG', endpoint='5502'),
+                    _dict(relay_contact='R3', channel='TG', endpoint='5503'), _dict(relay_contact='R5', channel='TG', endpoint='5505')]
+        usernames = {'R2': '{"username": "meena"}', 'R3': None}
+        names = {'R1': '5501', 'R2': '5502', 'R3': '5503', 'R4': '+91 98765 43210', 'R5': '7777', 'R6': 'Ravi'}
+        fake = MagicMock()
+        fake.get_all.side_effect = get_all
+        fake.db.get_value.side_effect = lambda doctype, filters, *args, **kwargs: usernames[filters['relay_contact']]
+        with patch('relay_core.endpoint_labels.frappe', fake):
+            titles = contact_titles(names)
+        self.assertEqual(titles, {'R1': '+919000001234', 'R2': '@meena', 'R3': 'Telegram user'},
+                         'A WhatsApp-only number (R4), a number that is not its chat id (R5) and a real name (R6) keep their names')
+
+    def test_contacts_with_names_read_nothing(self):
+        with patch('frappe.get_all') as get_all:
+            self.assertEqual(contact_titles({'R1': 'Ravi', 'R2': 'Meena'}), {})
+        get_all.assert_not_called()
 
     def test_no_telegram_chats_read_nothing(self):
         with patch('frappe.get_all') as get_all:

@@ -42,7 +42,42 @@ def linked_mobiles(people):
     return mobiles
 
 
+def contact_titles(names):
+    """{relay contact: title} for contacts saved under no name or only their numeric Telegram chat id, as unlinked Telegram
+    senders are: their linked mobile, else their @username, else "Telegram user". `names` maps a relay contact to its saved
+    name; other contacts keep theirs. A few batched reads, plus one username read per such contact without a mobile."""
+    candidates = [contact for contact, name in names.items() if contact and (not name or is_number(name))]
+    if not candidates:
+        return {}
+    telegram = frappe.get_all('Relay Channel', filters={'channel': 'Telegram'}, pluck='name')
+    if not telegram:
+        return {}
+    chats = {}
+    for row in frappe.get_all('Relay Contact Endpoint', filters={'relay_contact': ['in', candidates], 'channel': ['in', telegram]},
+                              fields=['relay_contact', 'channel', 'endpoint'], limit_page_length=0):
+        chats.setdefault(row.relay_contact, []).append((row.channel, row.endpoint))
+    chat_named = [contact for contact, pairs in chats.items() if not names[contact] or names[contact] in {endpoint for _, endpoint in pairs}]
+    if not chat_named:
+        return {}
+    people = {row.name: row for row in frappe.get_all('Relay Contact', filters={'name': ['in', chat_named]}, fields=['name', 'contact', 'display_name'])}
+    mobiles = linked_mobiles(people)
+    return {contact: mobiles.get(contact) or telegram_username(contact, chats[contact]) or 'Telegram user' for contact in chat_named}
+
+
+def telegram_username(contact, chats):
+    """The person's @username from their newest incoming Telegram message, when Telegram sent one."""
+    from relay_core.automation.provenance import context_of
+    context = frappe.db.get_value('Relay Message', {'relay_contact': contact, 'channel': ['in', [channel for channel, _ in chats]],
+                                                    'direction': 'Incoming'}, 'provider_context', order_by='name desc')
+    username = context_of({'provider_context': context}).get('username') if context else None
+    return '@' + username if isinstance(username, str) and username else ''
+
+
+def is_number(value):
+    return str(value).strip().lstrip('+-').replace(' ', '').isdigit()
+
+
 def person_name(person, chat_id):
     """The person's saved name, unless it is only the chat id or another number."""
     name = (person or {}).get('display_name') or ''
-    return '' if not name or name == chat_id or name.lstrip('+').replace(' ', '').isdigit() else name
+    return '' if not name or name == chat_id or is_number(name) else name
