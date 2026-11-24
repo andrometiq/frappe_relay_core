@@ -5,8 +5,6 @@ import { hasManyNumbers } from '../services/whatsappNumbers'
 import { useRealtimeRefresh } from './useRealtimeRefresh'
 import { isReceiptsOnly } from '../services/realtimeRefreshQueue'
 
-export const sendNumbersKey = Symbol('Send numbers')
-
 /** The site's WhatsApp numbers for the open chat on a site with several numbers: where the person wrote, and the
  * number a new conversation starts from. Read again on each new message event. */
 export function useSendNumbers(state, capabilities) {

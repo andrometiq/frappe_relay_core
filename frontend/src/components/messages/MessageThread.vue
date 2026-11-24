@@ -129,7 +129,6 @@ watch(() => props.rows, rows => {
 }, { immediate: true });
 onBeforeUnmount(() => clearTimeout(freshTimer));
 // Another chat starts its own set: its first rows are loaded, not new.
-watch(() => props.selected, () => { known = null; fresh.value = new Set(); clearTimeout(freshTimer); });
 const can = (message, feature) => channelCan(capabilities.value, objectValue(message.provider_context).provider, feature);
 const cursorReaders=ref([]);
 let readerGeneration=0;
@@ -188,7 +187,6 @@ function react(message, emoji) {
   reactionTarget.value = null;
   emit("send", message, "reaction", { emoji });
 }
-watch(() => props.selected, () => { reactionTarget.value = null; menu.value = null; cancelSelection(); });
 const {info,coverage,coverageError,infoOpen,showInfo,refreshCoverage,close:closeInfo}=useMessageInfo(()=>props.rows||[],()=>props.selected);
 useRealtimeRefresh([],['reads'],refreshCoverage);
 onBeforeUnmount(closeInfo);

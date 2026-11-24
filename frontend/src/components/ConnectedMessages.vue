@@ -21,7 +21,7 @@ import { composerActions } from "../services/composerActions";
 import ContactEndpoints from "./messages/ContactEndpoints.vue";
 import { useMessages } from "../composables/useMessages";
 import { useThreadNotes } from "../composables/useThreadNotes";
-import { sendNumbersKey, useSendNumbers } from "../composables/useSendNumbers";
+import { useSendNumbers } from "../composables/useSendNumbers";
 import { useConversationPresence } from "../composables/useConversationPresence";
 import { useRealtimeRefresh } from "../composables/useRealtimeRefresh";
 import { coreApi } from "../services/coreApi";
@@ -79,7 +79,6 @@ const frappeContact = computed(() => source.value?.frappe_contact || contactReco
 
 provide(messagesKey, state);
 const numbers = useSendNumbers(state, capabilities);
-provide(sendNumbersKey, numbers);
 // On a site with several WhatsApp numbers the header names the number the customer wrote to.
 const wroteTo = computed(() => numbers.active.value ? numbers.wroteTo.value : null);
 const {

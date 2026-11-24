@@ -58,10 +58,9 @@ test('ticket submission retains selected evidence evicted from the paging window
   assert.equal(view.selecting.value, false)
   assert.deepEqual(view.selection.value, [])
 
-  view.startSelection(older)
-  view.props.selected = 'OTHER-LOCAL-CONTACT'
-  await nextTick()
-  assert.deepEqual(view.selection.value, [])
+  // Another chat or thread mounts a new thread view (it is keyed by chat, channel and endpoint), so no selection carries over.
+  const chat = await readFile(new URL('../src/components/ConnectedMessages.vue', import.meta.url), 'utf8')
+  assert.match(chat, /<MessageThread v-else :key="active \+ ':' \+ channel \+ ':' \+ state\.endpoint\.value"/)
 })
 
 test('a 1.2 second phone press consumes its release click and the next tap toggles normally', t => {

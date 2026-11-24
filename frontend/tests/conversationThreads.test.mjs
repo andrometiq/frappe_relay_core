@@ -217,5 +217,5 @@ test('a re-layout that reports the same position saves nothing', async t => {
 test('the set of known rows of a thread is bounded and starts over in another chat', async () => {
   const thread = await read('components/messages/MessageThread.vue')
   assert.match(thread, /if \(known\.size > 2 \* list\.length \+ 200\) known = new Set\(list\.map\(row => row\.name\)\);/)
-  assert.match(thread, /watch\(\(\) => props\.selected, \(\) => \{ known = null; fresh\.value = new Set\(\); clearTimeout\(freshTimer\); \}\);/)
+  assert.doesNotMatch(thread, /watch\(\(\) => props\.selected, /, 'The view is keyed by chat, so another chat starts with new known rows')
 })

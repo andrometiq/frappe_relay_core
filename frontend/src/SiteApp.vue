@@ -173,7 +173,7 @@ onErrorCaptured(e => {
       <template #footer>
         <a href="/desk/relay-core" class="mobile-sheet-item"><span class="mobile-sheet-icon"><FeatherIcon name="grid" :size="18" /></span><span>Frappe Desk</span></a>
         <div class="relay-account mobile-sheet-account">
-          <button type="button" class="mobile-sheet-profile" data-profile-open @click="moreOpen = false; profileOpen = true"><UserAvatar :user="user" :label="userTitle" size="sm" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span></button>
+          <button type="button" class="mobile-sheet-profile" @click="moreOpen = false; profileOpen = true"><UserAvatar :user="user" :label="userTitle" size="sm" /><span class="relay-user-name" :title="userTitle">{{ userTitle }}</span></button>
           <Button :icon="THEME_LABELS[theme][0]" :aria-label="`Theme: ${THEME_LABELS[theme][1]}`" :title="`Theme: ${THEME_LABELS[theme][1]}`" @click="nextTheme" /><Button icon="log-out" aria-label="Sign out" @click="logout" />
         </div>
       </template>
