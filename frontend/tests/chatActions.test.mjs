@@ -42,6 +42,8 @@ test('the reaction pill has no close buttons and offers removal only after a rea
   assert.doesNotMatch(picker, /icon="x"|×|Close/)
   assert.match(picker, /<button v-if="props\.current"[^>]*>Remove reaction<\/button>/)
   assert.match(picker, /event\.key === 'Escape'/)
+  assert.doesNotMatch(picker, /:global\([^)]*\)\s*[>.]/, 'Vue drops what follows :global(), which once moved whole message rows 8px off screen')
+  assert.match(picker, /:global\(\.conversation-bubble\.is-mine \.reaction-pill\)/)
 })
 
 test('message info has no internal reference or coverage jargon', async () => {
