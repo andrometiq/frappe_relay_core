@@ -10,6 +10,7 @@ import TicketSettings from './TicketSettings.vue'
 import PageSidebar from './shell/PageSidebar.vue'
 import TicketDashboard from './tickets/TicketDashboard.vue'
 import TicketDialog from './tickets/TicketDialog.vue'
+import NewTicketDialog from './tickets/NewTicketDialog.vue'
 import { useTicketSettings } from '../composables/useTicketSettings'
 import { emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketRoute, ticketViewFilters, ticketViewKey, ticketViews } from '../services/ticketSettings'
 import { coreApi } from '../services/coreApi'
@@ -26,7 +27,7 @@ const businessTypes = ref([])
 const typeOptions = computed(() => businessTypes.value.filter(row => row.enabled).map(row => ({ value: row.business_doctype, label: row.label || row.business_doctype })))
 const filters = ref(emptyTicketFilters())
 const typeLabel = doctype => typeOptions.value.find(row => row.value === doctype)?.label || doctype
-const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref('')
+const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref(''), creating = ref(false)
 const listBusy = ref(false), detailBusy = ref(false), saving = ref(false)
 const busy = computed(() => listBusy.value || detailBusy.value || saving.value)
 const statusOptions = computed(() => pickerOptions(settings.value.statuses, 'All statuses'))
@@ -110,6 +111,10 @@ function show(row) {
   detail(row.name)
 }
 function close() { closeRoute(listRoute()); dismiss() }
+function created(ticket) {
+  toast('Ticket ' + ticket.name + ' created')
+  loadCounts(); load(); select(ticket)
+}
 function readRoute() {
   if (location.hash.split('?')[0] !== '#/tickets') return
   const route = readTicketRoute(location.hash)
@@ -176,6 +181,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
           <div class="page-head-actions">
             <Button variant="outline" icon-left="chart-column" label="Dashboard" @click="view = 'dashboard'" />
             <Button v-if="settings.can_manage" variant="outline" icon-left="settings" label="Ticket settings" @click="view = 'settings'" />
+            <Button v-if="typeOptions.length" variant="solid" icon-left="plus" label="New ticket" @click="creating = true" />
           </div>
         </header>
         <div v-if="stats.length" class="page-stats">
@@ -213,6 +219,7 @@ const ticketSentinel = useLoadMore({ loading: busy, hasMore: () => page.value.ne
         <div v-if="page.next" ref="ticketSentinel" class="h-px" aria-hidden="true" />
       </template>
     </main>
+    <NewTicketDialog v-model="creating" :business-types="typeOptions" @created="created" />
     <TicketDialog v-if="selected" :ticket="selected" :settings="settings" :error="saveError" :busy="busy" :ai-enabled="aiEnabled" @update="update" @close="close" />
   </div>
 </template>

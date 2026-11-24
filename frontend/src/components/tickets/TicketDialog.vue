@@ -7,7 +7,7 @@ import TicketDiscussion from '../TicketDiscussion.vue'
 import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
 import { recordTitle } from '../../services/recordTitle'
-import { distinctPeople } from '../../services/ticketForm'
+import { colleagueRequest, distinctPeople } from '../../services/ticketForm'
 import { isClosed, pickerOptions, statusLook } from '../../services/ticketSettings'
 import { dateTime } from '../relativeTime'
 
@@ -21,7 +21,7 @@ const look = computed(() => statusLook(props.settings, props.ticket))
 const closed = computed(() => isClosed(props.settings, props.ticket))
 const staffTookOver = computed(() => props.ticket.ai_disabled && props.ticket.ownership_actor && props.ticket.ownership_actor !== 'Administrator')
 const ownerField = computed(() => ({ label: '', placeholder: linkedTitle('User', props.ticket.assigned_to, 'Search colleagues…'), readOnly: props.busy,
-  search: async (query, signal) => distinctPeople(await coreApi('collaboration.colleagues', { contact: props.ticket.contact, query }, false, { signal })) }))
+  search: async (query, signal) => distinctPeople(await coreApi(...colleagueRequest(props.ticket.contact, query), false, { signal })) }))
 // The second press of the double-click that opened the ticket lands on the mask; it must not close it.
 const keepOpenOnDoubleClick = event => { if (event.detail > 1 && event.target.classList?.contains('relay-dialog-mask')) event.stopPropagation() }
 onMounted(() => document.addEventListener('mousedown', keepOpenOnDoubleClick, true))
@@ -52,7 +52,7 @@ watch(() => props.ticket.contact_person, async person => {
         </dd>
         <dt>Assigned to</dt>
         <dd>
-          <ChoiceField v-if="ticket.can_assign && ticket.contact" :model-value="''" :field="ownerField" @update:model-value="user => user && emit('update', 'assign', { user })" />
+          <ChoiceField v-if="ticket.can_assign && (ticket.contact || !ticket.messages?.length)" :model-value="''" :field="ownerField" @update:model-value="user => user && emit('update', 'assign', { user })" />
           <span v-else class="ticket-assignee" :class="{ 'ticket-unassigned': !ticket.assigned_to }"><UserAvatar v-if="ticket.assigned_to" :user="ticket.assigned_to" :label="linkedTitle('User', ticket.assigned_to)" size="sm" />{{ linkedTitle('User', ticket.assigned_to, 'Unassigned') }}</span>
         </dd>
       </dl>
@@ -64,6 +64,14 @@ watch(() => props.ticket.contact_person, async person => {
           <template v-if="ticket.contact">{{ ticket.contact_title || linkedTitle('Relay Contact', ticket.contact, 'Contact') }} · <a v-for="message in ticket.messages?.slice(0, 1)" :key="message.message" class="v1-link" :href="'#/messages?message=' + encodeURIComponent(message.message)">Open chat</a></template>
           <template v-else>No contact</template>
         </dd>
+        <template v-if="ticket.business_name">
+          <dt>Business record</dt>
+          <dd><a class="v1-link" :href="deskRoute(ticket.business_doctype, ticket.business_name)">{{ ticket.business_doctype }} · {{ linkedTitle(ticket.business_doctype, ticket.business_name) }}</a></dd>
+        </template>
+        <template v-if="ticket.mentions?.length">
+          <dt>Mentioned</dt>
+          <dd><span v-for="user in ticket.mentions" :key="user" class="ticket-assignee"><UserAvatar :user="user" :label="linkedTitle('User', user)" size="sm" />{{ linkedTitle('User', user) }}</span></dd>
+        </template>
         <dt>Linked records</dt>
         <dd>
           <span v-if="!records.length">None</span>

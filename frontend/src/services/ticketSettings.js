@@ -61,7 +61,7 @@ export function assigneeChartRows(rows, label) {
 
 const VIEWS = ['dashboard', 'tickets', 'settings']
 const ROUTE_FILTERS = ['query', 'ticket_status', 'mine', 'state', 'assigned', 'resolved_today', 'assigned_to',
-  'ticket_type', 'exclude_assignees', 'business_type', 'unlinked']
+  'ticket_type', 'exclude_assignees', 'business_type', 'unlinked', 'mentioned']
 // An empty value of these is itself a filter: no owner, no type.
 const EMPTY_FILTERS = ['assigned_to', 'ticket_type']
 
@@ -118,7 +118,8 @@ export function ticketViews(dashboard, settings, user, businessTypes = []) {
       { key: 'open', label: 'Open', icon: 'inbox', filters: { state: 'Open' }, count: known(totals?.open), strong: true },
       { key: 'mine', label: 'Assigned to me', icon: 'user', filters: { state: 'Open', mine: 1 },
         count: known(dashboard?.assignees.find(row => row.assigned_to === user)?.tickets || 0) },
-      { key: 'unassigned', label: 'Unassigned', icon: 'at-sign', filters: { state: 'Open', assigned_to: '' }, count: known(totals?.unassigned) },
+      { key: 'mentions', label: 'Mentions me', icon: 'at-sign', filters: { state: 'Open', mentioned: 1 }, count: known(totals?.mentioned || 0) },
+      { key: 'unassigned', label: 'Unassigned', icon: 'user-x', filters: { state: 'Open', assigned_to: '' }, count: known(totals?.unassigned) },
       { key: 'resolved', label: 'Resolved', icon: 'check', filters: { state: 'Closed' }, count: known(sum(statuses.filter(row => closed.has(row.ticket_status)))) },
     ] },
     { key: 'types', title: 'Business type', items: businessTypes.map((type, index) => ({

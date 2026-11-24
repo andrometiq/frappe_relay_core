@@ -67,7 +67,7 @@ test('template statuses fold into sidebar groups with counts per group and categ
 
 const settings = { statuses: [{ name: 'Open', state: 'Open' }, { name: 'Waiting', state: 'Open' }, { name: 'Done', state: 'Closed' }] }
 const dashboard = {
-  totals: { open: 5, assigned: 3, unassigned: 2, resolved_today: 1 },
+  totals: { open: 5, assigned: 3, unassigned: 2, resolved_today: 1, mentioned: 3 },
   statuses: [{ ticket_status: 'Open', tickets: 3 }, { ticket_status: 'Waiting', tickets: 2 }, { ticket_status: 'Done', tickets: 7 }],
   assignees: [{ assigned_to: 'me@x', tickets: 2 }, { assigned_to: 'other@x', tickets: 1 }, { assigned_to: null, tickets: 2 }],
   business_types: [{ business_doctype: 'Customer', tickets: 4 }, { business_doctype: null, tickets: 1 }],
@@ -76,7 +76,7 @@ const dashboard = {
 test('ticket views take their counts from the dashboard numbers', () => {
   const sections = ticketViews(dashboard, settings, 'me@x', [{ value: 'Customer', label: 'Customer' }, { value: 'Supplier', label: 'Supplier' }])
   const counts = Object.fromEntries(sections.flatMap(section => section.items).map(item => [item.key, item.count]))
-  assert.deepEqual(counts, { all: 12, open: 5, mine: 2, unassigned: 2, resolved: 7, 'type:Customer': 4, 'type:Supplier': 0 })
+  assert.deepEqual(counts, { all: 12, open: 5, mine: 2, mentions: 3, unassigned: 2, resolved: 7, 'type:Customer': 4, 'type:Supplier': 0 })
   assert.equal(sections[1].title, 'Business type')
   const unknown = ticketViews(null, settings, 'me@x', [])
   assert.equal(unknown.length, 1, 'No business type section without types')
@@ -92,6 +92,7 @@ test('a view matches the list filters, keeps the search and ignores the status p
   assert.equal(ticketViewKey(sections, unassigned), 'unassigned')
   assert.equal(ticketViewKey(sections, { ...unassigned, ticket_status: 'Waiting' }), 'unassigned')
   assert.equal(ticketViewKey(sections, { ...emptyTicketFilters(), state: 'Open', mine: '1' }), 'mine')
+  assert.equal(ticketViewKey(sections, { ...emptyTicketFilters(), state: 'Open', mentioned: '1' }), 'mentions')
   assert.equal(ticketViewKey(sections, ticketViewFilters(items['type:Customer'], emptyTicketFilters())), 'type:Customer')
   assert.equal(ticketViewKey(sections, { ...emptyTicketFilters(), assigned_to: 'a@x' }), '', 'A dashboard filter is no view')
 })

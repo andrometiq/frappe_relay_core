@@ -5,7 +5,7 @@ import ChoiceField from './fields/ChoiceField.vue'
 import { coreApi } from '../services/coreApi'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import { dateTime } from './relativeTime'
-import { distinctPeople, withMention } from '../services/ticketForm'
+import { colleagueRequest, distinctPeople, withMention } from '../services/ticketForm'
 import { ticketCommentsStore } from '../services/ticketComments'
 
 const props = defineProps({ ticket: Object })
@@ -21,7 +21,7 @@ function mention(values) {
   mentions.value = values
 }
 async function colleagues(query, signal) {
-  const rows = distinctPeople(await coreApi('collaboration.colleagues', { contact: contact.value, query }, false, { signal }))
+  const rows = distinctPeople(await coreApi(...colleagueRequest(contact.value, query), false, { signal }))
   for (const row of rows) labels.set(row.value, row.label)
   return rows
 }
