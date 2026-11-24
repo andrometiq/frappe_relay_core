@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { dayDividers, dayLabel, groupStarts, quoteIndex } from '../src/components/messages/threadIndex.js'
+import { dayDividers, dayLabel, groupStarts, isMine, quoteIndex, senderKey } from '../src/components/messages/threadIndex.js'
 
 const row = (index, values = {}) => ({ name: 'M' + index, channel: 'CH', sender_endpoint: '91', sent_at: values.at || '2026-10-01 10:00:00',
   provider_context: JSON.stringify({ message_id: 'w' + index, ...(values.reply ? { reply_to_message_id: values.reply } : {}) }) })
@@ -58,9 +58,25 @@ test('messages group by sender: a new group starts on the other side, another co
   assert.deepEqual([...groupStarts([])], [])
 })
 
+test('my own sends sit on the left; the contact, colleagues and automation sit on the right, each in their own group', () => {
+  const me = 'anitha@example.invalid', at = time => '2026-10-01 ' + time
+  const rows = [
+    { name: 'M1', direction: 'Incoming', relay_contact: 'C1', sent_at: at('10:00:00') },
+    { name: 'M2', direction: 'Outgoing', sender: { user: me }, sent_at: at('10:01:00') },
+    { name: 'M3', direction: 'Outgoing', _pending: true, sent_at: at('10:02:00') },
+    { name: 'M4', direction: 'Outgoing', sender: { user: 'prakash@example.invalid' }, sent_at: at('10:03:00') },
+    { name: 'M5', direction: 'Outgoing', sender: { automated: 1, name: 'Automation' }, sent_at: at('10:04:00') },
+    { name: 'M6', direction: 'Outgoing', sent_at: at('10:05:00') }]
+  assert.deepEqual(rows.map(row => isMine(row, me)), [false, true, true, false, false, false], 'A row without a sender is not claimed as mine')
+  assert.equal(isMine(rows[1], ''), false, 'Without a session user nothing is mine')
+  assert.deepEqual(rows.map(row => senderKey(row, me)), ['in:C1', 'me', 'me', 'out:prakash@example.invalid', 'automation', 'out:'])
+  assert.deepEqual([...groupStarts(rows, '', me)], ['M1', 'M2', 'M4', 'M5', 'M6'], 'A send in flight joins my group')
+})
+
 test('the thread shows the sender head once per group', async () => {
   const thread = await readFile(new URL('../src/components/messages/MessageThread.vue', import.meta.url), 'utf8')
-  assert.match(thread, /const starts = computed\(\(\) => groupStarts\(threadRows\.value, props\.unread\)\)/)
+  assert.match(thread, /const starts = computed\(\(\) => groupStarts\(threadRows\.value, props\.unread, me\)\)/)
+  assert.match(thread, /'is-mine': isMine\(message, me\),\s*'is-other': !isMine\(message, me\)/)
   assert.match(thread, /<header v-if="starts\.has\(message\.name\)" class="message-group-head">/)
   assert.match(thread, /v-memo="\[starts\.has\(message\.name\),/, 'A row repaints when it starts or stops a group')
 })

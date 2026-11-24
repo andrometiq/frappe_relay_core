@@ -102,6 +102,10 @@
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble{padding:2px 36px 2px 56px}
   .v1-shell.relay-shell .message-group-head .message-group-avatar{left:14px;width:32px;height:32px;font-size:12px}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer>time{left:4px;width:48px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other{padding:2px 56px 2px 36px}
+  .v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head .message-group-avatar{left:auto;right:14px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer>time{left:auto;right:4px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-menu-trigger{right:auto;left:0}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-menu-trigger{top:0;right:0;width:36px;height:36px;background:transparent;box-shadow:none}
   .v1-shell.relay-shell .message-date-divider{padding:8px 16px}
 

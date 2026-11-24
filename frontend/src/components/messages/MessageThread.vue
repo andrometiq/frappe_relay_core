@@ -19,7 +19,7 @@ import { messageData, objectValue, attachmentDownloadURL, reactionLabels, ownRea
 import { channelCan, multipleChannels, onPickedChannel } from "../../services/enabledChannels";
 import { messageNumberTags } from "../../services/whatsappNumbers";
 import { createScrollHold } from "./scrollHold";
-import { dayDividers, groupStarts, quoteIndex, timeOf } from "./threadIndex";
+import { dayDividers, groupStarts, isMine, quoteIndex, timeOf } from "./threadIndex";
 import { groupSends } from "../../services/sendGroups";
 import { notesInThread } from "../../services/threadNotes";
 import { selectMessages, selectableMessage } from '../../services/messageSelection'
@@ -96,11 +96,13 @@ const numberTags = computed(() => props.oneChannel ? {} : messageNumberTags(sent
 const quoted = computed(() => quoteIndex(props.rows || []));
 const dividers = computed(() => dayDividers(threadRows.value));
 // Messages read as sender groups: the first of a group shows the avatar, name and time.
-const starts = computed(() => groupStarts(threadRows.value, props.unread));
-// Our side is named by the channel it went out on, as a message does not record which colleague sent it.
+// The session user's own messages sit on the left; the contact, colleagues and automation sit on the right.
+const me = globalThis.frappe?.session?.user || "";
+const starts = computed(() => groupStarts(threadRows.value, props.unread, me));
 function senderName(message) {
   if (message.direction !== "Outgoing") return readableName(message.contact_label || props.contactName, "Contact");
-  return (!message._pending && message.channel_title) || "You";
+  if (message.sender?.name) return message.sender.name;
+  return message._pending ? "You" : message.channel_title || "Our team";
 }
 // A message sent to several channels shows one delivery mark per channel.
 const deliveries = message => message.sends || [message];
@@ -364,6 +366,9 @@ function actions(message) {
         :class="{
           'ml-auto': message.direction === 'Outgoing',
           'is-group-start': starts.has(message.name),
+          'is-mine': isMine(message, me),
+          'is-other': !isMine(message, me),
+          'is-automated': message.sender?.automated,
           'anchored-message': message.name === anchor,
           'menu-target': menu?.message.name === message.name,
           'is-selecting': selecting && selectableMessage(message),
@@ -385,7 +390,7 @@ function actions(message) {
       >
         <span v-if="selecting && selectableMessage(message)" class="message-selection-check" aria-hidden="true"><FeatherIcon :name="selection.includes(message.name) ? 'check-square' : 'square'" :size="20" /></span>
         <header v-if="starts.has(message.name)" class="message-group-head">
-          <Avatar class="message-group-avatar" :label="senderName(message)" aria-hidden="true" />
+          <Avatar class="message-group-avatar" :label="senderName(message)" :image="message.sender?.image || undefined" aria-hidden="true" />
           <strong>{{ senderName(message) }}</strong><time :datetime="timeOf(message)?.toISOString()">{{ timeLabel(message) }}</time>
         </header>
         <div v-if="message.contact_label" class="message-sender">

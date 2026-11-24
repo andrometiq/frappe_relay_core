@@ -1015,7 +1015,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .message-group-head strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-size:14px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .message-group-head time{flex:none;color:var(--relay-ink-soft);font-size:11.5px}
 .v1-shell.relay-shell .message-group-head .message-group-avatar{position:absolute;left:20px;top:8px;width:34px;height:34px;border:0;border-radius:8px;font-size:13px}
-.v1-shell.relay-shell .conversation-bubble.ml-auto .message-group-avatar{background:var(--relay-accent-soft);color:var(--relay-accent-text)}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-sender{display:none}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content{font-size:inherit;line-height:inherit}
 .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-content>*+*{margin-top:6px}
@@ -1048,6 +1047,22 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .conversation-bubble>.message-reactions{position:static;margin-top:5px}
 /* Day lines: the label between two hairlines. */
 .v1-shell.relay-shell .message-date-divider{display:flex;align-items:center;gap:12px;margin:0;padding:10px 20px}
+/* Everyone else's groups mirror the layout: avatar, name and text block on the right, the text itself still reads left to right. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other{padding:2px 66px 2px 64px;text-align:right}
+.v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head{justify-content:flex-end}
+.v1-shell.relay-shell .conversation-bubble.is-other>.message-group-head .message-group-avatar{left:auto;right:20px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>:is(.message-content,.message-quote,.message-pending-error,.delivery-reason-text){display:block;width:fit-content;max-width:100%;margin-left:auto;text-align:left}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content)){display:block}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content :is(.message-template,.message-quote,.media-document,.media-unavailable){margin-left:auto}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer{display:flex;justify-content:flex-end;margin-left:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-content[data-message-kind=text]:not(:has(.message-template,.email-content))+.message-footer{display:flex;margin-left:0}
+/* A footer holding only the hover time takes no line. */
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-footer:not(:has(>:not(time))){height:0;margin:0}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-footer>time{left:auto;right:12px}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-reactions{justify-content:flex-end}
+.v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-other>.message-menu-trigger{right:auto;left:16px}
+
+.v1-shell.relay-shell .conversation-bubble.is-automated .message-group-avatar{background:var(--relay-hover);color:var(--relay-ink-3)}
 .v1-shell.relay-shell .message-date-divider::before,.v1-shell.relay-shell .message-date-divider::after{content:"";flex:1;height:1px;background:var(--relay-stroke)}
 .v1-shell.relay-shell .message-date-divider span{padding:0;border:0;background:transparent;color:var(--relay-ink-soft);font-size:12px;font-weight:500}
 .v1-shell.relay-shell .message-unread-divider{margin:0}

@@ -36,15 +36,28 @@ export function dayDividers(rows, today = new Date()) {
   return dividers
 }
 
+// True for a message the session user sent: it sits on the left; the contact, colleagues and automation sit on the right.
+// A send still in flight is always the session user's own.
+export function isMine(row, me) {
+  return row?.direction === 'Outgoing' && (Boolean(row._pending) || (Boolean(me) && row.sender?.user === me))
+}
+
+// Who wrote a row, for grouping: the contact, or on our side a colleague or automation.
+export function senderKey(row, me = '') {
+  if (row.direction !== 'Outgoing') return 'in:' + (row.relay_contact || '')
+  if (isMine(row, me)) return 'me'
+  return row.sender?.automated ? 'automation' : 'out:' + (row.sender?.user || '')
+}
+
 // Rows that open a sender group, which shows the sender's avatar, name and time once: the first row, a row after a note
-// or the unread line, a new day, the other direction or another contact, or a gap of `minutes` or more.
-export function groupStarts(rows, unread = '', minutes = 10) {
+// or the unread line, a new day, another sender, or a gap of `minutes` or more.
+export function groupStarts(rows, unread = '', me = '', minutes = 10) {
   const starts = new Set()
   let previous = null
   for (const row of rows) {
     if (row.note) { previous = null; continue }
     const at = timeOf(row), before = previous && timeOf(previous)
-    if (!previous || row.name === unread || previous.direction !== row.direction || previous.relay_contact !== row.relay_contact
+    if (!previous || row.name === unread || senderKey(previous, me) !== senderKey(row, me)
         || !at || !before || at.toDateString() !== before.toDateString() || at - before >= minutes * 60000) starts.add(row.name)
     previous = row
   }
