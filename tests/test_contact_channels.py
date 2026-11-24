@@ -22,9 +22,11 @@ def site(*endpoints, channels=None):
         {'name': 'Support', 'channel': 'WhatsApp', 'account': 'site-a', 'enabled': 1},
         {'name': 'Bot', 'channel': 'Telegram', 'account': 'site-a', 'enabled': 1},
         {'name': 'Other site', 'channel': 'WhatsApp', 'account': 'site-b', 'enabled': 1}]
-    endpoints = [dict(row, endpoint_key=key(row['channel'], row['endpoint'])) for row in endpoints]
+    endpoints = [dict(row, endpoint_key=key(row['channel'], row['endpoint']), canonical_endpoint=row['endpoint'])
+                 for row in endpoints]
     return FakeSite(Relay_Channel=rows, Relay_Contact_Endpoint=endpoints, on_insert={
-        'Relay Contact Endpoint': lambda row: row.update(endpoint_key=key(row['channel'], row['endpoint']))})
+        'Relay Contact Endpoint': lambda row: row.update(endpoint_key=key(row['channel'], row['endpoint']),
+                                                         canonical_endpoint=row['endpoint'])})
 
 
 class SiblingContactTests(unittest.TestCase):

@@ -111,22 +111,18 @@ def contact_identities(person):
 def bindings(channel, provider, value):
     """Find canonical aliases without rewriting pre-normalization stored keys."""
     import frappe
-    canonical = normalize(provider, value)
-    start = 0
-    while True:
-        rows = frappe.get_all('Relay Contact Endpoint', filters={'channel': channel},
-            fields=['name', 'endpoint', 'relay_contact', 'verified'], order_by='name asc',
-            limit_start=start, limit_page_length=500)
-        for row in rows:
-            try:
-                matches = normalize(provider, row.endpoint) == canonical
-            except ValueError:
-                continue
-            if matches:
-                yield row
-        if len(rows) < 500:
-            break
-        start += len(rows)
+    # canonical_endpoint holds normalize() of each stored value, so legacy aliases are an index read.
+    yield from frappe.get_all('Relay Contact Endpoint', order_by='name asc',
+        filters={'channel': channel, 'canonical_endpoint': normalize(provider, value)},
+        fields=['name', 'endpoint', 'relay_contact', 'verified'])
+
+
+def canonical_endpoint(provider, value):
+    """normalize(), or None for a stored value that it rejects."""
+    try:
+        return normalize(provider, value)
+    except ValueError:
+        return None
 
 
 def contacts_by_phone(number=None, *, region=None):

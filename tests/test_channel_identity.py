@@ -18,13 +18,21 @@ class IdentityTests(unittest.TestCase):
             with self.subTest(provider=provider, value=value), self.assertRaises(ValueError):
                 normalize(provider, value)
 
-    def test_legacy_alias_search_includes_revoked_bindings_after_first_page(self):
+    def test_legacy_alias_search_is_one_indexed_read_that_includes_revoked_bindings(self):
         from unittest.mock import patch
         from frappe import _dict
         from relay_core.identity import bindings
-        rows = [_dict(name=str(i), endpoint=f'other{i}@example.invalid', verified=1) for i in range(500)]
         revoked = _dict(name='legacy', endpoint='PERSON@EXAMPLE.INVALID', verified=0, relay_contact='other-owner')
-        with patch('frappe.get_all', side_effect=[rows, [revoked]]) as query:
-            self.assertEqual(list(bindings('channel', 'Email', 'person@example.invalid')), [revoked])
-        self.assertEqual(query.call_args.kwargs['limit_start'], 500)
-        self.assertEqual(query.call_args.kwargs['filters'], {'channel': 'channel'})
+        with patch('frappe.get_all', return_value=[revoked]) as query:
+            self.assertEqual(list(bindings('channel', 'Email', ' Person@Example.invalid')), [revoked])
+        query.assert_called_once()
+        self.assertEqual(query.call_args.kwargs['filters'],
+                         {'channel': 'channel', 'canonical_endpoint': 'person@example.invalid'})
+
+    def test_canonical_endpoint_matches_every_stored_alias_and_skips_rejected_values(self):
+        from relay_core.identity import canonical_endpoint
+        for stored in ('+91 98765-43210', '(91) 98765 43210', '919876543210'):
+            self.assertEqual(canonical_endpoint('WhatsApp', stored), '919876543210')
+        self.assertEqual(canonical_endpoint('Telegram', '000123456'), '123456')
+        self.assertIsNone(canonical_endpoint('Telegram', '@username'))
+        self.assertIsNone(canonical_endpoint(None, '919876543210'))

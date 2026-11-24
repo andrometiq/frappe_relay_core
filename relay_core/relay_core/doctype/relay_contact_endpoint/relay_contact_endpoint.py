@@ -12,8 +12,9 @@ class RelayContactEndpoint(Document):
         elif not getattr(frappe.flags, "relay_contact_sync", False):
             require_access(configure=True)
         previous = self.get_doc_before_save()
-        from relay_core.identity import normalize
+        from relay_core.identity import canonical_endpoint, normalize
         provider = frappe.db.get_value('Relay Channel', self.channel, 'channel')
+        self.canonical_endpoint = canonical_endpoint(provider, self.endpoint)
         if previous:
             canonicalizing = self.flags.get('canonicalize_identity')
             expected = normalize(provider, previous.endpoint) if canonicalizing else previous.endpoint
@@ -56,3 +57,5 @@ def install_indexes():
     frappe.db.add_index('Relay Contact Endpoint', ['channel', 'relay_contact'], 'relay_channel_contacts')
     # A chat's own endpoints (inbox_records.chat_endpoints, endpoint_labels) are read by contact alone.
     frappe.db.add_index('Relay Contact Endpoint', ['relay_contact'], 'relay_endpoint_contact')
+    # identity.bindings finds an identity and its legacy aliases on one channel by equality.
+    frappe.db.add_index('Relay Contact Endpoint', ['channel', 'canonical_endpoint'], 'relay_endpoint_canonical')
