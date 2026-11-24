@@ -116,6 +116,8 @@ def after_migrate():
     frappe.db.add_index('Relay Hub Event', ['projection_status','name'], 'relay_event_projection')
     from relay_core.relay_chats import install_index as install_chat_index
     install_chat_index()
+    from relay_core.relay_core.doctype.relay_contact_endpoint.relay_contact_endpoint import install_indexes as install_endpoint_indexes
+    install_endpoint_indexes()
     from relay_core.ticket_settings import seed_defaults
     seed_defaults()
 

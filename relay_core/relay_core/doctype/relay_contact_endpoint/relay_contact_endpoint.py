@@ -47,6 +47,11 @@ class RelayContactEndpoint(Document):
 
 
 def on_doctype_update():
+    install_indexes()
+
+
+def install_indexes():
+    """Runs on DocType update and after every migrate, because migrate skips an unchanged DocType."""
     # Channel filters on the inbox and its counts read contacts per channel from this index.
     frappe.db.add_index('Relay Contact Endpoint', ['channel', 'relay_contact'], 'relay_channel_contacts')
     # A chat's own endpoints (inbox_records.chat_endpoints, endpoint_labels) are read by contact alone.
