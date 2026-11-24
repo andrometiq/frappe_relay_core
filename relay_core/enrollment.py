@@ -70,7 +70,7 @@ def pending(after=None):
     from relay_core.endpoint_labels import telegram_labels
     labels=telegram_labels([(item['channel'],item['endpoint']) for item in items if item['medium']=='Telegram'])
     for item in items:
-        if item['medium']=='Telegram':item['endpoint_label']=labels.get((item['channel'],item['endpoint'])) or 'Telegram'
+        if item['medium']=='Telegram':item['endpoint_label']=labels.get((item['channel'],item['endpoint'])) or 'Telegram user'
     return {'items':items,'next':events[19].name if len(events)>20 else None}
 
 

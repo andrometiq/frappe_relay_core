@@ -51,17 +51,22 @@ class ConversationThreadTests(unittest.TestCase):
                     conversation_threads.threads(**values)
 
 
-class TelegramHandleTests(unittest.TestCase):
-    def test_a_telegram_thread_shows_the_handle_of_its_newest_incoming_message(self):
+class TelegramThreadTests(unittest.TestCase):
+    def test_telegram_threads_read_their_usernames_and_labels_once_for_all_threads(self):
         fake = fake_frappe()
-        with patch.object(conversation_threads, 'frappe', fake):
-            fake.db.get_value.return_value = '{"provider": "Telegram", "chat_id": 55012345, "username": "ravitex"}'
-            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '@ravitex')
-            self.assertEqual(fake.db.get_value.call_args.kwargs['order_by'], 'name desc')
-            fake.db.get_value.return_value = '{"provider": "Telegram", "chat_id": 55012345}'
-            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '')
-            fake.db.get_value.return_value = None
-            self.assertEqual(conversation_threads.telegram_handle(('R1', 'CH-BOT', '55012345')), '')
+        fake.get_list.return_value = [_dict(name='CH-BOT', channel='Telegram', label='Bot', title='', address='@essdee_bot')]
+        fake.get_all.return_value = [last('M2', 'CH-BOT'), last('M4', 'CH-BOT')]
+        newest = {('R1', 'CH-BOT', '5501'): 'M2', ('R1', 'CH-BOT', '5502'): 'M4'}
+        with patch.object(conversation_threads, 'frappe', fake), patch('relay_core.inbox.directory_preview', side_effect=lambda row: row.content), \
+                patch.object(conversation_threads, 'readable_person', return_value={'label': 'Ravi', 'frappe_contact': ''}), \
+                patch('relay_core.endpoint_labels.contact_titles', return_value={}), \
+                patch('relay_core.endpoint_labels.telegram_usernames', return_value={('R1', 'CH-BOT', '5501'): ('M2', '@ravitex')}) as usernames, \
+                patch('relay_core.endpoint_labels.telegram_labels', return_value={('CH-BOT', '5501'): '+91 90000 01234'}) as labels:
+            items = conversation_threads.thread_items(newest, {})
+        usernames.assert_called_once_with({'R1'}, {'CH-BOT'})
+        labels.assert_called_once_with([('CH-BOT', '5501'), ('CH-BOT', '5502')], {('CH-BOT', '5501'): '@ravitex'})
+        self.assertEqual([(item['handle'], item['endpoint_label']) for item in items], [('@ravitex', '+91 90000 01234'), ('', '')],
+                         'A thread without a linked number or username gets no label, so the tab names Telegram once')
 
 
 class ReadablePersonTests(unittest.TestCase):

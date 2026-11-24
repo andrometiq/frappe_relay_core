@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from frappe import _dict
-from relay_core.endpoint_labels import contact_titles, telegram_labels
+from relay_core.endpoint_labels import contact_titles, display_phone, telegram_labels, telegram_usernames
 
 
 class TelegramLabelTests(unittest.TestCase):
@@ -30,11 +30,11 @@ class TelegramLabelTests(unittest.TestCase):
         with patch('frappe.get_all', side_effect=self.get_all):
             labels = telegram_labels(pairs, {('TG', '5503'): '@meena', ('TG', '5501'): '@ravi'})
         self.assertEqual(labels, {
-            ('TG', '5501'): '+919000001234',       # the person's WhatsApp number on the same Relay Contact
+            ('TG', '5501'): '+91 90000 01234',     # the person's WhatsApp number on the same Relay Contact, as the app formats it
             ('TG', '5502'): '+91 98765 43210',     # else the mobile of the linked Frappe Contact
             ('TG', '5503'): '@meena',              # else the Telegram username
-            ('TG', '5504'): 'Telegram',            # a name that is only a number is not shown
-            ('TG', '5505'): 'Telegram',            # an unknown chat
+            ('TG', '5504'): '',                    # a name that is only a number is not shown: the caller shows just "Telegram"
+            ('TG', '5505'): '',                    # an unknown chat
         })
         for label in labels.values():
             self.assertNotIn(label, ('5501', '5502', '5503', '5504', '5505'), 'A raw chat id is never a label')
@@ -55,15 +55,36 @@ class TelegramLabelTests(unittest.TestCase):
                 return [_dict(relay_contact='R1', endpoint='919000001234')]
             return [_dict(relay_contact='R1', channel='TG', endpoint='5501'), _dict(relay_contact='R2', channel='TG', endpoint='5502'),
                     _dict(relay_contact='R3', channel='TG', endpoint='5503'), _dict(relay_contact='R5', channel='TG', endpoint='5505')]
-        usernames = {'R2': '{"username": "meena"}', 'R3': None}
+        newest = {('R2', 'TG', '5502'): ('M7', '@meena'), ('R2', 'TG', '5599'): ('M3', '@old'), ('R3', 'TG', '5503'): ('M5', '')}
         names = {'R1': '5501', 'R2': '5502', 'R3': '5503', 'R4': '+91 98765 43210', 'R5': '7777', 'R6': 'Ravi'}
         fake = MagicMock()
         fake.get_all.side_effect = get_all
-        fake.db.get_value.side_effect = lambda doctype, filters, *args, **kwargs: usernames[filters['relay_contact']]
-        with patch('relay_core.endpoint_labels.frappe', fake):
+        with patch('relay_core.endpoint_labels.frappe', fake), patch('relay_core.endpoint_labels.telegram_usernames', return_value=newest) as read:
             titles = contact_titles(names)
-        self.assertEqual(titles, {'R1': '+919000001234', 'R2': '@meena', 'R3': 'Telegram user'},
+        read.assert_called_once_with(['R2', 'R3'], ['TG'])
+        self.assertEqual(titles, {'R1': '+91 90000 01234', 'R2': '@meena', 'R3': 'Telegram user'},
                          'A WhatsApp-only number (R4), a number that is not its chat id (R5) and a real name (R6) keep their names')
+
+    def test_usernames_of_every_chat_come_from_one_grouped_read_and_one_context_read(self):
+        from frappe.query_builder.utils import get_query_builder
+        fake = MagicMock()
+        fake.qb = get_query_builder('mariadb')
+        statements = []
+        with patch.object(type(fake.qb.from_('x')), 'run', lambda query, *args, **kwargs: statements.append(query.get_sql()) or
+                          [('R1', 'TG', '5501', 'M9'), ('R2', 'TG', '5502', 'M4')], create=True), patch('relay_core.endpoint_labels.frappe', fake):
+            fake.get_all.return_value = [('M9', '{"username": "ravitex"}'), ('M4', '{"provider": "Telegram"}')]
+            result = telegram_usernames({'R1', 'R2'}, {'TG'})
+        self.assertEqual(result, {('R1', 'TG', '5501'): ('M9', '@ravitex'), ('R2', 'TG', '5502'): ('M4', '')})
+        self.assertEqual(len(statements), 1)
+        self.assertIn('MAX(`name`)', statements[0])
+        self.assertIn('GROUP BY `relay_contact`,`channel`,`sender_endpoint`', statements[0])
+        self.assertEqual(fake.get_all.call_count, 1, 'One read for all chats, not one per chat')
+
+    def test_phone_numbers_use_the_app_format(self):
+        self.assertEqual(display_phone('+919876543210'), '+91 98765 43210')
+        self.assertEqual(display_phone('9876543210'), '98765 43210')
+        self.assertEqual(display_phone('+44 20 7946 0958'), '+442079460958')
+        self.assertEqual(display_phone('Ravi'), 'Ravi')
 
     def test_contacts_with_names_read_nothing(self):
         with patch('frappe.get_all') as get_all:

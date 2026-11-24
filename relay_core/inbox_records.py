@@ -215,7 +215,7 @@ def row_channels(rows, providers):
     telegram = [mark for marks in result.values() for mark in marks if mark['provider'] == 'Telegram']
     labels = telegram_labels([(mark['channel'], mark['endpoint']) for mark in telegram])
     for mark in telegram:
-        mark['endpoint_label'] = labels.get((mark['channel'], mark['endpoint'])) or 'Telegram'
+        mark['endpoint_label'] = labels.get((mark['channel'], mark['endpoint']), '')
     return result
 
 

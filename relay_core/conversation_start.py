@@ -183,7 +183,7 @@ def options(contact, business_doctype=None, business_name=None):
     from relay_core.endpoint_labels import telegram_labels
     labels=telegram_labels([(item['channel'],item['endpoint']) for item in result if item['provider']=='Telegram'])
     for item in result:
-        if item['provider']=='Telegram':item['label']='Telegram · '+(labels.get((item['channel'],item['endpoint'])) or 'Telegram')
+        if item['provider']=='Telegram':item['label']=' · '.join(filter(None,['Telegram',labels.get((item['channel'],item['endpoint']))]))
         item.pop('endpoint')
     return result
 
