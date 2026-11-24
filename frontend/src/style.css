@@ -1228,7 +1228,7 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
   .composer-note-head > span { display:block; }
   .composer-note-head > span > span { display:block; }
   .composer-closed-copy { min-width:0; flex-basis:calc(100% - 60px); }
-  .composer-dock .composer-closed > .relay-button { width:100%; }
+  .composer-dock .composer-closed > .relay-button:not(.composer-more-trigger) { width:100%; }
   .composer-dock .composer-start { padding:12px; gap:12px; }
   .composer-field-grid { grid-template-columns:1fr; }
   .composer-attachment { flex-wrap:wrap; }

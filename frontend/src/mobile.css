@@ -97,6 +97,7 @@
   .mobile-record-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:70%;height:28px;padding:0 10px;overflow:hidden;border-radius:7px;background:var(--relay-accent-soft);color:var(--relay-accent-text);font-size:12.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
   .mobile-record-chip small{font-weight:500;opacity:.8}
   .v1-shell.relay-shell .mobile-linked-chip{flex:none;height:28px;min-height:0;padding:0 10px;border:1px solid var(--relay-stroke-strong);border-radius:14px;color:var(--relay-ink-2);font-size:12.5px;font-weight:600}
+  .v1-shell.relay-shell .conversation-heading-actions .mobile-link-button{gap:4px;width:auto;min-width:0;height:24px;margin-right:4px;padding:0 9px;border-radius:12px;font-size:12px;white-space:nowrap}
   .v1-shell.relay-shell .message-thread{padding:4px 0 8px;background:var(--relay-chat)}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble{padding:2px 36px 2px 56px}
   .v1-shell.relay-shell .message-group-head .message-group-avatar{left:14px;width:32px;height:32px;font-size:12px}
