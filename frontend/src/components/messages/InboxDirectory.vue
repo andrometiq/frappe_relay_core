@@ -235,7 +235,6 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
 .directory-contact-top { display:flex; align-items:center; gap:6px; min-width:0; }
 .directory-contact-top strong { min-width:0; overflow:hidden; color:var(--relay-ink); font-size:13.5px; font-weight:600; line-height:20px; text-overflow:ellipsis; white-space:nowrap; }
 .directory-contact-top time { flex:none; margin-left:auto; color:var(--relay-ink-soft); font-size:11.5px; }
-.directory-contact.is-unread .directory-contact-top time { color:var(--relay-accent-text); font-weight:600; }
 .directory-contact-bottom { display:flex; align-items:center; gap:6px; min-width:0; margin-top:2px; }
 .directory-contact-bottom small { flex:1; min-width:0; margin:0; overflow:hidden; color:var(--relay-ink-3); font-size:13px; line-height:18px; text-overflow:ellipsis; white-space:nowrap; }
 .directory-contact.is-unread .directory-contact-bottom small { color:var(--relay-ink); font-weight:500; }
