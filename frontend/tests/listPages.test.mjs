@@ -99,12 +99,12 @@ test('a view matches the list filters, keeps the search and ignores the status p
 test('settings sections follow the person and the enabled channels', () => {
   const keys = capabilities => settingsSections(capabilities).flatMap(section => section.items.map(item => item.key))
   const manager = { manage: true, configure: false, enabled_channels: ['WhatsApp', 'Email'] }
-  assert.deepEqual(keys(manager), ['overview', 'whatsapp', 'email', 'access', 'business-types', 'replies', 'tickets', 'features', 'hub'])
+  assert.deepEqual(keys(manager), ['overview', 'whatsapp', 'email', 'access', 'teams', 'business-types', 'replies', 'tickets', 'features', 'hub'])
   assert.ok(keys({ ...manager, configure: true }).includes('billing'))
   assert.deepEqual(keys({ manage: false, enabled_channels: ['WhatsApp'] }), ['access'], 'Everyone else sees only Access')
   assert.equal(settingsTab(settingsSections(manager), 'hub'), 'hub')
   assert.equal(settingsTab(settingsSections(manager), 'billing'), 'overview', 'A tab the person may not open falls back')
-  assert.deepEqual(['access', 'overview', 'hub'].map(settingsRoute), ['#/teams', '#/settings', '#/settings?tab=hub'])
+  assert.deepEqual(['access', 'overview', 'hub', 'teams'].map(settingsRoute), ['#/teams', '#/settings', '#/settings?tab=hub', '#/settings?tab=teams'])
 })
 
 test('long names shrink with an ellipsis, Desk links are touch targets and contact endpoints stay linked', () => {
