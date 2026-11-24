@@ -53,6 +53,11 @@ export function applyPreferences({ theme, density } = {}) {
   if (density) setDensity(density)
 }
 
+// Save keeps only the theme and density the person previewed; an untouched one leaves the page as it is.
+export function applyPreviewed(form, previewed) {
+  applyPreferences({ theme: previewed.has('theme') && form.theme, density: previewed.has('density') && form.density })
+}
+
 export async function loadMyProfile() {
   myProfile.value = await coreApi('user_profiles.get')
   return myProfile.value

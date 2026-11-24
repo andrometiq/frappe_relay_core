@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Avatar, Button, Dialog, ErrorMessage, FormControl, toast } from '@relay/ui'
-import { CLEAR_AFTER, STATUSES, applyPreferences, changedFields, loadMyProfile, myProfile, saveMyProfile, setDensity } from '../../services/userProfiles'
+import { CLEAR_AFTER, STATUSES, applyPreviewed, changedFields, loadMyProfile, myProfile, saveMyProfile, setDensity } from '../../services/userProfiles'
 import { setTheme, theme } from '../../services/theme'
 import { uploadFile } from '../../services/uploadFile'
 
@@ -10,6 +10,7 @@ const open = defineModel({ type: Boolean, default: false })
 const form = ref(null), clearAfter = ref(null), busy = ref(false), uploading = ref(false), error = ref('')
 const photoInput = ref(null)
 let shown = null
+const previewed = new Set()
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024
 const NOTIFICATIONS = [['notify_messages', 'New message in my chats'], ['notify_mentions', 'Mentions and assignments'], ['notify_sound', 'Sound']]
 const name = computed(() => form.value?.display_name || form.value?.full_name || '')
@@ -22,6 +23,7 @@ const clearHint = computed(() => clearAfter.value === null && myProfile.value?.s
 watch(open, async value => {
   if (!value) return
   shown = { theme: theme.value, density: document.documentElement.dataset.density }
+  previewed.clear()
   error.value = ''
   clearAfter.value = null
   form.value = myProfile.value ? { ...myProfile.value } : null
@@ -30,6 +32,7 @@ watch(open, async value => {
 
 function preview(field, value) {
   form.value[field] = value
+  previewed.add(field)
   if (field === 'theme') setTheme(value.toLowerCase())
   else setDensity(value)
 }
@@ -72,9 +75,9 @@ async function save() {
   error.value = ''
   try {
     if (Object.keys(values).length) await saveMyProfile(values)
-    // Save keeps what the person sees, even when it equals the saved profile; only Cancel restores the page.
+    // Save keeps a previewed theme or density, even when it equals the saved profile; only Cancel restores the page.
     shown = null
-    applyPreferences(form.value)
+    applyPreviewed(form.value, previewed)
     open.value = false
     toast('Profile saved')
   } catch (e) { error.value = e.message }
