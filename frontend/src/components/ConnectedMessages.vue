@@ -29,7 +29,7 @@ import { messagesKey } from "../composables/messagesContext";
 import { useEnabledChannels } from "../composables/useEnabledChannels";
 import { channelCan } from "../services/enabledChannels";
 import { closeRoute, openRoute } from "../useViewRoute";
-import { useMobileLayout } from "../composables/useMobileLayout";
+import { DETAILS_OPEN_WIDTH, DOCKED_PANEL_WIDTH, useMobileLayout, useWideScreen } from "../composables/useMobileLayout";
 import { contactInfoRoute, isContactInfoRoute } from "../services/mobileNav";
 import { linkedLabel, recordIcon } from "../services/contactLinks";
 import { useConversationThreads } from "../composables/useConversationThreads";
@@ -157,18 +157,24 @@ const whoLine = computed(() => [whoName.value, phone.value, email.value, channel
 function readInfoRoute() { infoOpen.value = location.hash.split("?")[0] === "#/messages" && isContactInfoRoute(location.hash); }
 function openInfo(link = false) { linking.value = link; openRoute(contactInfoRoute(location.hash)); infoOpen.value = true; }
 // Wide screens keep the details panel open beside the chat, as in the approved layout; closing it is remembered in this browser.
+// A side panel sits beside the chat only while the chat keeps 480px; narrower screens open it over the chat.
 const detailsKey = 'relay-details-open';
+const docked = useWideScreen(DOCKED_PANEL_WIDTH);
 const detailsPreferred = ref(readDetailsPreference());
 function readDetailsPreference() {
-  try { const saved = localStorage.getItem(detailsKey); return saved === null ? innerWidth >= 1360 : saved === '1'; } catch { return innerWidth >= 1360; }
+  try { const saved = localStorage.getItem(detailsKey); return saved === null ? innerWidth >= DETAILS_OPEN_WIDTH : saved === '1'; } catch { return innerWidth >= DETAILS_OPEN_WIDTH; }
 }
-const contextShown = computed(() => panel.value === 'contact' || (!panel.value && detailsPreferred.value && !isMobile.value));
+const contextShown = computed(() => panel.value === 'contact' || (!panel.value && detailsPreferred.value && docked.value && !isMobile.value));
+function rememberDetails(open) {
+  detailsPreferred.value = open;
+  try { localStorage.setItem(detailsKey, open ? '1' : '0'); } catch { /* Private windows can block storage. */ }
+}
 function toggleContext() {
   linking.value = false;
-  detailsPreferred.value = !contextShown.value;
-  try { localStorage.setItem(detailsKey, detailsPreferred.value ? '1' : '0'); } catch { /* Private windows can block storage. */ }
+  rememberDetails(!contextShown.value);
   panel.value = detailsPreferred.value ? 'contact' : '';
 }
+function closeDetails() { linking.value = false; rememberDetails(false); panel.value = ''; }
 // "Link record" opens the link form itself, not the full contact details.
 function openLinking() {
   if (isMobile.value) { openInfo(true); return; }
@@ -367,7 +373,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
 </script>
 
 <template>
-  <section class="connected-inbox" :class="{ 'has-conversation': active }" aria-label="Business inbox">
+  <section class="connected-inbox" :class="{ 'has-conversation': active, 'panel-overlay': !docked }" aria-label="Business inbox">
     <StartConversation v-if="startOpen" :key="businessName + ':' + startContact + startTemplate + startBusiness" :template="startTemplate" :contact="startContact" :contact-label="startContactLabel" :channel="startChannel"
       :contacts="startBusiness ? linkedContacts : []"
       :business-doctype="startBusiness ? businessType : ''" :business-name="startBusiness ? businessName : ''" @close="startOpen = false" @sent="started" />
@@ -480,7 +486,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
         @close="panel = ''" @open="panel = ''; focusMessage($event)" />
-      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="panel = ''">
+      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="closeDetails">
         <div v-if="!linking" class="contact-panel-summary">
           <Avatar :label="title" size="lg" aria-hidden="true" />
           <strong>{{ businessName ? title : personName || title }}</strong>
@@ -493,7 +499,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
           </div>
         </div>
         <ThreadDetails v-if="!linking" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :record="panelRecord" @select="chooseThread" />
-        <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="panel = ''" />
+        <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="closeDetails" />
         <p v-else class="contact-panel-empty">This chat has no linked Contact yet.</p>
       </ChatPanel>
     </template>

@@ -932,6 +932,9 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .frappe-form-main,.frappe-form-sidebar,.frappe-form-section{background:transparent}
 .frappe-form-tabs button.active{border-color:var(--relay-accent);color:var(--relay-ink);font-weight:600}
 .workspace-person-row{border-color:var(--relay-stroke)}
+.v1-shell.relay-shell .connected-thread{min-width:0}
+/* Where a docked panel would leave the chat under 480px, the panel opens over the chat's right edge instead. */
+@media(min-width:769px){.v1-shell.relay-shell .connected-inbox.panel-overlay{position:relative}.v1-shell.relay-shell .connected-inbox.panel-overlay>.chat-panel{grid-column:1 / -1;grid-row:1;position:absolute;top:0;right:0;bottom:0;z-index:7;max-width:calc(100% - 24px);box-shadow:var(--relay-shadow-2)}}
 .workspace-person-row[aria-pressed=true],.relay-shell .team-group-list button.active,.relay-shell .workflow-list>button.selected{background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
 .v1-shell.relay-shell :is(.list-table th,.list-table td,.team-group-list button,.team-record-list button,.workflow-list>button,.team-groups,.workflow-directory){border-color:var(--relay-stroke)}
 .relay-shell :is(.team-record-list,.team-record-list button,.workflow-detail,.workflow-directory,.workflow-directory>header,.workflow-detail-heading,.workflow-definition,.workflow-runs){background:transparent}
@@ -943,8 +946,9 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .connected-inbox{grid-template-columns:auto minmax(0,1fr) auto;background:transparent}
 .v1-shell.relay-shell .connected-inbox>.chat-panel{grid-column:3;grid-row:1;max-width:none}
 .v1-shell.relay-shell .contact-directory{border:0;background:var(--relay-layer)}
-@media(min-width:769px){.v1-shell.relay-shell .contact-directory{flex-direction:row;border-right:1px solid var(--relay-stroke)}.v1-shell.relay-shell .contact-directory>.inbox-side{width:260px;flex:none}.v1-shell.relay-shell .contact-directory>.inbox-list{width:330px;flex:none}}
-@media(max-width:1180px) and (min-width:769px){.v1-shell.relay-shell .contact-directory>.inbox-side{width:200px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:280px}}
+@media(min-width:769px){.v1-shell.relay-shell .contact-directory{flex-direction:row;border-right:1px solid var(--relay-stroke)}.v1-shell.relay-shell .contact-directory>.page-side{width:260px;flex:none}.v1-shell.relay-shell .contact-directory>.inbox-list{width:330px;flex:none}}
+@media(max-width:1440px) and (min-width:1181px){.v1-shell.relay-shell .contact-directory>.page-side{width:220px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:300px}}
+@media(max-width:1180px) and (min-width:769px){.v1-shell.relay-shell .contact-directory>.page-side{width:200px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:280px}}
 
 /* WhatsApp numbers: filter, number tags and pickers show only on a site with two or more numbers */
 .number-caret{flex:none;margin-left:auto;color:var(--relay-ink-3)}
@@ -974,7 +978,6 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .send-number-pill strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .send-number-address{white-space:nowrap}
 .v1-shell.relay-shell .directory-unread{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--relay-accent);color:var(--relay-accent-ink);font-size:11px;font-weight:700}
-@media(max-width:1100px) and (min-width:769px){.v1-shell.relay-shell{grid-template-columns:200px minmax(0,1fr)}}
 
 /* Conversation */
 .v1-shell.relay-shell .connected-thread{border:0;background:var(--relay-chat)}
