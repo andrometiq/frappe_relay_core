@@ -201,7 +201,7 @@ class ContactImportTests(TestCase):
             self.assertTrue(service.allowed('staff', [role]))
         self.assertTrue(service.allowed('Administrator', []))
 
-    def export(self, people, links, records, **filters):
+    def export(self, people, links, records, covered=None, **filters):
         """Run export_rows over fake pages; returns the rows and the people_query calls."""
         pages = [people, []]
         calls = []
@@ -215,7 +215,11 @@ class ContactImportTests(TestCase):
                 raise LookupError(doctype)
             return [name for name in filters['name'][1] if name in records[doctype]]
         self.fake.get_all.side_effect = get_all
+        def covered_names(doctype, names):
+            found = get_all(doctype, filters={'name': ['in', list(names)]})
+            return {name for name in found if covered is None or name in covered}
         with patch('relay_core.business_access.people_query', side_effect=query), \
+                patch('relay_core.business_access.covered_names', side_effect=covered_names), \
                 patch('relay_core.business_access.allowed_types', return_value={'Customer', 'Gone'}), \
                 patch('relay_core.api.contact_filters', return_value=([], [])) as list_filters:
             rows = list(service.export_rows(**filters))
@@ -241,6 +245,12 @@ class ContactImportTests(TestCase):
                                                query='two', business_type='Customer', business_name='C2')
         list_filters.assert_called_once_with('two', 'Customer', 'C2', 0)
         self.assertEqual(rows[1:], [['', '', 'Two types', 'Customer', 'C2']])
+
+    def test_export_leaves_out_records_outside_the_teams(self):
+        people = [Person(name='P1', full_name='Two records')]
+        links = [('P1', 'Customer', 'C1'), ('P1', 'Customer', 'C2')]
+        rows, _, _ = self.export(people, links, {'Customer': {'C1', 'C2'}}, covered={'C2'})
+        self.assertEqual(rows[1:], [['', '', 'Two records', 'Customer', 'C2']])
 
     def test_export_file_name_names_the_filter(self):
         self.fake.response = {}

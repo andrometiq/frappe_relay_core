@@ -198,9 +198,12 @@ def records(doctype, query='', after=None):
     if after is not None and (not isinstance(after,str) or len(after)>140):
         frappe.throw('Invalid business record cursor')
     pattern='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
-    filters={'name':['like',pattern]}
-    if after:filters=[['name','like',pattern],['name','>',after]]
-    rows=frappe.get_all(doctype,filters=filters,fields=['name'],order_by='name asc',page_length=31)
+    filters=[['name','like',pattern]]
+    if after:filters.append(['name','>',after])
+    from pypika.terms import LiteralValue
+    from relay_core.business_access import record_query
+    rows=frappe.qb.get_query(doctype,filters=filters,fields=['name'],order_by='name asc',limit=31).where(
+        LiteralValue(f'`tab{doctype}`.name IN ({record_query(doctype)})')).run(as_dict=True)
     return {'items':rows[:30], 'next':rows[29].name if len(rows)>30 else None}
 
 

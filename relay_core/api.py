@@ -267,10 +267,9 @@ def contact_details(contact):
     # A visible conversation shows its contact's name and phone without Contact read.
     if relay:
         readable_contact(relay)
-    configured = set(business_types())
-    links = [{'doctype': row.link_doctype, 'name': row.link_name}
-             for row in person.links
-             if row.link_doctype in configured and frappe.db.exists(row.link_doctype, row.link_name)]
+    from relay_core.business_access import readable_links
+    links = [{'doctype': doctype, 'name': name}
+             for doctype, name in readable_links([(row.link_doctype, row.link_name) for row in person.links])]
     endpoints, primary = [], None
     if relay:
         from relay_core.business_access import primary_record
@@ -354,12 +353,10 @@ def contact_filters(query='', business_type=None, business_name=None, unlinked=0
 def contact_profile(contact):
     require_access()
     doc, person = readable_contact(contact)
-    from relay_core.business_access import candidates, primary_record
+    from relay_core.business_access import candidates, primary_record, readable_links
     from relay_core.contacts import contact_emails
     links = candidates(doc.name)
-    from relay_core.business_access import allowed_types
-    visible = allowed_types()
-    readable = [link for link in links if link[0] in visible]
+    readable = readable_links(links)
     email = person.email_id or contact_emails([person.name]).get(person.name, '')
     from relay_core.endpoint_labels import contact_titles
     display_name = contact_titles({doc.name: doc.display_name}).get(doc.name) or doc.display_name

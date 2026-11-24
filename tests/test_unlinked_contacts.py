@@ -439,7 +439,8 @@ class StartDestinationTests(BoundaryTests):
 
     def business_access(self, links, marked=None):
         return self.module('relay_core.business_access', candidates=Mock(return_value=links),
-            primary=Mock(return_value=marked), allowed_types=lambda: {'Customer'}, choose_business=Mock(return_value=('Customer', 'C1')))
+            primary=Mock(return_value=marked), allowed_types=lambda: {'Customer'}, choose_business=Mock(return_value=('Customer', 'C1')),
+            readable_links=lambda rows: [row for row in rows if row != ('Customer', 'HIDDEN')])
 
     def test_contact_without_records_starts_an_unlinked_chat(self):
         access = self.business_access([])
@@ -457,8 +458,9 @@ class StartDestinationTests(BoundaryTests):
         docs = {'C1': Row(meta=Row(title_field='customer_name'), customer_name='Shop One', has_permission=lambda p: True),
                 'C2': Row(meta=Row(title_field=None), has_permission=lambda p: False)}
         self.frappe.get_doc.side_effect = lambda dt, name: docs[name]
-        self.business_access([('Customer', 'C1'), ('Customer', 'C2')])
-        self.assertEqual(self.start.records('Relay'), [{'doctype': 'Customer', 'name': 'C1', 'title': 'Shop One'}, {'doctype': 'Customer', 'name': 'C2', 'title': 'C2'}])
+        self.business_access([('Customer', 'C1'), ('Customer', 'HIDDEN'), ('Customer', 'C2')])
+        self.assertEqual(self.start.records('Relay'), [{'doctype': 'Customer', 'name': 'C1', 'title': 'Shop One'}, {'doctype': 'Customer', 'name': 'C2', 'title': 'C2'}],
+                         'A record outside the teams is not offered')
         self.business_access([('Customer', 'C1')], marked=('Customer', 'C1'))
         self.assertEqual(self.start.records('Relay'), [])
 

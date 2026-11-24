@@ -80,15 +80,21 @@ class SectionTests(unittest.TestCase):
 
     def test_record_summary_needs_the_business_type_and_record_permission(self):
         with patch('relay_core.business_access.allowed_types', return_value={'Customer'}), \
+                patch('relay_core.business_access.record_covered', return_value=True), \
                 patch.object(frappe, 'has_permission', return_value=False):
             self.assertIsNone(reply_context.record_summary('Supplier', 'SUP-0001'))
             self.assertIsNone(reply_context.record_summary('Customer', 'CUST-0001'))
+        with patch('relay_core.business_access.allowed_types', return_value={'Customer'}), \
+                patch('relay_core.business_access.record_covered', return_value=False), \
+                patch.object(frappe, 'has_permission', return_value=True):
+            self.assertIsNone(reply_context.record_summary('Customer', 'CUST-0001'), 'A record outside the teams')
         fields = [frappe._dict(fieldname='customer_group', label='Customer Group', fieldtype='Link', in_list_view=1),
                   frappe._dict(fieldname='items', label='Items', fieldtype='Table', in_list_view=1),
                   frappe._dict(fieldname='notes', label='Notes', fieldtype='Text', in_list_view=0)]
         doc = Mock()
         doc.get.side_effect = {'customer_name': 'Sample Traders', 'customer_group': 'Retail', 'items': [1], 'notes': 'x'}.get
         with patch('relay_core.business_access.allowed_types', return_value={'Customer'}), \
+                patch('relay_core.business_access.record_covered', return_value=True), \
                 patch('relay_core.business_groups.title_field', return_value='customer_name'), \
                 patch.object(frappe, 'has_permission', return_value=True), patch.object(frappe, 'get_doc', return_value=doc), \
                 patch.object(frappe, 'get_meta', return_value=frappe._dict(fields=fields)):

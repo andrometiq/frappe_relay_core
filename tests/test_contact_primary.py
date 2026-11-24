@@ -27,6 +27,7 @@ class PrimaryLinkTests(unittest.TestCase):
         self.enterContext(patch('relay_core.business_groups.title_field', return_value='customer_name'))
         self.types = self.enterContext(patch.object(access, 'allowed_types', return_value={'Customer', 'Supplier'}))
         self.links = self.enterContext(patch.object(access, 'candidates', return_value=[]))
+        self.enterContext(patch.object(access, 'record_covered', return_value=True))
 
     def test_primary_with_no_one_or_several_links(self):
         self.assertIsNone(access.primary('contact'))
@@ -67,6 +68,9 @@ class PrimaryLinkTests(unittest.TestCase):
         record.get.return_value = 'Primary customer'
         self.fake.get_doc.return_value = record
         self.assertEqual(access.primary_record('contact'), {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'})
+        with patch.object(access, 'record_covered', return_value=False) as covered:
+            self.assertIsNone(access.primary_record('contact'), 'A primary outside the teams has no header')
+        covered.assert_called_once_with('Customer', 'C1', None)
         self.types.return_value = set()
         self.assertIsNone(access.primary_record('contact'))
 

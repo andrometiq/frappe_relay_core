@@ -38,6 +38,7 @@ class TeamScopeTests(unittest.TestCase):
         ''')
         self.roles = {'agent': [permissions.USER], 'buyer': [permissions.USER], 'manager': [permissions.MANAGER]}
         self.fake = SimpleNamespace(session=_dict(user='agent'), get_roles=lambda user=None: self.roles.get(user, []),
+            PermissionError=PermissionError, throw=self.throw, get_doc=lambda doctype, name: (doctype, name),
             get_all=self.get_all, qb=SimpleNamespace(get_query=lambda doctype, **kwargs: SimpleNamespace(
                 get_sql=lambda: f'SELECT name FROM `tab{doctype}`')),
             db=SimpleNamespace(escape=lambda value: "'" + value.replace("'", "''") + "'", sql=self.sql,
@@ -47,6 +48,10 @@ class TeamScopeTests(unittest.TestCase):
         self.teams_on = self.enterContext(patch('relay_core.features.is_enabled', return_value=True))
         self.enterContext(patch('relay_core.permissions.can_manage', side_effect=lambda user: user == 'manager'))
         self.enterContext(patch('relay_core.business_groups.configuration', return_value=['customer_group']))
+
+    @staticmethod
+    def throw(message, exception=ValueError):
+        raise exception(message)
 
     def get_all(self, doctype, filters, pluck=None):
         columns = ' AND '.join(f'`{key}`=?' for key in filters)
@@ -95,6 +100,36 @@ class TeamScopeTests(unittest.TestCase):
             INSERT INTO `tabRelay Chat` VALUES ('chat-north', 'Customer', 'C-NORTH'), ('chat-south', 'Customer', 'C-SOUTH');''')
         condition = access.explicit_condition('Relay Chat', 'agent')
         self.assertEqual([row[0] for row in self.sql(f'SELECT name FROM `tabRelay Chat` WHERE {condition}')], ['chat-north'])
+
+    def test_a_business_document_outside_the_teams_is_refused(self):
+        self.assertEqual(access.business_document('Customer', 'C-NORTH'), ('Customer', 'C-NORTH'))
+        with self.assertRaisesRegex(PermissionError, 'not accessible'):
+            access.business_document('Customer', 'C-SOUTH')
+        with self.assertRaisesRegex(PermissionError, 'not accessible'):
+            access.business_document('Supplier', 'S1')
+        self.fake.session.user = 'manager'
+        self.assertEqual(access.business_document('Customer', 'C-SOUTH'), ('Customer', 'C-SOUTH'))
+
+    def test_readable_links_keep_covered_records_of_allowed_types_only(self):
+        links = [('Customer', 'C-SOUTH'), ('Customer', 'C-NORTH'), ('Supplier', 'S1'), ('Customer', 'C-MISSING')]
+        self.assertEqual(access.readable_links(links, 'agent'), [('Customer', 'C-NORTH')])
+        self.assertEqual(access.readable_links(links, 'buyer'), [('Supplier', 'S1')])
+        self.assertEqual(access.readable_links(links, 'manager'), links[:3])
+        self.assertEqual(access.covered_names('Customer', ['C-NORTH', 'C-OTHER', 'C-MISSING'], 'agent'), {'C-NORTH'})
+
+    def test_unstamped_history_of_an_uncovered_primary_stays_private(self):
+        self.db.executescript('''CREATE TABLE `tabRelay Contact` (name TEXT, contact TEXT, primary_doctype TEXT, primary_name TEXT);
+            CREATE TABLE `tabRelay Message` (name TEXT, relay_contact TEXT, business_doctype TEXT, business_name TEXT,
+                ticket_notification TEXT);
+            INSERT INTO `tabDynamic Link` VALUES ('north', 'Contact', 'links', 'Supplier', 'S1'),
+                ('south', 'Contact', 'links', 'Supplier', 'S2');
+            INSERT INTO `tabRelay Contact` VALUES ('rc-north', 'north', 'Customer', 'C-NORTH'), ('rc-south', 'south', 'Customer', 'C-SOUTH');
+            INSERT INTO `tabRelay Message` VALUES ('m-north', 'rc-north', '', '', ''), ('m-south', 'rc-south', '', '', '');''')
+        condition = access.message_condition('agent')
+        self.assertEqual([row[0] for row in self.sql(f'SELECT name FROM `tabRelay Message` WHERE {condition}')], ['m-north'])
+        condition = access.message_condition('manager')
+        self.assertEqual({row[0] for row in self.sql(f'SELECT name FROM `tabRelay Message` WHERE {condition}')},
+                         {'m-north', 'm-south'})
 
 
 if __name__ == '__main__':
