@@ -858,14 +858,15 @@ def assign(name, user=''):
     return read(name)
 
 
-def permission(doc, user=None, permission_type=None):
+def permission(doc, user=None, ptype=None):
+    """Frappe's has_permission hook passes `ptype` by name."""
     from relay_core.permissions import can_read_contact_as
     from relay_core.business_access import allowed, reference, relay_user
     user = user or frappe.session.user
     if user == 'Administrator': return True
     if not relay_user(user): return False
     # Mentioned people read and comment; the assignee also works the ticket.
-    if user in named_people(doc) and (user == doc.get('assigned_to') or permission_type in (None, 'read', 'select')):
+    if user in named_people(doc) and (user == doc.get('assigned_to') or ptype in (None, 'read', 'select')):
         return True
     if doc.get('business_doctype') or doc.get('business_name'):
         if not (doc.get('business_doctype') and doc.get('business_name')) or not allowed(doc, user):
