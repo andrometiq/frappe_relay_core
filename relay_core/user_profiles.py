@@ -129,6 +129,9 @@ def update(user=None, **values):
     changed = save_photo(user, changes.pop('user_image')) if 'user_image' in changes else False
     if 'clear_after' in changes:
         changes['status_clear_at'] = changes.pop('clear_after')
+    elif 'status' in changes:
+        # A status set without a clear time stays until changed; an old timer must not clear it.
+        changes['status_clear_at'] = None
     if changes.get('status') == 'Available' and 'status_text' not in changes:
         changes.update(status_text='', status_clear_at=None)
     changed = save_profile(user, changes) or changed
@@ -149,6 +152,9 @@ def save_profile(user, changes):
     """Save only the fields that differ from the stored profile; True when something changed."""
     exists = frappe.db.exists(DOCTYPE, user)
     doc = frappe.get_doc(DOCTYPE, user) if exists else frappe.new_doc(DOCTYPE).update({'user': user, **DEFAULTS})
+    if is_expired(doc.get('status_clear_at')):
+        # An expired status reads as Available, so picking the old status again is a change.
+        doc.update({'status': 'Available', 'status_text': '', 'status_clear_at': None})
     changes = {key: value for key, value in changes.items() if not same(doc.get(key), value)}
     if not changes:
         return False

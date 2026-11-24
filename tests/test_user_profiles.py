@@ -148,6 +148,18 @@ class UserProfileTests(unittest.TestCase):
         site.profiles[AGENT].update(status='Busy', status_text='Call', status_clear_at=get_datetime('2026-11-23 09:00:00'))
         self.assertEqual((user_profiles.get()['status'], user_profiles.get()['status_text']), ('Available', ''))
 
+    def test_a_status_set_after_a_timed_status_expired_is_kept(self):
+        site = self.site()
+        user_profiles.update(status='Busy', status_text='Call', clear_after='30m')
+        site.profiles[AGENT].update(status_clear_at=get_datetime('2026-11-23 09:00:00'))
+        self.assertEqual(user_profiles.get()['status'], 'Available', 'The timer ran out')
+        self.assertEqual(user_profiles.update(status='Busy')['status'], 'Busy', 'Picking the expired status again is a change')
+        self.assertIsNone(site.profiles[AGENT]['status_clear_at'], 'A status set without a clear time drops the old timer')
+        self.assertEqual(user_profiles.update(status='Away')['status'], 'Away')
+        user_profiles.update(status='Busy', clear_after='1h')
+        self.assertEqual(user_profiles.update(job_title='Sales')['status'], 'Busy', 'Other edits keep a running timer')
+        self.assertIsNotNone(site.profiles[AGENT]['status_clear_at'])
+
     def test_cards_show_colleagues_public_fields_only(self):
         site = self.site()
         site.profiles[OTHER] = {'user': OTHER, 'display_name': 'Prakash', 'job_title': 'Dispatch',
