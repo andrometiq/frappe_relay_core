@@ -4,10 +4,10 @@
 @media (max-width:768px){
   /* One phone target floor, including controls teleported outside the app shell.
      Minimum sizes preserve targets while prefixed inputs can shrink to fit. */
-  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link,.hit-zone){min-height:44px!important;min-width:44px!important}
+  body :is(button,a[href],summary,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label:has(>input:is([type=checkbox],[type=radio])),select,textarea,[role=button],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[role=option],[role=combobox],.relay-checkbox,.relay-checkbox-field,.relay-input-shell):not(.sr-only,.directory-link,.hit-zone,.page-side-picker,.page-head-actions>.relay-button){min-height:44px!important;min-width:44px!important}
   /* A compact control keeps its small look and gets an invisible 44px tap area around it. */
   .hit-zone{position:relative}
-  :is(.v1-shell,.relay-dialog,.relay-menu) .hit-zone{min-height:0;min-width:0}
+  :is(.v1-shell,.relay-dialog,.relay-menu) :is(.hit-zone,.page-side-picker,.page-head-actions>.relay-button){min-height:0;min-width:0}
   .hit-zone::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
   /* Keep compact indicators inside the full-size label/input hit area. */
   label:has(>input:is([type=checkbox],[type=radio])){display:inline-flex;align-items:center;gap:8px}
