@@ -66,6 +66,20 @@ class TicketTagTests(unittest.TestCase):
         self.assertEqual(notice.kwargs['user'], 'owner@example.invalid')
         self.assertEqual(notice.args[1]['subject'], 'Refund <late>')
 
+    def test_only_newly_mentioned_people_are_notified(self):
+        person = lambda user: types.SimpleNamespace(user=user)
+        previous = self.ticket()
+        previous.watchers = [person('known@example.invalid')]
+        doc = self.ticket(previous=previous)
+        doc.watchers = [person('known@example.invalid'), person('new@example.invalid')]
+        self.module.on_update(doc)
+        [(mention, users)] = [entry.args for entry in self.logs.call_args_list]
+        self.assertEqual((mention['type'], users), ('Mention', ['new@example.invalid']))
+        self.logs.reset_mock()
+        previous.watchers = doc.watchers
+        self.module.on_update(doc)
+        self.logs.assert_not_called()
+
     def test_notifications_skip_actor_and_users_without_access(self):
         self.tickets.permission.side_effect = lambda doc, user: user != 'blocked@example.invalid'
         sent = self.module.notify(self.ticket(), ['author@example.invalid', 'blocked@example.invalid', 'ok@example.invalid'],

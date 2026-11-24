@@ -41,7 +41,7 @@ def message_business(names):
 
 
 def on_update(doc):
-    """Notify a new assignee. Internal episode transitions stay silent."""
+    """Notify a new assignee and newly mentioned people. Internal episode transitions stay silent."""
     from relay_core.tickets import _episode_transition
     if _episode_transition.get() is doc:
         return
@@ -50,6 +50,10 @@ def on_update(doc):
     actor = frappe.utils.get_fullname(frappe.session.user)
     if assignee and assignee != (previous.get('assigned_to') if previous else None):
         notify(doc, [assignee], 'Assignment', f'{actor} assigned you a ticket')
+    known = {row.user for row in previous.get('watchers') or []} if previous else set()
+    mentioned = [row.user for row in doc.get('watchers') or [] if row.user not in known]
+    if mentioned:
+        notify(doc, mentioned, 'Mention', f'{actor} mentioned you on a ticket')
 
 
 def notify(doc, users, kind, action):

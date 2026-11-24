@@ -34,6 +34,7 @@ class TicketTests(unittest.TestCase):
         self.contact = types.SimpleNamespace(check_permission=Mock())
         self.f.get_doc.side_effect = lambda doctype, name: self.message if doctype == 'Relay Message' else self.contact
         self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence', ticket_status='Open', owner='Sim Staff', messages=[types.SimpleNamespace(message=self.message.name)])
+        self.check_business, self.module.check_business = self.module.check_business, Mock()
 
         self.doc.get_doc_before_save=lambda:None
         self.doc.has_permission=Mock(return_value=True)
@@ -125,7 +126,7 @@ class TicketTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.module.validate_ticket(self.doc)
 
     def test_api_rejects_unbounded_or_malformed_create_before_insert(self):
-        for messages in ([], ['x']*51, [{}], True):
+        for messages in (['x']*51, [{}], True):
             with self.assertRaises(ValueError): self.module.create('subject',messages)
         self.f.get_doc.assert_not_called()
 
@@ -239,10 +240,11 @@ class TicketTests(unittest.TestCase):
                   Record(ticket_status='Done', assigned_to='b@example.invalid', business_doctype='Supplier', tickets=9)]
         recent = [Record(name='TKT-00009')]
         oldest = [Record(name='TKT-00001', subject='Old', creation='2026-10-01')]
-        self.f.get_list = Mock(side_effect=[groups, [Record(tickets=5)], recent, oldest])
+        self.f.get_list = Mock(side_effect=[groups, [Record(tickets=5)], recent, oldest, [Record(tickets=1)]])
+        self.module.mentioned_tickets = Mock(return_value=['TKT-00009'])
         result = self.module.dashboard()
         self.module.require_access.assert_called_once_with()
-        self.assertEqual(result['totals'], {'open': 9, 'assigned': 6, 'unassigned': 3, 'resolved_today': 5})
+        self.assertEqual(result['totals'], {'open': 9, 'assigned': 6, 'unassigned': 3, 'resolved_today': 5, 'mentioned': 1})
         self.assertEqual(result['oldest_open'].name, 'TKT-00001')
         self.assertEqual(result['recent'], recent)
         self.assertEqual(result['assignees'], [{'assigned_to': 'a@example.invalid', 'tickets': 6}, {'assigned_to': '', 'tickets': 3}])
@@ -250,7 +252,8 @@ class TicketTests(unittest.TestCase):
         self.assertEqual(result['statuses'], [{'ticket_status': 'Done', 'tickets': 9}, {'ticket_status': 'Open', 'tickets': 7},
                                               {'ticket_status': 'Started', 'tickets': 2}])
         calls = self.f.get_list.call_args_list
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(calls[4].kwargs['filters']['name'], ['in', ['TKT-00009']])
         self.assertTrue(all(call.args == ('Relay Ticket',) for call in calls))
         self.assertEqual(calls[1].kwargs['filters'], {'ticket_status': ['in', ['Done']], 'name': ['in', ['TKT-00007', 'TKT-00009']]})
         self.assertEqual((calls[2].kwargs['order_by'], calls[2].kwargs['limit_page_length']), ('creation desc', 10))
@@ -317,6 +320,117 @@ class TicketTests(unittest.TestCase):
         self.doc.get_doc_before_save = lambda: None
         self.doc.company = 'Sim Company'
         with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc)
+
+
+class StandaloneTicketTests(unittest.TestCase):
+    """Tickets created from the Tickets screen: one business record, no chat, mentioned colleagues."""
+    def setUp(self):
+        TicketTests.setUp(self)
+        self.module.check_business = self.check_business
+        self.covered = Mock(return_value=True)
+        access = types.SimpleNamespace(allowed_types=lambda: {'Customer'}, record_covered=self.covered,
+                                       document_name=lambda value: value, allowed=Mock(return_value=False),
+                                       reference=Mock(), relay_user=lambda user: True)
+        self.agents = Mock()
+        modules = {'relay_core.business_access': access, 'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents),
+                   'relay_core.permissions': types.SimpleNamespace(can_read_contact_as=Mock(return_value=True))}
+        self.enterContext(patch.dict(sys.modules, modules))
+        self.access = access
+        self.doc = Record(subject='Price list change', brief='', ticket_status='Open', messages=[], watchers=[],
+                          business_doctype='Customer', business_name='LOCAL-C1', assigned_to=None,
+                          get_doc_before_save=lambda: None)
+
+    def test_a_new_ticket_needs_one_reachable_business_record(self):
+        self.module.validate_ticket(self.doc, check_assignment=False)
+        self.covered.assert_called_once_with('Customer', 'LOCAL-C1')
+        self.covered.return_value = False
+        with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
+        with self.assertRaisesRegex(ValueError, 'business record of the ticket'):
+            self.module.validate_ticket(Record(self.doc, business_name=None), check_assignment=False)
+        with self.assertRaises(PermissionError):
+            self.module.validate_ticket(Record(self.doc, business_doctype='Supplier'), check_assignment=False)
+
+    def test_a_saved_ticket_without_a_business_record_still_saves(self):
+        old = Record(self.doc, business_doctype=None, business_name=None, messages=[Record(message=self.message.name)])
+        self.covered.return_value = False
+        self.module.validate_ticket(Record(old, get_doc_before_save=lambda: old), check_assignment=False)
+        self.covered.assert_not_called()
+        with self.assertRaisesRegex(ValueError, 'business record of the ticket'):
+            self.module.validate_ticket(Record(old, get_doc_before_save=lambda: self.doc), check_assignment=False)
+
+    def test_mentions_are_distinct_relay_users_on_a_ticket_without_a_chat(self):
+        self.doc.watchers = [Record(user='agent@example.invalid')]
+        self.module.validate_ticket(self.doc, check_assignment=False)
+        self.agents.assert_called_once_with('agent@example.invalid')
+        for watchers, messages, message in (([Record(user='a@example.invalid')] * 2, [], 'distinct'),
+                                            ([Record(user='a@example.invalid')], [Record(message=self.message.name)], 'comment')):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                self.module.validate_ticket(Record(self.doc, watchers=watchers, messages=messages), check_assignment=False)
+        self.agents.side_effect = PermissionError('The user needs a Relay communication role')
+        with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
+
+    def test_assignee_and_mentioned_people_read_it_outside_their_teams(self):
+        self.doc.update(name='TKT-00003', assigned_to='owner@example.invalid', watchers=[Record(user='mentioned@example.invalid')])
+        self.assertTrue(self.module.permission(self.doc, 'owner@example.invalid'))
+        self.assertTrue(self.module.permission(self.doc, 'mentioned@example.invalid'))
+        self.assertFalse(self.module.permission(self.doc, 'other@example.invalid'))
+        self.access.allowed.return_value = True
+        self.assertTrue(self.module.permission(self.doc, 'other@example.invalid'), 'Team members read it through the record')
+        chat = Record(self.doc, messages=[Record(message=self.message.name)])
+        self.assertEqual(self.module.named_people(chat), set(), 'A chat ticket keeps its chat permissions')
+
+    def test_query_lists_named_tickets_without_widening_chat_tickets(self):
+        import sqlite3
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.executescript("""CREATE TABLE `tabRelay Ticket` (name TEXT, business_doctype TEXT, business_name TEXT, assigned_to TEXT,
+                source_hub_event TEXT, source_provider_message_key TEXT, company TEXT, conversation_key TEXT);
+            CREATE TABLE `tabRelay Ticket Message` (parent TEXT, parenttype TEXT, message TEXT);
+            CREATE TABLE `tabRelay Ticket Watcher` (parent TEXT, parenttype TEXT, user TEXT);
+            CREATE TABLE `tabRelay Message` (name TEXT, relay_contact TEXT, business_doctype TEXT, business_name TEXT);
+            INSERT INTO `tabRelay Ticket` (name, business_doctype, business_name, assigned_to) VALUES
+                ('assigned', 'Customer', 'C1', 'me'), ('mentioned', 'Customer', 'C1', NULL), ('chat', 'Customer', 'C1', 'me'),
+                ('other', 'Customer', 'C1', NULL);
+            INSERT INTO `tabRelay Ticket Watcher` VALUES ('mentioned', 'Relay Ticket', 'me'), ('chat', 'Relay Ticket', 'me');
+            INSERT INTO `tabRelay Ticket Message` VALUES ('chat', 'Relay Ticket', 'M1');""")
+        self.f.qb = types.SimpleNamespace(get_query=lambda doctype, **kw: types.SimpleNamespace(get_sql=lambda: 'SELECT NULL WHERE 0'))
+        self.f.db.escape = lambda value: "'" + value + "'"
+        self.access.explicit_condition = lambda doctype, user, allow_empty: '1=0'
+        condition = self.module.query_condition('me')
+        rows = {row[0] for row in db.execute(f'SELECT name FROM `tabRelay Ticket` WHERE {condition}')}
+        self.assertEqual(rows, {'assigned', 'mentioned'})
+        rows = {row[0] for row in db.execute(f'SELECT name FROM `tabRelay Ticket` WHERE {self.module.query_condition("someone")}')}
+        self.assertEqual(rows, set())
+
+    def test_create_without_messages_stores_the_record_and_mentions(self):
+        inserted = Record(name='TKT-00004', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        self.f.parse_json = __import__('json').loads
+        with patch('relay_core.ticket_tags.message_business') as message_business:
+            self.module.create('Price list change', business_type='Customer', business_record='LOCAL-C1',
+                               mentions='["agent@example.invalid"]', assigned_to='owner@example.invalid')
+        message_business.assert_not_called()
+        payload = self.f.get_doc.call_args.args[0]
+        self.assertEqual((payload['business_doctype'], payload['business_name'], payload['messages']), ('Customer', 'LOCAL-C1', []))
+        self.assertEqual(payload['watchers'], [{'user': 'agent@example.invalid'}])
+        with self.assertRaisesRegex(ValueError, 'business record of the ticket'):
+            self.module.create('Price list change', business_type='Customer')
+        with self.assertRaisesRegex(ValueError, 'at most 50'):
+            self.module.create('Price list change', messages=['x'] * 51, business_type='Customer', business_record='LOCAL-C1')
+
+    def test_colleagues_and_mentions_view(self):
+        self.module.require_access.reset_mock()
+        with patch('relay_core.teams._agent_options', create=True) as options:
+            sys.modules['relay_core.teams']._agent_options = options
+            options.return_value = [Record(name='agent@example.invalid', full_name='Local Agent')]
+            self.assertEqual(self.module.colleagues('Lo_'), [{'value': 'agent@example.invalid', 'label': 'Local Agent'}])
+            options.assert_called_once_with('Lo\\_')
+        self.module.require_access.assert_called_once_with()
+        with self.assertRaises(ValueError): self.module.colleagues('x' * 81)
+        self.f.get_list = Mock(return_value=[])
+        self.module.mentioned_tickets = Mock(return_value=['TKT-00004'])
+        self.module.directory(mentioned='1')
+        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'name': ['in', ['TKT-00004']]})
 
 
 class Record(dict):
