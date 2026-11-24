@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { Badge, Button, Dialog, ErrorMessage, FeatherIcon, FormControl, toast } from '@relay/ui'
+import { Badge, Button, Dialog, Dropdown, ErrorMessage, FeatherIcon, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { whatsappHealth } from '../../services/whatsappHealth'
 import { accountMetadata, ACCOUNTS_RELOAD_DELAY, ADMIN_OFF_TEXT, adminLocked, connectionBadge, deliveryRows, needsReconnect, PIN_TEXT, removalText, SWITCHES, switchValue, webhookText } from '../../services/channelSetup'
@@ -8,6 +8,7 @@ import { setupRoute } from '../../services/onboarding'
 import { watchRealtime } from '../../composables/useRealtimeRefresh'
 import { dateTime } from '../relativeTime'
 import WhatsAppProfile from './WhatsAppProfile.vue'
+import ToggleSwitch from '../fields/ToggleSwitch.vue'
 
 const accounts = ref([]), metadata = ref({}), canConfigure = ref(false)
 const loaded = ref(false), busy = ref(''), error = ref(''), notice = ref('')
@@ -57,6 +58,23 @@ function syncText(account) {
   const synced = account.last_success ? 'Synced from Meta ' + dateTime(account.last_success) + '.' : 'Waiting for the first sync from Meta.'
   return account.status === 'failed' ? synced + ' The last refresh failed: ' + account.last_error : synced
 }
+// The number row's own actions, in the mockup's More menu; Connect again stays a visible link when Meta dropped access.
+function actionsFor(row) {
+  const disabled = !!busy.value
+  return [
+    ...(needsReconnect(row) ? [] : [{ label: 'Check connection', icon: 'activity', disabled, onClick: () => check(row) }]),
+    ...(!row.is_default && row.enabled ? [{ label: 'Make default', icon: 'star', disabled, onClick: () => makeDefault(row) }] : []),
+    ...(row.enabled ? [{ label: 'Edit profile', icon: 'edit-2', disabled, onClick: () => { profileOf.value = row } }] : []),
+    ...(!row.coexistence ? [{ label: 'Reset PIN', icon: 'key', disabled, onClick: () => confirm(row, 'pin') }] : []),
+    { label: 'Remove number', icon: 'trash-2', disabled, onClick: () => confirm(row, 'remove') },
+  ]
+}
+// Quality and messaging limit from Meta, as short badges beside the connection state.
+function metaBadges(row) {
+  const health = whatsappHealth(metadata.value[row.name]?.profile)
+  const quality = health.find(item => item.name === 'Quality rating'), limit = health.find(item => item.name === 'Messaging limit')
+  return [quality?.theme && { label: 'Quality: ' + quality.label, theme: 'gray' }, limit?.text && limit.text !== 'Unknown' && { label: 'Limit: ' + limit.text.replace(/,000 customers a day$/, 'K/day').replace(' customers a day', '/day'), theme: 'gray' }].filter(Boolean)
+}
 const checkedText = health => health.checked_at ? 'Checked ' + dateTime(health.checked_at) + '.' : 'Not checked yet.'
 
 onMounted(() => { load(); stop = watchRealtime(['Relay Channel'], ['channels', 'channel_automation'], load, ACCOUNTS_RELOAD_DELAY) })
@@ -71,9 +89,11 @@ onBeforeUnmount(() => stop?.())
     <article v-for="row in accounts" :key="row.name" class="whatsapp-account">
       <div class="settings-row">
         <span class="settings-row-icon whatsapp"><FeatherIcon name="phone" :size="16" /></span>
-        <span class="settings-row-text"><b>{{ metadata[row.name]?.profile?.display_phone_number || row.address || row.label }}</b>
-          <small>{{ [row.label, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</small></span>
-        <span class="settings-row-end"><Badge v-bind="connectionBadge(row)" /><Badge v-if="row.is_default" label="Default" theme="blue" /></span>
+        <span class="settings-row-text"><b>{{ row.label || metadata[row.name]?.profile?.display_phone_number || row.address }}</b>
+          <small>{{ [metadata[row.name]?.profile?.display_phone_number || row.address, metadata[row.name]?.profile?.verified_name].filter(Boolean).join(' · ') }}</small></span>
+        <span class="settings-row-end"><Badge v-bind="connectionBadge(row)" /><Badge v-if="row.is_default" label="Default" theme="blue" /><Badge v-for="badge in metaBadges(row)" :key="badge.label" v-bind="badge" />
+          <a v-if="canConfigure && needsReconnect(row)" class="relay-button relay-button--solid relay-button--sm" :href="setupRoute('number')">Connect again</a>
+          <Dropdown v-if="canConfigure" :options="actionsFor(row)"><Button icon="more-horizontal" variant="ghost" :aria-label="`${row.label} actions`" :title="`${row.label} actions`" :loading="busy.startsWith(row.name + ':')" /></Dropdown></span>
       </div>
       <details class="whatsapp-account__more">
         <summary>Account health</summary>
@@ -85,20 +105,10 @@ onBeforeUnmount(() => stop?.())
         </dl>
         <p>{{ checkedText(row.health) }} {{ syncText(metadata[row.name]) }}</p>
       </details>
-      <div v-if="canConfigure" class="whatsapp-account__manage">
-        <div class="whatsapp-account__switches">
-          <div v-for="item in SWITCHES" :key="item.name">
-            <FormControl type="checkbox" :label="item.label" :model-value="switchValue(row, item.name)" :disabled="!!busy || (item.name !== 'enabled' && !row.enabled) || (item.name === 'enabled' && adminLocked(row))" @update:model-value="value => toggle(row, item.name, value)" />
-            <small>{{ item.name === 'enabled' && adminLocked(row) ? ADMIN_OFF_TEXT : item.help }}</small>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <a v-if="needsReconnect(row)" class="relay-button relay-button--solid relay-button--sm" :href="setupRoute('number')">Connect again</a>
-          <Button v-else variant="outline" icon-left="activity" label="Check connection" :loading="busy === row.name + ':check'" :disabled="!!busy" @click="check(row)" />
-          <Button v-if="!row.is_default && row.enabled" variant="outline" label="Make default" :loading="busy === row.name + ':default'" :disabled="!!busy" @click="makeDefault(row)" />
-          <Button v-if="row.enabled" variant="outline" icon-left="edit-2" label="Edit profile" :disabled="!!busy" @click="profileOf = row" />
-          <Button v-if="!row.coexistence" variant="outline" icon-left="key" label="Reset PIN" :loading="busy === row.name + ':pin'" :disabled="!!busy" @click="confirm(row, 'pin')" />
-          <Button variant="outline" theme="red" icon-left="trash-2" label="Remove number" :loading="busy === row.name + ':remove'" :disabled="!!busy" @click="confirm(row, 'remove')" />
+      <div v-if="canConfigure" class="whatsapp-account__switches">
+        <div v-for="item in SWITCHES" :key="item.name" class="settings-row">
+          <span class="settings-row-text"><b>{{ item.label }}</b><small>{{ item.name === 'enabled' && adminLocked(row) ? ADMIN_OFF_TEXT : item.help }}</small></span>
+          <ToggleSwitch :label="item.label" :model-value="switchValue(row, item.name)" :disabled="!!busy || (item.name !== 'enabled' && !row.enabled) || (item.name === 'enabled' && adminLocked(row))" @update:model-value="value => toggle(row, item.name, value)" />
         </div>
       </div>
     </article>
@@ -121,15 +131,16 @@ onBeforeUnmount(() => stop?.())
 .whatsapp-account .settings-row { border-bottom:0; }
 .whatsapp-accounts-error { margin:12px 16px 0; }
 .whatsapp-accounts-note { margin:12px 16px 0; font-size:13px; color:var(--relay-ink-2); }
-.whatsapp-account__more, .whatsapp-account__manage { padding:0 16px 12px 62px; font-size:13px; color:var(--relay-ink-3); }
+.whatsapp-account__more { padding:0 16px 10px 62px; font-size:13px; color:var(--relay-ink-3); }
 .whatsapp-account__more summary { cursor:pointer; font-size:12.5px; }
-.whatsapp-account__manage { display:flex; flex-direction:column; gap:10px; }
+.whatsapp-account .settings-row-end :deep(.relay-button--ghost) { width:30px; min-width:30px; height:30px; min-height:30px; padding:0; color:var(--relay-ink-3); }
 .whatsapp-account__health { display:grid; gap:8px; margin:8px 0; }
 .whatsapp-account__health > div { display:grid; grid-template-columns:170px minmax(0,1fr); align-items:center; gap:12px; }
 .whatsapp-account__health dt { color:var(--relay-ink-3); }
 .whatsapp-account__health dd { margin:0; color:var(--relay-ink); overflow-wrap:anywhere; }
-.whatsapp-account__switches { display:grid; gap:10px; }
-.whatsapp-account__switches small { display:block; color:var(--relay-ink-3); padding-left:24px; }
+.whatsapp-account__switches { border-top:1px solid var(--relay-stroke); }
+.whatsapp-account__switches > .settings-row { min-height:52px; padding-left:62px; border-bottom:1px solid var(--relay-stroke); }
+.whatsapp-account__switches > .settings-row:last-child { border-bottom:0; }
 .whatsapp-accounts-foot { padding:12px 16px; }
-@media (max-width:768px) { .whatsapp-account__more, .whatsapp-account__manage { padding-left:16px; } .whatsapp-account__health > div { grid-template-columns:1fr; gap:2px; } }
+@media (max-width:768px) { .whatsapp-account__more, .whatsapp-account__switches > .settings-row { padding-left:16px; } .whatsapp-account__health > div { grid-template-columns:1fr; gap:2px; } }
 </style>
