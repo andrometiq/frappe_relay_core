@@ -19,6 +19,10 @@ test('panel close controls are icon buttons', async () => {
 
 test('chat side panels share one close control', async () => {
   const panel = await read('messages/ChatPanel.vue')
+  assert.match(panel, /onMounted\(\(\) => \{ if \(props\.takeFocus\) panel\.value\?\.querySelector\('button'\)\?\.focus/, 'Only a panel the person opened takes focus')
+  assert.match(panel, /const origin = props\.takeFocus \? document\.activeElement : null/, 'A panel that took no focus gives none back')
+  assert.match(await read('ConnectedMessages.vue'), /<ChatPanel v-if="contextShown && !isMobile" [^>]*:take-focus="panel === 'contact' \|\| !docked"/,
+    'The details panel that docks by default on a wide screen leaves focus in the chat')
   assert.match(panel, /<Button v-if="isMobile" icon="chevron-left" variant="ghost" aria-label="Close"/)
   assert.match(panel, /<Button v-if="!isMobile" icon="x" variant="ghost" aria-label="Close"/)
   for (const name of ['messages/InternalNotes.vue', 'messages/MessageSearch.vue', 'messages/BusinessMessageSearch.vue']) {

@@ -491,7 +491,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <MessageSearch v-if="searchOpen && selected && !businessName" :contact="selected" @close="panel = ''" @open="panel = ''; focusMessage($event)" />
       <BusinessMessageSearch v-if="searchOpen && businessName" :business-doctype="businessType" :business-name="businessName"
         @close="panel = ''" @open="panel = ''; focusMessage($event)" />
-      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" @close="closeDetails">
+      <ChatPanel v-if="contextShown && !isMobile" :title="linking ? 'Link record' : 'Details'" :take-focus="panel === 'contact' || !docked" @close="closeDetails">
         <div v-if="!linking" class="contact-panel-summary">
           <Avatar :label="title" size="lg" aria-hidden="true" />
           <strong>{{ businessName ? title : personName || title }}</strong>
