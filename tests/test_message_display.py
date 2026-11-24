@@ -29,10 +29,15 @@ class SenderTests(unittest.TestCase):
     def test_an_outgoing_row_names_the_person_who_sent_it_and_automation_is_not_a_person(self):
         actions = [_dict(request_key='K1', owner='anitha@example.invalid', payload='{"tool":"send"}'),
                    _dict(request_key='K2', owner='Administrator', payload='{"flow_run":{"name":"F1"}}'),
-                   _dict(request_key='K3', owner='prakash@example.invalid', payload={'automation_run': 'RUN-1'})]
-        messages = [_dict(name='M1', owner='Administrator', source_key='K1'), _dict(name='M2', owner='Administrator', source_key='K2'),
-                    _dict(name='M3', owner='Administrator', source_key='K3'), _dict(name='M4', owner='Guest', source_key=None),
-                    _dict(name='M5', owner='bob@example.invalid', source_key='old-key')]
+                   _dict(request_key='K3', owner='prakash@example.invalid', payload={'automation_run': 'RUN-1'}),
+                   _dict(request_key='K7', owner='prakash@example.invalid', payload={'business_event': 'EV-1'}),
+                   _dict(request_key='K8', owner='prakash@example.invalid', payload={'routing': {'channel': 'C'}}),
+                   _dict(request_key='K9', owner='prakash@example.invalid', payload={'email_values': {'auto_submitted': 1}}),
+                   _dict(request_key='K10', owner='prakash@example.invalid', payload={'handoff_notice': True})]
+        messages = [_dict(name='M1', source_key='K1'), _dict(name='M2', source_key='K2'), _dict(name='M3', source_key='K3'),
+                    _dict(name='M4', source_key=None), _dict(name='M5', source_key='old-key', legacy_author='old@example.invalid'),
+                    _dict(name='M7', source_key='K7'), _dict(name='M8', source_key='K8'), _dict(name='M9', source_key='K9'),
+                    _dict(name='M10', source_key='K10'), _dict(name='M11', source_key='campaign-row-key')]
         keys = []
 
         def get_all(doctype, filters, **kwargs):
@@ -41,19 +46,29 @@ class SenderTests(unittest.TestCase):
                 return actions
             return messages
         rows = [{'name': 'M1', 'direction': 'Outgoing'}, {'name': 'M2', 'direction': 'Outgoing'}, {'name': 'M3', 'direction': 'Outgoing'},
-                {'name': 'M4', 'direction': 'Outgoing'}, {'name': 'M5', 'direction': 'Outgoing', 'legacy_author': 'old@example.invalid'},
-                {'name': 'M6', 'direction': 'Incoming'}]
+                {'name': 'M4', 'direction': 'Outgoing'}, {'name': 'M5', 'direction': 'Outgoing'}, {'name': 'M6', 'direction': 'Incoming'},
+                *({'name': name, 'direction': 'Outgoing'} for name in ('M7', 'M8', 'M9', 'M10', 'M11'))]
         cards = [{'user': 'anitha@example.invalid', 'name': 'Anitha K', 'image': '/files/a.png'}]
         with patch('frappe.get_all', side_effect=get_all), patch('relay_core.user_profiles.user_cards', return_value=cards) as read:
             add_senders(rows)
         read.assert_called_once_with(['anitha@example.invalid', 'old@example.invalid'])
-        self.assertEqual(keys, [['K1', 'K2', 'K3', 'old-key']], 'Actions are read by their unique request key, in one query')
+        self.assertEqual(keys, [['K1', 'K2', 'K3', 'old-key', 'K7', 'K8', 'K9', 'K10', 'campaign-row-key']], 'Actions are read by their unique request key, in one query')
         self.assertEqual(rows[0]['sender'], {'user': 'anitha@example.invalid', 'name': 'Anitha K', 'image': '/files/a.png'})
         for row in rows[1:4]:
             self.assertEqual(row['sender'], {'automated': 1, 'name': 'Automation'}, row['name'])
         self.assertEqual(rows[4]['sender'], {'user': 'old@example.invalid', 'name': 'old@example.invalid', 'image': ''},
                          'A message without a send action names its import author')
         self.assertNotIn('sender', rows[5], 'The contact sends incoming messages')
+        for row in rows[6:]:
+            self.assertEqual(row['sender'], {'automated': 1, 'name': 'Automation'},
+                             row['name'] + ': business events, routing, automatic email, handoff notices and action-less system sends are Automation')
+
+    def test_business_inbox_messages_carry_the_import_author(self):
+        import inspect
+        from relay_core import business_inbox
+        source = inspect.getsource(business_inbox.messages)
+        self.assertIn("'send_group','legacy_author']", source)
+        self.assertIn('add_senders(decorate_messages(items, channel_docs))', source)
 
     def test_rows_without_outgoing_messages_read_nothing(self):
         with patch('frappe.get_all') as get_all:
