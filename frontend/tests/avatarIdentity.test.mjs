@@ -20,6 +20,7 @@ test('initials use the first two words', () => {
 
 test('initials keep whole emoji', () => {
   assert.equal(avatarInitials('😀 Smile'), '😀S')
+  assert.equal(avatarInitials('@karthik_tex'), 'K', 'A Telegram username starts at its first letter')
 })
 
 test('phone-only and non-letter labels use the person icon fallback', () => {

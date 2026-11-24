@@ -2,7 +2,8 @@ const TONES = 7
 
 export function avatarInitials(name) {
   if (!/\p{L}/u.test(String(name || ''))) return ''
-  return String(name || '').trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase()
+  // Each word starts at its first letter, so a username such as @karthik_tex reads K, not @.
+  return String(name || '').trim().split(/\s+/).map(part => Array.from(part.replace(/^[@#_.+-]+/, ''))[0] || '').filter(Boolean).slice(0, 2).join('').toUpperCase()
 }
 
 // One stable colour per name, so a person keeps the same avatar everywhere.
