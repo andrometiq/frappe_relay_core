@@ -307,7 +307,20 @@ def channel_options():
 def contact_directory(query='', after=None, business_type=None, business_name=None, unlinked=0):
     """Contacts by name; `business_type` keeps the contacts linked to a record of that type."""
     require_access()
-    if not isinstance(query, str) or len(query) > 80 or (after is not None and (not isinstance(after, str) or len(after) > 140)):
+    if after is not None and (not isinstance(after, str) or len(after) > 140):
+        frappe.throw('Invalid contact search')
+    filters, or_filters = contact_filters(query, business_type, business_name, unlinked)
+    if after:
+        filters.insert(0, ['Contact', 'name', '>', after])
+    from relay_core.business_access import people_query
+    rows = people_query(filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
+        order_by='name asc', limit=31, distinct=True).run(as_dict=True)
+    return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
+
+
+def contact_filters(query='', business_type=None, business_name=None, unlinked=0):
+    """The Contacts list filters as people_query `filters` and `or_filters`, checked against the user's access."""
+    if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid contact search')
     if business_type and business_type not in business_types():
         frappe.throw('Business type is not accessible', frappe.PermissionError)
@@ -320,8 +333,7 @@ def contact_directory(query='', after=None, business_type=None, business_name=No
             frappe.throw('Choose a business type first')
         from relay_core.business_access import business_document
         business_document(business_type, business_name)
-    filters = [['Contact', 'name', '>', after]] if after else []
-    or_filters = []
+    filters, or_filters = [], []
     if query.strip():
         pattern = '%' + query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
         or_filters = [['Contact', field, 'like', pattern] for field in ('name', 'full_name', 'mobile_no', 'phone', 'email_id')]
@@ -332,10 +344,7 @@ def contact_directory(query='', after=None, business_type=None, business_name=No
     if str(unlinked) == '1':
         from relay_core.contacts import unlinked_people
         filters.append(unlinked_people())
-    from relay_core.business_access import people_query
-    rows = people_query(filters=filters, or_filters=or_filters, fields=['name', 'full_name', 'mobile_no'],
-        order_by='name asc', limit=31, distinct=True).run(as_dict=True)
-    return {'items': rows[:30], 'next': rows[29].name if len(rows) > 30 else None}
+    return filters, or_filters
 
 
 @frappe.whitelist(methods=['GET'])
