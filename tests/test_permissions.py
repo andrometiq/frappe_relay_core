@@ -209,6 +209,8 @@ class MetadataTests(unittest.TestCase):
                 self.assertTrue(doc.get('modified'))
             elif doc['name']=='Relay Ticket':
                 self.assertEqual(doc['autoname'],'TKT-.#####')
+            elif doc['name']=='Relay Phone Index':
+                self.assertEqual(doc['autoname'],'hash')  # Bulk rows written on Contact saves take no series lock.
             elif not doc.get('issingle'):
                 self.assertTrue(doc['autoname'].endswith('.##########'))
             if doc['name'] in ('Relay Channel', 'Relay Settings'):

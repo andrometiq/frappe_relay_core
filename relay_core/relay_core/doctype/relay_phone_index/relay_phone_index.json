@@ -1,0 +1,38 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Phone Index",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "autoname": "hash",
+  "description": "Contact phones without separators, reversed, so the last digits of a number are an indexed prefix. Contact saves keep it current.",
+  "fields": [
+    {
+      "fieldname": "contact",
+      "label": "Contact",
+      "fieldtype": "Link",
+      "options": "Contact",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "reversed_digits",
+      "label": "Reversed digits",
+      "fieldtype": "Data",
+      "length": 140,
+      "reqd": 1,
+      "read_only": 1
+    }
+  ],
+  "field_order": [
+    "contact",
+    "reversed_digits"
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "report": 1
+    }
+  ],
+  "modified": "2026-11-24 12:00:00.000000"
+}

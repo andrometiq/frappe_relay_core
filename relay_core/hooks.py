@@ -70,6 +70,9 @@ relay_saved_reply_actions = {'relay.add_internal_note': _saved_note_action}
 doc_events["Relay Message"]["before_insert"] = "relay_core.business_access.associate"
 doc_events['Contact'] = {event: 'relay_core.contact_lifecycle.' + event
                          for event in ('on_update', 'on_trash', 'before_rename', 'after_rename')}
+_phone_index = 'relay_core.relay_core.doctype.relay_phone_index.relay_phone_index.'
+doc_events['Contact']['on_update'] = [doc_events['Contact']['on_update'], _phone_index + 'sync']
+doc_events['Contact']['after_delete'] = _phone_index + 'remove'
 
 from relay_core.business_references import RELAY_DOCTYPES as _relay_doctypes
 ignore_links_on_delete = list(_relay_doctypes)
