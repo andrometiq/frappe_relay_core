@@ -31,7 +31,9 @@ test('unsupported messages show the WhatsApp reason and order lines stay readabl
   assert.deepEqual(unsupportedNotice({ kind: 'unsupported', unsupported: { reason: 'Poll messages are not supported by WhatsApp Business', details: 'Message type is currently not supported.', code: 131051 } }),
     { reason: 'Poll messages are not supported by WhatsApp Business', meta: 'Message type is currently not supported. · code 131051', poll: false })
   assert.equal(unsupportedNotice({ kind: 'unsupported', unsupported: { type: 'poll_creation', reason: 'Poll: WhatsApp does not share poll contents with business accounts.' } }).poll, true)
-  assert.equal(unsupportedNotice({ kind: 'unsupported' }).reason, 'This message type is not supported')
+  assert.equal(unsupportedNotice({ kind: 'unsupported' }).reason, 'WhatsApp did not share this message. Ask the customer to send it again as text, a photo or a file.')
+  assert.equal(unsupportedNotice({ kind: 'unsupported', unsupported: { type: 'unknown', reason: 'This message type is not supported by WhatsApp Business' } }).reason,
+    'WhatsApp did not share this message. Ask the customer to send it again as text, a photo or a file.', 'Rows stored with the old wording read the new one')
   assert.deepEqual(orderLines({ order: { items: [{ product_retailer_id: 'shirt', quantity: 2, item_price: 30, currency: 'INR' }, { product_retailer_id: 'cap' }] } }),
     ['2 × shirt · INR 30', '1 × cap'])
 })

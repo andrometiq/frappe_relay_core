@@ -330,7 +330,7 @@ function keydown(event) {
           <span v-else class="composer-status composer-kind-hint">{{ mediaKind ? 'This file sends without a caption.' : 'Review the details before sending.' }}</span>
         </template>
       </div>
-      <div class="composer-toolbar">
+      <div v-if="!closed" class="composer-toolbar">
         <ComposerMore :actions="actions" :disabled="busy" :has-sticker="hasSticker" @action="moreAction" @emoji="insertEmoji">
           <template #details>
             <p>{{ sourceContext.provider || 'No channel' }} · {{ source.channel_title || source.channel }}</p>

@@ -96,10 +96,14 @@ export function transcriptState(message) {
     : { state: 'legacy', text: '' }
 }
 
+// Meta sends type 'unknown' without the content; rows stored before this wording carry the old reason.
+const UNKNOWN_REASON = 'WhatsApp did not share this message. Ask the customer to send it again as text, a photo or a file.'
+
 export function unsupportedNotice(data) {
   const value = data.unsupported || {}
   const meta = [value.details || value.title, value.code ? 'code ' + value.code : ''].filter(Boolean).join(' · ')
-  return { reason: value.reason || 'This message type is not supported', meta, poll: ['poll_creation', 'poll_update'].includes(value.type) }
+  const reason = value.type === 'unknown' || !value.reason ? UNKNOWN_REASON : value.reason
+  return { reason, meta, poll: ['poll_creation', 'poll_update'].includes(value.type) }
 }
 
 // A sent poll with the current vote of each contact counted on its option.

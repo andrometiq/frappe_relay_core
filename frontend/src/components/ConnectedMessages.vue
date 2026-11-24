@@ -186,6 +186,7 @@ function openLinking() {
 // Phones open the contact info page; wide screens open contact details under the heading.
 function toggleInfo() { if (!isMobile.value) toggleContext(); else if (infoOpen.value) closeInfo(); else openInfo(); }
 const unlinked = computed(() => !businessName.value && contactRecord.value && !Number(contactRecord.value.link_count));
+const canLink = computed(() => Boolean(unlinked.value && capabilities.value?.manage));
 function closeInfo() {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   params.delete("info");
@@ -404,11 +405,12 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
             <template v-if="!isMobile">
               <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
               <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextShown" @click="toggleContext">{{ otherLinks }}</button>
-              <button v-if="unlinked && capabilities.manage" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link</button>
+              <button v-if="canLink" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link</button>
             </template>
           </div>
         </div>
         <div class="conversation-heading-actions">
+          <button v-if="isMobile && canLink" type="button" class="conversation-linked mobile-link-button hit-zone" aria-label="Not linked. Link this chat to a record" @click="openLinking"><FeatherIcon name="link" :size="12" />Link</button>
           <span v-if="people.length" class="conversation-viewers" role="group" aria-label="Also viewing this chat"><UserAvatar v-for="person in people.slice(0, 3)" :key="person.name" class="viewer-avatar" size="sm" :user="person.name" :label="person.full_name || person.name" :title="'Also viewing: ' + (person.full_name || person.name) + (person.typing ? ' (typing)' : '')" /><span v-if="people.length > 3" class="viewer-more" :title="'Also viewing: ' + people.slice(3).map(person => person.full_name || person.name).join(', ')">+{{ people.length - 3 }}</span></span>
           <ConversationTools v-if="conversationContact" :key="conversationContact" :actions="menuActions" :menu-icon="isMobile ? 'more-vertical' : 'more-horizontal'">
             <Button v-if="!isMobile" icon="search" aria-label="Search conversation" title="Search conversation" :aria-pressed="searchOpen" @click="togglePanel('search')" />
@@ -418,10 +420,9 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         </div>
       </header>
 
-      <div v-if="isMobile && (primary || otherLinks || unlinked)" class="mobile-record-bar">
+      <div v-if="isMobile && (primary || otherLinks)" class="mobile-record-bar">
         <span v-if="primary" class="mobile-record-chip"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="14" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
         <button v-if="otherLinks" type="button" class="mobile-linked-chip" @click="openInfo()">{{ otherLinks }}</button>
-        <button v-if="unlinked && capabilities.manage" type="button" class="mobile-linked-chip" @click="openLinking">Not linked · Link</button>
       </div>
 
       <ThreadTabs v-if="threads.items.value.length" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :can-start="true"

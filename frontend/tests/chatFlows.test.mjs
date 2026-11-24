@@ -14,7 +14,8 @@ test('closing or switching the chat closes and clears the ticket dialog', () => 
 })
 
 test('"Link record" opens the link form, not the full contact details', async () => {
-  assert.match(connected, /capabilities.manage" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link/)
+  assert.match(connected, /v-if="canLink" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link/)
+  assert.match(connected, /v-if="isMobile && canLink" type="button" class="conversation-linked mobile-link-button hit-zone"/, 'Phones link from the heading, not a row of its own')
   assert.match(connected, /<ChatPanel v-if="contextShown && !isMobile" :title="linking \? 'Link record' : 'Details'"/)
   assert.match(connected, /<ContactDetails v-if="frappeContact" [^>]*compact [^>]*:link="linking"/)
   const details = await read('components/ContactDetails.vue')
@@ -29,7 +30,7 @@ test('composer is one card: Reply, Internal note and Template tabs over the draf
   assert.match(tabs, />Reply<\/button>[\s\S]*>Internal note<\/button>[\s\S]*>Template<\/button>/)
   assert.match(composer, /<ComposerTabs mode="reply" :template="can\('templates'\) && !offReason"/)
   assert.match(composer, /<ComposerTabs mode="note"[^>]*@mode="emit\('mode', \$event\)"/, 'The Reply tab leaves note mode')
-  assert.match(composer, /<div class="composer-toolbar">\s*<ComposerMore :actions="actions"/)
+  assert.match(composer, /<div v-if="!closed" class="composer-toolbar">\s*<ComposerMore :actions="actions"/)
   assert.match(composer, /class="composer-window-hint"[^>]*>[^\n]*\{\{ windowLabel \}\}/)
   assert.doesNotMatch(composer, /expanded|focusin=/)
   assert.match(composer, /Only your team sees this/)
@@ -52,7 +53,7 @@ test('the inbox "+" starts an empty new conversation', () => {
   assert.match(connected, /:business-name="startBusiness \? businessName : ''"/)
 })
 
-test('a closed reply window keeps More and opens the existing template flow', async () => {
+test('a closed reply window drops the toolbar, as its tabs already offer Template and Internal note, and opens the template flow', async () => {
   assert.match(composer, /24-hour reply window closed/)
   assert.match(composer, /<template v-if="closed">/)
   assert.match(composer, /label="Choose template"[^>]*@click="emit\('template'\)"/)

@@ -42,6 +42,8 @@ UNSUPPORTED_LABELS = {'edit': 'Edited', 'gif': 'GIF',
     'media_placeholder': 'View-once or unavailable media', 'pin': 'Pinned', 'product': 'Product', 'list': 'List',
     'button': 'Button', 'errors': 'Error', 'image': 'Image', 'interactive': 'Interactive', 'location': 'Location',
     'order': 'Order', 'reaction': 'Reaction', 'view_once': 'View-once'}
+# Meta sends type 'unknown' without the content or a hint of what the customer sent.
+UNKNOWN_REASON = 'WhatsApp did not share this message. Ask the customer to send it again as text, a photo or a file.'
 # WhatsApp Cloud API gives business accounts no poll question, options or votes.
 POLL_REASONS = {
     'poll_creation': 'Poll: WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text.',
@@ -124,7 +126,7 @@ def unsupported(detail, errors):
         label = UNSUPPORTED_LABELS.get(kind) or kind.replace('_', ' ').capitalize()
         result['reason'] = label + ' messages are not supported by WhatsApp Business'
     else:
-        result['reason'] = 'This message type is not supported by WhatsApp Business'
+        result['reason'] = UNKNOWN_REASON
     return result
 
 
