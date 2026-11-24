@@ -7,13 +7,13 @@ import { coreApi } from '../src/services/coreApi.js'
 import { defaultMedium, mediumOptions } from '../src/services/enabledChannels.js'
 import { mergeChangedRows, mergeFirstPage, newestActivity } from '../src/services/inboxRows.js'
 import { heldRefresh, listRefresh } from '../src/services/realtimeRefreshQueue.js'
-import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
+import { TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, withoutFilter, withoutFilters, VIEWS, listParams } from '../src/services/inboxFilters.js'
 
 test('the unread chat list loads the next page when its end scrolls into view, and stops at the last page', { timeout: 3000 }, async () => {
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'heldRefresh', 'useChatFolders',
-    'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
+    'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters', 'VIEWS', 'listParams',
     script + '\nreturn { rows, next, loading, more };').bind(null, useLoadMore)
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window, originalObserver = globalThis.IntersectionObserver
   const requests = [], observers = []
@@ -37,7 +37,7 @@ test('the unread chat list loads the next page when its end scrolls into view, a
     state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, () => {}, computed, ref, watch, coreApi,
       () => {}, mediumOptions, () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh, heldRefresh,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
-      () => false, TABS, channelOptions, filterChips, filterParams, (...args) => ({ ...loadFilters(...args), tab: 'unread' }), saveFilters, withoutFilter, withoutFilters))
+      () => false, TABS, channelOptions, filterChips, filterParams, (...args) => ({ ...loadFilters(...args), tab: 'unread' }), saveFilters, withoutFilter, withoutFilters, VIEWS, listParams))
     await mount()
     while (state.loading.value) await new Promise(resolve => setImmediate(resolve))
     state.more.value = {}
@@ -59,7 +59,7 @@ test('a live change while the next page loads keeps the loaded pages and runs af
   const source = await readFile(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*\n/gm, '')
   const make = new Function('useLoadMore','defineProps', 'defineEmits', 'inject', 'onMounted', 'onBeforeUnmount', 'computed', 'ref', 'watch', 'coreApi', 'useRealtimeRefresh', 'mediumOptions', 'useQueueCounts', 'defaultMedium', 'useMobileLayout', 'mergeChangedRows', 'mergeFirstPage', 'newestActivity', 'listRefresh', 'heldRefresh', 'useChatFolders',
-    'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters',
+    'hasManyNumbers', 'TABS', 'channelOptions', 'filterChips', 'filterParams', 'loadFilters', 'saveFilters', 'withoutFilter', 'withoutFilters', 'VIEWS', 'listParams',
     script + '\nreturn { rows, next, loading, more };').bind(null, useLoadMore)
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window, originalObserver = globalThis.IntersectionObserver
   const requests = [], observers = []
@@ -80,7 +80,7 @@ test('a live change while the next page loads keeps the loaded pages and runs af
     state = scope.run(() => make(() => ({}), () => () => {}, () => ({}), fn => mount = fn, () => {}, computed, ref, watch, coreApi,
       (_doctypes, _kinds, refresh) => { live = refresh }, mediumOptions, () => ({ counts: ref({}) }), defaultMedium, () => ref(false), mergeChangedRows, mergeFirstPage, newestActivity, listRefresh, heldRefresh,
       () => ({ folders: ref([]), changes: ref(0), moved: ref(null), move: async () => {} }),
-      () => false, TABS, channelOptions, filterChips, filterParams, (...args) => ({ ...loadFilters(...args), tab: 'unread' }), saveFilters, withoutFilter, withoutFilters))
+      () => false, TABS, channelOptions, filterChips, filterParams, (...args) => ({ ...loadFilters(...args), tab: 'unread' }), saveFilters, withoutFilter, withoutFilters, VIEWS, listParams))
     await mount(); await idle()
     state.more.value = {}
     await nextTick()

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { EMPTY_FILTERS, NO_RECORD, TABS, channelOptions, filterChips, filterParams, loadFilters, saveFilters, storageKey, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
+import { EMPTY_FILTERS, NO_RECORD, TABS, VIEWS, channelOptions, filterChips, filterParams, listParams, loadFilters, saveFilters, storageKey, withoutFilter, withoutFilters } from '../src/services/inboxFilters.js'
 
 const CHANNELS = [
   { name: 'WA-1', label: 'Sales line', address: '+91 1', medium: 'WhatsApp' },
@@ -9,16 +9,29 @@ const CHANNELS = [
 ]
 const memory = () => { const store = new Map(); return { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value), store } }
 
-test('the inbox has All, Unread and Not linked tabs, and a saved Read tab falls back to All', () => {
-  assert.deepEqual(TABS.map(([value, label]) => [value, label]), [['all', 'All'], ['unread', 'Unread'], ['unlinked', 'Not linked']])
+test('the inbox has All, Unread and Read tabs and the sidebar views; a saved Not linked tab becomes the Not linked view', () => {
+  assert.deepEqual(TABS.map(([value, label]) => [value, label]), [['all', 'All'], ['unread', 'Unread'], ['read', 'Read']])
+  assert.deepEqual(VIEWS.map(([value, label]) => [value, label]), [['all', 'All chats'], ['mine', 'Assigned to me'], ['starred', 'Starred'], ['unlinked', 'Not linked']])
   const storage = memory()
   storage.setItem(storageKey('ann@x'), JSON.stringify({ tab: 'read' }))
-  assert.equal(loadFilters(storage, 'ann@x').tab, 'all')
+  assert.equal(loadFilters(storage, 'ann@x').tab, 'read')
+  storage.setItem(storageKey('ann@x'), JSON.stringify({ tab: 'unlinked' }))
+  assert.deepEqual([loadFilters(storage, 'ann@x').tab, loadFilters(storage, 'ann@x').view], ['all', 'unlinked'])
+  storage.setItem(storageKey('ann@x'), JSON.stringify({ view: 'mentions' }))
+  assert.equal(loadFilters(storage, 'ann@x').view, 'all', 'A view the server does not filter falls back to All chats')
+})
+
+test('each sidebar view adds its server filter; Not linked replaces a chosen record', () => {
+  const filters = { ...EMPTY_FILTERS, channels: ['WA-1'], businessType: 'Customer', businessName: 'CUST-1' }
+  assert.deepEqual(listParams(filters, CHANNELS, 'all'), { channels: '["WA-1"]', business_type: 'Customer', business_name: 'CUST-1' })
+  assert.deepEqual(listParams(filters, CHANNELS, 'mine'), { channels: '["WA-1"]', business_type: 'Customer', business_name: 'CUST-1', assigned: 'me' })
+  assert.deepEqual(listParams(filters, CHANNELS, 'starred'), { channels: '["WA-1"]', business_type: 'Customer', business_name: 'CUST-1', starred: 1 })
+  assert.deepEqual(listParams(filters, CHANNELS, 'unlinked'), { channels: '["WA-1"]', business_type: NO_RECORD })
 })
 
 test('filters persist per user and survive a blocked or damaged store', () => {
   const storage = memory()
-  const filters = { tab: 'unlinked', channels: ['WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
+  const filters = { tab: 'unread', view: 'starred', channels: ['WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
   saveFilters(storage, 'ann@x', filters)
   assert.deepEqual(loadFilters(storage, 'ann@x'), filters)
   assert.deepEqual(loadFilters(storage, 'bob@x'), EMPTY_FILTERS, 'Another user starts with no filters')
@@ -50,12 +63,12 @@ test('a business type, one record or no record become request parameters', () =>
 })
 
 test('active filters show as removable chips', () => {
-  const filters = { tab: 'unread', channels: ['WA-1', 'WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
+  const filters = { tab: 'unread', view: 'mine', channels: ['WA-1', 'WA-2'], businessType: 'Customer', businessName: 'CUST-1', businessLabel: 'Acme' }
   assert.deepEqual(filterChips(filters, CHANNELS), [{ key: 'channels', label: 'Sales line, Support line' }, { key: 'business', label: 'Customer: Acme' }])
   assert.deepEqual(filterChips({ ...EMPTY_FILTERS, businessType: 'Supplier' }, CHANNELS), [{ key: 'business', label: 'Any Supplier' }])
   assert.deepEqual(filterChips({ ...EMPTY_FILTERS, businessType: NO_RECORD }, CHANNELS), [{ key: 'business', label: 'No business record' }])
   assert.deepEqual(filterChips(EMPTY_FILTERS, CHANNELS), [])
   assert.deepEqual(withoutFilter(filters, 'channels'), { ...filters, channels: [] })
   assert.deepEqual(withoutFilter(filters, 'business'), { ...filters, businessType: '', businessName: '', businessLabel: '' })
-  assert.deepEqual(withoutFilters(filters), { ...EMPTY_FILTERS, tab: 'unread' })
+  assert.deepEqual(withoutFilters(filters), { ...EMPTY_FILTERS, tab: 'unread', view: 'mine' })
 })

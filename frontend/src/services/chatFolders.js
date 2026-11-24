@@ -32,3 +32,11 @@ export function chatFolderStore(api) {
 export function folderLabel(folders, id) {
   return folders.find(folder => folder.name === id)?.folder_name || ''
 }
+
+// Folders have no stored colour, so each gets a steady one from its id.
+export const FOLDER_COLORS = Object.freeze(['#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#e5484d', '#12a594'])
+export function folderColor(id) {
+  let hash = 0
+  for (const character of String(id || '')) hash = (hash * 31 + character.codePointAt(0)) >>> 0
+  return FOLDER_COLORS[hash % FOLDER_COLORS.length]
+}

@@ -7,15 +7,16 @@ import { recordTitle } from '../../services/recordTitle'
 import { useMobileLayout } from '../../composables/useMobileLayout'
 import { NO_RECORD, withoutFilters } from '../../services/inboxFilters'
 
-/** Inbox filters by channel and business record: a popover under the filter button on desktop, a bottom sheet on the phone. */
-const props = defineProps({ anchor: Object, options: { type: Array, default: () => [] } })
+/** Inbox filters by channel type, channel and business record: a popover under the filter button on desktop, a bottom sheet on the phone. */
+const props = defineProps({ anchor: Object, options: { type: Array, default: () => [] }, mediums: { type: Array, default: () => [] } })
 const open = defineModel('open', { type: Boolean, default: false })
+const medium = defineModel('medium', { type: String, default: 'all' })
 const filters = defineModel({ type: Object, required: true })
 const emit = defineEmits(['browse'])
 const isMobile = useMobileLayout()
 const panel = ref(null), position = ref({}), types = ref([]), typeError = ref('')
 const labels = new Map()
-const active = computed(() => filters.value.channels.length > 0 || !!filters.value.businessType)
+const active = computed(() => filters.value.channels.length > 0 || !!filters.value.businessType || (props.mediums.length > 0 && medium.value !== props.mediums[0].value))
 const recordField = computed(() => ({
   label: filters.value.businessType, placeholder: `Search ${filters.value.businessType}…`,
   initialOptions: filters.value.businessName ? [{ value: filters.value.businessName, label: filters.value.businessLabel }] : [],
@@ -39,7 +40,7 @@ function chooseType(value) {
 function chooseRecord(value) {
   filters.value = { ...filters.value, businessName: value || '', businessLabel: value ? labels.get(value) || value : '' }
 }
-function clear() { filters.value = withoutFilters(filters.value) }
+function clear() { filters.value = withoutFilters(filters.value); if (props.mediums.length) medium.value = props.mediums[0].value }
 function browse(target) { open.value = false; emit('browse', target) }
 
 async function loadTypes() {
@@ -77,6 +78,12 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); re
         role="dialog" aria-label="Filter chats" :aria-modal="isMobile || undefined" @keydown.esc="open = false">
         <span v-if="isMobile" class="mobile-sheet-handle" aria-hidden="true" />
         <div class="inbox-filter-head"><h3>Filter chats</h3><button v-if="active" type="button" class="inbox-filter-clear" @click="clear">Clear filters</button></div>
+        <fieldset v-if="mediums.length" class="inbox-filter-group">
+          <legend>Channel type</legend>
+          <div class="inbox-filter-types" role="radiogroup" aria-label="Channel type">
+            <button v-for="chip in mediums" :key="chip.value" type="button" role="radio" :aria-checked="medium === chip.value" @click="medium = chip.value">{{ chip.label }}</button>
+          </div>
+        </fieldset>
         <fieldset v-if="options.length" class="inbox-filter-group">
           <legend>Channel</legend>
           <label v-for="option in options" :key="option.name" class="inbox-filter-check">

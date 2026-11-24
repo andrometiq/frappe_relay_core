@@ -59,9 +59,20 @@ test('the phone layout keeps the bottom tab bar and hides the rail', () => {
   assert.match(app, /<MobileTabBar v-if="isMobile && ready"/)
 })
 
-test('the shell keeps no dead brand styles, the inbox pane is called Inbox and the profile dialog is 560px on desktop', () => {
+test('the shell keeps no dead brand styles, the inbox sidebar is called Inbox and the profile dialog is 560px on desktop', () => {
   assert.doesNotMatch(css, /relay-brand|relay-logo/)
+  const sidebar = readFileSync(new URL('../src/components/messages/InboxSidebar.vue', import.meta.url), 'utf8')
+  assert.match(sidebar, /<PageSidebar [^>]*title="Inbox"/)
   const inbox = readFileSync(new URL('../src/components/messages/InboxDirectory.vue', import.meta.url), 'utf8')
-  assert.match(inbox, /<h2>Inbox<\/h2>/)
+  assert.match(inbox, /<h2>\{\{ listTitle \}\}<\/h2>/, 'The list is headed by the open view, such as All chats')
   assert.match(block(rail, '  .relay-dialog.profile-dialog'), /width:min\(560px,100%\)/)
+})
+
+test('desktop pages head themselves: no shell top bar, live updates are a dot on the logo and the bell sits in the rail', () => {
+  assert.match(app, /const shellHeader = computed\(\(\) => isMobile\.value \|\| !\(view\.value === 'Messages' \|\| ownTitle\.value\)\)/)
+  assert.match(app, /<header v-if="shellHeader" class="page-header v1-header"/)
+  assert.match(app, /class="relay-connection-dot" :class="\{ 'is-live': live \}" role="status"/)
+  assert.match(app, /<NotificationInbox v-if="!isMobile" class="rail-notifications" \/>/)
+  assert.match(app, /<NotificationInbox v-if="isMobile" \/>/, 'Phones keep the bell in the app bar')
+  assert.match(css, /\.v1-shell\.relay-shell:not\(:has\(>\.v1-header\)\) \.workspace\{grid-row:1 \/ -1\}/)
 })

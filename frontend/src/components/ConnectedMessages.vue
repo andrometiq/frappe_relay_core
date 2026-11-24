@@ -366,10 +366,6 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         @business="openBusiness" @select="openContact" @start="openStart()" @navigate="state.clearSelection(false)" />
     </aside>
 
-    <Teleport v-if="isMobile && !active" to="#relay-header-actions" defer>
-      <Button variant="solid" icon="plus" class="relay-header-new" aria-label="New conversation" title="New conversation" @click="openStart()" />
-    </Teleport>
-
     <Transition name="relay-page" :css="isMobile">
     <div v-if="active" class="connected-thread">
       <header class="conversation-heading">

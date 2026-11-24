@@ -939,18 +939,12 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .v1-shell.relay-shell .feedback-panel{border:0;border-radius:8px;background:var(--relay-accent-soft);color:var(--relay-ink)}
 
 /* Inbox list */
-.v1-shell.relay-shell .connected-inbox{grid-template-columns:340px minmax(0,1fr);background:transparent}
+/* Desktop: the inbox sidebar (260px) and the chat list (330px) share one column beside the conversation. */
+.v1-shell.relay-shell .connected-inbox{grid-template-columns:auto minmax(0,1fr) auto;background:transparent}
+.v1-shell.relay-shell .connected-inbox>.chat-panel{grid-column:3;grid-row:1;max-width:none}
 .v1-shell.relay-shell .contact-directory{border:0;background:var(--relay-layer)}
-.inbox-list-head{display:flex;align-items:center;gap:8px;padding:16px 16px 0}
-.inbox-list-head h2{margin-right:auto;color:var(--relay-ink);font-size:20px;font-weight:600;letter-spacing:-.01em}
-.inbox-list-head .relay-button--ghost{color:var(--relay-ink-2)}
-.inbox-list-head .relay-button--solid{box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .contact-directory>.inbox-channel-chips{display:flex;gap:6px;padding:12px 16px 0}
-.inbox-channel-chip{display:inline-flex;align-items:center;gap:6px;flex:none;height:28px;min-height:28px;padding:0 11px;border:1px solid var(--relay-stroke-strong);border-radius:14px;background:var(--relay-layer);color:var(--relay-ink-2);font-size:12.5px}
-.inbox-channel-chip[aria-pressed=true]{border-color:transparent;background:var(--relay-accent);color:var(--relay-accent-ink);font-weight:600}
-.inbox-channel-chip:disabled{opacity:.45;cursor:not-allowed}
-.inbox-channel-chip:disabled{padding:0 10px}
-.inbox-chip-soon{margin-left:-2px;font-size:10px;color:var(--relay-ink-3)}
+@media(min-width:769px){.v1-shell.relay-shell .contact-directory{flex-direction:row;border-right:1px solid var(--relay-stroke)}.v1-shell.relay-shell .contact-directory>.inbox-side{width:260px;flex:none}.v1-shell.relay-shell .contact-directory>.inbox-list{width:330px;flex:none}}
+@media(max-width:1180px) and (min-width:769px){.v1-shell.relay-shell .contact-directory>.inbox-side{width:200px}.v1-shell.relay-shell .contact-directory>.inbox-list{width:280px}}
 
 /* WhatsApp numbers: filter, number tags and pickers show only on a site with two or more numbers */
 .number-caret{flex:none;margin-left:auto;color:var(--relay-ink-3)}
@@ -979,35 +973,8 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
 .send-number-pill{display:inline-flex;align-items:center;gap:6px;min-width:0}
 .send-number-pill strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .send-number-address{white-space:nowrap}
-.v1-shell.relay-shell .contact-directory>.v1-queues{display:flex;flex-wrap:nowrap;gap:0;margin:10px 16px 10px;padding:3px;border:1px solid var(--relay-stroke);border-radius:7px;background:var(--relay-hover)}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button{flex:1 1 auto;justify-content:center;height:26px;min-height:26px;padding:0 6px;border-radius:5px;color:var(--relay-ink-2);font-size:12.5px;white-space:nowrap}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button:hover{background:transparent;color:var(--relay-ink)}
-.v1-shell.relay-shell .contact-directory>.v1-queues>button[aria-pressed=true]{background:var(--relay-layer-strong);color:var(--relay-ink);font-weight:600;box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .contact-directory>.v1-queues .relay-button{height:26px;min-height:26px;padding:0 6px;border:0;background:transparent;box-shadow:none;font-size:12.5px}
-.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders{overflow-x:auto;margin-top:0;scrollbar-width:none}
-.v1-shell.relay-shell .contact-directory>.v1-queues.inbox-folders>*{flex:0 0 auto;padding:0 8px}
-.v1-shell.relay-shell .directory-rows{padding:4px 8px 12px}
-.v1-shell.relay-shell .directory-contact{position:relative;align-items:flex-start;gap:11px;width:100%;min-height:0;margin:0 0 2px;padding:10px;border:0;border-radius:7px;transition:background-color var(--relay-fast) ease,box-shadow var(--relay-fast) ease}
-.v1-shell.relay-shell .directory-contact:hover{background:var(--relay-hover)}
-.v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true]){background:var(--relay-layer-strong);box-shadow:var(--relay-shadow-1)}
-.v1-shell.relay-shell .directory-contact:is(.selected,[aria-pressed=true])::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;background:var(--relay-accent)}
-.v1-shell.relay-shell .directory-avatar{margin:0}
-.v1-shell.relay-shell .directory-avatar .relay-avatar{width:36px;height:36px;font-size:12.5px}
-.v1-shell.relay-shell .directory-channel{right:-1px;bottom:-1px;width:11px;height:11px;border:2px solid var(--relay-layer-strong);background:var(--relay-green)}
-.v1-shell.relay-shell .directory-channel svg{display:none}
-.v1-shell.relay-shell .directory-contact-copy{display:flex;flex:1;flex-direction:column;min-width:0}
-.v1-shell.relay-shell .directory-contact-top{display:flex;align-items:baseline;gap:8px}
-.v1-shell.relay-shell .directory-contact-top strong{min-width:0;overflow:hidden;color:var(--relay-ink);font-size:13.5px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact-top time{flex:none;margin-left:auto;color:var(--relay-ink-3);font-size:11.5px}
-.v1-shell.relay-shell .directory-contact.is-unread time{color:var(--relay-accent-text);font-weight:600}
-.v1-shell.relay-shell .directory-contact-context{order:1;display:flex;gap:0;min-width:0;margin-top:1px;overflow:hidden;color:var(--relay-ink-3);font-size:11.5px;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact-context .directory-business{max-width:none;padding:0;background:none;overflow:hidden;text-overflow:ellipsis}
-.v1-shell.relay-shell .directory-contact-bottom{order:2;display:flex;align-items:center;gap:6px;margin-top:3px}
-.v1-shell.relay-shell .directory-contact-bottom small{flex:1;min-width:0;margin:0;overflow:hidden;color:var(--relay-ink-2);font-size:13.5px;text-overflow:ellipsis;white-space:nowrap}
-.v1-shell.relay-shell .directory-contact.is-unread .directory-contact-bottom small{color:var(--relay-ink);font-weight:500}
 .v1-shell.relay-shell .directory-unread{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--relay-accent);color:var(--relay-accent-ink);font-size:11px;font-weight:700}
-@media(min-width:769px){.v1-shell.relay-shell .contact-directory>.directory-search{padding:8px 16px 0}.v1-shell.relay-shell .contact-directory{border-top:1px solid var(--relay-stroke);border-left:1px solid var(--relay-stroke);border-radius:8px 0 0 0}}
-@media(max-width:1100px) and (min-width:769px){.v1-shell.relay-shell{grid-template-columns:200px minmax(0,1fr)}.v1-shell.relay-shell .connected-inbox{grid-template-columns:300px minmax(0,1fr)}}
+@media(max-width:1100px) and (min-width:769px){.v1-shell.relay-shell{grid-template-columns:200px minmax(0,1fr)}}
 
 /* Conversation */
 .v1-shell.relay-shell .connected-thread{border:0;background:var(--relay-chat)}

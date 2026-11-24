@@ -12,7 +12,21 @@
 .page-side-head small{display:block;overflow:hidden;color:var(--relay-ink-soft);font-size:11.5px;font-weight:500;text-overflow:ellipsis;white-space:nowrap}
 .page-side-sections{display:flex;flex-direction:column;padding-bottom:12px}
 .page-side-section{display:flex;flex-direction:column;gap:1px;padding:10px 8px 2px}
-.page-side-section h3{padding:4px 8px;color:var(--relay-ink-soft);font-size:11.5px;font-weight:600}
+.page-side-section h3{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;padding:4px 8px;color:var(--relay-ink-soft);font-size:11.5px;font-weight:600}
+.page-side-add,.page-side-menu{display:grid;flex:none;place-items:center;width:22px;height:22px;border-radius:5px;color:var(--relay-ink-soft)}
+.page-side-add:hover,.page-side-menu:hover{background:var(--relay-hover);color:var(--relay-ink)}
+.page-side-add:focus-visible,.page-side-menu:focus-visible{outline:2px solid var(--relay-accent);outline-offset:-2px}
+.page-side-row{position:relative}
+/* Desktop buttons drop the phone tap floor, so the sidebar rows keep the mockup's 30px height. */
+.page-side .page-side-item{min-height:30px}
+.inbox-side-search{padding:10px 10px 4px}
+.inbox-side-search .relay-input-shell{height:32px;min-height:32px;background:var(--relay-layer)}
+.inbox-side-search .relay-input{min-height:30px;font-size:13px}
+.inbox-side-search .relay-input-suffix kbd{font-size:10.5px}
+.page-side-row>.relay-dropdown-trigger{position:absolute;top:50%;right:4px;opacity:0;transform:translateY(-50%)}
+.page-side-row:is(:hover,:focus-within)>.relay-dropdown-trigger{opacity:1}
+.page-side-row:is(:hover,:focus-within)>.page-side-item.has-menu .page-side-count{visibility:hidden}
+@media(hover:none) and (pointer:coarse){.page-side-row>.relay-dropdown-trigger{opacity:1}.page-side-item.has-menu .page-side-count{display:none}}
 .page-side-item{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;padding:0 8px;border-radius:6px;color:var(--relay-ink-3);font-size:13.5px;font-weight:500;text-align:left;transition:background-color var(--relay-fast) ease,color var(--relay-fast) ease}
 button.page-side-item:hover{background:var(--relay-hover);color:var(--relay-ink)}
 .page-side-item.active{background:var(--relay-accent-soft);color:var(--relay-accent-text)}
