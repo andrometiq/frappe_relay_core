@@ -70,9 +70,9 @@ def template_media(data):
     return None
 
 
-def file_content(name,source):
-    """A private file kept on the source message. The caller has checked the source, so File's
-    owner-only sharing rule does not apply."""
+def file_content(name,source,limit=None):
+    """A private file kept on the source message, at most limit bytes (get_max_bytes by default). The caller
+    has checked the source, so File's owner-only sharing rule does not apply."""
     from relay_core.business_access import document_name
     document_name(name)
     file=frappe.get_doc('File',name)
@@ -80,7 +80,7 @@ def file_content(name,source):
         frappe.throw('Attachment belongs to another conversation source',frappe.PermissionError)
     # No encodings: Frappe would decode a binary file that happens to read as windows-1250 into text.
     raw=file.get_content(encodings=())
-    if error:=file_limits.size_error(len(raw),file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
+    if error:=file_limits.size_error(len(raw),limit or file_limits.get_max_bytes(),'The attachment'):frappe.throw(error)
     return file,raw
 
 
@@ -175,7 +175,7 @@ def read(message,download=0,index=None):
     if data.get('attachment'):
         original,original_channel,_=messaging.readable_source(data.get('attachment_source'))
         if original.relay_contact!=source.relay_contact or original_channel.name!=channel.name:frappe.throw('Attachment is not accessible',frappe.PermissionError)
-        file,raw=file_content(data['attachment'],original)
+        file,raw=file_content(data['attachment'],original,file_limits.get_received_max_bytes())
         import mimetypes
         return response(raw,mimetypes.guess_type(file.file_name)[0] or 'application/octet-stream',file.file_name,download)
     if header and data.get('campaign'):

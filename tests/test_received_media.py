@@ -113,6 +113,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(received_media.store(self.source.name, try_expired=True), 'expired')
         self.assertEqual(self.skipped()[-1], 'Media no longer available from WhatsApp')
 
+    def test_media_up_to_the_hub_download_limit_is_kept(self):
+        self.source.message_data = json.dumps({'kind': 'video', 'media': {'id': '555', 'file_size': 12 * 1024 * 1024}})
+        self.assertTrue(received_media.is_storable(self.source))
 
     def test_a_copy_kept_meanwhile_is_not_replaced(self):
         kept = json.dumps({'kind': 'image', 'media': {'id': '555'}, 'attachment': 'FILE-OTHER'})
@@ -131,8 +134,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual((self.saved, self.skipped()), ([], []))
 
     def test_media_that_can_never_be_kept_is_marked_and_not_downloaded_again(self):
-        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'x' * (10 * 1024 * 1024 + 1)).decode(), 'content_type': 'video/mp4'}
-        self.assertEqual(received_media.store(self.source.name), 'failed')
+        self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'x' * 1025).decode(), 'content_type': 'video/mp4'}
+        with patch.object(received_media.file_limits, 'get_received_max_bytes', return_value=1024):
+            self.assertEqual(received_media.store(self.source.name), 'failed')
         self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'ownership'}})
         self.assertEqual(received_media.store(self.source.name), 'failed')
         self.assertEqual(self.saved, [])

@@ -65,7 +65,7 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         file = SimpleNamespace(file_name='whatsapp-image.jpg')
         with patch.object(attachments, 'file_content', return_value=(file, b'jpeg')) as content:
             result = attachments.read(self.source.name)
-        content.assert_called_once_with('FILE-1', self.source)
+        content.assert_called_once_with('FILE-1', self.source, attachments.MAX_WHATSAPP_DOWNLOAD_BYTES)
         self.assertEqual((result.status_code, result.data, result.content_type), (200, b'jpeg', 'image/jpeg'))
         self.hub.call_tool.assert_not_called()
 

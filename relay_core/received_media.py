@@ -29,7 +29,7 @@ def is_storable(doc) -> bool:
     media = data.get('media') or {}
     size = media.get('file_size') or 0
     return (not data.get('attachment') and not data.get(SKIPPED) and bool(media.get('id'))
-            and size <= file_limits.get_max_bytes())
+            and size <= file_limits.get_received_max_bytes())
 
 
 def on_message(doc, method=None):
@@ -56,7 +56,7 @@ def store(message, try_expired=False):
             return 'expired'
         try:
             filename, raw = download(source, frappe.get_doc('Relay Channel', source.channel))
-            if error := file_limits.size_error(len(raw), file_limits.get_max_bytes(), 'The media'):
+            if error := file_limits.size_error(len(raw), file_limits.get_received_max_bytes(), 'The media'):
                 raise ValueError(error)
         except (HubError, ValueError, frappe.ValidationError) as error:
             frappe.logger('relay_core').warning(f'Received media {message} was not kept: {str(error)[:300]}')
