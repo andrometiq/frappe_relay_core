@@ -24,6 +24,14 @@ def get_max_bytes() -> int:
     return min(get_max_file_size(), (request_bytes - REQUEST_OVERHEAD_BYTES) * 3 // 4, MAX_BYTES)
 
 
+def get_received_max_bytes() -> int:
+    """Largest received media Relay keeps: what the Hub downloads, within the site file size limit.
+    Sending a kept copy again still needs get_max_bytes."""
+    from frappe.core.api.file import get_max_file_size
+    from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES
+    return min(get_max_file_size(), MAX_WHATSAPP_DOWNLOAD_BYTES)
+
+
 def get_media_max_bytes(channel_name: str, kind: str) -> int:
     """Largest attachment of one media kind, such as 'photo', on a channel."""
     from relay_core.channels import channel

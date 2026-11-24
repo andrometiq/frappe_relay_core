@@ -10,7 +10,7 @@ after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
 
 # Off until explicitly configured on an isolated/validated site.
-doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
+doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.received_media.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
 # Every job returns at once while no Relay Hub is configured.
 scheduler_events = {
     "cron": {
@@ -21,7 +21,7 @@ scheduler_events = {
         "*/10 * * * *": ["relay_core.scheduled_jobs.sync_whatsapp_templates"],
         "30 1 * * *": ["relay_core.scheduled_jobs.build_ai_memory"],
     },
-    "hourly": ["relay_core.scheduled_jobs.expire_approvals"],
+    "hourly": ["relay_core.scheduled_jobs.expire_approvals", "relay_core.scheduled_jobs.recover_received_media"],
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels",
               "relay_core.scheduled_jobs.purge_ai_payloads", "relay_core.scheduled_jobs.sync_ai_knowledge",
               "relay_core.scheduled_jobs.purge_ai_memory"],
@@ -62,6 +62,7 @@ doc_events.setdefault('Prepared Report', {})['on_update'] = 'relay_core.prepared
 doc_events.setdefault('Prepared Report', {})['on_trash'] = 'relay_core.prepared_reports.cleanup'
 has_permission['Prepared Report'] = 'relay_core.prepared_reports.permission'
 has_permission['File'] = 'relay_core.prepared_reports.file_permission'
+permission_query_conditions['File'] = 'relay_core.permissions.message_file_query'
 
 from relay_core.saved_reply_actions import NOTE_ACTION as _saved_note_action
 relay_saved_reply_actions = {'relay.add_internal_note': _saved_note_action}

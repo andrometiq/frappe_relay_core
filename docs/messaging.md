@@ -85,6 +85,7 @@ To quote one message while reusing another sticker, supply
 `{"sticker_message":"RELAY-MSG-0000000002"}`. That sticker must be readable and
 belong to the same contact and channel. An optional `file_id` must match the
 stored source. Outgoing copies retain the incoming sticker reference for reuse.
+On WhatsApp, Core uploads the saved copy of the sticker. When no copy is saved, Core reuses Meta's media ID only while Meta keeps the media (7 days); after that it refuses the send.
 
 Telegram sends one contact card per call. WhatsApp accepts a bounded array of
 cards. Portable contact details are preserved in Telegram's vCard field.
@@ -140,6 +141,25 @@ Choose one stable request key for one user intent. Reuse it after a timeout.
 Reusing a key with the same content returns its stored action; changing content
 under the same key is rejected. Creating a new key after an uncertain result can
 send a duplicate. Automatic reconciliation is not completed.
+
+## Received WhatsApp media
+
+Meta keeps media that a webhook received for only 7 days. Core saves a copy of each received WhatsApp image, video, audio, document and sticker as a private File on its Relay Message when the message arrives. A background job on the `long` queue downloads it through the Hub. `relay_core.attachments.read` and `relay_core.messaging.sticker` serve the saved copy first and call the Hub only when no copy exists.
+
+- Core keeps media up to the 16 MiB Hub download limit, or the site file size limit when that is lower. Core skips larger media and imported legacy messages. To send a kept copy again, it must be within the Relay attachment limit of 10 MB.
+- File lists show a File on a Relay Message only to users who can list that message. A direct `/private/files` download checks read access to the message. Only `attachments.read` also checks that the channel is enabled and the endpoint binding is verified.
+- A failed download does not stop the message. When the Hub is busy or fails, an hourly job tries again for one day. When the media can never be kept, for example because it is larger than the limit or WhatsApp refuses it, Core records the reason in `media_store_skipped` and does not download it again.
+- When the sender edits the caption, the saved copy stays on the message.
+- Media without a copy that is older than 7 days returns HTTP 410 "Media no longer available from WhatsApp". The UI shows no Retry button for it. A busy or failed Hub returns HTTP 503, and the UI shows Retry.
+
+To save the copies of media that has none, for example after an outage or for media that arrived before this change, count them first and then copy them:
+
+```sh
+bench --site <site> execute relay_core.received_media.backfill --kwargs "{'days': 7, 'dry_run': 1}"
+bench --site <site> execute relay_core.received_media.backfill --kwargs "{'days': 7}"
+```
+
+A dry run returns `{"candidates": <count>}`. A real run downloads one message at a time, commits each message, logs each outcome to the `relay_core` log, and returns the counts `stored`, `expired`, `failed` and `skipped`. It also tries media that is older than 7 days, because WhatsApp sometimes keeps it longer. Media that WhatsApp no longer keeps gets a recorded reason, so the next run does not try it again. Run it again after a Hub outage to try the `failed` messages again.
 
 ## View stickers and updates
 

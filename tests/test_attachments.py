@@ -1,12 +1,13 @@
 """Received WhatsApp media bounds and permission-checked response contract."""
 import base64
+from functools import partial
 import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from relay_core import attachments
-from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubError
+from relay_core.hub import MAX_WHATSAPP_DOWNLOAD_BYTES, HubClient, HubError
 from site_file_limit import use_relay_file_limit
 
 
@@ -16,13 +17,14 @@ def setUpModule():
 
 class WhatsAppAttachmentTests(unittest.TestCase):
     def setUp(self):
-        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
+        self.source = SimpleNamespace(name='RELAY-MSG-0000000001', direction='Incoming', message_type='document', sent_at='2026-10-20 10:00:00', creation='2026-10-20 10:00:01',
             message_data=json.dumps({'kind': 'document', 'media': {'id': '123', 'filename': 'Local fixture.docx'}}))
         self.hub = Mock()
+        self.hub.media = partial(HubClient.media, self.hub)
         def reject(message, *args): raise ValueError(message, *args)
         boundary = SimpleNamespace(db=SimpleNamespace(get_value=lambda *args: None), throw=reject)
         for fixture in (patch.object(attachments, 'frappe', boundary),
-                        patch.object(attachments.messaging, 'readable_source', return_value=(self.source, SimpleNamespace(channel='WhatsApp'), {})),
+                        patch.object(attachments.messaging, 'readable_source', return_value=(self.source, SimpleNamespace(channel='WhatsApp', name='RELAY-CH-1'), {})),
                         patch.object(attachments.whatsapp, 'client', return_value=self.hub)):
             fixture.start(); self.addCleanup(fixture.stop)
 
@@ -57,6 +59,16 @@ class WhatsAppAttachmentTests(unittest.TestCase):
             self.hub.call_tool.return_value = {'content_base64': encoded}
             with self.assertRaises(ValueError): attachments.read(self.source.name)
 
+    def test_kept_copy_is_served_without_contacting_hub(self):
+        self.source.message_data = json.dumps({'kind': 'image', 'media': {'id': '123'}, 'attachment': 'FILE-1', 'attachment_source': self.source.name})
+        self.source.relay_contact = 'RELAY-CON-1'
+        file = SimpleNamespace(file_name='whatsapp-image.jpg')
+        with patch.object(attachments, 'file_content', return_value=(file, b'jpeg')) as content:
+            result = attachments.read(self.source.name)
+        content.assert_called_once_with('FILE-1', self.source, attachments.MAX_WHATSAPP_DOWNLOAD_BYTES)
+        self.assertEqual((result.status_code, result.data, result.content_type), (200, b'jpeg', 'image/jpeg'))
+        self.hub.call_tool.assert_not_called()
+
     def test_permission_denial_does_not_contact_hub(self):
         with patch.object(attachments.messaging, 'readable_source', side_effect=PermissionError):
             with self.assertRaises(PermissionError): attachments.read(self.source.name)
@@ -69,11 +81,18 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         return failure.exception.args
 
     def test_hub_rejections_become_readable_reasons_with_retry_status(self):
-        self.assertEqual(self.rejected('provider_metadata', '2026-11-25 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-25 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.assertEqual(self.rejected('ownership', '2026-10-21 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
         self.assertEqual(self.rejected('provider_metadata', '2026-10-21 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
         self.assertEqual(self.rejected('capacity', '2026-10-21 10:00:00'), ('Media downloads are busy. Try again shortly.', attachments.MediaRetry))
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-26 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.assertEqual(self.rejected('ownership_verification', '2026-11-25 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.source.direction = 'Outgoing'
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-19 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.assertEqual(attachments.MediaGone.http_status_code, 410)
+        self.assertTrue(issubclass(attachments.MediaExpired, attachments.MediaGone))
         self.assertEqual(attachments.MediaRetry.http_status_code, 503)
 
 

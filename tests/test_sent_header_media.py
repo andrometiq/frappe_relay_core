@@ -175,7 +175,7 @@ class OneToOneHeaderTests(unittest.TestCase):
                 patch.object(attachments, 'file_content', return_value=(kept, b'video')) as content, \
                 patch.object(attachments.whatsapp, 'client', return_value=hub):
             result = attachments.read(source.name)
-        content.assert_called_once_with('FILE-9', source)
+        content.assert_called_once_with('FILE-9', source, attachments.MAX_WHATSAPP_DOWNLOAD_BYTES)
         self.assertEqual((result.status_code, result.data), (200, b'video'))
         hub.call_tool.assert_not_called()
 

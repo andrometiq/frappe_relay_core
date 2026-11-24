@@ -162,6 +162,15 @@ def message_query(user=None):
     return f"({assignment}) AND COALESCE(`tabRelay Message`.legacy_triage,0)=0 AND ({business})"
 
 
+def message_file_query(user=None):
+    """Files on Relay Messages only of messages the user can list. Frappe's own File rule lists every File
+    attached to a readable DocType; a direct download already checks message_permission on the message."""
+    condition = message_query(user)
+    if not condition: return ''
+    return ("(COALESCE(`tabFile`.attached_to_doctype,'')!='Relay Message' OR `tabFile`.attached_to_name IN "
+            f"(SELECT `tabRelay Message`.name FROM `tabRelay Message` WHERE {condition}))")
+
+
 def require_business_assignment(contact):
     import frappe
     relay=frappe.db.get_value('Relay Contact',{'contact':contact},'name')

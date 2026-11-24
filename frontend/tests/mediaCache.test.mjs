@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { loadMedia, formatBytes } from '../src/services/mediaCache.js'
-import { documentType } from '../src/components/messageContent.js'
+import { documentType, stickerURL } from '../src/components/messageContent.js'
 
 let created = 0
 globalThis.URL.createObjectURL = () => 'blob:media-' + ++created
@@ -49,4 +49,13 @@ test('document cards show a short type and a readable size', () => {
   assert.equal(formatBytes(24576), '24 KB')
   assert.equal(formatBytes(1572864), '1.5 MB')
   assert.equal(formatBytes(undefined), '')
+})
+
+test('a sticker that failed to show gets the same reason: expired has no retry, busy keeps it', async t => {
+  const requests = []
+  t.mock.method(globalThis, 'fetch', async url => { requests.push(url); return failure(410, 'Media no longer available from WhatsApp') })
+  await assert.rejects(loadMedia('RELAY-MSG-0000000110', stickerURL('RELAY-MSG-0000000110')), { message: 'Media no longer available from WhatsApp', retry: false })
+  assert.deepEqual(requests, ['/api/method/relay_core.messaging.sticker?message=RELAY-MSG-0000000110'])
+  t.mock.method(globalThis, 'fetch', async () => failure(503, 'Media downloads are busy. Try again shortly.'))
+  await assert.rejects(loadMedia('RELAY-MSG-0000000111', stickerURL('RELAY-MSG-0000000111')), { retry: true })
 })

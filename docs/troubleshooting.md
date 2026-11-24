@@ -9,6 +9,8 @@
 | Incoming event remains uncategorized | Check Relay Channel account and verified Relay Contact Endpoint; do not guess an identity from a matching number |
 | Reaction/edit remains uncategorized | The original target message or verified endpoint may not exist yet; inspect the event before reprocessing |
 | Sticker is unavailable | Check source-message permissions, inbound account ownership, 2 MiB limit, and supported WebP/WebM/TGS format |
+| Received WhatsApp media shows "no longer available" | Relay saves received media when it arrives. Meta keeps it for only 7 days, so media that was not saved in that time cannot be recovered. See [received WhatsApp media](messaging.md#received-whatsapp-media) |
+| Received WhatsApp media shows "Try again" | The Hub is busy or did not return the media. Retry. If it fails again, check the Hub log for the failed media check |
 | Animated sticker offers fallback | The browser may lack decompression support, or animation complexity/format may exceed the renderer's bounds |
 | Location/contact/reaction cannot be sent to a WhatsApp group | Those group message types are outside Meta's documented supported set |
 | Action is Uncertain or stays Dispatching | Inspect Relay Message Action and provider evidence; do not create a new key to blindly resend |

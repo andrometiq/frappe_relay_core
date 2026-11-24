@@ -15,6 +15,7 @@ import {
 import {messagesKey} from '../composables/messagesContext';
 import { FeatherIcon } from "@relay/ui";
 import { deliveryError } from '../services/serverError';
+import { loadMedia } from "../services/mediaCache";
 const chat=inject(messagesKey,null), translationOpen=ref(false);
 const translationEnabled=computed(()=>chat?.channels.value.some(row=>row.value===props.message.channel&&row.translation_enabled));
 const MessageTranslation=defineAsyncComponent(()=>import('./MessageTranslation.vue'));
@@ -32,9 +33,21 @@ const poll = computed(() => data.value.kind === "poll" && data.value.poll ? poll
 const header = computed(() => template.value && templateHeaderView(props.message));
 const headerData = computed(() => header.value && { kind: header.value.type, media: { file_name: header.value.fileName } });
 const context = computed(() => objectValue(props.message.provider_context));
-const mediaError = ref(false);
-watch(() => props.message.name, () => { mediaError.value = false; });
-const source = computed(() => stickerURL(props.message.name));
+// A failed sticker image is fetched once more to learn why: expired media offers no retry.
+const mediaError = ref(null), stickerCopy = ref("");
+watch(() => props.message.name, () => { mediaError.value = null; stickerCopy.value = ""; });
+const source = computed(() => stickerCopy.value || stickerURL(props.message.name));
+async function stickerFailed() {
+  const name = props.message.name;
+  if (stickerCopy.value) return (mediaError.value = { message: "", retry: false });
+  mediaError.value = { loading: true };
+  try {
+    const value = await loadMedia(name, stickerURL(name));
+    if (name === props.message.name) { stickerCopy.value = value.url; mediaError.value = null; }
+  } catch (failure) {
+    if (name === props.message.name) mediaError.value = failure;
+  }
+}
 const animatedDownload = computed(
   () => data.value.media?.is_animated && context.value.provider === "Telegram",
 );
@@ -80,7 +93,7 @@ const video = computed(
           playsinline
           preload="metadata"
           class="message-sticker"
-          @error="mediaError = true"
+          @error="stickerFailed"
         />
         <img
           v-else
@@ -90,10 +103,11 @@ const video = computed(
           width="160"
           height="160"
           class="message-sticker"
-          @error="mediaError = true"
+          @error="stickerFailed"
         />
       </template>
-      <p v-if="mediaError" class="media-error" role="status">Sticker unavailable. <button type="button" @click="mediaError = false">Retry</button></p>
+      <p v-if="mediaError?.loading" class="media-error" role="status">Loading sticker…</p>
+      <p v-else-if="mediaError" class="media-error" role="status">Sticker unavailable. {{ mediaError.message }} <button v-if="mediaError.retry" type="button" @click="stickerFailed">Retry</button></p>
       <p v-if="data.media?.emoji">{{ data.media.emoji }}</p>
     </div>
     <AttachmentViewer
