@@ -12,7 +12,8 @@
       "fieldtype": "Link",
       "options": "Contact",
       "reqd": 1,
-      "read_only": 1
+      "read_only": 1,
+      "search_index": 1
     },
     {
       "fieldname": "reversed_digits",

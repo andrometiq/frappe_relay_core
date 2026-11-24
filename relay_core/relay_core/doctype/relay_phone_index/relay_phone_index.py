@@ -28,7 +28,8 @@ def contacts(tail: str) -> list[str]:
 def sync(person, method=None):
     """Contact on_update: the Contact's rows follow its current phones."""
     phones = [row.phone for row in person.get('phone_nos') or []] + [person.get('mobile_no'), person.get('phone')]
-    frappe.db.delete('Relay Phone Index', {'contact': person.name})
+    if not (person.flags or {}).get('in_insert'):
+        frappe.db.delete('Relay Phone Index', {'contact': person.name})
     insert({person.name: phones})
 
 
@@ -42,13 +43,14 @@ def rename(person, method=None, old=None, new=None, merge=False):
 
 
 def rebuild():
-    """Index the phones of every Contact."""
+    """Index the phones of every Contact. Deleting first makes a Contact save that runs meanwhile wait for
+    this commit and then write its own rows over the ones read here."""
+    frappe.db.delete('Relay Phone Index')
     phones = defaultdict(list)
     for name, mobile, phone in frappe.db.sql('SELECT name, mobile_no, phone FROM `tabContact`'):
         phones[name] += [mobile, phone]
     for parent, phone in frappe.db.sql("SELECT parent, phone FROM `tabContact Phone` WHERE parenttype = 'Contact'"):
         phones[parent].append(phone)
-    frappe.db.delete('Relay Phone Index')
     insert(phones)
 
 
