@@ -4,6 +4,7 @@ import { Button, Dropdown, ErrorMessage, FeatherIcon, FormControl } from '@relay
 import ComposerMore from './ComposerMore.vue'
 import ReplyLock from './ReplyLock.vue'
 import ComposerTabs from './ComposerTabs.vue'
+import { useMobileLayout } from '../../composables/useMobileLayout'
 import { sizeLabel } from './attachmentFormats'
 import { composerActions } from '../../services/composerActions'
 import { messagesKey } from '../../composables/messagesContext'
@@ -14,6 +15,7 @@ import { useStoredDraft } from '../../composables/useStoredDraft'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 const { source, busy, beginEmail, finishEmail } = inject(messagesKey)
 const capabilities = inject('relayCapabilities', ref({}))
+const isMobile = useMobileLayout()
 // `mode` is "reply" or "note"; note mode shows only the note slot, so a note never goes out as email.
 // `lock` names the open thread's reply target (see replyLock).
 const props = defineProps({ mode: { type: String, default: 'reply' }, noteBusy: Boolean, lock: Object })
@@ -138,9 +140,11 @@ useRealtimeRefresh([],['message_actions'],check)
     </template>
     <template v-else>
       <ReplyLock v-if="lock" :lock="lock" />
-      <ComposerTabs mode="reply" :disabled="sending || busy" @mode="value => value === 'note' && moreAction('note')" />
-      <div class="email-actions"><Dropdown :options="modeOptions" placement="top" touch-targets><Button :label="emailModes.find(([value]) => value === draft.mode)?.[1]" icon-right="chevron-down" variant="ghost" :disabled="disabled" aria-label="Email action" /></Dropdown>
-        <Button v-if="lock && draft.mode === 'reply'" :label="fieldsOpen ? 'Hide recipients' : 'To and subject'" variant="ghost" :aria-expanded="fieldsOpen" @click="fieldsOpen = !fieldsOpen" /></div>
+      <ComposerTabs mode="reply" :disabled="sending || busy" @mode="value => value === 'note' && moreAction('note')">
+        <template #reply><Dropdown :options="modeOptions" placement="top" touch-targets><button type="button" class="hit-zone email-mode" aria-pressed="true" title="Reply, Reply all or Forward" :disabled="disabled">{{ emailModes.find(([value]) => value === draft.mode)?.[1] }}<FeatherIcon name="chevron-down" :size="13" /></button></Dropdown></template>
+      </ComposerTabs>
+      <div v-if="lock && draft.mode === 'reply'" class="email-actions">
+        <Button :label="fieldsOpen ? 'Hide recipients' : 'To and subject'" variant="ghost" :aria-expanded="fieldsOpen" @click="fieldsOpen = !fieldsOpen" /></div>
       <template v-if="fieldsShown">
       <div class="email-address-row"><FormControl v-model="draft.to" class="email-inline-field" label="To" aria-label="To" :disabled="disabled" required /><Button label="CC / BCC" variant="ghost" :aria-expanded="recipientsOpen" @click="recipientsOpen = !recipientsOpen" /></div>
       <div v-if="recipientsOpen" class="grid gap-2 sm:grid-cols-2"><FormControl v-model="draft.cc" label="CC" :disabled="disabled" /><FormControl v-model="draft.bcc" label="BCC (private delivery audit only)" :disabled="disabled" /></div>
@@ -153,7 +157,7 @@ useRealtimeRefresh([],['message_actions'],check)
       </div>
       <div class="composer-toolbar">
         <ComposerMore :actions="actions" :disabled="sending || busy" @action="moreAction"><template #details>From {{ anchor.channel_title || 'the configured email account' }}<p>To {{ draft.to }}</p></template></ComposerMore>
-        <Button v-if="!locked" class="email-send composer-send hit-zone" type="submit" label="Send email" icon-left="send" variant="solid" :disabled="disabled || !draft.body.trim()" :loading="sending" :title="draft.body.trim() ? 'Send email' : 'Type a message first'" />
+        <Button v-if="!locked" class="email-send composer-send hit-zone" type="submit" :label="isMobile ? '' : 'Send email'" aria-label="Send email" icon-left="send" variant="solid" :disabled="disabled || !draft.body.trim()" :loading="sending" :title="draft.body.trim() ? 'Send email' : 'Type a message first'" />
       </div>
       <input ref="fileInput" type="file" multiple hidden :disabled="disabled" @change="attach" />
       <p v-if="sending" role="status" class="composer-status">{{ activity }}</p>
@@ -170,6 +174,7 @@ useRealtimeRefresh([],['message_actions'],check)
 <style scoped>
 .email-actions, .email-address-row { display:flex; align-items:center; gap:8px; min-width:0; padding:0 8px; }
 .email-actions :deep(.relay-button) { min-height:28px; height:28px; font-size:12.5px; color:var(--relay-ink-3); }
+.email-mode { display:inline-flex; align-items:center; gap:4px; }
 .email-address-row, .email-inline-field, .email-signature, .email-attachments { margin:0 12px; }
 .email-address-row > .relay-field { flex:1; min-width:0; }
 .email-inline-field { border-top:1px solid var(--relay-stroke); min-height:48px; display:grid; grid-template-columns:58px minmax(0,1fr); align-items:center; gap:8px; }
