@@ -438,6 +438,10 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <WorkspaceState v-if="loadFailed && !visibleRows.length" class="conversation-load-failed" title="Could not load messages" :description="loadFailedReason" icon="alert-circle">
         <Button label="Retry" variant="solid" icon-left="refresh-cw" :loading="busy" @click="retryChat" />
       </WorkspaceState>
+      <WorkspaceState v-else-if="!threadOpen && !threads.ready.value && threads.error.value && !threads.loading.value" class="conversation-load-failed"
+        title="Could not load this chat" :description="plainChatError(threads.error.value) || 'Check your connection and try again.'" icon="alert-circle">
+        <Button label="Retry" variant="solid" icon-left="refresh-cw" @click="threads.load()" />
+      </WorkspaceState>
       <LoadingRows v-else-if="!threadOpen && !noThreads" class="conversation-thread-loading" label="Loading conversation…" :count="3" />
       <MessageThread v-else :key="active + ':' + channel + ':' + state.endpoint.value" :position="state.viewPosition.value"
         :newer="newer" :anchor="restored" :unread="state.firstUnread.value" :rows="visibleRows" :more="more" :busy="busy" :paging="paging" :paging-error="pagingError" :error="state.error.value" :emoji="emoji"
