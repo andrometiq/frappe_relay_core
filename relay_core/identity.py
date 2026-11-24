@@ -111,35 +111,38 @@ def contact_identities(person):
 def bindings(channel, provider, value):
     """Find canonical aliases without rewriting pre-normalization stored keys."""
     import frappe
-    canonical = normalize(provider, value)
-    start = 0
-    while True:
-        rows = frappe.get_all('Relay Contact Endpoint', filters={'channel': channel},
-            fields=['name', 'endpoint', 'relay_contact', 'verified'], order_by='name asc',
-            limit_start=start, limit_page_length=500)
-        for row in rows:
-            try:
-                matches = normalize(provider, row.endpoint) == canonical
-            except ValueError:
-                continue
-            if matches:
-                yield row
-        if len(rows) < 500:
-            break
-        start += len(rows)
+    # canonical_endpoint holds normalize() of each stored value, so legacy aliases are an index read.
+    yield from frappe.get_all('Relay Contact Endpoint', order_by='name asc',
+        filters={'channel': channel, 'canonical_endpoint': normalize(provider, value)},
+        fields=['name', 'endpoint', 'relay_contact', 'verified'])
+
+
+def canonical_endpoint(provider, value):
+    """normalize(), or None for a stored value that it rejects."""
+    try:
+        return normalize(provider, value)
+    except ValueError:
+        return None
 
 
 def contacts_by_phone(number=None, *, region=None):
     """Normalized number -> its Frappe Contacts: ones with a Relay Contact first, then ones linked to a Customer, then oldest.
     With a number, only Contacts whose stored phones end in its last ten digits are read."""
     import frappe
-    digits = lambda column: f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({column},' ',''),'-',''),'(',''),')',''),'.','') LIKE %(tail)s"
-    narrow = 'WHERE ' + ' OR '.join(map(digits, ('p.phone', 'c.mobile_no', 'c.phone'))) if number else ''
+    from relay_core.relay_core.doctype.relay_phone_index.relay_phone_index import contacts
+    tail, names, narrow = (number or '')[-10:], None, ''
+    if number:
+        # The phone index finds the few Contacts with a phone ending in tail; the suffix match then picks their rows.
+        names = contacts(tail)
+        if not names:
+            return {}
+        digits = lambda column: f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({column},' ',''),'-',''),'(',''),')',''),'.','') LIKE %(tail)s"
+        narrow = 'WHERE c.name IN %(names)s AND (' + ' OR '.join(map(digits, ('p.phone', 'c.mobile_no', 'c.phone'))) + ')'
     rows = frappe.db.sql("""SELECT c.name, c.creation, p.phone, c.mobile_no, c.phone contact_phone, r.name relay,
             EXISTS(SELECT 1 FROM `tabDynamic Link` l WHERE l.parent = c.name AND l.parenttype = 'Contact'
                 AND l.link_doctype = 'Customer') customer
         FROM `tabContact` c LEFT JOIN `tabContact Phone` p ON p.parent = c.name AND p.parenttype = 'Contact'
-        LEFT JOIN `tabRelay Contact` r ON r.contact = c.name """ + narrow, {'tail': '%' + (number or '')[-10:]}, as_dict=True)
+        LEFT JOIN `tabRelay Contact` r ON r.contact = c.name """ + narrow, {'tail': '%' + tail, 'names': names}, as_dict=True)
     rows.sort(key=lambda row: (not row.relay, not row.customer, row.creation, row.name))
     result = {}
     for row in rows:

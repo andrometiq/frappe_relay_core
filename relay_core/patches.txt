@@ -24,3 +24,5 @@ relay_core.patches.v1_0.move_ai_knowledge_to_playbooks
 relay_core.patches.v1_0.set_allowed_ai_auth_types
 relay_core.patches.v1_0.index_ai_events
 relay_core.patches.v1_0.show_customer_poll_notice
+relay_core.patches.v1_0.fill_canonical_endpoints
+relay_core.patches.v1_0.index_contact_phones

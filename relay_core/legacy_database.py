@@ -17,12 +17,13 @@ import frappe
 from relay_core import legacy
 from relay_core import legacy_bundle as bundles
 from relay_core.contact_lifecycle import endpoint_key
-from relay_core.identity import contacts_by_phone, phone_number
+from relay_core.identity import canonical_endpoint, contacts_by_phone, phone_number
 from relay_core.legacy_media import attach, copy_stream
 from relay_core.legacy_metadata import direct_document, project_reactions
 from relay_core.message_updates import provider_key
 from relay_core.opt_out import apply_history
 from relay_core.permissions import sequential_name
+from relay_core.relay_core.doctype.relay_phone_index.relay_phone_index import sync as sync_phone_index
 
 MESSAGE = 'tabWhatsApp Core Message'
 RETRIES = 3
@@ -395,7 +396,8 @@ class Importer:
             relay = created['relay_contact'] = direct_document('Relay Contact', {'contact': person, 'display_name': contact_title(person)},
                                                                sequential_name('contact')).name
         created['endpoint'] = direct_document('Relay Contact Endpoint', {'channel': channel, 'endpoint': endpoint, 'relay_contact': relay,
-                                              'verified': 1, 'endpoint_key': endpoint_key(channel, endpoint)}).name
+                                              'verified': 1, 'endpoint_key': endpoint_key(channel, endpoint),
+                                              'canonical_endpoint': canonical_endpoint('WhatsApp', endpoint)}).name
         return relay
 
     def phone_contact(self, endpoint, bound):
@@ -468,6 +470,7 @@ class Importer:
         from frappe.model.naming import set_new_name
         set_new_name(person)
         insert_with_children(person)
+        sync_phone_index(person)
         if number:
             self.phones[endpoint] = [person.name]
         self.customer_links()[person.name] = set(bound)
