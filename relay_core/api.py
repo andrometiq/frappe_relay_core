@@ -278,6 +278,11 @@ def contact_details(contact):
             if channel.has_permission('read'):
                 row.provider = channel.channel
                 endpoints.append(row)
+        from relay_core.endpoint_labels import telegram_labels
+        labels = telegram_labels([(row.channel, row.endpoint) for row in endpoints if row.provider == 'Telegram'])
+        for row in endpoints:
+            if row.provider == 'Telegram':
+                row.endpoint_label = labels.get((row.channel, row.endpoint)) or 'Telegram'
     from relay_core.contacts import can_manage_links
     can_edit_links = bool(person.has_permission('write') or can_manage_links(person.name))
     return {'name': person.name, 'label': person.full_name or person.name,

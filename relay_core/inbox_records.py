@@ -209,6 +209,11 @@ def row_channels(rows, providers):
         result[row.name] = sorted(({'channel': channel, 'provider': providers[channel], 'endpoint': endpoint, 'unread': flag}
                                    for (channel, endpoint), flag in marks.items() if channel in providers),
                                   key=lambda mark: (not mark['unread'], mark['provider'], mark['endpoint']))[:MAX_ROW_CHANNELS]
+    from relay_core.endpoint_labels import telegram_labels
+    telegram = [mark for marks in result.values() for mark in marks if mark['provider'] == 'Telegram']
+    labels = telegram_labels([(mark['channel'], mark['endpoint']) for mark in telegram])
+    for mark in telegram:
+        mark['endpoint_label'] = labels.get((mark['channel'], mark['endpoint'])) or 'Telegram'
     return result
 
 

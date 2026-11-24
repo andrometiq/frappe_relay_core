@@ -177,7 +177,14 @@ def options(contact, business_doctype=None, business_name=None):
         try:source,channel,context=target(contact,row.name,business_doctype,business_name)
         except (frappe.PermissionError,frappe.ValidationError):continue
         result.append({'value':row.name,'label':channel.channel+' · '+source.sender_endpoint,'provider':channel.channel,'channel':channel.name,
+                       'endpoint':source.sender_endpoint,
                        'window':service_window.status(contact,channel.name,source.sender_endpoint) if channel.channel=='WhatsApp' else {'open':True}})
+    # A Telegram chat id means nothing to people, so its option names the linked mobile number instead.
+    from relay_core.endpoint_labels import telegram_labels
+    labels=telegram_labels([(item['channel'],item['endpoint']) for item in result if item['provider']=='Telegram'])
+    for item in result:
+        if item['provider']=='Telegram':item['label']='Telegram · '+(labels.get((item['channel'],item['endpoint'])) or 'Telegram')
+        item.pop('endpoint')
     return result
 
 

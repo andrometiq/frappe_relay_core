@@ -64,6 +64,12 @@ def thread_items(newest, unread):
         if people[person] is None:
             continue
         items.append(thread_item(thread, last[name], channels[channel], people[person], unread.get(thread, (0, None, None))))
+    from relay_core.endpoint_labels import telegram_labels
+    telegram = [item for item in items if item['provider'] == 'Telegram']
+    labels = telegram_labels([(item['channel'], item['endpoint']) for item in telegram],
+                             {(item['channel'], item['endpoint']): item['handle'] for item in telegram if item['handle']})
+    for item in telegram:
+        item['endpoint_label'] = labels.get((item['channel'], item['endpoint'])) or 'Telegram'
     return sorted(items, key=lambda item: (provider_rank(item['provider']), item['channel_label'], item['endpoint'], item['contact_label']))
 
 
