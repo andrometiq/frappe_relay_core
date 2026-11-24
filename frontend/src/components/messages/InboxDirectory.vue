@@ -213,12 +213,17 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
 .directory-row-menu { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:var(--relay-layer-strong); color:var(--relay-ink-2); box-shadow:var(--relay-shadow-1); opacity:0; pointer-events:none; }
 .directory-row:hover > .directory-row-menu, .directory-row-menu:focus-visible { opacity:1; pointer-events:auto; }
 @media (hover:none) { .directory-row-menu { display:none; } }
+/* Phones keep the small pill on the last line; a wider invisible area keeps a 44px tap target. */
 @media (max-width:768px) {
-  .directory-link { right:12px; bottom:8px; }
-  .directory-rows .directory-row:has(.directory-link) > .directory-contact { padding-bottom:36px; align-items:flex-start; }
+  .directory-rows .directory-row > .directory-contact { min-height:0; padding-top:8px; padding-bottom:8px; }
+  .directory-rows .directory-row > .directory-contact .directory-contact-copy { gap:2px; }
+  .directory-link { right:10px; bottom:8px; height:20px; }
+  .directory-link::before { content:""; position:absolute; inset:-12px -4px; }
+  .directory-rows .directory-row .directory-row-channels { margin-top:2px; }
+  .directory-rows .directory-row .row-channel { width:20px; height:20px; }
 }
-/* The Link button sits on the context line and the row menu takes the time's place, so neither covers text. */
-.directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context) { padding-right:56px; }
+/* The Link button sits on the last line and the row menu takes the time's place, so neither covers text. */
+.directory-row:has(.directory-link) :is(.directory-contact-bottom, .directory-contact-context, .directory-row-channels) { padding-right:56px; }
 @media (hover:hover) { .directory-row:hover .directory-contact-top time { visibility:hidden; } }
 .directory-row-channels { order:3; display:flex; align-items:center; gap:4px; min-width:0; margin-top:6px; }
 .row-channel { position:relative; display:grid; flex:none; place-items:center; width:22px; height:22px; border-radius:6px; background:var(--relay-hover); color:var(--relay-ink-3); }
