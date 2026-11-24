@@ -30,8 +30,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .reaction-pill { position:absolute; bottom:calc(100% + 4px); right:8px; z-index:6; display:flex; align-items:center; gap:2px; padding:4px 6px; border:1px solid var(--relay-stroke, var(--outline-gray-2)); border-radius:999px; background:var(--surface-modal, var(--surface-white)); box-shadow:var(--relay-shadow-2, 0 4px 16px #0002); animation:relay-pop var(--relay-fast, 120ms) ease; }
-/* The pill opens over the row on its sender's side: my rows sit left, everyone else's right. The whole selector is global, as Vue drops any selector part after a global group. */
-:global(.conversation-bubble.is-mine .reaction-pill) { right:auto; left:56px; }
+/* The pill opens over the row on its sender's side: my rows sit right, everyone else's left. The whole selector is global, as Vue drops any selector part after a global group. */
+:global(.conversation-bubble.is-other .reaction-pill) { right:auto; left:56px; }
 .reaction-pill.is-below { bottom:auto; top:calc(100% + 4px); }
 .reaction-pill button { display:grid; place-items:center; min-width:34px; min-height:34px; padding:0; border-radius:999px; font-size:20px; line-height:1; }
 .reaction-pill button:hover:not(:disabled), .reaction-pill button:focus-visible { background:var(--relay-hover, var(--surface-gray-2)); outline:0; }
