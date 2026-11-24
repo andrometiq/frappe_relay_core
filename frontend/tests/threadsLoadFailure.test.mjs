@@ -30,6 +30,8 @@ test('a failed threads read shows its error with Retry instead of loading foreve
   assert.deepEqual([threads.ready.value, threads.error.value, threads.items.value.length, reads], [true, '', 1, 2])
 
   const view = await readFile(new URL('../src/components/ConnectedMessages.vue', import.meta.url), 'utf8')
-  assert.match(view, /<WorkspaceState v-else-if="!threadOpen && !threads\.ready\.value && threads\.error\.value && !threads\.loading\.value"[^>]*\n?[^>]*title="Could not load this chat"/)
+  assert.match(view, /const threadsFailed = computed\(\(\) => !threadOpen\.value && !threads\.ready\.value && !!threads\.error\.value && !threads\.loading\.value\)/)
+  assert.match(view, /<WorkspaceState v-else-if="threadsFailed"[^>]*\n?[^>]*title="Could not load this chat"/)
+  assert.match(view, /<div v-else-if="active && !loadFailed && !threadsFailed" class="composer-dock"/, 'A failed read hides the "Start one with a template" footer')
   assert.match(view, /<Button label="Retry" variant="solid" icon-left="refresh-cw" @click="threads\.load\(\)" \/>/)
 })
