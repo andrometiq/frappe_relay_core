@@ -65,7 +65,7 @@ class StickerTests(unittest.TestCase):
         self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'provider_metadata'}})
         self.incoming.sent_at = self.incoming.creation = '2026-11-04 10:00:00'
         with self.assertRaises(ValueError) as gone: messaging.sticker(self.incoming.name)
-        self.assertEqual(gone.exception.args, ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(gone.exception.args, ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'capacity'}})
         with self.assertRaises(ValueError) as busy: messaging.sticker(self.incoming.name)
         self.assertEqual(busy.exception.args[1], attachments.MediaRetry)

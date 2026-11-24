@@ -81,17 +81,18 @@ class WhatsAppAttachmentTests(unittest.TestCase):
         return failure.exception.args
 
     def test_hub_rejections_become_readable_reasons_with_retry_status(self):
-        self.assertEqual(self.rejected('provider_metadata', '2026-11-25 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-25 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.assertEqual(self.rejected('ownership', '2026-10-21 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
         self.assertEqual(self.rejected('provider_metadata', '2026-10-21 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
         self.assertEqual(self.rejected('capacity', '2026-10-21 10:00:00'), ('Media downloads are busy. Try again shortly.', attachments.MediaRetry))
-        self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.assertEqual(self.rejected('provider_metadata', '2026-10-26 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
         self.assertEqual(self.rejected('ownership_verification', '2026-11-25 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
         self.source.direction = 'Outgoing'
         self.assertEqual(self.rejected('provider_metadata', '2026-10-28 10:00:00'), ('WhatsApp did not return this media. Try again.', attachments.MediaRetry))
-        self.assertEqual(self.rejected('provider_metadata', '2026-11-19 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaGone))
+        self.assertEqual(self.rejected('provider_metadata', '2026-11-19 10:00:00'), ('Media no longer available from WhatsApp', attachments.MediaExpired))
         self.assertEqual(attachments.MediaGone.http_status_code, 410)
+        self.assertTrue(issubclass(attachments.MediaExpired, attachments.MediaGone))
         self.assertEqual(attachments.MediaRetry.http_status_code, 503)
 
 

@@ -130,16 +130,16 @@ with ExitStack() as stack:
     frappe.db.set_value('Relay Channel', channel.name, 'enabled', 1)
     frappe.db.commit()
     for row in (kept, kept_sticker):
-        assert received_media.store(row.name), row.name
-        assert received_media.store(row.name) is None, 'a kept copy is never downloaded again'
+        assert received_media.store(row.name) == 'stored', row.name
+        assert received_media.store(row.name) == 'skipped', 'a kept copy is never downloaded again'
         assert len(frappe.get_all('File', filters={'attached_to_doctype': 'Relay Message', 'attached_to_name': row.name, 'is_private': 1})) == 1
     assert FakeHub.calls == ['7004', '7102'], FakeHub.calls
     assert frappe.db.get_value('File', json.loads(frappe.db.get_value('Relay Message', kept_sticker.name, 'message_data'))['attachment'], 'file_name') == 'sticker.webp'
-    assert received_media.store(week_old.name) is None and FakeHub.calls == ['7004', '7102'], 'media Meta no longer keeps is not fetched'
+    assert received_media.store(week_old.name) == 'expired' and FakeHub.calls == ['7004', '7102'], 'media Meta no longer keeps is not fetched'
     print('PASS site store keeps one private File per received photo and sticker, never twice, and skips media older than 7 days')
-    assert received_media.store(refused.name) is None and FakeHub.calls[-1] == '7005'
+    assert received_media.store(refused.name) == 'failed' and FakeHub.calls[-1] == '7005'
     assert received_media.SKIPPED in json.loads(frappe.db.get_value('Relay Message', refused.name, 'message_data'))
-    assert received_media.store(refused.name) is None and FakeHub.calls.count('7005') == 1, 'refused media is not downloaded again'
+    assert received_media.store(refused.name) == 'skipped' and FakeHub.calls.count('7005') == 1, 'refused media is not downloaded again'
     missing = received_media.get_missing(7)
     assert recent.name in missing and busy.name in missing, missing
     assert not {kept.name, kept_sticker.name, refused.name, week_old.name} & set(missing), missing

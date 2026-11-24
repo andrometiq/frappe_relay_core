@@ -20,6 +20,10 @@ class MediaGone(frappe.ValidationError):
     http_status_code=410
 
 
+class MediaExpired(MediaGone):
+    pass
+
+
 class MediaRetry(frappe.ValidationError):
     http_status_code=503
 
@@ -37,8 +41,9 @@ def whatsapp_media(source,channel,media_id,sticker=False):
     ownership_verification stays a retry: it is the Hub's own lookup failing, not a fact about the media."""
     try:return whatsapp.client().media('WhatsApp',media_id,sticker=sticker,channel=hub_arguments(channel,{}).get('channel'))
     except HubError as error:check=error.metadata.get('error',{}).get('check')
-    if check=='provider_metadata' and is_media_expired(source) or check=='ownership':
-        frappe.throw('Media no longer available from WhatsApp',MediaGone)
+    if check=='provider_metadata' and is_media_expired(source):
+        frappe.throw('Media no longer available from WhatsApp',MediaExpired)
+    if check=='ownership':frappe.throw('Media no longer available from WhatsApp',MediaGone)
     if check=='size':frappe.throw('Media is larger than the 16 MiB download limit',MediaGone)
     if check=='capacity':frappe.throw('Media downloads are busy. Try again shortly.',MediaRetry)
     frappe.throw('WhatsApp did not return this media. Try again.',MediaRetry)

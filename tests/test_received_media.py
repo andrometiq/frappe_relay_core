@@ -81,7 +81,7 @@ class StoreTests(unittest.TestCase):
             fixture.start(); self.addCleanup(fixture.stop)
 
     def test_media_is_downloaded_once_and_recorded_where_read_looks_first(self):
-        self.assertEqual(received_media.store(self.source.name).name, 'FILE-NEW')
+        self.assertEqual(received_media.store(self.source.name), 'stored')
         self.hub.call_tool.assert_called_once_with('whatsapp.attachment', {'media_id': '555'})
         self.assertEqual(self.saved, [('whatsapp-image.jpg', b'jpeg bytes', 'RELAY-MSG-0000000101')])
         name, field, value = self.db.set_value.call_args.args[1:]
@@ -96,20 +96,28 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.saved[0][:2], ('sticker.webp', WEBP))
         self.saved.clear()
         self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'not webp').decode(), 'content_type': 'image/webp'}
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'failed')
         self.assertEqual(self.saved, [])
 
     def test_a_kept_copy_or_expired_media_is_not_downloaded_again(self):
         self.source = message(attachment='FILE-OLD', attachment_source='RELAY-MSG-0000000101')
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'skipped')
         self.source = message(sent_at='2026-11-04 10:00:00')
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'expired')
         self.hub.call_tool.assert_not_called()
+
+    def test_expired_media_is_tried_on_request_and_marked_when_meta_dropped_it(self):
+        self.source = message(sent_at='2026-11-04 10:00:00')
+        self.assertEqual(received_media.store(self.source.name, try_expired=True), 'stored')
+        self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'provider_metadata'}})
+        self.assertEqual(received_media.store(self.source.name, try_expired=True), 'expired')
+        self.assertEqual(self.skipped()[-1], 'Media no longer available from WhatsApp')
+
 
     def test_a_copy_kept_meanwhile_is_not_replaced(self):
         kept = json.dumps({'kind': 'image', 'media': {'id': '555'}, 'attachment': 'FILE-OTHER'})
         self.db.get_value.side_effect = lambda doctype, name, field, **kw: kept if field == 'message_data' else name
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'skipped')
         self.assertEqual(self.saved, [])
 
     def skipped(self):
@@ -118,20 +126,20 @@ class StoreTests(unittest.TestCase):
     def test_a_busy_or_failed_hub_is_logged_and_left_for_recover(self):
         for check in ('capacity', 'provider_metadata'):
             self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': check}})
-            self.assertIsNone(received_media.store(self.source.name))
+            self.assertEqual(received_media.store(self.source.name), 'failed')
         self.assertIn('Try again', self.logger.warning.call_args.args[0])
         self.assertEqual((self.saved, self.skipped()), ([], []))
 
     def test_media_that_can_never_be_kept_is_marked_and_not_downloaded_again(self):
         self.hub.call_tool.return_value = {'content_base64': base64.b64encode(b'x' * (10 * 1024 * 1024 + 1)).decode(), 'content_type': 'video/mp4'}
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'failed')
         self.hub.call_tool.side_effect = HubError('rejected', {'provider': 'Hub', 'error': {'check': 'ownership'}})
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'failed')
         self.assertEqual(self.saved, [])
         self.assertEqual([reason.split()[0] for reason in self.skipped()], ['The', 'Media'])
         self.source.message_data = self.db.set_value.call_args.args[3]
         self.hub.call_tool.reset_mock()
-        self.assertIsNone(received_media.store(self.source.name))
+        self.assertEqual(received_media.store(self.source.name), 'skipped')
         self.hub.call_tool.assert_not_called()
 
     def test_a_copy_kept_meanwhile_is_not_marked_skipped(self):
@@ -146,38 +154,61 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(received_media.file_name(None, 'application/x-unknown', 'document'), 'whatsapp-document')
 
 
-class BackfillTests(unittest.TestCase):
+class MissingTests(unittest.TestCase):
     def setUp(self):
         self.rows = [message(), message(sent_at='2026-11-01 10:00:00'), message(attachment='FILE-1')]
         for number, row in enumerate(self.rows): row.name = f'RELAY-MSG-000000020{number}'
         def get_all(doctype, limit_start=0, limit_page_length=None, **kw):
             return ['RELAY-CH-1'] if doctype == 'Relay Channel' else self.rows[limit_start:limit_start + limit_page_length]
-        self.frappe = SimpleNamespace(get_all=Mock(side_effect=get_all), enqueue=Mock(), logger=Mock())
+        self.frappe = SimpleNamespace(get_all=Mock(side_effect=get_all), enqueue=Mock(), logger=Mock(),
+                                      db=SimpleNamespace(rollback=Mock()))
         for fixture in (patch.object(received_media, 'frappe', self.frappe), patch.object(received_media, 'now_datetime', return_value=NOW),
                         patch.object(attachments, 'now_datetime', return_value=NOW)):
             fixture.start(); self.addCleanup(fixture.stop)
 
-    def test_dry_run_lists_only_media_meta_still_keeps(self):
-        self.assertEqual(received_media.store_recent_whatsapp_media(days=7), {'count': 1, 'names': ['RELAY-MSG-0000000200'], 'queued': False})
-        self.frappe.enqueue.assert_not_called()
+    def test_lists_only_media_meta_still_keeps_and_filters_in_sql(self):
+        self.assertEqual(received_media.get_missing(7), ['RELAY-MSG-0000000200'])
         filters = self.frappe.get_all.call_args.kwargs['filters']
         self.assertIn(['legacy_source', 'is', 'not set'], filters)
         self.assertIn(['creation', '>=', datetime(2026, 11, 5, 10, 0, 0)], filters)
         self.assertIn(['message_data', 'not like', '%"attachment"%'], filters)
         self.assertIn(['message_data', 'not like', '%"media_store_skipped"%'], filters)
         self.assertEqual(self.frappe.get_all.call_args.kwargs['limit_page_length'], received_media.BATCH)
+        self.assertEqual(received_media.get_missing(30, include_expired=True), ['RELAY-MSG-0000000200', 'RELAY-MSG-0000000201'])
 
     def test_pages_past_rows_that_cannot_be_queued_until_a_batch_is_found(self):
         self.rows = [message(sent_at='2026-11-01 10:00:00') for _ in range(4)] + [message() for _ in range(3)]
         for number, row in enumerate(self.rows): row.name = f'RELAY-MSG-000000030{number}'
         with patch.object(received_media, 'BATCH', 2):
-            self.assertEqual(received_media.get_missing(7), ['RELAY-MSG-0000000304', 'RELAY-MSG-0000000305'])
-        self.assertEqual([call.kwargs['limit_start'] for call in self.frappe.get_all.call_args_list[1:]], [0, 2, 4])
+            self.assertEqual(received_media.get_missing(7, limit=2), ['RELAY-MSG-0000000304', 'RELAY-MSG-0000000305'])
+            self.assertEqual(received_media.get_missing(7, limit=None), [f'RELAY-MSG-000000030{number}' for number in (4, 5, 6)])
+        self.assertEqual([call.kwargs['limit_start'] for call in self.frappe.get_all.call_args_list[1:4]], [0, 2, 4])
 
-    def test_a_real_run_queues_each_missing_copy(self):
-        self.assertTrue(received_media.store_recent_whatsapp_media(days=7, dry_run=0)['queued'])
+    def test_recover_queues_each_missing_copy_of_meta_window(self):
+        received_media.recover()
         self.frappe.enqueue.assert_called_once()
         self.assertEqual(self.frappe.enqueue.call_args.kwargs['job_id'], 'relay-media-store:RELAY-MSG-0000000200')
+
+    def test_backfill_dry_run_counts_candidates_without_downloading(self):
+        with patch.object(received_media, 'store') as store:
+            self.assertEqual(received_media.backfill(days=30, dry_run=1), {'candidates': 2})
+        store.assert_not_called()
+
+    def test_backfill_tries_each_message_once_and_counts_outcomes(self):
+        outcomes = iter(['stored', RuntimeError('database gone')])
+        def store(name, try_expired):
+            self.assertTrue(try_expired)
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception): raise outcome
+            return outcome
+        with patch.object(received_media, 'store', side_effect=store):
+            counts = received_media.backfill(days=30)
+        self.assertEqual(counts, {'stored': 1, 'expired': 0, 'failed': 1, 'skipped': 0})
+        self.frappe.db.rollback.assert_called_once()
+        logged = [call.args[0] for call in self.frappe.logger.return_value.info.call_args_list]
+        self.assertIn('Received media backfill RELAY-MSG-0000000200: stored', logged)
+        self.assertIn('Received media backfill RELAY-MSG-0000000201: failed', logged)
+        self.frappe.enqueue.assert_not_called()
 
 
 class EditTests(unittest.TestCase):

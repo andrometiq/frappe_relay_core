@@ -7,14 +7,14 @@ import re
 import frappe
 from frappe.utils import add_to_date, cint, now_datetime
 from relay_core import file_limits, locks
-from relay_core.attachments import MediaRetry, is_media_expired, save_attachment, whatsapp_attachment, whatsapp_media
+from relay_core.attachments import MediaExpired, MediaRetry, is_media_expired, save_attachment, whatsapp_attachment, whatsapp_media
 from relay_core.automation.service import KEPT_COPY_KEYS
 from relay_core.hub import HubError
 from relay_core.messaging import object_value, sticker_bytes, STICKER_TYPES
 
 KINDS = ('image', 'video', 'audio', 'document', 'sticker')
 TIMEOUT = 300
-# A failed or lost job is retried by recover() for this long; store_recent_whatsapp_media covers the rest.
+# A failed or lost job is retried by recover() for this long; backfill() covers the rest.
 RECOVER_DAYS = 1
 BATCH = 500
 # Why the media can never be kept, such as its size; recover() does not download it again.
@@ -44,13 +44,16 @@ def enqueue(message):
                    job_id='relay-media-store:' + message, deduplicate=True)
 
 
-def store(message):
-    """Download the media once and keep it on the message. Safe to repeat: a kept copy is never replaced."""
+def store(message, try_expired=False):
+    """Download the media once and keep it on the message, and return the outcome: stored, expired, failed or
+    skipped. Safe to repeat: a kept copy is never replaced. try_expired asks the Hub even after Meta's window."""
     with locks.lock('relay-media-store:' + message, timeout=TIMEOUT, blocking_timeout=60):
         frappe.db.commit()  # A waiter must not keep the snapshot from before the lock.
         source = frappe.get_doc('Relay Message', message)
-        if not is_storable(source) or is_media_expired(source):
-            return None
+        if not is_storable(source):
+            return 'skipped'
+        if is_media_expired(source) and not try_expired:
+            return 'expired'
         try:
             filename, raw = download(source, frappe.get_doc('Relay Channel', source.channel))
             if error := file_limits.size_error(len(raw), file_limits.get_max_bytes(), 'The media'):
@@ -58,13 +61,14 @@ def store(message):
         except (HubError, ValueError, frappe.ValidationError) as error:
             frappe.logger('relay_core').warning(f'Received media {message} was not kept: {str(error)[:300]}')
             # Only a busy or failed Hub is worth another try; recover() retries it while Meta keeps the media.
-            if not isinstance(error, (HubError, MediaRetry)):
-                skip(message, str(error)[:140])
-                frappe.db.commit()
-            return None
+            if isinstance(error, (HubError, MediaRetry)):
+                return 'failed'
+            skip(message, str(error)[:140])
+            frappe.db.commit()
+            return 'expired' if isinstance(error, MediaExpired) else 'failed'
         file = keep(source, filename, raw)
         frappe.db.commit()
-        return file
+        return 'stored' if file else 'skipped'
 
 
 def download(source, channel):
@@ -119,9 +123,10 @@ def with_kept_copy(previous, edited):
     return dict(edited, **{key: previous[key] for key in KEPT_COPY_KEYS if key in previous})
 
 
-def get_missing(days):
-    """At most BATCH live received WhatsApp media of the last `days` days that Meta still keeps and Relay
-    has not copied, oldest first. Kept and skipped media are left out in SQL, so each run moves on."""
+def get_missing(days, limit=BATCH, include_expired=False):
+    """Live received WhatsApp media of the last `days` days that Relay has not copied, oldest first: at most
+    `limit` names (None for all), and only media Meta still keeps unless include_expired. Kept and skipped
+    media are left out in SQL, so each run moves on."""
     channels = frappe.get_all('Relay Channel', filters={'channel': 'WhatsApp'}, pluck='name')
     if not channels:
         return []
@@ -129,31 +134,44 @@ def get_missing(days):
                ['legacy_source', 'is', 'not set'], ['creation', '>=', add_to_date(now_datetime(), days=-cint(days))],
                ['message_data', 'not like', '%"attachment"%'], ['message_data', 'not like', f'%"{SKIPPED}"%']]
     names, start = [], 0
-    while len(names) < BATCH:
+    while limit is None or len(names) < limit:
         rows = frappe.get_all('Relay Message', filters=filters, order_by='creation asc, name asc',
             fields=['name', 'direction', 'message_type', 'message_data', 'legacy_source', 'sent_at', 'creation'],
             limit_start=start, limit_page_length=BATCH)
-        names += [row.name for row in rows if is_storable(row) and not is_media_expired(row)]
+        names += [row.name for row in rows if is_storable(row) and (include_expired or not is_media_expired(row))]
         if len(rows) < BATCH:
             break
         start += BATCH
-    return names[:BATCH]
-
-
-def store_recent_whatsapp_media(days=7, dry_run=1):
-    """Queue the copy of received WhatsApp media from the last `days` days that has none, at most BATCH per run.
-
-    bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 0}"
-    """
-    names = get_missing(days)
-    if not cint(dry_run):
-        for name in names:
-            enqueue(name)
-    summary = {'count': len(names), 'names': names, 'queued': not cint(dry_run)}
-    frappe.logger('relay_core').info(f'Received media without a kept copy in {cint(days)} days: {len(names)}, queued: {summary["queued"]}')
-    return summary
+    return names[:limit]
 
 
 def recover():
-    """Retry copies whose job was lost or failed."""
-    store_recent_whatsapp_media(days=RECOVER_DAYS, dry_run=0)
+    """Queue again, at most BATCH per run, copies of the last RECOVER_DAYS days whose job was lost or failed."""
+    names = get_missing(RECOVER_DAYS)
+    for name in names:
+        enqueue(name)
+    frappe.logger('relay_core').info(f'Received media copies queued again: {len(names)}')
+
+
+def backfill(days=7, dry_run=0):
+    """Copy now, one message at a time, received WhatsApp media of the last `days` days that has no kept copy.
+    Media past Meta's window is still tried once. Safe to repeat; each message commits on its own.
+
+    bench --site <site> execute relay_core.received_media.backfill --kwargs "{'days': 7, 'dry_run': 1}"
+    """
+    names = get_missing(days, limit=None, include_expired=True)
+    if cint(dry_run):
+        return {'candidates': len(names)}
+    counts = dict.fromkeys(('stored', 'expired', 'failed', 'skipped'), 0)
+    log = frappe.logger('relay_core')
+    for name in names:
+        try:
+            outcome = store(name, try_expired=True)
+        except Exception:
+            frappe.db.rollback()
+            log.exception(f'Received media backfill {name} failed')
+            outcome = 'failed'
+        counts[outcome] += 1
+        log.info(f'Received media backfill {name}: {outcome}')
+    log.info(f'Received media backfill of {cint(days)} days: {counts}')
+    return counts

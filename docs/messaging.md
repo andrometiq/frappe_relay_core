@@ -152,14 +152,14 @@ Meta keeps media that a webhook received for only 7 days. Core saves a copy of e
 - When the sender edits the caption, the saved copy stays on the message.
 - Media without a copy that is older than 7 days returns HTTP 410 "Media no longer available from WhatsApp". The UI shows no Retry button for it. A busy or failed Hub returns HTTP 503, and the UI shows Retry.
 
-To save the copies of recent media that has none, for example after an outage, list them first and then queue them:
+To save the copies of media that has none, for example after an outage or for media that arrived before this change, count them first and then copy them:
 
 ```sh
-bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 1}"
-bench --site <site> execute relay_core.received_media.store_recent_whatsapp_media --kwargs "{'days': 7, 'dry_run': 0}"
+bench --site <site> execute relay_core.received_media.backfill --kwargs "{'days': 7, 'dry_run': 1}"
+bench --site <site> execute relay_core.received_media.backfill --kwargs "{'days': 7}"
 ```
 
-One run queues at most 500 messages, oldest first. A run skips media that has a copy or a recorded reason. When a run lists 500, run it again after its jobs finish.
+A dry run returns `{"candidates": <count>}`. A real run downloads one message at a time, commits each message, logs each outcome to the `relay_core` log, and returns the counts `stored`, `expired`, `failed` and `skipped`. It also tries media that is older than 7 days, because WhatsApp sometimes keeps it longer. Media that WhatsApp no longer keeps gets a recorded reason, so the next run does not try it again. Run it again after a Hub outage to try the `failed` messages again.
 
 ## View stickers and updates
 
