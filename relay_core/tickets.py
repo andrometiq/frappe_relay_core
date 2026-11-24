@@ -473,8 +473,12 @@ def check_watchers(doc, previous):
     if len(users) > MAX_MENTIONS or len(set(users)) != len(users):
         frappe.throw(f'Mention at most {MAX_MENTIONS} distinct colleagues')
     known = {row.user for row in previous.get('watchers') or []} if previous else set()
-    for user in set(users) - known:
+    added = set(users) - known
+    for user in added:
         validate_agent(user)
+    from relay_core.teams import colleagues_of
+    if added - colleagues_of(frappe.session.user, added):
+        frappe.throw('Mention colleagues who share a team with you', frappe.PermissionError)
 
 
 def named_people(doc):
@@ -832,7 +836,9 @@ def permission(doc, user=None, permission_type=None):
     user = user or frappe.session.user
     if user == 'Administrator': return True
     if not relay_user(user): return False
-    if user in named_people(doc): return True
+    # Mentioned people read and comment; the assignee also works the ticket.
+    if user in named_people(doc) and (user == doc.get('assigned_to') or permission_type in (None, 'read', 'select')):
+        return True
     if doc.get('business_doctype') or doc.get('business_name'):
         if not (doc.get('business_doctype') and doc.get('business_name')) or not allowed(doc, user):
             return False
@@ -885,13 +891,14 @@ def query_condition(user=None):
 
 @frappe.whitelist(methods=['GET'])
 def colleagues(query=''):
-    """Relay users to assign or mention on a ticket without a chat."""
+    """Relay users to assign or mention on a ticket without a chat: those who share a team with the user."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid colleague search')
     from relay_core.teams import _agent_options
     query = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-    return [dict(value=row.name, label=row.full_name or row.name) for row in _agent_options(query)]
+    return [dict(value=row.name, label=row.full_name or row.name)
+            for row in _agent_options(query, colleague_of=frappe.session.user)]
 
 
 def mentioned_tickets():
@@ -949,7 +956,10 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
     if frappe.utils.cint(mine):
         filters['assigned_to'] = frappe.session.user
     if frappe.utils.cint(mentioned):
-        filters['name'] = ['in', mentioned_tickets() or ['']]
+        names = set(mentioned_tickets())
+        if 'name' in filters:
+            names &= set(filters['name'][1])
+        filters['name'] = ['in', sorted(names) or ['']]
     if after:
         validate_reference(after, 'TKT')
         created = frappe.db.get_value('Relay Ticket', after, 'creation')

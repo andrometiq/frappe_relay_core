@@ -72,11 +72,11 @@ def notify(doc, users, kind, action):
     return users
 
 
-def locked_ticket(name):
+def locked_ticket(name, permission):
     require_access()
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
-    doc.check_permission('write')
+    doc.check_permission(permission)
     return doc
 
 
@@ -114,7 +114,8 @@ def add_comment(name, body, mentions=None, request_key=None):
 
 
 def insert_comment(name, body, users):
-    doc = locked_ticket(name)
+    """Every reader comments; mentioning colleagues needs write, so mentioned people cannot mention others."""
+    doc = locked_ticket(name, 'write' if users else 'read')
     if any(not can_follow(doc, user) for user in users):
         frappe.throw('A mentioned colleague cannot access this conversation', frappe.PermissionError)
     frappe.get_doc({'doctype': 'Comment', 'comment_type': 'Comment', 'reference_doctype': 'Relay Ticket',

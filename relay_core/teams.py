@@ -130,7 +130,41 @@ def agents(query=''):
     return _agent_options(query)
 
 
-def _agent_options(query, contact=None):
+def managers(user):
+    """Administrator and the holders of a role that sees every team, as a condition on the User table."""
+    role=frappe.qb.DocType('Has Role')
+    holders=frappe.qb.from_(role).select(role.parent).where(
+        (role.parenttype=='User') & role.role.isin(list(ALL_TEAMS_ROLES)))
+    return (user.name=='Administrator') | user.name.isin(holders)
+
+
+def team_members(teams):
+    """The users of `teams`, a list of team names or a subquery of them."""
+    member=frappe.qb.DocType('Relay Team Member')
+    return frappe.qb.from_(member).select(member.user).where((member.parenttype=='Relay Team') & member.parent.isin(teams))
+
+
+def user_teams(user):
+    """The teams `user` belongs to, as a subquery."""
+    mine=frappe.qb.DocType('Relay Team Member').as_('mine')
+    return frappe.qb.from_(mine).select(mine.parent).where((mine.user==user) & (mine.parenttype=='Relay Team'))
+
+
+def teams_limit(user):
+    """Teams are on and `user` does not see every team, so colleagues are their teammates and managers."""
+    return features.is_enabled('teams') and not sees_all_teams(user)
+
+
+def colleagues_of(user, users):
+    """The users among `users` that `user` may pick as colleagues on a ticket without a chat."""
+    if not users or not teams_limit(user):
+        return set(users)
+    table=frappe.qb.DocType('User')
+    return set(frappe.qb.from_(table).select(table.name).where(
+        table.name.isin(list(users)) & (managers(table) | table.name.isin(team_members(user_teams(user))))).run(pluck=True))
+
+
+def _agent_options(query, contact=None, colleague_of=None):
     """Filter candidates in SQL before applying the bounded search window."""
     user=frappe.qb.DocType('User');role=frappe.qb.DocType('Has Role')
     from frappe.permissions import get_doctype_roles
@@ -141,17 +175,14 @@ def _agent_options(query, contact=None):
         from relay_core.permissions import readable_contact
         readable_contact(contact)
         assignment=frappe.db.get_value('Relay Conversation Assignment',{'relay_contact':contact},['team','assigned_to'],as_dict=True) or {}
-        managers=frappe.qb.from_(role).select(role.parent).where(
-            (role.parenttype=='User') & role.role.isin(list(ALL_TEAMS_ROLES)))
-        allowed=(user.name=='Administrator') | user.name.isin(managers)
+        allowed=managers(user)
         if assignment.get('assigned_to'):
             allowed=allowed | (user.name==assignment['assigned_to'])
         if assignment.get('team'):
-            member=frappe.qb.DocType('Relay Team Member')
-            members=frappe.qb.from_(member).select(member.user).where(
-                (member.parent==assignment['team']) & (member.parenttype=='Relay Team'))
-            allowed=allowed | user.name.isin(members)
+            allowed=allowed | user.name.isin(team_members([assignment['team']]))
         condition=condition & allowed
+    if colleague_of and teams_limit(colleague_of):
+        condition=condition & (managers(user) | user.name.isin(team_members(user_teams(colleague_of))))
     rows=(frappe.qb.from_(user).select(user.name,user.full_name)
         .where(condition & (user.name.like('%'+query+'%') | user.full_name.like('%'+query+'%')))
         .orderby(user.name).limit(30).run(as_dict=True))

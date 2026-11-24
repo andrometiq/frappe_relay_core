@@ -13,7 +13,6 @@ const { comments, error, sending, open, load, add } = ticketCommentsStore(coreAp
 const body = ref(''), mentions = ref([])
 const labels = new Map()
 const contact = computed(() => props.ticket.messages?.[0]?.contact || '')
-const readOnly = computed(() => sending.value || !props.ticket.can_edit)
 
 function mention(values) {
   if (values.length > 10) { error.value = 'Mention at most 10 colleagues'; return }
@@ -25,7 +24,7 @@ async function colleagues(query, signal) {
   for (const row of rows) labels.set(row.value, row.label)
   return rows
 }
-const mentionField = computed(() => ({ label: 'Notify in this comment', placeholder: 'Search colleagues…', readOnly: readOnly.value, search: colleagues }))
+const mentionField = computed(() => ({ label: 'Notify in this comment', placeholder: 'Search colleagues…', readOnly: sending.value, search: colleagues }))
 async function send() {
   if (!await add(body.value, mentions.value)) return
   body.value = ''; mentions.value = []
@@ -46,10 +45,12 @@ useRealtimeRefresh([], ['tickets'], load)
       <div class="ticket-comment-author"><strong>{{ row.author_name }}</strong><time>{{ dateTime(row.creation) }}</time></div>
       <p>{{ row.body }}</p>
     </article>
-    <form v-if="ticket.can_edit" class="ticket-comment-form" @submit.prevent="send">
+    <form class="ticket-comment-form" @submit.prevent="send">
       <textarea v-model="body" aria-label="Ticket comment" placeholder="Write a comment…" rows="3" maxlength="4000" />
-      <ChoiceField :field="mentionField" :model-value="mentions" multiple @update:model-value="mention" />
-      <small class="ticket-muted">People you add here get a notification about this comment.</small>
+      <template v-if="ticket.can_edit">
+        <ChoiceField :field="mentionField" :model-value="mentions" multiple @update:model-value="mention" />
+        <small class="ticket-muted">People you add here get a notification about this comment.</small>
+      </template>
       <div><Button type="submit" variant="solid" label="Add comment" :disabled="sending || !body.trim()" /></div>
     </form>
     <ErrorMessage :message="error" />

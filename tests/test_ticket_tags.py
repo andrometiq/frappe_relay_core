@@ -106,6 +106,20 @@ class TicketTagTests(unittest.TestCase):
             self.module.add_comment('TKT-00001', 'Please check', ['blocked@example.invalid'])
         self.assertEqual(self.f.get_doc.call_count, 1)
 
+    def test_readers_comment_but_only_writers_mention(self):
+        ticket = self.ticket(); ticket.check_permission = Mock()
+        self.f.get_doc = Mock(side_effect=lambda value, *args, **kwargs: Mock() if isinstance(value, dict) else ticket)
+        self.tickets.permission.return_value = True
+        with patch.dict(sys.modules, {'relay_core.realtime': types.SimpleNamespace(changed=Mock())}):
+            self.module.insert_comment('TKT-00001', 'Checked the stock', [])
+            ticket.check_permission.assert_called_once_with('read')
+            ticket.check_permission.reset_mock()
+            self.module.insert_comment('TKT-00001', 'Please check @Local agent', ['agent@example.invalid'])
+            ticket.check_permission.assert_called_once_with('write')
+            ticket.check_permission.side_effect = PermissionError
+            with self.assertRaises(PermissionError):
+                self.module.insert_comment('TKT-00001', 'Please check @Local agent', ['agent@example.invalid'])
+
     def test_a_repeated_comment_request_key_adds_the_comment_once(self):
         import contextlib
         import relay_core

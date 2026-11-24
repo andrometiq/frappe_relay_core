@@ -332,7 +332,10 @@ class StandaloneTicketTests(unittest.TestCase):
                                        document_name=lambda value: value, allowed=Mock(return_value=False),
                                        reference=Mock(), relay_user=lambda user: True)
         self.agents = Mock()
-        modules = {'relay_core.business_access': access, 'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents),
+        self.colleagues = Mock(side_effect=lambda user, users: set(users))
+        self.f.session = Record(user='creator@example.invalid')
+        modules = {'relay_core.business_access': access,
+                   'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents, colleagues_of=self.colleagues),
                    'relay_core.permissions': types.SimpleNamespace(can_read_contact_as=Mock(return_value=True))}
         self.enterContext(patch.dict(sys.modules, modules))
         self.access = access
@@ -366,6 +369,10 @@ class StandaloneTicketTests(unittest.TestCase):
                                             ([Record(user='a@example.invalid')], [Record(message=self.message.name)], 'comment')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 self.module.validate_ticket(Record(self.doc, watchers=watchers, messages=messages), check_assignment=False)
+        self.colleagues.side_effect = lambda user, users: set()
+        with self.assertRaisesRegex(PermissionError, 'share a team'):
+            self.module.validate_ticket(self.doc, check_assignment=False)
+        self.colleagues.assert_called_with('creator@example.invalid', {'agent@example.invalid'})
         self.agents.side_effect = PermissionError('The user needs a Relay communication role')
         with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
 
@@ -373,9 +380,16 @@ class StandaloneTicketTests(unittest.TestCase):
         self.doc.update(name='TKT-00003', assigned_to='owner@example.invalid', watchers=[Record(user='mentioned@example.invalid')])
         self.assertTrue(self.module.permission(self.doc, 'owner@example.invalid'))
         self.assertTrue(self.module.permission(self.doc, 'mentioned@example.invalid'))
+        self.assertTrue(self.module.permission(self.doc, 'mentioned@example.invalid', 'read'))
+        self.assertTrue(self.module.permission(self.doc, 'owner@example.invalid', 'write'), 'The assignee works the ticket')
+        for ptype in ('write', 'delete', 'share'):
+            self.assertFalse(self.module.permission(self.doc, 'mentioned@example.invalid', ptype),
+                             'Mentioned people cannot change, reassign, close or mention')
         self.assertFalse(self.module.permission(self.doc, 'other@example.invalid'))
         self.access.allowed.return_value = True
         self.assertTrue(self.module.permission(self.doc, 'other@example.invalid'), 'Team members read it through the record')
+        self.assertTrue(self.module.permission(self.doc, 'mentioned@example.invalid', 'write'),
+                        'A mentioned person whose teams cover the record works it like any team member')
         chat = Record(self.doc, messages=[Record(message=self.message.name)])
         self.assertEqual(self.module.named_people(chat), set(), 'A chat ticket keeps its chat permissions')
 
@@ -424,13 +438,19 @@ class StandaloneTicketTests(unittest.TestCase):
             sys.modules['relay_core.teams']._agent_options = options
             options.return_value = [Record(name='agent@example.invalid', full_name='Local Agent')]
             self.assertEqual(self.module.colleagues('Lo_'), [{'value': 'agent@example.invalid', 'label': 'Local Agent'}])
-            options.assert_called_once_with('Lo\\_')
+            options.assert_called_once_with('Lo\\_', colleague_of='creator@example.invalid')
         self.module.require_access.assert_called_once_with()
         with self.assertRaises(ValueError): self.module.colleagues('x' * 81)
         self.f.get_list = Mock(return_value=[])
         self.module.mentioned_tickets = Mock(return_value=['TKT-00004'])
         self.module.directory(mentioned='1')
         self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'name': ['in', ['TKT-00004']]})
+        self.module._status_names = Mock(return_value=['Closed'])
+        for closed, expected in ((['TKT-00004', 'TKT-00005'], ['TKT-00004']), (['TKT-00005'], [''])):
+            self.module._resolved_today = Mock(return_value=closed)
+            self.module.directory(mentioned='1', resolved_today='1')
+            self.assertEqual(self.f.get_list.call_args.kwargs['filters']['name'], ['in', expected],
+                             'Mentioned and resolved today both apply')
 
 
 class Record(dict):
