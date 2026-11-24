@@ -96,6 +96,9 @@ doc_events['File'] = {event: 'relay_core.ai.event_memory.on_file_change' for eve
 doc_events.setdefault('Relay AI Event', {}).update(
     {event: 'relay_core.ai.knowledge_base.ingest.on_event_change' for event in ('on_update', 'on_trash')})
 
+# A deleted User takes their Relay profile with them, so the profile's link never blocks the delete.
+doc_events.setdefault('User', {})['on_trash'] = 'relay_core.user_profiles.on_user_trash'
+
 # Cover generic Desk/REST access as well as the dedicated AI APIs. Events, their builds and playbooks (the
 # knowledge base) stay open while AI is off: staff and external agents use them; only the model work is gated.
 for _doctype in ('Relay AI Skill', 'Relay AI Knowledge',

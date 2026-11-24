@@ -163,6 +163,12 @@ def save_profile(user, changes):
     return True
 
 
+def on_user_trash(doc, method=None):
+    """Delete the profile of a User being deleted; its link would otherwise stop the delete with LinkExistsError."""
+    if frappe.db.exists(DOCTYPE, doc.name):
+        frappe.delete_doc(DOCTYPE, doc.name, ignore_permissions=True, force=True)
+
+
 def same(current, value):
     if isinstance(value, datetime):
         return bool(current) and get_datetime(current) == value

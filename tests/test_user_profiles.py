@@ -174,6 +174,17 @@ class UserProfileTests(unittest.TestCase):
             user_profiles.cards([f'user{index}@example.invalid' for index in range(101)])
 
 
+class UserDeleteTests(unittest.TestCase):
+    def test_deleting_a_user_deletes_their_profile_first(self):
+        fake = SimpleNamespace(db=SimpleNamespace(exists=Mock(side_effect=lambda doctype, name: name == AGENT)), delete_doc=Mock())
+        with patch.object(user_profiles, 'frappe', fake):
+            user_profiles.on_user_trash(SimpleNamespace(name=AGENT))
+            user_profiles.on_user_trash(SimpleNamespace(name=OTHER))
+        fake.delete_doc.assert_called_once_with('Relay User Profile', AGENT, ignore_permissions=True, force=True)
+        from relay_core import hooks
+        self.assertEqual(hooks.doc_events['User']['on_trash'], 'relay_core.user_profiles.on_user_trash')
+
+
 class RelayStaffTests(unittest.TestCase):
     def test_only_colleagues_have_cards(self):
         def get_all(doctype, filters, pluck):
