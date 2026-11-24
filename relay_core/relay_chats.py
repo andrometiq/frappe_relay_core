@@ -137,6 +137,26 @@ def thread_unread(key):
     return unread_by_thread(*chat_condition(key))
 
 
+def unread_by_chat(keys):
+    """thread_unread of several chats in one query: {(doctype, name): {(relay_contact, channel, endpoint): (count, first, newest)}}."""
+    if not keys:
+        return {}
+    parts, values = [], {}
+    for index, key in enumerate(keys):
+        where, params = chat_condition(key)
+        for name in params:
+            where = where.replace(f'%({name})s', f'%({name}_{index})s')
+        parts.append(f'({where})')
+        values.update({f'{name}_{index}': value for name, value in params.items()})
+    # Each message's chat: its business record, else its contact, as chat_condition splits them.
+    chat = [f"IF(COALESCE(m.business_name, '')='', '{CONTACT}', m.business_doctype)",
+            "IF(COALESCE(m.business_name, '')='', m.relay_contact, m.business_name)"]
+    result = {}
+    for row in unread_threads(' OR '.join(parts), values, chat):
+        result.setdefault((row[0], row[1]), {})[tuple(row[2:5])] = tuple(row[5:])
+    return result
+
+
 def unread_by_thread(where, values=None):
     """thread_unread of the messages matching `where`."""
     return {tuple(row[:3]): tuple(row[3:]) for row in unread_threads(where, values)}

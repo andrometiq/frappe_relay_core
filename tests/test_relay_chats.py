@@ -108,6 +108,21 @@ class RelayChatTests(unittest.TestCase):
                              'A rebuild uses the same rule and adds each thread to its chat')
         self.assertEqual(len(shared.call_args.kwargs['key']), 2)
 
+    def test_the_unread_threads_of_many_chats_come_from_one_query(self):
+        self.fake.db.sql.return_value = [('Customer', 'C1', 'R1', 'CH-1', '911', 2, 'M-5', 'M-8'),
+                                          ('Relay Contact', 'R7', 'R7', 'CH-2', '933', 1, 'M-2', 'M-2')]
+        result = relay_chats.unread_by_chat([('Customer', 'C1'), ('Relay Contact', 'R7')])
+        self.assertEqual(result, {('Customer', 'C1'): {('R1', 'CH-1', '911'): (2, 'M-5', 'M-8')},
+                                  ('Relay Contact', 'R7'): {('R7', 'CH-2', '933'): (1, 'M-2', 'M-2')}})
+        self.assertEqual(self.fake.db.sql.call_count, 1)
+        statement, values = self.fake.db.sql.call_args.args
+        self.assertEqual(values, {'doctype_0': 'Customer', 'name_0': 'C1', 'contact_1': 'R7'})
+        self.assertIn('(m.business_doctype=%(doctype_0)s AND m.business_name=%(name_0)s) OR (m.relay_contact=%(contact_1)s', statement)
+        self.assertIn("IF(COALESCE(m.business_name, '')='', 'Relay Contact', m.business_doctype)", statement)
+        self.fake.db.sql.reset_mock()
+        self.assertEqual(relay_chats.unread_by_chat([]), {})
+        self.fake.db.sql.assert_not_called()
+
     def test_a_read_that_lowers_nothing_writes_nothing(self):
         self.row = _dict(name='RC-1', last_message='RELAY-MSG-0000000009', last_message_at=AT, unread_count=0)
         relay_chats.mark_read(('Customer', 'C1'))
