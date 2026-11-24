@@ -36,7 +36,7 @@ export function dayDividers(rows, today = new Date()) {
   return dividers
 }
 
-// True for a message the session user sent: it sits on the left; the contact, colleagues and automation sit on the right.
+// True for a message the session user sent: it sits on the right; the contact, colleagues and automation sit on the left.
 // A send still in flight is always the session user's own.
 export function isMine(row, me) {
   return row?.direction === 'Outgoing' && (Boolean(row._pending) || (Boolean(me) && row.sender?.user === me))

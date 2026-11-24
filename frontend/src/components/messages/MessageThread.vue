@@ -96,7 +96,7 @@ const numberTags = computed(() => props.oneChannel ? {} : messageNumberTags(sent
 const quoted = computed(() => quoteIndex(props.rows || []));
 const dividers = computed(() => dayDividers(threadRows.value));
 // Messages read as sender groups: the first of a group shows the avatar, name and time.
-// The session user's own messages sit on the left; the contact, colleagues and automation sit on the right.
+// The session user's own messages sit on the right; the contact, colleagues and automation sit on the left.
 const me = globalThis.frappe?.session?.user || "";
 const starts = computed(() => groupStarts(threadRows.value, props.unread, me));
 function senderName(message) {

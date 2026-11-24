@@ -58,7 +58,7 @@ test('messages group by sender: a new group starts on the other side, another co
   assert.deepEqual([...groupStarts([])], [])
 })
 
-test('my own sends sit on the left; the contact, colleagues and automation sit on the right, each in their own group', () => {
+test('my own sends sit on the right; the contact, colleagues and automation sit on the left, each in their own group', () => {
   const me = 'anitha@example.invalid', at = time => '2026-10-01 ' + time
   const rows = [
     { name: 'M1', direction: 'Incoming', relay_contact: 'C1', sent_at: at('10:00:00') },
