@@ -1230,6 +1230,12 @@ strong,b,h1,h2,h3,h4,th{font-weight:600}
   .composer-closed-copy { min-width:0; flex-basis:calc(100% - 60px); }
   .composer-dock .composer-closed > .relay-button:not(.composer-more-trigger) { width:100%; }
   .composer-dock .composer-start { padding:12px; gap:12px; }
+  /* A closed reply window is one row: the reason, then the template button. */
+  .composer-dock .composer-closed:not(.composer-start) { flex-wrap:nowrap; gap:10px; padding:8px 12px; }
+  .composer-dock .composer-closed:not(.composer-start) > .relay-button { width:auto; flex:none; }
+  .composer-closed:not(.composer-start) .composer-closed-copy { flex:1 1 auto; }
+  .composer-closed:not(.composer-start) .composer-closed-copy strong { font-size:13px; }
+  .composer-closed:not(.composer-start) .composer-closed-copy p { display:none; }
   .composer-field-grid { grid-template-columns:1fr; }
   .composer-attachment { flex-wrap:wrap; }
 }

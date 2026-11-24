@@ -392,7 +392,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
         <Button class="mobile-only conversation-back" icon="chevron-left" aria-label="Back to conversations" title="Back to conversations" @click="state.clearSelection()" />
         <Avatar :label="title" aria-hidden="true" />
         <div class="conversation-title">
-          <h2><button v-if="frappeContact || conversationContact" type="button" class="conversation-title-button" aria-label="Open contact info" @click="toggleInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
+          <h2><button v-if="frappeContact || conversationContact" type="button" class="conversation-title-button hit-zone" aria-label="Open contact info" @click="toggleInfo">{{ title }}</button><template v-else>{{ title }}</template></h2>
           <p v-if="isMobile && whoLine" class="conversation-channel-line conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></p>
           <div class="conversation-meta">
             <template v-if="businessName">
