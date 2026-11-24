@@ -68,7 +68,8 @@ test('a Telegram thread reads by its handle and every tab keeps its full text in
 
 test('a long address ends in an ellipsis inside its tab, and edge fades follow scrolling, not a timer', async () => {
   const tabs = await read('components/messages/ThreadTabs.vue')
-  assert.match(tabs, /\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ min-width:0; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \}/)
+  assert.match(tabs, /\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ min-width:0; max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \}/)
+  assert.match(tabs, /\.thread-tab-via \{ display:none; \}/, 'Our number name moves to the tooltip so four tabs fit beside the details panel')
   assert.match(tabs, /@media \(max-width:768px\) \{[^}]*\}\s*\.thread-tab \{ min-height:44px; \}\s*\.thread-tab-endpoint, \.thread-tab-person, \.thread-tab-via \{ max-width:120px; \}/)
   assert.match(tabs, /\.thread-tab-icon, \.thread-tab-provider, \.thread-tab-unread \{ flex:none; \}/)
   assert.match(tabs, /new ResizeObserver\(measure\)/)

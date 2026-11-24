@@ -35,7 +35,7 @@ function keydown(event) {
 </script>
 
 <template>
-  <div class="thread-tabs" :class="{ 'has-more-start': more.start, 'has-more-end': more.end }">
+  <div class="thread-tabs" :class="{ 'has-more-start': more.start, 'has-more-end': more.end, 'is-crowded': tabs.length > 3 }">
     <div ref="list" class="thread-tab-list" role="tablist" aria-label="Conversations by channel" @keydown="keydown" @scroll.passive="measure">
       <button v-for="tab in tabs" :key="tab.thread.key" type="button" role="tab" class="thread-tab" :data-provider="tab.provider"
         :aria-selected="tab.thread.key === active" :tabindex="tab.thread.key === active ? 0 : -1" :disabled="busy && tab.thread.key !== active"
@@ -54,17 +54,21 @@ function keydown(event) {
 </template>
 
 <style scoped>
-.thread-tabs { position:relative; display:flex; align-items:stretch; gap:4px; min-width:0; padding:0 12px; border-bottom:1px solid var(--relay-stroke); background:var(--relay-layer); }
-.thread-tab-list { display:flex; flex:1; gap:2px; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; scroll-snap-type:x proximity; }
+.thread-tabs { position:relative; display:flex; align-items:stretch; gap:2px; min-width:0; padding:0 8px; border-bottom:1px solid var(--relay-stroke); background:var(--relay-layer); }
+.thread-tab-list { display:flex; flex:1; gap:0; min-width:0; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; scroll-snap-type:x proximity; }
 .thread-tab-list::-webkit-scrollbar { display:none; }
-.thread-tab { position:relative; display:inline-flex; flex:none; align-items:center; gap:5px; min-height:42px; padding:0 8px; border:0; border-bottom:2px solid transparent; background:none; color:var(--relay-ink-3); font-size:12.5px; font-weight:500; white-space:nowrap; scroll-snap-align:start; cursor:pointer; transition:color var(--relay-fast) var(--relay-ease), border-color var(--relay-fast) var(--relay-ease); }
+.thread-tab { position:relative; display:inline-flex; flex:none; align-items:center; gap:4px; min-height:40px; padding:0 6px; border:0; border-bottom:2px solid transparent; background:none; color:var(--relay-ink-3); font-size:12.5px; font-weight:500; white-space:nowrap; scroll-snap-align:start; cursor:pointer; transition:color var(--relay-fast) var(--relay-ease), border-color var(--relay-fast) var(--relay-ease); }
 .thread-tab:hover { color:var(--relay-ink); }
 .thread-tab[aria-selected="true"] { color:var(--relay-ink); border-bottom-color:var(--relay-accent); }
 .thread-tab:focus-visible { outline:2px solid var(--relay-accent); outline-offset:-2px; border-radius:6px 6px 0 0; }
 .thread-tab:disabled { cursor:default; opacity:.6; }
-.thread-tab small { color:var(--relay-ink-soft); font-size:11.5px; font-weight:400; }
+.thread-tab small { color:var(--relay-ink-soft); font-size:11px; font-weight:400; }
+/* Tabs stay mockup-short so four fit beside the details panel: the address is cut at 104px and our number's name is in the tooltip. */
+.thread-tab-via { display:none; }
+/* With four or more threads the other tabs name their channel by icon only; the word stays for screen readers and the open tab. */
+.is-crowded .thread-tab:not([aria-selected="true"]) .thread-tab-provider { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 /* A long address never widens a tab: it ends in an ellipsis and the tab's tooltip holds the full value. */
-.thread-tab-endpoint, .thread-tab-person, .thread-tab-via { min-width:0; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.thread-tab-endpoint, .thread-tab-person, .thread-tab-via { min-width:0; max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .thread-tab-icon, .thread-tab-provider, .thread-tab-unread { flex:none; }
 .thread-tab-list { mask-image:linear-gradient(to right, var(--thread-fade-start, #000), #000 24px, #000 calc(100% - 24px), var(--thread-fade-end, #000)); }
 .has-more-start .thread-tab-list { --thread-fade-start:transparent; }
@@ -74,7 +78,7 @@ function keydown(event) {
 .thread-tab[data-provider="Telegram"] .thread-tab-icon { color:var(--relay-telegram); }
 .thread-tab[data-provider="Email"] .thread-tab-icon { color:var(--relay-email); }
 .thread-tab-unread { min-width:18px; height:16px; padding:0 5px; border-radius:9px; background:var(--relay-accent); color:var(--relay-accent-ink); font-size:10.5px; font-weight:600; line-height:16px; text-align:center; animation:thread-pop var(--relay-normal) var(--relay-ease); }
-.thread-tab-new { display:grid; flex:none; place-items:center; width:40px; min-height:42px; border:0; border-radius:6px; background:none; color:var(--relay-ink-3); cursor:pointer; }
+.thread-tab-new { display:grid; flex:none; place-items:center; width:32px; min-height:40px; border:0; border-radius:6px; background:none; color:var(--relay-ink-3); cursor:pointer; }
 .thread-tab-new:hover { background:var(--relay-hover); color:var(--relay-ink); }
 @keyframes thread-pop { from { transform:scale(.6); opacity:0; } to { transform:none; opacity:1; } }
 @media (max-width:768px) {
