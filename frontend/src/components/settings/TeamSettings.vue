@@ -113,8 +113,8 @@ onMounted(() => load())
 <style scoped>
 .team-avatars { display:inline-flex; align-items:center; gap:4px; color:var(--relay-ink-3); font-size:12.5px; }
 .team-table td.cell-main { min-width:160px; }
-.team-table .cell-title { white-space:normal; overflow-wrap:anywhere; }
-.team-access-line { display:block; overflow-wrap:anywhere; }
+.team-table .cell-title { white-space:normal; overflow-wrap:break-word; }
+.team-access-line { display:block; }
 .team-stale { color:var(--relay-red); }
 .team-access-line + .team-access-line { color:var(--relay-ink-soft); font-size:12px; }
 .team-more { padding:12px 20px; }
