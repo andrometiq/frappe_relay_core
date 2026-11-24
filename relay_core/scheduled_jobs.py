@@ -38,3 +38,4 @@ expire_approvals = when_hub_configured('relay_core.flows.actions.expire_approval
 purge_ai_payloads = when_hub_configured('relay_core.ai.minimise.purge_ai_payloads')
 sync_ai_knowledge = when_hub_configured('relay_core.ai.knowledge_base.ingest.sync_due', ai=True)
 purge_ai_memory = when_hub_configured('relay_core.ai.fact_memory.purge_pending', ai=True)
+rebuild_phone_index = when_hub_configured('relay_core.relay_core.doctype.relay_phone_index.relay_phone_index.rebuild')

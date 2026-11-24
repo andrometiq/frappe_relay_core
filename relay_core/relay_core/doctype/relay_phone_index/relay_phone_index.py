@@ -36,6 +36,11 @@ def remove(person, method=None):
     frappe.db.delete('Relay Phone Index', {'contact': person.name})
 
 
+def rename(person, method=None, old=None, new=None, merge=False):
+    """Contact after_rename: rows keep pointing at the Contact; a merge's phones join the kept Contact."""
+    frappe.db.set_value('Relay Phone Index', {'contact': old}, 'contact', new, update_modified=False)
+
+
 def rebuild():
     """Index the phones of every Contact."""
     phones = defaultdict(list)

@@ -24,7 +24,9 @@ scheduler_events = {
     "hourly": ["relay_core.scheduled_jobs.expire_approvals", "relay_core.scheduled_jobs.recover_received_media"],
     "daily": ["relay_core.scheduled_jobs.refresh_whatsapp_billing", "relay_core.scheduled_jobs.sync_channels",
               "relay_core.scheduled_jobs.purge_ai_payloads", "relay_core.scheduled_jobs.sync_ai_knowledge",
-              "relay_core.scheduled_jobs.purge_ai_memory"],
+              "relay_core.scheduled_jobs.purge_ai_memory",
+              # Phones written without a Contact save (db.set_value, SQL) reach the index here.
+              "relay_core.scheduled_jobs.rebuild_phone_index"],
 }
 
 permission_query_conditions = {'Relay Contact':'relay_core.permissions.contact_query', 'Relay Message':'relay_core.permissions.message_query', 'Relay Ticket':'relay_core.tickets.query_condition'}
@@ -73,6 +75,7 @@ doc_events['Contact'] = {event: 'relay_core.contact_lifecycle.' + event
 _phone_index = 'relay_core.relay_core.doctype.relay_phone_index.relay_phone_index.'
 doc_events['Contact']['on_update'] = [doc_events['Contact']['on_update'], _phone_index + 'sync']
 doc_events['Contact']['after_delete'] = _phone_index + 'remove'
+doc_events['Contact']['after_rename'] = [doc_events['Contact']['after_rename'], _phone_index + 'rename']
 
 from relay_core.business_references import RELAY_DOCTYPES as _relay_doctypes
 ignore_links_on_delete = list(_relay_doctypes)
