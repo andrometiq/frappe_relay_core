@@ -294,8 +294,8 @@ def messages(doctype, name, before=None, after=None, channel=None, limit=50, fro
             channel_docs[row.channel].check_permission('read')
         identity=readable[row.relay_contact]
         items.append(dict(row,contact_label=identity['label'],frappe_contact=identity['frappe_contact']))
-    from relay_core.message_display import decorate_messages
-    decorate_messages(items, channel_docs)
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(items, channel_docs))
     cursor = page[-1].name if since and page else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
     return {'items':items,'has_more':more,'ingestion_cursor':cursor,'first':page[0].name if page else None,'last':page[-1].name if page else None}
 

@@ -77,8 +77,8 @@ def messages(contact, before=None, after=None, channel=None, limit=50, sender_en
     for channel_name in {row.channel for row in rows}:
         channels[channel_name] = frappe.get_doc('Relay Channel', channel_name)
         channels[channel_name].check_permission('read')
-    from relay_core.message_display import decorate_messages
-    decorate_messages(rows, channels)
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(rows, channels))
     if not after and not since:
         rows.reverse()
     cursor = rows[-1].name if since and rows else since if since else watermark[0].name if watermark else 'RELAY-MSG-0000000000'
@@ -162,8 +162,8 @@ def message_context(message, channel=None):
     later=messages(doc.relay_contact,after=message,limit=25,channel=channel)
     fields=['name','channel','content','direction','status','creation','sent_at','provider_context','message_type','message_data','reactions','edited_at','transcript','transcript_status','delivery_error','provider_id','sender_endpoint','send_group','legacy_author']
     row={key:doc.get(key) for key in fields}
-    from relay_core.message_display import decorate_messages
-    decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)})
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages([row], {doc.channel: frappe.get_doc('Relay Channel', doc.channel)}))
     return {'contact':doc.relay_contact,'items':earlier['items']+[row]+later['items'],'first':earlier['first'] or message,'has_more':earlier['has_more'],'has_newer':later['has_more'],'last':later['last'] or message,'anchor':message}
 
 
@@ -199,8 +199,8 @@ def message_snapshots(contact, names):
     channels = {row.channel: frappe.get_doc('Relay Channel', row.channel) for row in rows}
     for channel in channels.values():
         channel.check_permission('read')
-    from relay_core.message_display import decorate_messages
-    decorate_messages(rows, channels)
+    from relay_core.message_display import add_senders, decorate_messages
+    add_senders(decorate_messages(rows, channels))
     return {'items':rows}
 
 
