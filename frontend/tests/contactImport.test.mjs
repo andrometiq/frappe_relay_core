@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises'
 import * as Vue from 'vue'
 import { compile } from '@vue/compiler-dom'
 import { renderToString } from 'vue/server-renderer'
-import { contactColumns, importCount, importFileError, importState } from '../src/services/contactImport.js'
+import { contactColumns, downloadName, exportSearch, importCount, importFileError, importState } from '../src/services/contactImport.js'
+import { readBrowse } from '../src/services/businessBrowse.js'
 
 test('preview states count valid actions, skipped duplicates and row errors', () => {
   const rows = [ { status: 'create' }, { status: 'link' }, { status: 'skip' }, { status: 'error', reason: 'Choose an enabled business type.' } ]
@@ -14,6 +15,19 @@ test('preview states count valid actions, skipped duplicates and row errors', ()
   assert.equal(importState(null).valid, 0)
   assert.equal(importState({ counts: { errors: 2000 } }).valid, 0)
   assert.deepEqual(contactColumns, ['Mobile', 'Email', 'Contact name', 'Business type', 'Business record'])
+})
+test('export sends the Contacts list filters; search only where the list searches contacts', () => {
+  const search = hash => Object.fromEntries(new URLSearchParams(exportSearch(readBrowse(hash)).slice(1)))
+  assert.equal(exportSearch(readBrowse('#/contacts')), '')
+  assert.deepEqual(search('#/contacts?group_type=Customer&group_query=north'), { business_type: 'Customer' })
+  assert.deepEqual(search('#/contacts?group_type=Customer&group_record=C+%26+1&group_query=ravi&contact=R1'),
+    { business_type: 'Customer', business_name: 'C & 1', query: 'ravi' })
+  assert.deepEqual(search('#/contacts?group_unlinked=1&group_query=ravi'), { unlinked: '1', query: 'ravi' })
+})
+test('export file name comes from the server', () => {
+  assert.equal(downloadName('attachment; filename="Relay contacts - Customer.xlsx"'), 'Relay contacts - Customer.xlsx')
+  assert.equal(downloadName("attachment; filename*=UTF-8''Relay%20contacts%20-%20Kund%C3%A9.xlsx"), 'Relay contacts - Kundé.xlsx')
+  assert.equal(downloadName(null), 'Relay contacts.xlsx')
 })
 test('file checks accept xlsx and csv and reject oversized or unsupported files', () => {
   for (const name of ['contacts.xlsx', 'contacts.CSV']) assert.equal(importFileError({ name, size: 200 }), '')

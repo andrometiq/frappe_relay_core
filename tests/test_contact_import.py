@@ -201,15 +201,54 @@ class ContactImportTests(TestCase):
             self.assertTrue(service.allowed('staff', [role]))
         self.assertTrue(service.allowed('Administrator', []))
 
+    def export(self, people, links, records, **filters):
+        """Run export_rows over fake pages; returns the rows and the people_query calls."""
+        pages = [people, []]
+        calls = []
+        def query(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(run=lambda **kw: pages.pop(0))
+        def get_all(doctype, filters=None, pluck=None, **kwargs):
+            if doctype == 'Dynamic Link':
+                return [Person(parent=p, link_doctype=d, link_name=n) for p, d, n in links if p in filters['parent'][1]]
+            if doctype not in records:
+                raise LookupError(doctype)
+            return [name for name in filters['name'][1] if name in records[doctype]]
+        self.fake.get_all.side_effect = get_all
+        with patch('relay_core.business_access.people_query', side_effect=query), \
+                patch('relay_core.business_access.allowed_types', return_value={'Customer', 'Gone'}), \
+                patch('relay_core.api.contact_filters', return_value=([], [])) as list_filters:
+            rows = list(service.export_rows(**filters))
+        return rows, calls, list_filters
+
     def test_export_shape_and_unreadable_links(self):
-        person = self.create('Local person', '919876543210', 'local@example.invalid')
-        self.link(person.name, 'Customer', 'LOCAL-1'); self.link(person.name, 'Customer', 'HIDDEN')
-        unlinked = self.create('Unlinked', '', 'unlinked@example.invalid')
-        self.fake.get_list.side_effect = [[person.name, unlinked.name], []]
-        with patch.object(service.contacts, 'readable', side_effect=lambda link: link.link_name != 'HIDDEN'):
-            rows = list(service.export_rows())
+        people = [Person(name='P1', mobile_no='', phone='919876543210', email_id='local@example.invalid', full_name='Local person'),
+                  Person(name='P2', email_id='unlinked@example.invalid', first_name='Unlinked'),
+                  Person(name='P3', full_name='Only hidden')]
+        links = [('P1', 'Customer', 'LOCAL-1'), ('P1', 'Customer', 'MISSING'), ('P1', 'Supplier', 'S1'),
+                 ('P1', 'Gone', 'G1'), ('P3', 'Customer', 'MISSING')]
+        rows, calls, _ = self.export(people, links, {'Customer': {'LOCAL-1'}})
         self.assertEqual(rows, [list(service.COLUMNS), ['919876543210', 'local@example.invalid', 'Local person', 'Customer', 'LOCAL-1'],
                                 ['', 'unlinked@example.invalid', 'Unlinked', '', '']])
+        self.assertEqual(calls[1]['filters'], [['Contact', 'name', '>', 'P3']])
+        self.assertEqual((calls[0]['limit'], calls[0]['order_by']), (service.EXPORT_PAGE, 'name asc'))
+        self.fake.get_doc.assert_not_called()
+
+    def test_export_uses_the_contacts_list_filters_and_keeps_only_matching_links(self):
+        people = [Person(name='P1', full_name='Two types')]
+        links = [('P1', 'Customer', 'C1'), ('P1', 'Customer', 'C2'), ('P1', 'Gone', 'G1')]
+        rows, calls, list_filters = self.export(people, links, {'Customer': {'C1', 'C2'}, 'Gone': {'G1'}},
+                                               query='two', business_type='Customer', business_name='C2')
+        list_filters.assert_called_once_with('two', 'Customer', 'C2', 0)
+        self.assertEqual(rows[1:], [['', '', 'Two types', 'Customer', 'C2']])
+
+    def test_export_file_name_names_the_filter(self):
+        self.fake.response = {}
+        with patch.object(service, 'require_manager'), patch.object(service, 'export_rows', return_value=iter([list(service.COLUMNS)])):
+            for args, name in ((dict(), 'Relay contacts.xlsx'), (dict(business_type='Customer'), 'Relay contacts - Customer.xlsx'),
+                               (dict(unlinked='1'), 'Relay contacts - Not linked.xlsx')):
+                service.export(**args)
+                self.assertEqual(self.fake.response['filename'], name)
 
     def test_file_limit_headers_and_excel_numeric_cells(self):
         from openpyxl import Workbook
