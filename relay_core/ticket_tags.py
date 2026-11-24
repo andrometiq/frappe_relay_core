@@ -26,15 +26,14 @@ def can_follow(ticket, user):
 
 
 def message_business(names):
-    """The one business all messages are explicitly filed under, when the caller can read it."""
-    targets = {tuple(frappe.db.get_value('Relay Message', name, ['business_doctype', 'business_name']) or ())
-               for name in names}
+    """The one business record of all messages, stored or their contact's primary one, when the caller can read it."""
+    from relay_core.business_access import allowed_types, reference
+    targets = {reference(frappe.get_doc('Relay Message', name)) for name in names}
     if len(targets) != 1:
         frappe.throw('Select messages from the same business record')
     target = targets.pop()
-    if len(target) != 2 or not all(target):
+    if not target:
         return None, None
-    from relay_core.business_access import allowed_types
     if target[0] not in allowed_types():
         frappe.throw('You cannot read the business record', frappe.PermissionError)
     return target

@@ -39,13 +39,16 @@ class TicketTagTests(unittest.TestCase):
         return doc
 
     def test_message_business_rejects_cross_business_and_unreadable_records(self):
-        self.f.db.get_value.side_effect = [('Customer', 'LOCAL-1'), ('Customer', 'LOCAL-2')]
-        with self.assertRaisesRegex(ValueError, 'same business'):
-            self.module.message_business(['one', 'two'])
-        self.f.db.get_value.side_effect = None
-        self.f.db.get_value.return_value = ('Customer', 'LOCAL-1')
-        self.f.has_permission.return_value = False
-        with self.assertRaises(PermissionError): self.module.message_business(['one'])
+        self.f.get_doc = lambda doctype, name: name
+        records = {'one': ('Customer', 'LOCAL-1'), 'two': ('Customer', 'LOCAL-2'), 'unfiled': None}
+        with patch('relay_core.business_access.reference', side_effect=records.get) as reference:
+            with self.assertRaisesRegex(ValueError, 'same business'):
+                self.module.message_business(['one', 'two'])
+            with self.assertRaises(PermissionError): self.module.message_business(['one'])
+            self.types.return_value = {'Customer'}
+            self.assertEqual(self.module.message_business(['one', 'one']), ('Customer', 'LOCAL-1'))
+            self.assertEqual(self.module.message_business(['unfiled']), (None, None))
+        reference.assert_called_with('unfiled')
 
     def test_user_list_rejects_duplicates_wrong_types_and_too_many(self):
         self.assertEqual(self.module.user_list('["a@example.invalid"]'), ['a@example.invalid'])

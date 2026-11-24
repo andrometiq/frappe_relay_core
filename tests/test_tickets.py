@@ -136,6 +136,31 @@ class TicketTests(unittest.TestCase):
                 self.module.create('Local ticket', [self.message.name], business_type='Supplier', business_record='LOCAL-2')
         self.f.get_doc.assert_not_called()
 
+    def test_a_chat_without_a_record_links_its_contact_to_the_picked_record(self):
+        found = [(None, None), ('Customer', 'LOCAL-1')]
+        self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: {'Relay Message': 'RELAY-CON-0000000001',
+                                                                            'Relay Contact': 'person'}[doctype])
+        contacts = types.SimpleNamespace(add_link=Mock())
+        access = types.SimpleNamespace(candidates=Mock(return_value=[]))
+        with patch('relay_core.ticket_tags.message_business', side_effect=lambda names: found.pop(0)), \
+                patch.dict(sys.modules, {'relay_core.contacts': contacts, 'relay_core.business_access': access}):
+            self.assertEqual(self.module.chat_business([self.message.name], 'Customer', 'LOCAL-1'), ('Customer', 'LOCAL-1'))
+        contacts.add_link.assert_called_once_with('person', 'Customer', 'LOCAL-1')
+        self.message.check_permission.assert_called_once_with('read')
+        self.module.readable_contact.assert_called_once_with('RELAY-CON-0000000001')
+
+    def test_a_chat_without_a_record_and_no_pick_or_a_linked_contact_gets_a_clear_error(self):
+        self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: {'Relay Message': 'RELAY-CON-0000000001',
+                                                                            'Relay Contact': 'person'}[doctype])
+        contacts = types.SimpleNamespace(add_link=Mock())
+        access = types.SimpleNamespace(candidates=Mock(return_value=[('Customer', 'LOCAL-1'), ('Customer', 'LOCAL-2')]))
+        with patch('relay_core.ticket_tags.message_business', return_value=(None, None)), \
+                patch.dict(sys.modules, {'relay_core.contacts': contacts, 'relay_core.business_access': access}):
+            for picked in ((None, None), ('Customer', 'LOCAL-3')):
+                with self.subTest(picked=picked), self.assertRaisesRegex(ValueError, 'no business record. Pick one'):
+                    self.module.chat_business([self.message.name], *picked)
+        contacts.add_link.assert_not_called()
+
     def test_business_type_filter_and_page_enrichment_are_batched(self):
         self.f.get_list = Mock(return_value=[Record(name='TKT-00001', business_doctype='Supplier', business_name='LOCAL-1')])
         with patch('relay_core.business_inbox.check_type') as check_type, \

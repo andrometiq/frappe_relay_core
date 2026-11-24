@@ -513,10 +513,7 @@ def create(subject, messages=None, brief='', assigned_to='', ticket_type=None, t
     if not messages and not (business_doctype and business_name):
         frappe.throw('Choose the business record of the ticket')
     if messages:
-        business_doctype, business_name = ticket_tags.message_business(messages)
-        if business_type is not None or business_record is not None:
-            if (business_type or None, business_record or None) != (business_doctype or None, business_name or None):
-                frappe.throw('Choose the business record that owns the selected messages')
+        business_doctype, business_name = chat_business(messages, business_doctype, business_name)
     values = {'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
               'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
               'assigned_to': assigned_to or None,
@@ -534,6 +531,37 @@ def create(subject, messages=None, brief='', assigned_to='', ticket_type=None, t
         result = insert_ticket(dict(values, request_key=key))
         frappe.db.commit()
     return result
+
+
+def chat_business(messages, business_type, business_record):
+    """The one business record of the selected messages. The contact of a chat without any record is first linked
+    to the picked record, so the chat and its ticket share it."""
+    from relay_core import ticket_tags
+    picked = (business_type, business_record)
+    found = ticket_tags.message_business(messages)
+    if not any(found) and all(picked) and link_unlinked_contact(messages, picked):
+        found = ticket_tags.message_business(messages)
+    if not all(found):
+        frappe.throw('This chat has no business record. Pick one for its contact, or mark the contact\'s primary record.')
+    if any(picked) and picked != found:
+        frappe.throw('Choose the business record that owns the selected messages')
+    return found
+
+
+def link_unlinked_contact(messages, business):
+    """Link the one contact of `messages` to `business` when it has no business record. True when it linked."""
+    from relay_core.business_access import candidates
+    contacts = {frappe.db.get_value('Relay Message', name, 'relay_contact') for name in messages}
+    contact = contacts.pop() if len(contacts) == 1 else None
+    person = frappe.db.get_value('Relay Contact', contact, 'contact') if contact else None
+    if not person or candidates(contact):
+        return False
+    readable_contact(contact)
+    for name in messages:
+        frappe.get_doc('Relay Message', name).check_permission('read')
+    from relay_core.contacts import add_link
+    add_link(person, *business)
+    return True
 
 
 def insert_ticket(values):

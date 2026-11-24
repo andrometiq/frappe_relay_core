@@ -14,6 +14,7 @@ import NewTicketDialog from './tickets/NewTicketDialog.vue'
 import { useTicketSettings } from '../composables/useTicketSettings'
 import { emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketRoute, ticketViewFilters, ticketViewKey, ticketViews } from '../services/ticketSettings'
 import { coreApi } from '../services/coreApi'
+import { businessTypeOptions } from '../services/ticketForm'
 import { useRealtimeRefresh } from '../composables/useRealtimeRefresh'
 import LoadingRows from './LoadingRows.vue'
 import { dateTime, listTime, relativeTime } from './relativeTime'
@@ -24,7 +25,7 @@ const me = window.frappe?.session?.user || ''
 const { settings, load: loadSettings } = useTicketSettings()
 const view = ref('tickets')
 const businessTypes = ref([])
-const typeOptions = computed(() => businessTypes.value.filter(row => row.enabled).map(row => ({ value: row.business_doctype, label: row.label || row.business_doctype })))
+const typeOptions = computed(() => businessTypeOptions(businessTypes.value))
 const filters = ref(emptyTicketFilters())
 const typeLabel = doctype => typeOptions.value.find(row => row.value === doctype)?.label || doctype
 const page = ref({ items: [] }), selected = ref(null), error = ref(''), saveError = ref(''), creating = ref(false)
