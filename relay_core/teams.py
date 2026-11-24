@@ -35,27 +35,25 @@ def validate_team(doc):
 
 
 def validate_business(rows):
-    """Each row gives all records of an enabled type, one group of its first grouping field or one record."""
+    """Each row gives all records of an enabled type, one group of its first grouping field or one record. A type
+    has one kind of access in a team."""
     if not rows:
         return
     if len(rows) > MAX_BUSINESS_ROWS:
         frappe.throw(f'A team can have at most {MAX_BUSINESS_ROWS} business rows')
     enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
-    seen, picked = set(), {}
+    seen, kinds, picked = set(), {}, {}
     for row in rows:
         if row.business_doctype not in enabled:
             frappe.throw('Choose an enabled business type')
         if row.access not in ACCESS:
             frappe.throw('Business access must be All records, Group or Record')
         validate_row(row)
-        if (row.business_doctype, row.access, row.value) in seen:
-            frappe.throw('A group or record can only appear once in a team')
-        seen.add((row.business_doctype, row.access, row.value))
+        if kinds.setdefault(row.business_doctype, row.access) != row.access or (row.business_doctype, row.value) in seen:
+            frappe.throw(f'{row.business_doctype} can only appear once in a team')
+        seen.add((row.business_doctype, row.value))
         if row.access == RECORD:
             picked.setdefault(row.business_doctype, set()).add(row.value)
-    whole = {doctype for doctype, access, value in seen if access == ALL}
-    if any(doctype in whole and access != ALL for doctype, access, value in seen):
-        frappe.throw('A business type with all records cannot also pick groups or records')
     for doctype, names in picked.items():
         missing = names - set(frappe.get_all(doctype, filters={'name': ['in', list(names)]}, pluck='name'))
         if missing:
@@ -206,11 +204,14 @@ def save(title, members, name=None, business=None):
 
 
 def business_rows(value):
+    """A group row names the grouping field it was picked under, so a changed field is refused, not rebound."""
     rows = frappe.parse_json(value) if isinstance(value, str) else value
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         frappe.throw('Business access must be a list of rows')
-    return [{'business_doctype': row.get('business_doctype'), 'access': row.get('access'), 'value': row.get('value') or ''}
-            for row in rows]
+    if any(row.get('access') == GROUP and not row.get('grouping_field') for row in rows):
+        frappe.throw('Each group needs the grouping field it was picked under. Pick its groups again.')
+    return [{'business_doctype': row.get('business_doctype'), 'access': row.get('access'), 'value': row.get('value') or '',
+             'grouping_field': row.get('grouping_field') or ''} for row in rows]
 
 
 def user_list(value, message):
@@ -221,8 +222,8 @@ def user_list(value, message):
 
 def team_payload(doc):
     return {'name':doc.name,'title':doc.title,'members':[row.user for row in doc.members],
-            'business':[{'business_doctype':row.business_doctype,'access':row.access,'value':row.value or ''}
-                        for row in doc.get('business_access') or []]}
+            'business':[{'business_doctype':row.business_doctype,'access':row.access,'value':row.value or '',
+                         'grouping_field':row.grouping_field or ''} for row in doc.get('business_access') or []]}
 
 
 @frappe.whitelist(methods=['GET'])

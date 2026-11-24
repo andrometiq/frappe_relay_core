@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Button, ErrorMessage, FeatherIcon, TextInput, toast } from '@relay/ui'
 import { coreApi } from '../../services/coreApi'
 import { linkedTitle } from '../../services/linkedTitle'
-import { ALL, GROUP, RECORD, accessModes, accessSummary, businessRows, fieldLabel, teamDraft } from '../../services/teamAccess'
+import { ALL, GROUP, RECORD, accessModes, accessSummary, businessRows, draftType, fieldLabel, groupField, staleGroups, teamDraft } from '../../services/teamAccess'
 import SettingsLayout from './SettingsLayout.vue'
 import SidePanel from '../shell/SidePanel.vue'
 import RemoteLinkField from '../fields/RemoteLinkField.vue'
@@ -38,9 +38,10 @@ async function edit(team) {
   catch (e) { panelError.value = e.message }
 }
 function addType(doctype) {
-  if (doctype) draft.value.types.push({ doctype, mode: accessModes(typeOf(doctype))[0], values: [] })
+  const type = draftType(draft.value.types, typeOf(doctype))
+  if (type) draft.value.types.push(type)
 }
-function setMode(type, mode) { type.mode = mode; type.values = [] }
+function setMode(type, mode) { type.mode = mode; type.values = []; type.groupingField = groupField(typeOf(type.doctype)) }
 function close() { draft.value = null; panelError.value = '' }
 async function save() {
   saving.value = true; panelError.value = ''
@@ -89,6 +90,8 @@ onMounted(() => load())
         <div class="segmented" role="group" :aria-label="typeLabel(type.doctype) + ' access'">
           <button v-for="mode in accessModes(typeOf(type.doctype))" :key="mode" type="button" :aria-pressed="type.mode === mode" :disabled="saving" @click="setMode(type, mode)">{{ modeLabel[mode] }}</button>
         </div>
+        <p v-if="staleGroups(type, typeOf(type.doctype))" class="panel-hint team-stale" role="alert">The grouping field of {{ typeLabel(type.doctype) }} changed. Pick its groups again.
+          <button type="button" class="v1-link" :disabled="saving" @click="setMode(type, GROUP)">Clear and pick again</button></p>
         <TeamGroupPicker v-if="type.mode === GROUP" v-model="type.values" :doctype="type.doctype" :label="typeLabel(type.doctype)" :disabled="saving" />
         <RemoteLinkField v-else-if="type.mode === RECORD" v-model="type.values" multiple :field="{ label: '', method: 'api.business_records', params: { doctype: type.doctype }, placeholder: 'Search and add records', readOnly: saving }" />
         <p v-else class="panel-hint">Every {{ typeLabel(type.doctype) }} record, including new ones.</p>
@@ -109,7 +112,10 @@ onMounted(() => load())
 
 <style scoped>
 .team-avatars { display:inline-flex; align-items:center; gap:4px; color:var(--relay-ink-3); font-size:12.5px; }
-.team-access-line { display:block; white-space:nowrap; }
+.team-table td.cell-main { min-width:160px; }
+.team-table .cell-title { white-space:normal; overflow-wrap:anywhere; }
+.team-access-line { display:block; overflow-wrap:anywhere; }
+.team-stale { color:var(--relay-red); }
 .team-access-line + .team-access-line { color:var(--relay-ink-soft); font-size:12px; }
 .team-more { padding:12px 20px; }
 .team-type { padding-top:4px; }

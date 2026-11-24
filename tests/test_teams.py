@@ -109,11 +109,13 @@ class TeamBusinessTests(unittest.TestCase):
 
     def test_groups_records_and_all_records_are_accepted(self):
         rows = [Row(business_doctype='Customer', access='Group', value='North'),
-                Row(business_doctype='Customer', access='Record', value='C1'),
+                Row(business_doctype='Customer', access='Group', value='South', grouping_field='customer_group'),
                 Row(business_doctype='Supplier', access='All records', value='ignored')]
         self.teams.validate_business(rows)
         self.assertEqual(rows[0].grouping_field, 'customer_group')
         self.assertEqual((rows[2].value, rows[2].grouping_field), ('', ''))
+        self.teams.validate_business([Row(business_doctype='Customer', access='Record', value='C1'),
+                                      Row(business_doctype='Customer', access='Record', value='C2')])
 
     def test_invalid_rows_are_refused(self):
         cases = [([Row(business_doctype='Lead', access='Record', value='L1')], 'enabled business type'),
@@ -124,21 +126,27 @@ class TeamBusinessTests(unittest.TestCase):
                  ([Row(business_doctype='Customer', access='Record', value='C9')], 'Unknown Customer: C9'),
                  ([Row(business_doctype='Customer', access='Record', value='C1')] * 2, 'only appear once'),
                  ([Row(business_doctype='Supplier', access='All records'), Row(business_doctype='Supplier', access='Record', value='S1')],
-                  'cannot also pick')]
+                  'Supplier can only appear once'),
+                 ([Row(business_doctype='Supplier', access='All records')] * 2, 'Supplier can only appear once'),
+                 ([Row(business_doctype='Customer', access='Group', value='North'), Row(business_doctype='Customer', access='Record', value='C1')],
+                  'Customer can only appear once')]
         for rows, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(PermissionError, message):
                 self.teams.validate_business(rows)
 
     def test_save_replaces_business_rows_only_when_given_and_returns_them(self):
         doc = Mock(); doc.name = 'Sales-001'; doc.title = 'Sales'; doc.members = []
-        doc.get = lambda field: [Row(business_doctype='Customer', access='Group', value='North')]
+        doc.get = lambda field: [Row(business_doctype='Customer', access='Group', value='North', grouping_field='customer_group')]
         self.f.get_doc = Mock(return_value=doc)
-        result = self.teams.save('Sales', '[]', name='Sales-001',
-                                 business='[{"business_doctype": "Customer", "access": "Group", "value": "North", "extra": 1}]')
-        doc.set.assert_any_call('business_access', [{'business_doctype': 'Customer', 'access': 'Group', 'value': 'North'}])
-        self.assertEqual(result['business'], [{'business_doctype': 'Customer', 'access': 'Group', 'value': 'North'}])
+        result = self.teams.save('Sales', '[]', name='Sales-001', business='[{"business_doctype": "Customer", "access": "Group", '
+                                 '"value": "North", "grouping_field": "customer_group", "extra": 1}]')
+        row = {'business_doctype': 'Customer', 'access': 'Group', 'value': 'North', 'grouping_field': 'customer_group'}
+        doc.set.assert_any_call('business_access', [row])
+        self.assertEqual(result['business'], [row])
         with self.assertRaisesRegex(PermissionError, 'list of rows'):
             self.teams.save('Sales', '[]', name='Sales-001', business='{"business_doctype": "Customer"}')
+        with self.assertRaisesRegex(PermissionError, 'Pick its groups again'):
+            self.teams.save('Sales', '[]', name='Sales-001', business='[{"business_doctype": "Customer", "access": "Group", "value": "North"}]')
 
     def test_directory_summarizes_members_and_business_per_team(self):
         team = Row(name='Sales-001', title='Sales')
