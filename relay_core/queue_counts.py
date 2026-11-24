@@ -62,9 +62,9 @@ def get_counts(channels=None, business=None):
 
 
 def business_counts(channels=None, business_type=None, business_name=None):
-    """All, Unread, Read and Unlinked Relay Chat rows and their unread messages."""
+    """All, Unread, Read, Unlinked and Assigned to me Relay Chat rows and their unread messages."""
     if channels is not None and not channels:
-        return {'all': 0, 'unread': 0, 'read': 0, 'unlinked': 0, 'unread_messages': 0}
+        return {'all': 0, 'unread': 0, 'read': 0, 'unlinked': 0, 'mine': 0, 'unread_messages': 0}
     from relay_core import inbox_records
     return inbox_records.counts(channels, business_type, business_name)
 

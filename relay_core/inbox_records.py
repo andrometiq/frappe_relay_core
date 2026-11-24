@@ -132,7 +132,7 @@ def page(*, query='', mode='all', after=None, since=None, channels=None, busines
 
 
 def counts(channels=None, business_type=None, business_name=None):
-    """Row counts for the All, Unread, Read and Unlinked tabs and the unread message total, with the same business-link predicate as the queue."""
+    """Row counts for the All, Unread, Read, Unlinked and Assigned to me views and the unread message total, with the same business-link predicate as the queue."""
     rows = frappe.get_list(CHAT, filters=scope_filters('all', channels, business_type, business_name), group_by='business_doctype',
                            fields=['business_doctype', {'COUNT': '*', 'as': 'total'}, {'SUM': 'is_unread', 'as': 'unread'},
                                    {'SUM': 'unread_count', 'as': 'messages'}], order_by='business_doctype')
@@ -140,8 +140,18 @@ def counts(channels=None, business_type=None, business_name=None):
     unlinked = frappe.get_list(CHAT, filters=[*scope_filters('all', channels, business_type, business_name),
         [CHAT, 'business_doctype', '=', CONTACT], unlinked_condition()], fields=[{'COUNT': '*', 'as': 'total'}])
     return {'all': total, 'unread': unread, 'read': total - unread,
-            'unlinked': int(unlinked[0].total or 0) if unlinked else 0,
+            'unlinked': int(unlinked[0].total or 0) if unlinked else 0, 'mine': assigned_count(channels, business_type, business_name),
             'unread_messages': sum(int(row.messages or 0) for row in rows)}
+
+
+def assigned_count(channels=None, business_type=None, business_name=None):
+    """Rows whose last writer is a chat assigned to the session user, as the Assigned to me view lists them."""
+    from relay_core.inbox import chosen_contacts
+    contacts = chosen_contacts(assigned='me')
+    if not contacts:
+        return 0
+    found = frappe.get_list(CHAT, filters=scope_filters('all', channels, business_type, business_name, contacts), fields=[{'COUNT': '*', 'as': 'total'}])
+    return int(found[0].total or 0) if found else 0
 
 
 def items(rows):

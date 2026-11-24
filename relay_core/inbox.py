@@ -72,13 +72,14 @@ ROWS = ('contact', 'business')
 
 @frappe.whitelist(methods=['GET'])
 def directory(query='', before=None, after=None, starred=0, folder='', mode='all', team=None, medium=None, since=None, channel=None,
-              channels=None, business_type=None, business_name=None, rows='contact'):
+              channels=None, business_type=None, business_name=None, rows='contact', assigned=None):
     """Filter before pagination and expose only accessible conversation previews.
 
     `since` returns only conversations active at or after that time, so a live client can update the changed rows.
     `channels` narrows the list to some Relay Channels, such as WhatsApp numbers; `channel` is the one-channel form.
     `business_type` and `business_name` keep the chats of one business type or record; `none` keeps chats without one.
     Read keeps the chats without unread incoming messages for the session user; Unlinked keeps chats without a business record.
+    `assigned='me'` keeps the chats assigned to the session user.
     A search matches every word of the name in any order, or a mobile number or email of the chat.
     `rows='business'` gives the Relay Chat rows: one per readable business record and one per chat whose messages name
     no record. Star, folder and team keep the rows whose last writer is such a chat. Its cursor is opaque and it pages
@@ -86,7 +87,7 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
     require_access()
     if not isinstance(query,str) or len(query)>80 or any(ord(c)<32 for c in query) or not isinstance(folder,str) or len(folder)>140 or bool(before)+bool(after)+bool(since)>1:
         frappe.throw('Invalid conversation search')
-    if str(starred) not in ('0','1') or mode not in MODES or rows not in ROWS or rows=='business' and before:
+    if str(starred) not in ('0','1') or mode not in MODES or rows not in ROWS or rows=='business' and before or assigned not in (None,'','me'):
         frappe.throw('Invalid conversation filter')
     from pypika import Order
     from pypika.functions import Coalesce
@@ -99,12 +100,12 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
         from relay_core import inbox_records
         return inbox_records.page(query=query, mode=mode, after=after, since=activity_time(since) if since else None,
                                   channels=channel_names, business_type=business_type, business_name=business_name,
-                                  contacts=chosen_contacts(starred, folder, team))
+                                  contacts=chosen_contacts(starred, folder, team, assigned))
     activity=Coalesce(contact.last_message_at,contact.creation)
     search=frappe.qb.get_query('Relay Contact',fields=['name','contact','display_name','last_message_at','creation'],filters={},
                                ignore_permissions=False,order_by='',limit=31)
     search=filtered_contacts(search, channel_names, business, mode)
-    search=chosen_states(search, starred, folder, team)
+    search=chosen_states(search, starred, folder, team, assigned)
     if before or after:
         cursor=before or after;validate_reference(cursor,'CON');anchor,_=readable_contact(cursor)
         stamp=anchor.last_message_at or anchor.creation
@@ -123,15 +124,15 @@ def directory(query='', before=None, after=None, starred=0, folder='', mode='all
             'next':{'after':page[-1].name} if page and (bool(before) if before else more) else None}
 
 
-def chosen_contacts(starred=0, folder='', team=None):
-    """The visible chats in the user's folder, starred, or of a team; None when no such filter is set."""
-    if not (folder or str(starred)=='1' or team):return None
+def chosen_contacts(starred=0, folder='', team=None, assigned=None):
+    """The visible chats in the user's folder, starred, of a team or assigned to the user; None when no such filter is set."""
+    if not (folder or str(starred)=='1' or team or assigned):return None
     search=frappe.qb.get_query('Relay Contact',fields=['name'],ignore_permissions=False,order_by='')
-    return [row[0] for row in chosen_states(search, starred, folder, team).run()]
+    return [row[0] for row in chosen_states(search, starred, folder, team, assigned).run()]
 
 
-def chosen_states(search, starred=0, folder='', team=None):
-    """Keep the chats in the user's folder, starred chats, or the chats assigned to a readable team."""
+def chosen_states(search, starred=0, folder='', team=None, assigned=None):
+    """Keep the chats in the user's folder, starred chats, the chats assigned to a readable team or, with `assigned='me'`, to the user."""
     contact=frappe.qb.DocType('Relay Contact');saved=frappe.qb.DocType('Relay Conversation State')
     if folder: features.require('folders')
     if folder or str(starred)=='1':
@@ -145,6 +146,9 @@ def chosen_states(search, starred=0, folder='', team=None):
         readable_filter_team(team)
         assignment=frappe.qb.DocType('Relay Conversation Assignment')
         search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.team==team)))
+    if assigned:
+        assignment=frappe.qb.DocType('Relay Conversation Assignment')
+        search=search.where(contact.name.isin(frappe.qb.from_(assignment).select(assignment.relay_contact).where(assignment.assigned_to==frappe.session.user)))
     return search
 
 

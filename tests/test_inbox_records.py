@@ -145,12 +145,24 @@ class InboxRecordTests(unittest.TestCase):
     def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),
                       _dict(business_doctype='Relay Contact', total=3, unread=1, messages=1)]
-        self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 1, 'unread_messages': 8})
+        with patch.object(inbox_records, 'assigned_count', return_value=0):
+            self.assertEqual(inbox_records.counts(['CH-1']), {'all': 8, 'unread': 3, 'read': 5, 'unlinked': 1, 'mine': 0, 'unread_messages': 8})
         calls = [call for call in self.fake.get_list.call_args_list if call.args[0] == CHAT]
         self.assertEqual(calls[1].kwargs['filters'][-1].get_sql(), inbox_records.scope_filters('unlinked')[-1].get_sql())
         call = calls[0]
         self.assertEqual(call.kwargs['group_by'], 'business_doctype')
         self.assertEqual(call.kwargs['filters'], [[CHAT, 'last_channel', 'in', ['CH-1']]])
+
+    def test_assigned_to_me_counts_the_rows_of_my_assigned_chats_under_the_same_filters(self):
+        with patch('relay_core.inbox.chosen_contacts', return_value=['R1', 'R2']) as chosen:
+            self.assertEqual(inbox_records.assigned_count(['CH-1'], 'Customer'), 1)
+        chosen.assert_called_once_with(assigned='me')
+        self.assertEqual(self.chat_call().kwargs['filters'], [[CHAT, 'business_doctype', '=', 'Customer'], [CHAT, 'last_channel', 'in', ['CH-1']],
+                                                              [CHAT, 'last_contact', 'in', ['R1', 'R2']]])
+        self.fake.get_list.reset_mock()
+        with patch('relay_core.inbox.chosen_contacts', return_value=[]):
+            self.assertEqual(inbox_records.assigned_count(), 0)
+        self.assertEqual(self.fake.get_list.call_count, 0, 'No assigned chat needs no count query')
 
 
 if __name__ == '__main__':
