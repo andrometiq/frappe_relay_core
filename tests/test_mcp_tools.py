@@ -138,7 +138,8 @@ CASES = {
     'skills_save': ({'values': SKILL, 'request_key': KEY}, [('relay_core.ai.configuration', 'save', {'name': 'Orders-001'})],
                     ((SKILL, None), {})),
 }
-COVERED_ELSEWHERE = {'campaigns_validate', 'campaigns_control', 'chat_claim', 'chat_release', 'changes_since', 'activity_log'}
+COVERED_ELSEWHERE = {'campaigns_validate', 'campaigns_control', 'chat_claim', 'chat_release', 'changes_since', 'activity_log',
+                     'messages_media_read'}
 
 
 def run_case(name, arguments, targets):
@@ -419,3 +420,38 @@ class AISetupTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def media(raw=b'\xff\xd8picture', mime='image/jpeg', filename='photo.jpg'):
+    return Mock(get_data=Mock(return_value=raw), mimetype=mime,
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+
+class MediaReadTests(unittest.TestCase):
+    def call(self, response, **arguments):
+        with patch('relay_core.attachments.read', return_value=response) as read:
+            answer = registry.call('messages_media_read', {'message': MSG, **arguments})
+        read.assert_called_once_with(MSG, download=1)
+        return answer
+
+    def test_a_picture_comes_back_as_an_image_block_without_base64_text(self):
+        answer = self.call(media())
+        self.assertFalse(answer['isError'])
+        self.assertEqual(answer['content'], [{'type': 'image', 'data': '/9hwaWN0dXJl', 'mimeType': 'image/jpeg'}])
+        self.assertEqual(answer['structuredContent'], {'filename': 'photo.jpg', 'content_type': 'image/jpeg', 'size': 9})
+
+    def test_base64_returns_any_media_with_its_type(self):
+        answer = self.call(media(b'OggS', 'audio/ogg', 'voice.ogg'), format='base64')
+        self.assertEqual(answer['structuredContent'], {'filename': 'voice.ogg', 'content_type': 'audio/ogg', 'size': 4,
+                                                       'content_base64': 'T2dnUw=='})
+
+    def test_a_voice_note_is_not_a_picture_and_large_media_is_refused(self):
+        self.assertEqual(self.call(media(b'OggS', 'audio/ogg'))['content'][0]['text'], 'This media is not a picture')
+        large = self.call(media(b'x' * 3_750_001), format='base64')
+        self.assertEqual(large['content'][0]['text'], 'The media is larger than 3.75 MB')
+
+    def test_it_is_a_read_tool_that_a_reader_may_call(self):
+        with patch('relay_core.permissions.can_write', return_value=False):
+            self.assertFalse(self.call(media())['isError'])
+        self.assertEqual(registry.TOOLS['messages_media_read'].safety, READ)
+

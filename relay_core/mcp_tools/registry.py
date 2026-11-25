@@ -89,6 +89,13 @@ def tool(name, safety, schema, doc, *, listed=True, large=False, chat=False, onc
     return register
 
 
+@dataclass
+class Blocks:
+    """A tool answer of MCP content blocks, such as an image the client shows its model, with a small JSON summary."""
+    content: list
+    structured: dict
+
+
 class ToolError(Exception):
     """A specific, safe message for the AI client; it is returned as an isError tool result."""
 
@@ -201,6 +208,8 @@ def call(name, arguments) -> dict:
 
 
 def result(value) -> dict:
+    if isinstance(value, Blocks):
+        return {'content': value.content, 'structuredContent': value.structured, 'isError': False}
     data = json.loads(json.dumps(value, default=str))
     structured = data if isinstance(data, dict) else {'items': data}
     return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured, 'isError': False}

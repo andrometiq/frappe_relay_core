@@ -1,5 +1,5 @@
 """Chat list, unread messages, history, read state and internal notes."""
-from relay_core.mcp_tools.registry import CURSOR, FLAG, NAME_FIELD, READ, WRITE, limit, obj, tool
+from relay_core.mcp_tools.registry import CURSOR, FLAG, NAME_FIELD, READ, WRITE, Blocks, ToolError, limit, obj, tool
 
 CONTACT = {'type': 'string', 'pattern': '^RELAY-CON-[0-9]{10}$', 'description': 'Relay Contact id, RELAY-CON-##########.'}
 MESSAGE = {'type': 'string', 'pattern': '^RELAY-MSG-[0-9]{10}$', 'description': 'Relay Message id, RELAY-MSG-##########.'}
@@ -8,6 +8,9 @@ MESSAGE_FIELDS = ('name', 'direction', 'content', 'message_type', 'status', 'cre
 CHAT_FIELDS = ('name', 'display_name', 'unread', 'channel', 'provider', 'business', 'latest_preview', 'latest_at', 'starred',
                'folder', 'assignment', 'unlinked')
 UNREAD_PER_CHAT = 10
+# An image block is at most 5 MB of base64; one media answer stays inside it.
+MEDIA_MAX_BYTES = 3_750_000
+IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
 
 
 def brief(row, fields=MESSAGE_FIELDS):
@@ -87,6 +90,34 @@ def messages_read_one(message):
     return {'message': items[index], 'contact': context['contact'], 'before': [brief(row) for row in items[max(0, index - 5):index]],
             'after': [brief(row) for row in items[index + 1:index + 6]], 'reply_window': messaging.reply_window(message),
             'claim': public_claim(context['contact'], claim) if (claim := active_claim(context['contact'])) else None}
+
+
+@tool('messages_media_read', READ, obj({'message': MESSAGE, 'format': {'type': 'string', 'enum': ['image', 'base64'],
+                                                                       'default': 'image'}}, ('message',)), {
+    'summary': 'Read the picture, voice note or file that one message carries.',
+    'use_when': 'a customer sent a picture (message_type image or sticker) and you must see it to answer.',
+    'avoid_when': 'the message has no media; use messages_read_one.',
+    'returns': 'format image: the picture itself (jpeg, png, webp or gif) with {filename, content_type, size}. '
+               'format base64: {filename, content_type, size, content_base64} for a program that reads the bytes.',
+    'errors': '"This message has no supported attachment"; "The media is larger than 3.75 MB"; "This media is not a '
+              'picture"; "Not found" or "Not permitted" outside the user\'s scope.'})
+def messages_media_read(message, format='image'):
+    import base64
+    import re
+
+    from relay_core.attachments import read
+    response = read(message, download=1)
+    raw = response.get_data()
+    if len(raw) > MEDIA_MAX_BYTES:
+        raise ToolError('The media is larger than 3.75 MB')
+    disposition = re.search(r'filename="([^"]*)"', response.headers.get('Content-Disposition', ''))
+    summary = {'filename': disposition.group(1) if disposition else '', 'content_type': response.mimetype, 'size': len(raw)}
+    data = base64.b64encode(raw).decode()
+    if format == 'base64':
+        return {**summary, 'content_base64': data}
+    if response.mimetype not in IMAGE_TYPES:
+        raise ToolError('This media is not a picture')
+    return Blocks([{'type': 'image', 'data': data, 'mimeType': response.mimetype}], summary)
 
 
 @tool('reply_context', READ, obj({'contact': CONTACT, 'limit': limit(50, 20)}, ('contact',)), {
