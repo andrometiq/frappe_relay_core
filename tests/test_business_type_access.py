@@ -54,6 +54,8 @@ class BusinessTypeAccessTests(unittest.TestCase):
         self.enterContext(patch.object(access, 'frappe', self.fake))
         self.enterContext(patch.object(business_inbox, 'frappe', self.fake))
         self.enterContext(patch.object(business_inbox, 'require_access'))
+        self.enterContext(patch('relay_core.business_types.profile', return_value=[]))
+        self.enterContext(patch('relay_core.business_types.type_label', side_effect=lambda doctype: doctype))
 
     def get_all(self, doctype, filters, pluck=None, fields=None, order_by=None):
         columns = ' AND '.join(f'`{key}`=?' for key in filters)

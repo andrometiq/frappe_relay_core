@@ -12,6 +12,7 @@
     "label",
     "grouping_fields",
     "grouping_field",
+    "profile_fields",
     "users"
   ],
   "fields": [
@@ -50,6 +51,13 @@
       "description": "Choose a field from the business document to group the inbox. Leave blank to show all records.",
       "hidden": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "profile_fields",
+      "label": "Profile Fields",
+      "fieldtype": "Table",
+      "options": "Relay Business Profile Field",
+      "description": "Business fields shown with the linked record in the chat details, in row order. At most 12."
     },
     {
       "fieldname": "users",
@@ -92,5 +100,5 @@
       "read": 1
     }
   ],
-  "modified": "2026-11-25 12:00:00.000000"
+  "modified": "2026-11-25 14:00:00.000000"
 }

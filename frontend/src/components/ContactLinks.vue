@@ -90,7 +90,7 @@ async function removeLink(link) {
           <span class="info-icon" :class="'is-' + recordIcon(link.doctype).tone" aria-hidden="true"><FeatherIcon :name="recordIcon(link.doctype).icon" :size="18" /></span>
           <span class="info-item-copy">
             <a :href="desk(link)"><b>{{ linkedTitle(link.doctype, link.name) }}</b><span v-if="links.length > 1 && isPrimaryLink(detail.primary, link)" class="info-primary">Main</span></a>
-            <small>{{ link.doctype }} · <a :href="conversation(link)">Open chat</a></small>
+            <small>{{ link.doctype_label || link.doctype }} · <a :href="conversation(link)">Open chat</a></small>
           </span>
           <span v-if="detail.can_set_primary && links.length > 1" class="info-switch-label" aria-hidden="true">Main</span>
           <button v-if="detail.can_set_primary && links.length > 1" type="button" role="switch" class="info-switch" :aria-checked="isPrimaryLink(detail.primary, link)"

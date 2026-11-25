@@ -24,7 +24,7 @@ onMounted(() => run(load))
 <template>
   <section class="settings-card" aria-label="Business types and users">
     <header><div><h3>Business types and users</h3><p>These assignments apply to every channel. Users see their assigned types and unlinked contacts. Managers see every enabled type.</p></div></header>
-    <a class="settings-row" href="/desk/relay-contact-type"><span class="settings-row-text"><b>Configure business types and grouping</b><small>Add a type or change how its records are grouped</small></span><FeatherIcon name="external-link" :size="16" /></a>
+    <a class="settings-row" href="/desk/relay-contact-type"><span class="settings-row-text"><b>Configure business types, grouping and profile fields</b><small>Add a type, change how its records are grouped, or pick the fields the chat details show</small></span><FeatherIcon name="external-link" :size="16" /></a>
   </section>
   <ErrorMessage :message="error" /><p v-if="notice" role="status" class="workspace-success">{{ notice }}</p>
   <LoadingRows v-if="busy && !rows.length" :count="2" label="Loading business types…" />

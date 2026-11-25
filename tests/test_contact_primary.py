@@ -67,7 +67,12 @@ class PrimaryLinkTests(unittest.TestCase):
         record = Mock(meta=_dict(title_field='customer_name'))
         record.get.return_value = 'Primary customer'
         self.fake.get_doc.return_value = record
-        self.assertEqual(access.primary_record('contact'), {'doctype': 'Customer', 'name': 'C1', 'title': 'Primary customer'})
+        profile = [{'label': 'Territory', 'value': 'North'}]
+        with patch('relay_core.business_types.type_label', return_value='Client'), \
+                patch('relay_core.business_types.profile', return_value=profile) as read_profile:
+            self.assertEqual(access.primary_record('contact'), {'doctype': 'Customer', 'doctype_label': 'Client', 'name': 'C1',
+                                                                'title': 'Primary customer', 'profile': profile})
+        read_profile.assert_called_once_with(record)
         with patch.object(access, 'record_covered', return_value=False) as covered:
             self.assertIsNone(access.primary_record('contact'), 'A primary outside the teams has no header')
         covered.assert_called_once_with('Customer', 'C1', None)
