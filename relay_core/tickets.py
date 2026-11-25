@@ -12,6 +12,8 @@ from relay_core.api import validate_reference
 _episode_transition = ContextVar('relay_episode_transition', default=None)
 LIST_FIELDS = ['name', 'subject', 'ticket_status', 'ticket_type', 'assigned_to', 'owner', 'creation', 'modified',
                'business_doctype', 'business_name']
+# An episode ticket AI still owns is its conversation record; it is staff work once staff hold it.
+STAFF_TICKETS = [['ai_disabled', '=', 1], 'or', ['active_scope_key', 'is', 'not set']]
 
 
 def _save_episode(doc, *, new=False):
@@ -934,6 +936,15 @@ def colleagues(query=''):
             for row in _agent_options(query, colleague_of=frappe.session.user)]
 
 
+def staff_filters(filters: dict, *groups: list) -> list:
+    """Nested Frappe filters for staff ticket lists and counts: `filters`, each OR group and STAFF_TICKETS."""
+    conditions = [[field, *value] if isinstance(value, list) else [field, '=', value] for field, value in filters.items()]
+    nested = []
+    for condition in [*conditions, *groups, STAFF_TICKETS]:
+        nested += [condition, 'and']
+    return nested[:-1]
+
+
 def mentioned_tickets():
     return frappe.get_all('Relay Ticket Watcher', filters={'parenttype': 'Relay Ticket', 'user': frappe.session.user},
                           pluck='parent', limit=0)
@@ -968,7 +979,7 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         if not isinstance(ticket_status, str) or len(ticket_status) > 140:
             frappe.throw('Invalid ticket filter')
         filters['ticket_status'] = ticket_status
-    or_filters = []
+    groups = []
     for field, value in (('assigned_to', assigned_to), ('ticket_type', ticket_type)):
         if value is not None:
             if not isinstance(value, str) or len(value) > 140:
@@ -983,7 +994,7 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         if '' in excluded:
             filters['assigned_to'] = ['not in', users + ['']]
         else:
-            or_filters = [['assigned_to', 'not in', users], ['assigned_to', 'is', 'not set']]
+            groups = [[['assigned_to', 'not in', users], 'or', ['assigned_to', 'is', 'not set']]]
     if frappe.utils.cint(assigned) and 'assigned_to' not in filters:
         filters['assigned_to'] = ['is', 'set']
     if frappe.utils.cint(mine):
@@ -999,7 +1010,7 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         if not created:
             frappe.throw('Invalid ticket cursor')
         filters['creation'] = ['<', created]
-    rows = frappe.get_list('Relay Ticket', filters=filters, or_filters=or_filters, fields=LIST_FIELDS,
+    rows = frappe.get_list('Relay Ticket', filters=staff_filters(filters, *groups), fields=LIST_FIELDS,
                            order_by='creation desc', page_length=31)
     from relay_core.business_groups import ticket_values
     columns = ticket_values(rows[:30], business_type)
@@ -1032,21 +1043,21 @@ def dashboard():
     """Open-ticket workload for the readable tickets: totals, groups and the newest open tickets."""
     require_access()
     open_statuses = _status_names('Open')
-    groups = frappe.get_list('Relay Ticket', fields=['ticket_status', 'assigned_to', 'business_doctype',
+    groups = frappe.get_list('Relay Ticket', filters=staff_filters({}), fields=['ticket_status', 'assigned_to', 'business_doctype',
                              {'COUNT': 'name', 'as': 'tickets'}],
                              group_by='ticket_status, assigned_to, business_doctype', order_by='',
                              limit_page_length=0)
     open_groups = [row for row in groups if row.ticket_status in open_statuses]
-    resolved = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', _status_names('Closed') or ['']],
-                               'name': ['in', _resolved_today() or ['']]},
+    resolved = frappe.get_list('Relay Ticket', filters=staff_filters({'ticket_status': ['in', _status_names('Closed') or ['']],
+                               'name': ['in', _resolved_today() or ['']]}),
                                fields=[{'COUNT': 'name', 'as': 'tickets'}], order_by='')
-    recent = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']]},
+    recent = frappe.get_list('Relay Ticket', filters=staff_filters({'ticket_status': ['in', open_statuses or ['']]}),
                              fields=LIST_FIELDS, order_by='creation desc', limit_page_length=10)
-    oldest = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']]},
+    oldest = frappe.get_list('Relay Ticket', filters=staff_filters({'ticket_status': ['in', open_statuses or ['']]}),
                              fields=['name', 'subject', 'creation'], order_by='creation asc',
                              limit_page_length=1)
-    mentioned = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']],
-                                'name': ['in', mentioned_tickets() or ['']]},
+    mentioned = frappe.get_list('Relay Ticket', filters=staff_filters({'ticket_status': ['in', open_statuses or ['']],
+                                'name': ['in', mentioned_tickets() or ['']]}),
                                 fields=[{'COUNT': 'name', 'as': 'tickets'}], order_by='')
     return {
         'totals': {

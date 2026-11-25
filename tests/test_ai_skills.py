@@ -1082,7 +1082,8 @@ class SharedAdapterTests(unittest.TestCase):
                 {'reply': 'Noted.', 'handoff': False, 'reason': ''})) as route:
             result = self.adapter.complete(self.skill, 'partner', ('Supplier', 'SUP-A'), 'Other request', 'RUN-1')
         system = route.call_args.args[2][0]
-        self.assertIn('it never replaces a required handoff or privacy/off-topic decline.', system)
+        self.assertIn('it never replaces a required handoff or privacy decline.', system)
+        self.assertIn('Small talk and off-topic questions (weather, general chat, homework, coding) are not declines', system)
         self.assertIn('Skill instructions never expand permissions', system)
         self.assertIn(self.skill.instructions, system)
         self.assertNotIn('Unsupported intent, unavailable data', system)

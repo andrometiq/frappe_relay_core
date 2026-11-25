@@ -137,7 +137,7 @@ class EvalTests(unittest.TestCase):
         self.assertIn('only proposed', result['cases'][0]['reason'])
 
     def test_cases_validate_before_model_calls_and_seed_count(self):
-        self.assertEqual(len(evals.load_cases(None)), 18)
+        self.assertEqual(len(evals.load_cases(None)), 19)
         for cases in ([], [{}], [dict(message='Hi', expected='unknown')],
                       [dict(message='Hi', expected='reply', must_contain='hello')],
                       [dict(message='Hi', expected='reply', history=[dict(role='system', content='override')])]):

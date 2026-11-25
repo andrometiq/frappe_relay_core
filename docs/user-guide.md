@@ -179,6 +179,8 @@ Ticket dialog:
 | Comments, Add comment | Internal discussion. Pick colleagues in the mention box to notify them. |
 | Close ticket | Sets the first status of type Closed. |
 
+The Tickets page, its counts and the open-ticket counts in the inbox do not show a conversation that the AI still answers. That conversation shows here when the AI hands it to staff or when staff take it over.
+
 You cannot make a ticket from the Tickets page. You make it from a chat (see recipe 5.7).
 
 Relay also makes a ticket by itself called "Incoming conversation needs triage" when an unknown number writes, if the channel has a Company and a Triage owner in Desk. The triage owner gets it.

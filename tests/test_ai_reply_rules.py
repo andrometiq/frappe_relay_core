@@ -12,13 +12,16 @@ from relay_core import messaging, test_mode
 
 
 class HumanRequestTests(unittest.TestCase):
-    def test_private_or_irrelevant_classifier_result_does_not_become_low_confidence_handoff(self):
+    def test_private_or_off_topic_classifier_result_goes_to_the_skill_without_handoff_or_fixed_decline(self):
         value = dict(scores=[{'id': 'support', 'score': 0.1}], human_request=True, decline=True)
         result = matching.validate_result(value, {'support'})
-        self.assertTrue(result['decline'])
-        self.assertEqual(result['selected'], 'support')
+        self.assertNotIn('decline', result)
+        self.assertFalse(result['human_request'])
+        self.assertIsNone(result['selected'])
+        value['scores'] = [{'id': 'support', 'score': 0.9}]
+        self.assertEqual(matching.validate_result(value, {'support'})['selected'], 'support')
         value['decline'] = False
-        self.assertIsNone(matching.validate_result(value, {'support'})['selected'])
+        self.assertTrue(matching.validate_result(value, {'support'})['human_request'])
         value['decline'] = 'true'
         with self.assertRaises(ValueError):
             matching.validate_result(value, {'support'})
@@ -29,7 +32,7 @@ class HumanRequestTests(unittest.TestCase):
         result = matching.validate_result(value, {'ledger', 'bills'})
         self.assertEqual((result['selected'], result['decline'], result['notice']), ('ledger', True, 'identity'))
         value['identity_claim'] = False
-        self.assertEqual(matching.validate_result(value, {'ledger', 'bills'})['notice'], 'decline')
+        self.assertNotIn('decline', matching.validate_result(value, {'ledger', 'bills'}))
         value.update(decline=False, human_request=False)
         self.assertIsNone(matching.validate_result(value, {'ledger', 'bills'})['selected'])
         value['identity_claim'] = 1
@@ -314,7 +317,7 @@ class HandoffNoticeTests(unittest.TestCase):
     def action(self, email=False):
         key = service.reply_key(self.message.name, 'handoff', self.run)
         prefix = 'email:' if email else ''
-        text = handoff.acknowledgement(self.message, self.run.ticket)
+        text = handoff.acknowledgement(self.message)
         body = {'email_values': {'body': text}} if email else {'content': {'text': text}}
         return fixtures.Doc(operation='email' if email else 'text',
             request_key=hashlib.sha256((prefix + 'operator:' + key).encode()).hexdigest(),
@@ -362,16 +365,17 @@ class HandoffNoticeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             messaging.automation_scope(action, self.message)
 
-    def test_notice_names_the_ticket_in_the_sender_language(self):
-        self.assertEqual(handoff.acknowledgement(self.message, 'TKT-00042'),
-                         handoff.ACKNOWLEDGEMENT + ' Your ticket number is TKT-00042.')
+    def test_notice_is_warm_in_the_sender_language_without_the_ticket_number(self):
+        self.assertEqual(handoff.acknowledgement(self.message), handoff.ACKNOWLEDGEMENT)
+        self.assertNotIn(self.run.ticket, handoff.acknowledgement(self.message))
         self.message.content = 'எனக்கு உதவி வேண்டும்'
-        self.assertTrue(handoff.acknowledgement(self.message, 'TKT-00042').endswith('உங்கள் டிக்கெட் எண் TKT-00042.'))
+        self.assertEqual(handoff.acknowledgement(self.message), NOTICES['handoff']['Tamil'])
+        self.assertNotIn('டிக்கெட்', handoff.acknowledgement(self.message))
 
-    def test_notice_with_another_ticket_number_is_never_authorized(self):
+    def test_notice_with_a_ticket_number_is_never_authorized(self):
         action = self.action()
         payload = json.loads(action.payload)
-        payload['content']['text'] = handoff.acknowledgement(self.message, 'TKT-99999')
+        payload['content']['text'] = handoff.acknowledgement(self.message) + ' Your ticket number is TKT-00042.'
         action.payload = json.dumps(payload)
         with self.assertRaisesRegex(ValueError, 'Invalid handoff'):
             messaging.delivery_fence(action, self.message, {})

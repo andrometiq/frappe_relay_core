@@ -152,6 +152,9 @@ class InboxRecordTests(unittest.TestCase):
         self.assertEqual((first['last_direction'], first['open_tickets']), ('Incoming', 2))
         self.assertEqual((second['threads'], second['last_direction'], second['open_tickets']), ([], None, 0))
         scan.assert_called_once_with([('Customer', 'C1')])
+        ticket_filters = next(c.kwargs['filters'] for c in self.fake.get_list.call_args_list if c.args[0] == 'Relay Ticket')
+        self.assertEqual(ticket_filters[-1], [['ai_disabled', '=', 1], 'or', ['active_scope_key', 'is', 'not set']],
+                         'Episodes AI still owns are not counted as open tickets')
 
     def test_counts_use_the_same_unlinked_predicate_as_the_directory(self):
         self.chats = [_dict(business_doctype='Customer', total=5, unread=2, messages=7),

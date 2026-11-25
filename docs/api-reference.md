@@ -281,6 +281,8 @@ gets 403.
 - `GET relay_core.api.business_types`: configured business DocTypes the caller can read.
 - `GET relay_core.tickets.directory`: newest tickets first, 30 per page. Each row has `modified` and `contact_title`,
   the name of the first linked message's contact, empty when the caller cannot read that message or contact.
+  It and `relay_core.tickets.dashboard` leave out episode tickets that AI still owns (`ai_disabled` 0 with an
+  `active_scope_key`).
 - `GET relay_core.api.business_records`: `doctype` and optional `query`; returns
   up to 30 permission-filtered record names. Unconfigured DocTypes are rejected.
 - `relay_core.api.messages` additionally accepts `sender_endpoint` to narrow
