@@ -488,7 +488,9 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
         'operation': kind, 'preview':preview(content)[:300], 'target_channel':channel.name, 'payload': encoded, 'payload_hash': digest, 'status': 'Dispatching'})
     if not outgoing_run.get() and not outgoing_flow.get():
         from relay_core.tickets import manual_takeover
+        from relay_core.whatsapp_presence import mark_replied
         manual_takeover(source)
+        mark_replied(source, channel, context)
         if source.get('ticket'):
             payload['ticket'] = source.ticket
             action.payload = json.dumps(payload)

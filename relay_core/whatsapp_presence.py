@@ -58,6 +58,16 @@ def mark_read(contact, names):
     return queue(message, 'relay-whatsapp-read:' + contact + ':' + message.name, READ_LEASE_SECONDS)
 
 
+def mark_replied(source, channel, context):
+    """With auto seen off, an operator reply sends the blue ticks that reading did not."""
+    if is_enabled('send_whatsapp_read_receipts') or not direct_channel(channel, context):
+        return False
+    message = newest_incoming(source.relay_contact, channel=channel.name)
+    if not message:
+        return False
+    return queue(message, 'relay-whatsapp-read:' + source.relay_contact + ':' + message.name, READ_LEASE_SECONDS)
+
+
 def direct_channel(channel, context):
     """The channel name when a source message is a one-to-one WhatsApp chat."""
     if channel.channel == 'WhatsApp' and context.get('provider') == 'WhatsApp' and not context.get('group_id'):
@@ -66,8 +76,8 @@ def direct_channel(channel, context):
 
 
 def typing(contact, channel):
-    """Show the customer that an operator is typing; this also sends blue ticks."""
-    if not is_enabled('send_whatsapp_typing'):
+    """Show the customer that an operator is typing; this also sends blue ticks, so auto seen must be on."""
+    if not (is_enabled('send_whatsapp_read_receipts') and is_enabled('send_whatsapp_typing')):
         return False
     message = newest_incoming(contact, channel=channel)
     if not message:

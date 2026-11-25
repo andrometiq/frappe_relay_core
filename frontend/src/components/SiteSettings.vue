@@ -72,6 +72,7 @@ const features = [
   { key: 'folders', label: 'Chat folders', help: 'Lets people sort chats into folders in the Chats list.' },
   { key: 'flows', label: 'Automations', help: 'Shows the Flows page, where managers build automatic replies and steps.' },
   { key: 'teams', label: 'Teams', help: 'Each User sees only the business records of their teams. Set up the teams first.' },
+  { key: 'auto_seen', label: 'Auto seen', help: 'WhatsApp customers see blue ticks and typing as soon as someone reads a chat. Off: blue ticks show only when someone sends a reply.' },
 ]
 const providerChannels = provider => channels.value.filter(row => row.channel === provider)
 const checklist = computed(() => [

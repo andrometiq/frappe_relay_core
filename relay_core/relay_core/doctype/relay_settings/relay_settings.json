@@ -181,17 +181,17 @@
     },
     {
       "fieldname": "send_whatsapp_read_receipts",
-      "label": "Send WhatsApp read receipts",
+      "label": "Auto seen",
       "fieldtype": "Check",
       "default": "1",
-      "description": "When an operator reads a one-to-one WhatsApp chat, the customer sees blue ticks on the newest message."
+      "description": "On: when an operator reads a one-to-one WhatsApp chat, the customer sees blue ticks on the newest message. Off: blue ticks go only when an operator sends a reply in that chat, and no typing indicator shows."
     },
     {
       "fieldname": "send_whatsapp_typing",
       "label": "Show WhatsApp typing indicator",
       "fieldtype": "Check",
       "default": "1",
-      "description": "While an operator types a reply, the customer sees a typing indicator. WhatsApp also marks their newest message as read."
+      "description": "While an operator types a reply, the customer sees a typing indicator. WhatsApp also marks their newest message as read. Works only when Auto seen is on."
     },
     {
       "fieldname": "whatsapp_margin_percent",
