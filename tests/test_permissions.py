@@ -91,11 +91,11 @@ class RoleMatrixTests(unittest.TestCase):
             for role in ('"WhatsApp User"', '"WhatsApp Manager"', '"WhatsApp Multi-Channel User"'):
                 self.assertNotIn(role, text, path)
 
-    def test_read_only_role_only_reads_conversations(self):
+    def test_read_only_role_only_reads_conversations_and_campaigns(self):
         granted = {doctype: rows[READ_ONLY] for doctype, rows in PERMS.items() if READ_ONLY in rows}
         self.assertEqual(granted, dict.fromkeys(('Relay Message', 'Relay Contact', 'Relay Contact Endpoint', 'Relay Channel',
             'Relay Chat', 'Relay Ticket', 'Relay Ticket Status', 'Relay Ticket Type', 'Relay Ticket Category',
-            'Relay Contact Type'), 'r'))
+            'Relay Contact Type', 'Relay Campaign', 'Relay Campaign Recipient'), 'r'))
 
     def test_no_internal_record_hooks_remain(self):
         from relay_core import hooks
@@ -184,6 +184,17 @@ class ReadOnlyTests(unittest.TestCase):
                                      (('Relay Message', 'delete'), {}), ((), {'manage': True}), ((), {'configure': True})):
                     with self.assertRaises(PermissionError, msg=(roles, args, kwargs)):
                         permissions.require_access(*args, **kwargs)
+
+    def test_only_a_pure_reader_or_a_manager_reads_campaigns(self):
+        from relay_core import permissions
+        with patch.dict(sys.modules, frappe=read_everything([READ_ONLY])):
+            permissions.require_access('Relay Campaign')
+            permissions.require_access('Relay Campaign Recipient', 'read')
+            with self.assertRaises(PermissionError):
+                permissions.require_access('Relay Campaign', 'write')
+        for roles in (['AI Bot'], [USER], [READ_ONLY, USER]):
+            with patch.dict(sys.modules, frappe=read_everything(roles)), self.assertRaises(PermissionError, msg=roles):
+                permissions.require_access('Relay Campaign')
 
     def gate(self, roles, method, http='POST', user='bot@example.com', user_type='Website User'):
         from relay_core import permissions

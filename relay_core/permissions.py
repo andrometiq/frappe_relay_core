@@ -118,7 +118,8 @@ def require_access(doctype='Relay Contact', ptype='read', *, configure=False, ma
         frappe.throw('Not permitted', frappe.PermissionError)
     if ptype not in ('read', 'select') and not can_write():
         frappe.throw('Your Relay role can only read', frappe.PermissionError)
-    if (manage or doctype in ('Relay Campaign', 'Relay Campaign Recipient')) and not can_manage():
+    campaign = doctype in ('Relay Campaign', 'Relay Campaign Recipient')
+    if (manage or campaign) and not can_manage() and not (campaign and ptype == 'read' and is_read_only()):
         frappe.throw('Only communication managers can perform this action', frappe.PermissionError)
 
 
