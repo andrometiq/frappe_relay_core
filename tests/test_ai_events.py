@@ -282,7 +282,8 @@ class AdmissionTests(unittest.TestCase):
         self.episode.assert_not_called(); self.notice.assert_not_called()
 
     def test_both_hooks_and_manual_flow_enqueue_share_admission(self):
-        with patch.object(service,'create_run',return_value={'name':'run'}) as admit:
+        with patch.object(service,'create_run',return_value={'name':'run'}) as admit, \
+             patch('relay_core.genie.handles',return_value=False):
             flows.on_message(self.message)
             service.on_message(self.message)
         self.assertEqual(admit.call_count,2)

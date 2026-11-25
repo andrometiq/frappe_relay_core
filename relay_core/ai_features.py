@@ -26,6 +26,21 @@ def required(function):
     return guarded
 
 
+def takeover_enabled() -> bool:
+    """Staff takeover keeps the Relay AI or Genie out of a chat, so it works while either one is on."""
+    return is_enabled() or features.is_enabled('genie')
+
+
+def takeover_required(function):
+    """Deny a whitelisted takeover API while both the Relay AI and Genie are off."""
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        if not takeover_enabled():
+            frappe.throw(OFF_MESSAGE, frappe.PermissionError)
+        return function(*args, **kwargs)
+    return guarded
+
+
 def when_enabled(function):
     """Return at once from AI background work while the switch is off."""
     @wraps(function)

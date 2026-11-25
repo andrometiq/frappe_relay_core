@@ -112,8 +112,9 @@ def check_episode(run):
 def manual_takeover(source):
     """Join the current episode hold to the caller's manual-message journal write.
 
-    With AI off a staff message touches no episode. A staff message never fails because it cannot open one."""
-    if not ai_features.is_enabled() or not source.get('business_name'):
+    With the Relay AI and Genie off a staff message touches no episode. A staff message never fails because it cannot
+    open one."""
+    if not ai_features.takeover_enabled() or not source.get('business_name'):
         return
     if not frappe.db.get_value('Relay Channel', source.channel, 'company'):
         return  # Legacy channels cannot admit AI episodes.

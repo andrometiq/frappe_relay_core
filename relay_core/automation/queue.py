@@ -23,6 +23,8 @@ HANDLERS = (
     'relay_core.voice_transcripts.on_message',
     'relay_core.automation.service.on_message',
     'relay_core.email_preferences.on_message',
+    # Last, so a voice note's transcript state is committed before Genie reads it.
+    'relay_core.genie.on_message',
 )
 
 

@@ -533,6 +533,16 @@ List unread incoming messages, grouped by chat, newest chats first.
 - **Common errors:** "Not permitted" without a Relay role.
 - **Arguments:** `channel`?, `limit`?, `after`?
 
+### `messages_media_read` (R)
+
+Read the picture, voice note or file that one message carries.
+
+- **Use when:** a customer sent a picture (message_type image or sticker) and you must see it to answer.
+- **Do not use when:** the message has no media; use messages_read_one.
+- **Returns:** format image (the default; an AI agent always uses it): the picture itself (jpeg, png, webp or gif) with {filename, content_type, size}. format base64, only for a program that reads the bytes: the summary as text and {filename, content_type, size, content_base64} as structured content.
+- **Common errors:** "This message has no supported attachment"; "The media is larger than 3.75 MB"; "This media is not a picture"; "Not found" or "Not permitted" outside the user's scope.
+- **Arguments:** `message`, `format`?
+
 ### `messages_read_one` (R)
 
 Read one message with its media details, five messages around it and the reply window state.
@@ -599,7 +609,7 @@ Everything you need before you reply in one chat: the persona to reply as, the c
 
 - **Use when:** always, right before you write a reply or a template to this chat.
 - **Do not use when:** you only browse chats; use inbox_list or messages_list.
-- **Returns:** {contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: {persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. A section your user may not read is null; facts not in events or knowledge are unknown.
+- **Returns:** {contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: {persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}, taken_over: true when staff took the chat over (send nothing then)}. A section your user may not read is null; facts not in events or knowledge are unknown.
 - **Common errors:** "Not found" or "Not permitted" for a chat outside the user's scope; "Too many knowledge instructions".
 - **Arguments:** `contact`, `limit`?
 

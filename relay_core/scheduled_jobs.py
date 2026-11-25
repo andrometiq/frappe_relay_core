@@ -1,4 +1,4 @@
-"""Scheduler entry points. Each job returns at once on a site that has no Relay Hub."""
+"""Scheduler entry points. Each job but retry_genie returns at once on a site that has no Relay Hub."""
 from collections.abc import Callable
 
 import frappe
@@ -39,3 +39,11 @@ purge_ai_payloads = when_hub_configured('relay_core.ai.minimise.purge_ai_payload
 sync_ai_knowledge = when_hub_configured('relay_core.ai.knowledge_base.ingest.sync_due', ai=True)
 purge_ai_memory = when_hub_configured('relay_core.ai.fact_memory.purge_pending', ai=True)
 rebuild_phone_index = when_hub_configured('relay_core.relay_core.doctype.relay_phone_index.relay_phone_index.rebuild')
+
+
+def retry_genie() -> None:
+    """Send due Genie deliveries and note unanswered chats. Genie needs no Relay Hub; the job reads two indexes.
+    Before the migrate that adds Relay Genie Delivery it does nothing."""
+    from relay_core.genie import DELIVERY, run_due
+    if frappe.db.table_exists(DELIVERY):
+        run_due()

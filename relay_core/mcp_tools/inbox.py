@@ -1,5 +1,5 @@
 """Chat list, unread messages, history, read state and internal notes."""
-from relay_core.mcp_tools.registry import CURSOR, FLAG, NAME_FIELD, READ, WRITE, limit, obj, tool
+from relay_core.mcp_tools.registry import CURSOR, FLAG, NAME_FIELD, READ, WRITE, Blocks, ToolError, limit, obj, tool
 
 CONTACT = {'type': 'string', 'pattern': '^RELAY-CON-[0-9]{10}$', 'description': 'Relay Contact id, RELAY-CON-##########.'}
 MESSAGE = {'type': 'string', 'pattern': '^RELAY-MSG-[0-9]{10}$', 'description': 'Relay Message id, RELAY-MSG-##########.'}
@@ -8,6 +8,9 @@ MESSAGE_FIELDS = ('name', 'direction', 'content', 'message_type', 'status', 'cre
 CHAT_FIELDS = ('name', 'display_name', 'unread', 'channel', 'provider', 'business', 'latest_preview', 'latest_at', 'starred',
                'folder', 'assignment', 'unlinked')
 UNREAD_PER_CHAT = 10
+# An image block is at most 5 MB of base64; one media answer stays inside it.
+MEDIA_MAX_BYTES = 3_750_000
+IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
 
 
 def brief(row, fields=MESSAGE_FIELDS):
@@ -89,6 +92,37 @@ def messages_read_one(message):
             'claim': public_claim(context['contact'], claim) if (claim := active_claim(context['contact'])) else None}
 
 
+@tool('messages_media_read', READ, obj({'message': MESSAGE, 'format': {'type': 'string', 'enum': ['image', 'base64'],
+                                                                       'default': 'image'}}, ('message',)), {
+    'summary': 'Read the picture, voice note or file that one message carries.',
+    'use_when': 'a customer sent a picture (message_type image or sticker) and you must see it to answer.',
+    'avoid_when': 'the message has no media; use messages_read_one.',
+    'returns': 'format image (the default; an AI agent always uses it): the picture itself (jpeg, png, webp or gif) '
+               'with {filename, content_type, size}. format base64, only for a program that reads the bytes: the summary '
+               'as text and {filename, content_type, size, content_base64} as structured content.',
+    'errors': '"This message has no supported attachment"; "The media is larger than 3.75 MB"; "This media is not a '
+              'picture"; "Not found" or "Not permitted" outside the user\'s scope.'})
+def messages_media_read(message, format='image'):
+    import base64
+    import json
+    import re
+
+    from relay_core.attachments import read
+    response = read(message, download=1)
+    raw = response.get_data()
+    if len(raw) > MEDIA_MAX_BYTES:
+        raise ToolError('The media is larger than 3.75 MB')
+    disposition = re.search(r'filename="([^"]*)"', response.headers.get('Content-Disposition', ''))
+    summary = {'filename': disposition.group(1) if disposition else '', 'content_type': response.mimetype, 'size': len(raw)}
+    data = base64.b64encode(raw).decode()
+    if format == 'base64':
+        # The bytes go once: the text block is only the summary, so the answer stays about 4/3 of the media.
+        return Blocks([{'type': 'text', 'text': json.dumps(summary)}], {**summary, 'content_base64': data})
+    if response.mimetype not in IMAGE_TYPES:
+        raise ToolError('This media is not a picture')
+    return Blocks([{'type': 'image', 'data': data, 'mimeType': response.mimetype}], summary)
+
+
 @tool('reply_context', READ, obj({'contact': CONTACT, 'limit': limit(50, 20)}, ('contact',)), {
     'summary': 'Everything you need before you reply in one chat: the persona to reply as, the contact, the business '
                'record you may read, the active events and knowledge rules that apply to it, the recent messages and the '
@@ -97,14 +131,17 @@ def messages_read_one(message):
     'avoid_when': 'you only browse chats; use inbox_list or messages_list.',
     'returns': '{contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: '
                '{persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, '
-               'available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. '
+               'available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}, '
+               'taken_over: true when staff took the chat over (send nothing then)}. '
                'A section your user may not read is null; facts not in events or knowledge are unknown.',
     'errors': '"Not found" or "Not permitted" for a chat outside the user\'s scope; "Too many knowledge instructions".'})
 def reply_context(contact, limit=20):
     from relay_core import reply_context as context
+    from relay_core.genie import is_chat_taken_over
     from relay_core.mcp_tools.coordination import with_actors
     result = context.read(contact, limit)
-    return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']])}
+    return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']]),
+            'taken_over': is_chat_taken_over(contact)}
 
 
 @tool('chat_mark_read', WRITE, obj({'contact': CONTACT, 'read': FLAG}, ('contact', 'read')), {
