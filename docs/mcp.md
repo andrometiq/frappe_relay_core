@@ -599,7 +599,7 @@ Everything you need before you reply in one chat: the persona to reply as, the c
 
 - **Use when:** always, right before you write a reply or a template to this chat.
 - **Do not use when:** you only browse chats; use inbox_list or messages_list.
-- **Returns:** {contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: {persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. A section your user may not read is null; facts not in events or knowledge are unknown.
+- **Returns:** {contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: {persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}, taken_over: true when staff took the chat over (send nothing then)}. A section your user may not read is null; facts not in events or knowledge are unknown.
 - **Common errors:** "Not found" or "Not permitted" for a chat outside the user's scope; "Too many knowledge instructions".
 - **Arguments:** `contact`, `limit`?
 

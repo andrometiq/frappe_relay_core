@@ -97,14 +97,17 @@ def messages_read_one(message):
     'avoid_when': 'you only browse chats; use inbox_list or messages_list.',
     'returns': '{contact, company, business_record: {doctype, name, title, fields: [{label, value}]} or null, persona: '
                '{persona_name, instructions} or null, events: [{name, title, description, event_starts_on, event_ends_on, '
-               'available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}}. '
+               'available_to}], knowledge: [{title, instructions}], messages: [oldest first], reply_window: {open, ...}, '
+               'taken_over: true when staff took the chat over (send nothing then)}. '
                'A section your user may not read is null; facts not in events or knowledge are unknown.',
     'errors': '"Not found" or "Not permitted" for a chat outside the user\'s scope; "Too many knowledge instructions".'})
 def reply_context(contact, limit=20):
     from relay_core import reply_context as context
+    from relay_core.genie import is_chat_taken_over
     from relay_core.mcp_tools.coordination import with_actors
     result = context.read(contact, limit)
-    return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']])}
+    return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']]),
+            'taken_over': is_chat_taken_over(contact)}
 
 
 @tool('chat_mark_read', WRITE, obj({'contact': CONTACT, 'read': FLAG}, ('contact', 'read')), {

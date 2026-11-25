@@ -37,6 +37,7 @@
     "genie_enabled",
     "genie_url",
     "genie_secret",
+    "genie_user",
     "genie_business_types",
     "onboarding_section",
     "hub_origin",
@@ -262,6 +263,13 @@
       "label": "Genie signing secret",
       "fieldtype": "Password",
       "description": "Signs each request (X-Hub-Signature-256). At least 32 characters."
+    },
+    {
+      "fieldname": "genie_user",
+      "label": "Genie Relay user",
+      "fieldtype": "Link",
+      "options": "User",
+      "description": "The Relay user of the Genie agent's MCP login (and of the hooks device's relay_token). Its own chat claims and replies do not count as a staff takeover."
     },
     {
       "fieldname": "genie_business_types",

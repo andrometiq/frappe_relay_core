@@ -1,4 +1,4 @@
-"""Scheduler entry points. Each job returns at once on a site that has no Relay Hub."""
+"""Scheduler entry points. Each job but retry_genie returns at once on a site that has no Relay Hub."""
 from collections.abc import Callable
 
 import frappe
@@ -30,7 +30,6 @@ recover_translations = when_hub_configured('relay_core.translations.recover', ai
 recover_voice_transcripts = when_hub_configured('relay_core.voice_transcripts.recover', ai=True)
 recover_business_events = when_hub_configured('relay_core.business_events.recover')
 recover_received_media = when_hub_configured('relay_core.received_media.recover')
-retry_genie = when_hub_configured('relay_core.genie.retry_due')
 sync_whatsapp_templates = when_hub_configured('relay_core.whatsapp_templates.sync')
 refresh_whatsapp_billing = when_hub_configured('relay_core.billing.refresh_configured')
 sync_channels = when_hub_configured('relay_core.channel_sync.sync')
@@ -40,3 +39,9 @@ purge_ai_payloads = when_hub_configured('relay_core.ai.minimise.purge_ai_payload
 sync_ai_knowledge = when_hub_configured('relay_core.ai.knowledge_base.ingest.sync_due', ai=True)
 purge_ai_memory = when_hub_configured('relay_core.ai.fact_memory.purge_pending', ai=True)
 rebuild_phone_index = when_hub_configured('relay_core.relay_core.doctype.relay_phone_index.relay_phone_index.rebuild')
+
+
+def retry_genie() -> None:
+    """Send due Genie deliveries and note unanswered chats. Genie needs no Relay Hub; the job reads two indexes."""
+    from relay_core.genie import run_due
+    run_due()

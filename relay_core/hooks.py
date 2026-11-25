@@ -13,7 +13,7 @@ auth_hooks = ["relay_core.permissions.block_unpermitted_writes"]
 
 # Off until explicitly configured on an isolated/validated site.
 doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.received_media.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message", "relay_core.genie.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}
-# Every job returns at once while no Relay Hub is configured.
+# Every job but retry_genie returns at once while no Relay Hub is configured.
 scheduler_events = {
     "cron": {
         "* * * * *": [f"relay_core.scheduled_jobs.{job}" for job in (
