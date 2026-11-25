@@ -264,9 +264,10 @@ def open_tickets(rows):
     if not statuses:
         return {}
     result = {}
-    for ticket in frappe.get_list('Relay Ticket', fields=['business_doctype', 'business_name'], limit_page_length=1000, filters={
+    from relay_core.tickets import staff_filters
+    for ticket in frappe.get_list('Relay Ticket', fields=['business_doctype', 'business_name'], limit_page_length=1000, filters=staff_filters({
             'business_doctype': ['in', list({row.business_doctype for row in records})],
-            'business_name': ['in', list({row.business_name for row in records})], 'ticket_status': ['in', statuses]}):
+            'business_name': ['in', list({row.business_name for row in records})], 'ticket_status': ['in', statuses]})):
         key = (ticket.business_doctype, ticket.business_name)
         result[key] = result.get(key, 0) + 1
     return result

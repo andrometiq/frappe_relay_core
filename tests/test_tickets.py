@@ -167,7 +167,7 @@ class TicketTests(unittest.TestCase):
                 patch('relay_core.business_groups.ticket_values', return_value=[{'fieldname': 'region', 'label': 'Region'}]) as values:
             result = self.module.directory(business_type='Supplier')
         check_type.assert_called_once_with('Supplier')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'business_doctype': 'Supplier'})
+        self.assertEqual(listed(self.f.get_list.call_args), {'business_doctype': 'Supplier'})
         values.assert_called_once_with(result['items'], 'Supplier')
         self.assertEqual(result['group_fields'], [{'fieldname': 'region', 'label': 'Region'}])
 
@@ -202,26 +202,26 @@ class TicketTests(unittest.TestCase):
         self.f.session = types.SimpleNamespace(user='agent@example.invalid')
         self.module.directory(query='50%', ticket_status='Closed', mine='1')
         kwargs = self.f.get_list.call_args.kwargs
-        self.assertEqual(kwargs['filters'], dict(subject=['like', '%50\\%%'], ticket_status='Closed', assigned_to='agent@example.invalid'))
+        self.assertEqual(listed(self.f.get_list.call_args), dict(subject=['like', '%50\\%%'], ticket_status='Closed', assigned_to='agent@example.invalid'))
         self.assertEqual(kwargs['fields'], self.module.LIST_FIELDS)
         self.module.directory(mine='0')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {})
+        self.assertEqual(listed(self.f.get_list.call_args), {})
         for bad in (dict(query='x' * 81), dict(ticket_status=['Open'])):
             with self.subTest(bad=bad), self.assertRaises(ValueError): self.module.directory(**bad)
 
     def test_dashboard_filters_apply_to_the_permission_checked_directory(self):
         self.f.get_list = Mock(return_value=[])
         self.module.directory(assigned_to='a@example.invalid', ticket_type='Delivery')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+        self.assertEqual(listed(self.f.get_list.call_args),
                          {'assigned_to': 'a@example.invalid', 'ticket_type': 'Delivery'})
         self.module.directory(assigned_to='', ticket_type='')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'],
+        self.assertEqual(listed(self.f.get_list.call_args),
                          {'assigned_to': ['is', 'not set'], 'ticket_type': ['is', 'not set']})
         self.module.directory(exclude_assignees=['a@example.invalid'])
-        self.assertEqual(self.f.get_list.call_args.kwargs['or_filters'], [
-            ['assigned_to', 'not in', ['a@example.invalid']], ['assigned_to', 'is', 'not set']])
+        self.assertEqual(listed_groups(self.f.get_list.call_args), [
+            [['assigned_to', 'not in', ['a@example.invalid']], 'or', ['assigned_to', 'is', 'not set']]])
         self.module.directory(exclude_assignees=['', 'a@example.invalid'])
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters']['assigned_to'],
+        self.assertEqual(listed(self.f.get_list.call_args)['assigned_to'],
                          ['not in', ['a@example.invalid', '']])
         for bad in (dict(assigned_to=['a']), dict(ticket_type='x' * 141),
                     dict(exclude_assignees=[]), dict(exclude_assignees=['a'] * 9),
@@ -229,13 +229,22 @@ class TicketTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.module.directory(**bad)
 
+    def test_staff_lists_hide_episodes_ai_still_owns(self):
+        owned = self.module.STAFF_TICKETS
+        self.assertEqual(self.module.staff_filters({}), [owned])
+        self.assertEqual(self.module.staff_filters({'ticket_type': 'Delivery', 'name': ['in', ['TKT-00001']]},
+                                                   [['assigned_to', '=', 'a'], 'or', ['assigned_to', 'is', 'not set']]),
+                         [['ticket_type', '=', 'Delivery'], 'and', ['name', 'in', ['TKT-00001']], 'and',
+                          [['assigned_to', '=', 'a'], 'or', ['assigned_to', 'is', 'not set']], 'and', owned])
+        self.assertEqual(owned, [['ai_disabled', '=', 1], 'or', ['active_scope_key', 'is', 'not set']])
+
     def test_directory_pages_newest_first_by_creation(self):
         rows = [Record(name=f'TKT-{n:05d}') for n in range(31, 0, -1)]
         self.f.get_list = Mock(return_value=rows)
         self.f.db = types.SimpleNamespace(get_value=Mock(return_value='2026-10-28 10:00:00'))
         page = self.module.directory(after='TKT-99999')
         kwargs = self.f.get_list.call_args.kwargs
-        self.assertEqual(kwargs['filters']['creation'], ['<', '2026-10-28 10:00:00'])
+        self.assertEqual(listed(self.f.get_list.call_args)['creation'], ['<', '2026-10-28 10:00:00'])
         self.assertEqual((kwargs['order_by'], kwargs['page_length']), ('creation desc', 31))
         self.assertEqual((len(page['items']), page['next']), (30, {'after': 'TKT-00002'}))
         with self.assertRaises(ValueError): self.module.directory(after='RELAY-TKT-0000000001')
@@ -278,9 +287,10 @@ class TicketTests(unittest.TestCase):
                                               {'ticket_status': 'Started', 'tickets': 2}])
         calls = self.f.get_list.call_args_list
         self.assertEqual(len(calls), 5)
-        self.assertEqual(calls[4].kwargs['filters']['name'], ['in', ['TKT-00009']])
+        self.assertEqual(listed(calls[4])['name'], ['in', ['TKT-00009']])
+        self.assertEqual(listed(calls[0]), {})
         self.assertTrue(all(call.args == ('Relay Ticket',) for call in calls))
-        self.assertEqual(calls[1].kwargs['filters'], {'ticket_status': ['in', ['Done']], 'name': ['in', ['TKT-00007', 'TKT-00009']]})
+        self.assertEqual(listed(calls[1]), {'ticket_status': ['in', ['Done']], 'name': ['in', ['TKT-00007', 'TKT-00009']]})
         self.assertEqual((calls[2].kwargs['order_by'], calls[2].kwargs['limit_page_length']), ('creation desc', 10))
 
     def test_resolved_today_counts_only_tickets_closed_today(self):
@@ -294,13 +304,13 @@ class TicketTests(unittest.TestCase):
         self.statuses()
         self.f.get_list = Mock(return_value=[])
         self.module.directory(state='Open', assigned='1', unlinked='1')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+        self.assertEqual(listed(self.f.get_list.call_args), {
             'business_doctype': ['is', 'not set'], 'ticket_status': ['in', ['Open', 'Started']], 'assigned_to': ['is', 'set']})
         self.module.directory(resolved_today='1')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {
+        self.assertEqual(listed(self.f.get_list.call_args), {
             'name': ['in', ['TKT-00007', 'TKT-00009']], 'ticket_status': ['in', ['Done']]})
         self.module.directory(state='Open', ticket_status='Done', assigned='1', assigned_to='')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'ticket_status': 'Done', 'assigned_to': ['is', 'not set']})
+        self.assertEqual(listed(self.f.get_list.call_args), {'ticket_status': 'Done', 'assigned_to': ['is', 'not set']})
         with self.assertRaises(ValueError): self.module.directory(state='Pending')
 
     def test_linked_drafts_recheck_document_and_scope_without_accounting_fields(self):
@@ -478,13 +488,28 @@ class StandaloneTicketTests(unittest.TestCase):
         self.f.get_list = Mock(return_value=[])
         self.module.mentioned_tickets = Mock(return_value=['TKT-00004'])
         self.module.directory(mentioned='1')
-        self.assertEqual(self.f.get_list.call_args.kwargs['filters'], {'name': ['in', ['TKT-00004']]})
+        self.assertEqual(listed(self.f.get_list.call_args), {'name': ['in', ['TKT-00004']]})
         self.module._status_names = Mock(return_value=['Closed'])
         for closed, expected in ((['TKT-00004', 'TKT-00005'], ['TKT-00004']), (['TKT-00005'], [''])):
             self.module._resolved_today = Mock(return_value=closed)
             self.module.directory(mentioned='1', resolved_today='1')
-            self.assertEqual(self.f.get_list.call_args.kwargs['filters']['name'], ['in', expected],
+            self.assertEqual(listed(self.f.get_list.call_args)['name'], ['in', expected],
                              'Mentioned and resolved today both apply')
+
+
+def listed(call, module=None):
+    """The dict filters of a staff ticket list call; it fails unless the AI-owned episode filter is applied."""
+    nested = call.kwargs['filters']
+    conditions = nested[::2]
+    assert all(operator == 'and' for operator in nested[1::2]), nested
+    assert conditions[-1] == [['ai_disabled', '=', 1], 'or', ['active_scope_key', 'is', 'not set']], nested
+    plain = [row for row in conditions[:-1] if row[1] != 'or']
+    return {field: value[0] if operator == '=' else [operator, *value] for field, operator, *value in plain}
+
+
+def listed_groups(call):
+    nested = call.kwargs['filters']
+    return [row for row in nested[::2][:-1] if row[1] == 'or']
 
 
 class Record(dict):
