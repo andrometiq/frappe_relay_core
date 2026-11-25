@@ -80,6 +80,8 @@ def handles(doc) -> bool:
         return False
     if not features.is_enabled('genie') or not frappe.db.get_single_value('Relay Settings', 'genie_url'):
         return False
+    if not features.is_automation_allowed(doc.relay_contact):
+        return False  # While automation is limited to test contacts, only those contacts go to Genie.
     from relay_core.automation.provenance import context_of
     from relay_core.email_preferences import automatic_allowed
     from relay_core.opt_out import is_keyword

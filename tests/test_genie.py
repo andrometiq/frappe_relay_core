@@ -39,6 +39,7 @@ class GenieTests(unittest.TestCase):
         self.frappe = fake_frappe()
         self.enterContext(patch.object(genie, 'frappe', self.frappe))
         self.enabled = self.enterContext(patch.object(genie.features, 'is_enabled', return_value=True))
+        self.allowed = self.enterContext(patch.object(genie.features, 'is_automation_allowed', return_value=True))
         self.enterContext(patch('relay_core.opt_out.keywords', return_value={'stop', 'start'}))
         self.enterContext(patch.object(genie, 'now_datetime', return_value=NOW))
         self.enterContext(patch.object(genie, 'held_ticket', return_value=None))
@@ -92,6 +93,11 @@ class GenieTests(unittest.TestCase):
             self.assertFalse(genie.handles(doc), doc)
         self.enabled.return_value = False
         self.assertFalse(genie.handles(message()))
+
+    def test_only_automation_test_contacts_go_while_the_list_is_set(self):
+        self.allowed.side_effect = lambda contact: contact == 'RELAY-CON-0000000002'
+        self.assertFalse(genie.handles(message()))
+        self.assertTrue(genie.handles(message(relay_contact='RELAY-CON-0000000002')))
 
     def test_business_type_filter(self):
         self.frappe.db.get_single_value.side_effect = lambda doctype, field: {

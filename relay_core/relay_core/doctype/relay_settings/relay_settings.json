@@ -57,7 +57,7 @@
       "fieldname": "automation_test_contacts",
       "label": "Automation test contacts",
       "fieldtype": "Small Text",
-      "description": "Relay Contact names, one per line. When set, automation (flows, AI replies, handoff tickets and notices) runs only for these contacts and does nothing for others. Empty means every contact."
+      "description": "Relay Contact names, one per line. When set, automation (flows, AI replies, handoff tickets and notices) runs only for these contacts and does nothing for others, and only these contacts go to Genie. Empty means every contact."
     },
     {
       "fieldname": "hub_url",
