@@ -7,7 +7,6 @@ import frappe
 
 MAX_CANDIDATES = 20
 MAX_TEXT = 4000
-DECLINE_REASONS = {'identity': 'Sender claims another account', 'decline': 'Private or off-topic request'}
 
 
 def candidates(message):
@@ -97,16 +96,18 @@ def validate_result(value, names):
     ranked = sorted(scores, key=lambda row: row['score'], reverse=True)
     winner = ranked[0] if ranked else None
     runner = ranked[1]['score'] if len(ranked) > 1 else 0
+    # A private or off-topic request goes to the skill, which declines private data and answers small talk;
+    # it never needs a person.
+    human = value['human_request'] and not value.get('decline')
     selected = None
-    if (winner and not value['human_request'] and Decimal(str(winner['score'])) >= Decimal('0.85')
+    if (winner and not human and Decimal(str(winner['score'])) >= Decimal('0.85')
             and Decimal(str(winner['score'])) - Decimal(str(runner)) >= Decimal('0.15')):
         selected = winner['id']
-    kind = 'identity' if value.get('identity_claim') else 'decline' if value.get('decline') else None
-    if kind and winner:
+    if value.get('identity_claim') and winner:
         # Bind only a fixed Core decline to an accessible candidate; no skill tools run.
-        return dict(selected=winner['id'], scores=scores, decline=True, notice=kind,
-                    reason=DECLINE_REASONS[kind], method='classifier')
-    return dict(selected=selected, scores=scores, reason='Sender requested a person' if value['human_request']
+        return dict(selected=winner['id'], scores=scores, decline=True, notice='identity',
+                    reason='Sender claims another account', method='classifier')
+    return dict(selected=selected, scores=scores, human_request=human, reason='Sender requested a person' if human
                 else 'Event matched' if selected else 'No confident event match', method='classifier')
 
 
@@ -143,8 +144,8 @@ def select(message, skills, run_id, deadline, *, history=None):
                   **({'history': minimiser.mask(history)} if history else {}))
     result = validate_result(value, {skill.name for skill in skills})
     if not result['selected']:
-        result['reason'] = (human_reason(text) if value['human_request'] else
+        result['reason'] = (human_reason(text) if result.get('human_request') else
             'No confident event match for request: ' + ' '.join(text.split())[:350])
-    if not result['selected'] and fallback and not value['human_request']:
+    if not result['selected'] and fallback and not result.get('human_request'):
         result.update(selected=fallback.name, method='default', reason='Default skill fallback')
     return result

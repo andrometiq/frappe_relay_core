@@ -12,13 +12,16 @@ from relay_core import messaging, test_mode
 
 
 class HumanRequestTests(unittest.TestCase):
-    def test_private_or_irrelevant_classifier_result_does_not_become_low_confidence_handoff(self):
+    def test_private_or_off_topic_classifier_result_goes_to_the_skill_without_handoff_or_fixed_decline(self):
         value = dict(scores=[{'id': 'support', 'score': 0.1}], human_request=True, decline=True)
         result = matching.validate_result(value, {'support'})
-        self.assertTrue(result['decline'])
-        self.assertEqual(result['selected'], 'support')
+        self.assertNotIn('decline', result)
+        self.assertFalse(result['human_request'])
+        self.assertIsNone(result['selected'])
+        value['scores'] = [{'id': 'support', 'score': 0.9}]
+        self.assertEqual(matching.validate_result(value, {'support'})['selected'], 'support')
         value['decline'] = False
-        self.assertIsNone(matching.validate_result(value, {'support'})['selected'])
+        self.assertTrue(matching.validate_result(value, {'support'})['human_request'])
         value['decline'] = 'true'
         with self.assertRaises(ValueError):
             matching.validate_result(value, {'support'})
@@ -29,7 +32,7 @@ class HumanRequestTests(unittest.TestCase):
         result = matching.validate_result(value, {'ledger', 'bills'})
         self.assertEqual((result['selected'], result['decline'], result['notice']), ('ledger', True, 'identity'))
         value['identity_claim'] = False
-        self.assertEqual(matching.validate_result(value, {'ledger', 'bills'})['notice'], 'decline')
+        self.assertNotIn('decline', matching.validate_result(value, {'ledger', 'bills'}))
         value.update(decline=False, human_request=False)
         self.assertIsNone(matching.validate_result(value, {'ledger', 'bills'})['selected'])
         value['identity_claim'] = 1

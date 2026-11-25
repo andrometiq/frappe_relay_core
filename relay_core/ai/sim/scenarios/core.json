@@ -744,6 +744,7 @@
      "handoff": false,
      "reason": "",
      "data_question": false,
+     "decline": true,
      "match": {
       "human_request": false,
       "decline": true,
