@@ -1,7 +1,7 @@
 """Relay AI hand-over: a new customer message goes to the Live Relay AI skill whose AI Model is a conversation agent.
 
 frappe_tools holds the agent's endpoint, secret and model (AI Provider Account and AI Model). The agent answers the
-whole chat through the Relay MCP as the skill's Run as user. Relay hands each message over once, in a background job;
+whole chat through the Relay MCP as its own Relay AI Agent user. Relay hands each message over once, in a background job;
 retries and unanswered chats are the agent's job. A voice note goes at once, with Relay's transcript when it has one."""
 import json
 import re
@@ -49,7 +49,7 @@ def agent_skill(doc):
     if is_keyword(doc) or is_group(doc) or not automatic_allowed(context_of(doc)):
         return None
     skill = live_agent_skill(doc)
-    if not skill or is_taken_over(doc.relay_contact, doc, skill.run_as_user):
+    if not skill or is_taken_over(doc.relay_contact, doc):
         return None
     return skill
 
@@ -68,15 +68,20 @@ def handles_safely(doc) -> bool:
         return False
 
 
-def is_taken_over(contact: str, message=None, agent_user: str | None = None) -> bool:
+def is_taken_over(contact: str, message=None) -> bool:
     """True when staff own the chat: the Relay automation's rule (a paused contact, or a held episode ticket), less
     the agent's own holds. A pause for an active MCP claim is the claim's (its guard stops another sender),
-    and a ticket held by the agent user's own reply is the agent's."""
+    and a ticket held by the reply of a Relay AI Agent user is the agent's."""
     paused, generation = frappe.db.get_value('Relay Contact', contact, ['automation_paused', 'automation_generation'])
     if paused and not is_claim_pause(contact, generation):
         return True
     ticket = held_ticket(message) if message else None
-    return bool(ticket and ticket.ai_disabled and ticket.ownership_actor != agent_user)
+    return bool(ticket and ticket.ai_disabled and not is_agent_user(ticket.ownership_actor))
+
+
+def is_agent_user(user: str | None) -> bool:
+    from relay_core.permissions import AI_AGENT
+    return bool(user) and AI_AGENT in frappe.get_roles(user)
 
 
 def is_claim_pause(contact: str, generation) -> bool:
@@ -102,9 +107,7 @@ def is_chat_taken_over(contact: str) -> bool:
     """is_taken_over for the chat's newest customer message, for reply_context."""
     newest = frappe.get_all('Relay Message', filters={'relay_contact': contact, 'direction': 'Incoming'}, pluck='name',
                             order_by='name desc', limit_page_length=1)
-    message = frappe.get_doc('Relay Message', newest[0]) if newest else None
-    skill = live_agent_skill(message) if message else None
-    return is_taken_over(contact, message, skill.run_as_user if skill else None)
+    return is_taken_over(contact, frappe.get_doc('Relay Message', newest[0]) if newest else None)
 
 
 def job_id(message: str) -> str:

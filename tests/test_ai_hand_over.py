@@ -119,21 +119,25 @@ class HandOverTests(unittest.TestCase):
         self.frappe.cache.hget.return_value = json.dumps(dict(claim, until=1, paused_generation=5))
         self.assertFalse(hand_over.handles(message()))
 
-    def test_a_ticket_held_by_staff_is_a_takeover_but_the_skills_run_as_user_is_not(self):
+    def test_a_ticket_held_by_staff_is_a_takeover_but_one_held_by_an_ai_agent_user_is_not(self):
+        self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else ['Relay Communication User']
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=1, ownership_actor='staff@relay.test')):
             self.assertFalse(hand_over.handles(message()))
-            self.assertTrue(hand_over.is_taken_over('RELAY-CON-0000000001', message(), 'agent@relay.test'))
+            self.assertTrue(hand_over.is_taken_over('RELAY-CON-0000000001', message()))
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=1, ownership_actor='agent@relay.test')):
             self.assertTrue(hand_over.handles(message()))
+        with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=1, ownership_actor=None)):
+            self.assertFalse(hand_over.handles(message()))
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=0, ownership_actor='staff@relay.test')):
             self.assertTrue(hand_over.handles(message()))
 
-    def test_reply_context_rule_uses_the_newest_messages_agent_user(self):
+    def test_reply_context_rule_reads_the_newest_customer_message(self):
+        self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else []
         self.frappe.get_all.return_value = ['RELAY-MSG-0000000001']
         self.frappe.get_doc.return_value = message()
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=1, ownership_actor='agent@relay.test')):
             self.assertFalse(hand_over.is_chat_taken_over('RELAY-CON-0000000001'))
-            self.skills.return_value = []
+        with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=1, ownership_actor='staff@relay.test')):
             self.assertTrue(hand_over.is_chat_taken_over('RELAY-CON-0000000001'))
 
     def test_an_unexpected_error_leaves_the_message_to_the_relay_automation(self):

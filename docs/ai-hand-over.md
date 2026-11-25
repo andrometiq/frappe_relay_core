@@ -6,7 +6,7 @@ Relay can give a whole chat to an agent runtime instead of answering it with Rel
 
 - Install frappe_tools and turn on Relay AI features (`enable_ai_features` in Relay Settings).
 - In frappe_tools, create an AI Provider Account for the agent runtime (its Base URL and shared secret) and an AI Model on that account. A model is a conversation agent when the model and its account are enabled and the provider takes a hand-over.
-- Create a Relay AI skill for the channel and business type, with that AI Model, Mode Automatic (Live) and Run as user = the Relay user of the agent's MCP login.
+- Create a Relay AI skill for the channel and business type, with that AI Model, Mode Automatic (Live). The agent's MCP login is a Relay user with the Relay AI Agent role.
 
 Relay finds the skill the same way Relay AI does: the enabled skills of the message's channel for its business type, plus the channel's default skill, in name order. The first Live skill whose AI Model is a conversation agent takes the message. When no such skill applies, Relay AI answers as usual. A message with no business record has no skill. While a message goes to an agent, the Relay automation (flows, channel steps, Relay AI) and email auto-reply rules do not reply to it.
 
@@ -40,7 +40,7 @@ Relay finds the skill the same way Relay AI does: the enabled skills of the mess
 ```
 
 - `chat` is the Relay Contact id (`RELAY-CON-##########`), the same value as `contact`. Relay has no separate chat id: one chat is one Relay Contact. Pass it as `contact` to `reply_context`, `messages_list`, `chat_claim`, `chat_release` and `chat_mark_read`. `chat_send_text` does not take the chat: it takes `message` = the `message_id` of this body (a `RELAY-MSG-##########`) plus a unique `request_key`, and sends the reply to that message's contact and channel.
-- Relay does not send a message of a chat staff took over: the Relay automation's rule (the contact's automation is paused, or the active episode ticket is held with AI off), except a pause made by an active MCP chat claim and a ticket held by the skill's Run as user's own reply. Such a message follows the staff path. If the hand-over check itself errors, the automation and email rule treat the message as Relay's and log `Relay AI hand-over check failed`.
+- Relay does not send a message of a chat staff took over: the Relay automation's rule (the contact's automation is paused, or the active episode ticket is held with AI off), except a pause made by an active MCP chat claim and a ticket held by the reply of a user with the Relay AI Agent role. Such a message follows the staff path. If the hand-over check itself errors, the automation and email rule treat the message as Relay's and log `Relay AI hand-over check failed`.
 - Relay does not send group chats (WhatsApp group, Telegram group, supergroup or channel), outgoing messages, imported history, system events, opt-out or opt-in keyword messages (STOP, START), or automatic email (auto-submitted or unauthenticated). Reactions and status updates are not new messages, so they are never sent. When Automation test contacts (`automation_test_contacts`) is set, Relay sends only the messages of those contacts.
 - A voice note goes at once; Relay never waits for its own transcript. When Relay already has one, `transcript` holds it (and `text` too); else `transcript` is empty and the agent transcribes the audio itself.
 - `contact_name` is empty when the display name is a phone number or contains an email address.
@@ -50,6 +50,6 @@ Relay finds the skill the same way Relay AI does: the enabled skills of the mess
 
 ## Replies
 
-The agent replies, claims chats, adds staff notes and creates tickets through the Relay MCP (`/api/method/relay_core.mcp.endpoint`, logged in as the skill's Run as user). `reply_context` returns `taken_over` (true when staff took the chat over, by the rule above): the agent then sends nothing and releases the chat.
+The agent replies, claims chats, adds staff notes and creates tickets through the Relay MCP (`/api/method/relay_core.mcp.endpoint`, logged in as the agent's Relay user). `reply_context` returns `taken_over` (true when staff took the chat over, by the rule above): the agent then sends nothing and releases the chat.
 
 The agent's `chat_send_text` passes `message` (the newest customer message), `after_message` (the newest message it read) and a `request_key` unique to that reply. Relay keys a send by user and `request_key`, so a send repeated with the same key returns the first send, and a send after a newer message is refused with "Chat changed". When the agent cannot answer, it adds a staff note on the chat (`chat_comment_add`).
