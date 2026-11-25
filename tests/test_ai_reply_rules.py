@@ -317,7 +317,7 @@ class HandoffNoticeTests(unittest.TestCase):
     def action(self, email=False):
         key = service.reply_key(self.message.name, 'handoff', self.run)
         prefix = 'email:' if email else ''
-        text = handoff.acknowledgement(self.message, self.run.ticket)
+        text = handoff.acknowledgement(self.message)
         body = {'email_values': {'body': text}} if email else {'content': {'text': text}}
         return fixtures.Doc(operation='email' if email else 'text',
             request_key=hashlib.sha256((prefix + 'operator:' + key).encode()).hexdigest(),
@@ -365,16 +365,17 @@ class HandoffNoticeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             messaging.automation_scope(action, self.message)
 
-    def test_notice_names_the_ticket_in_the_sender_language(self):
-        self.assertEqual(handoff.acknowledgement(self.message, 'TKT-00042'),
-                         handoff.ACKNOWLEDGEMENT + ' Your ticket number is TKT-00042.')
+    def test_notice_is_warm_in_the_sender_language_without_the_ticket_number(self):
+        self.assertEqual(handoff.acknowledgement(self.message), handoff.ACKNOWLEDGEMENT)
+        self.assertNotIn(self.run.ticket, handoff.acknowledgement(self.message))
         self.message.content = 'எனக்கு உதவி வேண்டும்'
-        self.assertTrue(handoff.acknowledgement(self.message, 'TKT-00042').endswith('உங்கள் டிக்கெட் எண் TKT-00042.'))
+        self.assertEqual(handoff.acknowledgement(self.message), NOTICES['handoff']['Tamil'])
+        self.assertNotIn('டிக்கெட்', handoff.acknowledgement(self.message))
 
-    def test_notice_with_another_ticket_number_is_never_authorized(self):
+    def test_notice_with_a_ticket_number_is_never_authorized(self):
         action = self.action()
         payload = json.loads(action.payload)
-        payload['content']['text'] = handoff.acknowledgement(self.message, 'TKT-99999')
+        payload['content']['text'] = handoff.acknowledgement(self.message) + ' Your ticket number is TKT-00042.'
         action.payload = json.dumps(payload)
         with self.assertRaisesRegex(ValueError, 'Invalid handoff'):
             messaging.delivery_fence(action, self.message, {})

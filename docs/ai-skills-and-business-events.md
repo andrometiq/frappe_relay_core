@@ -171,7 +171,7 @@ Search uses MariaDB FULLTEXT in natural language mode with the scope as query pa
 
 ## Staff ownership and delivery
 
-Every handoff, triage and request for a person creates or reopens the episode ticket of the sender and holds it for staff, so AI stops for that episode. The fixed acknowledgement in the sender's language names the ticket, for example "Thank you for letting us know. A person from our team will follow up with you. Your ticket number is TKT-00042." Delivery accepts only this exact text with the run's own ticket number.
+Every handoff, triage and request for a person creates or reopens the episode ticket of the sender and holds it for staff, so AI stops for that episode. The fixed acknowledgement in the sender's language is short and does not show the ticket number, for example "Sure 🙏 I'm passing this to our team, they'll get back to you shortly." Delivery accepts only this exact text. Staff see the ticket number on the ticket.
 
 Take over, Start work, an explicit claim, and the first manual outbound message stop AI for that episode. The ownership transaction sets `ai_disabled`, advances its generation, and invalidates pending approvals. Assignment alone does not stop AI. All continuations, writes, flow steps, sends, and recovery attempts check ownership. Other business episodes for the same contact remain independent.
 
