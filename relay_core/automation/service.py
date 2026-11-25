@@ -214,6 +214,9 @@ def create_run(doc):
     from relay_core.opt_out import is_keyword
     if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc):
         return {'status': 'Ignored'}  # An opt-out or opt-in keyword gets no automatic reply.
+    from relay_core import features
+    if not features.is_automation_allowed(doc.relay_contact):
+        return {'status': 'Disabled'}
     from relay_core.flows.service import claims, create_event
     from relay_core.ai.matching import human_request, human_reason
     from relay_core.email_preferences import automatic_allowed, automatic_reply_exists

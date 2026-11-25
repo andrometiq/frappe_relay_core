@@ -172,6 +172,8 @@ class AdmissionTests(unittest.TestCase):
         self.waiting = self.enterContext(patch('relay_core.automation.channel.owns_reply', return_value=False))
         self.confirm = self.enterContext(patch.object(ai,'continue_search',return_value=False))
         self.keyword = self.enterContext(patch('relay_core.opt_out.is_keyword', return_value=False))
+        self.settings = self.enterContext(patch('relay_core.features.frappe'))
+        self.settings.db.get_single_value.return_value = ''
 
     def test_waiting_flow_owns_reply_even_with_search_confirmation_and_reordered_steps(self):
         self.channel.automation_steps = [_dict(step='AI skill', enabled=1, ai_skill='skill', on_reply='Stop')]
@@ -261,6 +263,23 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(service.create_run(self.message)['status'],'Pending')
         self.assertEqual(self.run.stage,'Triage')
         self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
+
+    def test_test_contacts_limit_automation_to_listed_contacts(self):
+        self.settings.db.get_single_value.return_value = 'other\n'
+        self.claims.return_value = True
+        self.assertEqual(service.create_run(self.message), {'status': 'Disabled'})
+        self.save.assert_not_called(); self.episode.assert_not_called(); self.notice.assert_not_called()
+        self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
+        self.settings.db.get_single_value.return_value = 'other\nperson'
+        self.assertEqual(service.create_run(self.message)['status'], 'Completed')
+        self.episode.assert_called_once()
+        self.event.assert_called_once_with(self.message)
+
+    def test_unlisted_human_request_gets_no_ticket_or_notice(self):
+        self.settings.db.get_single_value.return_value = 'other'
+        self.message.content = 'I want a human'
+        self.assertEqual(service.create_run(self.message), {'status': 'Disabled'})
+        self.episode.assert_not_called(); self.notice.assert_not_called()
 
     def test_both_hooks_and_manual_flow_enqueue_share_admission(self):
         with patch.object(service,'create_run',return_value={'name':'run'}) as admit:
