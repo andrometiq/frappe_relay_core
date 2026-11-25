@@ -50,6 +50,12 @@ class DisclosureDelivery(unittest.TestCase):
         self.assertEqual([text for text, _ in self.sent()], ['Noted: 1250 received.'])
         self.f.db.set_value.assert_not_called()
 
+    def test_no_notice_when_the_site_turns_it_off(self):
+        self.f.db.get_single_value = Mock(side_effect=lambda doctype, field: 0 if field == 'send_ai_disclosure' else 1)
+        self.service.process(self.run.name)
+        self.assertEqual([text for text, _ in self.sent()], ['Noted: 1250 received.'])
+        self.assertEqual(self.ticket.ai_disclosed, 0)
+
     def test_notice_uses_the_customer_language(self):
         self.message.content = 'என் கட்டணம் எப்போது வரும்?'
         self.service.process(self.run.name)
