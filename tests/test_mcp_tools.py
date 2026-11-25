@@ -444,6 +444,12 @@ class MediaReadTests(unittest.TestCase):
         answer = self.call(media(b'OggS', 'audio/ogg', 'voice.ogg'), format='base64')
         self.assertEqual(answer['structuredContent'], {'filename': 'voice.ogg', 'content_type': 'audio/ogg', 'size': 4,
                                                        'content_base64': 'T2dnUw=='})
+        self.assertNotIn('T2dnUw==', answer['content'][0]['text'])  # The bytes go once, in the structured content.
+
+    def test_a_full_size_clip_answers_in_about_four_thirds_of_its_bytes(self):
+        import json
+        answer = self.call(media(b'x' * 3_750_000, 'audio/ogg', 'voice.ogg'), format='base64')
+        self.assertLess(len(json.dumps(answer)), 5_100_000)
 
     def test_a_voice_note_is_not_a_picture_and_large_media_is_refused(self):
         self.assertEqual(self.call(media(b'OggS', 'audio/ogg'))['content'][0]['text'], 'This media is not a picture')

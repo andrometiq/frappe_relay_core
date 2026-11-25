@@ -539,7 +539,7 @@ Read the picture, voice note or file that one message carries.
 
 - **Use when:** a customer sent a picture (message_type image or sticker) and you must see it to answer.
 - **Do not use when:** the message has no media; use messages_read_one.
-- **Returns:** format image: the picture itself (jpeg, png, webp or gif) with {filename, content_type, size}. format base64: {filename, content_type, size, content_base64} for a program that reads the bytes.
+- **Returns:** format image (the default; an AI agent always uses it): the picture itself (jpeg, png, webp or gif) with {filename, content_type, size}. format base64, only for a program that reads the bytes: the summary as text and {filename, content_type, size, content_base64} as structured content.
 - **Common errors:** "This message has no supported attachment"; "The media is larger than 3.75 MB"; "This media is not a picture"; "Not found" or "Not permitted" outside the user's scope.
 - **Arguments:** `message`, `format`?
 

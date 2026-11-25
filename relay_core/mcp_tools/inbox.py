@@ -97,12 +97,14 @@ def messages_read_one(message):
     'summary': 'Read the picture, voice note or file that one message carries.',
     'use_when': 'a customer sent a picture (message_type image or sticker) and you must see it to answer.',
     'avoid_when': 'the message has no media; use messages_read_one.',
-    'returns': 'format image: the picture itself (jpeg, png, webp or gif) with {filename, content_type, size}. '
-               'format base64: {filename, content_type, size, content_base64} for a program that reads the bytes.',
+    'returns': 'format image (the default; an AI agent always uses it): the picture itself (jpeg, png, webp or gif) '
+               'with {filename, content_type, size}. format base64, only for a program that reads the bytes: the summary '
+               'as text and {filename, content_type, size, content_base64} as structured content.',
     'errors': '"This message has no supported attachment"; "The media is larger than 3.75 MB"; "This media is not a '
               'picture"; "Not found" or "Not permitted" outside the user\'s scope.'})
 def messages_media_read(message, format='image'):
     import base64
+    import json
     import re
 
     from relay_core.attachments import read
@@ -114,7 +116,8 @@ def messages_media_read(message, format='image'):
     summary = {'filename': disposition.group(1) if disposition else '', 'content_type': response.mimetype, 'size': len(raw)}
     data = base64.b64encode(raw).decode()
     if format == 'base64':
-        return {**summary, 'content_base64': data}
+        # The bytes go once: the text block is only the summary, so the answer stays about 4/3 of the media.
+        return Blocks([{'type': 'text', 'text': json.dumps(summary)}], {**summary, 'content_base64': data})
     if response.mimetype not in IMAGE_TYPES:
         raise ToolError('This media is not a picture')
     return Blocks([{'type': 'image', 'data': data, 'mimeType': response.mimetype}], summary)
