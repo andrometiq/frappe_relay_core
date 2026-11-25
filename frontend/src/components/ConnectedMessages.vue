@@ -117,7 +117,11 @@ const lock = computed(() => replyLock(activeThread.value));
 const noThreads = computed(() => threads.ready.value && !threads.items.value.length && !threadOpen.value);
 // The threads read failed: the chat shows only the error and Retry.
 const threadsFailed = computed(() => !threadOpen.value && !threads.ready.value && !!threads.error.value && !threads.loading.value);
-const panelRecord = computed(() => businessName.value ? { doctype: businessContext.value?.doctype_label || businessType.value, name: businessName.value, title: title.value } : null);
+// The details panel's record: the business chat's record, else the contact's primary record.
+const panelRecord = computed(() => {
+  if (!businessName.value) return primary.value ? { ...primary.value, doctype: primary.value.doctype_label || primary.value.doctype } : null;
+  return { doctype: businessContext.value?.doctype_label || businessType.value, name: businessName.value, title: title.value, profile: businessContext.value?.profile };
+});
 const isMobile = useMobileLayout(), infoOpen = ref(false), linking = ref(false);
 const primary = computed(() => businessName.value ? null : contactRecord.value?.primary);
 const otherLinks = computed(() => businessName.value ? '' : linkedLabel(contactRecord.value));
@@ -403,7 +407,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
             </template>
             <span v-else-if="!isMobile && whoLine" class="conversation-channel conversation-who" :title="whoLine"><span v-if="whoName">{{ whoName }}</span><ContactEndpoints :phone="phone" :email="email" /><span v-if="channelCaption">{{ channelCaption }}</span></span>
             <template v-if="!isMobile">
-              <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
+              <span v-if="primary" class="conversation-record"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="13" />{{ primary.title }}<small>· {{ primary.doctype_label || primary.doctype }}</small></span>
               <button v-if="otherLinks" type="button" class="conversation-linked" :aria-expanded="contextShown" @click="toggleContext">{{ otherLinks }}</button>
               <button v-if="canLink" type="button" class="conversation-linked" :aria-expanded="contextShown && linking" @click="openLinking">Not linked · Link</button>
             </template>
@@ -421,7 +425,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       </header>
 
       <div v-if="isMobile && (primary || otherLinks)" class="mobile-record-bar">
-        <span v-if="primary" class="mobile-record-chip"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="14" />{{ primary.title }}<small>· {{ primary.doctype }}</small></span>
+        <span v-if="primary" class="mobile-record-chip"><FeatherIcon :name="recordIcon(primary.doctype).icon" :size="14" />{{ primary.title }}<small>· {{ primary.doctype_label || primary.doctype }}</small></span>
         <button v-if="otherLinks" type="button" class="mobile-linked-chip" @click="openInfo()">{{ otherLinks }}</button>
       </div>
 

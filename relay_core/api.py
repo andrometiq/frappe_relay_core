@@ -268,7 +268,8 @@ def contact_details(contact):
     if relay:
         readable_contact(relay)
     from relay_core.business_access import readable_links
-    links = [{'doctype': doctype, 'name': name}
+    from relay_core.business_types import type_label
+    links = [{'doctype': doctype, 'doctype_label': type_label(doctype), 'name': name}
              for doctype, name in readable_links([(row.link_doctype, row.link_name) for row in person.links])]
     endpoints, primary = [], None
     if relay:

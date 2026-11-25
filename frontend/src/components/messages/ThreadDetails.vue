@@ -24,6 +24,9 @@ const manyPeople = computed(() => hasManyPeople(props.threads))
   <section v-if="record" class="thread-details" aria-label="Record">
     <h3>Record</h3>
     <p class="thread-record"><FeatherIcon name="file-text" :size="15" aria-hidden="true" /><span><strong>{{ record.title }}</strong><small>{{ record.doctype }}<template v-if="record.title !== record.name"> · {{ record.name }}</template></small></span></p>
+    <dl v-if="record.profile?.length" class="thread-profile" aria-label="Record profile">
+      <div v-for="field in record.profile" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value || '—' }}</dd></div>
+    </dl>
   </section>
 </template>
 
@@ -41,5 +44,9 @@ const manyPeople = computed(() => hasManyPeople(props.threads))
 .thread-detail-copy strong, .thread-record strong { overflow:hidden; font-size:13px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
 .thread-detail-copy small, .thread-record small { overflow:hidden; color:var(--relay-ink-3); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 .thread-detail-unread { min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--relay-accent); color:var(--relay-accent-ink); font-size:11px; font-weight:600; line-height:18px; text-align:center; }
+.thread-profile { display:flex; flex-direction:column; gap:6px; margin:10px 0 0; }
+.thread-profile div { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
+.thread-profile dt { flex:none; color:var(--relay-ink-3); }
+.thread-profile dd { min-width:0; margin:0; color:var(--relay-ink); text-align:right; overflow-wrap:anywhere; }
 .thread-record { display:flex; align-items:center; gap:10px; margin:0; color:inherit; }
 </style>

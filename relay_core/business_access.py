@@ -195,7 +195,9 @@ def primary_record(contact, links=None):
     doc = frappe.get_doc(*target)
     from relay_core.business_groups import title_field
     title = doc.get(title_field(target[0]))
-    return {'doctype': target[0], 'name': target[1], 'title': str(title or target[1])}
+    from relay_core.business_types import profile, type_label
+    return {'doctype': target[0], 'doctype_label': type_label(target[0]), 'name': target[1],
+            'title': str(title or target[1]), 'profile': profile(doc)}
 
 
 def preserve_primary_history(contact, *, authorize=False):

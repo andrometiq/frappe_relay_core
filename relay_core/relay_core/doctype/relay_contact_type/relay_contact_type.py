@@ -25,6 +25,7 @@ class RelayContactType(Document):
             if isinstance(row.priority, bool) or not str(row.priority).isdigit() or int(row.priority) < 1:
                 frappe.throw('Grouping priority must be a positive integer.')
             seen.add(row.fieldname)
+        validate_profile_fields(self)
         # After editing the table, clearing its last row must mean no grouping.
         if configure:
             self.grouping_field = ''
@@ -47,8 +48,18 @@ def _is_grouping_field(field):
     )
 
 
+def validate_profile_fields(doc):
+    from relay_core.business_types import MAX_PROFILE_FIELDS, is_profile_field
+    fields = [row.fieldname for row in doc.get('profile_fields') or []]
+    if len(fields) > MAX_PROFILE_FIELDS:
+        frappe.throw(f'Choose at most {MAX_PROFILE_FIELDS} profile fields.')
+    meta = frappe.get_meta(doc.business_doctype)
+    if len(set(fields)) != len(fields) or not all(is_profile_field(meta.get_field(field)) for field in fields):
+        frappe.throw(f"Choose distinct available profile fields from {frappe.bold(doc.business_doctype)}.")
+
+
 def validate_configuration_access(doc):
-    """Managers may change only assignments, including through Desk/resource saves."""
+    """Managers may change only assignments and profile fields, including through Desk/resource saves."""
     if frappe.session.user == 'Administrator' or 'System Manager' in frappe.get_roles():
         return True
     previous = None if doc.is_new() else doc.get_doc_before_save()

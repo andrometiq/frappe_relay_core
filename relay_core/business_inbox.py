@@ -184,7 +184,8 @@ def context(doctype,name):
     contacts=_linked_contacts(doctype,name,limit=101)
     from relay_core.business_groups import configuration
     fields = configuration(doctype)
-    return {'name':name,'title':title,'doctype':doctype,'doctype_label':frappe._(doctype),
+    from relay_core.business_types import profile, type_label
+    return {'name':name,'title':title,'doctype':doctype,'doctype_label':type_label(doctype),'profile':profile(doc),
             'grouping_value':doc.get(fields[0]) if fields else '',
             'groups': [{'fieldname': field, 'value': doc.get(field) or ''} for field in fields],
             'contact_count':min(len(contacts),100),'contact_count_limited':len(contacts)>100}

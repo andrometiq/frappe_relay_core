@@ -131,5 +131,65 @@ class SendTests(unittest.TestCase):
             {'operation': 'messages.read', 'message_id': 'wamid.B', 'typing': True}])
 
 
+class AutoSeenOffTests(unittest.TestCase):
+    """Auto seen off: reading and typing leave no trace; an operator reply sends the blue ticks."""
+
+    def setUp(self):
+        PresenceTests.setUp(self)
+        self.frappe.get_cached_doc.return_value = _dict(send_whatsapp_read_receipts=0, send_whatsapp_typing=1)
+        self.source = _dict(name='MSG-3', relay_contact='CON-1')
+        self.channel = SimpleNamespace(channel='WhatsApp', name='CH-WA')
+
+    def test_reading_and_typing_send_nothing(self):
+        self.assertFalse(whatsapp_presence.mark_read('CON-1', ['MSG-3']))
+        self.assertFalse(whatsapp_presence.typing('CON-1', 'CH-WA'))
+        self.frappe.enqueue.assert_not_called()
+
+    def test_a_reply_marks_the_newest_incoming_message_read_once(self):
+        self.assertTrue(whatsapp_presence.mark_replied(self.source, self.channel, {'provider': 'WhatsApp'}))
+        self.assertFalse(whatsapp_presence.mark_replied(self.source, self.channel, {'provider': 'WhatsApp'}))
+        self.frappe.enqueue.assert_called_once_with('relay_core.whatsapp_presence.send', queue='short',
+            job_id='relay-whatsapp-read:MSG-3', deduplicate=True, message_id='wamid.MSG-3', typing=False, channel='WA')
+        self.assertEqual(self.latest.call_args.args[0]['channel'], ['in', ['CH-WA']])
+
+    def test_a_reply_sends_nothing_for_groups_readers_or_with_auto_seen_on(self):
+        self.assertFalse(whatsapp_presence.mark_replied(self.source, self.channel, {'provider': 'WhatsApp', 'group_id': 'G1'}))
+        with patch('relay_core.permissions.can_write', return_value=False):
+            self.assertFalse(whatsapp_presence.mark_replied(self.source, self.channel, {'provider': 'WhatsApp'}))
+        self.frappe.get_cached_doc.return_value = _dict(send_whatsapp_read_receipts=1, send_whatsapp_typing=1)
+        self.assertFalse(whatsapp_presence.mark_replied(self.source, self.channel, {'provider': 'WhatsApp'}))
+        self.frappe.enqueue.assert_not_called()
+
+
+class ReplyReceiptHookTests(unittest.TestCase):
+    """Only an operator reply through messaging.send_one asks for the reply receipt."""
+
+    def run_send(self, run=None):
+        from relay_core import messaging
+        source, channel, context = _dict(name='MSG-3', relay_contact='CON-1'), SimpleNamespace(channel='WhatsApp', name='CH-WA'), {'provider': 'WhatsApp'}
+        fake = Mock()
+        fake.db.get_value.return_value = None
+        fake.session.user = 'operator'
+        fake.ValidationError, fake.PermissionError, fake.DoesNotExistError = ValueError, PermissionError, LookupError
+        token = messaging.outgoing_run.set(run)
+        self.addCleanup(messaging.outgoing_run.reset, token)
+        with patch.object(messaging, 'frappe', fake), \
+                patch.object(messaging, 'readable_source', side_effect=[(source, channel, context), ValueError('stop')]), \
+                patch.object(messaging, 'prepare', return_value=('whatsapp.execute', {}, {'text': 'Hi'})), \
+                patch.object(messaging, 'delivery_snapshot'), patch.object(messaging, 'require_reply_window'), \
+                patch.object(messaging, 'internal_save'), patch('relay_core.tickets.manual_takeover'), \
+                patch('relay_core.whatsapp_presence.mark_replied') as replied:
+            messaging.send_one('MSG-3', 'text', {'text': 'Hi'}, 'key')
+        return replied, (source, channel, context)
+
+    def test_an_operator_reply_asks_for_the_receipt(self):
+        replied, arguments = self.run_send()
+        replied.assert_called_once_with(*arguments)
+
+    def test_an_automation_reply_does_not(self):
+        replied, _ = self.run_send(run='RUN-1')
+        replied.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

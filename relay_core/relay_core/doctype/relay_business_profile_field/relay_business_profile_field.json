@@ -1,0 +1,22 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Profile Field",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "fieldname"
+  ],
+  "fields": [
+    {
+      "fieldname": "fieldname",
+      "label": "Fieldname",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [],
+  "autoname": "RELAY-BPF-.##########",
+  "modified": "2026-11-25 14:00:00.000000"
+}

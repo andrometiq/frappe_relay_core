@@ -4,6 +4,38 @@ from relay_core.business_access import document_name
 from relay_core.permissions import require_access, can_manage
 
 FIELDS = ['business_doctype', 'label', 'enabled']
+MAX_PROFILE_FIELDS = 12
+PROFILE_FIELDTYPES = frozenset({'Data', 'Link', 'Select', 'Int', 'Float', 'Currency', 'Date', 'Datetime', 'Check',
+                                'Small Text', 'Phone'})
+
+
+def is_profile_field(field):
+    return bool(field and field.fieldtype in PROFILE_FIELDTYPES and not field.hidden and not field.permlevel)
+
+
+def type_label(doctype):
+    """The configured caption of a business type, such as "Retailer" for "YRP Retailer"."""
+    return frappe.db.get_value('Relay Contact Type', doctype, 'label') or doctype
+
+
+def profile(doc):
+    """Configured profile fields of a business record as label and display value rows. The caller checks access.
+    A field that became hidden or restricted after it was picked is left out."""
+    meta = frappe.get_meta(doc.doctype)
+    names = frappe.get_all('Relay Business Profile Field', filters={
+        'parent': doc.doctype, 'parenttype': 'Relay Contact Type', 'parentfield': 'profile_fields'},
+        pluck='fieldname', order_by='idx asc', limit_page_length=MAX_PROFILE_FIELDS)
+    fields = [field for field in map(meta.get_field, names) if is_profile_field(field)]
+    return [{'label': field.label or field.fieldname, 'value': display_value(doc, field)} for field in fields]
+
+
+def display_value(doc, field):
+    value = doc.get(field.fieldname)
+    if field.fieldtype == 'Check':
+        return 'Yes' if value else 'No'
+    if value in (None, ''):
+        return ''
+    return str(frappe.format_value(value, field, doc))
 
 
 def picker_options():
