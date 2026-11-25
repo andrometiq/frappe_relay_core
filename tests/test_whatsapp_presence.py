@@ -9,6 +9,13 @@ from relay_core import whatsapp_presence
 from relay_core.hub import HubError
 
 
+def setUpModule():
+    """Every user in these tests holds a Relay writer role."""
+    writer = patch('relay_core.permissions.can_write', return_value=True)
+    writer.start()
+    unittest.addModuleCleanup(writer.stop)
+
+
 class Lease:
     def __init__(self):
         self.keys = {}
@@ -61,6 +68,13 @@ class PresenceTests(unittest.TestCase):
         self.assertNotIn('legacy_source', filters)
         self.assertEqual(self.latest.call_args.kwargs, {'since': ('days', -30), 'limit': 20})
         self.frappe.get_all.assert_any_call('Relay Channel', filters={'channel': 'WhatsApp', 'account': 'hub-account'}, pluck='name')
+
+    def test_a_user_without_a_relay_writer_role_leaves_no_trace_for_the_customer(self):
+        with patch('relay_core.permissions.can_write', return_value=False):
+            self.assertFalse(whatsapp_presence.mark_read('CON-1', ['MSG-3']))
+            self.assertFalse(whatsapp_presence.typing('CON-1', 'CH-WA'))
+        self.frappe.enqueue.assert_not_called()
+        self.assertEqual(self.cache.keys, {})
 
     def test_a_newer_message_gets_its_own_receipt_inside_the_lease(self):
         whatsapp_presence.mark_read('CON-1', ['MSG-3'])

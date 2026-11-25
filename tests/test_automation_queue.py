@@ -16,6 +16,7 @@ from relay_core import translations
 class AutomationQueueTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch('relay_core.email_preferences.recover'))
+        self.enterContext(patch('relay_core.permissions.is_read_only', return_value=False))
 
     def test_every_inbound_hook_defers_policy_reads_and_redis_until_commit(self):
         callbacks = []

@@ -14,6 +14,13 @@ from relay_core.mcp_tools import chats, coordination, registry
 CON, KEY = 'RELAY-CON-0000000001', 'agent-key-0001'
 
 
+def setUpModule():
+    """Every user in these tests holds a Relay writer role."""
+    writer = patch('relay_core.permissions.can_write', return_value=True)
+    writer.start()
+    unittest.addModuleCleanup(writer.stop)
+
+
 class Row(dict):
     __getattr__ = dict.get
 

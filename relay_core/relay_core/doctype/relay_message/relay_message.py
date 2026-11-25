@@ -15,6 +15,9 @@ class RelayMessage(Document):
             frappe.throw('Invalid provider message ID')
 
     def before_insert(self):
+        from relay_core.permissions import is_read_only
+        if self.direction == 'Outgoing' and is_read_only():
+            frappe.throw('Your Relay role can only read', frappe.PermissionError)
         # Content is plain text. JSON also keeps previews independent of legacy HTML.
         if not self.get('message_data') and self.get('message_type') in (None, '', 'text'):
             self.message_data = frappe.as_json({'kind': 'text', 'text': self.get('content') or ''})

@@ -159,6 +159,13 @@ def run_case(name, arguments, targets):
     return result, mocks
 
 
+def setUpModule():
+    """Every user in these tests holds a Relay writer role."""
+    writer = patch('relay_core.permissions.can_write', return_value=True)
+    writer.start()
+    unittest.addModuleCleanup(writer.stop)
+
+
 class RegistryTests(unittest.TestCase):
     def test_every_listed_tool_is_documented_and_safe_by_class(self):
         for entry in registry.listed():
@@ -301,6 +308,23 @@ class CampaignGuardTests(unittest.TestCase):
     def test_pause_needs_no_confirm(self):
         self.handler(action='pause')
         self.control.assert_called_once_with('Promo', 'pause', scheduled_at=None)
+
+
+class ReadOnlyCallTests(unittest.TestCase):
+    def test_a_user_without_a_relay_writer_role_calls_and_lists_read_tools_only(self):
+        send = Mock()
+        with patch('relay_core.permissions.can_write', return_value=False), patch('relay_core.messaging.send', send), \
+                patch('relay_core.api.messages', return_value={'items': [], 'has_more': False, 'first': None, 'last': None}) as messages:
+            denied = registry.call('chat_send_text', {'message': MSG, 'text': 'Hi', 'request_key': KEY})
+            allowed = registry.call('messages_list', {'contact': CON, 'limit': 3})
+            tools = registry.callable_tools()
+        send.assert_not_called()
+        self.assertTrue(denied['isError'])
+        self.assertEqual(denied['content'][0]['text'], 'Not permitted: Your Relay role can only read')
+        self.assertFalse(allowed['isError'])
+        messages.assert_called_once()
+        self.assertTrue(tools and all(entry.safety == READ for entry in tools))
+        self.assertGreater(len(registry.listed()), len(tools))
 
 
 class AISetupTests(unittest.TestCase):

@@ -8,6 +8,8 @@ before_install = "relay_core.permissions.install_roles"
 after_migrate = ["relay_core.permissions.after_migrate", "relay_core.ai.capabilities.sync", "relay_core.ai.playbooks.sync"]
 after_install = "relay_core.permissions.after_migrate"
 on_login = "relay_core.login.use_site_scoped_boot_cache"
+# Runs once the request user is known: only a Relay writer calls a Relay method that changes anything.
+auth_hooks = ["relay_core.permissions.block_unpermitted_writes"]
 
 # Off until explicitly configured on an isolated/validated site.
 doc_events = {"Relay Message": {"after_insert": ["relay_core.opt_out.on_message", "relay_core.inbox.message_created", "relay_core.relay_chats.on_message", "relay_core.translations.on_message", "relay_core.voice_transcripts.on_message", "relay_core.received_media.on_message", "relay_core.flows.service.on_message", "relay_core.automation.service.on_message", "relay_core.email_preferences.on_message"]}, "Relay Hub Event": {"after_insert": "relay_core.automation.projection.on_event"}, "Relay Ticket": {"on_update": "relay_core.ticket_notifications.on_update"}}

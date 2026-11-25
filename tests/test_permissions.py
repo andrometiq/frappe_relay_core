@@ -153,6 +153,104 @@ class AccessTests(unittest.TestCase):
                          [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0), (AI_AGENT, 1), (READ_ONLY, 0)])
 
 
+def read_everything(roles, **extra):
+    """A Frappe boundary where a role outside Relay, such as an API bot's, has DocPerm read on every DocType."""
+    fake = fake_frappe(roles, **extra)
+    fake.has_permission = lambda doctype='Relay Contact', ptype='read', **kwargs: ptype == 'read'
+    return fake
+
+
+class ReadOnlyTests(unittest.TestCase):
+    """Only a Relay writer role sends or changes; DocPerm read from any other role only reads."""
+
+    def test_only_relay_writer_roles_write(self):
+        from relay_core import permissions
+        for roles, writer, read_only in (([USER], True, False), ([TEAM_USER], True, False), ([MANAGER], True, False),
+                                         ([AI_AGENT], True, False), ([HUB_SERVICE], True, False),
+                                         (['System Manager'], True, False), ([READ_ONLY], False, True),
+                                         ([READ_ONLY, USER], True, False), (['AI Bot'], False, False), ([], False, False)):
+            with patch.dict(sys.modules, frappe=fake_frappe(roles)):
+                self.assertEqual((permissions.can_write(), permissions.is_read_only()), (writer, read_only), roles)
+        with patch.dict(sys.modules, frappe=fake_frappe([], user='Administrator')):
+            self.assertTrue(permissions.can_write())
+
+    def test_require_access_lets_a_reader_read_only(self):
+        from relay_core import permissions
+        for roles in ([READ_ONLY], ['AI Bot']):
+            with patch.dict(sys.modules, frappe=read_everything(roles)):
+                permissions.require_access()
+                permissions.require_access('Relay Message', 'read')
+                for args, kwargs in ((('Relay Ticket', 'write'), {}), (('Relay Ticket', 'create'), {}),
+                                     (('Relay Message', 'delete'), {}), ((), {'manage': True}), ((), {'configure': True})):
+                    with self.assertRaises(PermissionError, msg=(roles, args, kwargs)):
+                        permissions.require_access(*args, **kwargs)
+
+    def gate(self, roles, method, http='POST', user='bot@example.com', user_type='Website User'):
+        from relay_core import permissions
+        fake = fake_frappe(roles, user=user, request=types.SimpleNamespace(method=http),
+                           get_cached_value=lambda doctype, name, field: user_type)
+        import frappe.auth
+        with patch.dict(sys.modules, {'frappe': fake, 'frappe.auth': frappe.auth}), \
+                patch.object(permissions, 'called_method', return_value=method):
+            permissions.block_unpermitted_writes()
+
+    def test_a_non_writer_never_calls_a_relay_method_that_changes_anything(self):
+        for roles in ([READ_ONLY], ['AI Bot'], []):
+            for method in ('relay_core.messaging_api.send_text', 'relay_core.messaging.send', 'relay_core.email.send',
+                           'relay_core.telegram.send', 'relay_core.conversation_start.send', 'relay_core.message_reads.mark',
+                           'relay_core.tickets.update', 'relay_core.contacts.update_links', 'relay_core.collaboration.add'):
+                with self.assertRaises(PermissionError, msg=(roles, method)):
+                    self.gate(roles, method)
+        for roles, user_type in (([READ_ONLY], 'System User'), (['AI Bot'], 'Website User')):
+            with self.assertRaises(PermissionError, msg=roles):
+                self.gate(roles, 'relay_core.api.send_document', user_type=user_type)
+
+    def test_reads_writers_guests_mcp_and_other_apps_pass_the_gate(self):
+        self.gate([READ_ONLY], 'relay_core.api.messages', http='GET')
+        self.gate([READ_ONLY], 'relay_core.mcp.endpoint')
+        self.gate([READ_ONLY], 'frappe.client.save')
+        self.gate([READ_ONLY], '')
+        self.gate([], 'relay_core.inbound.receive', user='Guest')
+        self.gate([USER], 'relay_core.messaging_api.send_text')
+        self.gate(['Accounts User'], 'relay_core.api.send_document', user_type='System User')
+
+    def test_called_method_follows_frappe_api_routes(self):
+        from werkzeug.test import EnvironBuilder
+        from frappe import _dict
+        from relay_core import permissions
+        for path, expected in (('/api/method/relay_core.messaging_api.send_text', 'relay_core.messaging_api.send_text'),
+                               ('/api/v1/method/relay_core.email.send', 'relay_core.email.send'),
+                               ('/api/v2/method/relay_core.telegram.send', 'relay_core.telegram.send'),
+                               ('/api/resource/Relay Message', ''), ('/app/relay', None)):
+            request = types.SimpleNamespace(environ=EnvironBuilder(path=path, method='POST').get_environ())
+            with patch('frappe.form_dict', _dict()):
+                self.assertEqual(permissions.called_method(request), expected, path)
+        with patch('frappe.form_dict', _dict(cmd='relay_core.messaging.send')):
+            self.assertEqual(permissions.called_method(None), 'relay_core.messaging.send')
+
+    def test_a_read_only_user_never_creates_an_outgoing_message(self):
+        from frappe import _dict
+        from relay_core.relay_core.doctype.relay_message.relay_message import RelayMessage
+        with patch('relay_core.permissions.is_read_only', return_value=True), patch('frappe.throw', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                RelayMessage.before_insert(_dict(direction='Outgoing'))
+            incoming = _dict(direction='Incoming')
+            RelayMessage.before_insert(incoming)
+        self.assertEqual(incoming.automation_status, 'Pending')
+
+    def test_a_read_only_user_never_journals_a_send(self):
+        from relay_core.relay_core.doctype.relay_message_action.relay_message_action import RelayMessageAction
+        with patch('relay_core.permissions.is_read_only', return_value=True), patch('frappe.throw', side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                RelayMessageAction.before_insert(types.SimpleNamespace())
+        with patch('relay_core.permissions.is_read_only', return_value=False):
+            RelayMessageAction.before_insert(types.SimpleNamespace())
+
+    def test_the_gate_runs_after_authentication(self):
+        from relay_core import hooks
+        self.assertEqual(hooks.auth_hooks, ['relay_core.permissions.block_unpermitted_writes'])
+
+
 class RoleMigrationTests(unittest.TestCase):
     def test_patch_gives_relay_roles_to_whatsapp_role_holders(self):
         import importlib
