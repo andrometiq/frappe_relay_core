@@ -299,7 +299,7 @@ class MetadataTests(unittest.TestCase):
             'Relay Email Preference':'user', 'Relay User Profile':'user', 'Relay Contact Type':'business_doctype',
             'Relay Business Group Claim':'claim_key', 'Relay Pending Receipt':'record_key',
             'Relay WhatsApp Template':'record_key', 'Relay Campaign':'title', 'Relay Document Action':'title',
-            'Relay WhatsApp Billing Month':'record_key', 'Relay Genie Delivery':'message',
+            'Relay WhatsApp Billing Month':'record_key',
             'Relay AI Capability':'capability_key', 'Relay AI Playbook':'playbook_key', 'Relay WhatsApp Signup':'session_id',
             'Relay Ticket Status':'label', 'Relay Ticket Category':'label', 'Relay Ticket Type':'label',
         }

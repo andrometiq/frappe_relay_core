@@ -152,9 +152,9 @@ def enqueue(message):
     require_access(manage=True)
     doc = frappe.get_doc('Relay Message', message)
     doc.check_permission('read')
-    from relay_core import genie
-    if genie.handles_safely(doc):
-        return {'status': 'Ignored'}  # Genie answers this chat; a manual run would make Relay AI reply too.
+    from relay_core.ai import hand_over
+    if hand_over.handles_safely(doc):
+        return {'status': 'Ignored'}  # An agent answers this chat; a manual run would make Relay AI reply too.
     return create_run(doc)
 
 
@@ -283,9 +283,9 @@ def create_run(doc):
 
 @after_message_commit
 def on_message(doc, method=None):
-    from relay_core import genie
-    if genie.handles_safely(doc):
-        return {'status': 'Ignored'}  # Genie answers; the Relay automation and AI must not reply too.
+    from relay_core.ai import hand_over
+    if hand_over.handles_safely(doc):
+        return {'status': 'Ignored'}  # An agent answers; the Relay automation and AI must not reply too.
     return create_run(doc)
 
 
@@ -441,7 +441,7 @@ def recover():
 
 
 @frappe.whitelist(methods=['POST'])
-@ai_features.takeover_required
+@ai_features.required
 def takeover(contact, paused=1):
     require_access(manage=True)
     if str(paused) not in ('0', '1'):

@@ -10,11 +10,6 @@ def scheduled_methods():
             *events['daily']]
 
 
-def hub_methods():
-    """Every job but retry_genie: Genie needs no Relay Hub."""
-    return [method for method in scheduled_methods() if method != 'relay_core.scheduled_jobs.retry_genie']
-
-
 class ScheduledJobTests(unittest.TestCase):
     def test_every_scheduled_job_and_recovery_status_entry_is_gated(self):
         for method in [*scheduled_methods(), *operations.JOBS]:
@@ -27,11 +22,11 @@ class ScheduledJobTests(unittest.TestCase):
         database.get_single_value.return_value = None
         with patch.object(scheduled_jobs.frappe, 'conf', {}), patch.object(scheduled_jobs.frappe, 'db', database), \
              patch.object(scheduled_jobs.frappe, 'get_attr') as get_attr:
-            for method in hub_methods():
+            for method in scheduled_methods():
                 getattr(scheduled_jobs, method.rsplit('.', 1)[1])()
         get_attr.assert_not_called()
         self.assertEqual(database.mock_calls, [(('get_single_value', ('Relay Settings', 'hub_url'), {}))]
-                         * len(hub_methods()))
+                         * len(scheduled_methods()))
 
     def test_configured_hub_runs_the_job(self):
         for conf, saved_url in (({}, 'https://hub.example/mcp'), ({'relay_hub_url': 'https://hub.example/mcp'}, None)):

@@ -283,7 +283,7 @@ class AdmissionTests(unittest.TestCase):
 
     def test_both_hooks_and_manual_flow_enqueue_share_admission(self):
         with patch.object(service,'create_run',return_value={'name':'run'}) as admit, \
-             patch('relay_core.genie.handles',return_value=False):
+             patch('relay_core.ai.hand_over.handles',return_value=False):
             flows.on_message(self.message)
             service.on_message(self.message)
         self.assertEqual(admit.call_count,2)

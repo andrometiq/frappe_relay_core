@@ -137,7 +137,7 @@ def messages_media_read(message, format='image'):
     'errors': '"Not found" or "Not permitted" for a chat outside the user\'s scope; "Too many knowledge instructions".'})
 def reply_context(contact, limit=20):
     from relay_core import reply_context as context
-    from relay_core.genie import is_chat_taken_over
+    from relay_core.ai.hand_over import is_chat_taken_over
     from relay_core.mcp_tools.coordination import with_actors
     result = context.read(contact, limit)
     return {**result, 'messages': with_actors([brief(row) for row in result['messages']['items']]),

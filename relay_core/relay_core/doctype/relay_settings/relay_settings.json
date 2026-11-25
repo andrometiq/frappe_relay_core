@@ -33,12 +33,6 @@
     "opt_out_section",
     "opt_out_keywords",
     "opt_in_keywords",
-    "genie_section",
-    "genie_enabled",
-    "genie_url",
-    "genie_secret",
-    "genie_user",
-    "genie_business_types",
     "onboarding_section",
     "hub_origin",
     "enrolled_at",
@@ -57,7 +51,7 @@
       "fieldname": "automation_test_contacts",
       "label": "Automation test contacts",
       "fieldtype": "Small Text",
-      "description": "Relay Contact names, one per line. When set, automation (flows, AI replies, handoff tickets and notices) runs only for these contacts and does nothing for others, and only these contacts go to Genie. Empty means every contact."
+      "description": "Relay Contact names, one per line. When set, automation (flows, AI replies, handoff tickets and notices) runs only for these contacts and does nothing for others. Empty means every contact."
     },
     {
       "fieldname": "hub_url",
@@ -241,43 +235,6 @@
       "description": "One per line. An incoming message that is exactly one of these words opts the number back in."
     },
     {
-      "fieldname": "genie_section",
-      "label": "Genie",
-      "fieldtype": "Section Break"
-    },
-    {
-      "fieldname": "genie_enabled",
-      "label": "Send messages to Genie",
-      "fieldtype": "Check",
-      "default": "0",
-      "description": "On: each new customer message goes to the Genie hooks communicator, and Genie replies through the Relay MCP. The Relay automation, AI and email rules do not reply to the messages that go to Genie. Group chats and opt-out or opt-in keywords do not go."
-    },
-    {
-      "fieldname": "genie_url",
-      "label": "Genie hooks URL",
-      "fieldtype": "Data",
-      "description": "The /relay path of the Genie hooks communicator. Use https, or http only to a loopback, private or 100.64.0.0/10 address."
-    },
-    {
-      "fieldname": "genie_secret",
-      "label": "Genie signing secret",
-      "fieldtype": "Password",
-      "description": "Signs each request (X-Hub-Signature-256). At least 32 characters."
-    },
-    {
-      "fieldname": "genie_user",
-      "label": "Genie Relay user",
-      "fieldtype": "Link",
-      "options": "User",
-      "description": "The Relay user of the Genie agent's MCP login (and of the hooks device's relay_token). Its own chat claims and replies do not count as a staff takeover."
-    },
-    {
-      "fieldname": "genie_business_types",
-      "label": "Genie business types",
-      "fieldtype": "Small Text",
-      "description": "One business DocType per line. Only messages linked to these types go to Genie. Empty: all messages go."
-    },
-    {
       "fieldname": "onboarding_section",
       "label": "Self-service setup",
       "fieldtype": "Section Break",
@@ -324,5 +281,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-11-26 00:30:00.000000"
+  "modified": "2026-11-26 12:00:00.000000"
 }
