@@ -16,6 +16,21 @@ def is_enabled(feature: str) -> bool:
         return False
 
 
+def automation_test_contacts() -> set[str]:
+    """Relay Contacts that automation is limited to; empty means every contact."""
+    try:
+        value = frappe.db.get_single_value('Relay Settings', 'automation_test_contacts')
+    except frappe.ValidationError:
+        frappe.clear_last_message()
+        return set()
+    return {line.strip() for line in (value or '').splitlines() if line.strip()}
+
+
+def is_automation_allowed(contact: str | None) -> bool:
+    contacts = automation_test_contacts()
+    return not contacts or contact in contacts
+
+
 def require(feature: str):
     if not is_enabled(feature):
         frappe.throw(OFF_MESSAGES[feature], frappe.PermissionError)

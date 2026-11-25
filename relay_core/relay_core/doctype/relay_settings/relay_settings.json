@@ -6,6 +6,7 @@
   "track_changes": 1,
   "field_order": [
     "test_mode",
+    "automation_test_contacts",
     "hub_url",
     "hub_account",
     "hub_token",
@@ -44,6 +45,12 @@
       "label": "Test mode",
       "fieldtype": "Check",
       "description": "Nothing is sent outside this server. Only local simulator addresses are allowed."
+    },
+    {
+      "fieldname": "automation_test_contacts",
+      "label": "Automation test contacts",
+      "fieldtype": "Small Text",
+      "description": "Relay Contact names, one per line. When set, automation (flows, AI replies, handoff tickets and notices) runs only for these contacts and does nothing for others. Empty means every contact."
     },
     {
       "fieldname": "hub_url",

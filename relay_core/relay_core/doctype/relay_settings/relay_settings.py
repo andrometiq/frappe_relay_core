@@ -23,6 +23,9 @@ class RelaySettings(Document):
             value=self.get(field)
             if value and not set(value)=={'*'} and (not 32<=len(value)<=maximum or any(ord(c)<32 for c in value)):
                 frappe.throw('Credentials must contain at least 32 printable characters')
+        contacts = {line.strip() for line in (self.get('automation_test_contacts') or '').splitlines() if line.strip()}
+        if missing := sorted(name for name in contacts if not frappe.db.exists('Relay Contact', name)):
+            frappe.throw('Automation test contacts must be Relay Contact names: ' + ', '.join(missing))
         if not 0 <= (self.whatsapp_margin_percent or 0) <= 1000:
             frappe.throw('WhatsApp margin percent must be between 0 and 1000')
         from relay_core.ai.adapter import auth_types
