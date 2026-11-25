@@ -79,6 +79,11 @@ class TeamScopeTests(unittest.TestCase):
         self.assertTrue(access.record_covered('Customer', 'C-OTHER', 'reader'))
         self.assertTrue(access.person_allowed('south', 'reader'))
 
+    def test_the_read_only_role_does_not_widen_a_team_member(self):
+        self.roles['agent'] = [permissions.USER, permissions.READ_ONLY]
+        self.assertEqual(self.covered('Customer', 'agent'), {'C-NORTH', 'C-PICKED'})
+        self.assertFalse(access.record_covered('Customer', 'C-SOUTH', 'agent'))
+
     def test_a_role_without_relay_access_reads_nothing(self):
         self.assertFalse(access.relay_user('bot'))
         self.assertEqual(access.allowed_types('bot'), set())

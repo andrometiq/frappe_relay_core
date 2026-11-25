@@ -7,12 +7,12 @@ import frappe.permissions
 def allowed_types(user=None):
     """The Relay business access rule. Desk permissions do not grant access. While Teams are on, a user's types are
     the types their teams cover; record_covered then limits the records."""
-    from relay_core.permissions import ALL_RECORDS_ROLES
+    from relay_core.permissions import ALL_RECORDS_ROLES, is_read_only
     user = user or frappe.session.user
     if not relay_user(user):
         return set()
     enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
-    if user == 'Administrator' or ALL_RECORDS_ROLES.intersection(frappe.get_roles(user)):
+    if user == 'Administrator' or ALL_RECORDS_ROLES.intersection(frappe.get_roles(user)) or is_read_only(user, frappe.get_roles(user)):
         return enabled
     from relay_core.team_access import restricted, coverage
     if restricted(user):

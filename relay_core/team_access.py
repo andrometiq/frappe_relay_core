@@ -13,8 +13,8 @@ ACCESS = (ALL, GROUP, RECORD)
 
 def restricted(user: str) -> bool:
     from relay_core import features
-    from relay_core.permissions import READ_ONLY, can_manage
-    return not can_manage(user) and READ_ONLY not in frappe.get_roles(user) and features.is_enabled('teams')
+    from relay_core.permissions import can_manage, is_read_only
+    return not can_manage(user) and not is_read_only(user, frappe.get_roles(user)) and features.is_enabled('teams')
 
 
 def coverage(user: str) -> dict:

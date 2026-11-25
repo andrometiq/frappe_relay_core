@@ -201,7 +201,7 @@ class ReadOnlyTests(unittest.TestCase):
                            'relay_core.tickets.update', 'relay_core.contacts.update_links', 'relay_core.collaboration.add'):
                 with self.assertRaises(PermissionError, msg=(roles, method)):
                     self.gate(roles, method)
-        for roles, user_type in (([READ_ONLY], 'System User'), (['AI Bot'], 'Website User')):
+        for roles, user_type in (([READ_ONLY], 'System User'), (['AI Bot'], 'Website User'), (['Accounts User'], 'System User')):
             with self.assertRaises(PermissionError, msg=roles):
                 self.gate(roles, 'relay_core.api.send_document', user_type=user_type)
 
@@ -212,7 +212,6 @@ class ReadOnlyTests(unittest.TestCase):
         self.gate([READ_ONLY], '')
         self.gate([], 'relay_core.inbound.receive', user='Guest')
         self.gate([USER], 'relay_core.messaging_api.send_text')
-        self.gate(['Accounts User'], 'relay_core.api.send_document', user_type='System User')
 
     def test_called_method_follows_frappe_api_routes(self):
         from werkzeug.test import EnvironBuilder

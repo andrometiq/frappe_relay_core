@@ -9,11 +9,9 @@ AI_AGENT = 'Relay AI Agent'
 READ_ONLY = 'Relay Read Only'
 # Only these roles change or send in Relay. Any other user, even with DocPerm read through another role, only reads.
 WRITE_ROLES = frozenset({USER, TEAM_USER, MANAGER, AI_AGENT, HUB_SERVICE, 'System Manager'})
-# Relay methods with their own role rule for desk users without a Relay role: ERPNext document sends.
-OPEN_WRITE_METHODS = frozenset({'relay_core.api.send_document'})
 MCP_METHOD = 'relay_core.mcp.endpoint'
-# Managers and read-only users read every record of every enabled business type, whatever their teams.
-ALL_RECORDS_ROLES = frozenset({MANAGER, 'System Manager', READ_ONLY})
+# Managers read every record of every enabled business type, whatever their teams. So does a pure reader (is_read_only).
+ALL_RECORDS_ROLES = frozenset({MANAGER, 'System Manager'})
 # Legacy team endpoints retain these roles; business access is owned by business_access.
 ALL_TEAMS_ROLES = frozenset({TEAM_USER, MANAGER, 'System Manager'})
 
@@ -56,10 +54,12 @@ def can_write(user=None):
     return user == 'Administrator' or bool(WRITE_ROLES.intersection(frappe.get_roles(user)))
 
 
-def is_read_only(user=None):
+def is_read_only(user=None, roles=None):
     """Holds the read-only role and no role that changes or sends anything."""
     import frappe
-    return READ_ONLY in frappe.get_roles(user or frappe.session.user) and not can_write(user)
+    user = user or frappe.session.user
+    roles = set(frappe.get_roles(user) if roles is None else roles)
+    return user != 'Administrator' and READ_ONLY in roles and not WRITE_ROLES.intersection(roles)
 
 
 def called_method(request):
@@ -85,16 +85,13 @@ def called_method(request):
 
 def block_unpermitted_writes():
     """auth_hooks: only a Relay writer calls a Relay method with an unsafe HTTP method. The MCP endpoint checks
-    each tool. An open method keeps its own role rule for a desk user, never for a read-only user or an API-only user."""
+    each tool."""
     import frappe
     from frappe.auth import SAFE_HTTP_METHODS
     if frappe.request.method in SAFE_HTTP_METHODS or frappe.session.user == 'Guest' or can_write():
         return
     method = called_method(frappe.request) or ''
     if not method.startswith('relay_core.') or method == MCP_METHOD:
-        return
-    if (method in OPEN_WRITE_METHODS and READ_ONLY not in frappe.get_roles()
-            and frappe.get_cached_value('User', frappe.session.user, 'user_type') == 'System User'):
         return
     frappe.throw('Your Relay role can only read', frappe.PermissionError)
 
