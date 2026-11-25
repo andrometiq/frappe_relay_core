@@ -4,7 +4,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from relay_core.permissions import AI_AGENT, MANAGER, TEAM_USER, USER, HUB_SERVICE
+from relay_core.permissions import AI_AGENT, MANAGER, TEAM_USER, USER, HUB_SERVICE, READ_ONLY
 
 DOCTYPES = Path('relay_core/relay_core/doctype')
 LETTERS = {'read': 'r', 'write': 'w', 'create': 'c', 'delete': 'd'}
@@ -91,6 +91,12 @@ class RoleMatrixTests(unittest.TestCase):
             for role in ('"WhatsApp User"', '"WhatsApp Manager"', '"WhatsApp Multi-Channel User"'):
                 self.assertNotIn(role, text, path)
 
+    def test_read_only_role_only_reads_conversations(self):
+        granted = {doctype: rows[READ_ONLY] for doctype, rows in PERMS.items() if READ_ONLY in rows}
+        self.assertEqual(granted, dict.fromkeys(('Relay Message', 'Relay Contact', 'Relay Contact Endpoint', 'Relay Channel',
+            'Relay Chat', 'Relay Ticket', 'Relay Ticket Status', 'Relay Ticket Type', 'Relay Ticket Category',
+            'Relay Contact Type'), 'r'))
+
     def test_no_internal_record_hooks_remain(self):
         from relay_core import hooks
         self.assertNotIn('relay_core.permissions.internal_record_permission', hooks.has_permission.values())
@@ -144,7 +150,7 @@ class AccessTests(unittest.TestCase):
         with patch.dict(sys.modules, frappe=fake):
             permissions.install_roles()
         self.assertEqual([(row['role_name'], row['desk_access']) for row in created],
-                         [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0), (AI_AGENT, 1)])
+                         [(USER, 1), (TEAM_USER, 1), (HUB_SERVICE, 0), (AI_AGENT, 1), (READ_ONLY, 0)])
 
 
 class RoleMigrationTests(unittest.TestCase):
