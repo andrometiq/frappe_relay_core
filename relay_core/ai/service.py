@@ -682,6 +682,8 @@ def dispatch_reply(run, skill, message, reply, *, slot):
 def disclose(run, message):
     """Send the assistant notice before the ticket's first AI reply; `current` holds the ticket lock."""
     from relay_core.ai.disclosure import due, send
+    if not frappe.db.get_single_value('Relay Settings', 'send_ai_disclosure'):
+        return
     if not run.get('ticket'):
         return  # Pre-episode runs have no ticket to record the notice on.
     if due(frappe.db.get_value('Relay Ticket', run.ticket, ['name', 'ai_disclosed'], as_dict=True)):

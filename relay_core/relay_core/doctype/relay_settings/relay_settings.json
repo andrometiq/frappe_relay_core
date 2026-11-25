@@ -27,6 +27,7 @@
     "monthly_spend_cap_usd",
     "ai_log_retention_days",
     "send_whatsapp_read_receipts",
+    "send_ai_disclosure",
     "send_whatsapp_typing",
     "whatsapp_margin_percent",
     "opt_out_section",
@@ -194,6 +195,13 @@
       "description": "On: when an operator reads a one-to-one WhatsApp chat, the customer sees blue ticks on the newest message. Off: blue ticks go only when an operator sends a reply in that chat, and no typing indicator shows."
     },
     {
+      "fieldname": "send_ai_disclosure",
+      "label": "Send AI notice",
+      "fieldtype": "Check",
+      "default": "1",
+      "description": "On: before the first AI reply in a conversation, the customer gets the notice that an assistant is replying and how to reach a person. Off: no notice is sent."
+    },
+    {
       "fieldname": "send_whatsapp_typing",
       "label": "Show WhatsApp typing indicator",
       "fieldtype": "Check",
@@ -273,5 +281,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-11-04 15:00:00.000000"
+  "modified": "2026-11-25 23:00:00.000000"
 }
