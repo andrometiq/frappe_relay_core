@@ -9,4 +9,4 @@ class RelayGenieDelivery(Document):
 def on_doctype_update():
     # The scheduler reads due retries and delivered messages that still wait for an answer by these keys.
     frappe.db.add_index('Relay Genie Delivery', ['status', 'next_try'], 'relay_genie_delivery_due')
-    frappe.db.add_index('Relay Genie Delivery', ['status', 'follow_up', 'delivered_at'], 'relay_genie_delivery_watch')
+    frappe.db.add_index('Relay Genie Delivery', ['status', 'delivered_at'], 'relay_genie_delivery_watch')

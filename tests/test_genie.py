@@ -149,6 +149,16 @@ class GenieTests(unittest.TestCase):
         with patch.object(genie, 'held_ticket', return_value=_dict(ai_disabled=0, ownership_actor='staff@relay.test')):
             self.assertTrue(genie.handles(message()))
 
+    def test_an_unexpected_error_leaves_the_message_to_the_relay_automation(self):
+        from relay_core import email_preferences
+        with patch.object(genie, 'handles', side_effect=RuntimeError('lock wait')), \
+             patch.object(service, 'create_run', return_value={'status': 'Pending'}) as admit:
+            self.assertFalse(genie.handles_safely(message()))
+            self.assertEqual(service.on_message(message()), {'status': 'Pending'})
+            email_preferences.on_message(message(direction='Outgoing'))
+        admit.assert_called_once()
+        self.assertEqual({entry.kwargs['title'] for entry in self.frappe.log_error.call_args_list}, {'Relay Genie check failed'})
+
     def test_drain_sends_a_taken_over_chat_down_the_staff_path(self):
         with patch.object(genie, 'is_taken_over', return_value=True), patch.object(service, 'create_run') as admit:
             service.on_message(message())
@@ -182,8 +192,10 @@ class GenieTests(unittest.TestCase):
         self.deliver(4)
         self.assertEqual(self.saved(), {'attempts': 5, 'next_try': datetime(2026, 11, 25, 12, 15), 'last_error': 'HTTP 503'})
         self.frappe.log_error.assert_not_called()
-        self.deliver(5)
+        with patch.object(genie, 'add_note') as note:
+            self.deliver(5)
         self.assertEqual(self.saved(), {'status': 'Failed', 'attempts': 6, 'last_error': 'HTTP 503'})
+        note.assert_called_once_with('RELAY-CON-0000000001', 'RELAY-MSG-0000000001')  # Staff hear of it now.
         self.frappe.log_error.assert_called_once()
         self.assertNotIn('secret', str(self.frappe.log_error.call_args))
         self.frappe.cache.zadd.assert_not_called()
@@ -231,15 +243,15 @@ class GenieTests(unittest.TestCase):
         add = self.watch()
         add.assert_called_once_with('RELAY-CON-0000000001', 'Not answered automatically; please reply.',
                                     'genie-watch-RELAY-MSG-0000000001', messages=['RELAY-MSG-0000000001'])
-        self.frappe.db.set_value.assert_called_once_with('Relay Genie Delivery', 'RELAY-MSG-0000000001', {'follow_up': 'Noted'})
+        self.frappe.db.set_value.assert_called_once_with('Relay Genie Delivery', 'RELAY-MSG-0000000001', {'status': 'Noted'})
         filters = self.frappe.get_all.call_args.kwargs['filters']
-        self.assertEqual(filters, {'status': 'Sent', 'follow_up': ['is', 'not set'], 'delivered_at': ['<=', datetime(2026, 11, 25, 11, 50)]})
+        self.assertEqual(filters, {'status': 'Sent', 'delivered_at': ['<=', datetime(2026, 11, 25, 11, 50)]})
 
     def test_watchdog_leaves_answered_noted_and_claimed_chats(self):
         self.watch(replied=True).assert_not_called()
-        self.assertEqual(self.saved(), {'follow_up': 'Replied'})
+        self.assertEqual(self.saved(), {'status': 'Replied'})
         self.watch(noted=True).assert_not_called()
-        self.assertEqual(self.saved(), {'follow_up': 'Noted'})
+        self.assertEqual(self.saved(), {'status': 'Noted'})
         self.watch(claimed=True).assert_not_called()
         self.frappe.db.set_value.assert_not_called()  # Checked again next minute, after the claim.
 
@@ -249,7 +261,7 @@ class GenieTests(unittest.TestCase):
         with patch('relay_core.mcp_tools.coordination.active_claim', return_value=None), \
              patch('relay_core.collaboration.add', side_effect=PermissionError):
             genie.watch()
-        self.assertEqual(self.saved(), {'follow_up': 'Note Failed'})
+        self.assertEqual(self.saved(), {'status': 'Note Failed'})
         self.frappe.log_error.assert_called_once()
 
     def test_url_validation(self):
@@ -288,11 +300,34 @@ class DrainTests(unittest.TestCase):
     def test_genie_runs_last_in_the_inbound_drain(self):
         self.assertEqual(queue.HANDLERS[-1], 'relay_core.genie.on_message')
 
-    def test_the_genie_job_runs_without_a_relay_hub(self):
+    def test_the_genie_job_runs_without_a_relay_hub_and_waits_for_its_table(self):
         from relay_core import scheduled_jobs
-        with patch.object(scheduled_jobs, 'is_hub_configured', return_value=False), patch.object(genie, 'run_due') as run:
+        database = Mock()
+        with patch.object(scheduled_jobs, 'is_hub_configured', return_value=False), patch.object(scheduled_jobs.frappe, 'db', database), \
+             patch.object(genie, 'run_due') as run:
+            database.table_exists.return_value = False  # Before the migrate that adds Relay Genie Delivery.
+            scheduled_jobs.retry_genie()
+            run.assert_not_called()
+            database.table_exists.return_value = True
             scheduled_jobs.retry_genie()
         run.assert_called_once()
+        database.table_exists.assert_called_with('Relay Genie Delivery')
+
+    def test_staff_takeover_works_with_relay_ai_off_while_genie_is_on(self):
+        from relay_core import ai_features, tickets
+        for ai, genie_on, allowed in ((True, False, True), (False, True, True), (False, False, False)):
+            with self.subTest(ai=ai, genie=genie_on), \
+                 patch.object(ai_features.features, 'is_enabled', side_effect=lambda name: {'ai': ai, 'genie': genie_on}[name]), \
+                 patch.object(ai_features, 'frappe') as fake, patch.object(service, 'require_access', side_effect=StopIteration):
+                fake.PermissionError = PermissionError
+                fake.throw.side_effect = PermissionError
+                with self.assertRaises(StopIteration if allowed else PermissionError):
+                    service.takeover('RELAY-CON-0000000001', 1)  # StopIteration: past the switch, into the takeover.
+                source = _dict(business_name='CUST-0001', channel='RELAY-CH-1')
+                with patch.object(tickets, 'frappe') as ticket_frappe:
+                    ticket_frappe.db.get_value.return_value = None  # A legacy channel: returns right after the switch.
+                    tickets.manual_takeover(source)
+                self.assertEqual(ticket_frappe.db.get_value.called, allowed)
 
     def test_the_delivery_table_is_indexed_for_the_scheduler(self):
         from relay_core.relay_core.doctype.relay_genie_delivery import relay_genie_delivery as doctype

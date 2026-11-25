@@ -42,7 +42,7 @@ def save(signature):
 def on_message(doc,method=None):
     from relay_core.opt_out import is_keyword
     from relay_core import genie
-    if genie.handles(doc):return  # Genie answers instead of the email rule.
+    if genie.handles_safely(doc):return  # Genie answers instead of the email rule.
     if not doc.get('legacy_source') and doc.direction=='Incoming' and not is_keyword(doc) and frappe.db.exists('Relay Email Rule',{'channel':doc.channel,'enabled':1}):
         if not automatic_allowed(context_of(doc)) or skill_claims(doc):return
         from relay_core.flows.service import claims

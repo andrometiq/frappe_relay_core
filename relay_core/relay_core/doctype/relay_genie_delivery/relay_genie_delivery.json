@@ -17,8 +17,7 @@
     "attempts",
     "next_try",
     "delivered_at",
-    "last_error",
-    "follow_up"
+    "last_error"
   ],
   "fields": [
     {
@@ -44,11 +43,12 @@
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
-      "options": "Pending\nSent\nFailed\nSkipped",
+      "options": "Pending\nSent\nReplied\nNoted\nNote Failed\nFailed\nSkipped",
       "default": "Pending",
       "in_list_view": 1,
       "in_standard_filter": 1,
-      "read_only": 1
+      "read_only": 1,
+      "description": "Pending: waiting for a try. Sent: Genie took it. 10 minutes later: Replied when the chat got a reply, Noted when it has a staff note (one is added when it has neither), Note Failed when that note failed. Failed: no try was accepted (a staff note is added). Skipped: not for Genie any more."
     },
     {
       "fieldname": "attempts",
@@ -78,16 +78,6 @@
       "fieldtype": "Data",
       "length": 140,
       "read_only": 1
-    },
-    {
-      "fieldname": "follow_up",
-      "label": "Follow-up",
-      "fieldtype": "Select",
-      "options": "\nReplied\nNoted\nNote Failed",
-      "in_list_view": 1,
-      "in_standard_filter": 1,
-      "read_only": 1,
-      "description": "10 minutes after delivery: Replied when the chat got a reply, Noted when it has a staff note (one is added when it has neither)."
     }
   ],
   "permissions": [

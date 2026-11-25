@@ -968,9 +968,9 @@ class OwnershipTests(unittest.TestCase):
         self.module.manual_takeover(source)
         return source
 
-    def test_staff_reply_with_ai_off_touches_no_episode(self):
+    def test_staff_reply_with_ai_and_genie_off_touches_no_episode(self):
         self.module._episode_scope = Mock()
-        with patch.object(self.module.ai_features, 'is_enabled', return_value=False):
+        with patch.object(self.module.ai_features, 'takeover_enabled', return_value=False):
             self.module.manual_takeover(Record(name='Sim Source', channel='Sim Channel', business_name='Sim Supplier'))
         self.module._episode_scope.assert_not_called()
         self.f.db.get_value.assert_not_called()

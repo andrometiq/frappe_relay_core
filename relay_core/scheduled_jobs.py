@@ -42,6 +42,8 @@ rebuild_phone_index = when_hub_configured('relay_core.relay_core.doctype.relay_p
 
 
 def retry_genie() -> None:
-    """Send due Genie deliveries and note unanswered chats. Genie needs no Relay Hub; the job reads two indexes."""
-    from relay_core.genie import run_due
-    run_due()
+    """Send due Genie deliveries and note unanswered chats. Genie needs no Relay Hub; the job reads two indexes.
+    Before the migrate that adds Relay Genie Delivery it does nothing."""
+    from relay_core.genie import DELIVERY, run_due
+    if frappe.db.table_exists(DELIVERY):
+        run_due()

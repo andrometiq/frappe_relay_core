@@ -91,6 +91,16 @@ def handles(doc) -> bool:
     return not is_taken_over(doc.relay_contact, doc)
 
 
+def handles_safely(doc) -> bool:
+    """handles() for the other inbound handlers: an unexpected error is logged and the message stays Relay's, so the
+    inbound drain never rolls back and retries the message for a Genie problem."""
+    try:
+        return handles(doc)
+    except Exception:
+        frappe.log_error(title='Relay Genie check failed', message=f'Message {doc.name} stays with the Relay automation.')
+        return False
+
+
 def is_taken_over(contact: str, message=None) -> bool:
     """True when staff own the chat: the Relay automation's rule (a paused contact, or a held episode ticket), less
     the Genie user's own holds. A pause for an active MCP claim is the claim's (its guard stops another sender),
@@ -213,7 +223,7 @@ def deliver(message: str) -> None:
     settings = frappe.get_single('Relay Settings')
     secret = settings.get_password('genie_secret', raise_exception=False)
     if not secret:
-        fail(message, attempt, 'Set the Genie secret')
+        fail(doc, attempt, 'Set the Genie secret')
         return
     try:
         post(settings.genie_url, secret, doc)
@@ -221,7 +231,7 @@ def deliver(message: str) -> None:
         if attempt < MAX_ATTEMPTS:
             retry_later(message, attempt, str(error))
         else:
-            fail(message, attempt, str(error))
+            fail(doc, attempt, str(error))
         return
     save(message, status='Sent', attempts=attempt, delivered_at=now_datetime(), last_error=None)
 
@@ -235,9 +245,11 @@ def retry_later(message: str, attempt: int, reason: str) -> None:
     save(message, attempts=attempt, next_try=add_to_date(now_datetime(), seconds=BACKOFF[attempt - 1]), last_error=reason[:140])
 
 
-def fail(message: str, attempt: int, reason: str) -> None:
-    save(message, status='Failed', attempts=attempt, last_error=reason[:140])
-    frappe.log_error(title='Relay Genie delivery failed', message=f'Message {message} was not accepted after {attempt} tries: {reason}')
+def fail(doc, attempt: int, reason: str) -> None:
+    """The last try failed: one Error Log, and the staff note the watchdog would add, now."""
+    save(doc.name, status='Failed', attempts=attempt, last_error=reason[:140])
+    frappe.log_error(title='Relay Genie delivery failed', message=f'Message {doc.name} was not accepted after {attempt} tries: {reason}')
+    add_note(doc.relay_contact, doc.name)
 
 
 def run_due() -> None:
@@ -259,18 +271,17 @@ def retry_due() -> None:
 
 def watch() -> None:
     """A delivered message whose chat has no reply after it and no staff note WATCH_MINUTES later gets one note.
-    A claimed chat waits: its holder is answering. The row's follow_up is set once, so a chat is noted once."""
+    A claimed chat waits: its holder is answering. The row leaves Sent once checked, so a chat is noted once."""
     from relay_core.mcp_tools.coordination import active_claim
-    rows = frappe.get_all(DELIVERY, filters={'status': 'Sent', 'follow_up': ['is', 'not set'],
-                                             'delivered_at': ['<=', add_to_date(now_datetime(), minutes=-WATCH_MINUTES)]},
+    rows = frappe.get_all(DELIVERY, filters={'status': 'Sent', 'delivered_at': ['<=', add_to_date(now_datetime(), minutes=-WATCH_MINUTES)]},
                           fields=['name', 'relay_contact'], order_by='delivered_at asc', limit_page_length=BATCH)
     for row in rows:
         if frappe.db.exists('Relay Message', {'relay_contact': row.relay_contact, 'direction': 'Outgoing', 'name': ['>', row.name]}):
-            save(row.name, follow_up='Replied')
+            save(row.name, status='Replied')
         elif has_note_after(row.relay_contact, row.name):
-            save(row.name, follow_up='Noted')
+            save(row.name, status='Noted')
         elif not active_claim(row.relay_contact):
-            save(row.name, follow_up=add_note(row.relay_contact, row.name))
+            save(row.name, status=add_note(row.relay_contact, row.name))
 
 
 def has_note_after(contact: str, message: str) -> bool:
