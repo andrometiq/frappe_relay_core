@@ -8,6 +8,13 @@ from relay_core import mcp
 from relay_core.mcp_tools import coordination, registry
 
 
+def setUpModule():
+    """Every user in these tests holds a Relay writer role."""
+    writer = patch('relay_core.permissions.can_write', return_value=True)
+    writer.start()
+    unittest.addModuleCleanup(writer.stop)
+
+
 class EndpointTests(unittest.TestCase):
     def setUp(self):
         self.headers = {'Authorization': 'token key:secret'}

@@ -48,7 +48,7 @@ def call_tool(params):
 
 
 METHODS = {'initialize': initialize, 'ping': lambda params: {}, 'tools/call': call_tool, 'resources/read': read_resource,
-           'tools/list': lambda params: {'tools': [entry.definition() for entry in registry.listed()]},
+           'tools/list': lambda params: {'tools': [entry.definition() for entry in registry.callable_tools()]},
            'resources/list': lambda params: {'resources': guide.resources()}}
 
 

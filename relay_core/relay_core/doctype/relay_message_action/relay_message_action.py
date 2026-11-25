@@ -3,6 +3,12 @@ from relay_core.automation.documents import InternalRecord
 
 
 class RelayMessageAction(InternalRecord):
+    def before_insert(self):
+        # Every send is journaled here before it reaches a provider.
+        from relay_core.permissions import is_read_only
+        if is_read_only():
+            frappe.throw('Your Relay role can only read', frappe.PermissionError)
+
     def on_update(self):
         from relay_core.ticket_notifications import complete
         complete(self)

@@ -8,6 +8,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 
+def setUpModule():
+    """Every user in these tests holds a Relay writer role."""
+    writer = patch('relay_core.permissions.can_write', return_value=True)
+    writer.start()
+    unittest.addModuleCleanup(writer.stop)
+
+
 class Row(dict):
     __getattr__ = dict.get
 

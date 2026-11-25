@@ -97,6 +97,13 @@ def listed() -> list[Tool]:
     return [entry for entry in TOOLS.values() if entry.listed]
 
 
+def callable_tools() -> list[Tool]:
+    """The listed tools the session user may call: a user without a Relay writer role sees only read tools."""
+    from relay_core.permissions import can_write
+    writer = can_write()
+    return [entry for entry in listed() if writer or entry.safety == READ]
+
+
 def find(name) -> Tool | None:
     return TOOLS.get(name) if isinstance(name, str) else None
 
@@ -184,6 +191,9 @@ def call(name, arguments) -> dict:
             raise ToolError(problem)
         if entry.safety == READ:
             return result(entry.handler(**arguments))
+        from relay_core.permissions import can_write
+        if not can_write():
+            raise FrappePermissionError('Your Relay role can only read')
         from relay_core.mcp_tools.coordination import run
         return result(run(entry, arguments))
     except Exception as error:  # Each failure maps to a safe message below; nothing raw crosses the boundary.

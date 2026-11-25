@@ -36,7 +36,8 @@ class TeamScopeTests(unittest.TestCase):
             INSERT INTO `tabDynamic Link` VALUES ('north', 'Contact', 'links', 'Customer', 'C-NORTH'),
                 ('south', 'Contact', 'links', 'Customer', 'C-SOUTH');
         ''')
-        self.roles = {'agent': [permissions.USER], 'buyer': [permissions.USER], 'manager': [permissions.MANAGER]}
+        self.roles = {'agent': [permissions.USER], 'buyer': [permissions.USER], 'manager': [permissions.MANAGER],
+                      'reader': [permissions.READ_ONLY], 'bot': ['AI Bot']}
         self.fake = SimpleNamespace(session=_dict(user='agent'), get_roles=lambda user=None: self.roles.get(user, []),
             PermissionError=PermissionError, throw=self.throw, get_doc=lambda doctype, name: (doctype, name),
             get_all=self.get_all, qb=SimpleNamespace(get_query=lambda doctype, **kwargs: SimpleNamespace(
@@ -71,6 +72,22 @@ class TeamScopeTests(unittest.TestCase):
         self.assertFalse(access.record_covered('Customer', 'C-SOUTH', 'agent'), 'A group under an old grouping field')
         self.assertFalse(access.record_covered('Customer', 'C-OTHER', 'agent'))
         self.assertEqual(self.covered('Customer', 'buyer'), set(), 'A team without the type covers nothing')
+
+    def test_a_read_only_user_reads_every_record_while_teams_are_on(self):
+        self.assertEqual(access.allowed_types('reader'), {'Customer', 'Supplier'})
+        self.assertIsNone(team_access.covered_query('Customer', 'reader'))
+        self.assertTrue(access.record_covered('Customer', 'C-OTHER', 'reader'))
+        self.assertTrue(access.person_allowed('south', 'reader'))
+
+    def test_the_read_only_role_does_not_widen_a_team_member(self):
+        self.roles['agent'] = [permissions.USER, permissions.READ_ONLY]
+        self.assertEqual(self.covered('Customer', 'agent'), {'C-NORTH', 'C-PICKED'})
+        self.assertFalse(access.record_covered('Customer', 'C-SOUTH', 'agent'))
+
+    def test_a_role_without_relay_access_reads_nothing(self):
+        self.assertFalse(access.relay_user('bot'))
+        self.assertEqual(access.allowed_types('bot'), set())
+        self.assertFalse(access.person_allowed('unlinked', 'bot'))
 
     def test_all_records_managers_and_teams_off_are_not_limited(self):
         self.assertEqual(self.covered('Supplier', 'buyer'), {'S1', 'S2'})

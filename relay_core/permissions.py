@@ -5,6 +5,13 @@ MANAGER = 'Relay Communication Manager'
 HUB_SERVICE = 'Relay Hub Service'
 # An external AI's user: with Relay Communication User it manages templates, events and knowledge and reads the persona.
 AI_AGENT = 'Relay AI Agent'
+# An API reader of every conversation: it never sends or changes anything.
+READ_ONLY = 'Relay Read Only'
+# Only these roles change or send in Relay. Any other user, even with DocPerm read through another role, only reads.
+WRITE_ROLES = frozenset({USER, TEAM_USER, MANAGER, AI_AGENT, HUB_SERVICE, 'System Manager'})
+MCP_METHOD = 'relay_core.mcp.endpoint'
+# Managers read every record of every enabled business type, whatever their teams. So does a pure reader (is_read_only).
+ALL_RECORDS_ROLES = frozenset({MANAGER, 'System Manager'})
 # Legacy team endpoints retain these roles; business access is owned by business_access.
 ALL_TEAMS_ROLES = frozenset({TEAM_USER, MANAGER, 'System Manager'})
 
@@ -41,6 +48,54 @@ def require_administrator():
         frappe.throw('Account-wide operations require Administrator', frappe.PermissionError)
 
 
+def can_write(user=None):
+    import frappe
+    user = user or frappe.session.user
+    return user == 'Administrator' or bool(WRITE_ROLES.intersection(frappe.get_roles(user)))
+
+
+def is_read_only(user=None, roles=None):
+    """Holds the read-only role and no role that changes or sends anything."""
+    import frappe
+    user = user or frappe.session.user
+    roles = set(frappe.get_roles(user) if roles is None else roles)
+    return user != 'Administrator' and READ_ONLY in roles and not WRITE_ROLES.intersection(roles)
+
+
+def called_method(request):
+    """The whitelisted module method a request calls, resolved as Frappe's API routes resolve it."""
+    import frappe
+    from frappe.api import API_URL_MAP
+    from werkzeug.exceptions import HTTPException
+    if frappe.form_dict.cmd:
+        return frappe.form_dict.cmd
+    try:
+        _, arguments = API_URL_MAP.bind_to_environ(request.environ).match()
+    except HTTPException:
+        return None
+    method = (arguments.get('method') or '').split('/')[0]
+    if method and arguments.get('doctype'):
+        from frappe.modules.utils import load_doctype_module
+        try:
+            return load_doctype_module(arguments['doctype']).__name__ + '.' + method
+        except (ImportError, frappe.DoesNotExistError):
+            return None
+    return method
+
+
+def block_unpermitted_writes():
+    """auth_hooks: only a Relay writer calls a Relay method with an unsafe HTTP method. The MCP endpoint checks
+    each tool."""
+    import frappe
+    from frappe.auth import SAFE_HTTP_METHODS
+    if frappe.request.method in SAFE_HTTP_METHODS or frappe.session.user == 'Guest' or can_write():
+        return
+    method = called_method(frappe.request) or ''
+    if not method.startswith('relay_core.') or method == MCP_METHOD:
+        return
+    frappe.throw('Your Relay role can only read', frappe.PermissionError)
+
+
 def can_manage(user=None):
     import frappe
     user = user or frappe.session.user
@@ -61,16 +116,20 @@ def require_access(doctype='Relay Contact', ptype='read', *, configure=False, ma
         doctype, ptype = 'Relay Team', 'write'
     if not frappe.has_permission(doctype, ptype):
         frappe.throw('Not permitted', frappe.PermissionError)
-    if (manage or doctype in ('Relay Campaign', 'Relay Campaign Recipient')) and not can_manage():
+    if ptype not in ('read', 'select') and not can_write():
+        frappe.throw('Your Relay role can only read', frappe.PermissionError)
+    campaign = doctype in ('Relay Campaign', 'Relay Campaign Recipient')
+    if (manage or campaign) and not can_manage() and not (campaign and ptype == 'read' and is_read_only()):
         frappe.throw('Only communication managers can perform this action', frappe.PermissionError)
 
 
 def install_roles():
     """Run through the app installer, never from a public endpoint."""
     import frappe
-    for name in (USER, TEAM_USER, MANAGER, HUB_SERVICE, AI_AGENT):
+    # Without desk access a Website User with the read-only role stays a Website User.
+    for name in (USER, TEAM_USER, MANAGER, HUB_SERVICE, AI_AGENT, READ_ONLY):
         if not frappe.db.exists('Role', name):
-            frappe.get_doc({'doctype': 'Role', 'role_name': name, 'desk_access': 0 if name == HUB_SERVICE else 1}).insert()
+            frappe.get_doc({'doctype': 'Role', 'role_name': name, 'desk_access': int(name not in (HUB_SERVICE, READ_ONLY))}).insert()
 
 
 def sequential_name(kind):

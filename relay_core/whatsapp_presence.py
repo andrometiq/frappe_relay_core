@@ -37,7 +37,10 @@ def newest_incoming(contact, names=None, channel=None):
 
 
 def queue(message, lease, seconds, typing=False):
-    """Queue one receipt unless another tab or agent already claimed it."""
+    """Queue one receipt unless another tab or agent already claimed it. A reader leaves no trace for the customer."""
+    from relay_core.permissions import can_write
+    if not can_write():
+        return False
     if not frappe.cache.set(frappe.cache.make_key(lease), '1', nx=True, ex=seconds):
         return False
     frappe.enqueue('relay_core.whatsapp_presence.send', queue='short', job_id='relay-whatsapp-read:' + message.name + (':typing' if typing else ''),

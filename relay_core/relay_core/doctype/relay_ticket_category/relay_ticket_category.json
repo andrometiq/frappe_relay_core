@@ -65,9 +65,13 @@
       "write": 1,
       "create": 1,
       "delete": 1
+    },
+    {
+      "role": "Relay Read Only",
+      "read": 1
     }
   ],
   "sort_field": "sort_order",
   "sort_order": "ASC",
-  "modified": "2026-10-28 15:00:00.000000"
+  "modified": "2026-11-25 12:00:00.000000"
 }

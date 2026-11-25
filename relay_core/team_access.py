@@ -1,7 +1,7 @@
 """Team record scope. While Teams are on, a Relay Communication User reaches only the records their teams cover.
 
 A team covers all records of a business type, the records in picked groups of the type's first grouping field,
-or picked records. Managers and System Managers are never limited. business_access applies this scope.
+or picked records. Managers, System Managers and read-only users are never limited. business_access applies this scope.
 """
 import frappe
 
@@ -13,8 +13,8 @@ ACCESS = (ALL, GROUP, RECORD)
 
 def restricted(user: str) -> bool:
     from relay_core import features
-    from relay_core.permissions import can_manage
-    return not can_manage(user) and features.is_enabled('teams')
+    from relay_core.permissions import can_manage, is_read_only
+    return not can_manage(user) and not is_read_only(user, frappe.get_roles(user)) and features.is_enabled('teams')
 
 
 def coverage(user: str) -> dict:
