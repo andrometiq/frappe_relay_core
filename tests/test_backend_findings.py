@@ -210,7 +210,7 @@ class BackendFindings(unittest.TestCase):
         f=self.fake(); f.db.exists.return_value=True
         with patch.object(email_preferences,'frappe',f),patch.object(email_preferences,'context_of',return_value={}), \
              patch.object(email_preferences,'skill_claims',return_value=False),patch.object(flows,'claims',return_value=False), \
-             patch('relay_core.genie.handles',return_value=False):
+             patch('relay_core.ai.hand_over.handles',return_value=False):
             email_preferences.on_message(_dict(name='message',direction='Incoming',channel='email'))
         f.db.set_value.assert_called_with('Relay Message','message','email_reply_status','Pending',update_modified=False)
         f.enqueue.assert_not_called()
