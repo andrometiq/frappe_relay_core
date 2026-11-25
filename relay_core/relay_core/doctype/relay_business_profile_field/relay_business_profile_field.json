@@ -5,7 +5,8 @@
   "engine": "InnoDB",
   "istable": 1,
   "field_order": [
-    "fieldname"
+    "fieldname",
+    "label"
   ],
   "fields": [
     {
@@ -14,9 +15,16 @@
       "fieldtype": "Data",
       "reqd": 1,
       "in_list_view": 1
+    },
+    {
+      "fieldname": "label",
+      "label": "Label",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "description": "Shown instead of the field label, for example Distributor."
     }
   ],
   "permissions": [],
   "autoname": "RELAY-BPF-.##########",
-  "modified": "2026-11-25 14:00:00.000000"
+  "modified": "2026-11-25 15:00:00.000000"
 }

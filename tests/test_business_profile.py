@@ -21,9 +21,9 @@ FIELDS = {'territory': field('territory', 'Link'), 'credit_limit': field('credit
 
 class BusinessProfileTests(unittest.TestCase):
     def setUp(self):
-        self.picked = ['credit_limit', 'territory', 'is_frozen', 'internal', 'missing']
+        self.picked = [_dict(fieldname=name, label=None) for name in ('credit_limit', 'territory', 'is_frozen', 'internal', 'missing')]
         self.fake = SimpleNamespace(
-            get_meta=lambda doctype: _dict(get_field=FIELDS.get),
+            get_meta=lambda doctype: _dict(get_field=FIELDS.get, title_field='territory_name'),
             get_all=Mock(side_effect=lambda *a, **kw: self.picked),
             format_value=lambda value, df, doc: f'₹ {value:,.2f}' if df.fieldtype == 'Currency' else value,
             db=SimpleNamespace(get_value=Mock(return_value='Retailer')))
@@ -40,6 +40,11 @@ class BusinessProfileTests(unittest.TestCase):
             {'label': 'Credit Limit', 'value': '₹ 125,000.00'},
             {'label': 'Territory', 'value': ''},
             {'label': 'Is Frozen', 'value': 'No'}])
+        self.picked[1].label = 'Region'
+        self.fake.db.get_value.return_value = 'South India'
+        doc.territory = 'T-0001'
+        self.assertEqual(business_types.profile(doc)[1], {'label': 'Region', 'value': 'South India'},
+                         'A label override and a Link shown by its title')
         filters = self.fake.get_all.call_args.kwargs['filters']
         self.assertEqual(filters, {'parent': 'YRP Retailer', 'parenttype': 'Relay Contact Type', 'parentfield': 'profile_fields'})
         self.assertEqual(self.fake.get_all.call_args.kwargs['limit_page_length'], business_types.MAX_PROFILE_FIELDS)

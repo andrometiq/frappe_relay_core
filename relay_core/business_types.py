@@ -22,11 +22,12 @@ def profile(doc):
     """Configured profile fields of a business record as label and display value rows. The caller checks access.
     A field that became hidden or restricted after it was picked is left out."""
     meta = frappe.get_meta(doc.doctype)
-    names = frappe.get_all('Relay Business Profile Field', filters={
+    rows = frappe.get_all('Relay Business Profile Field', filters={
         'parent': doc.doctype, 'parenttype': 'Relay Contact Type', 'parentfield': 'profile_fields'},
-        pluck='fieldname', order_by='idx asc', limit_page_length=MAX_PROFILE_FIELDS)
-    fields = [field for field in map(meta.get_field, names) if is_profile_field(field)]
-    return [{'label': field.label or field.fieldname, 'value': display_value(doc, field)} for field in fields]
+        fields=['fieldname', 'label'], order_by='idx asc', limit_page_length=MAX_PROFILE_FIELDS)
+    picked = [(row, meta.get_field(row.fieldname)) for row in rows]
+    return [{'label': row.label or field.label or field.fieldname, 'value': display_value(doc, field)}
+            for row, field in picked if is_profile_field(field)]
 
 
 def display_value(doc, field):
@@ -35,7 +36,15 @@ def display_value(doc, field):
         return 'Yes' if value else 'No'
     if value in (None, ''):
         return ''
+    if field.fieldtype == 'Link':
+        return link_title(field.options, value)
     return str(frappe.format_value(value, field, doc))
+
+
+def link_title(doctype, name):
+    """A linked record's title, such as a sales person's name instead of SP-00013."""
+    title_field = frappe.get_meta(doctype).title_field
+    return str((title_field and frappe.db.get_value(doctype, name, title_field)) or name)
 
 
 def picker_options():
