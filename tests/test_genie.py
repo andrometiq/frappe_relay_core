@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import requests
 from frappe import _dict
 from relay_core import genie
-from relay_core.automation import queue
+from relay_core.automation import queue, service
 
 FAILED = genie.DeliveryError('HTTP 503')
 
@@ -165,6 +165,21 @@ class GenieTests(unittest.TestCase):
 
 
 class DrainTests(unittest.TestCase):
+    def test_relay_automation_does_not_admit_messages_genie_answers(self):
+        with patch.object(genie, 'handles', return_value=True), patch.object(service, 'create_run') as admit:
+            self.assertEqual(service.on_message(message()), {'status': 'Ignored'})
+        admit.assert_not_called()
+        with patch.object(genie, 'handles', return_value=False), patch.object(service, 'create_run') as admit:
+            service.on_message(message())
+        admit.assert_called_once()
+
+    def test_email_rule_does_not_reply_to_messages_genie_answers(self):
+        from relay_core import email_preferences
+        fake = Mock()
+        with patch.object(genie, 'handles', return_value=True), patch.object(email_preferences, 'frappe', fake):
+            email_preferences.on_message(message())
+        fake.db.set_value.assert_not_called()
+
     def test_genie_runs_last_in_the_inbound_drain(self):
         self.assertEqual(queue.HANDLERS[-1], 'relay_core.genie.on_message')
 
