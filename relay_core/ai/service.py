@@ -81,8 +81,8 @@ def context(skill, message, capabilities=None):
         contact=contact.name, person=person.name, business=list(business), user=user,
         capabilities=capability_hashes(skill) if capabilities is None else capabilities)
     if message.message_type in ('voice', 'audio'):
-        from relay_core.ai.language import incoming
-        scope['transcript_hash'] = hashlib.sha256(incoming(message).encode()).hexdigest()
+        # Empty until transcribed; decide() still refuses a voice note without its transcript.
+        scope['transcript_hash'] = hashlib.sha256((message.get('transcript') or '').strip().encode()).hexdigest()
     return user, business, scope
 
 
@@ -497,8 +497,16 @@ def process(name, *, deadline=None):
     try:
         with as_user(run.execution_user):
             message = frappe.get_doc('Relay Message', run.message)
-            current(run, skill, message)
+            user, _, scope = current(run, skill, message)
             decision = json.loads(run.decision) if run.decision else None
+            from relay_core.ai import voice
+            if decision is None and voice.is_untranscribed(message):
+                decision = voice.decision(run, message, user, scope)
+                if decision is None:
+                    run.status, run.reason = 'Completed', 'Voice note without transcript; the sender was already asked to type'
+                    internal_save(run); frappe.db.commit(); return
+                run.decision = json.dumps(decision)
+                internal_save(run); frappe.db.commit()
             if decision is None:
                 if int(run.attempts or 0) >= 2:
                     raise ValueError('AI attempt limit reached')
@@ -533,9 +541,11 @@ def process(name, *, deadline=None):
             elif decision.get('decline'):
                 from relay_core.ai.adapter import DECLINE_REPLIES
                 from relay_core.ai.language import message_notice
+                from relay_core.ai.voice import notice_text
                 kind = decision.get('notice', 'decline')
-                result = dispatch_reply(run, skill, message, message_notice(kind, message, DECLINE_REPLIES[kind]),
-                                        slot='reply')
+                reply = (notice_text(decision.get('language')) if kind == 'voice'
+                         else message_notice(kind, message, DECLINE_REPLIES[kind]))
+                result = dispatch_reply(run, skill, message, reply, slot='reply')
                 run = lock_run(name)
                 run.status = 'Completed' if result['status'] == 'Submitted' else 'Delivering'
                 internal_save(run)
@@ -659,7 +669,8 @@ def decline_notices(message) -> dict:
 
 def dispatch_reply(run, skill, message, reply, *, slot):
     delivery_scope(run, skill, message)
-    guarded = slot != 'approval_notice' and reply not in decline_notices(message).values()
+    from relay_core.ai.voice import notices
+    guarded = slot != 'approval_notice' and reply not in (*decline_notices(message).values(), *notices())
     if guarded:
         from relay_core.ai.reply_guard import check_delivery
         check_delivery(run, skill, message, reply)
@@ -859,6 +870,10 @@ def admit(run):
         skills = matching.candidates(message)
         contexts = {skill.name: context(skill, message) for skill in skills}
         scopes = {name: fingerprint(value[2]) for name, value in contexts.items()}
+        from relay_core.ai import voice
+        if voice.admit(run, message, skills):
+            internal_save(run); frappe.db.commit()
+            return process(run.name) if run.status == 'Pending' and run.stage == 'Event' else None
         # Only prior announcements without business reads can enter matching.
         # The existing history reader rechecks source access and the exact scope.
         history = []
