@@ -30,6 +30,7 @@ recover_translations = when_hub_configured('relay_core.translations.recover', ai
 recover_voice_transcripts = when_hub_configured('relay_core.voice_transcripts.recover', ai=True)
 recover_business_events = when_hub_configured('relay_core.business_events.recover')
 recover_received_media = when_hub_configured('relay_core.received_media.recover')
+retry_genie = when_hub_configured('relay_core.genie.retry_due')
 sync_whatsapp_templates = when_hub_configured('relay_core.whatsapp_templates.sync')
 refresh_whatsapp_billing = when_hub_configured('relay_core.billing.refresh_configured')
 sync_channels = when_hub_configured('relay_core.channel_sync.sync')

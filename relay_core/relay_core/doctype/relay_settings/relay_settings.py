@@ -19,7 +19,7 @@ class RelaySettings(Document):
 
         if self.hub_account and not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',self.hub_account):
             frappe.throw('Hub account must contain 1–100 letters, numbers, underscores or hyphens')
-        for field,maximum in (('hub_token',4096),('callback_secret',512)):
+        for field,maximum in (('hub_token',4096),('callback_secret',512),('genie_secret',512)):
             value=self.get(field)
             if value and not set(value)=={'*'} and (not 32<=len(value)<=maximum or any(ord(c)<32 for c in value)):
                 frappe.throw('Credentials must contain at least 32 printable characters')
@@ -36,6 +36,8 @@ class RelaySettings(Document):
             provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)
             if provider.provider!='OpenAI' or not provider.enabled:
                 frappe.throw('Voice transcription requires an enabled OpenAI provider with a transcription model')
+        from relay_core.genie import validate_settings
+        validate_settings(self)
 
     def on_update(self):
         from relay_core.whatsapp import clear_hub_capabilities

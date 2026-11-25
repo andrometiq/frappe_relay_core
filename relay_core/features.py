@@ -2,9 +2,10 @@
 import frappe
 
 FIELDS = {'ai': 'enable_ai_features', 'folders': 'enable_chat_folders', 'teams': 'enable_teams', 'flows': 'enable_flows',
-          'auto_seen': 'send_whatsapp_read_receipts'}
+          'auto_seen': 'send_whatsapp_read_receipts', 'genie': 'genie_enabled'}
 OFF_MESSAGES = {'ai': 'AI features are turned off', 'folders': 'Chat folders are turned off', 'teams': 'Teams are turned off',
-                'flows': 'Flows are turned off', 'auto_seen': 'Auto seen is turned off'}
+                'flows': 'Flows are turned off', 'auto_seen': 'Auto seen is turned off',
+                'genie': 'Genie is turned off'}
 
 
 def is_enabled(feature: str) -> bool:
