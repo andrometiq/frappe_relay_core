@@ -152,6 +152,9 @@ def enqueue(message):
     require_access(manage=True)
     doc = frappe.get_doc('Relay Message', message)
     doc.check_permission('read')
+    from relay_core import genie
+    if genie.handles_safely(doc):
+        return {'status': 'Ignored'}  # Genie answers this chat; a manual run would make Relay AI reply too.
     return create_run(doc)
 
 

@@ -54,7 +54,8 @@ class GenieTests(unittest.TestCase):
             body = genie.payload(doc)
         self.assertEqual(body, {'version': 1, 'site': 'relay.test', 'message_id': doc.name, 'chat': doc.relay_contact,
                                 'contact': doc.relay_contact, 'contact_name': '', 'channel': 'WhatsApp',
-                                'text': 'Where is my order?', 'message_type': 'image', 'has_media': True,
+                                'text': 'Where is my order?', 'transcript': '', 'transcript_status': '',
+                                'message_type': 'image', 'has_media': True,
                                 'business': {'doctype': 'Customer', 'doctype_label': 'Retailer', 'name': 'CUST-0001'},
                                 'timestamp': '2026-11-25T10:50:52Z'})
 
@@ -63,8 +64,8 @@ class GenieTests(unittest.TestCase):
         self.frappe.db.get_value.return_value = 'Asha'
         with patch.object(genie, 'get_system_timezone', return_value='UTC'):
             body = genie.payload(message(transcript='Send the bill', content='', message_type='audio'))
-        self.assertEqual((body['text'], body['business'], body['contact_name'], body['has_media']),
-                         ('Send the bill', None, 'Asha', False))
+        self.assertEqual((body['text'], body['transcript'], body['transcript_status'], body['business'], body['contact_name'],
+                          body['has_media']), ('Send the bill', 'Send the bill', '', None, 'Asha', False))
 
     def test_post_signs_the_exact_raw_body(self):
         response = Mock(status_code=202)
@@ -216,12 +217,10 @@ class GenieTests(unittest.TestCase):
         self.deliver().assert_not_called()
         self.assertEqual(self.saved(), {'status': 'Skipped'})
 
-    def test_voice_note_waits_for_its_transcript(self):
-        post = self.deliver(0, doc=message(message_type='audio', transcript_status='Pending'))
-        post.assert_not_called()
-        self.assertEqual(self.saved()['last_error'], 'Waiting for the voice transcript')
-        post = self.deliver(5, error=None, doc=message(message_type='audio', transcript_status='Pending'))
+    def test_a_voice_note_goes_at_once_with_relays_transcript_when_it_has_one(self):
+        post = self.deliver(0, error=None, doc=message(message_type='audio', transcript_status='Pending'))
         post.assert_called_once()
+        self.assertEqual(self.saved()['status'], 'Sent')
 
     def test_due_retries_come_from_the_database_and_survive_a_cache_flush(self):
         self.frappe.cache = Mock(side_effect=AssertionError, **{name: Mock(side_effect=AssertionError('cache used'))
@@ -295,6 +294,18 @@ class DrainTests(unittest.TestCase):
         with patch.object(genie, 'handles', return_value=False), patch.object(service, 'create_run') as admit:
             service.on_message(message())
         admit.assert_called_once()
+
+    def test_a_manual_automation_run_does_not_reply_in_a_chat_genie_answers(self):
+        doc = Mock(**message())
+        with patch('relay_core.ai_features.require'), patch.object(service, 'document_name'), \
+                patch.object(service, 'require_access'), patch.object(service.frappe, 'get_doc', return_value=doc), \
+                patch.object(service, 'create_run') as admit:
+            with patch.object(genie, 'handles', return_value=True):
+                self.assertEqual(service.enqueue(doc.name), {'status': 'Ignored'})
+            admit.assert_not_called()
+            with patch.object(genie, 'handles', return_value=False):
+                service.enqueue(doc.name)
+            admit.assert_called_once_with(doc)
 
     def test_email_rule_does_not_reply_to_messages_genie_answers(self):
         from relay_core import email_preferences

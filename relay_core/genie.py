@@ -1,7 +1,8 @@
 """Forward new customer messages to a Genie hooks communicator, signed like GitHub webhooks.
 
-Each forwarded message has one Relay Genie Delivery row: its tries live in the database, so a retry or a voice
-note's wait survives a cache flush or a worker restart, and the watchdog notes a chat left unanswered."""
+Each forwarded message has one Relay Genie Delivery row: its tries live in the database, so a retry survives a cache
+flush or a worker restart, and the watchdog notes a chat left unanswered. A voice note goes at once, with Relay's
+transcript when it has one; the Genie hooks device transcribes the others itself."""
 import hashlib
 import hmac
 import ipaddress
@@ -190,7 +191,8 @@ def payload(doc) -> dict:
     return {'version': 1, 'site': frappe.local.site, 'message_id': doc.name, 'chat': doc.relay_contact,
             'contact': doc.relay_contact, 'contact_name': '' if CONTACT_DETAIL.search(name) else name,
             'channel': frappe.db.get_value('Relay Channel', doc.channel, 'channel'),
-            'text': doc.get('transcript') or doc.get('content') or '', 'message_type': doc.get('message_type') or 'text',
+            'text': doc.get('transcript') or doc.get('content') or '', 'transcript': doc.get('transcript') or '',
+            'transcript_status': doc.get('transcript_status') or '', 'message_type': doc.get('message_type') or 'text',
             'has_media': has_media(doc), 'business': business(doc), 'timestamp': utc_stamp(doc.get('sent_at') or doc.creation)}
 
 
@@ -219,9 +221,6 @@ def deliver(message: str) -> None:
         save(message, status='Skipped')
         return
     attempt = int(row.attempts or 0) + 1
-    if doc.get('transcript_status') == 'Pending' and attempt < MAX_ATTEMPTS:
-        retry_later(message, attempt, 'Waiting for the voice transcript')  # Send the voice note with its transcript.
-        return
     settings = frappe.get_single('Relay Settings')
     secret = settings.get_password('genie_secret', raise_exception=False)
     if not secret:
