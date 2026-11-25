@@ -43,9 +43,9 @@ def business_of(newest, profile) -> tuple[str, str] | None:
 
 def record_summary(doctype: str, name: str) -> dict | None:
     """The record title and its list-view fields the user may read, or None when the user cannot read the record."""
-    from relay_core.business_access import allowed_types
+    from relay_core.business_access import readable_links
     from relay_core.business_groups import title_field
-    if doctype not in allowed_types() or not frappe.has_permission(doctype, 'read', doc=name):
+    if not readable_links([(doctype, name)]) or not frappe.has_permission(doctype, 'read', doc=name):
         return None
     doc = frappe.get_doc(doctype, name)
     doc.apply_fieldlevel_read_permissions()

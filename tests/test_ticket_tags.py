@@ -39,13 +39,16 @@ class TicketTagTests(unittest.TestCase):
         return doc
 
     def test_message_business_rejects_cross_business_and_unreadable_records(self):
-        self.f.db.get_value.side_effect = [('Customer', 'LOCAL-1'), ('Customer', 'LOCAL-2')]
-        with self.assertRaisesRegex(ValueError, 'same business'):
-            self.module.message_business(['one', 'two'])
-        self.f.db.get_value.side_effect = None
-        self.f.db.get_value.return_value = ('Customer', 'LOCAL-1')
-        self.f.has_permission.return_value = False
-        with self.assertRaises(PermissionError): self.module.message_business(['one'])
+        self.f.get_doc = lambda doctype, name: name
+        records = {'one': ('Customer', 'LOCAL-1'), 'two': ('Customer', 'LOCAL-2'), 'unfiled': None}
+        with patch('relay_core.business_access.reference', side_effect=records.get) as reference:
+            with self.assertRaisesRegex(ValueError, 'same business'):
+                self.module.message_business(['one', 'two'])
+            with self.assertRaises(PermissionError): self.module.message_business(['one'])
+            self.types.return_value = {'Customer'}
+            self.assertEqual(self.module.message_business(['one', 'one']), ('Customer', 'LOCAL-1'))
+            self.assertEqual(self.module.message_business(['unfiled']), (None, None))
+        reference.assert_called_with('unfiled')
 
     def test_user_list_rejects_duplicates_wrong_types_and_too_many(self):
         self.assertEqual(self.module.user_list('["a@example.invalid"]'), ['a@example.invalid'])
@@ -65,6 +68,20 @@ class TicketTagTests(unittest.TestCase):
         self.assertEqual(notice.args[0], 'relay_ticket_notice')
         self.assertEqual(notice.kwargs['user'], 'owner@example.invalid')
         self.assertEqual(notice.args[1]['subject'], 'Refund <late>')
+
+    def test_only_newly_mentioned_people_are_notified(self):
+        person = lambda user: types.SimpleNamespace(user=user)
+        previous = self.ticket()
+        previous.watchers = [person('known@example.invalid')]
+        doc = self.ticket(previous=previous)
+        doc.watchers = [person('known@example.invalid'), person('new@example.invalid')]
+        self.module.on_update(doc)
+        [(mention, users)] = [entry.args for entry in self.logs.call_args_list]
+        self.assertEqual((mention['type'], users), ('Mention', ['new@example.invalid']))
+        self.logs.reset_mock()
+        previous.watchers = doc.watchers
+        self.module.on_update(doc)
+        self.logs.assert_not_called()
 
     def test_notifications_skip_actor_and_users_without_access(self):
         self.tickets.permission.side_effect = lambda doc, user: user != 'blocked@example.invalid'
@@ -91,6 +108,20 @@ class TicketTagTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.module.add_comment('TKT-00001', 'Please check', ['blocked@example.invalid'])
         self.assertEqual(self.f.get_doc.call_count, 1)
+
+    def test_readers_comment_but_only_writers_mention(self):
+        ticket = self.ticket(); ticket.check_permission = Mock()
+        self.f.get_doc = Mock(side_effect=lambda value, *args, **kwargs: Mock() if isinstance(value, dict) else ticket)
+        self.tickets.permission.return_value = True
+        with patch.dict(sys.modules, {'relay_core.realtime': types.SimpleNamespace(changed=Mock())}):
+            self.module.insert_comment('TKT-00001', 'Checked the stock', [])
+            ticket.check_permission.assert_called_once_with('read')
+            ticket.check_permission.reset_mock()
+            self.module.insert_comment('TKT-00001', 'Please check @Local agent', ['agent@example.invalid'])
+            ticket.check_permission.assert_called_once_with('write')
+            ticket.check_permission.side_effect = PermissionError
+            with self.assertRaises(PermissionError):
+                self.module.insert_comment('TKT-00001', 'Please check @Local agent', ['agent@example.invalid'])
 
     def test_a_repeated_comment_request_key_adds_the_comment_once(self):
         import contextlib

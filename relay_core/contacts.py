@@ -5,7 +5,7 @@ import hashlib
 import frappe
 from relay_core.business_access import document_name
 from relay_core.permissions import can_manage, readable_contact, require_access
-from relay_core.business_access import business_document, allowed_types, require_person
+from relay_core.business_access import business_document, allowed_types, record_covered, require_person
 from relay_core import locks
 
 
@@ -130,7 +130,7 @@ def add_link(contact, doctype, name):
 
 def readable(row):
     try:
-        return row.link_doctype in allowed_types() and bool(frappe.db.exists(row.link_doctype, row.link_name))
+        return row.link_doctype in allowed_types() and record_covered(row.link_doctype, row.link_name)
     except frappe.DoesNotExistError:
         return False
 

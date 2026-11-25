@@ -5,7 +5,8 @@ import frappe.permissions
 
 
 def allowed_types(user=None):
-    """The Relay business access rule. Desk permissions and teams do not grant access."""
+    """The Relay business access rule. Desk permissions do not grant access. While Teams are on, a user's types are
+    the types their teams cover; record_covered then limits the records."""
     from relay_core.permissions import USER, MANAGER
     user = user or frappe.session.user
     roles = set(frappe.get_roles(user))
@@ -14,6 +15,9 @@ def allowed_types(user=None):
     enabled = set(frappe.get_all('Relay Contact Type', filters={'enabled': 1}, pluck='business_doctype'))
     if user == 'Administrator' or roles.intersection({MANAGER, 'System Manager'}):
         return enabled
+    from relay_core.team_access import restricted, coverage
+    if restricted(user):
+        return enabled.intersection(coverage(user))
     assigned = frappe.get_all('Relay Contact Type User', filters={
         'user': user, 'parenttype': 'Relay Contact Type', 'parentfield': 'users'}, pluck='parent')
     return enabled.intersection(assigned)
@@ -23,6 +27,43 @@ def relay_user(user=None):
     from relay_core.permissions import USER, MANAGER
     user = user or frappe.session.user
     return user == 'Administrator' or bool(set(frappe.get_roles(user)).intersection({USER, MANAGER, 'System Manager'}))
+
+
+def record_query(doctype, user=None):
+    """SQL for the names of `doctype` records the user reaches. The caller checks the type."""
+    from relay_core.team_access import covered_query
+    return covered_query(doctype, user or frappe.session.user) or frappe.qb.get_query(
+        doctype, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+
+
+def record_covered(doctype, name, user=None):
+    """The record exists and the user's teams cover it. The caller checks the type."""
+    from relay_core.team_access import covered_query
+    covered = covered_query(doctype, user or frappe.session.user)
+    if covered is None:
+        return bool(frappe.db.exists(doctype, name))
+    return bool(frappe.db.sql(f'SELECT 1 FROM ({covered}) covered WHERE covered.name=%s LIMIT 1', name))
+
+
+def covered_names(doctype, names, user=None):
+    """The names among `names` of records that exist and the user's teams cover, in one query. The caller checks
+    the type."""
+    from relay_core.team_access import covered_query
+    names = list(names)
+    if not names:
+        return set()
+    covered = covered_query(doctype, user or frappe.session.user)
+    if covered is None:
+        return set(frappe.get_all(doctype, filters={'name': ['in', names]}, pluck='name'))
+    marks = ', '.join(['%s'] * len(names))
+    return {row[0] for row in frappe.db.sql(
+        f'SELECT covered.name FROM ({covered}) covered WHERE covered.name IN ({marks})', names)}
+
+
+def readable_links(links, user=None):
+    """The (doctype, name) business links of a type the user has whose records exist and the user's teams cover."""
+    types = allowed_types(user)
+    return [tuple(link) for link in links if link[0] in types and record_covered(*link, user)]
 
 
 def require_type(doctype, user=None):
@@ -38,18 +79,31 @@ def document_name(value):
 
 
 def business_document(doctype, name, user=None):
+    """The record, when the user has its type and the user's teams cover it."""
     require_type(doctype, user)
-    return frappe.get_doc(doctype, document_name(name))
+    doc = frappe.get_doc(doctype, document_name(name))
+    if not record_covered(doctype, name, user):
+        frappe.throw('Business record is not accessible', frappe.PermissionError)
+    return doc
 
 
 def person_condition(expression, user=None):
     """Contact membership, applied before pagination and counts; unlinked people are shared."""
     if not relay_user(user):
         return '1=0'
-    types = ', '.join(frappe.db.escape(dt) for dt in sorted(allowed_types(user))) or "''"
+    from relay_core.team_access import covered_query
+    whole, clauses = [], []
+    for doctype in sorted(allowed_types(user)):
+        covered = covered_query(doctype, user or frappe.session.user)
+        if covered is None:
+            whole.append(frappe.db.escape(doctype))
+        else:
+            clauses.append(f'(l.link_doctype={frappe.db.escape(doctype)} AND l.link_name IN ({covered}))')
+    types = ', '.join(whole) or "''"
+    scope = ' OR '.join([f'l.link_doctype IN ({types})', *clauses])
     links = (f"SELECT 1 FROM `tabDynamic Link` l WHERE l.parent={expression} "
              "AND l.parenttype='Contact' AND l.parentfield='links'")
-    return f"(NOT EXISTS ({links}) OR EXISTS ({links} AND l.link_doctype IN ({types})))"
+    return f"(NOT EXISTS ({links}) OR EXISTS ({links} AND ({scope})))"
 
 
 def unlinked_contact(contact):
@@ -138,7 +192,7 @@ def primary_record(contact, links=None):
     """The primary record the current user can read, for a conversation header."""
     target = primary(contact, links)
     if not target: return None
-    if target[0] not in allowed_types(): return None
+    if not readable_links([target]): return None
     doc = frappe.get_doc(*target)
     from relay_core.business_groups import title_field
     title = doc.get(title_field(target[0]))
@@ -192,7 +246,7 @@ def allowed(doc, user=None):
     if not target or target[0] not in allowed_types(user): return False
     if (doc.get('doctype') != 'Relay Ticket' and not doc.get('ticket_notification')
             and target not in candidates(doc.relay_contact)): return False
-    return bool(frappe.db.exists(*target))
+    return record_covered(*target, user)
 
 
 def associate(doc,method=None):
@@ -362,7 +416,7 @@ def action_permission(doc, user=None, permission_type=None):
         except frappe.DoesNotExistError:
             return False
     try:
-        return business[0] in allowed_types(user) and bool(frappe.db.exists(*business))
+        return business[0] in allowed_types(user) and record_covered(*business, user)
     except frappe.DoesNotExistError:
         return False
 
@@ -377,7 +431,7 @@ def action_query(user=None):
               for index, key in enumerate(('business_doctype', 'business_name'))]
     clauses = []
     for dt in sorted(allowed_types(user)):
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+        query = record_query(dt, user)
         clauses.append(f'({fields[0]}={frappe.db.escape(dt)} AND {fields[1]} IN ({query}))')
     scope = ' OR '.join(clauses) or '1=0'
     sources = frappe.qb.get_query('Relay Message', fields=['name'], ignore_permissions=False,
@@ -406,7 +460,7 @@ def explicit_condition(doctype, user=None, *, allow_empty=False):
     table = '`tab' + doctype + '`'
     clauses = []
     for dt in sorted(allowed_types(user)):
-        query = frappe.qb.get_query(dt, fields=['name'], ignore_permissions=True, order_by='').get_sql()
+        query = record_query(dt, user)
         clauses.append(f'({table}.business_doctype={frappe.db.escape(dt)} AND {table}.business_name IN ({query}))')
     if allow_empty and relay_user(user):
         clauses.append(f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='')")
@@ -420,13 +474,14 @@ def message_condition(user=None):
     linked = (f"EXISTS (SELECT 1 FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact "
               f"WHERE r.name={table}.relay_contact AND l.parenttype='Contact' AND l.parentfield='links' "
               f"AND l.link_doctype={table}.business_doctype AND l.link_name={table}.business_name)")
-    types = ', '.join(frappe.db.escape(dt) for dt in sorted(allowed_types(user))) or "''"
+    reachable = ' OR '.join(f'(l.link_doctype={frappe.db.escape(dt)} AND l.link_name IN ({record_query(dt, user)}))'
+                            for dt in sorted(allowed_types(user))) or '1=0'
     # A valid marked primary owns unstamped history. Do not let another link expose it.
     private_primary = (f"EXISTS (SELECT 1 FROM `tabRelay Contact` r JOIN `tabDynamic Link` l ON l.parent=r.contact "
                        "JOIN `tabRelay Contact Type` t ON t.business_doctype=l.link_doctype AND t.enabled=1 "
                        f"WHERE r.name={table}.relay_contact AND l.parenttype='Contact' AND l.parentfield='links' "
                        "AND l.link_doctype=r.primary_doctype AND l.link_name=r.primary_name "
-                       f"AND l.link_doctype NOT IN ({types}))")
+                       f"AND NOT ({reachable}))")
     return (f"(({explicit}) AND (COALESCE({table}.ticket_notification,'')!='' OR {linked})) OR "
             f"(COALESCE({table}.business_doctype,'')='' AND COALESCE({table}.business_name,'')='' "
             f"AND NOT {private_primary})")

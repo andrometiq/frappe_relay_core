@@ -267,10 +267,11 @@ def page_links(people, types):
         for row in rows:
             if row.link_doctype in types:
                 wanted.setdefault(row.link_doctype, set()).add(row.link_name)
+    from relay_core.business_access import covered_names
     readable = set()
     for doctype, names in wanted.items():
         try:
-            readable.update((doctype, name) for name in frappe.get_all(doctype, filters={'name': ['in', list(names)]}, pluck='name'))
+            readable.update((doctype, name) for name in covered_names(doctype, names))
         except frappe.DoesNotExistError:
             pass
     return links, readable

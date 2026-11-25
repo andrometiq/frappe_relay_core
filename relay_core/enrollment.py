@@ -109,9 +109,8 @@ def bind(event, provider_id, contact, business_doctype=None, business_name=None)
 @frappe.whitelist(methods=['GET'])
 def businesses(contact):
     require_access(manage=True); readable_contact(contact)
-    from relay_core.business_access import candidates, allowed_types
-    visible = allowed_types()
-    return [{'doctype': dt, 'name': name} for dt, name in candidates(contact) if dt in visible]
+    from relay_core.business_access import candidates, readable_links
+    return [{'doctype': dt, 'name': name} for dt, name in readable_links(candidates(contact))]
 
 
 @frappe.whitelist(methods=['POST'])

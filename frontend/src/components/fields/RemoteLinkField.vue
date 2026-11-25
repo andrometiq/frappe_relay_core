@@ -15,7 +15,7 @@ const search = computed(() => {
 })
 const linkedType = computed(() => props.field.doctype || (props.field.method === 'api.business_records' ? props.field.params?.doctype : {
  'api.contacts': 'Relay Contact', 'inbox.directory': 'Relay Contact', 'api.contact_directory': 'Contact',
- 'teams.agents': 'User', 'collaboration.colleagues': 'User', 'cases.agents': 'User',
+ 'teams.agents': 'User', 'collaboration.colleagues': 'User', 'cases.agents': 'User', 'tickets.colleagues': 'User',
 }[props.field.method]))
 const remoteField = computed(() => ({...props.field, search:search.value,
  initialOptions: props.field.initialOptions || (linkedType.value ? (props.multiple ? props.modelValue || [] : [props.modelValue]).filter(Boolean).map(value => ({value, label:linkedTitle(linkedType.value, value)})) : undefined),

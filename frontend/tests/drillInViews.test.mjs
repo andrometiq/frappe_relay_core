@@ -9,6 +9,7 @@ import { browser } from './browserHistory.js'
 import { hasManyNumbers, numberName, whatsappNumbers } from '../src/services/whatsappNumbers.js'
 import { inputTime, siteTime } from '../src/services/campaignAudience.js'
 import { emptySettings, emptyTicketFilters, pickerOptions, readTicketRoute, statusLook, ticketFilterRoute, ticketRoute, ticketViewFilters, ticketViewKey, ticketViews } from '../src/services/ticketSettings.js'
+import { businessTypeOptions } from '../src/services/ticketForm.js'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -39,7 +40,7 @@ function tickets(t, calls = [], failure = null) {
     return { items: [], next: null }
   }
   return component(t, 'TicketsWorkspace.vue', { coreApi: api, inject: () => ref({ ai: true }), pickerOptions, statusLook, emptyTicketFilters, readTicketRoute, ticketRoute, linkedTitle: () => '', toast: () => {},
-    ticketViewFilters, ticketViewKey, ticketViews, recordTitle: row => row.subject || row.name, relativeTime: () => '1h ago',
+    ticketViewFilters, ticketViewKey, ticketViews, businessTypeOptions, recordTitle: row => row.subject || row.name, relativeTime: () => '1h ago',
     useTicketSettings: () => ({ settings: ref(emptySettings()), load: async () => {} }) }, ['selected', 'select', 'close', 'error', 'page', 'setFilter', 'pickStatus', 'view', 'filters', 'readRoute', 'update', 'saveError', 'load', 'pickView', 'sections', 'activeView', 'stats', 'openStat', 'filterLabel', 'refreshView'])
 }
 

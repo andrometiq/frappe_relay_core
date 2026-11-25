@@ -60,8 +60,8 @@ def recheck(contact, business_doctype, business_name, selection):
 
 
 def permission(doc, user=None, permission_type=None):
-    from relay_core.business_access import allowed_types
-    return doc.business_doctype in allowed_types(user) and bool(frappe.db.exists(doc.business_doctype, doc.business_name))
+    from relay_core.business_access import allowed_types, record_covered
+    return doc.business_doctype in allowed_types(user) and record_covered(doc.business_doctype, doc.business_name, user)
 
 
 def query(user=None):

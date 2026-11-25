@@ -200,9 +200,12 @@ class ContactDetailsTests(unittest.TestCase):
         self.f.db=types.SimpleNamespace(get_value=Mock(return_value='relay-contact'), exists=lambda dt,name: True)
         endpoint=types.SimpleNamespace(name='binding', channel='wa', verified=0)
         self.f.get_all=Mock(return_value=[endpoint,types.SimpleNamespace(channel='email')])
-        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False):
+        covered = lambda links: [link for link in links if link == ('Customer', 'visible')]
+        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False), \
+                patch('relay_core.business_access.readable_links', side_effect=covered) as readable:
             result=self.api.contact_details('fixture-contact')
-        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}, {'doctype':'Customer','name':'private'}])
+        self.assertEqual(result['links'],[{'doctype':'Customer','name':'visible'}], 'Uncovered and unconfigured links stay hidden')
+        readable.assert_called_once_with([('Customer', 'visible'), ('Customer', 'private'), ('Supplier', 'unconfigured')])
         self.assertIsNone(result['primary'])
         self.assertEqual([row.channel for row in result['endpoints']],['wa','email'])
         self.assertEqual([row.provider for row in result['endpoints']],['WhatsApp','Email'])
@@ -212,7 +215,8 @@ class ContactDetailsTests(unittest.TestCase):
         self.assertEqual((result['can_edit_links'], result['can_set_primary']), (True, True))
         person.has_permission.assert_called_once_with('write')
         person.has_permission.return_value=False
-        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False):
+        with patch('relay_core.business_access.primary_record', return_value=None), patch('relay_core.contacts.can_manage_links', return_value=False), \
+                patch('relay_core.business_access.readable_links', side_effect=covered):
             result=self.api.contact_details('fixture-contact')
         self.assertEqual((result['can_edit_links'], result['can_set_primary']), (False, False), 'Read-only users get no link controls')
 
@@ -267,11 +271,13 @@ class ChannelUITests(unittest.TestCase):
         self.f.has_permission = Mock(side_effect=lambda doctype, ptype, doc: doctype == 'Customer')
         with patch('relay_core.business_access.primary_record', return_value=header) as primary, \
                 patch('relay_core.business_access.candidates', return_value=links), \
+                patch('relay_core.business_access.readable_links', side_effect=lambda rows: rows[:1]) as readable, \
                 patch('relay_core.contacts.contact_emails', return_value={'person': 'ann@example.invalid'}) as emails:
             self.assertEqual(self.api.contact_profile('relay'), {'name':'relay','display_name':'Local','contact':'person',
                                                                  'primary': header, 'link_count': 1,
                                                                  'phone': '+91 98765 43210', 'email': 'ann@example.invalid'})
         primary.assert_called_once_with('relay', links)
+        readable.assert_called_once_with(links)
         emails.assert_called_once_with(['person'])
         self.api.readable_contact.side_effect = PermissionError
         with self.assertRaises(PermissionError): self.api.contact_profile('relay')

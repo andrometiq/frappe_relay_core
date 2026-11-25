@@ -90,12 +90,17 @@ def bound_query(query, values, prefix):
 def record_scope(doctype, values, prefix='record_'):
     """Relay business scope, or the existing Relay document/channel query hooks."""
     from relay_core.business_access import require_type, people_query
+    from relay_core.team_access import covered_query
     if doctype == 'Contact':
         query = people_query(fields=['name'], order_by='')
     elif doctype in ('Relay Message', 'Relay Contact', 'Relay Channel'):
         query = frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=False, order_by='')
     else:
         require_type(doctype)
+        covered = covered_query(doctype, frappe.session.user)
+        if covered is not None:
+            # Raw SQL runs with named values, so its percent signs are doubled.
+            return covered.replace('%', '%%')
         query = frappe.qb.get_query(doctype, fields=['name'], ignore_permissions=True, order_by='')
     return bound_query(query, values, prefix)
 

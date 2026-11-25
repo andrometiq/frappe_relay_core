@@ -26,22 +26,21 @@ def can_follow(ticket, user):
 
 
 def message_business(names):
-    """The one business all messages are explicitly filed under, when the caller can read it."""
-    targets = {tuple(frappe.db.get_value('Relay Message', name, ['business_doctype', 'business_name']) or ())
-               for name in names}
+    """The one business record of all messages, stored or their contact's primary one, when the caller can read it."""
+    from relay_core.business_access import allowed_types, reference
+    targets = {reference(frappe.get_doc('Relay Message', name)) for name in names}
     if len(targets) != 1:
         frappe.throw('Select messages from the same business record')
     target = targets.pop()
-    if len(target) != 2 or not all(target):
+    if not target:
         return None, None
-    from relay_core.business_access import allowed_types
     if target[0] not in allowed_types():
         frappe.throw('You cannot read the business record', frappe.PermissionError)
     return target
 
 
 def on_update(doc):
-    """Notify a new assignee. Internal episode transitions stay silent."""
+    """Notify a new assignee and newly mentioned people. Internal episode transitions stay silent."""
     from relay_core.tickets import _episode_transition
     if _episode_transition.get() is doc:
         return
@@ -50,6 +49,10 @@ def on_update(doc):
     actor = frappe.utils.get_fullname(frappe.session.user)
     if assignee and assignee != (previous.get('assigned_to') if previous else None):
         notify(doc, [assignee], 'Assignment', f'{actor} assigned you a ticket')
+    known = {row.user for row in previous.get('watchers') or []} if previous else set()
+    mentioned = [row.user for row in doc.get('watchers') or [] if row.user not in known]
+    if mentioned:
+        notify(doc, mentioned, 'Mention', f'{actor} mentioned you on a ticket')
 
 
 def notify(doc, users, kind, action):
@@ -68,11 +71,11 @@ def notify(doc, users, kind, action):
     return users
 
 
-def locked_ticket(name):
+def locked_ticket(name, permission):
     require_access()
     validate_reference(name, 'TKT')
     doc = frappe.get_doc('Relay Ticket', name, for_update=True)
-    doc.check_permission('write')
+    doc.check_permission(permission)
     return doc
 
 
@@ -110,7 +113,8 @@ def add_comment(name, body, mentions=None, request_key=None):
 
 
 def insert_comment(name, body, users):
-    doc = locked_ticket(name)
+    """Every reader comments; mentioning colleagues needs write, so mentioned people cannot mention others."""
+    doc = locked_ticket(name, 'write' if users else 'read')
     if any(not can_follow(doc, user) for user in users):
         frappe.throw('A mentioned colleague cannot access this conversation', frappe.PermissionError)
     frappe.get_doc({'doctype': 'Comment', 'comment_type': 'Comment', 'reference_doctype': 'Relay Ticket',

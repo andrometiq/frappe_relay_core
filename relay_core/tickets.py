@@ -389,9 +389,13 @@ def validate_ticket(doc, check_assignment=True):
         if _episode_transition.get() is not doc and (not previous or any(
                 doc.get(key) != previous.get(key) for key in protected)):
             frappe.throw('Episode scope can only be changed by an internal transition', frappe.PermissionError)
-    if (not doc.messages and not (doc.get('source_hub_event') and doc.get('source_provider_message_key')
-            and doc.get('company') and doc.get('conversation_key'))) or (len(doc.messages) > 50 and not doc.get('conversation_key')):
+    triage = bool(doc.get('source_hub_event') and doc.get('source_provider_message_key')
+                  and doc.get('company') and doc.get('conversation_key'))
+    if not triage:
+        check_business(doc, previous)
+    if (not doc.messages and not triage and not doc.get('business_name')) or (len(doc.messages) > 50 and not doc.get('conversation_key')):
         frappe.throw('Link between 1 and 50 messages')
+    check_watchers(doc, previous)
     if doc.get('active_scope_key') == '':
         doc.active_scope_key = None
     seen = set()
@@ -428,6 +432,10 @@ def validate_ticket(doc, check_assignment=True):
                     from relay_core.permissions import company_allowed
                     if not company_allowed(doc.company):
                         frappe.throw('Ticket company is not accessible', frappe.PermissionError)
+                if doc.get('business_name'):
+                    from relay_core.business_access import allowed_types, record_covered
+                    if doc.business_doctype not in allowed_types() or not record_covered(doc.business_doctype, doc.business_name):
+                        frappe.throw('The agent cannot reach the business record of this ticket', frappe.PermissionError)
                 for row in doc.messages:
                     message = frappe.get_doc('Relay Message', row.message)
                     message.check_permission('read')
@@ -444,30 +452,78 @@ def validate_ticket(doc, check_assignment=True):
         _ownership(doc)
 
 
+def check_business(doc, previous):
+    """A new ticket names one business record its creator reaches. A saved ticket keeps its record or gains one."""
+    business = (doc.get('business_doctype') or None, doc.get('business_name') or None)
+    if previous and business == (previous.get('business_doctype') or None, previous.get('business_name') or None):
+        return
+    if not all(business):
+        frappe.throw('Choose the business record of the ticket')
+    from relay_core.business_access import allowed_types, document_name, record_covered
+    document_name(business[1])
+    if business[0] not in allowed_types() or not record_covered(*business):
+        frappe.throw('Business record is not accessible', frappe.PermissionError)
+
+
+def check_watchers(doc, previous):
+    """People mentioned on a ticket without a chat: at most ten distinct Relay users."""
+    users = [row.user for row in doc.get('watchers') or []]
+    if not users:
+        return
+    from relay_core.teams import validate_agent
+    from relay_core.ticket_tags import MAX_MENTIONS
+    if doc.messages:
+        frappe.throw('Mention colleagues in a comment on a ticket with a chat')
+    if len(users) > MAX_MENTIONS or len(set(users)) != len(users):
+        frappe.throw(f'Mention at most {MAX_MENTIONS} distinct colleagues')
+    known = {row.user for row in previous.get('watchers') or []} if previous else set()
+    added = set(users) - known
+    for user in added:
+        validate_agent(user)
+    from relay_core.teams import colleagues_of
+    if added - colleagues_of(frappe.session.user, added):
+        frappe.throw('Mention colleagues who share a team with you', frappe.PermissionError)
+
+
+def named_people(doc):
+    """The assignee and mentioned people of a ticket without a chat read it outside their teams."""
+    if doc.messages or not doc.get('business_name'):
+        return set()
+    people = {row.user for row in doc.get('watchers') or []}
+    if doc.get('assigned_to'):
+        people.add(doc.assigned_to)
+    return people
+
+
 @frappe.whitelist(methods=['POST'])
-def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket_status=None,
-           business_type=None, business_record=None, request_key=None):
-    """A repeated request key returns the ticket it created."""
+def create(subject, messages=None, brief='', assigned_to='', ticket_type=None, ticket_status=None,
+           business_type=None, business_record=None, request_key=None, mentions=None):
+    """A repeated request key returns the ticket it created. Without messages the ticket names its business record
+    and may mention colleagues."""
     from relay_core import locks, ticket_tags
     from relay_core.messaging import request_hash
     require_access()
     if isinstance(messages, str):
         messages = frappe.parse_json(messages)
-    if not isinstance(messages, list) or not 1 <= len(messages) <= 50 or any(not isinstance(m, str) for m in messages):
-        frappe.throw('Messages must be a list of 1–50 references')
+    if messages is None:
+        messages = []
+    if not isinstance(messages, list) or len(messages) > 50 or any(not isinstance(m, str) for m in messages):
+        frappe.throw('Messages must be a list of at most 50 references')
     if assigned_to and not isinstance(assigned_to, str):
         frappe.throw('Invalid ticket assignee')
     for name in messages:
         validate_reference(name, 'MSG')
-    business_doctype, business_name = ticket_tags.message_business(messages)
-    if business_type is not None or business_record is not None:
-        if (business_type or None, business_record or None) != (business_doctype or None, business_name or None):
-            frappe.throw('Choose the business record that owns the selected messages')
+    business_doctype, business_name = business_type or None, business_record or None
+    if not messages and not (business_doctype and business_name):
+        frappe.throw('Choose the business record of the ticket')
+    if messages:
+        business_doctype, business_name = chat_business(messages, business_doctype, business_name)
     values = {'doctype': 'Relay Ticket', 'subject': subject, 'brief': brief,
               'ticket_type': ticket_type or None, 'ticket_status': ticket_status or None,
               'assigned_to': assigned_to or None,
               'business_doctype': business_doctype, 'business_name': business_name,
-              'messages': [{'message': name} for name in messages]}
+              'messages': [{'message': name} for name in messages],
+              'watchers': [{'user': user} for user in ticket_tags.user_list(mentions)]}
     if request_key is None:
         return insert_ticket(values)
     key = request_hash(request_key)
@@ -479,6 +535,37 @@ def create(subject, messages, brief='', assigned_to='', ticket_type=None, ticket
         result = insert_ticket(dict(values, request_key=key))
         frappe.db.commit()
     return result
+
+
+def chat_business(messages, business_type, business_record):
+    """The one business record of the selected messages. The contact of a chat without any record is first linked
+    to the picked record, so the chat and its ticket share it."""
+    from relay_core import ticket_tags
+    picked = (business_type, business_record)
+    found = ticket_tags.message_business(messages)
+    if not any(found) and all(picked) and link_unlinked_contact(messages, picked):
+        found = ticket_tags.message_business(messages)
+    if not all(found):
+        frappe.throw('This chat has no business record. Pick one for its contact, or mark the contact\'s primary record.')
+    if any(picked) and picked != found:
+        frappe.throw('Choose the business record that owns the selected messages')
+    return found
+
+
+def link_unlinked_contact(messages, business):
+    """Link the one contact of `messages` to `business` when it has no business record. True when it linked."""
+    from relay_core.business_access import candidates
+    contacts = {frappe.db.get_value('Relay Message', name, 'relay_contact') for name in messages}
+    contact = contacts.pop() if len(contacts) == 1 else None
+    person = frappe.db.get_value('Relay Contact', contact, 'contact') if contact else None
+    if not person or candidates(contact):
+        return False
+    readable_contact(contact)
+    for name in messages:
+        frappe.get_doc('Relay Message', name).check_permission('read')
+    from relay_core.contacts import add_link
+    add_link(person, *business)
+    return True
 
 
 def insert_ticket(values):
@@ -546,7 +633,8 @@ def read(name):
             'can_resume': bool(doc.get('active_scope_key') and doc.get('ai_disabled')
                 and not ticket_settings.is_closed(doc) and doc.has_permission('write')),
             'can_take_over': bool(not _legacy_ticket(doc) and doc.has_permission('write')),
-            'can_assign': frappe.has_permission('Relay Conversation Assignment', 'write')}
+            'can_assign': frappe.has_permission('Relay Conversation Assignment', 'write'),
+            'mentions': [row.user for row in doc.get('watchers') or []]}
 
 
 def _legacy_ticket(ticket):
@@ -774,18 +862,23 @@ def assign(name, user=''):
     return read(name)
 
 
-def permission(doc, user=None, permission_type=None):
+def permission(doc, user=None, ptype=None):
+    """Frappe's has_permission hook passes `ptype` by name."""
     from relay_core.permissions import can_read_contact_as
     from relay_core.business_access import allowed, reference, relay_user
     user = user or frappe.session.user
     if user == 'Administrator': return True
     if not relay_user(user): return False
+    # Mentioned people read and comment; the assignee also works the ticket.
+    if user in named_people(doc) and (user == doc.get('assigned_to') or ptype in (None, 'read', 'select')):
+        return True
     if doc.get('business_doctype') or doc.get('business_name'):
         if not (doc.get('business_doctype') and doc.get('business_name')) or not allowed(doc, user):
             return False
     if not doc.messages:
-        return bool(doc.get('source_hub_event') and doc.get('source_provider_message_key')
-                    and doc.get('company') and doc.get('conversation_key') and not doc.get('business_name'))
+        # A triage ticket has no business yet; a ticket without a chat has one.
+        return bool(doc.get('business_name') or doc.get('source_hub_event') and doc.get('source_provider_message_key')
+                    and doc.get('company') and doc.get('conversation_key'))
     try:
         for row in doc.messages:
             message = frappe.get_doc('Relay Message', row.message)
@@ -807,8 +900,15 @@ def query_condition(user=None):
     contacts = frappe.qb.get_query('Relay Contact', fields=['name'], ignore_permissions=False,
                                    user=user, order_by='').get_sql()
     links = "t.parent=`tabRelay Ticket`.name AND t.parenttype='Relay Ticket'"
-    return f"""({explicit_condition('Relay Ticket', user, allow_empty=True)})
+    person = frappe.db.escape(user)
+    # Twin of named_people: the assignee and mentioned people of a ticket without a chat.
+    named = f"""(COALESCE(`tabRelay Ticket`.business_name,'')!=''
+        AND NOT EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links})
+        AND (`tabRelay Ticket`.assigned_to={person} OR `tabRelay Ticket`.name IN (SELECT w.parent
+             FROM `tabRelay Ticket Watcher` w WHERE w.user={person} AND w.parenttype='Relay Ticket')))"""
+    return f"""(({explicit_condition('Relay Ticket', user, allow_empty=True)})
         AND (EXISTS (SELECT 1 FROM `tabRelay Ticket Message` t WHERE {links}) OR
+             COALESCE(`tabRelay Ticket`.business_name,'')!='' OR
              (COALESCE(`tabRelay Ticket`.source_hub_event,'')!=''
               AND COALESCE(`tabRelay Ticket`.source_provider_message_key,'')!=''
               AND COALESCE(`tabRelay Ticket`.company,'')!=''
@@ -818,17 +918,35 @@ def query_condition(user=None):
           AND NOT EXISTS (SELECT 1 FROM `tabRelay Message` m WHERE m.name=t.message
             AND m.name IN ({messages}) AND m.relay_contact IN ({contacts})
             AND (COALESCE(`tabRelay Ticket`.business_name,'')='' OR
-                 (m.business_doctype=`tabRelay Ticket`.business_doctype AND m.business_name=`tabRelay Ticket`.business_name))))"""
+                 (m.business_doctype=`tabRelay Ticket`.business_doctype AND m.business_name=`tabRelay Ticket`.business_name)))))
+        OR {named}"""
+
+
+@frappe.whitelist(methods=['GET'])
+def colleagues(query=''):
+    """Relay users to assign or mention on a ticket without a chat: those who share a team with the user."""
+    require_access()
+    if not isinstance(query, str) or len(query) > 80:
+        frappe.throw('Invalid colleague search')
+    from relay_core.teams import _agent_options
+    query = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return [dict(value=row.name, label=row.full_name or row.name)
+            for row in _agent_options(query, colleague_of=frappe.session.user)]
+
+
+def mentioned_tickets():
+    return frappe.get_all('Relay Ticket Watcher', filters={'parenttype': 'Relay Ticket', 'user': frappe.session.user},
+                          pluck='parent', limit=0)
 
 
 @frappe.whitelist(methods=['GET'])
 def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
               exclude_assignees=None, business_type=None, state=None, assigned=None, unlinked=None,
-              resolved_today=None):
+              resolved_today=None, mentioned=None):
     """Newest tickets first, 30 per page; `after` continues below the given ticket.
 
     `state` limits to statuses of that type unless `ticket_status` is given; `resolved_today` is
-    tickets closed today."""
+    tickets closed today; `mentioned` is tickets that mention the user."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid ticket search')
@@ -870,6 +988,11 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         filters['assigned_to'] = ['is', 'set']
     if frappe.utils.cint(mine):
         filters['assigned_to'] = frappe.session.user
+    if frappe.utils.cint(mentioned):
+        names = set(mentioned_tickets())
+        if 'name' in filters:
+            names &= set(filters['name'][1])
+        filters['name'] = ['in', sorted(names) or ['']]
     if after:
         validate_reference(after, 'TKT')
         created = frappe.db.get_value('Relay Ticket', after, 'creation')
@@ -922,12 +1045,16 @@ def dashboard():
     oldest = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']]},
                              fields=['name', 'subject', 'creation'], order_by='creation asc',
                              limit_page_length=1)
+    mentioned = frappe.get_list('Relay Ticket', filters={'ticket_status': ['in', open_statuses or ['']],
+                                'name': ['in', mentioned_tickets() or ['']]},
+                                fields=[{'COUNT': 'name', 'as': 'tickets'}], order_by='')
     return {
         'totals': {
             'open': sum(row.tickets for row in open_groups),
             'assigned': sum(row.tickets for row in open_groups if row.assigned_to),
             'unassigned': sum(row.tickets for row in open_groups if not row.assigned_to),
             'resolved_today': resolved[0].tickets if resolved else 0,
+            'mentioned': mentioned[0].tickets if mentioned else 0,
         },
         'oldest_open': oldest[0] if oldest else None,
         'statuses': _counted(groups, 'ticket_status'),

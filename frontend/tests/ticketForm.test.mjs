@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { distinctPeople, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
+import { businessTypeOptions, colleagueRequest, distinctPeople, hasMention, insertMention, mentionListPlacement, mentionQuery, mentionedUsers, ticketNotice, ticketPayload, ticketRoute, ticketSubject, withMention } from '../src/services/ticketForm.js'
 
 test('ticket subject uses the message text on one line within the subject limit', () => {
   assert.equal(ticketSubject({ content: '  Parcel\n arrived   damaged ' }), 'Parcel arrived damaged')
@@ -43,4 +43,58 @@ test('message selection and the message menu open the create ticket dialog', asy
 test('people with the same name show their login so a picker never lists one name twice', () => {
   const rows = distinctPeople([{ value: 'a@x.invalid', label: 'MRP' }, { value: 'b@x.invalid', label: 'MRP' }, { value: 'c@x.invalid', label: 'Asha' }])
   assert.deepEqual(rows.map(row => row.description), ['a@x.invalid', 'b@x.invalid', undefined])
+})
+
+test('typing @ before the caret starts a mention; an e-mail address does not', () => {
+  assert.deepEqual(mentionQuery('Please ask @Pra', 15), { start: 11, query: 'Pra' })
+  assert.deepEqual(mentionQuery('@', 1), { start: 0, query: '' })
+  assert.equal(mentionQuery('mail ops@example.invalid', 24), null)
+  assert.equal(mentionQuery('@Prakash done', 13), null, 'Text after a space ends the mention')
+})
+
+test('a picked colleague replaces the typed name and stays mentioned while its label is in the text', () => {
+  const text = insertMention('Please ask @Pra today', 11, 15, 'Prakash S')
+  assert.equal(text, 'Please ask @Prakash S  today')
+  const picked = new Map([['p@example.invalid', 'Prakash S'], ['r@example.invalid', 'Ravi']])
+  assert.deepEqual(mentionedUsers(text, picked), ['p@example.invalid'])
+  assert.deepEqual(mentionedUsers('No mentions left', picked), [])
+})
+
+test('a ticket without a chat searches every Relay colleague', () => {
+  assert.deepEqual(colleagueRequest('RELAY-CON-1', 'ra'), ['collaboration.colleagues', { contact: 'RELAY-CON-1', query: 'ra' }])
+  assert.deepEqual(colleagueRequest('', 'ra'), ['tickets.colleagues', { query: 'ra' }])
+})
+
+test('a mention counts only as a whole word', () => {
+  const picked = new Map([['sam@example.invalid', 'Sam'], ['samantha@example.invalid', 'Samantha'], ['ann@example.invalid', 'Ann Lee']])
+  assert.deepEqual(mentionedUsers('Please ask @Samantha today', picked), ['samantha@example.invalid'], '"@Sam" is not inside "@Samantha"')
+  assert.deepEqual(mentionedUsers('@Sam, please check', picked), ['sam@example.invalid'])
+  assert.deepEqual(mentionedUsers('cc @Ann Lee.', picked), ['ann@example.invalid'])
+  assert.equal(hasMention('mail sam@Sam.example', 'Sam'), false, 'An e-mail address is no mention')
+  assert.equal(hasMention('ask @A.B now', 'A.B'), true, 'A label is matched literally')
+  assert.equal(withMention('Hi @Samantha', 'Sam'), 'Hi @Samantha @Sam ')
+})
+
+test('the mention list opens below the text area, or above it near the bottom of the screen', () => {
+  const below = mentionListPlacement({ left: 10, width: 300, top: 100, bottom: 188 }, 844)
+  assert.deepEqual(below, { left: '10px', width: '300px', maxHeight: '220px', top: '192px' })
+  const above = mentionListPlacement({ left: 10, width: 300, top: 600, bottom: 688 }, 844)
+  assert.deepEqual(above, { left: '10px', width: '300px', maxHeight: '220px', bottom: '248px' })
+  const tight = mentionListPlacement({ left: 0, width: 300, top: 150, bottom: 238 }, 400)
+  assert.equal(tight.top, '242px', 'More room below than above keeps the list below')
+  assert.equal(tight.maxHeight, '150px')
+})
+
+test('business type options list only enabled types', () => {
+  assert.deepEqual(businessTypeOptions([{ business_doctype: 'Customer', label: 'Customers', enabled: 1 }, { business_doctype: 'Lead', enabled: 0 },
+    { business_doctype: 'Supplier', enabled: 1 }]), [{ value: 'Customer', label: 'Customers' }, { value: 'Supplier', label: 'Supplier' }])
+  assert.deepEqual(businessTypeOptions(undefined), [])
+})
+
+test('both ticket dialogs pick the business record with the same picker', async () => {
+  const chat = await readFile(new URL('../src/components/messages/CreateTicketDialog.vue', import.meta.url), 'utf8')
+  const standalone = await readFile(new URL('../src/components/tickets/NewTicketDialog.vue', import.meta.url), 'utf8')
+  for (const source of [chat, standalone]) assert.match(source, /<BusinessRecordPicker v-model:type="\w+(\.businessType)?" v-model:record=/)
+  assert.match(chat, /api\.contact_profile/, 'A chat without a stored record looks up the contact first')
+  assert.match(chat, /e\.message \|\|/, 'The server message is shown, not a generic error')
 })

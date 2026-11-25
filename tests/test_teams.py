@@ -44,10 +44,11 @@ class TeamTests(unittest.TestCase):
     def test_save_and_read_return_members_only(self):
         doc = Mock(); doc.name = 'Sales-001'; doc.title = 'Sales'
         doc.members = [types.SimpleNamespace(user='agent@example.com')]
+        doc.get = lambda field: []
         self.f.get_doc = Mock(return_value=doc)
         result = self.teams.save('Sales', '["agent@example.com"]', name='Sales-001')
         self.assertEqual([call.args[0] for call in doc.set.call_args_list], ['members'])
-        self.assertEqual(result, {'name': 'Sales-001', 'title': 'Sales', 'members': ['agent@example.com']})
+        self.assertEqual(result, {'name': 'Sales-001', 'title': 'Sales', 'members': ['agent@example.com'], 'business': []})
         self.assertEqual(self.teams.read('Sales-001'), result)
         self.teams.require_access.assert_called_with(manage=True)
 
@@ -87,6 +88,85 @@ class TeamTests(unittest.TestCase):
         self.teams.features.is_enabled.return_value = True
         with self.assertRaisesRegex(PermissionError, 'belong to the selected team'):
             self.teams.validate_assignment(doc)
+
+
+class Row(dict):
+    __getattr__ = dict.get
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+
+class TeamBusinessTests(unittest.TestCase):
+    """Which business records a team covers: all records, groups of the first grouping field or picked records."""
+    def setUp(self):
+        TeamTests.setUp(self)
+        records = {'Customer': ['C1', 'C2'], 'Supplier': ['S1']}
+        self.f.get_all = lambda doctype, filters, pluck: (
+            ['Customer', 'Supplier'] if doctype == 'Relay Contact Type'
+            else [name for name in records[doctype] if name in filters['name'][1]])
+        self.teams.group_field = lambda doctype: 'customer_group' if doctype == 'Customer' else ''
+
+    def test_groups_records_and_all_records_are_accepted(self):
+        rows = [Row(business_doctype='Customer', access='Group', value='North'),
+                Row(business_doctype='Customer', access='Group', value='South', grouping_field='customer_group'),
+                Row(business_doctype='Supplier', access='All records', value='ignored')]
+        self.teams.validate_business(rows)
+        self.assertEqual(rows[0].grouping_field, 'customer_group')
+        self.assertEqual((rows[2].value, rows[2].grouping_field), ('', ''))
+        self.teams.validate_business([Row(business_doctype='Customer', access='Record', value='C1'),
+                                      Row(business_doctype='Customer', access='Record', value='C2')])
+
+    def test_invalid_rows_are_refused(self):
+        cases = [([Row(business_doctype='Lead', access='Record', value='L1')], 'enabled business type'),
+                 ([Row(business_doctype='Customer', access='Everything', value='')], 'All records, Group or Record'),
+                 ([Row(business_doctype='Supplier', access='Group', value='Local')], 'no grouping field'),
+                 ([Row(business_doctype='Customer', access='Group', value='North', grouping_field='territory')], 'changed'),
+                 ([Row(business_doctype='Customer', access='Group', value='')], 'Choose a group or record'),
+                 ([Row(business_doctype='Customer', access='Record', value='C9')], 'Unknown Customer: C9'),
+                 ([Row(business_doctype='Customer', access='Record', value='C1')] * 2, 'only appear once'),
+                 ([Row(business_doctype='Supplier', access='All records'), Row(business_doctype='Supplier', access='Record', value='S1')],
+                  'Supplier can only appear once'),
+                 ([Row(business_doctype='Supplier', access='All records')] * 2, 'Supplier can only appear once'),
+                 ([Row(business_doctype='Customer', access='Group', value='North'), Row(business_doctype='Customer', access='Record', value='C1')],
+                  'Customer can only appear once')]
+        for rows, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(PermissionError, message):
+                self.teams.validate_business(rows)
+
+    def test_save_replaces_business_rows_only_when_given_and_returns_them(self):
+        doc = Mock(); doc.name = 'Sales-001'; doc.title = 'Sales'; doc.members = []
+        doc.get = lambda field: [Row(business_doctype='Customer', access='Group', value='North', grouping_field='customer_group')]
+        self.f.get_doc = Mock(return_value=doc)
+        result = self.teams.save('Sales', '[]', name='Sales-001', business='[{"business_doctype": "Customer", "access": "Group", '
+                                 '"value": "North", "grouping_field": "customer_group", "extra": 1}]')
+        row = {'business_doctype': 'Customer', 'access': 'Group', 'value': 'North', 'grouping_field': 'customer_group'}
+        doc.set.assert_any_call('business_access', [row])
+        self.assertEqual(result['business'], [row])
+        with self.assertRaisesRegex(PermissionError, 'list of rows'):
+            self.teams.save('Sales', '[]', name='Sales-001', business='{"business_doctype": "Customer"}')
+        with self.assertRaisesRegex(PermissionError, 'Pick its groups again'):
+            self.teams.save('Sales', '[]', name='Sales-001', business='[{"business_doctype": "Customer", "access": "Group", "value": "North"}]')
+
+    def test_directory_summarizes_members_and_business_per_team(self):
+        team = Row(name='Sales-001', title='Sales')
+        self.f.get_list = Mock(return_value=[team])
+        members = [Row(parent='Sales-001', user='agent@example.com')]
+        business = [Row(parent='Sales-001', business_doctype='Customer', access='Group', total=3),
+                    Row(parent='Sales-001', business_doctype='Customer', access='Record', total=2),
+                    Row(parent='Sales-001', business_doctype='Supplier', access='All records', total=1)]
+        self.f.get_all = lambda doctype, **kwargs: members if doctype == 'Relay Team Member' else business
+        self.teams.features = Mock(); self.teams.features.is_enabled.return_value = True
+        result = self.teams.directory()
+        self.assertEqual(result['items'][0]['members'], ['agent@example.com'])
+        self.assertEqual(result['items'][0]['business'], [
+            {'business_doctype': 'Customer', 'all': False, 'groups': 3, 'records': 2},
+            {'business_doctype': 'Supplier', 'all': True, 'groups': 0, 'records': 0}])
+        self.assertTrue(result['teams_enabled'])
+        self.teams.require_access.side_effect = PermissionError('Only communication managers')
+        with self.assertRaises(PermissionError):
+            self.teams.directory()
+        self.teams.require_access.assert_called_with(manage=True)
 
 
 class HealthEndpointTests(unittest.TestCase):

@@ -9,7 +9,7 @@ def titles(records):
     records = frappe.parse_json(records) if isinstance(records, str) else records
     if not isinstance(records, list) or len(records) > 50:
         frappe.throw('Request at most 50 record titles')
-    from relay_core.business_access import allowed_types, person_allowed
+    from relay_core.business_access import allowed_types, person_allowed, record_covered
     business_types = allowed_types()
     items = []
     for row in records:
@@ -17,7 +17,8 @@ def titles(records):
                 or len(row[key]) > 140 or any(ord(c) < 32 for c in row[key]) for key in ('doctype', 'name')):
             frappe.throw('Invalid record title reference')
         doctype, name = row['doctype'], row['name']
-        relay_read = doctype in business_types or doctype == 'Contact' and person_allowed(name)
+        relay_read = (doctype in business_types and record_covered(doctype, name)
+                      or doctype == 'Contact' and person_allowed(name))
         if (doctype == 'Contact' or frappe.db.exists('Relay Contact Type', doctype)) and not relay_read:
             continue
         if not relay_read and not frappe.has_permission(doctype, 'read'):

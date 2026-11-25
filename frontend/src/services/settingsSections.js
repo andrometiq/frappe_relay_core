@@ -10,6 +10,7 @@ const SECTIONS = [
   ] },
   { key: 'people', title: 'People', items: [
     { key: 'access', label: 'Access', icon: 'user-check', open: true },
+    { key: 'teams', label: 'Teams', icon: 'folder' },
     { key: 'business-types', label: 'Business types', icon: 'users' },
   ] },
   { key: 'messages', title: 'Messages', items: [

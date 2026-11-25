@@ -10,6 +10,7 @@ import BusinessTypeSettings from './BusinessTypeSettings.vue'
 import TicketSettings from './TicketSettings.vue'
 import WhatsAppAccounts from './whatsapp/WhatsAppAccounts.vue'
 import SettingsLayout from './settings/SettingsLayout.vue'
+import TeamSettings from './settings/TeamSettings.vue'
 import ToggleSwitch from './fields/ToggleSwitch.vue'
 import { channelEnabled } from '../services/enabledChannels'
 import { settingsSections, settingsTab } from '../services/settingsSections'
@@ -70,6 +71,7 @@ const features = [
   { key: 'ai', label: 'AI features', help: 'Shows AI replies, AI skills and AI history on tickets.' },
   { key: 'folders', label: 'Chat folders', help: 'Lets people sort chats into folders in the Chats list.' },
   { key: 'flows', label: 'Automations', help: 'Shows the Flows page, where managers build automatic replies and steps.' },
+  { key: 'teams', label: 'Teams', help: 'Each User sees only the business records of their teams. Set up the teams first.' },
 ]
 const providerChannels = provider => channels.value.filter(row => row.channel === provider)
 const checklist = computed(() => [
@@ -88,7 +90,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', readRoute))
 watch(() => capabilities.value?.configure, configure => { if (configure) loadMargin() }, { immediate: true })
 </script>
 <template>
-  <SettingsLayout :active="tab">
+  <TeamSettings v-if="tab === 'teams'" />
+  <SettingsLayout v-else :active="tab">
     <main class="page-main" :aria-label="title">
       <header class="page-head">
         <h2>{{ title }}</h2>

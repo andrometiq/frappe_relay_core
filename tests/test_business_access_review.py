@@ -47,6 +47,7 @@ class EventExecutionUserTests(unittest.TestCase):
 
 class ScalarSelectorTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
         self.fake = fake_frappe()
         self.fake.has_permission.return_value = True
         self.enterContext(patch.object(access, 'frappe', self.fake))
@@ -166,6 +167,7 @@ class CachedChatTitleTests(unittest.TestCase):
 
 class PrimaryOwnerTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch('relay_core.team_access.restricted', return_value=False))  # Teams off
         self.fake = fake_frappe()
         self.db = sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)

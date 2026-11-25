@@ -1,0 +1,47 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Team Business",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "business_doctype",
+    "access",
+    "grouping_field",
+    "value"
+  ],
+  "fields": [
+    {
+      "fieldname": "business_doctype",
+      "label": "Business type",
+      "fieldtype": "Link",
+      "options": "DocType",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "access",
+      "label": "Access",
+      "fieldtype": "Select",
+      "options": "All records\nGroup\nRecord",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "grouping_field",
+      "label": "Grouping field",
+      "fieldtype": "Data",
+      "description": "The first grouping field of the business type when access is Group."
+    },
+    {
+      "fieldname": "value",
+      "label": "Group or record",
+      "fieldtype": "Data",
+      "in_list_view": 1
+    }
+  ],
+  "permissions": [],
+  "autoname": "RELAY-TB-.##########",
+  "naming_rule": "Expression (old style)",
+  "modified": "2026-11-24 12:00:00.000000"
+}

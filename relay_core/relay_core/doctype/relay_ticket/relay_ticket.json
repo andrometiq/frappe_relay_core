@@ -10,6 +10,7 @@
     "ticket_status",
     "assigned_to",
     "messages",
+    "watchers",
     "source_action_key",
     "request_key",
     "business_doctype",
@@ -54,6 +55,13 @@
       "label": "Messages",
       "fieldtype": "Table",
       "options": "Relay Ticket Message"
+    },
+    {
+      "fieldname": "watchers",
+      "label": "Mentioned people",
+      "fieldtype": "Table",
+      "options": "Relay Ticket Watcher",
+      "description": "People mentioned in a ticket without a chat. They see the ticket even outside their teams."
     },
     {
       "fieldname": "source_action_key",
@@ -194,5 +202,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-10-30 12:00:00.000000"
+  "modified": "2026-11-24 12:00:00.000000"
 }

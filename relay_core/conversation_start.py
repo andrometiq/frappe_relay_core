@@ -153,18 +153,15 @@ def start_business(contact, business_doctype=None, business_name=None):
 def records(contact):
     """Readable records to choose from when the contact has several and none is marked primary."""
     start_contact(contact)
-    from relay_core.business_access import candidates, primary, allowed_types
+    from relay_core.business_access import candidates, primary, readable_links
+    from relay_core.business_groups import title_field
     links = candidates(contact)
     if primary(contact, links):
         return []
     rows = []
-    visible = allowed_types()
-    for doctype, name in links:
-        if doctype in visible:
-            doc = frappe.get_doc(doctype, name)
-            from relay_core.business_groups import title_field
-            title = doc.get(title_field(doctype))
-            rows.append({'doctype': doctype, 'name': name, 'title': str(title or name)})
+    for doctype, name in readable_links(links):
+        title = frappe.get_doc(doctype, name).get(title_field(doctype))
+        rows.append({'doctype': doctype, 'name': name, 'title': str(title or name)})
     return rows
 
 
