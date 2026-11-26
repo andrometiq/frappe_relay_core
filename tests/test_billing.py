@@ -235,12 +235,19 @@ class BillingTests(unittest.TestCase):
     def test_refresh_reads_monthly_pricing_through_the_hub(self):
         client, hub = self.hub([self.point(), self.point('SERVICE', 'FREE_CUSTOMER_SERVICE', 4, 0)])
         hub.execute.return_value['currency'] = 'INR'
-        with client, patch.object(billing, 'year_bounds', return_value=(100, 200)):
+        with client, patch.object(billing, 'year_bounds', return_value=(100, 200)), patch.object(billing, 'month_start', return_value=200):
             self.assertEqual(billing.refresh('acct-1', '2026'), {'rows': 2, 'data_points': 2})
         hub.execute.assert_called_once_with({'operation': 'billing.pricing', 'start': 100, 'end': 200, 'granularity': 'MONTHLY',
                                              'dimensions': ['PRICING_CATEGORY', 'PRICING_TYPE']})
         self.assertEqual(self.store.inserts, 2)
         self.assertEqual({row['currency'] for row in self.store.rows.values()}, {'INR'})
+
+    def test_the_running_month_is_read_by_day(self):
+        self.assertEqual([(r['start'], r['end'], r['granularity']) for r in billing.pricing_requests(100, 200, 150)],
+                         [(100, 150, 'MONTHLY'), (150, 200, 'DAILY')])
+        self.assertEqual([(r['start'], r['end'], r['granularity']) for r in billing.pricing_requests(100, 200, 100)],
+                         [(100, 200, 'DAILY')], 'January is only the running month')
+        self.assertEqual([r['granularity'] for r in billing.pricing_requests(100, 200, 200)], ['MONTHLY'], 'A past year')
 
     def test_a_point_currency_wins_and_an_older_hub_leaves_it_empty(self):
         self.assertEqual(billing.parse([dict(self.point(), currency='USD')], 'INR')[(date(2026, 2, 1), 'MARKETING', 'REGULAR')]['currency'], 'USD')
