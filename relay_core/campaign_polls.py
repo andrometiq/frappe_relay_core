@@ -13,7 +13,7 @@ from relay_core.message_types import text
 
 RECIPIENT = 'Relay Campaign Recipient'
 # A choice value names its recipient row, so a tap finds its poll without a lookup of the sent message.
-CHOICE = re.compile(r'cpoll:(RELAY-REC-\d+):(\d+|confirm:\d+|change)')
+CHOICE = re.compile(r'cpoll:([\w-]+):(\d+|confirm:\d+|change)')
 THANKS = 'Thank you, your response is recorded.'
 ALREADY = 'Your response is already recorded. Thank you.'
 CONFIRMED, CHOSEN, ASKED, OPTED_OUT = 'Confirmed', 'Chosen', 'Asked', 'Opted out'

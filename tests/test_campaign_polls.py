@@ -12,7 +12,7 @@ from relay_core import bulk_campaigns, campaign_polls, messaging
 from relay_core.automation import queue, service
 
 CHANNEL, NUMBER, OTHER = 'Acme-WA', '910000000001', '910000000002'
-ROW = 'RELAY-REC-0000000001'
+ROW = 'bulk-0a1b2c3d4e5f6a7b-1'
 BUTTONS = {'type': 'BUTTONS', 'buttons': [{'type': 'QUICK_REPLY', 'text': 'Interested'},
                                           {'type': 'QUICK_REPLY', 'text': 'Opt out'}, {'type': 'URL', 'text': 'Visit'}]}
 POLL = {'question': 'Which size?', 'options': ['Small', 'Large'], 'opt_in': 'Interested', 'opt_out': 'Opt out',
@@ -93,7 +93,7 @@ class PollSiteTests(unittest.TestCase):
                             {'name': 'Plain launch', 'channel': CHANNEL, 'arguments': json.dumps(snapshot())}],
             Relay_Campaign_Recipient=[{'name': ROW, 'campaign': 'Poll launch', 'destination': NUMBER, 'provider_id': 'wamid.sent',
                                        'arguments': json.dumps({'values': {}})},
-                                      {'name': 'RELAY-REC-0000000002', 'campaign': 'Plain launch', 'destination': NUMBER,
+                                      {'name': 'bulk-0a1b2c3d4e5f6a7b-2', 'campaign': 'Plain launch', 'destination': NUMBER,
                                        'provider_id': 'wamid.plain', 'arguments': '{}'}])
         self.site.frappe.db.set_value = self.site.set_value
         self.opt_outs, self.changed = [], []
@@ -130,7 +130,7 @@ class PollSiteTests(unittest.TestCase):
         for message in [self.tap('Something else'), self.tap('Interested', quoted='wamid.other'),
                         self.tap('Interested', quoted=''), self.tap('Interested', sender=OTHER),
                         self.tap('Interested', channel='Other-WA'), self.tap('Interested', quoted='wamid.plain'), plain,
-                        self.pick('cpoll:RELAY-REC-0000000002:0'), self.pick(f'cpoll:{ROW}:0', sender=OTHER), self.pick('poll-1'),
+                        self.pick('cpoll:bulk-0a1b2c3d4e5f6a7b-2:0'), self.pick(f'cpoll:{ROW}:0', sender=OTHER), self.pick('poll-1'),
                         _dict(self.tap('Interested'), direction='Outgoing')]:
             with self.subTest(message=message):
                 self.assertIsNone(campaign_polls.claim(message))
