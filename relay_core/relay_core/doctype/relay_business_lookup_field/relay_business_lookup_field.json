@@ -1,0 +1,38 @@
+{
+  "doctype": "DocType",
+  "name": "Relay Business Lookup Field",
+  "module": "Relay Core",
+  "engine": "InnoDB",
+  "istable": 1,
+  "field_order": [
+    "fieldname",
+    "search",
+    "share"
+  ],
+  "fields": [
+    {
+      "fieldname": "fieldname",
+      "label": "Fieldname",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "search",
+      "label": "Search",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "description": "The agent may filter by this field."
+    },
+    {
+      "fieldname": "share",
+      "label": "Share",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "description": "The agent may read this field and tell customers."
+    }
+  ],
+  "permissions": [],
+  "autoname": "RELAY-BLF-.##########",
+  "modified": "2026-11-26 10:00:00.000000"
+}

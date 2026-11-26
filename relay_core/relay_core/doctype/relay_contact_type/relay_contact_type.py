@@ -26,6 +26,8 @@ class RelayContactType(Document):
                 frappe.throw('Grouping priority must be a positive integer.')
             seen.add(row.fieldname)
         validate_profile_fields(self)
+        from relay_core.business_lookup import configuration
+        configuration(self)
         # After editing the table, clearing its last row must mean no grouping.
         if configure:
             self.grouping_field = ''
