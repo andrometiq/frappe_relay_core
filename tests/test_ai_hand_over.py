@@ -151,6 +151,25 @@ class HandOverTests(unittest.TestCase):
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=0, ownership_actor='staff@relay.test')):
             self.assertTrue(hand_over.handles(message()))
 
+    def test_a_chat_with_no_business_record_is_held_by_the_newest_staff_reply_of_the_last_day(self):
+        self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else ['Relay Communication User']
+        self.frappe.get_all.return_value = ['RELAY-MSG-0000000009', 'RELAY-MSG-0000000008', 'RELAY-MSG-0000000007']
+        sent = {'RELAY-MSG-0000000009': None, 'RELAY-MSG-0000000008': 'Administrator', 'RELAY-MSG-0000000007': 'staff@relay.test'}
+        with patch.object(hand_over, 'held_ticket', side_effect=ValueError('Episode requires a company and a resolved conversation')), \
+             patch.object(hand_over, 'now_datetime', return_value=datetime(2026, 11, 25, 12, 0)), \
+             patch('relay_core.message_display.senders', side_effect=lambda names: sent) as senders:
+            self.assertFalse(hand_over.handles(message()))  # Automatic and Administrator sends after staff do not count.
+            senders.assert_called_with(self.frappe.get_all.return_value)
+            filters = self.frappe.get_all.call_args.kwargs['filters']
+            self.assertEqual((filters['relay_contact'], filters['direction'], filters['creation']),
+                             ('RELAY-CON-0000000001', 'Outgoing', ['>', datetime(2026, 11, 24, 12, 0)]))
+            sent['RELAY-MSG-0000000008'] = 'agent@relay.test'
+            self.assertTrue(hand_over.handles(message()))  # The agent answered after staff.
+            sent['RELAY-MSG-0000000008'] = sent['RELAY-MSG-0000000007'] = None
+            self.assertTrue(hand_over.handles(message()))  # Only automatic sends, such as a campaign or greeting.
+            self.frappe.get_all.return_value = []
+            self.assertTrue(hand_over.handles(message()))
+
     def test_reply_context_rule_reads_the_newest_customer_message(self):
         self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else []
         self.frappe.get_all.return_value = ['RELAY-MSG-0000000001']

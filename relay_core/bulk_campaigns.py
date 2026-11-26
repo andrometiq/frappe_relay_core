@@ -269,7 +269,7 @@ def fixed_file(doc):
         if attachment['mode'] != 'static':
             return None
         from relay_core.campaign_media import checked_file
-        return checked_file(attachment['files'][0], header_type(doc))
+        return checked_file(attachment['files'][0], header_type(doc), doc.name)
     value = (mapping.get('fixed') or {}).get('media_url')
     if not bulk_sheet.is_site_file(value):
         return None
@@ -297,12 +297,9 @@ def media_upload(hub, doc):
 
 
 def upload_media_file(hub, channel, file, mime_type, kind, filename=None):
-    from relay_core.file_limits import get_media_max_bytes, size_error
-    limit = get_media_max_bytes('WhatsApp', bulk_sheet.HEADER_KINDS.get(kind, kind))
-    with open(file.get_full_path(), 'rb') as handle:
-        raw = handle.read(limit + 1)
-    if error := size_error(len(raw), limit, 'Header attachment'):
-        raise ValueError(error)
+    from relay_core.campaign_media import header_bytes
+    from relay_core.file_limits import get_media_max_bytes
+    raw = header_bytes(file, get_media_max_bytes('WhatsApp', bulk_sheet.HEADER_KINDS.get(kind, kind)))
     payload = whatsapp.prepare('messages.media_upload', {'media_type': kind, 'mime_type': mime_type,
         'filename': filename or file.file_name, 'content_base64': base64.b64encode(raw).decode()})
     media_id = str(hub.execute(hub_arguments(channel, payload)).get('id') or '')
@@ -974,7 +971,7 @@ def prepare_messages(hub, doc, snapshot, rows, *, deadline=None):
         try:
             if not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files:
                 raise ValueError('Missing header attachment')
-            file, mime = checked_file(item, kind)
+            file, mime = checked_file(item, kind, doc.name)
         except (ValueError, OSError, DoesNotExistError, PermissionError, ValidationError) as exc:
             frappe.db.set_value(RECIPIENT, row.name, {'status': 'Skipped', 'reason': str(exc)[:500]})
             continue

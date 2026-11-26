@@ -115,6 +115,7 @@ def add_comment(name, body, mentions=None, request_key=None):
 def insert_comment(name, body, users):
     """Every reader comments; mentioning colleagues needs write, so mentioned people cannot mention others."""
     doc = locked_ticket(name, 'write' if users else 'read')
+    watching = watch(doc, users)
     if any(not can_follow(doc, user) for user in users):
         frappe.throw('A mentioned colleague cannot access this conversation', frappe.PermissionError)
     frappe.get_doc({'doctype': 'Comment', 'comment_type': 'Comment', 'reference_doctype': 'Relay Ticket',
@@ -122,4 +123,18 @@ def insert_comment(name, body, users):
         'comment_by': frappe.utils.get_fullname(frappe.session.user)}).insert(ignore_permissions=True)
     from relay_core.realtime import changed
     changed(doc)
-    notify(doc, users, 'Mention', f'{frappe.utils.get_fullname(frappe.session.user)} mentioned you on a ticket')
+    notify(doc, [user for user in users if user not in watching], 'Mention',
+           f'{frappe.utils.get_fullname(frappe.session.user)} mentioned you on a ticket')
+
+
+def watch(doc, users):
+    """On a ticket without a chat, mentioned users who cannot read it become its watchers, so they read it as
+    people mentioned at creation do. Saving the ticket notifies them. Returns the added users."""
+    if doc.get('messages') or not doc.get('business_name'):
+        return []
+    added = [user for user in users if not can_follow(doc, user)]
+    if added:
+        for user in added:
+            doc.append('watchers', {'user': user})
+        doc.save()
+    return added

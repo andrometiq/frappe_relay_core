@@ -20,7 +20,7 @@ function mention(values) {
   mentions.value = values
 }
 async function colleagues(query, signal) {
-  const rows = distinctPeople(await coreApi(...colleagueRequest(contact.value, query), false, { signal }))
+  const rows = distinctPeople(await coreApi(...colleagueRequest(contact.value, query, true), false, { signal }))
   for (const row of rows) labels.set(row.value, row.label)
   return rows
 }

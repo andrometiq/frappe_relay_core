@@ -123,6 +123,25 @@ class TicketTagTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.module.insert_comment('TKT-00001', 'Please check @Local agent', ['agent@example.invalid'])
 
+    def test_a_mention_on_a_ticket_without_a_chat_lets_the_person_read_it(self):
+        ticket = self.ticket(); ticket.check_permission = Mock(); ticket.save = Mock()
+        ticket.business_name, ticket.messages, ticket.watchers = 'LOCAL-C1', [], []
+        ticket.append = lambda field, row: ticket.watchers.append(types.SimpleNamespace(**row))
+        self.f.get_doc = Mock(side_effect=lambda value, *args, **kwargs: Mock() if isinstance(value, dict) else ticket)
+        self.tickets.permission.side_effect = lambda doc, user: user in {row.user for row in getattr(doc, 'watchers', [])} or user == 'teammate@example.invalid'
+        with patch.dict(sys.modules, {'relay_core.realtime': types.SimpleNamespace(changed=Mock())}):
+            self.module.insert_comment('TKT-00001', 'Please check', ['outsider@example.invalid', 'teammate@example.invalid'])
+        self.assertEqual([row.user for row in ticket.watchers], ['outsider@example.invalid'], 'Only people who cannot read it are added')
+        ticket.save.assert_called_once_with()
+        [(mention, users)] = [entry.args for entry in self.logs.call_args_list]
+        self.assertEqual(users, ['teammate@example.invalid'], 'The ticket save already notified the new watcher')
+        chat = self.ticket(); chat.check_permission = Mock(); chat.save = Mock()
+        chat.business_name, chat.messages = 'LOCAL-C1', [types.SimpleNamespace(message='RELAY-MSG-0000000001')]
+        self.f.get_doc = Mock(side_effect=lambda value, *args, **kwargs: Mock() if isinstance(value, dict) else chat)
+        with self.assertRaises(PermissionError):
+            self.module.insert_comment('TKT-00001', 'Please check', ['outsider@example.invalid'])
+        chat.save.assert_not_called()
+
     def test_a_repeated_comment_request_key_adds_the_comment_once(self):
         import contextlib
         import relay_core

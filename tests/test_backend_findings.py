@@ -256,6 +256,15 @@ class BackendFindings(unittest.TestCase):
         with patch.object(collaboration,'frappe',f),patch.object(collaboration,'require_access'),patch.object(collaboration,'readable_contact'),patch.object(collaboration,'serialize',side_effect=PermissionError):
             self.assertEqual(collaboration.notifications()['items'],[])
 
+    def test_note_mentions_offer_every_reader_of_the_chat_not_only_its_team(self):
+        rows=[_dict(name='reader',full_name='Reader'),_dict(name='outsider',full_name='')]
+        with patch.object(collaboration,'require_access'),patch.object(collaboration,'readable_contact') as reader, \
+                patch('relay_core.teams._agent_options',return_value=rows) as options, \
+                patch.object(permissions,'can_read_contact_as',side_effect=lambda contact,user:user=='reader'):
+            self.assertEqual(collaboration.colleagues('contact','Re_'),[{'value':'reader','label':'Reader'}])
+        options.assert_called_once_with('Re\\_')
+        reader.assert_called_once_with('contact')
+
     def test_model_discovery_returns_ai_model_identifiers_and_enabled_accounts(self):
         f=self.fake();f.get_list.side_effect=[['account'],[_dict(name='MODEL',provider='OpenRouter',model='model-id')]]
         with patch.object(flows,'frappe',f),patch.object(flows,'require_access'):

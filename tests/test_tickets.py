@@ -418,14 +418,13 @@ class StandaloneTicketTests(unittest.TestCase):
         TicketTests.setUp(self)
         self.module.check_business = self.check_business
         self.covered = Mock(return_value=True)
-        access = types.SimpleNamespace(allowed_types=lambda: {'Customer'}, record_covered=self.covered,
+        access = types.SimpleNamespace(allowed_types=lambda user=None: {'Customer'}, record_covered=self.covered,
                                        document_name=lambda value: value, allowed=Mock(return_value=False),
                                        reference=Mock(), relay_user=lambda user: True)
         self.agents = Mock()
-        self.colleagues = Mock(side_effect=lambda user, users: set(users))
         self.f.session = Record(user='creator@example.invalid')
         modules = {'relay_core.business_access': access,
-                   'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents, colleagues_of=self.colleagues),
+                   'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents),
                    'relay_core.permissions': types.SimpleNamespace(can_read_contact_as=Mock(return_value=True))}
         self.enterContext(patch.dict(sys.modules, modules))
         self.access = access
@@ -459,10 +458,6 @@ class StandaloneTicketTests(unittest.TestCase):
                                             ([Record(user='a@example.invalid')], [Record(message=self.message.name)], 'comment')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 self.module.validate_ticket(Record(self.doc, watchers=watchers, messages=messages), check_assignment=False)
-        self.colleagues.side_effect = lambda user, users: set()
-        with self.assertRaisesRegex(PermissionError, 'share a team'):
-            self.module.validate_ticket(self.doc, check_assignment=False)
-        self.colleagues.assert_called_with('creator@example.invalid', {'agent@example.invalid'})
         self.agents.side_effect = PermissionError('The user needs a Relay communication role')
         with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
 
@@ -474,6 +469,54 @@ class StandaloneTicketTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, 'agent cannot reach'):
             self.module.validate_ticket(self.doc)
         self.f.set_user.assert_called_with('creator@example.invalid')
+
+    def team_fixture(self, rows, members, roles=None, teams_on=True):
+        """Team rows and members for team_assignee; every user is enabled and reaches the record unless roles say."""
+        import relay_core
+        roles = roles or {}
+        tables = {'Relay Team Business': [Record(row) for row in rows], 'Relay Team Member': [Record(row) for row in members]}
+        self.f.get_all = Mock(side_effect=lambda doctype, **kwargs: tables[doctype])
+        self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: 'North' if doctype == 'Customer' else 1)
+        self.f.get_roles = lambda user: roles.get(user, ['Relay Communication User'])
+        self.f.has_permission = lambda doctype, ptype='read', **kwargs: True
+        self.f.set_user = Mock()
+        sys.modules['relay_core.permissions'].__dict__.update(
+            AI_AGENT='Relay AI Agent', ALL_RECORDS_ROLES=frozenset({'Relay Communication Manager', 'System Manager'}),
+            company_allowed=Mock(return_value=True), is_read_only=lambda user, roles: 'Relay Read Only' in roles)
+        access = types.SimpleNamespace(ALL='All records', GROUP='Group', RECORD='Record', group_field=lambda doctype: 'territory')
+        features = types.SimpleNamespace(is_enabled=lambda name: teams_on)
+        self.enterContext(patch.dict(sys.modules, {'relay_core.team_access': access}))
+        self.enterContext(patch.object(relay_core, 'features', features, create=True))
+
+    def test_a_new_ticket_goes_to_the_member_of_the_narrowest_covering_team(self):
+        self.team_fixture(
+            rows=[dict(parent='TEAM-A', access='Group', value='North', grouping_field='territory'),
+                  dict(parent='TEAM-B', access='Record', value='LOCAL-C1', grouping_field=''),
+                  dict(parent='TEAM-C', access='Group', value='North', grouping_field='old_field')],
+            members=[dict(parent='TEAM-A', user='a@example.invalid'), dict(parent='TEAM-B', user='ai@example.invalid'),
+                     dict(parent='TEAM-B', user='manager@example.invalid'), dict(parent='TEAM-B', user='b@example.invalid'),
+                     dict(parent='TEAM-C', user='0@example.invalid')],
+            roles={'ai@example.invalid': ['Relay Communication User', 'Relay AI Agent'],
+                   'manager@example.invalid': ['Relay Communication Manager']})
+        self.module.validate_ticket(self.doc)
+        self.assertEqual(self.doc.assigned_to, 'b@example.invalid', 'A Record row wins; AI agents and managers are skipped')
+        self.f.set_user.assert_any_call('b@example.invalid')
+        self.covered.side_effect = lambda doctype, name, user=None: user != 'b@example.invalid'
+        self.assertEqual(self.module.team_assignee(self.doc), 'a@example.invalid', 'A member who cannot reach it is skipped')
+
+    def test_no_narrow_team_or_an_explicit_assignee_leaves_the_owner_as_chosen(self):
+        self.team_fixture(rows=[], members=[])
+        self.module.validate_ticket(self.doc)
+        self.assertIsNone(self.doc.assigned_to, 'All records rows and teams without rows never assign')
+        self.team_fixture(rows=[dict(parent='TEAM-B', access='Record', value='LOCAL-C1', grouping_field='')],
+                          members=[dict(parent='TEAM-B', user='b@example.invalid')])
+        self.doc.assigned_to = 'owner@example.invalid'
+        self.module.validate_ticket(self.doc)
+        self.assertEqual(self.doc.assigned_to, 'owner@example.invalid')
+        self.f.get_all.assert_not_called()
+        self.team_fixture(rows=[dict(parent='TEAM-B', access='Record', value='LOCAL-C1', grouping_field='')],
+                          members=[dict(parent='TEAM-B', user='b@example.invalid')], teams_on=False)
+        self.assertIsNone(self.module.team_assignee(Record(self.doc, assigned_to=None)), 'Teams off: no team owns a record')
 
     def test_assignee_and_mentioned_people_read_it_outside_their_teams(self):
         self.doc.update(name='TKT-00003', assigned_to='owner@example.invalid', watchers=[Record(user='mentioned@example.invalid')])
@@ -573,7 +616,9 @@ class StandaloneTicketTests(unittest.TestCase):
             options.return_value = [Record(name='agent@example.invalid', full_name='Local Agent')]
             self.assertEqual(self.module.colleagues('Lo_'), [{'value': 'agent@example.invalid', 'label': 'Local Agent'}])
             options.assert_called_once_with('Lo\\_', colleague_of='creator@example.invalid')
-        self.module.require_access.assert_called_once_with()
+            self.module.colleagues('Lo', mention='1')
+            options.assert_called_with('Lo', colleague_of=None)
+        self.module.require_access.assert_called_with()
         with self.assertRaises(ValueError): self.module.colleagues('x' * 81)
         self.f.get_list = Mock(return_value=[])
         self.module.mentioned_tickets = Mock(return_value=['TKT-00004'])

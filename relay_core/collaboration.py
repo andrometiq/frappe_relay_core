@@ -195,7 +195,8 @@ def colleagues(contact,query=''):
     from relay_core.teams import _agent_options
     if not isinstance(query,str) or len(query)>80:frappe.throw('Invalid colleague search')
     query=query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
-    rows=_agent_options(query,contact=contact)
+    # Every Relay user who reads the chat, not only its team: a mention needs read access, not team membership.
+    rows=_agent_options(query)
     return [dict(value=row.name,label=row.full_name or row.name) for row in rows if can_read_contact_as(contact,row.name)]
 
 

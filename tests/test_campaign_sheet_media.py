@@ -136,7 +136,7 @@ class HeaderResolutionTests(unittest.TestCase):
     def file(self, name, raw=b'\x89PNG\r\n\x1a\n', private=1):
         path = self.root / name
         path.write_bytes(raw)
-        file = _dict(file_name=name, file_url='/private/files/' + name, is_private=private, get_full_path=lambda: str(path))
+        file = _dict(file_name=name, file_url='/private/files/' + name, is_private=private, get_content=lambda encodings: path.read_bytes())
         self.files[file.file_url] = file
         return file
 
@@ -267,7 +267,7 @@ class HeaderSendTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         path = self.root / 'offer.png'; path.write_bytes(b'\x89PNG\r\n\x1a\n')
-        self.file = _dict(file_name='offer.png', get_full_path=lambda: str(path))
+        self.file = _dict(file_name='offer.png', get_content=lambda encodings: path.read_bytes())
         self.now = frappe.utils.get_datetime('2026-10-29 12:00:00')
         self.doc = _dict(name='Sheet', channel='WA', template_name='offer', language='en', arguments=json.dumps({'fields': FIELDS}),
             column_map=json.dumps({'header_attachment': attachment('static', 'offer.png')}))

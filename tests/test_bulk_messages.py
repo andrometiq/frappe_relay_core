@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 import frappe
@@ -136,7 +137,7 @@ class MediaUploadTests(unittest.TestCase):
         self.path = self.enterContext(tempfile.TemporaryDirectory()) + '/offer.png'
         with open(self.path, 'wb') as handle:
             handle.write(b'\x89PNG\r\n\x1a\n')
-        self.file = _dict(file_name='offer.png', get_full_path=lambda: self.path)
+        self.file = _dict(file_name='offer.png', get_content=lambda encodings: Path(self.path).read_bytes())
         self.doc = _dict(name='Offer', status='Draft', channel='WA', operation='messages.media', last_error='', reply_window_hours=72,
                          arguments=json.dumps({'message': PHOTO, 'fields': bulk_sheet.message_fields(PHOTO)}),
                          column_map=json.dumps({'phone': 'Mobile', 'fields': {'text:Name': 'Name'},
