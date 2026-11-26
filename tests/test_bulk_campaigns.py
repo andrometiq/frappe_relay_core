@@ -878,16 +878,15 @@ class TimelineTests(unittest.TestCase):
                       {'type': 'body', 'parameters': [{'type': 'text', 'text': 'Asha'}, {'type': 'text', 'text': 'Ten'}]}]
         rows = [_dict(request_key=f'bulk-k-{i}', destination=f'91987654321{i}', message={'components': components}) for i in range(3)]
         db = Mock()
-        fake = SimpleNamespace(db=db, session=_dict(user='manager@example.invalid'), _dict=_dict, publish_realtime=Mock(),
+        fake = SimpleNamespace(db=db, session=_dict(user='manager@example.invalid'), _dict=_dict,
                                get_all=Mock(return_value=[]),
-                               utils=SimpleNamespace(now_datetime=lambda: '2026-10-26 10:00:00'),
-                               realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
+                               utils=SimpleNamespace(now_datetime=lambda: '2026-10-26 10:00:00'))
         order = []
         db.sql.side_effect = lambda query, values: order.append('lock contacts')
         fake.get_all.side_effect = lambda *args, **kwargs: order.append('read') or []
         with patch.object(bulk_timeline, 'frappe', fake), \
                 patch('relay_core.whatsapp_receipts.lock_endpoints', return_value={'919876543210': 'RELAY-CON-A', '919876543212': 'RELAY-CON-B'}), \
-                patch('relay_core.inbox.message_created') as activity:
+                patch('relay_core.inbox.message_created') as activity, patch('relay_core.realtime.readers_changed') as published:
             bulk_timeline.record(doc, {'template': template}, rows, 41)
         self.assertEqual(order, ['lock contacts', 'read'])  # Snapshot isolation refuses a lock taken after a read.
         self.assertIn('FOR UPDATE', db.sql.call_args.args[0])
@@ -901,7 +900,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual((data['campaign'], data['template']['header'], data['template']['footer'], data['template']['buttons']),
                          ('Winter launch', 'Hello Asha', 'Reply STOP to opt out', ['Stop']))
         self.assertEqual(activity.call_count, 2)
-        fake.publish_realtime.assert_called_once_with('relay_changed', {'kind': 'messages'}, room='doctype:Relay Message', after_commit=True)
+        published.assert_called_once_with({'kind': 'messages'}, 'Relay Message')
 
     def test_names_are_reserved_in_a_transaction_of_their_own(self):
         from relay_core import bulk_timeline
@@ -920,9 +919,9 @@ class TimelineTests(unittest.TestCase):
         db = Mock()
         messages = [_dict(name='MSG-A', source_key='a', channel='WA', sender_endpoint='919876543210', relay_contact='CON-A'),
                     _dict(name='MSG-B', source_key='b', channel='WA', sender_endpoint='919876543211', relay_contact='CON-A')]
-        fake = SimpleNamespace(db=db, get_all=Mock(return_value=messages), publish_realtime=Mock(),
-                               realtime=SimpleNamespace(get_doctype_room=lambda doctype: 'doctype:' + doctype))
-        with patch.object(bulk_timeline, 'frappe', fake), patch('relay_core.realtime.contact_changed') as contact_changed:
+        fake = SimpleNamespace(db=db, get_all=Mock(return_value=messages))
+        with patch.object(bulk_timeline, 'frappe', fake), patch('relay_core.realtime.contact_changed') as contact_changed, \
+                patch('relay_core.realtime.readers_changed') as published:
             bulk_timeline.apply([{'key': 'a', 'status': 'Read', 'message_id': 'wamid.a', 'reason': ''},
                                  {'key': 'b', 'status': 'Cancelled', 'message_id': '', 'reason': ''},
                                  {'key': 'c', 'status': 'Queued', 'message_id': '', 'reason': ''}])
@@ -932,7 +931,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(failed[1], ('MSG-B', '', '', 'Cancelled before sending', 'Failed', ('Pending', 'Sent')))
         self.assertIn('m.delivery_error=u.error', failed[0])
         self.assertIn("m.delivery_error=''", read[0])
-        fake.publish_realtime.assert_called_once()
+        published.assert_called_once()
         # An open thread re-reads only the messages whose status moved.
         contact_changed.assert_called_once_with('CON-A', messages=['MSG-A', 'MSG-B'])
 

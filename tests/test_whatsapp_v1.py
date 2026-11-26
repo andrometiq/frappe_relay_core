@@ -243,14 +243,14 @@ class TemplateLifecycleTests(unittest.TestCase):
     def test_lifecycle_updates_record_and_publishes_without_provider_call(self):
         from relay_core import whatsapp_templates
         doc=_dict(hub_event_id='4')
-        fake=SimpleNamespace(db=Mock(),get_doc=Mock(return_value=doc),publish_realtime=Mock(),realtime=SimpleNamespace(get_doctype_room=lambda dt:dt))
+        fake=SimpleNamespace(db=Mock(),get_doc=Mock(return_value=doc))
         fake.db.get_value.return_value='record'
         payload={'entry':[{'changes':[{'field':'message_template_status_update','value':{'message_template_id':123,'message_template_name':'welcome','message_template_language':'en_US','event':'APPROVED'}}]}]}
-        with patch.object(whatsapp_templates,'frappe',fake),patch.object(whatsapp_templates,'internal_save') as save:
+        with patch.object(whatsapp_templates,'frappe',fake),patch.object(whatsapp_templates,'internal_save') as save,patch('relay_core.realtime.readers_changed') as published:
             self.assertTrue(whatsapp_templates.project(payload,_dict(account='fixture',hub_event_id='5')))
             self.assertEqual(doc.status,'APPROVED')
             save.assert_called_once_with(doc,new=False)
-            fake.publish_realtime.assert_called_once_with('relay_changed',{'kind':'templates'},room='Relay WhatsApp Template',after_commit=True)
+            published.assert_called_once_with({'kind':'templates'},'Relay WhatsApp Template')
             whatsapp_templates.project(payload,_dict(account='fixture',hub_event_id='3'))
             self.assertEqual(save.call_count,1)
 

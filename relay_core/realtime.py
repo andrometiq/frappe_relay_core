@@ -38,19 +38,16 @@ def changed(doc, method=None, messages=None, receipt=False):
         return
     if doc.doctype in TICKET_RECORDS:
         if has_ticket(doc):
-            frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
-                room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
+            readers_changed({'kind': 'tickets'}, 'Relay Ticket')
         return
     if doc.doctype == 'Relay Message':
         messages = messages or [doc.name]
     change = new_change() if messages else None
     # No document IDs, message text, addresses or identities in shared events.
     # Conversation rooms are permission checked, so they name the changed messages for a re-read of only those.
-    frappe.publish_realtime('relay_changed', conversation_event(kind, receipt=receipt, change=change),
-        room=frappe.realtime.get_doctype_room('Relay Ticket' if kind == 'tickets' else doc.doctype), after_commit=True)
+    readers_changed(conversation_event(kind, receipt=receipt, change=change), 'Relay Ticket' if kind == 'tickets' else doc.doctype)
     if doc.doctype == 'Relay Business Event Delivery' or doc.doctype == 'Relay Message' and doc.get('ticket'):
-        frappe.publish_realtime('relay_changed', {'kind': 'tickets'},
-            room=frappe.realtime.get_doctype_room('Relay Ticket'), after_commit=True)
+        readers_changed({'kind': 'tickets'}, 'Relay Ticket')
     contact = doc.get('relay_contact')
     if contact:
         contact_changed(contact, kind, messages, receipt, change)
@@ -114,8 +111,16 @@ def incoming_changed():
         incoming_batch.set(True)
         return
     # Triage access does not grant REST access to raw Hub event payloads.
+    readers_changed({'kind': 'incoming'}, 'Relay Team', 'write')
+
+
+def readers_changed(event, doctype, ptype='read'):
+    """Send a shared event to the user room of each user whose roles give `ptype` on `doctype`.
+
+    Every user joins their own room on connect. A site may refuse whole-DocType rooms to some users, and a list
+    in such a room then never updates. The event names no record; each screen re-reads through its checked API."""
     from frappe.permissions import get_doctype_roles
-    users = frappe.get_all('Has Role', filters={'parenttype':'User',
-        'role':['in',get_doctype_roles('Relay Team', 'write')]}, pluck='parent', distinct=True)
-    for user in set(users) | {'Administrator'}:
-        frappe.publish_realtime('relay_changed', {'kind':'incoming'}, user=user, after_commit=True)
+    users = frappe.get_all('Has Role', filters={'parenttype': 'User', 'role': ['in', get_doctype_roles(doctype, ptype)]},
+                           pluck='parent', distinct=True)
+    for user in sorted(set(users) | {'Administrator'}):
+        frappe.publish_realtime('relay_changed', event, user=user, after_commit=True)

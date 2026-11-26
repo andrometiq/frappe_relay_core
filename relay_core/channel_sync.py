@@ -128,8 +128,8 @@ def keep_one_default(account):
 
 def publish():
     """Tell open Account pages to read the channels again. No ids or status travel in the event."""
-    frappe.publish_realtime('relay_changed', {'kind': 'channels'}, room=frappe.realtime.get_doctype_room('Relay Channel'),
-                            after_commit=True)
+    from relay_core.realtime import readers_changed
+    readers_changed({'kind': 'channels'}, 'Relay Channel')
 
 
 def queue_sync():

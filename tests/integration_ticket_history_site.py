@@ -119,7 +119,7 @@ def exercise(*, stack, raw, actor, company, supplier, contact, event, source, re
         frappe.publish_realtime.reset_mock()
         service.internal_save(doc)
         frappe.publish_realtime.assert_any_call('relay_changed',{'kind':'tickets'},
-            room=frappe.realtime.get_doctype_room('Relay Ticket'),after_commit=True)
+            user='Administrator',after_commit=True)
     assert frappe.db.get_value('Payment Entry',draft.name,'docstatus') == 0
     print('PASS takeover invalidates approval, preserves completed draft; journal Socket.IO invalidations contain only kind')
 
