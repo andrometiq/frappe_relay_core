@@ -485,9 +485,11 @@ function actions(message) {
 .message-selection-bar { flex:none; z-index:5; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; background:var(--surface-modal); border:1px solid var(--outline-gray-3); border-radius:8px; }
 .message-selection-bar span { margin-right:auto; }
 .message-selection-bar :deep(button) { min-height:44px; }
-.message-thread .message-thread-content .conversation-bubble.is-selecting { cursor:pointer; user-select:none; min-height:44px; padding-left:40px; }
-.conversation-bubble.is-selected { outline:2px solid var(--relay-accent); }
-.message-selection-check { position:absolute; left:10px; top:12px; color:inherit; }
+/* While selecting, the checkbox takes the avatar's column, so names and text keep their place. */
+.message-thread .message-thread-content .conversation-bubble.is-selecting { cursor:pointer; user-select:none; min-height:44px; margin-inline:8px; border-radius:8px; }
+.message-thread .message-thread-content .conversation-bubble.is-selected { outline:2px solid var(--relay-accent); outline-offset:-2px; }
+.conversation-bubble.is-selecting .message-group-avatar, .conversation-bubble.is-selecting > .message-footer > time { visibility:hidden; }
+.message-selection-check { position:absolute; left:27px; top:8px; color:inherit; }
 
 .conversation-bubble:has(.message-readers){margin-bottom:24px}
 .conversation-bubble{position:relative}
