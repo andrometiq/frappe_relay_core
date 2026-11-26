@@ -10,6 +10,7 @@ import FrappeListView from "./frappe/FrappeListView.vue";
 import FrappeReadField from "./frappe/FrappeReadField.vue";
 import RelaySelect from "./RelaySelect.vue";
 import CampaignValidation from './campaigns/CampaignValidation.vue';
+import CampaignPoll from './campaigns/CampaignPoll.vue';
 import { campaignError } from '../services/campaignErrors.js';
 import { useCampaigns } from "../composables/useCampaigns";
 import { coreApi } from "../services/coreApi";
@@ -18,7 +19,7 @@ import { channelFeature } from "../services/enabledChannels";
 import { attachmentMaxBytes, sizeLabel } from "./messages/attachmentFormats";
 import { hasManyNumbers, numberName, whatsappNumbers } from "../services/whatsappNumbers";
 import { campaignActions, campaignMessage, headerFilesNotice, messageLabel, messageTypes, missingMapping, percent, placeholders,
-  shownCounters, statusTheme, windowNotice, invalidNumberLabel } from "../services/campaignProgress";
+  quickReplies, shownCounters, statusTheme, windowNotice, invalidNumberLabel } from "../services/campaignProgress";
 import { inputTime, recipientLabel, scheduleNotice, siteTime } from "../services/campaignAudience";
 
 const capabilities = inject("relayCapabilities");
@@ -40,7 +41,10 @@ const columns = [
   { key: "template_name", label: "Message", width: "minmax(140px,1fr)" },
   { key: "progress", label: "Sent / replied", width: "140px" },
 ];
-const templateOptions = computed(() => templates.value.map((row) => ({ value: `${row.name}|${row.language}`, label: `${row.name} (${row.language})` })));
+// A poll campaign lists only templates with a quick reply button.
+const templated = computed(() => type.value === "template" || type.value === "poll");
+const templateOptions = computed(() => templates.value.filter((row) => type.value !== "poll" || quickReplies(row).length)
+  .map((row) => ({ value: `${row.name}|${row.language}`, label: `${row.name} (${row.language})` })));
 const columnOptions = (field) => [{ value: "", label: field.key === "header_media" ? "Choose a column" : field.component === "media" ? "One file or link for every row" : "Fixed value" },
   ...(sheet.value?.columns || [])];
 const headerField = computed(() => sheet.value?.fields.find((field) => field.key === "header_media"));
@@ -49,12 +53,12 @@ const counts = computed(() => campaign.value?.counts || {});
 const media = (kind) => channelFeature(capabilities.value, "WhatsApp", "media." + kind);
 const types = computed(() => messageTypes(["photo", "video", "document"].filter(media)));
 const columnsUsed = computed(() => placeholders(text.value));
-const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (type.value === "template" ? template.value : type.value !== "text" || text.value.trim()));
-const noApprovedTemplates = computed(() => type.value === "template" && !busy.value && !templates.value.length && (!manyNumbers.value || number.value));
+const ready = computed(() => title.value.trim().length >= 3 && (!manyNumbers.value || number.value) && (templated.value ? template.value : type.value !== "text" || text.value.trim()));
+const noApprovedTemplates = computed(() => templated.value && !busy.value && !templateOptions.value.length && (!manyNumbers.value || number.value));
 const createMissing = computed(() => [
   title.value.trim().length < 3 && "add a title of at least 3 characters",
   manyNumbers.value && !number.value && "choose a WhatsApp number",
-  type.value === "template" && !template.value && (noApprovedTemplates.value ? "choose an approved template (none yet)" : "choose an approved template"),
+  templated.value && !template.value && (noApprovedTemplates.value ? "choose an approved template (none yet)" : "choose an approved template"),
   type.value === "text" && !text.value.trim() && "add the message text",
 ].filter(Boolean));
 const missingList = new Intl.ListFormat("en", { type: "conjunction" });
@@ -101,6 +105,7 @@ async function schedule() {
   await workspace.control("schedule", { scheduled_at: siteTime(startAt.value) });
   if (!error.value) toast("Campaign scheduled");
 }
+watch(type, () => { template.value = ""; });
 watch(() => campaign.value?.name, () => {
   sendMode.value = "now"; startAt.value = inputTime(campaign.value?.scheduled_at);
 });
@@ -122,7 +127,7 @@ function chooseNumber(value) {
 }
 async function create() {
   const [template_name, language] = template.value.split("|");
-  const values = type.value === "template" ? { template_name, language } : { message: campaignMessage(type.value, text.value) };
+  const values = templated.value ? { template_name, language, ...(type.value === "poll" ? { poll: 1 } : {}) } : { message: campaignMessage(type.value, text.value) };
   if (await workspace.create({ title: title.value, ...values, ...(number.value ? { channel: number.value } : {}) })) { routeCampaign(campaign.value.name); creating.value = false; }
 }
 async function chooseFile(event) {
@@ -181,14 +186,15 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
           <label class="campaign-field"><span>Title</span><TextInput v-model="title" maxlength="100" placeholder="Winter launch Oct 2026" /><small class="campaign-hint">3 to 100 characters. Do not use / \ % # ? &lt; &gt;</small></label>
           <ChoiceField v-if="manyNumbers" :model-value="number" :field="{ label: 'WhatsApp number', options: numberOptions }" @update:model-value="chooseNumber" />
           <RelaySelect v-model="type" label="Message type" :options="types" />
-          <ChoiceField v-if="type === 'template'" v-model="template" :field="{ label: 'Approved template', options: templateOptions, readOnly: manyNumbers && !number }" />
+          <ChoiceField v-if="templated" v-model="template" :field="{ label: 'Approved template', options: templateOptions, readOnly: manyNumbers && !number }" />
         </div>
         <div v-if="noApprovedTemplates" class="campaign-note campaign-empty" role="status">
           <FeatherIcon name="file-text" :size="20" />
-          <div><strong>No approved template yet</strong><p>A campaign needs a template that Meta has approved. Create one in Templates; approval usually takes under a day.</p></div>
+          <div><strong>No approved template yet</strong><p>{{ type === 'poll' ? 'A poll campaign needs an approved template with a quick reply button, such as Vote Now.' : 'A campaign needs a template that Meta has approved.' }} Create one in Templates; approval usually takes under a day.</p></div>
           <a class="relay-button relay-button--outline" href="#/whatsapp">Go to Templates</a>
         </div>
-        <div v-if="type !== 'template'" class="campaign-actions">
+        <p v-if="type === 'poll'" class="campaign-note">The template goes to everyone. When a person taps its opt-in button, Relay asks your poll question. You set up the question and buttons on the next page.</p>
+        <div v-if="!templated" class="campaign-actions">
           <FormControl v-model="text" type="textarea" :rows="4" :label="type === 'text' ? 'Message' : 'Caption (optional)'"
             :placeholder="'Hi {{Name}}, your order is ready'" />
           <p class="campaign-hint">Write <code v-text="'{{column}}'" /> to fill a value from the sheet column with that name.
@@ -222,6 +228,9 @@ const campaignSentinel = useLoadMore({ loading: busy, hasMore: () => workspace.n
         <p v-if="campaign.last_error" class="campaign-issue" role="alert">{{ campaignError(campaign.last_error) }}</p>
         <p v-if="replyWindow" :class="replyWindow.open ? 'campaign-note' : 'campaign-issue'" role="status">{{ windowNotice(replyWindow) }}</p>
         <p v-if="scheduleNotice(campaign)" class="campaign-hint" role="status">{{ scheduleNotice(campaign) }}</p>
+      </FrappeFormSection>
+      <FrappeFormSection v-if="campaign.poll" title="Poll">
+        <CampaignPoll :campaign="campaign" :busy="busy" @save="workspace.configurePoll" />
       </FrappeFormSection>
       <FrappeFormSection v-if="campaign.status === 'Draft'" title="1. Upload recipients"
         description="Upload a sheet. Uploading again replaces the people not messaged yet.">

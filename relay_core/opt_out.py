@@ -37,12 +37,15 @@ def on_message(doc, method=None):
     if doc.get('legacy_source'):
         return  # apply_history sets imported keywords with their own time.
     opted_out = choice(doc)
-    if opted_out is None or not doc.sender_endpoint:
-        return
-    endpoint = frappe.db.get_value('Relay Contact Endpoint',
-                                   {'endpoint_key': endpoint_key(doc.channel, doc.sender_endpoint)}, 'name')
-    if endpoint:
-        frappe.db.set_value('Relay Contact Endpoint', endpoint, {
+    if opted_out is not None and doc.sender_endpoint:
+        set_choice(doc.channel, doc.sender_endpoint, opted_out)
+
+
+def set_choice(channel: str, endpoint: str, opted_out: bool) -> None:
+    """Opt the number out of marketing messages, or back in."""
+    name = frappe.db.get_value('Relay Contact Endpoint', {'endpoint_key': endpoint_key(channel, endpoint)}, 'name')
+    if name:
+        frappe.db.set_value('Relay Contact Endpoint', name, {
             'marketing_opt_out': int(opted_out), 'opt_out_changed_at': frappe.utils.now_datetime()})
 
 
