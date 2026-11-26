@@ -146,6 +146,16 @@ test('a send in flight leaves the composer open for the next message', async t =
   state.busy.value=true;assert.equal(view.canSend.value,false)
 })
 
+test('Reply puts the cursor in the draft without checking the window of the same conversation again', async t => {
+  const {state,view,events,focusCount}=fixture(t);await settle();const before=focusCount(),closedEvents=events.length
+  state.source.value={...state.source.value,name:'local-quoted'};state.quoting.value=true;await settle()
+  assert.equal(focusCount(),before+1)
+  assert.equal(view.canSend.value,false,'An empty draft cannot send');state.body.value='Yes';assert.equal(view.canSend.value,true)
+  assert.equal(events.length,closedEvents,'The thread does not hide and show Reply while a window check runs')
+  state.source.value={...state.source.value,name:'local-other'};await settle();assert.equal(focusCount(),before+2,'Reply to another message')
+  state.quoting.value=false;await settle();assert.equal(focusCount(),before+2)
+})
+
 test('a live reply window recheck keeps Send open; a new source waits for its window', async t => {
   const {state,view}=fixture(t);await settle();state.body.value='Next message'
   const live=view.checkWindow(true);assert.equal(view.canSend.value,true);await live

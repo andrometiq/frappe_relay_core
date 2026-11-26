@@ -117,6 +117,8 @@ function moreAction(action) {
 function insertEmoji(value) { body.value += value; focusDraft(); }
 function closeReplies() { showReplies.value = false; focusDraft(); }
 watch(() => props.mode, value => { if (value === 'reply') focusDraft(); else stopTyping(); });
+// Reply on a message puts the cursor in the draft, also when that reply opens this composer.
+watch(() => quoting.value && source.value?.name, name => { if (name) focusDraft(); }, { immediate: true });
 function resizeDraft() {
   const node=draftInput.value;
   if (!node) return;
@@ -182,8 +184,9 @@ async function checkWindow(live = false) {
     }
   } finally { if (generation === windowGeneration) windowChecking.value = false; }
 }
+// The window belongs to the conversation, so quoting another of its messages does not check it again.
 watch(
-  () => source.value?.name,
+  () => source.value && [source.value.relay_contact, source.value.channel, source.value.sender_endpoint, sourceContext.value.group_id].join('\n'),
   () => {
     windowState.value = {
       open: !can("reply_window_hours") || !!sourceContext.value.group_id,
