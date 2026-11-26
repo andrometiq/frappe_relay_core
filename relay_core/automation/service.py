@@ -202,14 +202,19 @@ def configuration_failure(message, error):
 
 
 def staff_owned(contact, *, ticket=None, message=None):
-    """Preview a new message against the active episode, not its historical ticket."""
+    """Preview a new message against the active episode, not its historical ticket. A ticket that was held or
+    resumed decides; otherwise a recent staff reply holds the chat, as a staff reply opens no ticket
+    (hand_over.is_taken_over)."""
     if contact.automation_paused:
         return True
-    if ticket is not None:
+    if ticket is None:
+        from relay_core.tickets import _episode_scope
+        _, key = _episode_scope(message)
+        ticket = frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, ['ai_disabled', 'ownership_at'], as_dict=True)
+    if ticket and (ticket.ai_disabled or ticket.get('ownership_at')):
         return bool(ticket.ai_disabled)
-    from relay_core.tickets import _episode_scope
-    _, key = _episode_scope(message)
-    return bool(frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, 'ai_disabled'))
+    from relay_core.ai.hand_over import has_staff_reply
+    return has_staff_reply(contact.name)
 
 
 def create_run(doc):
