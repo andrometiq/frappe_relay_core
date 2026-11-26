@@ -99,7 +99,7 @@ WhatsApp Cloud API cannot send a native poll and does not give business accounts
 
 | Direction | Behavior |
 | --- | --- |
-| Outgoing | A poll with 2-3 options goes as reply buttons (up to 20 characters each). A poll with 4-10 options goes as a list (up to 24 characters each). The reply window must be open. |
+| Outgoing | A poll with 2-3 options goes as reply buttons (up to 20 characters each). A poll with 4-10 options goes as a list (up to 72 characters each; an option longer than 24 characters shows shortened in the row title and whole in the row description). The reply window must be open. |
 | Votes | A tap on an option quotes the poll. Relay counts it as the current vote of that contact and updates the poll card live. A later tap replaces the vote. A tap from another contact or chat is not counted. |
 | Incoming | A customer's poll arrives as Meta type `unsupported` (`poll_creation`, error 131051) without content. Relay shows "WhatsApp does not share poll contents with business accounts. Ask the customer to reply in text." A poll vote (`poll_update`) shows a similar notice. |
 

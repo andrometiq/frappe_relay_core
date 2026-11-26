@@ -35,10 +35,19 @@ class PollSendTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in interactive['action']['sections'][0]['rows']], ['poll-%d' % n for n in range(1, 11)])
         self.assertEqual(content['poll']['options'], options)
 
+    def test_a_long_list_option_is_shortened_in_the_title_and_whole_in_the_description(self):
+        long = 'Comfort that lasts all day long'
+        _, arguments, content = self.prepare({'question': 'Pick one', 'options': [long, 'B', 'C', 'D']})
+        rows = arguments['interactive']['action']['sections'][0]['rows']
+        self.assertEqual(rows[0], {'id': 'poll-1', 'title': 'Comfort that lasts all…', 'description': long})
+        self.assertEqual(rows[1], {'id': 'poll-2', 'title': 'B'})
+        self.assertLessEqual(len(rows[0]['title']), 24)
+        self.assertEqual(content['poll']['options'][0], long)
+
     def test_invalid_polls_are_refused(self):
         for data in [{'question': 'Q', 'options': ['Only']}, {'question': 'Q', 'options': ['x%d' % n for n in range(11)]},
                      {'question': ' ', 'options': ['A', 'B']}, {'question': 'Q', 'options': ['Red', 'red']},
-                     {'question': 'Q', 'options': ['x' * 21, 'B']}, {'question': 'Q', 'options': ['x' * 25, 'B', 'C', 'D']},
+                     {'question': 'Q', 'options': ['x' * 21, 'B']}, {'question': 'Q', 'options': ['x' * 73, 'B', 'C', 'D']},
                      {'question': 'Q', 'options': ['A', 'B'], 'extra': 1}, {'question': 'Q', 'options': ['A', 7]}]:
             with self.subTest(data=data), self.assertRaises(ValueError):
                 self.prepare(data)
