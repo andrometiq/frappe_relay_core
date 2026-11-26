@@ -60,8 +60,19 @@ export function headerFilesNotice(attachment, media) {
 // Message types a campaign can send: a template, text, or a media kind the WhatsApp channel registry offers.
 export function messageTypes(mediaKinds) {
   const media = ["photo", "video", "document"].filter((kind) => mediaKinds.includes(kind));
-  return [{ value: "template", label: "Template" }, { value: "text", label: "Text" },
+  return [{ value: "template", label: "Template" }, { value: "poll", label: "Poll" }, { value: "text", label: "Text" },
     ...media.map((kind) => ({ value: kind, label: kind[0].toUpperCase() + kind.slice(1) }))];
+}
+
+// A poll campaign template needs a quick reply button that opens the poll.
+export function quickReplies(template) {
+  const buttons = (template?.components || []).find((part) => String(part.type).toUpperCase() === "BUTTONS")?.buttons || [];
+  return buttons.filter((button) => String(button.type).toUpperCase() === "QUICK_REPLY" && button.text).map((button) => button.text);
+}
+
+// One poll option per line; blank lines are ignored.
+export function pollOptions(text) {
+  return (text || "").split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
 export function campaignMessage(type, text) {

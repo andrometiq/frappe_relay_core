@@ -46,6 +46,7 @@ export function useCampaigns() {
   // Relay sends this file to Hub once when the campaign starts; rows carry the Hub media ID.
   const uploadMedia = (file) => run(() => uploadFile(file, "The media file could not be uploaded."));
   const importRows = (mapping) => run(async () => { campaign.value = await coreApi("bulk_campaigns.import_rows", { name: campaign.value.name, mapping }, true); sheet.value = null; });
+  const configurePoll = (poll) => run(async () => { campaign.value = await coreApi("campaign_polls.configure", { name: campaign.value.name, poll }, true); });
   const control = (action, values = {}) => run(async () => { campaign.value = await coreApi("bulk_campaigns.control", { name: campaign.value.name, action, ...values }, true); });
   const page = (status, after) => run(async () => {
     filter.value = status || "";
@@ -84,5 +85,5 @@ export function useCampaigns() {
   useRealtimeRefresh(["Relay Campaign"], ["campaigns"], () => refresh());
   onMounted(refresh);
   onBeforeUnmount(() => { off(); leave?.(); reread.dispose(); });
-  return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, download, uploadMedia, importRows, control, page };
+  return { busy, error, items, next, campaign, sheet, templates, filter, replyWindow, refresh, open, loadTemplates, create, upload, download, uploadMedia, importRows, configurePoll, control, page };
 }

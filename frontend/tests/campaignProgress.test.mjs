@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyProgress, approvedTemplates, campaignActions, shownCounters, campaignMessage, mergeCampaign, messageLabel, messageTypes, missingMapping, percent, placeholders, windowNotice } from "../src/services/campaignProgress.js";
+import { applyProgress, approvedTemplates, campaignActions, shownCounters, campaignMessage, mergeCampaign, messageLabel, messageTypes, missingMapping, percent, placeholders, pollOptions, quickReplies, windowNotice } from "../src/services/campaignProgress.js";
 
 test("progress events merge counters only for the open campaign", () => {
   const campaign = { name: "Winter launch Oct 2026", status: "Running", counts: { total: 5000, sent: 10 } };
@@ -46,7 +46,7 @@ test("approved templates are read across every Hub page", async () => {
 });
 
 test("text and media campaigns follow the registry kinds and fill sheet columns", () => {
-  assert.deepEqual(messageTypes(["photo", "voice", "document"]).map((row) => row.value), ["template", "text", "photo", "document"]);
+  assert.deepEqual(messageTypes(["photo", "voice", "document"]).map((row) => row.value), ["template", "poll", "text", "photo", "document"]);
   assert.deepEqual(campaignMessage("text", " Hi {{Name}} "), { kind: "text", body: "Hi {{Name}}" });
   assert.deepEqual(campaignMessage("photo", ""), { kind: "photo", caption: "" });
   assert.deepEqual(placeholders("Hi {{Name}}, order {{ Order No }} for {{Name}}"), ["Name", "Order No"]);
@@ -54,6 +54,14 @@ test("text and media campaigns follow the registry kinds and fill sheet columns"
   assert.equal(messageLabel({ template_name: "notice" }), "notice");
   assert.equal(messageLabel({ message: { kind: "video" } }), "Video");
   assert.equal(messageLabel({ operation: "messages.send" }), "Text");
+});
+
+test("a poll campaign maps quick reply buttons and takes one option per line", () => {
+  const template = { components: [{ type: "BODY", text: "Hi" }, { type: "BUTTONS", buttons: [
+    { type: "QUICK_REPLY", text: "Vote Now" }, { type: "URL", text: "Visit" }, { type: "QUICK_REPLY", text: "Opt out" }] }] };
+  assert.deepEqual(quickReplies(template), ["Vote Now", "Opt out"]);
+  assert.deepEqual(quickReplies({ components: [{ type: "BODY", text: "Hi" }] }), []);
+  assert.deepEqual(pollOptions(" Small \n\nLarge\n "), ["Small", "Large"]);
 });
 
 test("the reply window preflight counts numbers and warns about the rest", () => {
