@@ -81,8 +81,8 @@ def handles_safely(doc) -> bool:
 def is_taken_over(contact: str, message=None) -> bool:
     """True when staff own the chat: the Relay automation's rule (a paused contact, or a held episode ticket), less
     the agent's own holds. A pause for an active MCP claim is the claim's (its guard stops another sender),
-    and a ticket held by the reply of a Relay AI Agent user is the agent's. A message with no episode (no business
-    record) has no ticket to hold, so a staff reply holds its chat instead (has_staff_reply)."""
+    and a ticket held by the reply of a Relay AI Agent user is the agent's. A staff reply opens no ticket, so while
+    no active episode ticket was held or resumed, a recent staff reply holds the chat (has_staff_reply)."""
     paused, generation = frappe.db.get_value('Relay Contact', contact, ['automation_paused', 'automation_generation'])
     if paused and not is_claim_pause(contact, generation):
         return True
@@ -91,8 +91,10 @@ def is_taken_over(contact: str, message=None) -> bool:
     try:
         ticket = held_ticket(message)
     except ValueError:
+        ticket = None
+    if not ticket or not (ticket.ai_disabled or ticket.ownership_at):
         return has_staff_reply(contact)
-    return bool(ticket and ticket.ai_disabled and not is_agent_user(ticket.ownership_actor))
+    return bool(ticket.ai_disabled and not is_agent_user(ticket.ownership_actor))
 
 
 def is_agent_user(user: str | None) -> bool:
@@ -114,7 +116,8 @@ def held_ticket(message):
     no episode scope."""
     from relay_core.tickets import _episode_scope
     _, key = _episode_scope(message)
-    return frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, ['ai_disabled', 'ownership_actor'], as_dict=True)
+    return frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, ['ai_disabled', 'ownership_actor', 'ownership_at'],
+                               as_dict=True)
 
 
 def has_staff_reply(contact: str) -> bool:

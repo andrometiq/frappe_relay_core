@@ -112,8 +112,8 @@ def check_episode(run):
 def manual_takeover(source):
     """Join the current episode hold to the caller's manual-message journal write.
 
-    With the Relay AI off a staff message touches no episode. A staff message never fails because it cannot
-    open one."""
+    With the Relay AI off a staff message touches no episode. A staff message never opens a ticket: without an
+    active episode the staff reply itself holds the chat (hand_over.has_staff_reply)."""
     if not ai_features.is_enabled() or not source.get('business_name'):
         return
     if not frappe.db.get_value('Relay Channel', source.channel, 'company'):
@@ -121,17 +121,6 @@ def manual_takeover(source):
     scope, key = _episode_scope(source)
     _lock_episode_routing(source, scope['conversation_key'])
     name = frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, 'name', for_update=True)
-    if not name and source.get('name') and not source.get('ticket'):
-        source.check_permission('read')
-        actor = frappe.session.user
-        if not episode_owner_allowed(actor, source):
-            frappe.logger('relay_core').info('Staff message sent without an AI episode: %s cannot own one', actor)
-            return
-        try:
-            frappe.set_user('Administrator')
-            name = ensure_episode(source, owner=actor).name
-        finally:
-            frappe.set_user(actor)
     if name:
         hold_episode(name, claim=True)
         source.ticket = name

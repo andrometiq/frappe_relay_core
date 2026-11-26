@@ -179,7 +179,7 @@ Ticket dialog:
 | Comments, Add comment | Internal discussion. Pick colleagues in the mention box to notify them. On a ticket without a chat, you can mention any Relay user, and that user can then open the ticket. On a ticket with a chat, only users who can read the chat show. |
 | Close ticket | Sets the first status of type Closed. |
 
-The Tickets page, its counts and the open-ticket counts in the inbox do not show a conversation that the AI still answers. That conversation shows here when the AI hands it to staff or when staff take it over.
+The Tickets page, its counts and the open-ticket counts in the inbox do not show a conversation that the AI still answers. That conversation shows here when the AI hands it to staff or when staff take over its ticket. A staff reply in the chat does not create a ticket. It keeps the AI and the automation silent in that chat for 24 hours.
 
 You cannot make a ticket from the Tickets page. You make it from a chat (see recipe 5.7).
 

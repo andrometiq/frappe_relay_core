@@ -1090,19 +1090,6 @@ class OwnershipTests(unittest.TestCase):
         self.module.manual_takeover(Record(name='Source', channel='Legacy Channel', business_name='Supplier'))
         self.module._episode_scope.assert_not_called()
 
-    def staff_reply_without_episode(self, owner_allowed):
-        self.module._episode_scope = Mock(return_value=(dict(conversation_key='Sim Conversation'), 'Sim Business Scope'))
-        self.module._lock_episode_routing = Mock()
-        self.module.hold_episode = Mock()
-        self.module.episode_owner_allowed = Mock(return_value=owner_allowed)
-        self.module.ensure_episode = Mock(return_value=Record(name='TKT-00009'))
-        self.f.set_user = Mock()
-        self.f.logger = Mock()
-        self.f.db.get_value.side_effect = lambda dt, *a, **kw: 'Sim Company' if dt == 'Relay Channel' else None
-        source = Record(name='Sim Source', channel='Sim Channel', business_name='Sim Supplier', check_permission=Mock())
-        self.module.manual_takeover(source)
-        return source
-
     def test_staff_reply_with_ai_off_touches_no_episode(self):
         self.module._episode_scope = Mock()
         with patch.object(self.module.ai_features, 'is_enabled', return_value=False):
@@ -1110,18 +1097,17 @@ class OwnershipTests(unittest.TestCase):
         self.module._episode_scope.assert_not_called()
         self.f.db.get_value.assert_not_called()
 
-    def test_staff_reply_is_sent_when_its_sender_cannot_own_a_new_episode(self):
-        source = self.staff_reply_without_episode(owner_allowed=False)
+    def test_staff_reply_without_an_episode_opens_no_ticket(self):
+        self.module._episode_scope = Mock(return_value=(dict(conversation_key='Sim Conversation'), 'Sim Business Scope'))
+        self.module._lock_episode_routing = Mock()
+        self.module.hold_episode = Mock()
+        self.module.ensure_episode = Mock()
+        self.f.db.get_value.side_effect = lambda dt, *a, **kw: 'Sim Company' if dt == 'Relay Channel' else None
+        source = Record(name='Sim Source', channel='Sim Channel', business_name='Sim Supplier', check_permission=Mock())
+        self.module.manual_takeover(source)
         self.module.ensure_episode.assert_not_called()
         self.module.hold_episode.assert_not_called()
         self.assertIsNone(source.ticket)
-
-    def test_staff_reply_opens_and_holds_an_episode_for_an_allowed_sender(self):
-        source = self.staff_reply_without_episode(owner_allowed=True)
-        self.module.episode_owner_allowed.assert_called_once_with('Sim Staff', source)
-        self.module.ensure_episode.assert_called_once_with(source, owner='Sim Staff')
-        self.module.hold_episode.assert_called_once_with('TKT-00009', claim=True)
-        self.assertEqual(source.ticket, 'TKT-00009')
 
 
 class TicketHistoryTests(unittest.TestCase):

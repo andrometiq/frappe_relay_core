@@ -224,15 +224,15 @@ class ChannelApiTests(unittest.TestCase):
     def test_preview_checks_active_episode_instead_of_closed_source_ticket(self):
         message = _dict(name='msg', relay_contact='person', channel='channel', ticket='closed-ticket',
                         provider_context='{}', direction='Incoming')
-        person = _dict(automation_paused=0)
+        person = _dict(name='person', automation_paused=0)
         self.fake.get_doc.side_effect = lambda dt, name: {
             'Relay Channel': self.doc, 'Relay Message': message, 'Relay Contact': person}[dt]
         self.fake.get_list.return_value = [message.name]
         self.doc.automation_steps = [row('Flow')]
         active = {'held': None}
-        def lookup(dt, filters, field):
-            self.assertEqual((dt, filters, field), ('Relay Ticket', {'active_scope_key': 'current-scope'}, 'ai_disabled'))
-            return active['held']
+        def lookup(dt, filters, fields, as_dict):
+            self.assertEqual((dt, filters, fields), ('Relay Ticket', {'active_scope_key': 'current-scope'}, ['ai_disabled', 'ownership_at']))
+            return None if active['held'] is None else _dict(ai_disabled=active['held'], ownership_at=None)
         self.fake.db.get_value.side_effect = lookup
         with patch.object(service, 'frappe', self.fake), \
              patch('relay_core.tickets._episode_scope', return_value=({}, 'current-scope')), \
@@ -241,6 +241,7 @@ class ChannelApiTests(unittest.TestCase):
              patch.object(channel, 'ai_available', return_value=False), \
              patch.object(channel, 'ticket_resolved', return_value=True), \
              patch.object(channel, 'evaluate', return_value=(True, 'Flow matched')), \
+             patch('relay_core.ai.hand_over.has_staff_reply', return_value=False) as staff_reply, \
              patch.object(service, 'staff_owned', wraps=service.staff_owned) as ownership:
             for held, paused, runs in ((None, 0, True), (0, 0, True), (1, 0, False), (None, 1, False)):
                 with self.subTest(held=held, paused=paused):
@@ -250,6 +251,16 @@ class ChannelApiTests(unittest.TestCase):
                     ownership.assert_called_with(person, message=message)
                     # Admission passes the episode it has resolved; both paths use this check.
                     self.assertEqual(service.staff_owned(person, ticket=_dict(ai_disabled=held or 0)), not runs)
+            # A staff reply opens no ticket, yet keeps automation silent until staff hold or resume an episode.
+            staff_reply.return_value, person.automation_paused = True, 0
+            for held in (None, 0):
+                with self.subTest(held=held, staff_reply=True):
+                    active['held'] = held
+                    self.assertFalse(channel.dry_run('channel', 'Order 1250', contact='person')['trace'][0]['runs'])
+                    self.assertTrue(service.staff_owned(person, ticket=_dict(ai_disabled=0)))
+            staff_reply.assert_called_with('person')
+            resumed = _dict(ai_disabled=0, ownership_at='2026-11-25 12:00:00')
+            self.assertFalse(service.staff_owned(person, ticket=resumed), 'Staff gave the chat back to the AI')
         self.doc.save.assert_not_called()
         self.fake.db.commit.assert_not_called()
         self.fake.db.set_value.assert_not_called()
