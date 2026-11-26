@@ -9,7 +9,7 @@ class RelaySettings(Document):
         require_access(configure=True)
         previous = self.get_doc_before_save()
         if previous and not self.get('enable_ai_features'):
-            fields = ('ai_handoff_owner', 'transcription_provider', 'memory_model',
+            fields = ('ai_handoff_owner', 'transcription_model', 'transcription_provider', 'memory_model',
                       'event_memory_model', 'max_ai_file_size_mb', 'trusted_adapter_apps', 'company_neutral_types',
                       'allowed_ai_auth_types')
             if any(self.get(field) != previous.get(field) for field in fields):
@@ -32,6 +32,9 @@ class RelaySettings(Document):
         allowed = auth_types(self.get('allowed_ai_auth_types'))
         if allowed and allowed - set(frappe.get_meta('AI Provider Account').get_field('auth_type').options.split('\n')):
             frappe.throw('Allowed AI auth types must be AI Provider Account auth types, one per line')
+        model = self.get('transcription_model')
+        if model and not frappe.db.get_value('AI Model', model, 'enabled'):
+            frappe.throw('Voice transcription model must be an enabled AI Model')
         if self.transcription_provider:
             provider=frappe.get_doc('Relay AI Provider',self.transcription_provider)
             if provider.provider!='OpenAI' or not provider.enabled:

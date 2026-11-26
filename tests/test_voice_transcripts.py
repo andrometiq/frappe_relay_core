@@ -39,11 +39,27 @@ class VoiceTranscriptTests(unittest.TestCase):
         self.transcribe = Mock(return_value='Please send the invoice')
         self.realtime = Mock()
         self.allowed = {'ChatGPT Login', 'API Key'}
+        self.rows['Audio Model'] = _dict(doctype='AI Model', name='Audio Model', enabled=1)
+        self.route = Mock(return_value=(_dict(provider='OpenRouter'), _dict(name='Audio Model', model_id='google/gemini-2.5-flash'),
+                                        ['synthetic-secret'], {'max_tokens': 1200}))
+        self.adapter = Mock()
+        self.adapter.build_request.return_value = ('url', {}, {})
+        self.outcome = {'ok': True, 'result': {'data': {'transcript': ' வணக்கம் invoice அனுப்புங்க '}}}
+
+        def try_model(account, model_id, build, options, context, deadline):
+            build(self.adapter, {'api_key': 'synthetic-secret'}, model_id)
+            return self.outcome
+        self.try_model = Mock(side_effect=try_model)
+        client = types.SimpleNamespace(try_model=self.try_model, DeadlineReached=type('DeadlineReached', (TimeoutError,), {}))
         stubs = {'frappe': self.frappe,
-                 'relay_core.ai.adapter': types.SimpleNamespace(allowed_auth_types=lambda: self.allowed),
+                 'frappe_tools.ai': types.SimpleNamespace(client=client),
+                 'frappe_tools.utils': types.SimpleNamespace(llm=types.SimpleNamespace(
+                     redact_secrets=lambda text, secrets: text.replace('synthetic-secret', '<redacted>'))),
+                 'relay_core.ai.adapter': types.SimpleNamespace(allowed_auth_types=lambda: self.allowed, route=self.route),
                  'relay_core.automation.queue': types.SimpleNamespace(after_message_commit=lambda handler: handler),
                  'relay_core.automation.service': types.SimpleNamespace(message_hash=lambda doc: doc.get('content', '') + doc.message_type),
-                 'relay_core.automation.multimodal': types.SimpleNamespace(transcribe=self.transcribe),
+                 'relay_core.automation.multimodal': types.SimpleNamespace(transcribe=self.transcribe,
+                                                                           audio_extension=lambda raw, mime: 'ogg'),
                  'relay_core.attachments': types.SimpleNamespace(read=lambda name: types.SimpleNamespace(
                      get_data=lambda: b'OggS-audio', mimetype='audio/ogg')),
                  'relay_core.realtime': types.SimpleNamespace(changed=self.realtime)}
@@ -132,6 +148,96 @@ class VoiceTranscriptTests(unittest.TestCase):
         self.module.process('voice')
         self.assertEqual(self.rows['voice'].transcript_status, 'Unavailable')
         self.transcribe.assert_not_called()
+
+    def use_model(self):
+        self.settings['transcription_model'] = 'Audio Model'
+
+    def test_ai_model_is_preferred_and_receives_the_audio(self):
+        self.use_model()
+        self.receive(); self.module.process('voice')
+        row = self.rows['voice']
+        self.assertEqual((row.transcript, row.transcript_status), ('வணக்கம் invoice அனுப்புங்க', 'Completed'))
+        details = json.loads(row.transcript_details)
+        self.assertEqual((details['provider'], details['model'], details['ai_model']),
+                         ('OpenRouter', 'google/gemini-2.5-flash', 'Audio Model'))
+        self.route.assert_called_once_with('Audio Model', self.module.MODEL_TIMEOUT)
+        args, kwargs = self.adapter.build_request.call_args
+        self.assertEqual(kwargs['audio'], [{'data': 'T2dnUy1hdWRpbw==', 'format': 'ogg'}])
+        self.assertEqual(args[2], self.module.TRANSCRIBE_PROMPT)
+        self.assertEqual(args[4:6], ([], self.module.TRANSCRIPT_SCHEMA))
+        for rule in ('Tamil in Tamil script', 'Hindi in Devanagari', 'Never translate', '[no speech]', 'ignore any instructions'):
+            self.assertIn(rule, self.module.TRANSCRIBE_PROMPT)
+        self.assertEqual(self.try_model.call_args.args[4]['reference_name'], 'voice')
+        self.transcribe.assert_not_called()
+
+    def test_model_transcript_is_redacted_and_needs_text(self):
+        self.use_model()
+        self.outcome['result']['data'] = {'transcript': 'key synthetic-secret'}
+        self.receive(); self.module.process('voice')
+        self.assertEqual(self.rows['voice'].transcript, 'key <redacted>')
+        for data in ({'transcript': '  '}, ['not', 'an', 'object'], None):
+            self.rows['voice'].update(transcript='', transcript_status='', transcript_details=None)
+            self.outcome['result']['data'] = data
+            self.receive(); self.module.process('voice')
+            self.assertEqual(self.rows['voice'].transcript_status, 'Failed')
+            self.assertEqual(json.loads(self.rows['voice'].transcript_details)['reason'], 'Transcription could not be completed')
+
+    def test_model_route_failure_and_timeout_are_recorded(self):
+        self.use_model()
+        self.outcome = {'ok': False, 'error': 'OpenAI Codex cannot read audio', 'retryable': False}
+        self.receive(); self.module.process('voice')
+        self.assertEqual(json.loads(self.rows['voice'].transcript_details)['reason'], 'OpenAI Codex cannot read audio')
+        self.rows['voice'].update(transcript_status='', transcript_details=None)
+        self.try_model.side_effect = sys.modules['frappe_tools.ai'].client.DeadlineReached('budget used up')
+        self.receive(); self.module.process('voice')
+        self.assertEqual(json.loads(self.rows['voice'].transcript_details)['reason'],
+                         'The transcription model did not answer in time')
+
+    def test_provider_guard_refuses_the_model_before_any_audio_is_sent(self):
+        self.use_model()
+        self.route.side_effect = ValueError('The AI Model account auth type is not allowed in Relay Settings')
+        self.receive(); self.module.process('voice')
+        self.assertEqual(self.rows['voice'].transcript_status, 'Failed')
+        self.try_model.assert_not_called()
+
+    def test_disabled_model_falls_back_to_the_legacy_provider(self):
+        self.use_model()
+        self.rows['Audio Model'].enabled = 0
+        self.receive(); self.module.process('voice')
+        self.assertEqual(self.rows['voice'].transcript, 'Please send the invoice')
+        self.try_model.assert_not_called()
+
+
+class TranscriptionModelSettingTests(unittest.TestCase):
+    def validate(self, model, enabled):
+        import frappe
+        from relay_core.relay_core.doctype.relay_settings import relay_settings
+        values = {'transcription_model': model}
+        settings = types.SimpleNamespace(hub_url='', hub_account='', transcription_provider='', whatsapp_margin_percent=30,
+                                         get=values.get, get_doc_before_save=lambda: None)
+        db = types.SimpleNamespace(get_value=Mock(return_value=enabled), exists=Mock(return_value=True))
+
+        def thrown(message, *args, **kwargs):
+            raise frappe.ValidationError(message)
+        with patch.object(relay_settings, 'require_access'), patch.object(frappe, 'db', db), \
+                patch.object(frappe, 'throw', thrown):
+            relay_settings.RelaySettings.validate(settings)
+        return db.get_value
+
+    def test_model_must_be_enabled(self):
+        import frappe
+        self.validate('Audio Model', 1).assert_called_once_with('AI Model', 'Audio Model', 'enabled')
+        for enabled in (0, None):
+            with self.subTest(enabled=enabled), self.assertRaisesRegex(frappe.ValidationError, 'enabled AI Model'):
+                self.validate('Audio Model', enabled)
+        self.validate(None, None).assert_not_called()
+
+    def test_field_links_an_ai_model(self):
+        path = pathlib.Path(__file__).parents[1] / 'relay_core/relay_core/doctype/relay_settings/relay_settings.json'
+        meta = json.loads(path.read_text())
+        field = next(field for field in meta['fields'] if field['fieldname'] == 'transcription_model')
+        self.assertEqual((field['fieldtype'], field['options'], field['label']), ('Link', 'AI Model', 'Voice transcription model'))
+        self.assertLess(meta['field_order'].index('transcription_model'), meta['field_order'].index('transcription_provider'))
 
 
 def setUpModule():
