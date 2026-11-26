@@ -15,6 +15,7 @@ GUIDE = """# Relay guide
 - **Message** (`RELAY-MSG-##########`): one incoming or outgoing message in a chat.
 - **Chat**: all messages of one Contact. `inbox_list` lists chats; `messages_list` reads one.
 - **Business record**: an ERP document (for example a Customer) that a Contact is linked to. `records_types`, `records_list` and `records_messages` show the record tiles.
+- **Business lookup**: a business type the business lets you search, such as distributors by city. `business_lookup_types` lists them; `business_lookup` returns only the fields the business chose to share.
 - **Ticket** (`TKT-#####`): a support case made from messages.
 - **Template**: a WhatsApp message approved by Meta. Only templates can start a chat or reach a person after 24 hours.
 - **Campaign**: one template or message sent to many numbers, with live counts.
@@ -49,6 +50,12 @@ GUIDE = """# Relay guide
 4. `chat_send_text` with your text, a new request_key and `after_message` set to the newest message (or `chat_send_template` when the window is closed).
 5. `send_status` with the returned message id to follow delivery.
 6. `chat_mark_read` to clear the chat's unread count for the user.
+
+**Answer a lookup question** (such as "nearest distributor in my city")
+1. `business_lookup_types` to find the type whose description fits and its search and share fields.
+2. Ask the customer for a missing search value, such as their city.
+3. `business_lookup` with that type and filters on search fields only, such as `{"city": "Madurai"}`. With no match, try a wider field, such as territory.
+4. Tell the customer only the returned values. With no match, say so and offer a person (`chat_comment_add`); never guess a record.
 
 **Create a template**
 1. `templates_media_upload` when the header has an image, video or document; put the returned `handle` (not `id`) in the header's `example.header_handle`.
