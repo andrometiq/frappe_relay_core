@@ -154,6 +154,21 @@ def billing_channels(account):
     return wabas, len(rows) > 1
 
 
+def month_start(end):
+    """UNIX seconds of the site-timezone month that holds `end`."""
+    point = datetime.fromtimestamp(end, site_zone())
+    return int(point.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+def pricing_requests(start, end, month):
+    """Meta gives a monthly total only for whole months, so the running month is read by day and summed in parse."""
+    base = {'operation': 'billing.pricing', 'dimensions': DIMENSIONS}
+    requests = [dict(base, start=start, end=month, granularity='MONTHLY')] if month > start else []
+    if end > max(start, month):
+        requests.append(dict(base, start=max(start, month), end=end, granularity='DAILY'))
+    return requests
+
+
 def refresh(account, year):
     """Read the year's monthly Meta charges and the WABA currency through the Hub, and upsert one row per number,
     month, category and type. A site with one number keeps the request of a single-number Hub."""
@@ -166,11 +181,14 @@ def refresh(account, year):
     if not wabas:
         frappe.throw('Configure an enabled WhatsApp channel')
     hub, _ = checked_client()
-    request = {'operation': 'billing.pricing', 'start': start, 'end': end, 'granularity': 'MONTHLY', 'dimensions': DIMENSIONS}
+    month = month_start(end)
     fetched_at, rows, read = frappe.utils.now_datetime(), 0, 0
     for waba, channels in wabas.items():
-        points, currency = pricing(hub, hub_arguments(channels[0], dict(request, dimensions=['PHONE', *DIMENSIONS]))
-                                   if split else request)
+        points, currency = [], ''
+        for request in pricing_requests(start, end, month):
+            found, currency = pricing(hub, hub_arguments(channels[0], dict(request, dimensions=['PHONE', *DIMENSIONS]))
+                                      if split else request)
+            points += found
         groups, by_name = {}, {channel.name: channel for channel in channels}
         for point in points:
             channel = point_channel(point, channels) if split else channels[0]
