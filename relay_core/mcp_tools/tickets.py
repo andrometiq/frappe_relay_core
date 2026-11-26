@@ -1,5 +1,5 @@
 """Support tickets."""
-from relay_core.mcp_tools.inbox import MESSAGE
+from relay_core.mcp_tools.inbox import CONTACT, MESSAGE
 from relay_core.mcp_tools.registry import CURSOR, NAME_FIELD, READ, WRITE, ToolError, obj, tool
 
 TICKET = {'type': 'string', 'pattern': '^TKT-[0-9]+$', 'description': 'Ticket id, TKT-#####.'}
@@ -7,15 +7,16 @@ ACTIONS = ('status', 'assign', 'claim', 'close', 'comment')
 
 
 @tool('tickets_list', READ, obj({'query': {'type': 'string', 'maxLength': 80}, 'ticket_status': NAME_FIELD, 'mine': {'type': 'integer', 'enum': [0, 1]},
-                                 'after': TICKET}), {
+                                 'contact': CONTACT, 'after': TICKET}), {
     'summary': 'List tickets, newest first, 30 per page.',
-    'use_when': 'the user asks for open, own or matching support tickets.',
+    'use_when': 'the user asks for open, own or matching support tickets. In a customer chat, pass the chat\'s contact '
+                'to see only that customer\'s tickets (those whose first message is from the contact).',
     'avoid_when': 'you know the ticket id; use tickets_read.',
     'returns': '{items: tickets, next: {after} or null}.',
     'errors': '"Invalid ticket search"; "Not permitted" without a Relay role.'})
-def tickets_list(query='', ticket_status=None, mine=None, after=None):
+def tickets_list(query='', ticket_status=None, mine=None, contact=None, after=None):
     from relay_core.tickets import directory
-    return directory(query=query, ticket_status=ticket_status, mine=mine, after=after)
+    return directory(query=query, ticket_status=ticket_status, mine=mine, contact=contact, after=after)
 
 
 @tool('tickets_read', READ, obj({'name': TICKET, 'after': MESSAGE}, ('name',)), {

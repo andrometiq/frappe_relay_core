@@ -209,6 +209,25 @@ class TicketTests(unittest.TestCase):
         for bad in (dict(query='x' * 81), dict(ticket_status=['Open'])):
             with self.subTest(bad=bad), self.assertRaises(ValueError): self.module.directory(**bad)
 
+    def test_directory_filters_by_contact_of_the_first_linked_message(self):
+        self.f.get_list = Mock(return_value=[])
+        self.f.db.sql = Mock(return_value=['TKT-00004', 'TKT-00005'])
+        self.module.directory(contact='RELAY-CON-0000000001')
+        self.assertEqual(listed(self.f.get_list.call_args), {'name': ['in', ['TKT-00004', 'TKT-00005']]})
+        self.module.readable_contact.assert_called_once_with('RELAY-CON-0000000001')
+        sql, contact = self.f.db.sql.call_args.args
+        self.assertIn('t.idx=1 AND m.relay_contact=%s', sql)
+        self.assertEqual((contact, self.f.db.sql.call_args.kwargs), (('RELAY-CON-0000000001',), {'pluck': True}))
+        self.module.mentioned_tickets = Mock(return_value=['TKT-00005', 'TKT-00006'])
+        self.module.directory(contact='RELAY-CON-0000000001', mentioned='1')
+        self.assertEqual(listed(self.f.get_list.call_args)['name'], ['in', ['TKT-00005']])
+        self.f.db.sql.return_value = []
+        self.module.directory(contact='RELAY-CON-0000000002')
+        self.assertEqual(listed(self.f.get_list.call_args)['name'], ['in', ['']])
+        self.module.readable_contact.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.module.directory(contact='RELAY-CON-0000000003')
+        with self.assertRaises(ValueError): self.module.directory(contact='Ravi')
+
     def test_dashboard_filters_apply_to_the_permission_checked_directory(self):
         self.f.get_list = Mock(return_value=[])
         self.module.directory(assigned_to='a@example.invalid', ticket_type='Delivery')
