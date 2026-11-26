@@ -416,7 +416,7 @@ def validate_ticket(doc, check_assignment=True):
     if not check_assignment:
         return
     if not previous and not doc.get('assigned_to'):
-        doc.assigned_to = team_assignee(doc)
+        doc.assigned_to = team_assignee(doc) or fallback_assignee(doc)
     if (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
         # The creator picks the first owner; reassignment needs team management.
         if previous:
@@ -481,6 +481,19 @@ def team_assignee(doc):
             if can_own(doc, user):
                 return user
     return None
+
+
+def fallback_assignee(doc):
+    """Relay Settings' AI handoff owner, for a new ticket no team owns, when they read its messages."""
+    from relay_core.permissions import can_read_contact_as
+    user = frappe.db.get_single_value('Relay Settings', 'ai_handoff_owner')
+    if not user or not frappe.db.get_value('User', user, 'enabled'):
+        return None
+    for row in doc.messages:
+        message = frappe.get_doc('Relay Message', row.message)
+        if not message.has_permission('read', user=user) or not can_read_contact_as(message.relay_contact, user):
+            return None
+    return user
 
 
 def can_own(doc, user):

@@ -43,7 +43,7 @@ class TicketTests(unittest.TestCase):
         self.f.PermissionError = PermissionError
         self.f.DoesNotExistError = LookupError
         self.f.get_all = Mock(return_value=[])
-        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='Sim Person'))
+        self.f.db = types.SimpleNamespace(get_value=Mock(return_value='Sim Person'), get_single_value=Mock(return_value=None))
         self.f.utils = types.SimpleNamespace(cint=lambda value: int(value or 0))
 
     def test_create_stores_exactly_selected_messages(self):
@@ -497,6 +497,7 @@ class StandaloneTicketTests(unittest.TestCase):
         tables = {'Relay Team Business': [Record(row) for row in rows], 'Relay Team Member': [Record(row) for row in members]}
         self.f.get_all = Mock(side_effect=lambda doctype, **kwargs: tables[doctype])
         self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: 'North' if doctype == 'Customer' else 1)
+        self.f.db.get_single_value = Mock(return_value=None)
         self.f.get_roles = lambda user: roles.get(user, ['Relay Communication User'])
         self.f.has_permission = lambda doctype, ptype='read', **kwargs: True
         self.f.set_user = Mock()
@@ -537,6 +538,14 @@ class StandaloneTicketTests(unittest.TestCase):
         self.team_fixture(rows=[dict(parent='TEAM-B', access='Record', value='LOCAL-C1', grouping_field='')],
                           members=[dict(parent='TEAM-B', user='b@example.invalid')], teams_on=False)
         self.assertIsNone(self.module.team_assignee(Record(self.doc, assigned_to=None)), 'Teams off: no team owns a record')
+
+    def test_a_ticket_no_team_owns_goes_to_the_ai_handoff_owner(self):
+        self.team_fixture(rows=[], members=[])
+        self.f.db.get_single_value = Mock(return_value='fallback@example.invalid')
+        self.module.validate_ticket(self.doc)
+        self.assertEqual(self.doc.assigned_to, 'fallback@example.invalid')
+        self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: 0 if doctype == 'User' else 'North')
+        self.assertIsNone(self.module.fallback_assignee(self.doc), 'A disabled handoff owner gets nothing')
 
     def test_assignee_and_mentioned_people_read_it_outside_their_teams(self):
         self.doc.update(name='TKT-00003', assigned_to='owner@example.invalid', watchers=[Record(user='mentioned@example.invalid')])
