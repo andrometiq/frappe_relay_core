@@ -16,6 +16,7 @@ The older `relay.*` tool names still work but are not listed.
 - **Message** (`RELAY-MSG-##########`): one incoming or outgoing message in a chat.
 - **Chat**: all messages of one Contact. `inbox_list` lists chats; `messages_list` reads one.
 - **Business record**: an ERP document (for example a Customer) that a Contact is linked to. `records_types`, `records_list` and `records_messages` show the record tiles.
+- **Business lookup**: a business type the business lets you search, such as distributors by city. `business_lookup_types` lists them; `business_lookup` returns only the fields the business chose to share.
 - **Ticket** (`TKT-#####`): a support case made from messages.
 - **Template**: a WhatsApp message approved by Meta. Only templates can start a chat or reach a person after 24 hours.
 - **Campaign**: one template or message sent to many numbers, with live counts.
@@ -50,6 +51,12 @@ The older `relay.*` tool names still work but are not listed.
 4. `chat_send_text` with your text, a new request_key and `after_message` set to the newest message (or `chat_send_template` when the window is closed).
 5. `send_status` with the returned message id to follow delivery.
 6. `chat_mark_read` to clear the chat's unread count for the user.
+
+**Answer a lookup question** (such as "nearest distributor in my city")
+1. `business_lookup_types` to find the type whose description fits and its search and share fields.
+2. Ask the customer for a missing search value, such as their city.
+3. `business_lookup` with that type and filters on search fields only, such as `{"city": "Madurai"}`. With no match, try a wider field, such as territory.
+4. Tell the customer only the returned values. With no match, say so and offer a person (`chat_comment_add`); never guess a record.
 
 **Create a template**
 1. `templates_media_upload` when the header has an image, video or document; put the returned `handle` (not `id`) in the header's `example.header_handle`.
@@ -92,6 +99,26 @@ Read the audit log of MCP writes and sends: which agent did what, in which chat,
 - **Returns:** {items: [{creation, user, tool, contact, action, client, request_key, message, response_seconds}]}. Managers see every agent; other users see their own rows.
 - **Common errors:** "Not permitted" for another user's rows without the manager role.
 - **Arguments:** `user`?, `contact`?, `limit`?
+
+### `business_lookup` (R)
+
+Find records of one configured business type, such as distributors in a city. Returns only the share fields.
+
+- **Use when:** a customer asks which business, place or person serves them; business_lookup_types names the type and fields.
+- **Do not use when:** the type is not in business_lookup_types; tell the customer a person will help instead of guessing.
+- **Returns:** {business_type, items: [{share field: value}]}, at most limit rows ordered by the first share field. Tell the customer only these values.
+- **Common errors:** "<type> has no agent lookup"; "Cannot search <type> by <field>; search fields: ..." for a field that is not a search field.
+- **Arguments:** `business_type`, `filters`?, `query`?, `limit`?
+
+### `business_lookup_types` (R)
+
+List the business types the business lets you look up, with what each holds and which fields you may use.
+
+- **Use when:** a customer asks for a business record you do not have, such as the nearest distributor; call it before business_lookup.
+- **Do not use when:** you need the record linked to a chat; reply_context gives it.
+- **Returns:** {items: [{business_type, description, search_fields, share_fields}]}.
+- **Common errors:** "Not permitted" without a Relay role.
+- **Arguments:** none
 
 ### `campaigns_append` (W)
 

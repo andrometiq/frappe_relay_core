@@ -47,3 +47,16 @@ Relay Contact Type.users field, then assign users before they resume work. No
 migration or site activation was run as part of this change. Unit tests use local
 in-memory records and mocked external delivery; installed-site verification must
 follow migration.
+
+## Agent lookup
+
+The Agent Lookup section of a Relay Contact Type lets the AI agent search that type's records, for example "the nearest distributor in my city". Relay Communication Managers and System Managers edit it in Desk.
+
+| Field | Use |
+|---|---|
+| Enable Agent Lookup | Turns the lookup on. The business type must also be enabled. |
+| Lookup Description | Tells the agent what the records are, for example "Distributors. Search by city or territory." |
+| Lookup Fields | One row per field. Search: the agent may filter by it. Share: the agent may read it and tell customers. `name` is allowed. |
+| Fixed Lookup Filters | JSON that is always applied, for example `{"disabled": 0, "customer_group": ["Distributor"]}`. A list matches any of its values. |
+
+Every field must be a visible, unrestricted plain field (the profile field types), and its name must not contain token, key, password or secret. Relay checks the configuration on save and again on every lookup. The MCP tools `business_lookup_types` and `business_lookup` use it. A lookup returns at most 10 rows with only the share fields. Text fields match a part of the value in any case; other fields match exactly. The read skips DocType permissions, because the agent user may not read the DocType; the configuration is the limit. Deployment: migrate the site to install Relay Business Lookup Field and the new Relay Contact Type fields.

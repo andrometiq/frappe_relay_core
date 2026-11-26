@@ -12,6 +12,7 @@ frappe.ui.form.on("Relay Contact Type", {
                 .filter(field => PROFILE_FIELDTYPES.includes(field.fieldtype) && !field.hidden && !field.permlevel)
                 .map(field => field.fieldname);
             frm.set_df_property("profile_fields", "description", __("At most 12, shown in row order. Available fields: {0}", [profile.join(", ")]));
+            frm.set_df_property("lookup_fields", "description", __("Search fields the agent may filter by; share fields are the only values it reads. Available fields: {0}", [["name", ...profile].join(", ")]));
         });
     },
     business_doctype(frm) { frm.trigger("refresh"); },

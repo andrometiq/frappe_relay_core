@@ -13,6 +13,11 @@
     "grouping_fields",
     "grouping_field",
     "profile_fields",
+    "agent_lookup_section",
+    "lookup_enabled",
+    "lookup_description",
+    "lookup_fields",
+    "lookup_filters",
     "users"
   ],
   "fields": [
@@ -60,6 +65,39 @@
       "description": "Business fields shown with the linked record in the chat details, in row order. At most 12."
     },
     {
+      "fieldname": "agent_lookup_section",
+      "label": "Agent Lookup",
+      "fieldtype": "Section Break",
+      "collapsible": 1
+    },
+    {
+      "fieldname": "lookup_enabled",
+      "label": "Enable Agent Lookup",
+      "fieldtype": "Check",
+      "default": 0,
+      "description": "Let the AI agent search these records with business_lookup."
+    },
+    {
+      "fieldname": "lookup_description",
+      "label": "Lookup Description",
+      "fieldtype": "Small Text",
+      "description": "Shown to the agent, for example: Distributors. Search by city or territory."
+    },
+    {
+      "fieldname": "lookup_fields",
+      "label": "Lookup Fields",
+      "fieldtype": "Table",
+      "options": "Relay Business Lookup Field",
+      "description": "Search fields the agent may filter by; share fields are the only values it reads."
+    },
+    {
+      "fieldname": "lookup_filters",
+      "label": "Fixed Lookup Filters",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "description": "Always applied, as {\"field\": value} or {\"field\": [values]}, for example {\"disabled\": 0}."
+    },
+    {
       "fieldname": "users",
       "fieldtype": "Table",
       "label": "Users",
@@ -100,5 +138,5 @@
       "read": 1
     }
   ],
-  "modified": "2026-11-25 14:00:00.000000"
+  "modified": "2026-11-26 10:00:00.000000"
 }

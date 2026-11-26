@@ -68,3 +68,29 @@ def records_list(doctype, query='', after=None):
 def records_messages(doctype, name, before=None, channel=None, limit=50):
     from relay_core.business_inbox import messages
     return messages(doctype, name, before=before, channel=channel, limit=limit)
+
+
+@tool('business_lookup_types', READ, obj({}), {
+    'summary': 'List the business types the business lets you look up, with what each holds and which fields you may use.',
+    'use_when': 'a customer asks for a business record you do not have, such as the nearest distributor; call it before business_lookup.',
+    'avoid_when': 'you need the record linked to a chat; reply_context gives it.',
+    'returns': '{items: [{business_type, description, search_fields, share_fields}]}.',
+    'errors': '"Not permitted" without a Relay role.'})
+def business_lookup_types():
+    from relay_core.business_lookup import types
+    return types()
+
+
+@tool('business_lookup', READ, obj({'business_type': NAME_FIELD, 'filters': {
+        'type': 'object', 'description': 'Field and value pairs, only on search_fields. Text fields match a part, any case.'},
+        'query': {'type': 'string', 'maxLength': 80, 'description': 'Words to find in the text share fields.'},
+        'limit': limit(10, 5)}, ('business_type',)), {
+    'summary': 'Find records of one configured business type, such as distributors in a city. Returns only the share fields.',
+    'use_when': 'a customer asks which business, place or person serves them; business_lookup_types names the type and fields.',
+    'avoid_when': 'the type is not in business_lookup_types; tell the customer a person will help instead of guessing.',
+    'returns': '{business_type, items: [{share field: value}]}, at most limit rows ordered by the first share field. '
+               'Tell the customer only these values.',
+    'errors': '"<type> has no agent lookup"; "Cannot search <type> by <field>; search fields: ..." for a field that is not a search field.'})
+def business_lookup(business_type, filters=None, query='', limit=5):
+    from relay_core.business_lookup import search
+    return search(business_type, filters, query, limit)
