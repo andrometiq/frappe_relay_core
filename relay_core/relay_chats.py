@@ -195,8 +195,8 @@ def changed():
     """A shared read state changed: counts start over and chat lists reload. The event names no chat."""
     from relay_core.queue_counts import invalidate
     invalidate()
-    frappe.publish_realtime('relay_changed', {'kind': 'chats'}, room=frappe.realtime.get_doctype_room('Relay Message'),
-                            after_commit=True)
+    from relay_core.realtime import readers_changed
+    readers_changed({'kind': 'chats'}, 'Relay Message')
 
 
 def install_index():

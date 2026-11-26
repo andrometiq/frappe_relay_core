@@ -34,8 +34,8 @@ def lock_account(account):
 
 
 def publish():
-    frappe.publish_realtime('relay_changed', {'kind':'templates'},
-        room=frappe.realtime.get_doctype_room('Relay WhatsApp Template'), after_commit=True)
+    from relay_core.realtime import readers_changed
+    readers_changed({'kind': 'templates'}, 'Relay WhatsApp Template')
 
 
 def event_reason(value):

@@ -109,5 +109,5 @@ def cancelled(request_key):
 
 
 def changed():
-    frappe.publish_realtime('relay_changed', {'kind': 'messages'},
-                            room=frappe.realtime.get_doctype_room('Relay Message'), after_commit=True)
+    from relay_core.realtime import readers_changed
+    readers_changed({'kind': 'messages'}, 'Relay Message')

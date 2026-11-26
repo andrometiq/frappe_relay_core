@@ -61,14 +61,12 @@ class TemplateWabaTests(unittest.TestCase):
         site.frappe.cache = Mock()
         site.frappe.utils = Mock(now=lambda: 'now')
         site.frappe.log_error = Mock()
-        site.frappe.publish_realtime = Mock()
-        site.frappe.realtime = Mock()
         def save(doc, new=False):
             doc.save()
         with patch.object(whatsapp_templates, 'frappe', site.frappe), patch.object(hub_channels, 'frappe', site.frappe), \
                 patch.object(whatsapp_templates, 'connection_value', return_value='site-a'), \
                 patch.object(whatsapp_templates, 'internal_save', side_effect=save), \
-                patch.object(whatsapp_templates, 'lock_account'), \
+                patch.object(whatsapp_templates, 'lock_account'), patch('relay_core.realtime.readers_changed'), \
                 patch('relay_core.whatsapp.checked_client', return_value=(hub, {'templates': True})):
             whatsapp_templates.sync()
         return site, hub
@@ -95,7 +93,8 @@ class TemplateWabaTests(unittest.TestCase):
         payload = {'entry': [{'id': '222', 'changes': [{'field': 'message_template_status_update', 'value': {
             'message_template_id': 7, 'message_template_name': 'export', 'message_template_language': 'en',
             'event': 'APPROVED'}}]}]}
-        with patch.object(whatsapp_templates, 'frappe', fake), patch.object(whatsapp_templates, 'internal_save'):
+        with patch.object(whatsapp_templates, 'frappe', fake), patch.object(whatsapp_templates, 'internal_save'), \
+                patch('relay_core.realtime.readers_changed'):
             whatsapp_templates.project(payload, _dict(account='site-a', hub_event_id='5'))
         self.assertEqual((doc.waba_id, doc.status), ('222', 'APPROVED'))
 

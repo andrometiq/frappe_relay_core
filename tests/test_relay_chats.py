@@ -76,15 +76,14 @@ class RelayChatTests(unittest.TestCase):
         self.row = _dict(name='RC-1', last_message='RELAY-MSG-0000000009', last_message_at=AT, unread_count=3)
         threads = {('R1', 'CH-1', '911'): (2, 'M-5', 'M-8'), ('R2', 'CH-2', 'b@x.invalid'): (1, 'M-6', 'M-6')}
         with patch('relay_core.queue_counts.invalidate'), patch.object(relay_chats, 'thread_unread', return_value=threads), \
-                patch('relay_core.message_reads.insert_reads') as reads:
+                patch('relay_core.message_reads.insert_reads') as reads, patch('relay_core.realtime.readers_changed') as published:
             relay_chats.mark_read(('Customer', 'C1'))
             self.fake.db.set_value.assert_not_called()
             reads.assert_not_called()
             self.row.unread_count = 4
             relay_chats.mark_read(('Customer', 'C1'))
             self.assertEqual(self.written(), {'unread_count': 3, 'is_unread': 1})
-            self.fake.publish_realtime.assert_called_with('relay_changed', {'kind': 'chats'}, room=self.fake.realtime.get_doctype_room.return_value,
-                                                          after_commit=True)
+            published.assert_called_with({'kind': 'chats'}, 'Relay Message')
             relay_chats.mark_read(('Customer', 'C1'), everything=True)
         reads.assert_called_once_with([('R1', 'M-8'), ('R2', 'M-6')])
 

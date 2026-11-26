@@ -1237,26 +1237,26 @@ class TicketHistoryTests(unittest.TestCase):
         row = self.module.ai_history(self.ticket.name)['items'][0]
         self.assertIsNone(row['search']); self.assertEqual(row['read_count'], 0); self.assertEqual(row['deliveries'], [])
 
-    def test_realtime_journals_use_ticket_room_without_payload_and_after_commit(self):
+    def test_realtime_journals_reach_ticket_readers_without_payload_and_after_commit(self):
         from relay_core import realtime
-        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt),
+        fake = types.SimpleNamespace(publish_realtime=Mock(), get_all=Mock(return_value=[]),
                                      parse_json=lambda value: json.loads(value) if isinstance(value, str) else value, db=types.SimpleNamespace(get_value=Mock(return_value=None)))
         ticketed = (Record(doctype='Relay Automation Run', ticket=self.ticket.name, input_snapshot='private'),
                     Record(doctype='Relay Flow Action', ticket=self.ticket.name),
                     Record(doctype='Relay Message Action', payload={'ticket': self.ticket.name}),
                     Record(doctype='Relay Message Action', payload='{"delivery_episodes": [["T-1", 1]]}'),
                     Record(doctype='Relay Message', ticket=self.ticket.name))
-        with patch.object(realtime, 'frappe', fake):
+        with patch.object(realtime, 'frappe', fake), patch('frappe.permissions.get_doctype_roles', return_value=['Relay Communication User']):
             for doc in ticketed:
                 fake.publish_realtime.reset_mock()
                 realtime.changed(doc)
-                fake.publish_realtime.assert_any_call('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
+                fake.publish_realtime.assert_any_call('relay_changed', {'kind':'tickets'}, user='Administrator', after_commit=True)
 
     def test_chat_sends_and_untracked_automation_do_not_reload_ticket_screens(self):
         from relay_core import realtime
-        fake = types.SimpleNamespace(publish_realtime=Mock(), realtime=types.SimpleNamespace(get_doctype_room=lambda dt:dt),
+        fake = types.SimpleNamespace(publish_realtime=Mock(), get_all=Mock(return_value=[]),
                                      parse_json=lambda value: json.loads(value) if isinstance(value, str) else value, db=types.SimpleNamespace(get_value=Mock(return_value=None)))
-        with patch.object(realtime, 'frappe', fake):
+        with patch.object(realtime, 'frappe', fake), patch('frappe.permissions.get_doctype_roles', return_value=['Relay Communication User']):
             for doc in (Record(doctype='Relay Automation Run'), Record(doctype='Relay Flow Action'),
                         Record(doctype='Relay Message Action', payload={'text': 'ok'}, source_message='MSG-1'),
                         Record(doctype='Relay Message Action', payload='broken')):
@@ -1264,7 +1264,7 @@ class TicketHistoryTests(unittest.TestCase):
             fake.publish_realtime.assert_not_called()
             fake.db.get_value.return_value = self.ticket.name
             realtime.changed(Record(doctype='Relay Message Action', payload={'text': 'ok'}, source_message='MSG-1'))
-            fake.publish_realtime.assert_called_once_with('relay_changed', {'kind':'tickets'}, room='Relay Ticket', after_commit=True)
+            fake.publish_realtime.assert_called_once_with('relay_changed', {'kind':'tickets'}, user='Administrator', after_commit=True)
 
 def setUpModule():
     """These tests cover AI behavior, so the AI features switch is on."""
