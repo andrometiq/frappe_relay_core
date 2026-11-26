@@ -16,6 +16,7 @@
     "enable_teams",
     "enable_flows",
     "ai_handoff_owner",
+    "transcription_model",
     "transcription_provider",
     "memory_model",
     "event_memory_model",
@@ -110,11 +111,19 @@
       "depends_on": "enable_ai_features"
     },
     {
+      "fieldname": "transcription_model",
+      "label": "Voice transcription model",
+      "fieldtype": "Link",
+      "options": "AI Model",
+      "description": "Transcribes received voice notes in the background through frappe_tools. Choose an enabled model that reads audio, such as an OpenRouter Gemini model.",
+      "depends_on": "enable_ai_features"
+    },
+    {
       "fieldname": "transcription_provider",
       "label": "Voice transcription provider",
       "fieldtype": "Link",
       "options": "Relay AI Provider",
-      "description": "Transcribes received voice notes in the background. Requires an enabled OpenAI provider with a transcription model.",
+      "description": "Legacy. Used only when no voice transcription model is set. Requires an enabled OpenAI provider with a transcription model.",
       "depends_on": "enable_ai_features"
     },
     {
@@ -281,5 +290,5 @@
       "print": 1
     }
   ],
-  "modified": "2026-11-26 12:00:00.000000"
+  "modified": "2026-11-26 12:30:00.000000"
 }
