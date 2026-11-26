@@ -33,9 +33,39 @@ Sending keeps the existing 45-second slices on the `long` queue. Each send job r
 
 Recipient records retain validation outcome/reason/time/user in their existing `arguments.validation`, followed by the existing Queued, Sent, Delivered, Read, Failed, Skipped or Cancelled status and reason fields. Campaign `arguments.phases` records creation, upload, validation, control, scheduled-start and completion transitions with timestamp/user. The campaign page displays this history. No new DocTypes or fields are required.
 
+## Poll campaigns
+
+A poll campaign sends an approved template that has at least one quick reply button, for example a utility template with the button `Vote Now`. Choose **Poll** as the message type when you create the campaign. The template list then shows only templates with a quick reply button. `relay_core/campaign_polls.py` owns the poll logic.
+
+Before sending, set up the poll in the **Poll** section of the Draft campaign. The campaign cannot start until you save the poll.
+
+| Setting | Rule |
+| --- | --- |
+| Opt-in button | Required. A quick reply button of the template. A tap on it opens the poll. |
+| Opt-out button | Optional. Another quick reply button of the template, or none. |
+| Question | Required. At most 1024 characters. |
+| Options | 2-10 options, one per line, all different. Up to 3 options are sent as reply buttons of at most 20 characters. 4-10 options are sent as a list of at most 24 characters. This is the `polls.prepare` limit. |
+| Thank-you message | Optional. The default is "Thank you, your response is recorded." |
+
+The template, the audience and the template values work as for any other template campaign.
+
+What the recipient sees:
+
+1. The recipient gets the template.
+2. A tap on the opt-in button sends the question with the options.
+3. A tap on an option sends "You chose: <option>" and "Confirm your answer?" with the buttons **Confirm** and **Change**.
+4. **Change** sends the question again. **Confirm** records the answer as final and sends the thank-you message.
+5. After the answer is final, every later tap on a poll message gets "Your response is already recorded. Thank you." The answer does not change.
+6. A **Confirm** tap on an older confirmation, from before a **Change**, is ignored.
+7. A tap on the opt-out button sets the marketing opt-out of the number, as the `STOP` keyword does. Relay sends no reply. Later taps from that recipient on this poll get no reply.
+
+Relay accepts a template button tap only when it quotes the campaign message that went to that number. Each poll button value names its recipient row, and Relay accepts it only from that row's number on the campaign's channel. The inbound drain runs the poll handler first. A claimed tap does not start a flow, the Relay AI, an agent hand-over or a ticket. This is true when **Enable flows** is off and when it is on. Each reply uses the message action journal with one request key for each tap, so a retried job does not send twice. Replies are sent as the user who started the campaign and show as automatic messages in the chat.
+
+Each recipient row keeps its poll state in `arguments.poll`: the state (`Asked`, `Chosen`, `Confirmed` or `Opted out`), the option number, and the message and time of the last tap. The campaign page shows, for each option, the confirmed and the not confirmed answers. It also shows the people who opened the poll but did not pick an option, and the opt-outs. The counts update with the existing campaign progress event. A poll has no end time. No new DocTypes or fields are required.
+
 ## Local verification
 
-`tests/test_campaign_zip_validation.py` covers archive limits and unsafe paths, validation evidence, blocked sending, timeout calculation, permissions and Excel safety. Existing campaign tests exercise missing/wrong media, duplicates, opt-outs, send batching, retries and delivery outcomes.
+`tests/test_campaign_polls.py` covers the poll set-up, button and choice claims, the confirm and change steps, opt-out, counts and the admission order. `tests/test_campaign_zip_validation.py` covers archive limits and unsafe paths, validation evidence, blocked sending, timeout calculation, permissions and Excel safety. Existing campaign tests exercise missing/wrong media, duplicates, opt-outs, send batching, retries and delivery outcomes.
 
 `FRAPPE_STREAM_LOGGING=1 ../../env/bin/python -B tests/integration_campaign_sheet_site.py` runs against the local `relay-flows-test.localhost` fixture site. It uses representative rows, private file adapters rooted in this repository, a mocked Hub, and disabled external sending; no migration or web server is started. Clearly named local test campaigns/contacts remain for inspection. It exercises ZIP → validation → error download → send → sent/failed delivery projection and phase history, plus concurrent contact enrollment.
 
