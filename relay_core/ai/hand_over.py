@@ -29,12 +29,21 @@ def is_group(doc) -> bool:
 
 
 def live_agent_skill(doc):
-    """The first Live skill of Relay AI's candidates for the message whose AI Model is a conversation agent."""
+    """The first Live skill of Relay AI's candidates for the message whose AI Model is a conversation agent. A message
+    with no business record has no candidates, so it falls back to the channel's default skill."""
     from frappe_tools.ai.conversation import is_conversation_agent
 
     from relay_core.ai.matching import candidates
-    return next((skill for skill in candidates(doc)
+    return next((skill for skill in candidates(doc) or default_skills(doc)
                  if skill.mode == 'Automatic' and skill.ai_model and is_conversation_agent(skill.ai_model)), None)
+
+
+def default_skills(doc):
+    """The channel's enabled default skill, with the channel filter of Relay AI's candidates."""
+    from relay_core.ai.skills import DEFAULT_KEY
+    names = frappe.get_all('Relay AI Skill', filters={'channel': doc.channel, 'enabled': 1, 'sample_key': DEFAULT_KEY},
+                           pluck='name', order_by='name asc')
+    return [frappe.get_doc('Relay AI Skill', name) for name in names]
 
 
 def agent_skill(doc):

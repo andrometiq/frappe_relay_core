@@ -8,7 +8,7 @@ Relay can give a whole chat to an agent runtime instead of answering it with Rel
 - In frappe_tools, create an AI Provider Account for the agent runtime (its Base URL and shared secret) and an AI Model on that account. A model is a conversation agent when the model and its account are enabled and the provider takes a hand-over.
 - Create a Relay AI skill for the channel and business type, with that AI Model, Mode Automatic (Live). The agent's MCP login is a Relay user with the Relay AI Agent role.
 
-Relay finds the skill the same way Relay AI does: the enabled skills of the message's channel for its business type, plus the channel's default skill, in name order. The first Live skill whose AI Model is a conversation agent takes the message. When no such skill applies, Relay AI answers as usual. A message with no business record has no skill. While a message goes to an agent, the Relay automation (flows, channel steps, Relay AI) and email auto-reply rules do not reply to it.
+Relay finds the skill the same way Relay AI does: the enabled skills of the message's channel for its business type, plus the channel's default skill, in name order. The first Live skill whose AI Model is a conversation agent takes the message. When no such skill applies, Relay AI answers as usual. A message with no business record goes to the channel's enabled default skill. While a message goes to an agent, the Relay automation (flows, channel steps, Relay AI) and email auto-reply rules do not reply to it.
 
 ## Request
 

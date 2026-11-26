@@ -21,6 +21,7 @@ def fake_frappe():
     fake = Mock()
     fake.db.get_value.side_effect = lambda doctype, name, field=None, **kwargs: (0, 3) if doctype == 'Relay Contact' else None
     fake.cache.hget.return_value = None
+    fake.get_all.return_value = []
     fake.local.site = 'relay.test'
     return fake
 
@@ -86,6 +87,25 @@ class HandOverTests(unittest.TestCase):
         self.assertIsNone(hand_over.agent_skill(doc))  # The normal Relay AI path answers.
         self.skills.return_value = []
         self.assertFalse(hand_over.handles(doc))
+
+    def test_a_message_with_no_business_record_falls_back_to_the_channels_default_skill(self):
+        self.skills.return_value = []
+        self.frappe.get_all.return_value = ['Default skill']
+        self.frappe.get_doc.return_value = AGENT
+        self.assertIs(hand_over.agent_skill(message()), AGENT)
+        self.frappe.get_all.assert_called_once_with(
+            'Relay AI Skill', filters={'channel': 'RELAY-CH-1', 'enabled': 1, 'sample_key': 'relay-default-skill'},
+            pluck='name', order_by='name asc')
+        self.frappe.get_doc.assert_called_once_with('Relay AI Skill', 'Default skill')
+        for skill in (_dict(AGENT, mode='Shadow'), _dict(AGENT, ai_model='Chat Model')):
+            self.frappe.get_doc.return_value = skill
+            self.assertIsNone(hand_over.agent_skill(message()))  # Automatic mode and a conversation agent still apply.
+        self.frappe.get_all.return_value = []
+        self.assertIsNone(hand_over.agent_skill(message()))
+        self.frappe.get_all.reset_mock()
+        self.skills.return_value = [AGENT]
+        self.assertIs(hand_over.agent_skill(message()), AGENT)
+        self.frappe.get_all.assert_not_called()  # Relay AI's candidates win when the message has a business record.
 
     def test_hook_enqueues_one_deduplicated_job_after_commit(self):
         hand_over.on_message(message())
