@@ -7,6 +7,7 @@ import { coreApi } from '../../services/coreApi'
 import { useRealtimeRefresh } from '../../composables/useRealtimeRefresh'
 import { listTime } from '../relativeTime'
 import LoadingRows from '../LoadingRows.vue'
+import WindowedRows from '../WindowedRows.vue'
 import WorkspaceState from '../WorkspaceState.vue'
 import BusinessDirectory from './BusinessDirectory.vue'
 import { defaultMedium, mediumChips } from '../../services/enabledChannels'
@@ -80,7 +81,9 @@ watch(query, (_value, _previous, onCleanup) => {
 })
 watch([mode, medium, () => JSON.stringify(requestParams.value), folder], () => { ++generation; rows.value = []; next.value = null; load() })
 onMounted(() => load())
-const more = useLoadMore({ loading, hasMore: next, error, load: () => load(next.value) })
+// Only the rows in view are rendered; the next page loads while the end is still a few rows away.
+const rowList = ref(null)
+const more = useLoadMore({ loading, hasMore: next, error, load: () => load(next.value), root: () => rowList.value?.scroller, margin: '0px 0px 800px 0px' })
 const { folders, changes, moved } = useChatFolders()
 // A move changes only that row; a folder view or a deleted folder reloads the page.
 watch(moved, value => {
@@ -175,10 +178,10 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
     <BusinessDirectory v-if="groupingView" :filters="{ ...params, medium: medium === 'all' ? undefined : medium }" :selected="businessName" :selected-doctype="businessType" :busy="busy" @navigate="emit('navigate')" @select="(doctype, record) => emit('business', doctype, record)" @chat="name => emit('select', name)" />
     <template v-else>
       <div v-if="error" class="px-4 py-3"><ErrorMessage :message="error" /><Button label="Retry" @click="load()" /></div>
-      <div class="directory-rows" :aria-busy="loading">
-        <LoadingRows v-if="loading && !rows.length" label="Loading chats…" />
-        <TransitionGroup name="inbox-row">
-        <div v-for="row in rows" :key="row.name" class="directory-row" @contextmenu="openRowMenu($event, row)" @pointerdown="pressStart($event, row)" @pointerup="pressEnd" @pointercancel="pressEnd">
+      <WindowedRows ref="rowList" class="directory-rows" :items="rows" :aria-busy="loading">
+        <template #default="{ rows: shown, animate }">
+        <TransitionGroup :name="animate ? 'inbox-row' : 'inbox-row-still'">
+        <div v-for="row in shown" :key="row.name" class="directory-row" @contextmenu="openRowMenu($event, row)" @pointerdown="pressStart($event, row)" @pointerup="pressEnd" @pointercancel="pressEnd">
           <button type="button" :aria-label="'Open chat: ' + rowTitle(row)" class="directory-contact" :class="{ 'is-unread': row.unread }"
             :aria-pressed="row.kind === 'business' ? businessType === row.doctype && businessName === row.record : selected === row.name" :disabled="busy" @click="openRow(row)">
             <span class="directory-avatar"><Avatar :label="rowTitle(row)" /></span>
@@ -199,9 +202,13 @@ useRealtimeRefresh(['Relay Message'], ['messages', 'receipts', 'inbox', 'reads',
           <button type="button" class="directory-row-menu" aria-label="Chat actions" title="Chat actions" @click="rowActions.open($event, $event.currentTarget, row)"><FeatherIcon name="more-horizontal" :size="16" /></button>
         </div>
         </TransitionGroup>
+        </template>
+        <template #after>
+        <LoadingRows v-if="loading && !rows.length" label="Loading chats…" />
         <WorkspaceState v-if="!loading && !rows.length && !error" compact :icon="mode === 'unread' ? 'check' : 'message-square'" :title="query || activeFilters.length ? 'No chats found' : folder ? 'No chats in this folder' : view === 'unlinked' ? 'Every chat is linked' : view === 'mine' ? 'No chats assigned to you' : view === 'starred' ? 'No starred chats' : mode === 'unread' ? 'You’re all caught up' : 'No chats yet'" :description="query ? 'Try a different name or number.' : activeFilters.length ? 'No chat matches these filters.' : folder ? 'Chats you move to this folder show here.' : view === 'starred' ? 'Star a chat from its menu to keep it here.' : mode === 'all' && view === 'all' ? 'Press New to message a contact.' : ''"><Button v-if="query" label="Clear search" @click="query = ''" /><Button v-else-if="activeFilters.length" label="Clear filters" @click="filters = withoutFilters(filters)" /><Button v-else-if="mode === 'all' && view === 'all' && !folder" label="New chat" variant="solid" @click="emit('start')" /></WorkspaceState>
         <div v-if="next" ref="more" class="directory-load-more" role="status">{{ loading ? 'Loading more chats…' : '' }}</div>
-      </div>
+        </template>
+      </WindowedRows>
       <InboxRowActions ref="rowActions" @changed="rowChanged" @error="message => error = message" />
     </template>
   </div>

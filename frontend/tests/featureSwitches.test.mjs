@@ -28,7 +28,7 @@ test('the inbox tabs come from TABS, rows carry no assignment control and Assign
   const inbox = await read('components/messages/InboxDirectory.vue')
   assert.match(inbox, /v-for="\[value, label, hint\] in TABS"/)
   assert.match(inbox, /:title="hint"/)
-  const rows = inbox.split('<TransitionGroup name="inbox-row">')[1].split('</TransitionGroup>')[0]
+  const rows = inbox.split('<TransitionGroup :name="animate ? \'inbox-row\' : \'inbox-row-still\'">')[1].split('</TransitionGroup>')[0]
   assert.doesNotMatch(rows, /assignment|assigned|Mine|Unassigned/i)
   const sidebar = await read('components/messages/InboxSidebar.vue')
   assert.match(sidebar, /mine: props\.counts\.mine/, 'The view count is the server count')
