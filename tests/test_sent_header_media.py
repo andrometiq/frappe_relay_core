@@ -44,14 +44,25 @@ class CampaignHeaderTests(unittest.TestCase):
                 if filters != {'name': 'bulk-db2d635f49efad7a-2', 'campaign': CAMPAIGN}:
                     return None
                 return SimpleNamespace(destination=self.row['destination'], arguments=json.dumps({'values': self.row['values']}))
-            return 'FILE-1' if filters['file_url'].startswith('/private/files/') else None
+            return next((name for name, record in self.records.items() if record['file_url'] == filters['file_url']), None)
+
+        def get_all(doctype, filters, fields, order_by):
+            return [SimpleNamespace(name=name, file_url=record['file_url']) for name, record in reversed(self.records.items())
+                    if record.get('attached_to_name') == filters['attached_to_name']
+                    and record['file_name'] in filters['file_name'][1]]
 
         def content(encodings=None):
             with open(self.path, 'rb') as handle:
                 return handle.read()
 
-        file = SimpleNamespace(get_full_path=lambda: self.path, get_content=content)
-        boundary = SimpleNamespace(db=SimpleNamespace(get_value=get_value), get_doc=lambda doctype, name: file)
+        self.records = {'FILE-1': {'file_url': VIDEO['file_url'], 'file_name': 'offer.mp4', 'attached_to_name': CAMPAIGN}}
+        self.served = []
+
+        def get_doc(doctype, name):
+            self.served.append(name)
+            return SimpleNamespace(name=name, get_content=content)
+
+        boundary = SimpleNamespace(db=SimpleNamespace(get_value=get_value), get_all=get_all, get_doc=get_doc)
         for fixture in (patch.object(campaign_media, 'frappe', boundary),
                         patch.object(attachments.whatsapp, 'client', return_value=self.hub)):
             fixture.start()
@@ -74,8 +85,30 @@ class CampaignHeaderTests(unittest.TestCase):
     def test_per_row_zip_file_is_served_from_the_site(self):
         own = {'file_url': '/private/files/919999999999.mp4', 'filename': '919999999999.mp4'}
         self.files = [{'file_url': '/private/files/919000000001.mp4', 'filename': '919000000001.mp4'}, own]
+        self.records = {'FILE-2': {**self.files[0], 'file_name': '919000000001.mp4', 'attached_to_name': CAMPAIGN},
+                        'FILE-3': {**own, 'file_name': '919999999999.mp4', 'attached_to_name': CAMPAIGN}}
         self.row['values'] = {'header_media': own}
         self.assertEqual(campaign_media.sent_header(video_message(), CAMPAIGN)[0], '919999999999.mp4')
+        self.assertEqual(self.served, ['FILE-3'])
+
+    def test_file_moved_to_remote_storage_is_found_by_its_campaign_attachment(self):
+        self.records['FILE-1']['file_url'] = '/api/method/storage.serve/offer.mp4?file_id=FILE-1'
+        self.records['FILE-9'] = {'file_url': VIDEO['file_url'], 'file_name': 'offer.mp4', 'attached_to_name': 'Other'}
+        self.assertEqual(campaign_media.sent_header(video_message(), CAMPAIGN), ('offer.mp4', b'\x00\x00\x00\x18ftypmp42 video'))
+        self.assertEqual(self.served, ['FILE-1'])
+
+    def test_unattached_upload_is_found_by_its_url(self):
+        self.records['FILE-1']['attached_to_name'] = None
+        self.assertEqual(campaign_media.sent_header(video_message(), CAMPAIGN)[0], 'offer.mp4')
+        self.assertEqual(self.served, ['FILE-1'])
+
+    def test_send_check_reads_a_remote_campaign_file(self):
+        self.records['FILE-1']['file_url'] = '/api/method/storage.serve/offer.mp4?file_id=FILE-1'
+        stored = SimpleNamespace(name='FILE-1', is_private=1, file_name='offer.mp4', check_permission=Mock(),
+                                 get_content=lambda encodings: b'\x00\x00\x00\x18ftypmp42 video')
+        with patch.object(campaign_media.frappe, 'get_doc', return_value=stored):
+            self.assertEqual(campaign_media.checked_file(VIDEO, 'video', CAMPAIGN), (stored, 'video/mp4'))
+        stored.check_permission.assert_called_once_with('read')
 
     def test_old_message_with_only_a_campaign_reference_is_served_without_hub(self):
         result = self.read(video_message(campaign=CAMPAIGN))

@@ -136,23 +136,49 @@ def check_rejected(value):
     return rejected
 
 
-def checked_file(item, media_type):
-    from relay_core.bulk_campaigns import uploaded_file
-    file = uploaded_file(item['file_url'])  # File read permission applies to every reference.
-    if not file.is_private or not str(file.file_url).startswith('/private/files/'):
+def checked_file(item, media_type, campaign=None):
+    """(File, MIME type) of a header entry. A campaign finds its own attachment; a new mapping checks the upload."""
+    if campaign:
+        file = header_file(campaign, item)
+        file.check_permission('read')  # File read permission applies to every reference.
+    else:
+        from relay_core.bulk_campaigns import uploaded_file
+        file = uploaded_file(item['file_url'])
+    if not file.is_private:
         raise ValueError('Header attachments must stay private')
     mime = mimetypes.guess_type(file.file_name or '')[0]
     if (mime not in channel('WhatsApp').features['media'][HEADER_KINDS[media_type]]
             or mimetypes.guess_type(item['filename'])[0] != mime):
         raise ValueError(f'Wrong file type for {media_type} header')
-    limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type])
-    if error := size_error(os.path.getsize(file.get_full_path()), limit, 'Header attachment'):
-        raise ValueError(error)
-    with open(file.get_full_path(), 'rb') as handle:
-        prefix = handle.read(1024)
-    if not matches_format(prefix, mime):
+    raw = header_bytes(file, get_media_max_bytes('WhatsApp', HEADER_KINDS[media_type]))
+    if not matches_format(raw[:1024], mime):
         raise ValueError(f'Wrong file content for {media_type} header')
     return file, mime
+
+
+def header_file(campaign, item):
+    """The private File of a campaign header entry. A storage app (such as S3) may rewrite file_url after
+    upload and free the old URL for another file, so the campaign's own attachment is matched first."""
+    names = (item['filename'], os.path.basename(item['file_url']))
+    files = frappe.get_all('File', filters={'attached_to_doctype': 'Relay Campaign', 'attached_to_name': campaign,
+                                            'file_name': ['in', names], 'is_private': 1},
+                           fields=['name', 'file_url'], order_by='creation desc')
+    name = (next((file.name for file in files if file.file_url == item['file_url']), files[0].name) if files
+            else frappe.db.get_value('File', {'file_url': item['file_url'], 'is_private': 1}, 'name'))
+    if not name:
+        raise DoesNotExistError('Header attachment unavailable')
+    return frappe.get_doc('File', name)
+
+
+def header_bytes(file, limit):
+    """Bytes of a local or remotely stored File, read through the File controller."""
+    try:
+        raw = file.get_content(encodings=())  # No encodings: Frappe would decode some binary files as text.
+    except OSError as exc:
+        raise DoesNotExistError('Header attachment unavailable') from exc
+    if error := size_error(len(raw), limit, 'Header attachment'):
+        raise ValueError(error)
+    return raw
 
 
 def matches_format(prefix, mime):
@@ -238,14 +264,8 @@ def sent_header(source, campaign):
     if (doc.channel != source.channel or row.destination != source.sender_endpoint
             or not isinstance(item, dict) or (item.get('file_url'), item.get('filename')) not in files):
         raise PermissionError('Attachment belongs to another campaign')
-    name = frappe.db.get_value('File', {'file_url': item['file_url'], 'is_private': 1}, 'name')
-    if not name:
-        raise DoesNotExistError('Header attachment unavailable')
-    file = frappe.get_doc('File', name)
-    path = file.get_full_path()
-    if not os.path.isfile(path):
-        raise DoesNotExistError('Header attachment unavailable')
     limit = get_media_max_bytes('WhatsApp', HEADER_KINDS[header_type(doc)])
-    if error := size_error(os.path.getsize(path), limit, 'Header attachment'):
-        raise ValidationError(error)
-    return item['filename'], file.get_content(encodings=())
+    try:
+        return item['filename'], header_bytes(header_file(campaign, item), limit)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
