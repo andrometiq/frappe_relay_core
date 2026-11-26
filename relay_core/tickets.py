@@ -426,7 +426,9 @@ def validate_ticket(doc, check_assignment=True):
         frappe.throw('A ticket without a business record links messages of one contact')
     if not check_assignment:
         return
-    if check_assignment and (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
+    if not previous and not doc.get('assigned_to'):
+        doc.assigned_to = team_assignee(doc)
+    if (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
         # The creator picks the first owner; reassignment needs team management.
         if previous:
             require_access(manage=True)
@@ -459,6 +461,59 @@ def validate_ticket(doc, check_assignment=True):
         if int(current.generation or 0) != int(previous.generation or 0):
             frappe.throw('Episode ownership changed; reload the ticket')
         _ownership(doc)
+
+
+def team_assignee(doc):
+    """The owner of a new ticket without one: a member of a team whose Group or Record row covers its business
+    record. A Record row wins over a Group row, then teams and members go by name. Disabled, read-only, AI agent
+    and all-records users are skipped, and the owner must read the ticket's messages."""
+    from relay_core import features
+    from relay_core.team_access import GROUP, RECORD, group_field
+    doctype, name = doc.get('business_doctype'), doc.get('business_name')
+    if not (doctype and name) or not features.is_enabled('teams'):
+        return None
+    field = group_field(doctype)
+    group = frappe.db.get_value(doctype, name, field) if field else None
+    rows = frappe.get_all('Relay Team Business', filters={'parenttype': 'Relay Team', 'business_doctype': doctype,
+                          'access': ['in', [RECORD, GROUP]], 'value': ['in', [name, group] if group else [name]]},
+                          fields=['parent', 'access', 'value', 'grouping_field'], limit=0)
+    ranks = {}
+    for row in rows:
+        if row.access == RECORD and row.value == name:
+            ranks[row.parent] = 0
+        elif group and (row.access, row.grouping_field, row.value) == (GROUP, field, group):
+            ranks.setdefault(row.parent, 1)
+    if not ranks:
+        return None
+    members = frappe.get_all('Relay Team Member', filters={'parenttype': 'Relay Team', 'parent': ['in', list(ranks)]},
+                             fields=['parent', 'user'], order_by='user asc', limit=0)
+    for team in sorted(ranks, key=lambda team: (ranks[team], team)):
+        for user in [row.user for row in members if row.parent == team]:
+            if can_own(doc, user):
+                return user
+    return None
+
+
+def can_own(doc, user):
+    """The user may be the automatic owner of the ticket: the assignee check of validate_ticket, without throwing."""
+    from relay_core.business_access import allowed_types, record_covered
+    from relay_core.permissions import AI_AGENT, ALL_RECORDS_ROLES, can_read_contact_as, company_allowed, is_read_only
+    if user == 'Administrator' or not frappe.db.get_value('User', user, 'enabled'):
+        return False
+    roles = set(frappe.get_roles(user))
+    if roles & {AI_AGENT, *ALL_RECORDS_ROLES} or is_read_only(user, roles):
+        return False
+    if not frappe.has_permission('Relay Contact', 'read', user=user):
+        return False
+    if doc.get('company') and not company_allowed(doc.company, user):
+        return False
+    if doc.business_doctype not in allowed_types(user) or not record_covered(doc.business_doctype, doc.business_name, user):
+        return False
+    for row in doc.messages:
+        message = frappe.get_doc('Relay Message', row.message)
+        if not message.has_permission('read', user=user) or not can_read_contact_as(message.relay_contact, user):
+            return False
+    return True
 
 
 def check_business(doc, previous):

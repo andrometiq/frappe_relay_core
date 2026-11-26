@@ -529,10 +529,10 @@ Only you see your folders. A chat can be in one of your folders at a time. Delet
 1. Open the chat. Click "Ticket" in the header, or point at a message and click "Create ticket".
 2. Check the Subject. Write what must happen in Description.
 3. Pick a Type, if your site has types.
-4. In "Assign to", search a colleague.
+4. In "Assign to", search a colleague. Leave it empty to give the ticket to the team of its business record.
 5. Click "Create ticket". A note says "Ticket created" with "Open ticket".
 
-What happens: the ticket links to the chat and its business record, and starts in the first status of type Open. The assignee gets a notification in the bell and a card on screen. When the chat has no business record (for example a new number), the ticket has no business record. Only people who can read this chat see the ticket. Only colleagues who can read this chat show in the search. In the ticket dialog, use comments with mentions to discuss, change the status, and "Close ticket" when done.
+What happens: the ticket links to the chat and its business record, and starts in the first status of type Open. The assignee gets a notification in the bell and a card on screen. When "Assign to" is empty and Teams are on, the ticket goes to a member of a team that picks its business record or the group of the record. Teams with All records and teams without business rows are not used. A team that picks the record wins over a team that picks its group, then teams and members go by name. AI agents, managers, read-only and disabled users are skipped. When no member fits, the ticket stays unassigned. This applies to every new ticket without an owner, also one that the AI agent creates. When the chat has no business record (for example a new number), the ticket has no business record. Only people who can read this chat see the ticket. Only colleagues who can read this chat show in the search. In the ticket dialog, use comments with mentions to discuss, change the status, and "Close ticket" when done.
 
 ### 5.9 Opt-outs (System Manager sets keywords, nothing to do for staff)
 
