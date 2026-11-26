@@ -56,7 +56,8 @@ def agent_skill(doc):
     from relay_core.automation.provenance import context_of
     from relay_core.email_preferences import automatic_allowed
     from relay_core.opt_out import is_keyword
-    if is_keyword(doc) or is_group(doc) or not automatic_allowed(context_of(doc)):
+    from relay_core.campaign_polls import claims as poll_claims
+    if is_keyword(doc) or is_group(doc) or poll_claims(doc) or not automatic_allowed(context_of(doc)):
         return None
     skill = live_agent_skill(doc)
     if not skill or is_taken_over(doc.relay_contact, doc):

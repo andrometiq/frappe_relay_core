@@ -231,8 +231,9 @@ def held_without_episode(contact, message):
 def create_run(doc):
     """The sole admission transaction for automatic inbound handlers and APIs."""
     from relay_core.opt_out import is_keyword
-    if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc):
-        return {'status': 'Ignored'}  # An opt-out or opt-in keyword gets no automatic reply.
+    from relay_core.campaign_polls import claims as poll_claims
+    if doc.get('legacy_source') or doc.direction != 'Incoming' or is_keyword(doc) or poll_claims(doc):
+        return {'status': 'Ignored'}  # A consent keyword gets no automatic reply; a poll tap gets only the poll's.
     from relay_core import features
     if not features.is_automation_allowed(doc.relay_contact):
         return {'status': 'Disabled'}

@@ -12,7 +12,7 @@ import frappe
 from relay_core.business_access import document_name
 from frappe.exceptions import DoesNotExistError, PermissionError, ValidationError
 from redis.exceptions import LockError
-from relay_core import bulk_sheet, service_window, whatsapp, locks
+from relay_core import bulk_sheet, campaign_polls, service_window, whatsapp, locks
 from relay_core.automation.contracts import canonical
 from relay_core.automation.service import internal_save
 from relay_core.hub_channels import hub_arguments
@@ -222,8 +222,9 @@ def template_snapshot(template):
 
 
 @frappe.whitelist(methods=['POST'])
-def create(title, template_name=None, language=None, channel=None, reply_window_hours=72, message=None):
-    """A Draft campaign that sends an approved template, or with message a text or media message."""
+def create(title, template_name=None, language=None, channel=None, reply_window_hours=72, message=None, poll=0):
+    """A Draft campaign that sends an approved template, or with message a text or media message. A poll campaign
+    sends a template with quick reply buttons and asks its poll when a person taps the opt-in button."""
     require_access('Relay Campaign', 'write')
     title = (title or '').strip() if isinstance(title, str) else ''
     if not 3 <= len(title) <= 100 or any(c in title for c in '/\\%#?<>'):
@@ -245,6 +246,10 @@ def create(title, template_name=None, language=None, channel=None, reply_window_
         frappe.throw(whatsapp.failure_message(exc))
     except ValueError as exc:
         frappe.throw(str(exc))
+    if frappe.utils.cint(poll):
+        if message or not campaign_polls.template_buttons(snapshot):
+            frappe.throw('A poll campaign needs a template with a quick reply button')
+        snapshot['poll'] = {}
     doc = frappe.get_doc(dict(doctype='Relay Campaign', title=title, channel=target, operation=operation,
         template_name=template_name, language=language, arguments=canonical(snapshot),
         status='Draft', account=connection_value('relay_hub_account'), country=channel_region(target),
@@ -701,6 +706,7 @@ def read(name, after=None, status=None):
             'error_rows': error_rows,
             'validated': snapshot.get('validated', bool(doc.column_map) and not doc.last_error),
             'phases': snapshot.get('phases', []), 'file_issues': snapshot.get('file_issues', []),
+            'poll': campaign_polls.summary(name, snapshot) if 'poll' in snapshot else None,
             'contact_counts': contact_counts(name) if doc.source_file else None,
             'recipients': rows[:50], 'next': rows[49].sheet_row if len(rows) > 50 else None}
 
@@ -829,8 +835,11 @@ def log_start_failure(doc, step, detail):
 
 
 def check_validation(doc):
-    if json.loads(doc.arguments or '{}').get('validated') is False:
+    snapshot = json.loads(doc.arguments or '{}')
+    if snapshot.get('validated') is False:
         frappe.throw('Validate recipients before sending')
+    if not campaign_polls.is_ready(snapshot):
+        frappe.throw('Set up the poll question and buttons before sending')
     if doc.status == 'Draft' and doc.last_error:
         frappe.throw('The last import failed. Fix the file and import the recipients again')
     if doc.status == 'Draft' and not frappe.db.exists(RECIPIENT, {'campaign': doc.name, 'status': 'Pending'}):

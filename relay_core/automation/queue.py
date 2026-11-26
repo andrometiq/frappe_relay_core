@@ -19,6 +19,8 @@ BATCH_SIZE = 100
 TURN_SECONDS = 5
 WAKE_TTL = 120
 HANDLERS = (
+    # First, so a poll tap is recorded before any handler that skips it.
+    'relay_core.campaign_polls.on_message',
     'relay_core.translations.on_message',
     'relay_core.voice_transcripts.on_message',
     'relay_core.automation.service.on_message',

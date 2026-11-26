@@ -27,6 +27,7 @@ from relay_core.permissions import require_access, readable_contact
 
 
 outgoing_flow = ContextVar('relay_outgoing_flow', default=None)
+outgoing_poll = ContextVar('relay_outgoing_poll', default=None)
 
 
 class DeliverySuppressed(ValueError):
@@ -35,7 +36,7 @@ class DeliverySuppressed(ValueError):
 
 def automatic_delivery(payload):
     return bool(any(payload.get(key) for key in
-        ('automation_run', 'flow_run', 'business_event', 'notification', 'routing'))
+        ('automation_run', 'flow_run', 'business_event', 'notification', 'routing', 'campaign_poll'))
         or str(payload.get('email_values', {}).get('auto_submitted', 0)) == '1')
 
 
@@ -99,8 +100,8 @@ def delivery_fence(action, source, context):
     # retry/ownership checks, but staff takeover must not suppress the notice.
     if payload.get('business_event') and not (payload.get('automation_run') or payload.get('flow_run')):
         return
-    if not automatic_delivery(payload):
-        return
+    if not automatic_delivery(payload) or payload.get('campaign_poll'):
+        return  # A poll step answers the person's own tap, so staff ownership does not stop it.
     if payload.get('handoff_notice'):
         from relay_core.ai.handoff import authorize_notice
         authorize_notice(action, source)
@@ -476,6 +477,7 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
     from relay_core.ai.handoff import outgoing_notice
     if outgoing_notice.get(): payload['handoff_notice'] = True
     if send_group: payload['send_group'] = send_group
+    if outgoing_poll.get(): payload['campaign_poll'] = outgoing_poll.get()
     delivery_snapshot(payload, source, context)
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(json.dumps({'tool':tool,'arguments':arguments,'source':source.name}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -486,7 +488,7 @@ def send_one(message, kind, data, request_key, quote=1, send_group=None):
     require_reply_window(source,channel,context)
     action = frappe.get_doc({'doctype': 'Relay Message Action', 'request_key': key, 'source_message': source.name,
         'operation': kind, 'preview':preview(content)[:300], 'target_channel':channel.name, 'payload': encoded, 'payload_hash': digest, 'status': 'Dispatching'})
-    if not outgoing_run.get() and not outgoing_flow.get():
+    if not outgoing_run.get() and not outgoing_flow.get() and not outgoing_poll.get():
         from relay_core.tickets import manual_takeover
         from relay_core.whatsapp_presence import mark_replied
         manual_takeover(source)
