@@ -153,38 +153,30 @@ class HandOverTests(unittest.TestCase):
         with patch.object(hand_over, 'held_ticket', return_value=_dict(ai_disabled=0, ownership_actor='staff@relay.test')):
             self.assertTrue(hand_over.handles(message()))
 
-    def test_a_chat_with_no_business_record_is_held_by_the_newest_staff_reply_of_the_last_day(self):
+    def test_the_newest_staff_reply_of_the_last_day_counts_for_the_automation(self):
         self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else ['Relay Communication User']
         self.frappe.get_all.return_value = ['RELAY-MSG-0000000009', 'RELAY-MSG-0000000008', 'RELAY-MSG-0000000007']
         sent = {'RELAY-MSG-0000000009': None, 'RELAY-MSG-0000000008': 'Administrator', 'RELAY-MSG-0000000007': 'staff@relay.test'}
-        with patch.object(hand_over, 'held_ticket', side_effect=ValueError('Episode requires a company and a resolved conversation')), \
-             patch.object(hand_over, 'now_datetime', return_value=datetime(2026, 11, 25, 12, 0)), \
-             patch.object(hand_over, 'has_staff_reply', HAS_STAFF_REPLY), \
+        with patch.object(hand_over, 'now_datetime', return_value=datetime(2026, 11, 25, 12, 0)), \
              patch('relay_core.message_display.senders', side_effect=lambda names: sent) as senders:
-            self.assertFalse(hand_over.handles(message()))  # Automatic and Administrator sends after staff do not count.
+            self.assertTrue(HAS_STAFF_REPLY('RELAY-CON-0000000001'))  # Automatic and Administrator sends after staff do not count.
             senders.assert_called_with(self.frappe.get_all.return_value)
             filters = self.frappe.get_all.call_args.kwargs['filters']
             self.assertEqual((filters['relay_contact'], filters['direction'], filters['creation']),
                              ('RELAY-CON-0000000001', 'Outgoing', ['>', datetime(2026, 11, 24, 12, 0)]))
             sent['RELAY-MSG-0000000008'] = 'agent@relay.test'
-            self.assertTrue(hand_over.handles(message()))  # The agent answered after staff.
-            sent['RELAY-MSG-0000000008'] = sent['RELAY-MSG-0000000007'] = None
-            self.assertTrue(hand_over.handles(message()))  # Only automatic sends, such as a campaign or greeting.
+            self.assertFalse(HAS_STAFF_REPLY('RELAY-CON-0000000001'))  # The agent answered after staff.
             self.frappe.get_all.return_value = []
-            self.assertTrue(hand_over.handles(message()))
+            self.assertFalse(HAS_STAFF_REPLY('RELAY-CON-0000000001'))
 
-    def test_a_staff_reply_holds_the_chat_until_its_episode_ticket_is_held_or_resumed(self):
+    def test_a_staff_reply_alone_leaves_the_decision_to_the_agent(self):
         self.staff_reply.return_value = True
         for ticket in (None, _dict(ai_disabled=0, ownership_actor=None, ownership_at=None)):
             with self.subTest(ticket=ticket), patch.object(hand_over, 'held_ticket', return_value=ticket):
-                self.assertTrue(hand_over.is_taken_over('RELAY-CON-0000000001', message()), 'A staff reply opens no ticket')
-        self.staff_reply.assert_called_with('RELAY-CON-0000000001')
-        resumed = _dict(ai_disabled=0, ownership_actor='staff@relay.test', ownership_at=datetime(2026, 11, 25, 12, 0))
-        with patch.object(hand_over, 'held_ticket', return_value=resumed):
-            self.assertFalse(hand_over.is_taken_over('RELAY-CON-0000000001', message()), 'Staff gave the chat back to the AI')
-        self.staff_reply.return_value = False
-        with patch.object(hand_over, 'held_ticket', return_value=None):
+                self.assertFalse(hand_over.is_taken_over('RELAY-CON-0000000001', message()))
+        with patch.object(hand_over, 'held_ticket', side_effect=ValueError('Episode requires a company')):
             self.assertFalse(hand_over.is_taken_over('RELAY-CON-0000000001', message()))
+        self.staff_reply.assert_not_called()
 
     def test_reply_context_rule_reads_the_newest_customer_message(self):
         self.frappe.get_roles.side_effect = lambda user: ['Relay AI Agent'] if user == 'agent@relay.test' else []

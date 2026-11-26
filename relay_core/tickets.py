@@ -113,7 +113,7 @@ def manual_takeover(source):
     """Join the current episode hold to the caller's manual-message journal write.
 
     With the Relay AI off a staff message touches no episode. A staff message never opens a ticket: without an
-    active episode the staff reply itself holds the chat (hand_over.has_staff_reply)."""
+    active episode the automation treats a recent staff reply as a hold (automation.service.staff_owned)."""
     if not ai_features.is_enabled() or not source.get('business_name'):
         return
     if not frappe.db.get_value('Relay Channel', source.channel, 'company'):
