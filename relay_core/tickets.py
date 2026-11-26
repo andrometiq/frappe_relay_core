@@ -954,11 +954,11 @@ def mentioned_tickets():
 @frappe.whitelist(methods=['GET'])
 def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
               exclude_assignees=None, business_type=None, state=None, assigned=None, unlinked=None,
-              resolved_today=None, mentioned=None):
+              resolved_today=None, mentioned=None, contact=None):
     """Newest tickets first, 30 per page; `after` continues below the given ticket.
 
     `state` limits to statuses of that type unless `ticket_status` is given; `resolved_today` is
-    tickets closed today; `mentioned` is tickets that mention the user."""
+    tickets closed today; `mentioned` is tickets that mention the user; `contact` is the tickets of that Relay Contact."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid ticket search')
@@ -1000,8 +1000,11 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         filters['assigned_to'] = ['is', 'set']
     if frappe.utils.cint(mine):
         filters['assigned_to'] = frappe.session.user
-    if frappe.utils.cint(mentioned):
-        names = set(mentioned_tickets())
+    scopes = [mentioned_tickets()] if frappe.utils.cint(mentioned) else []
+    if contact:
+        scopes.append(contact_tickets(contact))
+    for scope in scopes:
+        names = set(scope)
         if 'name' in filters:
             names &= set(filters['name'][1])
         filters['name'] = ['in', sorted(names) or ['']]
@@ -1017,6 +1020,14 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
     columns = ticket_values(rows[:30], business_type)
     contact_titles(rows[:30])
     return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None, 'group_fields': columns}
+
+
+def contact_tickets(contact):
+    """Tickets whose first linked message is the contact's: the `contact` that read() shows."""
+    validate_reference(contact, 'CON')
+    readable_contact(contact)
+    return frappe.db.sql("""SELECT t.parent FROM `tabRelay Ticket Message` t JOIN `tabRelay Message` m ON m.name=t.message
+        WHERE t.parenttype='Relay Ticket' AND t.idx=1 AND m.relay_contact=%s""", (contact,), pluck=True)
 
 
 def contact_titles(rows):

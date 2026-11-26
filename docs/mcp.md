@@ -757,11 +757,11 @@ Create a ticket from 1-50 readable messages of one business scope.
 
 List tickets, newest first, 30 per page.
 
-- **Use when:** the user asks for open, own or matching support tickets.
+- **Use when:** the user asks for open, own or matching support tickets. In a customer chat, pass the chat's contact to see only that customer's tickets (those whose first message is from the contact).
 - **Do not use when:** you know the ticket id; use tickets_read.
 - **Returns:** {items: tickets, next: {after} or null}.
 - **Common errors:** "Invalid ticket search"; "Not permitted" without a Relay role.
-- **Arguments:** `query`?, `ticket_status`?, `mine`?, `after`?
+- **Arguments:** `query`?, `ticket_status`?, `mine`?, `contact`?, `after`?
 
 ### `tickets_read` (R)
 
