@@ -2,7 +2,7 @@
 
 In a chat, choose Select from a message menu, or long-press a message on a phone. Click or tap messages to toggle selection; Shift-click adds a range. Pending messages and internal notes cannot be selected. Select at most 50 messages.
 
-The selection bar shows the count, Create ticket and Cancel. Escape cancels selection. Create ticket opens the existing dialog with exactly the selected messages. The business record comes from those messages; mixed-business selections are rejected by the server. Add a subject, description and optional type or assignee.
+The selection bar shows the count, Create ticket and Cancel. Escape cancels selection. Create ticket opens the existing dialog with exactly the selected messages. The business record comes from those messages; mixed-business selections are rejected by the server. A chat without a business record makes a ticket without one; its messages must be of one contact. Add a subject, description and optional type or assignee.
 
 Open a ticket to see its linked messages. Click a linked message to open its position in the chat. Current read permissions apply to the ticket and its evidence.
 

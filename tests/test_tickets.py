@@ -35,6 +35,7 @@ class TicketTests(unittest.TestCase):
         self.f.get_doc.side_effect = lambda doctype, name: self.message if doctype == 'Relay Message' else self.contact
         self.doc = types.SimpleNamespace(subject='Payment query', brief='Review attached evidence', ticket_status='Open', owner='Sim Staff', messages=[types.SimpleNamespace(message=self.message.name)])
         self.check_business, self.module.check_business = self.module.check_business, Mock()
+        self.reference = self.enterContext(patch('relay_core.business_access.reference', return_value=None))
 
         self.doc.get_doc_before_save=lambda:None
         self.doc.has_permission=Mock(return_value=True)
@@ -149,17 +150,52 @@ class TicketTests(unittest.TestCase):
         self.message.check_permission.assert_called_once_with('read')
         self.module.readable_contact.assert_called_once_with('RELAY-CON-0000000001')
 
-    def test_a_chat_without_a_record_and_no_pick_or_a_linked_contact_gets_a_clear_error(self):
+    def test_a_pick_for_a_linked_contact_without_a_chat_record_gets_a_clear_error(self):
         self.f.db.get_value = Mock(side_effect=lambda doctype, name, field: {'Relay Message': 'RELAY-CON-0000000001',
                                                                             'Relay Contact': 'person'}[doctype])
         contacts = types.SimpleNamespace(add_link=Mock())
         access = types.SimpleNamespace(candidates=Mock(return_value=[('Customer', 'LOCAL-1'), ('Customer', 'LOCAL-2')]))
         with patch('relay_core.ticket_tags.message_business', return_value=(None, None)), \
                 patch.dict(sys.modules, {'relay_core.contacts': contacts, 'relay_core.business_access': access}):
-            for picked in ((None, None), ('Customer', 'LOCAL-3')):
-                with self.subTest(picked=picked), self.assertRaisesRegex(ValueError, 'no business record. Pick one'):
-                    self.module.chat_business([self.message.name], *picked)
+            with self.assertRaisesRegex(ValueError, 'no business record. Pick one'):
+                self.module.chat_business([self.message.name], 'Customer', 'LOCAL-3')
+            with self.assertRaisesRegex(ValueError, 'owns the selected messages'):
+                self.module.chat_business([self.message.name], 'Customer', None)
         contacts.add_link.assert_not_called()
+
+    def test_a_chat_without_a_record_gets_a_ticket_without_one(self):
+        inserted = Record(name='TKT-00005', ticket_status='Open', insert=Mock())
+        self.f.get_doc.side_effect = None; self.f.get_doc.return_value = inserted
+        with patch('relay_core.ticket_tags.message_business', return_value=(None, None)):
+            self.module.create('Wants to become a distributor', [self.message.name])
+        payload = self.f.get_doc.call_args.args[0]
+        self.assertEqual((payload['business_doctype'], payload['business_name']), (None, None))
+        self.assertEqual(payload['messages'], [{'message': self.message.name}])
+        inserted.insert.assert_called_once()
+
+    def test_a_ticket_without_a_record_links_readable_messages_of_one_contact(self):
+        self.module.check_business = self.check_business
+        other = types.SimpleNamespace(name='RELAY-MSG-0000000002', relay_contact='RELAY-CON-0000000002', check_permission=Mock())
+        messages = {self.message.name: self.message, other.name: other}
+        self.f.get_doc.side_effect = lambda doctype, name: messages[name]
+        self.module.validate_ticket(self.doc)
+        self.message.check_permission.assert_called_once_with('read')
+        self.module.readable_contact.assert_called_once_with(self.message.relay_contact)
+        self.doc.messages = [types.SimpleNamespace(message=name) for name in messages]
+        with self.assertRaisesRegex(ValueError, 'messages of one contact'):
+            self.module.validate_ticket(self.doc)
+        self.doc.messages = self.doc.messages[:1]
+        self.message.check_permission.side_effect = PermissionError
+        with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc)
+
+    def test_a_new_ticket_without_a_record_needs_a_chat_without_one(self):
+        self.module.check_business = self.check_business
+        self.reference.return_value = ('Customer', 'LOCAL-1')
+        with self.assertRaisesRegex(ValueError, 'must match its conversation'):
+            self.module.validate_ticket(self.doc)
+        saved = Record(subject=self.doc.subject, messages=self.doc.messages)
+        saved.update(get_doc_before_save=lambda: saved)
+        self.module.validate_ticket(saved, check_assignment=False)
 
     def test_business_type_filter_and_page_enrichment_are_batched(self):
         self.f.get_list = Mock(return_value=[Record(name='TKT-00001', business_doctype='Supplier', business_name='LOCAL-1')])
@@ -478,6 +514,41 @@ class StandaloneTicketTests(unittest.TestCase):
         self.assertEqual(rows, {'assigned', 'mentioned'})
         rows = {row[0] for row in db.execute(f'SELECT name FROM `tabRelay Ticket` WHERE {self.module.query_condition("someone")}')}
         self.assertEqual(rows, set())
+
+    def test_a_chat_ticket_without_a_record_is_seen_only_by_readers_of_its_chat(self):
+        readable = sys.modules['relay_core.permissions'].can_read_contact_as
+        self.message.has_permission = Mock(return_value=True)
+        self.f.get_doc.side_effect = lambda doctype, name: self.message
+        chat = Record(name='TKT-00006', business_doctype=None, business_name=None, assigned_to='owner@example.invalid',
+                      messages=[Record(message=self.message.name)], watchers=[])
+        self.assertTrue(self.module.permission(chat, 'reader@example.invalid'))
+        self.access.allowed.assert_not_called()
+        readable.return_value = False
+        self.assertFalse(self.module.permission(chat, 'reader@example.invalid'), 'Outside the contact\'s teams')
+        self.assertFalse(self.module.permission(chat, 'owner@example.invalid'), 'Assignment alone does not open a chat')
+        readable.return_value = True
+        self.message.has_permission.return_value = False
+        self.assertFalse(self.module.permission(chat, 'reader@example.invalid'))
+
+    def test_query_lists_a_chat_ticket_without_a_record_only_to_readers_of_its_chat(self):
+        import sqlite3
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.executescript("""CREATE TABLE `tabRelay Ticket` (name TEXT, business_doctype TEXT, business_name TEXT, assigned_to TEXT,
+                source_hub_event TEXT, source_provider_message_key TEXT, company TEXT, conversation_key TEXT);
+            CREATE TABLE `tabRelay Ticket Message` (parent TEXT, parenttype TEXT, message TEXT);
+            CREATE TABLE `tabRelay Ticket Watcher` (parent TEXT, parenttype TEXT, user TEXT);
+            CREATE TABLE `tabRelay Message` (name TEXT, relay_contact TEXT, business_doctype TEXT, business_name TEXT);
+            INSERT INTO `tabRelay Ticket` (name) VALUES ('readable'), ('hidden'), ('empty');
+            INSERT INTO `tabRelay Message` VALUES ('M1', 'C1', NULL, NULL), ('M2', 'C2', NULL, NULL);
+            INSERT INTO `tabRelay Ticket Message` VALUES ('readable', 'Relay Ticket', 'M1'), ('hidden', 'Relay Ticket', 'M2');""")
+        sql = {'Relay Message': "SELECT 'M1'", 'Relay Contact': "SELECT 'C1'"}
+        self.f.qb = types.SimpleNamespace(get_query=lambda doctype, **kw: types.SimpleNamespace(get_sql=lambda: sql[doctype]))
+        self.f.db.escape = lambda value: "'" + value + "'"
+        self.access.explicit_condition = lambda doctype, user, allow_empty: (
+            "(COALESCE(`tabRelay Ticket`.business_doctype,'')='' AND COALESCE(`tabRelay Ticket`.business_name,'')='')")
+        rows = {row[0] for row in db.execute(f'SELECT name FROM `tabRelay Ticket` WHERE {self.module.query_condition("me")}')}
+        self.assertEqual(rows, {'readable'})
 
     def test_create_without_messages_stores_the_record_and_mentions(self):
         inserted = Record(name='TKT-00004', ticket_status='Open', insert=Mock())

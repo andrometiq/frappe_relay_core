@@ -745,12 +745,12 @@ Change the components of an existing template. Meta reviews it again.
 
 ### `tickets_create` (W)
 
-Create a ticket from 1-50 readable messages of one business scope.
+Create a ticket from 1-50 readable messages of one business scope, or of one contact when the chat has no business record.
 
 - **Use when:** a customer request needs follow-up by the team.
 - **Do not use when:** a ticket for these messages exists; check tickets_list.
 - **Returns:** {name, ticket_status}.
-- **Common errors:** "Messages must be a list of 1-50 references"; messages of different business records.
+- **Common errors:** "Messages must be a list of 1-50 references"; messages of different business records, or of different contacts when the chat has no business record.
 - **Arguments:** `subject`, `messages`, `brief`?, `ticket_type`?
 
 ### `tickets_list` (R)
