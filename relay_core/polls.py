@@ -10,6 +10,7 @@ from relay_core.message_types import text
 from relay_core.message_updates import provider_key
 
 OPTION_PREFIX = 'poll-'
+LIST_TITLE, LIST_DESCRIPTION = 24, 72
 
 
 def prepare(data: dict) -> tuple[dict, dict]:
@@ -20,8 +21,8 @@ def prepare(data: dict) -> tuple[dict, dict]:
     options = data.get('options')
     if not isinstance(options, list) or not 2 <= len(options) <= 10:
         raise ValueError('A WhatsApp poll needs 2-10 options')
-    # Meta allows 20 characters on a reply button and 24 on a list row.
-    limit = 20 if len(options) <= 3 else 24
+    # Meta allows 20 characters on a reply button; a longer list option goes in the row description.
+    limit = 20 if len(options) <= 3 else LIST_DESCRIPTION
     if any(not isinstance(option, str) or len(option.strip()) > limit for option in options):
         raise ValueError(f'Poll options can have up to {limit} characters with {len(options)} options')
     options = [text(option, limit, required=True).strip() for option in options]

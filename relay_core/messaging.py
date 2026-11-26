@@ -26,6 +26,9 @@ from relay_core.message_updates import provider_key
 from relay_core.permissions import require_access, readable_contact
 
 
+from relay_core.polls import LIST_DESCRIPTION, LIST_TITLE
+
+
 outgoing_flow = ContextVar('relay_outgoing_flow', default=None)
 outgoing_poll = ContextVar('relay_outgoing_poll', default=None)
 
@@ -162,6 +165,13 @@ def require_binding(source):
         frappe.throw('Conversation binding is missing or revoked', frappe.PermissionError)
 
 
+def list_row(row):
+    """A list row; a label too long for the title is shortened there and given whole in the description."""
+    if len(row['label']) <= LIST_TITLE:
+        return {'id': row['value'], 'title': row['label']}
+    return {'id': row['value'], 'title': row['label'][:LIST_TITLE - 1].rstrip() + '…', 'description': row['label']}
+
+
 def prepare_choices(source, channel, context, data):
     from relay_core.flows.contracts import choice_options
     if channel.channel != 'WhatsApp' or context.get('provider') != 'WhatsApp':
@@ -173,13 +183,13 @@ def prepare_choices(source, channel, context, data):
     if len(choices) > 10:
         raise ValueError('Interactive choices support at most 10 options')
     buttons = len(choices) <= 3
-    if any(len(row['label']) > (20 if buttons else 24) for row in choices):
+    if any(len(row['label']) > (20 if buttons else LIST_DESCRIPTION) for row in choices):
         raise ValueError('Interactive choice labels are too long')
     if buttons:
         action = {'buttons': [{'type': 'reply', 'reply': {'id': row['value'], 'title': row['label']}} for row in choices]}
     else:
         action = {'button': text(data.get('button') or 'Choose', 20, required=True),
-                  'sections': [{'rows': [{'id': row['value'], 'title': row['label']} for row in choices]}]}
+                  'sections': [{'rows': [list_row(row) for row in choices]}]}
     interactive = {'type': 'button' if buttons else 'list', 'body': {'text': body}, 'action': action}
     arguments = {'operation': 'messages.interactive', 'to': source.sender_endpoint, 'interactive': interactive,
                  'reply_to': text(context.get('message_id') or source.provider_id or '', 300)}

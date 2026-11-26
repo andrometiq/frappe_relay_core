@@ -44,7 +44,7 @@ Before sending, set up the poll in the **Poll** section of the Draft campaign. T
 | Opt-in button | Required. A quick reply button of the template. A tap on it opens the poll. |
 | Opt-out button | Optional. Another quick reply button of the template, or none. |
 | Question | Required. At most 1024 characters. |
-| Options | 2-10 options, one per line, all different. Up to 3 options are sent as reply buttons of at most 20 characters. 4-10 options are sent as a list of at most 24 characters. This is the `polls.prepare` limit. |
+| Options | 2-10 options, one per line, all different. Up to 3 options are sent as reply buttons of at most 20 characters. 4-10 options are sent as a list of at most 72 characters. An option longer than 24 characters shows shortened in the row title and whole in the row description. This is the `polls.prepare` limit. |
 | Thank-you message | Optional. The default is "Thank you, your response is recorded." |
 
 The template, the audience and the template values work as for any other template campaign.

@@ -17,8 +17,8 @@ watch(optIn, (value) => { if (optOut.value === value) optOut.value = ''; });
 const buttonOptions = computed(() => (poll.value.buttons || []).map((text) => ({ value: text, label: text })));
 const optOutOptions = computed(() => [{ value: '', label: 'None' }, ...buttonOptions.value.filter((row) => row.value !== optIn.value)]);
 const choices = computed(() => pollOptions(options.value));
-// Meta allows 20 characters on a reply button (up to 3 options) and 24 on a list row (4 to 10 options).
-const limit = computed(() => choices.value.length <= 3 ? 20 : 24);
+// Meta allows 20 characters on a reply button (up to 3 options); a list option (4 to 10) can have 72.
+const limit = computed(() => choices.value.length <= 3 ? 20 : 72);
 const problems = computed(() => [
   !optIn.value && 'choose the button that opens the poll',
   !question.value.trim() && 'add the question',
@@ -42,7 +42,7 @@ function save() {
       </div>
       <FormControl v-model="question" type="textarea" :rows="2" label="Question" maxlength="1024" />
       <FormControl v-model="options" type="textarea" :rows="4" label="Options, one per line" placeholder="Small&#10;Large" />
-      <p class="poll-hint">2 to 10 options. Up to 3 options show as buttons of 20 characters; 4 to 10 show as a list of 24 characters.</p>
+      <p class="poll-hint">2 to 10 options. Up to 3 options show as buttons of 20 characters; 4 to 10 show as a list of up to 72 characters.</p>
       <label class="poll-field"><span>Thank-you message</span><TextInput v-model="thanks" maxlength="1024" placeholder="Thank you, your response is recorded." /></label>
       <div class="poll-save">
         <Button label="Save poll" variant="solid" :loading="busy" :disabled="problems.length > 0" @click="save" />
