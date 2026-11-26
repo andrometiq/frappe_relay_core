@@ -396,6 +396,8 @@ def validate_ticket(doc, check_assignment=True):
                   and doc.get('company') and doc.get('conversation_key'))
     if not triage:
         check_business(doc, previous)
+    business = (doc.get('business_doctype') or None, doc.get('business_name') or None)
+    contacts = set()
     if (not doc.messages and not triage and not doc.get('business_name')) or (len(doc.messages) > 50 and not doc.get('conversation_key')):
         frappe.throw('Link between 1 and 50 messages')
     check_watchers(doc, previous)
@@ -410,14 +412,18 @@ def validate_ticket(doc, check_assignment=True):
         message = frappe.get_doc('Relay Message', row.message)
         message.check_permission('read')
         readable_contact(message.relay_contact)
+        contacts.add(message.relay_contact)
         if doc.get('conversation_key'):
             scope, _ = _episode_scope(message)
             if any(doc.get(key) != value for key, value in scope.items()):
                 frappe.throw('Ticket scope must match its conversation')
-        if doc.get('business_doctype') or doc.get('business_name'):
+        # A new chat ticket without a record needs a chat without one; it may gain the record later.
+        if any(business) or not previous and not doc.get('conversation_key'):
             from relay_core.business_access import reference
-            if reference(message) != (doc.get('business_doctype'), doc.get('business_name')):
+            if (reference(message) or (None, None)) != business:
                 frappe.throw('Ticket business must match its conversation')
+    if not any(business) and not doc.get('conversation_key') and len(contacts) > 1:
+        frappe.throw('A ticket without a business record links messages of one contact')
     if not check_assignment:
         return
     if check_assignment and (doc.get('assigned_to') or '') != ((previous.get('assigned_to') or '') if previous else ''):
@@ -456,9 +462,12 @@ def validate_ticket(doc, check_assignment=True):
 
 
 def check_business(doc, previous):
-    """A new ticket names one business record its creator reaches. A saved ticket keeps its record or gains one."""
+    """A new ticket names one business record its creator reaches, unless it links a chat without one. A saved
+    ticket keeps its record or gains one."""
     business = (doc.get('business_doctype') or None, doc.get('business_name') or None)
     if previous and business == (previous.get('business_doctype') or None, previous.get('business_name') or None):
+        return
+    if not previous and doc.messages and not any(business):
         return
     if not all(business):
         frappe.throw('Choose the business record of the ticket')
@@ -541,14 +550,14 @@ def create(subject, messages=None, brief='', assigned_to='', ticket_type=None, t
 
 
 def chat_business(messages, business_type, business_record):
-    """The one business record of the selected messages. The contact of a chat without any record is first linked
-    to the picked record, so the chat and its ticket share it."""
+    """The one business record of the selected messages, or none for a chat without one. The contact of a chat
+    without any record is first linked to the picked record, so the chat and its ticket share it."""
     from relay_core import ticket_tags
     picked = (business_type, business_record)
     found = ticket_tags.message_business(messages)
     if not any(found) and all(picked) and link_unlinked_contact(messages, picked):
         found = ticket_tags.message_business(messages)
-    if not all(found):
+    if all(picked) and not any(found):
         frappe.throw('This chat has no business record. Pick one for its contact, or mark the contact\'s primary record.')
     if any(picked) and picked != found:
         frappe.throw('Choose the business record that owns the selected messages')

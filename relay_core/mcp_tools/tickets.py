@@ -33,11 +33,13 @@ def tickets_read(name, after=None):
 @tool('tickets_create', WRITE, obj({'subject': {'type': 'string', 'minLength': 1, 'maxLength': 140},
                                     'messages': {'type': 'array', 'items': MESSAGE, 'minItems': 1, 'maxItems': 50},
                                     'brief': {'type': 'string', 'maxLength': 4000}, 'ticket_type': NAME_FIELD}, ('subject', 'messages')), {
-    'summary': 'Create a ticket from 1-50 readable messages of one business scope.',
+    'summary': 'Create a ticket from 1-50 readable messages of one business scope, or of one contact when the chat '
+               'has no business record.',
     'use_when': 'a customer request needs follow-up by the team.',
     'avoid_when': 'a ticket for these messages exists; check tickets_list.',
     'returns': '{name, ticket_status}.',
-    'errors': '"Messages must be a list of 1-50 references"; messages of different business records.'})
+    'errors': '"Messages must be a list of 1-50 references"; messages of different business records, or of '
+              'different contacts when the chat has no business record.'})
 def tickets_create(subject, messages, brief='', ticket_type=None):
     from relay_core.tickets import create
     return create(subject, messages, brief=brief, ticket_type=ticket_type)
