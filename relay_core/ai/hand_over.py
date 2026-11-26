@@ -10,7 +10,7 @@ from datetime import UTC
 from zoneinfo import ZoneInfo
 
 import frappe
-from frappe.utils import get_datetime, get_system_timezone
+from frappe.utils import add_to_date, get_datetime, get_system_timezone, now_datetime
 
 from relay_core import ai_features, features
 from relay_core.automation.queue import QUEUE, after_message_commit
@@ -20,6 +20,7 @@ TIMEOUT = 10
 SKIPPED_KINDS = ('system', 'reaction')
 GROUP_CHAT_TYPES = ('group', 'supergroup', 'channel')
 CONTACT_DETAIL = re.compile(r'@|^[\d\s()+.-]+$')
+STAFF_REPLY_HOURS = 24
 
 
 def is_group(doc) -> bool:
@@ -80,11 +81,17 @@ def handles_safely(doc) -> bool:
 def is_taken_over(contact: str, message=None) -> bool:
     """True when staff own the chat: the Relay automation's rule (a paused contact, or a held episode ticket), less
     the agent's own holds. A pause for an active MCP claim is the claim's (its guard stops another sender),
-    and a ticket held by the reply of a Relay AI Agent user is the agent's."""
+    and a ticket held by the reply of a Relay AI Agent user is the agent's. A message with no episode (no business
+    record) has no ticket to hold, so a staff reply holds its chat instead (has_staff_reply)."""
     paused, generation = frappe.db.get_value('Relay Contact', contact, ['automation_paused', 'automation_generation'])
     if paused and not is_claim_pause(contact, generation):
         return True
-    ticket = held_ticket(message) if message else None
+    if not message:
+        return False
+    try:
+        ticket = held_ticket(message)
+    except ValueError:
+        return has_staff_reply(contact)
     return bool(ticket and ticket.ai_disabled and not is_agent_user(ticket.ownership_actor))
 
 
@@ -103,13 +110,23 @@ def is_claim_pause(contact: str, generation) -> bool:
 
 
 def held_ticket(message):
-    """The ownership of the message's active episode ticket, or None when it has none."""
+    """The ownership of the message's active episode ticket, or None when it has none. ValueError: the message has
+    no episode scope."""
     from relay_core.tickets import _episode_scope
-    try:
-        _, key = _episode_scope(message)
-    except ValueError:
-        return None
+    _, key = _episode_scope(message)
     return frappe.db.get_value('Relay Ticket', {'active_scope_key': key}, ['ai_disabled', 'ownership_actor'], as_dict=True)
+
+
+def has_staff_reply(contact: str) -> bool:
+    """The newest outgoing message a person sent in the chat within STAFF_REPLY_HOURS is a staff reply, not the
+    agent's. Automatic sends (automation, flows, business events, campaigns) and Administrator's are not a person's."""
+    from relay_core.message_display import senders
+    names = frappe.get_all('Relay Message', filters={'relay_contact': contact, 'direction': 'Outgoing',
+                           'creation': ['>', add_to_date(now_datetime(), hours=-STAFF_REPLY_HOURS)]},
+                           pluck='name', order_by='name desc', limit_page_length=50)
+    found = senders(names) if names else {}
+    user = next((found[name] for name in names if found.get(name) not in (None, 'Administrator')), None)
+    return bool(user) and not is_agent_user(user)
 
 
 def is_chat_taken_over(contact: str) -> bool:
