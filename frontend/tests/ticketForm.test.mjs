@@ -60,9 +60,11 @@ test('a picked colleague replaces the typed name and stays mentioned while its l
   assert.deepEqual(mentionedUsers('No mentions left', picked), [])
 })
 
-test('a ticket without a chat searches every Relay colleague', () => {
+test('a mention on a ticket without a chat searches every Relay colleague; its owner a teammate', () => {
   assert.deepEqual(colleagueRequest('RELAY-CON-1', 'ra'), ['collaboration.colleagues', { contact: 'RELAY-CON-1', query: 'ra' }])
+  assert.deepEqual(colleagueRequest('RELAY-CON-1', 'ra', true), ['collaboration.colleagues', { contact: 'RELAY-CON-1', query: 'ra' }])
   assert.deepEqual(colleagueRequest('', 'ra'), ['tickets.colleagues', { query: 'ra' }])
+  assert.deepEqual(colleagueRequest('', 'ra', true), ['tickets.colleagues', { query: 'ra', mention: 1 }])
 })
 
 test('a mention counts only as a whole word', () => {

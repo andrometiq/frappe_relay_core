@@ -69,7 +69,9 @@ export function mentionedUsers(text, picked) {
   return [...picked].filter(([, label]) => hasMention(text, label)).map(([user]) => user)
 }
 
-// Colleagues of a chat ticket are those who read its contact; a ticket without a chat offers every Relay user.
-export function colleagueRequest(contact, query) {
-  return contact ? ['collaboration.colleagues', { contact, query }] : ['tickets.colleagues', { query }]
+// Colleagues of a chat ticket are those who read its contact. Without a chat, a mention offers every Relay user and
+// an owner a teammate.
+export function colleagueRequest(contact, query, mention = false) {
+  if (contact) return ['collaboration.colleagues', { contact, query }]
+  return ['tickets.colleagues', mention ? { query, mention: 1 } : { query }]
 }

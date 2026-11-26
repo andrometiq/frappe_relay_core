@@ -176,7 +176,7 @@ Ticket dialog:
 | Linked records | The business records linked to that contact. |
 | Created | Who made the ticket, and when. |
 | Assigned to | Managers change the owner. The new owner gets a notification. |
-| Comments, Add comment | Internal discussion. Pick colleagues in the mention box to notify them. |
+| Comments, Add comment | Internal discussion. Pick colleagues in the mention box to notify them. On a ticket without a chat, you can mention any Relay user, and that user can then open the ticket. On a ticket with a chat, only users who can read the chat show. |
 | Close ticket | Sets the first status of type Closed. |
 
 The Tickets page, its counts and the open-ticket counts in the inbox do not show a conversation that the AI still answers. That conversation shows here when the AI hands it to staff or when staff take it over.

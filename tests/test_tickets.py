@@ -422,10 +422,9 @@ class StandaloneTicketTests(unittest.TestCase):
                                        document_name=lambda value: value, allowed=Mock(return_value=False),
                                        reference=Mock(), relay_user=lambda user: True)
         self.agents = Mock()
-        self.colleagues = Mock(side_effect=lambda user, users: set(users))
         self.f.session = Record(user='creator@example.invalid')
         modules = {'relay_core.business_access': access,
-                   'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents, colleagues_of=self.colleagues),
+                   'relay_core.teams': types.SimpleNamespace(validate_agent=self.agents),
                    'relay_core.permissions': types.SimpleNamespace(can_read_contact_as=Mock(return_value=True))}
         self.enterContext(patch.dict(sys.modules, modules))
         self.access = access
@@ -459,10 +458,6 @@ class StandaloneTicketTests(unittest.TestCase):
                                             ([Record(user='a@example.invalid')], [Record(message=self.message.name)], 'comment')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 self.module.validate_ticket(Record(self.doc, watchers=watchers, messages=messages), check_assignment=False)
-        self.colleagues.side_effect = lambda user, users: set()
-        with self.assertRaisesRegex(PermissionError, 'share a team'):
-            self.module.validate_ticket(self.doc, check_assignment=False)
-        self.colleagues.assert_called_with('creator@example.invalid', {'agent@example.invalid'})
         self.agents.side_effect = PermissionError('The user needs a Relay communication role')
         with self.assertRaises(PermissionError): self.module.validate_ticket(self.doc, check_assignment=False)
 
@@ -621,7 +616,9 @@ class StandaloneTicketTests(unittest.TestCase):
             options.return_value = [Record(name='agent@example.invalid', full_name='Local Agent')]
             self.assertEqual(self.module.colleagues('Lo_'), [{'value': 'agent@example.invalid', 'label': 'Local Agent'}])
             options.assert_called_once_with('Lo\\_', colleague_of='creator@example.invalid')
-        self.module.require_access.assert_called_once_with()
+            self.module.colleagues('Lo', mention='1')
+            options.assert_called_with('Lo', colleague_of=None)
+        self.module.require_access.assert_called_with()
         with self.assertRaises(ValueError): self.module.colleagues('x' * 81)
         self.f.get_list = Mock(return_value=[])
         self.module.mentioned_tickets = Mock(return_value=['TKT-00004'])

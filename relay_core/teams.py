@@ -153,15 +153,6 @@ def teams_limit(user):
     return features.is_enabled('teams') and not sees_all_teams(user)
 
 
-def colleagues_of(user, users):
-    """The users among `users` that `user` may pick as colleagues on a ticket without a chat."""
-    if not users or not teams_limit(user):
-        return set(users)
-    table=frappe.qb.DocType('User')
-    return set(frappe.qb.from_(table).select(table.name).where(
-        table.name.isin(list(users)) & (managers(table) | table.name.isin(team_members(user_teams(user))))).run(pluck=True))
-
-
 def _agent_options(query, contact=None, colleague_of=None):
     """Filter candidates in SQL before applying the bounded search window."""
     user=frappe.qb.DocType('User');role=frappe.qb.DocType('Has Role')

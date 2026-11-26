@@ -547,9 +547,6 @@ def check_watchers(doc, previous):
     added = set(users) - known
     for user in added:
         validate_agent(user)
-    from relay_core.teams import colleagues_of
-    if added - colleagues_of(frappe.session.user, added):
-        frappe.throw('Mention colleagues who share a team with you', frappe.PermissionError)
 
 
 def named_people(doc):
@@ -990,15 +987,17 @@ def query_condition(user=None):
 
 
 @frappe.whitelist(methods=['GET'])
-def colleagues(query=''):
-    """Relay users to assign or mention on a ticket without a chat: those who share a team with the user."""
+def colleagues(query='', mention=0):
+    """Relay users on a ticket without a chat: every one to mention, those who share a team with the user to
+    assign."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid colleague search')
     from relay_core.teams import _agent_options
     query = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    colleague_of = None if frappe.utils.cint(mention) else frappe.session.user
     return [dict(value=row.name, label=row.full_name or row.name)
-            for row in _agent_options(query, colleague_of=frappe.session.user)]
+            for row in _agent_options(query, colleague_of=colleague_of)]
 
 
 def staff_filters(filters: dict, *groups: list) -> list:

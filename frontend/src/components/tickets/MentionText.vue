@@ -23,7 +23,7 @@ function lookup() {
   timer = setTimeout(async () => {
     controller?.abort(); controller = new AbortController()
     try {
-      options.value = distinctPeople(await coreApi('tickets.colleagues', { query: found.query }, false, { signal: controller.signal })).slice(0, 8)
+      options.value = distinctPeople(await coreApi('tickets.colleagues', { query: found.query, mention: 1 }, false, { signal: controller.signal })).slice(0, 8)
       active.value = 0
       placement.value = mentionListPlacement(area.value.getBoundingClientRect(), window.innerHeight)
     } catch { options.value = [] }
