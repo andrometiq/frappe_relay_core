@@ -71,8 +71,14 @@ def templates_delete(channel, name, confirm, id=None):
     'summary': 'Upload a header image, video or document for a template or template send. Requests up to 7 MB.',
     'use_when': 'a template has a media header.',
     'avoid_when': 'the file is reachable by HTTPS; chat_send_template takes header_media_url.',
-    'returns': '{id: media handle for the header component}.',
+    'returns': '{id: media id for a template send, handle: header_handle example for templates_create}.',
     'errors': '"This file type is not accepted for this <kind> header"; "The file must be at most <size>".'}, large=True)
 def templates_media_upload(channel, media_type, filename, content_base64):
+    """Meta takes a send's header by media id but a new template's sample only by a Resumable Upload handle."""
+    import mimetypes
+    from relay_core import whatsapp
     from relay_core.template_media import upload
-    return upload(channel, media_type, filename, content_base64)
+    result = upload(channel, media_type, filename, content_base64)
+    sample = whatsapp.execute('templates.media_upload', {'media_type': media_type, 'filename': filename,
+        'mime_type': mimetypes.guess_type(filename)[0], 'content_base64': content_base64}, channel=channel)
+    return {**result, 'handle': sample['handle']}

@@ -92,7 +92,8 @@ CASES = {
     'templates_delete': ({'channel': CH, 'name': 'order_ready', 'confirm': True}, [('relay_core.whatsapp', 'execute', {})],
                          (('templates.delete', {'name': 'order_ready'}), {'channel': CH})),
     'templates_media_upload': ({'channel': CH, 'media_type': 'image', 'filename': 'a.png', 'content_base64': 'AA=='},
-                               [('relay_core.template_media', 'upload', {'id': '9'})], ((CH, 'image', 'a.png', 'AA=='), {})),
+                               [('relay_core.template_media', 'upload', {'id': '9'}), ('relay_core.whatsapp', 'execute', {'handle': '4::h'})],
+                               ((CH, 'image', 'a.png', 'AA=='), {})),
     'campaigns_list': ({'status': 'Draft'}, [('relay_core.campaigns', 'directory', {'items': []})],
                        ((), {'after': None, 'query': '', 'status': 'Draft'})),
     'campaigns_read': ({'name': 'Promo'}, [('relay_core.bulk_campaigns', 'read', {})], (('Promo',), {'after': None, 'status': None})),
@@ -247,6 +248,12 @@ class WrappedCallTests(unittest.TestCase):
                 if expected:
                     self.assertEqual((mocks[0].call_args.args, mocks[0].call_args.kwargs), expected)
                 self.assertIsNotNone(result)
+
+    def test_template_upload_returns_the_send_id_and_the_sample_handle(self):
+        result, mocks = run_case('templates_media_upload', *CASES['templates_media_upload'][:2])
+        self.assertEqual(result, {'id': '9', 'handle': '4::h'})
+        self.assertEqual(mocks[1].call_args.args[0], 'templates.media_upload')
+        self.assertEqual(mocks[1].call_args.kwargs, {'channel': CH})
 
     def test_template_status_filter_and_unread_grouping(self):
         result, _ = run_case('templates_list', *CASES['templates_list'][:2])

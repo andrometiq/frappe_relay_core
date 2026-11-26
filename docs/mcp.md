@@ -52,7 +52,7 @@ The older `relay.*` tool names still work but are not listed.
 6. `chat_mark_read` to clear the chat's unread count for the user.
 
 **Create a template**
-1. `templates_media_upload` when the header has an image, video or document; keep the returned handle.
+1. `templates_media_upload` when the header has an image, video or document; put the returned `handle` (not `id`) in the header's `example.header_handle`.
 2. `templates_create` with name, language, category and components; it is submitted to Meta at once.
 3. `templates_list` about a minute later (after the next sync) to see PENDING, APPROVED or REJECTED with the reason.
 
@@ -729,7 +729,7 @@ Upload a header image, video or document for a template or template send. Reques
 
 - **Use when:** a template has a media header.
 - **Do not use when:** the file is reachable by HTTPS; chat_send_template takes header_media_url.
-- **Returns:** {id: media handle for the header component}.
+- **Returns:** {id: media id for a template send, handle: header_handle example for templates_create}.
 - **Common errors:** "This file type is not accepted for this <kind> header"; "The file must be at most <size>".
 - **Arguments:** `channel`, `media_type`, `filename`, `content_base64`
 
