@@ -50,6 +50,7 @@ const ConversationSummary = defineAsyncComponent(() => import('./messages/Conver
 const ContactInfoPage = defineAsyncComponent(() => import('./messages/ContactInfoPage.vue'))
 const EmailComposer = defineAsyncComponent(() => import('./messages/EmailComposer.vue'))
 const NoteComposer = defineAsyncComponent(() => import('./messages/NoteComposer.vue'))
+const ChatTickets = defineAsyncComponent(() => import('./tickets/ChatTickets.vue'))
 
 const state = useMessages({ threads: true });
 // One tab per thread (a contact endpoint on one of our channels); the reply stays on the open thread.
@@ -510,6 +511,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
           </div>
         </div>
         <ThreadDetails v-if="!linking" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :record="panelRecord" @select="chooseThread" />
+        <ChatTickets v-if="!linking && conversationContact" :contact="conversationContact" />
         <ContactDetails v-if="frappeContact" :key="frappeContact + linking" compact :contact="frappeContact" :link="linking" @changed="linked" @close="closeDetails" />
         <p v-else class="contact-panel-empty">This chat has no linked Contact yet.</p>
       </ChatPanel>
@@ -519,6 +521,7 @@ const moreSentinel = useLoadMore({ loading: busy, hasMore: () => state.pendingCu
       <ContactInfoPage v-if="isMobile && infoOpen && active" :title="title" :contact="frappeContact" :primary="contactRecord?.primary" :channel="channelLine" :link="linking"
         :can-organize="!!conversationContact" @close="closeInfo" @cases="infoAction(() => casesOpen = true)" @notes="infoAction(openNotes)" @changed="loadProfile(selected)">
         <ThreadDetails v-if="!linking" :threads="threads.items.value" :active="activeThread?.key" :busy="busy" :record="panelRecord" @select="infoAction(() => chooseThread($event))" />
+        <ChatTickets v-if="!linking && conversationContact" :contact="conversationContact" />
       </ContactInfoPage>
     </Transition>
   </section>

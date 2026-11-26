@@ -15,7 +15,7 @@ import { addressLabel } from '../services/conversationThreads'
 const channelEnabled = useEnabledChannels()
 const capabilities = inject('relayCapabilities')
 const isMobile = useMobileLayout()
-// `link` shows only the link form, for an unlinked chat.
+// `link` shows only the link form, for an unlinked chat. `compact` is the chat screen: it has no Advanced section.
 const props = defineProps({ contact: String, dismissible: Boolean, compact: Boolean, channel: String, link: Boolean })
 const emit = defineEmits(['close', 'loaded', 'changed'])
 const detail = ref(null), busy = ref(false), error = ref('')
@@ -57,7 +57,7 @@ useRealtimeRefresh(['Contact', 'Relay Contact Endpoint'], ['contacts', 'incoming
         <div v-if="channel" class="info-kv"><dt>Channel</dt><dd>{{ channel }}</dd></div>
         <div class="info-kv"><dt>Phone</dt><dd>{{ detail.phone || 'No phone number' }}<Badge v-if="detail.phone && !validPhone(detail.phone)" label="Add country code" theme="orange" /></dd></div>
       </dl>
-      <details v-if="capabilities.manage" class="info-section">
+      <details v-if="capabilities.manage && !compact" class="info-section">
         <summary class="info-group-title"><span>Advanced</span><FeatherIcon name="chevron-down" :size="14" /></summary>
         <h4 class="info-group-title">Saved numbers · {{ detail.endpoints.length }}</h4>
         <ul v-if="detail.endpoints.length" class="info-card">

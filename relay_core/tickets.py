@@ -1006,14 +1006,18 @@ def mentioned_tickets():
 @frappe.whitelist(methods=['GET'])
 def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=None, ticket_type=None,
               exclude_assignees=None, business_type=None, state=None, assigned=None, unlinked=None,
-              resolved_today=None, mentioned=None, contact=None):
-    """Newest tickets first, 30 per page; `after` continues below the given ticket.
+              resolved_today=None, mentioned=None, contact=None, limit=30):
+    """Newest tickets first, `limit` (at most 30) per page; `after` continues below the given ticket.
 
+    Every word of `query` is in the subject or the brief. `ticket_status` is one status or a JSON list of them.
     `state` limits to statuses of that type unless `ticket_status` is given; `resolved_today` is
     tickets closed today; `mentioned` is tickets that mention the user; `contact` is the tickets of that Relay Contact."""
     require_access()
     if not isinstance(query, str) or len(query) > 80:
         frappe.throw('Invalid ticket search')
+    limit = frappe.utils.cint(limit)
+    if not 1 <= limit <= 30:
+        frappe.throw('Invalid ticket page size')
     filters = {}
     if business_type:
         from relay_core.business_inbox import check_type
@@ -1026,13 +1030,11 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         filters['name'] = ['in', _resolved_today() or ['']]
     if state and not ticket_status:
         filters['ticket_status'] = ['in', _status_names(state) or ['']]
-    if query:
-        filters['subject'] = ['like', '%' + query.replace('%', '\\%').replace('_', '\\_') + '%']
     if ticket_status:
-        if not isinstance(ticket_status, str) or len(ticket_status) > 140:
-            frappe.throw('Invalid ticket filter')
-        filters['ticket_status'] = ticket_status
-    groups = []
+        filters['ticket_status'] = status_filter(ticket_status)
+    words = query.split()[:8]
+    groups = [[['subject', 'like', pattern], 'or', ['brief', 'like', pattern]]
+              for pattern in ('%' + word.replace('%', '\\%').replace('_', '\\_') + '%' for word in words)]
     for field, value in (('assigned_to', assigned_to), ('ticket_type', ticket_type)):
         if value is not None:
             if not isinstance(value, str) or len(value) > 140:
@@ -1047,7 +1049,7 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
         if '' in excluded:
             filters['assigned_to'] = ['not in', users + ['']]
         else:
-            groups = [[['assigned_to', 'not in', users], 'or', ['assigned_to', 'is', 'not set']]]
+            groups.append([['assigned_to', 'not in', users], 'or', ['assigned_to', 'is', 'not set']])
     if frappe.utils.cint(assigned) and 'assigned_to' not in filters:
         filters['assigned_to'] = ['is', 'set']
     if frappe.utils.cint(mine):
@@ -1067,11 +1069,23 @@ def directory(query='', ticket_status=None, mine=None, after=None, assigned_to=N
             frappe.throw('Invalid ticket cursor')
         filters['creation'] = ['<', created]
     rows = frappe.get_list('Relay Ticket', filters=staff_filters(filters, *groups), fields=LIST_FIELDS,
-                           order_by='creation desc', page_length=31)
+                           order_by='creation desc', page_length=limit + 1)
+    page = rows[:limit]
     from relay_core.business_groups import ticket_values
-    columns = ticket_values(rows[:30], business_type)
-    contact_titles(rows[:30])
-    return {'items': rows[:30], 'next': {'after': rows[29].name} if len(rows) > 30 else None, 'group_fields': columns}
+    columns = ticket_values(page, business_type)
+    contact_titles(page)
+    return {'items': page, 'next': {'after': page[-1].name} if len(rows) > limit else None, 'group_fields': columns}
+
+
+def status_filter(value):
+    """One status name, or a JSON list of 1-20 of them."""
+    statuses = frappe.parse_json(value) if isinstance(value, str) and value.startswith('[') else value
+    if isinstance(statuses, str) and len(statuses) <= 140:
+        return statuses
+    if (not isinstance(statuses, list) or not 1 <= len(statuses) <= 20
+            or any(not isinstance(status, str) or len(status) > 140 for status in statuses)):
+        frappe.throw('Invalid ticket filter')
+    return ['in', statuses]
 
 
 def contact_tickets(contact):
