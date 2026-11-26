@@ -1,5 +1,13 @@
+import { messageData, templateParts } from '../components/messageContent.js'
+
 export const MAX_SELECTED_MESSAGES = 50
-export const selectableMessage = row => !!row?.name && !row._pending && !row.note
+
+// A text message without text, email or template shows nothing, so it is not a row to pick.
+export function hasContent(row) {
+  const data = messageData(row)
+  return data.kind !== 'text' || !!String(data.text || '').trim() || !!data.email || !!templateParts(data)
+}
+export const selectableMessage = row => !!row?.name && !row._pending && !row.note && hasContent(row)
 
 export function selectMessages(rows, selected, name, anchor, range = false) {
   const available = rows.filter(selectableMessage).map(row => row.name)

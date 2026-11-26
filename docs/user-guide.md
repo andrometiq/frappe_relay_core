@@ -120,6 +120,8 @@ Conversation header, right side:
 
 ![Organize conversation dialog](images/guide/assign.png)
 
+Chat details panel ("Details" in the chat header, or the chat name): the Tickets part shows the 10 newest tickets of the chat with subject, owner, date and status. Click a ticket to open it. Click "Tickets" or "View all" to open all tickets of the chat. That list loads 20 more tickets as you scroll. Filter it by status, assigned person and type, or type words that must all be in the subject or the description. Saved numbers and number choices per record are on the Contacts page, not in the chat panel.
+
 Message menu (point at a message):
 
 | Item | What it does |

@@ -236,14 +236,34 @@ class TicketTests(unittest.TestCase):
     def test_directory_filters_by_status_search_and_assigned_to_me(self):
         self.f.get_list = Mock(return_value=[])
         self.f.session = types.SimpleNamespace(user='agent@example.invalid')
+        self.f.parse_json = json.loads
         self.module.directory(query='50%', ticket_status='Closed', mine='1')
         kwargs = self.f.get_list.call_args.kwargs
-        self.assertEqual(listed(self.f.get_list.call_args), dict(subject=['like', '%50\\%%'], ticket_status='Closed', assigned_to='agent@example.invalid'))
+        self.assertEqual(listed(self.f.get_list.call_args), dict(ticket_status='Closed', assigned_to='agent@example.invalid'))
+        self.assertEqual(listed_groups(self.f.get_list.call_args), [[['subject', 'like', '%50\\%%'], 'or', ['brief', 'like', '%50\\%%']]])
         self.assertEqual(kwargs['fields'], self.module.LIST_FIELDS)
         self.module.directory(mine='0')
         self.assertEqual(listed(self.f.get_list.call_args), {})
-        for bad in (dict(query='x' * 81), dict(ticket_status=['Open'])):
+        for bad in (dict(query='x' * 81), dict(ticket_status='[1]'), dict(ticket_status=['x'] * 21),
+                    dict(limit=0), dict(limit=31)):
             with self.subTest(bad=bad), self.assertRaises(ValueError): self.module.directory(**bad)
+
+    def test_chat_ticket_search_pages_by_twenty_and_matches_every_word_and_any_picked_status(self):
+        self.f.parse_json = json.loads
+        rows = [Record(name=f'TKT-{n:05d}') for n in range(21, 0, -1)]
+        self.f.get_list = Mock(return_value=rows)
+        self.f.db.sql = Mock(return_value=['TKT-00004'])
+        page = self.module.directory(contact='RELAY-CON-0000000001', query=' late  parcel ', limit='20',
+                                     ticket_status='["Open", "Waiting"]', assigned_to='a@example.invalid', ticket_type='Delivery')
+        call = self.f.get_list.call_args
+        self.assertEqual(call.kwargs['page_length'], 21)
+        self.assertEqual((len(page['items']), page['next']), (20, {'after': 'TKT-00002'}))
+        self.assertEqual(listed(call), {'name': ['in', ['TKT-00004']], 'ticket_status': ['in', ['Open', 'Waiting']],
+                                        'assigned_to': 'a@example.invalid', 'ticket_type': 'Delivery'})
+        self.assertEqual(listed_groups(call), [[['subject', 'like', '%late%'], 'or', ['brief', 'like', '%late%']],
+                                              [['subject', 'like', '%parcel%'], 'or', ['brief', 'like', '%parcel%']]])
+        self.f.get_list.return_value = rows[:3]
+        self.assertIsNone(self.module.directory(contact='RELAY-CON-0000000001', limit=20)['next'])
 
     def test_directory_filters_by_contact_of_the_first_linked_message(self):
         self.f.get_list = Mock(return_value=[])

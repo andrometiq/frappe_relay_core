@@ -107,6 +107,8 @@
   .v1-shell.relay-shell .conversation-bubble.is-mine>.message-group-head .message-group-avatar{left:auto;right:14px}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-mine>.message-footer>time{left:auto;right:4px}
   .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-mine>.message-menu-trigger{right:auto;left:0}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble>.message-selection-check{left:20px}
+  .v1-shell.relay-shell .message-thread-content>.conversation-bubble.is-mine>.message-selection-check{left:auto;right:20px}
   .v1-shell.relay-shell .message-date-divider{padding:8px 16px}
 
   .v1-shell.relay-shell .business-compose-start{padding:8px 12px calc(8px + env(safe-area-inset-bottom))}

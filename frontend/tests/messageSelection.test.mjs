@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { selectMessages, selectableMessage } from '../src/services/messageSelection.js'
 import { groupSends } from '../src/services/sendGroups.js'
-const rows = Array.from({ length: 60 }, (_, i) => ({ name: String(i) }))
+const rows = Array.from({ length: 60 }, (_, i) => ({ name: String(i), content: 'Line ' + i }))
 
 test('click and tap toggle messages; shift adds a chronological range', () => {
   let selected = selectMessages(rows, [], '1')
@@ -21,6 +21,12 @@ test('selection is bounded and excludes internal notes and pending messages', ()
     assert.deepEqual(selectMessages([row], [], row.name), [])
   }
   assert.deepEqual(selectMessages([], ['old'], 'missing'), ['old'])
+})
+test('a message that shows nothing is not selectable, even inside a shift range', () => {
+  const shown = [{ name: 'a', content: 'Quantity 40' }, { name: 'blank', content: '  ' }, { name: 'b', content: 'Rate 125' },
+    { name: 'photo', message_type: 'photo', content: '' }, { name: 'template', message_data: { kind: 'text', text: '', template: { name: 'order' } } }]
+  assert.equal(selectableMessage(shown[1]), false)
+  assert.deepEqual(selectMessages(shown, ['a'], 'template', 'a', true), ['a', 'b', 'photo', 'template'])
 })
 
 const source = await readFile(new URL('../src/components/messages/MessageThread.vue', import.meta.url), 'utf8')
@@ -65,7 +71,7 @@ test('ticket submission retains selected evidence evicted from the paging window
 
 test('a 1.2 second phone press consumes its release click and the next tap toggles normally', t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
-  const message = { name: 'LOCAL-PRESS' }, view = thread(t, [message])
+  const message = { name: 'LOCAL-PRESS', content: 'Quantity 40' }, view = thread(t, [message])
   view.pressStart(message, touch)
   t.mock.timers.tick(450)
   assert.deepEqual(view.selection.value, [message.name])
@@ -82,7 +88,7 @@ test('a 1.2 second phone press consumes its release click and the next tap toggl
 
 test('scrolling and cancelled presses do not select; a missing release click does not swallow the next tap', t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
-  const message = { name: 'LOCAL-CANCEL' }, view = thread(t, [message])
+  const message = { name: 'LOCAL-CANCEL', content: 'Quantity 40' }, view = thread(t, [message])
   for (const cancel of [() => view.pressMove({ clientX: 0, clientY: 11 }), () => view.pressEnd({ type: 'pointercancel' })]) {
     view.pressStart(message, touch)
     t.mock.timers.tick(200)
@@ -114,4 +120,13 @@ test('cancelling selection before layout does not move the reader', async t => {
   view.cancelSelection()
   await selecting
   assert.deepEqual(view.scrolledTo, [])
+})
+
+test('the selection checkbox takes the avatar column and the outline stays inside the row', async () => {
+  const style = source.split('<style')[1]
+  assert.doesNotMatch(style, /is-selecting[^}]*padding-left/, 'Text keeps its column, so the avatar never covers it')
+  assert.match(style, /\.is-selecting \.message-group-avatar, \.conversation-bubble\.is-selecting > \.message-footer > time \{ visibility:hidden; \}/)
+  assert.match(style, /\.is-selected \{ outline:2px solid var\(--relay-accent\); outline-offset:-2px; \}/)
+  const mobile = await readFile(new URL('../src/mobile.css', import.meta.url), 'utf8')
+  assert.match(mobile, /\.is-mine>\.message-selection-check\{left:auto;right:20px\}/, 'On a phone own messages keep the checkbox on the avatar side')
 })
