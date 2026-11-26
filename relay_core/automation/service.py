@@ -217,6 +217,17 @@ def staff_owned(contact, *, ticket=None, message=None):
     return has_staff_reply(contact.name)
 
 
+def held_without_episode(contact, message):
+    """Staff hold the chat (a pause or a recent staff reply) and the message has no active episode ticket. Only a
+    person opens tickets, so admission opens none; an active episode still gains the message."""
+    from relay_core.tickets import _episode_scope
+    try:
+        _, key = _episode_scope(message)
+    except ValueError:
+        return False
+    return not frappe.db.exists('Relay Ticket', {'active_scope_key': key}) and staff_owned(contact, message=message)
+
+
 def create_run(doc):
     """The sole admission transaction for automatic inbound handlers and APIs."""
     from relay_core.opt_out import is_keyword
@@ -252,6 +263,10 @@ def create_run(doc):
         'message': doc.name, 'execution_user': frappe.session.user, 'message_hash': message_hash(doc),
         'status': 'Pending', 'stage': 'Matching', 'generation': int(contact.automation_generation or 0)})
     internal_save(run, new=True)
+    if held_without_episode(contact, doc):
+        run.status, run.reason = 'Cancelled', 'Conversation is owned by staff'
+        internal_save(run)
+        return {'name': run.name, 'status': run.status}
     try:
         ticket = episode(run, doc)
     except (ValueError, frappe.PermissionError, frappe.ValidationError):

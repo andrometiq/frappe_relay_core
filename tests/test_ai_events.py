@@ -164,7 +164,7 @@ class AdmissionTests(unittest.TestCase):
         self.notice = self.enterContext(patch('relay_core.ai.handoff.queue_acknowledgement'))
         self.save = self.enterContext(patch.object(service,'internal_save'))
         self.enterContext(patch.object(service,'message_hash',return_value='hash'))
-        self.contact = _dict(automation_generation=0, automation_paused=0, save=Mock())
+        self.contact = _dict(name='person', automation_generation=0, automation_paused=0, save=Mock())
         self.enterContext(patch.object(service,'lock_contact',return_value=self.contact))
         self.episode = self.enterContext(patch.object(service,'episode',return_value=_dict(name='ticket',ai_disabled=0)))
         self.claims = self.enterContext(patch.object(flows,'claims',return_value=False))
@@ -174,6 +174,9 @@ class AdmissionTests(unittest.TestCase):
         self.keyword = self.enterContext(patch('relay_core.opt_out.is_keyword', return_value=False))
         self.settings = self.enterContext(patch('relay_core.features.frappe'))
         self.settings.db.get_single_value.return_value = ''
+        self.fake.db.exists.return_value = None
+        self.staff_reply = self.enterContext(patch('relay_core.ai.hand_over.has_staff_reply', return_value=False))
+        self.enterContext(patch('relay_core.tickets._episode_scope', return_value=({}, 'scope')))
 
     def test_waiting_flow_owns_reply_even_with_search_confirmation_and_reordered_steps(self):
         self.channel.automation_steps = [_dict(step='AI skill', enabled=1, ai_skill='skill', on_reply='Stop')]
@@ -254,6 +257,18 @@ class AdmissionTests(unittest.TestCase):
         self.episode.return_value.ai_disabled = 1
         self.assertEqual(service.create_run(self.message)['status'], 'Cancelled')
         self.contact.save.assert_not_called()
+        self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
+
+    def test_a_staff_reply_opens_no_episode_but_an_active_one_still_gains_the_message(self):
+        self.claims.return_value = True
+        self.staff_reply.return_value = True
+        self.assertEqual(service.create_run(self.message)['status'], 'Cancelled')
+        self.episode.assert_not_called()
+        self.staff_reply.assert_called_with('person')
+        self.fake.db.exists.assert_called_with('Relay Ticket', {'active_scope_key': 'scope'})
+        self.fake.db.exists.return_value = 'TKT-00001'
+        self.assertEqual(service.create_run(self.message)['status'], 'Cancelled')
+        self.episode.assert_called_once()
         self.event.assert_not_called(); self.fake.enqueue.assert_not_called()
 
     def test_takeover_and_owner_failure_never_start_handlers(self):
