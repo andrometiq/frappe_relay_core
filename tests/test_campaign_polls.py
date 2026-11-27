@@ -173,6 +173,13 @@ class PollSiteTests(unittest.TestCase):
         campaign_polls.on_message(self.pick(f'cpoll:{ROW}:confirm:1'))
         self.assertEqual((self.state()['state'], self.state()['option']), ('Confirmed', 1))
 
+    def test_a_closed_poll_records_and_sends_nothing(self):
+        closed = {'question': 'Which size?', 'options': ['Small', 'Large'], 'closed': 1}
+        for step in ('in', '0', 'confirm:0', 'change'):
+            with self.subTest(step=step):
+                self.assertEqual(campaign_polls.advance({'state': 'Chosen', 'option': 0}, step, ROW, closed),
+                                 ({'state': 'Chosen', 'option': 0}, None))
+
     def test_opt_out_opts_the_number_out_and_sends_nothing(self):
         campaign_polls.on_message(self.tap('Opt out'))
         self.assertEqual(self.opt_outs, [(CHANNEL, NUMBER, True)])
