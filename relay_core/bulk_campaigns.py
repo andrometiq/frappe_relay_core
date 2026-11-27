@@ -854,7 +854,11 @@ def send_job(name, step=0):
             doc = frappe.get_doc('Relay Campaign', name)
             if doc.status == 'Running':
                 more = push(doc, deadline)
-            if not more and current_status(name) == 'Cancelling':
+            status = None if more else current_status(name)
+            if status == 'Running':
+                from relay_core.bulk_updates import reconcile_stale
+                reconcile_stale(doc)
+            if status == 'Cancelling':
                 more = cancel_remaining(doc, deadline)
     except LockError:
         return  # Another worker owns this campaign.

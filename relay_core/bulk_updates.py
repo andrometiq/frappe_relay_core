@@ -4,11 +4,18 @@ import frappe
 from relay_core.settings import value as connection_value
 
 RECIPIENT = 'Relay Campaign Recipient'
-RANK = {'Pending': 0, 'Queued': 1, 'Uncertain': 1, 'Cancelled': 2, 'Sent': 3, 'Failed': 4, 'Delivered': 5, 'Read': 6}
+# Uncertain ranks above Queued: Hub reports it after the send started, and a later receipt can still move it on.
+RANK = {'Pending': 0, 'Queued': 1, 'Uncertain': 2, 'Cancelled': 3, 'Sent': 4, 'Failed': 5, 'Delivered': 6, 'Read': 7}
 STATUS = {'sent': 'Sent', 'delivered': 'Delivered', 'read': 'Read', 'failed': 'Failed'}
 STATE = {'queued': 'Queued', 'submitting': 'Queued', 'submitted': 'Sent', 'rejected': 'Failed',
          'uncertain': 'Uncertain', 'cancelled': 'Cancelled'}
 REACHABLE = "('Pending', 'Queued', 'Uncertain', 'Sent', 'Delivered', 'Read')"  # Rows a reply may answer once attempted.
+FINAL = ('submitted', 'rejected', 'uncertain', 'cancelled')
+UNCONFIRMED = 'WhatsApp did not confirm this message, so it may or may not have been sent'
+NO_OUTCOME = 'Hub reported no final outcome within 6 hours, so it may or may not have been sent'
+STALE_HOURS = 6  # Hub sends a queued row within minutes, retries included; a row held this long lost its outcome.
+STALE_BATCH = 50
+NO_DELIVERY = 'delivery unavailable'
 PROGRESS_SECONDS = 3
 # A refresh may sleep out the throttle. Workers take 'short' before 'long', so back-to-back refreshes there
 # held send slices back; in 'long' they take turns with them.
@@ -34,19 +41,24 @@ def reason(error):
 
 
 def project_batch(event, rows):
-    """Monotonic apply with one UPDATE per target status; the status guard lives in SQL so replays and races
-    cannot regress."""
     if event.account != connection_value('relay_hub_account'):
         raise ValueError('Bulk updates belong to another account')
+    apply_rows(rows)
+    frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
+
+
+def apply_rows(rows):
+    """Monotonic apply with one UPDATE per target status; the status guard lives in SQL so replays and races
+    cannot regress."""
     timeline, groups = [], {}
     for row in sorted(rows, key=lambda item: item['key']):
         status = target(row)
         error = row.get('error') or {}
-        timeline.append({'key': row['key'], 'status': status, 'message_id': row['message_id'], 'reason': reason(error)})
-        groups.setdefault(status, []).append((row['key'], row['message_id'], str(row['id']), error.get('code') or 0,
-                                              reason(error)))
+        detail = reason(error) or (UNCONFIRMED if status == 'Uncertain' else '')
+        timeline.append({'key': row['key'], 'status': status, 'message_id': row['message_id'], 'reason': detail})
+        groups.setdefault(status, []).append((row['key'], row['message_id'], str(row['id']), error.get('code') or 0, detail))
     for status in sorted(groups, key=RANK.get):
-        failure = ', r.error_code=u.code, r.reason=u.reason' if status == 'Failed' else ''
+        failure = ', r.error_code=u.code, r.reason=u.reason' if status in ('Failed', 'Uncertain') else ''
         table, values = derived(('request_key', 'message_id', 'delivery_id', 'code', 'reason'), groups[status])
         frappe.db.sql(f'''UPDATE `tab{RECIPIENT}` r JOIN ({table}) u ON r.request_key=u.request_key
             SET r.status=%s, r.provider_id=IF(u.message_id='', r.provider_id, u.message_id),
@@ -56,9 +68,47 @@ def project_batch(event, rows):
                            pluck='campaign', distinct=True, limit_page_length=0)
     from relay_core.bulk_timeline import apply
     apply(timeline)
-    frappe.db.set_value('Relay Hub Event', event.name, 'projection_status', 'Projected')
     for name in names:
         changed(name)  # Also after cancel: rows Hub still sent keep moving, and so do the counters.
+
+
+def reconcile_stale(doc):
+    """Read by request key the rows Hub has held for STALE_HOURS and apply what Hub reports. A lookup never
+    sends again. A row without a final outcome becomes Uncertain, so the campaign can complete."""
+    rows = frappe.db.sql(f'''SELECT request_key, delivery_id FROM `tab{RECIPIENT}` WHERE campaign=%s AND status='Queued'
+        AND modified < NOW() - INTERVAL {STALE_HOURS} HOUR ORDER BY modified LIMIT {STALE_BATCH}''', doc.name, as_dict=True)
+    if not rows:
+        return
+    from relay_core import whatsapp
+    from relay_core.hub_channels import hub_arguments
+    hub, updates = whatsapp.client(), []
+    for row in rows:
+        try:
+            found = hub.call_tool('whatsapp.deliveries', hub_arguments(doc.channel, {'request_key': row.request_key}))
+            delivery = (found.get('deliveries') or [{}])[0]
+        except whatsapp.HubError as exc:
+            if NO_DELIVERY not in (exc.detail or ''):
+                break  # Hub is unreachable; the next recovery run asks again.
+            delivery = {}
+        updates.append(stale_update(row, delivery))
+    if updates:
+        apply_rows(updates)
+        frappe.db.commit()
+
+
+def stale_update(row, delivery):
+    """One bulk update row from a Hub delivery lookup."""
+    state = delivery.get('state') if delivery.get('key') == row.request_key else None
+    if state not in FINAL:
+        return {'id': row.delivery_id, 'key': row.request_key, 'state': 'uncertain', 'message_id': '', 'status': '',
+                'error': {'message': NO_OUTCOME}}
+    messages = (delivery.get('result') or {}).get('messages') if state == 'submitted' else None
+    code = (delivery.get('provider_error') or {}).get('code')
+    error = {'code': code} if type(code) is int else {}
+    if state == 'rejected' and delivery.get('error'):
+        error['message'] = str(delivery['error'])[:300]
+    return {'id': delivery.get('id') or row.delivery_id, 'key': row.request_key, 'state': state,
+            'message_id': str((messages or [{}])[0].get('id') or ''), 'status': '', 'error': error}
 
 
 def derived(columns, rows):
