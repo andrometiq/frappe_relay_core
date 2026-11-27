@@ -217,6 +217,25 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(bulk_updates.reason({'code': 131026, 'title': 'Message undeliverable'}),
                          'Meta error 131026: Message undeliverable')
 
+    def test_hub_uncertain_moves_a_queued_row_with_its_reason_and_lets_the_campaign_complete(self):
+        """Uncertain ranked with Queued, so Hub's uncertain update left the row Queued and the campaign Running."""
+        self.assertEqual(bulk_updates.lower('Uncertain'), ('Pending', 'Queued'))
+        self.assertNotIn('Uncertain', bulk_updates.lower('Queued'))
+        self.assertIn('Uncertain', bulk_updates.lower('Sent'))  # A later receipt still moves it on.
+        db = Mock()
+        fake = SimpleNamespace(db=db, get_all=Mock(return_value=['Poll']))
+        rows = [dict(UpdateContractTests.row, key='a', state='uncertain', status='', message_id='', error={'code': 131000}),
+                dict(UpdateContractTests.row, id=2, key='b', state='uncertain', status='', message_id='')]
+        with patch.object(bulk_updates, 'frappe', fake), patch.object(bulk_updates, 'changed') as changed, \
+                patch.object(bulk_updates, 'connection_value', return_value='site-a'), patch('relay_core.bulk_timeline.apply'):
+            bulk_updates.project_batch(_dict(name='event', account='site-a'), rows)
+        statement, values = db.sql.call_args.args
+        self.assertIn('r.reason=u.reason', statement)
+        self.assertEqual(values, ('a', '', '1', 131000, 'Meta error 131000', 'b', '', '2', 0, bulk_updates.UNCONFIRMED,
+                                  'Uncertain', ('Pending', 'Queued')))
+        changed.assert_called_once_with('Poll')
+        self.assertEqual(bulk_updates.tally([('Uncertain', 2, 0), ('Sent', 5, 0)])['queued'], 0)
+
     def test_tally_counts_reached_states_and_replies(self):
         counts = bulk_updates.tally([('Pending', 2, 0), ('Skipped', 3, 0), ('Sent', 4, 0), ('Read', 5, 2), ('Failed', 1, 0)])
         self.assertEqual(counts, {'total': 12, 'skipped': 3, 'queued': 2, 'sent': 9, 'delivered': 5, 'read': 5,
@@ -318,6 +337,52 @@ class ApplyTests(unittest.TestCase):
         self.assertNotIn('provider_id', fallback)  # A reply may arrive before Hub reports the provider ID.
         with patch.object(bulk_updates, 'reply_window_open', return_value=False):
             self.assertIsNone(bulk_updates.link_reply(row))
+
+
+class StaleRowTests(unittest.TestCase):
+    def reconcile(self, answers):
+        rows = [_dict(request_key=f'k{i}', delivery_id=str(10 + i)) for i in range(len(answers))]
+        db = Mock(sql=Mock(return_value=rows))
+        hub = Mock(call_tool=Mock(side_effect=answers))
+        with patch.object(bulk_updates, 'frappe', SimpleNamespace(db=db)), \
+                patch('relay_core.whatsapp.client', return_value=hub), \
+                patch('relay_core.hub_channels.hub_arguments', side_effect=lambda channel, arguments: arguments), \
+                patch.object(bulk_updates, 'apply_rows') as apply_rows:
+            bulk_updates.reconcile_stale(_dict(name='Poll', channel='WA'))
+        self.assertIn(f'INTERVAL {bulk_updates.STALE_HOURS} HOUR', db.sql.call_args.args[0])
+        return hub, db, apply_rows
+
+    def test_rows_hub_held_for_hours_are_read_by_key_never_sent_again_and_end_final(self):
+        hub, db, apply_rows = self.reconcile([
+            {'deliveries': [{'id': '10', 'key': 'k0', 'state': 'submitted', 'result': {'messages': [{'id': 'wamid.x'}]}}]},
+            {'deliveries': [{'id': '11', 'key': 'k1', 'state': 'uncertain', 'provider_error': {'code': 131000, 'http_status': 500}}]},
+            {'deliveries': [{'id': '12', 'key': 'k2', 'state': 'queued'}]},
+            HubError('rejected', detail='delivery unavailable'),
+            {'deliveries': [{'id': '14', 'key': 'k4', 'state': 'rejected', 'error': 'Message rejected before acceptance'}]}])
+        self.assertEqual({call.args[0] for call in hub.call_tool.call_args_list}, {'whatsapp.deliveries'})
+        self.assertEqual(hub.call_tool.call_args_list[0].args[1], {'request_key': 'k0'})
+        updates = apply_rows.call_args.args[0]
+        self.assertEqual([(row['key'], row['state'], row['message_id']) for row in updates],
+                         [('k0', 'submitted', 'wamid.x'), ('k1', 'uncertain', ''), ('k2', 'uncertain', ''),
+                          ('k3', 'uncertain', ''), ('k4', 'rejected', '')])
+        self.assertEqual(updates[1]['error'], {'code': 131000})
+        self.assertEqual(updates[2]['error'], {'message': bulk_updates.NO_OUTCOME})  # Hub still holds it.
+        self.assertEqual(updates[3]['id'], '13')
+        self.assertEqual(updates[4]['error'], {'message': 'Message rejected before acceptance'})
+        self.assertEqual([bulk_updates.target(row) for row in updates], ['Sent', 'Uncertain', 'Uncertain', 'Uncertain', 'Failed'])
+        db.commit.assert_called_once()
+
+    def test_an_unreachable_hub_keeps_the_rest_queued_for_the_next_run(self):
+        _, _, apply_rows = self.reconcile([{'deliveries': [{'id': '10', 'key': 'k0', 'state': 'cancelled'}]},
+                                           HubError('Hub returned an invalid response or is unavailable'),
+                                           {'deliveries': []}])
+        self.assertEqual([row['key'] for row in apply_rows.call_args.args[0]], ['k0'])
+
+    def test_no_stale_rows_makes_no_hub_call(self):
+        with patch.object(bulk_updates, 'frappe', SimpleNamespace(db=Mock(sql=Mock(return_value=[])))), \
+                patch('relay_core.whatsapp.client') as client:
+            bulk_updates.reconcile_stale(_dict(name='Poll', channel='WA'))
+        client.assert_not_called()
 
 
 class ProjectionRoutingTests(unittest.TestCase):
@@ -535,6 +600,19 @@ class SenderTests(unittest.TestCase):
             bulk_campaigns.send_job('Winter launch')
         cancel.assert_called_once()
         self.fake.enqueue.assert_not_called()
+
+    def test_a_running_slice_without_pending_rows_reconciles_stale_rows(self):
+        self.fake.get_doc = Mock(return_value=self.doc)
+        with patch.object(bulk_campaigns, 'push', return_value=False), \
+                patch('relay_core.bulk_updates.reconcile_stale') as reconcile:
+            bulk_campaigns.send_job('Winter launch')
+            reconcile.assert_called_once_with(self.doc)
+            reconcile.reset_mock()
+            with patch.object(bulk_campaigns, 'push', return_value=True):
+                bulk_campaigns.send_job('Winter launch')  # Rows still to push: no lookups yet.
+            self.db.get_value.return_value = 'Paused'
+            bulk_campaigns.send_job('Winter launch')
+        reconcile.assert_not_called()
 
     def test_admission_mapping_returns_the_rows_hub_holds(self):
         held = bulk_campaigns.admit(self.rows(3), [{'key': 'bulk-k-0', 'id': '7', 'state': 'queued'},
