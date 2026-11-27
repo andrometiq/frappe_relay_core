@@ -70,7 +70,7 @@ def configure(name, poll):
 
 @frappe.whitelist(methods=['POST'])
 def close(name):
-    """Stop a poll campaign taking answers. Its taps are still claimed, so no AI, flow or ticket answers them."""
+    """Stop a poll campaign taking answers. Its taps are no longer claimed, so the usual automation and AI answer them."""
     from relay_core.bulk_campaigns import bulk, lock_campaign, read
     from relay_core.automation.service import internal_save
     lock_campaign(name)
@@ -130,7 +130,7 @@ def claim(message) -> _dict | None:
         return None
     campaign = frappe.db.get_value('Relay Campaign', row.campaign, ['channel', 'arguments', 'execution_user'], as_dict=True)
     poll = json.loads(campaign.arguments or '{}').get('poll') if campaign and campaign.channel == message.channel else None
-    if not poll or not poll.get('question'):
+    if not poll or not poll.get('question') or poll.get('closed'):
         return None
     if step == 'tap':
         button = data.get('text')
@@ -158,10 +158,7 @@ def confirmation(recipient: str, poll: dict, option: int) -> tuple[str, dict]:
 
 
 def advance(state: dict, step: str, recipient: str, poll: dict) -> tuple[dict, tuple[str, dict] | None]:
-    """The recipient's next poll state and the reply to send, if any. A confirmed answer is final, and a closed
-    poll takes no more answers and sends nothing."""
-    if poll.get('closed'):
-        return state, None
+    """The recipient's next poll state and the reply to send, if any. A confirmed answer is final."""
     current = state.get('state')
     if step == 'out':
         return (state if current == CONFIRMED else {**state, 'state': OPTED_OUT}), None
